@@ -8,6 +8,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { reviewLayout } from './measure';
 import { StackPlacer, type Band, type PlacedSection } from './stack-place';
 import type { StackHunk } from './stack-model';
+import type { StackPlace } from './view-state';
 
 const tally = vi.hoisted(() => {
   const counts = { hunks: 0, rows: 0, searches: 0, measures: 0, queries: 0 };
@@ -75,6 +76,8 @@ interface Page {
   order: StackHunk[];
   drawn: number; // bodies drawn
   tops: number[]; // each section's top in the scroller
+  heights: Map<Element, number>; // as the page lays them out
+  offsets: Map<Element, number>; // a row's top in its body
 }
 
 // A stack of `files` files, each `HUNKS` hunks, scrolled to `at`: the bodies within the band drawn, the rest spacers.
@@ -166,7 +169,7 @@ function pageOf(files: number, at: number, headerOf: (file: number) => number = 
     tally.counts.measures += 1;
     return offsets.get(element) ?? 0;
   });
-  return { el, sections, order, drawn, tops };
+  return { el, sections, order, drawn, tops, heights, offsets };
 }
 
 // Every query the page answers (its own and its elements'), counted.
@@ -237,6 +240,48 @@ describe('the place read where one file’s header hands over to the next', () =
       expect(stood.filter(({ at, stood }) => stood !== at)).toEqual([]);
     });
   }
+});
+
+// The architect's review (its second finding): a card opened on a line in view, its exposure waiting for the card to
+// draw under the line; the person presses ↑ in the toolbar (outside the scroller, so no input there) before it draws.
+describe('a card’s exposure and the person’s navigation', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it('leaves the hunk the person jumped to at the top when the card opened before the jump draws: no scroll, the place the jump’s', () => {
+    const page = pageOf(3, 0);
+    const saved: StackPlace[] = [];
+    const placer = new StackPlacer({ band: () => {}, saved: (place) => saved.push(place), counted: () => {} });
+    page.el.addEventListener('scroll', () => placer.scrolled());
+    placer.update({ sections: page.sections, order: page.order, current: 0 });
+    placer.attach(page.el, null);
+    placer.relayout();
+    placer.interact(); // the person's wheel, to the first file's sixth hunk
+    page.el.scrollTop = 5 * (1 + LINES) * ROW;
+    const hunkRow = (h: number) => page.el.querySelector(`[data-review-file="src/part-000.ts"] [data-line-new-num="${1 + h * 10}"]`)!.closest('tr')!;
+    // the card opened on the ninth hunk's first line, in view: no reveal, its exposure waits for the card
+    const line = { path: 'src/part-000.ts', row: { block: 0, side: 'new' as const, line: 1 + 8 * 10 }, offset: 0 };
+    placer.showCard(line);
+    placer.relayout();
+    placer.revealHunk(page.order[4]); // ↑, to the fifth hunk
+    expect(page.el.scrollTop).toBe(4 * (1 + LINES) * ROW); // its header row and first line under the file’s header
+    // the card draws under its line, 160 px high: a layout change
+    const widget = document.createElement('tr');
+    widget.dataset.state = 'widget';
+    widget.innerHTML = '<td><div data-review-card-row="new:81"><div data-comment-card></div></div></td>';
+    hunkRow(8).after(widget);
+    page.heights.set(widget, 160);
+    page.offsets.set(widget, page.offsets.get(hunkRow(8))! + ROW);
+    const body = page.el.querySelector('[data-review-file="src/part-000.ts"] [data-review-body]')!;
+    page.heights.set(body, page.heights.get(body)! + 160);
+    let scrolls = 0;
+    page.el.addEventListener('scroll', () => scrolls++);
+    saved.length = 0;
+    placer.relayout();
+    expect({ scrolls, scrollTop: page.el.scrollTop, saved }).toEqual({ scrolls: 0, scrollTop: 4 * (1 + LINES) * ROW, saved: [] });
+  });
 });
 
 describe('one scroll of the person’s on the stack', () => {

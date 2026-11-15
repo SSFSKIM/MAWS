@@ -785,37 +785,6 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect(await placeSaved()).toEqual(reading); // the live place: saved when Review is hidden, restored when shown
     });
 
-    // The architect's review (its second finding): a card's exposure waiting for its row to draw is a request the
-    // person's later navigation replaces, as it replaces the card's reveal; the hunks they jump to stand at the top once
-    // the card draws near them.
-    it('stands the hunk the person jumped to at the top when a card opened before it draws nearby: its exposure was replaced', async () => {
-      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
-      offs.push(registerCommentComposer(openComment));
-      await mount(files);
-      page.scrollTo(page.topOf(sectionOf(files[1].path)) + HEADER); // by hand, to the second file
-      await page.settle();
-      addOn(files[1].path, files[1].added[0]);
-      await page.settle();
-      const field = within(card()!).getByRole('textbox', { name: 'Comment' });
-      fireEvent.change(field, { target: { value: 'Say what this counts.' } });
-      fireEvent.keyDown(field, { key: 'Escape' }); // a draft: the card goes, the chip stands for it
-      await page.settle();
-      page.scrollTo(page.topOf(sectionOf(files[4].path)) + HEADER + 2 * ROW); // by hand, to the last file
-      await page.settle();
-      expect(drawnBodies().map((section) => section.dataset.reviewFile)).not.toContain(files[1].path); // the card's file out of the band
-      expect(hunkLabel()).toBe('Showing hunk 5 of 5');
-      clock += 1_000;
-      // the chip's card on the second file's line, revealed there; at once (its body not drawn yet) the person presses ↑
-      // three times, to the second file's hunk
-      fireEvent.click(document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]')!);
-      for (let n = 0; n < 3; n++) fireEvent.click(screen.getByLabelText('Previous hunk'));
-      await page.settle();
-      expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[1].path)); // drawn, under its line
-      const jumped = { path: files[1].path, side: 'new', line: files[1].starts[0] };
-      expect({ hunk: hunkLabel(), top: page.rowAtTop() }).toEqual({ hunk: 'Showing hunk 2 of 5', top: jumped });
-      expect(await placeSaved()).toEqual(jumped); // the live place: saved when Review is hidden, restored when shown
-    });
-
     it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
       const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
       offs.push(registerCommentComposer(openComment));
