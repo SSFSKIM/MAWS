@@ -9,7 +9,9 @@
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import { openCardSession, useFloatingCard } from '../shell/floating';
 import { selectWaitingRequests, useAttention } from '../stores/attention';
-import { tabOnScreen, useLayout } from '../stores/layout';
+import { panelInMain } from '../app/regions';
+import { pageOpen, useLayout } from '../stores/layout';
+import { currentSet, floatingPane } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
 import { waitingViewsOf, whenWaitingViewMounts } from '../transcript/view/waiting-view';
 
@@ -17,14 +19,30 @@ const GONE_COPY = 'That request is no longer waiting';
 
 const sayGone = () => useNotices.getState().toast({ level: 'info', text: GONE_COPY, actions: [], dismissible: true });
 
-// The sessions in front of the person: the one the tab on screen shows (none behind a page or the Overview), and the
-// one the open floating card draws.
-function inFront(): AppSessionId[] {
+/**
+ * The sessions in front of the person: those whose transcript the person can see now. Whatever covers the shell covers
+ * all of it, the floating card included: under a destination page the main area and the panel are invisible and inert
+ * (`app/Shell.tsx`, `panel/PanelRegion.tsx`, both by `pageOpen`), and behind the Overview no session counts. Else the
+ * open floating card's session (`openCardSession`), and each pane's active session tab while the main area is on screen
+ * (a maximized or floating panel stands in its place, `panelInMain`), but a pane the split's card draws instead.
+ */
+export function sessionsInFront(): AppSessionId[] {
   const layout = useLayout.getState();
-  const tab = layout.overviewOpen ? null : tabOnScreen(layout);
-  return [tab?.kind === 'session' ? tab.appSessionId : null, openCardSession(layout)].filter((id): id is AppSessionId => id !== null);
+  if (pageOpen(layout) || layout.overviewOpen) return [];
+  const seen = new Set<AppSessionId>();
+  const card = openCardSession(layout);
+  if (card !== null) seen.add(card);
+  if (!panelInMain(layout.regions)) {
+    const set = currentSet(layout.main);
+    const floated = floatingPane(set);
+    set.panes.forEach((pane, index) => {
+      if (index === floated) return;
+      const tab = pane.tabs.find((t) => t.id === pane.activeTabId);
+      if (tab?.kind === 'session') seen.add(tab.appSessionId);
+    });
+  }
+  return [...seen];
 }
-
 let remembered: (() => void) | null = null; // lets the remembered request go
 const forget = () => remembered?.();
 
@@ -45,10 +63,10 @@ export function showWaiting(appSessionId: AppSessionId, attentionId: AttentionId
   // the navigation made. Any change of it that leaves the session out, to another session or to none (a page, the
   // Overview), is the person leaving. A front that never held the session (a caller whose session shows in no tab or
   // card) is not required at the mount, only a change away from what it was.
-  let seen = inFront().join('\n');
-  let held = inFront().includes(appSessionId);
+  let seen = sessionsInFront().join('\n');
+  let held = sessionsInFront().includes(appSessionId);
   const watch = () => {
-    const now = inFront();
+    const now = sessionsInFront();
     if (now.join('\n') === seen) return;
     seen = now.join('\n');
     if (now.includes(appSessionId)) held = true;
@@ -57,7 +75,7 @@ export function showWaiting(appSessionId: AppSessionId, attentionId: AttentionId
   const offs = [
     whenWaitingViewMounts(appSessionId, (view) => {
       forget();
-      if (held && !inFront().includes(appSessionId)) return; // checked again: the session is no longer in front
+      if (held && !sessionsInFront().includes(appSessionId)) return; // checked again: the session is no longer in front
       if (view.show(id) === 'gone') sayGone();
     }),
     useLayout.subscribe(watch),
