@@ -57,6 +57,10 @@ import { noteDeletedReplica } from './deleted-replicas'; // UX wave U10b
 import { artifactMachineOf } from './machines';
 
 export const RECONNECT_BACKOFF_MS = [250, 1_000, 3_000] as const;
+// Fix wave 2: the store's refusals of a standing read that say the artifact is not there for this window (`notFound`
+// is also main's word for one the member may not view; `invalid`, an id or kind it cannot name). The others (`unavailable`,
+// `storeTooNew`, and those no read gives: `tooLarge`, `handleTaken`, `designSystemInUse`, the two exports') are no answer.
+const ARTIFACT_GONE: ReadonlySet<string> = new Set(['notFound', 'invalid']);
 /**
  * P5 O7 M5b review fix 1: a connection whose first frame (the host's step 1, sent at attach) hasn't come by then is
  * dropped into the reopen path: its port closed before the replica listened (a close said early is never said again).
@@ -272,8 +276,10 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
         const answer = await call('artifacts.get', { artifactId: this.artifactId });
         now = answer.artifact ? 'live' : answer.deleted?.undoable === true ? 'deletedByAgent' : 'gone';
       } catch (error) {
-        // a refusal of the read itself (not found, not viewable) is the host's answer; anything else is none
-        now = error instanceof ArtifactCommandError && artifactRefusalOf(error.error) !== null ? 'gone' : 'unknown';
+        // a refusal of the read itself that the artifact is not there for this window (not found, not viewable, not one
+        // it can name) is the host's answer; anything else (its store not open, too new, a host not answering) is none
+        const refusal = error instanceof ArtifactCommandError ? artifactRefusalOf(error.error) : null;
+        now = refusal !== null && ARTIFACT_GONE.has(refusal.reason) ? 'gone' : 'unknown';
         if (now === 'unknown') log(`${this.artifactId}: the host did not say why it was refused: ${error instanceof Error ? error.message : String(error)}`);
       }
       return { now, current: !this.closed && ticket === this.standingTicket };
@@ -352,6 +358,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
     hostGone(): void {
       this.generation += 1;
+      this.standingTicket += 1; // fix wave 2: what the host that went said of the artifact decides nothing
       if (this.provider.state.phase !== 'off') this.provider.disconnect(); // the change listener schedules the reopen
     }
 
@@ -380,11 +387,13 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
     private changed(state: SaveState): void {
       // UX wave U10b: a waiting replica says what it keeps; one the host synced anew (a restore it did not hear) is done waiting
-      if ((this.deletedByAgent || this.standingUnknown) && state.synced && !this.synced) this.deletedByAgent = this.standingUnknown = false;
+      const wasSynced = this.synced;
+      if ((this.deletedByAgent || this.standingUnknown) && state.synced && !wasSynced) this.deletedByAgent = this.standingUnknown = false;
       this.synced = state.synced;
       noteDeletedReplica(this, this.artifactId, this.deletedByAgent || this.standingUnknown ? state.unsaved : null);
       if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {
+        if (!wasSynced) this.standingTicket += 1; // fix wave 2: a read asked before this sync is older than it
         this.attempt = 0;
         this.settleFirst?.resolve();
         this.settleFirst = null;
