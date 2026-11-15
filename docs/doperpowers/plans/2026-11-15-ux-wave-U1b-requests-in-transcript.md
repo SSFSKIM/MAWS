@@ -30,7 +30,7 @@ How to see it working: the unit suites named per milestone, and the Electron e2e
 - [x] (2026-11-15) M4 — A prompt's keys from the composer and from no focus, under the guard. Commits `9895868b4`..`201341965`, fix `91e722095`..`0f746a7a5`; reviewed at the boundary, the last finding closed as narrowed by design (the ruling of 2026-11-15); the source guard on overlays' portals is built at the start of M5's range.
 - [x] (2026-11-15) M5 — Finding what waits: the card, the jump button, the way there. Commits `a2880d92f`..`ccddb2679` (with M4's portal guard), the Needs-you line `fed73c172`..`5c7e17dcc`, fix waves `eee76ad54`..`f2074d307`, `657d25985`..`060f25c3c`, `2f40736a1`..`09326452a`; reviewed clean at the boundary (third pass approved).
 - [x] (2026-11-15) M6 — MAWS's ask: nothing opens by itself. Commits `2b129d553`..`142803541`; reviewed clean at the boundary.
-- [ ] M7 — The e2e edits, the record and the acceptance run.
+- [x] (2026-11-15) M7 — The e2e edits, the record and the acceptance run. M7a (the scenes) `b022c6530`..`bca549a33`, two fix waves; the probes merges `d7fc71272`, `a8a6e829e`; the M7 addition `50879fb99`..`db813de4e`, fix `2dc387b5c`..`2ca73a4ad`; the early chain merge of U6b `e8ddff845` and its scene commit `d50ca424b`; M7b (the record and the whole checks) `eebee3d03`; the early Mac run's panel fixes `285be3ecd`..`e17ea9046`; each reviewed clean. The Electron scenes are the architect's (Proof).
 - [ ] Handed back to the architect: the branch review, class 1a, the Electron e2e groups, the pull request.
 
 ## What this document assumes of landings in flight
@@ -594,9 +594,10 @@ So no two-build run is owed for a stored form: the landing takes no wire minor a
 | `transcript/model/reduce.ts`, `rows.ts`, `schema.ts`, `keys.ts`, `derive.ts`, `copy.ts`; `transcript/view/Transcript.tsx`, `rows/Row.tsx`, `cells/CellLine.tsx`, `transcript.css` | per UC-3 (U3 owns `Transcript.tsx`; U4 and U2 inserted in the model files) | the parts UC-3 gives U1: the three rows, the end row, the waiting state of a call's row, the jump button's request state; `index.answers`; one term removed from U3a's `isPersistentNotice`. U2a's insertion in `askRow` (C12) is kept as it is |
 | `attention/navigation.ts` | no child | ⇧⌘J (with none) and a notification's open and its fallback toast's "Open session" (with the item it names, when it waits on an answer) call `showWaiting` once the session is in front. Permitted by the ruling of 2026-11-15 (corrected the same day: a Needs-you row's open is not here) |
 | `sidebar/NeedsYou.tsx` | U7 (the sidebar) | one line in `NeedsYouItem`'s `open`, for a row without an owner anchor, after the session is opened its way: `showWaiting(row.appSessionId, waitsOnAnswer(row.oldest) ? row.oldest.id : null)`; an owner-anchor row opens at its anchor and calls nothing; the rows, their counts, words and keys are unchanged. Approved by the architect on 2026-11-15 |
-| `session/SessionPane.tsx` | U1 (U2b removes the `ReportBar` mount; U4, U10, U11, U12 hold one line each) | the fallback `DockedRequest` goes; the compact pane's line (M5) |
+| `session/SessionPane.tsx` | U1 (U2b removes the `ReportBar` mount; U4, U10, U11, U12 hold one line each) | the fallback `DockedRequest` goes; the compact pane's line (M5), which opens the card with `openCard(false)`; on U4a's transcript box, one class, `in-data-[pane=card]:has-[[data-request-end]]:min-h-50`, a 200 px floor inside the floating card while it holds a request at its end, and its comment (M7, panel 1361). Approved by the architect on 2026-11-15 |
 | `app/slots.ts`, `panel/summary/Summary.tsx` | U8 | none: the slot is filled by registration, and the presence line stays |
-| `shell/floating.ts`, `shell/FloatingPill.tsx` | U10 | none: the raise rule is unchanged |
+| `shell/floating.ts` | U10 | `openCard(composerTakesKeyboard = true)`: the composer is marked to take the keyboard as it mounts only when true; every existing caller keeps the default; the raise rule is unchanged (M7, panel 1409). Approved by the architect on 2026-11-15 |
+| `shell/FloatingPill.tsx` | U10 | the pill's `onClick={() => openCard()}`, so no event reaches the flag; nothing else (M7, panel 1409). Approved by the architect on 2026-11-15 |
 | `panel/SurfaceRow.tsx` | U8 | M6: the import of `settleWaitingAsks` and its one call in `toggleSurface` removed (the function goes with the automatic open and close it stopped); nothing else; a unit case pins that toggling the ask sheet's row still shows and hides the sheet. Approved by the architect on 2026-11-15 |
 | `App.tsx` | no child | M6: one comment corrected ("the live asks that open it"); comment only. Approved by the architect on 2026-11-15 |
 | `tools/browser/agent/connect.ts` | U12 | M6: one comment corrected ("as E1's `connectAsks` opens the sheet"); comment only. Approved by the architect on 2026-11-15 |
@@ -884,6 +885,73 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   Rationale: the M7b executor's report (`task-7b-report.md`).
   Date/Author: 2026-11-15 (UTC), M7b's executor; folded by the controller.
 
+- Decision: (M7, the early Mac run's panel 1361; the architect's go of 2026-11-15) inside the floating card only, `StartedPane`'s transcript region keeps a 200 px floor while it holds a request at its end: `in-data-[pane=card]:has-[[data-request-end]]:min-h-50`, compiled to `:where([data-pane="card"]) .<class>:has([data-request-end]) { min-height: calc(var(--spacing) * 50) }` with `--spacing: 4px`. The card's body then scrolls between the request and the composer. By the selector's own scope, a main pane lays out as before (its `data-pane` is its index, and only the card's body and the compact section carry `"card"`). So does the compact pane (it draws no transcript region), and so does a card with no `[data-request-end]` (the `:has` fails and `min-h-0` stands). The floor also holds while the end row holds only a settling receipt (decision 20: the same element). It goes when the virtual list unmounts the end row, scrolled far from view, which returns the region to what it was before U1b. That is stable both ways and cannot loop: a mounted end row keeps the height that keeps it mounted.
+  Rationale: the end request is a row inside the transcript's scroller; with no floor the scroller got under 40 px at 360×240 and clipped its buttons. The class is scoped to the card and to the request's presence, so nothing else moves.
+  Date/Author: 2026-11-15 (UTC), the panel fixes' executor (`285be3ecd`..`e17ea9046`); folded by the controller.
+- Decision: (M7, panel 1361's scene) the scene "at its minimum size the card’s body scrolls…" reaches the controls in two positions of the body's scroll. The composer's bottom-inside-the-body check is now an `expect.poll` with the same bound. Playwright's `mouse.wheel` does not wait for the scroll to finish, and before the edit the `reachable` poll ran first and gave the scroll time to settle. The wheel back up is over the composer's toolbar ("Composer tools"), which is no scroller.
+  Rationale: the scene's own sentence: each control can be brought into the card's visible rect by the body's scroll; the new assertion proves the body scrolls.
+  Date/Author: 2026-11-15 (UTC), the panel fixes' executor (`285be3ecd`..`e17ea9046`); folded by the controller.
+- Decision: (M7, the early Mac run's panel 1409; the architect's go of 2026-11-15) `openCard(composerTakesKeyboard = true)`. The compact composer's "Waiting for you · N" calls `openCard(false)`, so the card's composer is not marked to take the keyboard as it mounts and the request's row keeps what `show` gives it. The pill calls `openCard()` through an arrow, so no event object reaches the flag. Every other caller passes nothing: `togglePanelFloat`, `focusSplitCard`, the split's focus-pane subscription, and the tests. The raise on a new request is unchanged.
+  Rationale: the card's transcript, its entry kept `live`, shows the request in the mount commit and queues `land`. The composer registers later in the same commit, and tiptap's focus frame comes after `land`. Pinned by `shell/FloatingCard.test.tsx` (no `focusFrame` call from the line; the pill still makes one) and `request-card/finding-waiting.test.tsx` (the race ends on the end row), both shown red first.
+  Date/Author: 2026-11-15 (UTC), the panel fixes' executor (`285be3ecd`..`e17ea9046`); folded by the controller.
+
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+Written 2026-11-15 by the controller at the end of M7, on the head that holds M1 to M7, the two probes merges and the early chain merge of U6b. The branch review, class 1a, the Electron groups and the pull request are the architect's.
+
+**What landed.**
+- A session's requests are drawn in its transcript. A question, a plan and MAWS's ask stand in the row of the call that raised them. A permission prompt stands in one end row after the transcript's last row, with "Also waiting" under it. The composer is never replaced by a request; only the trust, relay-down and failed-start cards dock.
+- An answered or dismissed question's row reads its answer from the first source that applies: the window's receipt, the settlement, or the delivery.
+- A prompt answers to ⌘↩, ⇧⌘↩ and Esc from the empty composer, from its own row, or from nothing with its pane active, under a guard that re-arms (decision 18, the narrower occlusion contract).
+- The card column's "Waiting for you", the jump button's pill, Needs you's line and the compact composer's line each go to a waiting request with one operation (`showWaiting`).
+- MAWS's ask no longer opens its sheet by itself.
+- Engine facts behind Stop and behind a message sent while a question waits were probed (probes 8 and 9), not guessed, and decisions 22 and the 9a reading rest on them.
+
+**Acceptance, line by line** (Concrete Step 8; proofs found in the tree at `eebee3d03`; unit files under `src/renderer/src/` unless rooted; scenes under `e2e/`, none run by an executor):
+
+| # | unit proofs | Mac scene (group) | open until the Mac |
+|---|---|---|---|
+| 1 | `request-card/in-transcript.test.tsx` (the end row, Also waiting, the waiting label); `composer/Composer.test.tsx` (free beside a waiting request); `transcript/view/rows/run-row.test.tsx`; `RequestCard.test.tsx` (Deny with a reason, Deny and stop); `src/engine-host/broker.test.ts` (probe 8, main and child); `request-card/prompt-keys.test.tsx` (the child's card through Stop and the turn's end) | `requests.spec.ts` "a replayed permission renders at its transcript’s end…", "a one-line command with no description: the card is at most 200 px tall"; `composer.spec.ts` "U1b, a prompt waits at the transcript’s end…", "U1b, Stop while the main loop’s prompt waits…" (requests, composer) | yes: the 200 px bound and the main loop's Stop in the app |
+| 2 | `prompt-keys.test.tsx` (reach and refusals, the held chord, popup, IME, dictation); `request-card/prompt-guard.test.ts` (arming and re-arming) | `requests.spec.ts` "a prompt’s keys: Esc from no focus…", "the three keys on their buttons…", "a held ⌘Enter answers the first of two…" (requests); `composer.spec.ts` (composer) | yes; the child-transcript refusal is unit-only (Decision Log, M7a) |
+| 3 | `in-transcript.test.tsx` (the ask in its row); `tools/maws/ask/store.test.ts` (a file tab in view stays, no sheet tab); `tools/maws/ask/AskSheetTool.test.tsx` (Open beside keeps the draft); `transcript/view/rows/maws.test.tsx` | `maws-tools.spec.ts` "an ask beside an open file…" (tools) | yes: first runs on the tree that holds the file-beside-the-chat landing |
+| 4 | `in-transcript.test.tsx` (the form in its row, two-line header); `request-card/lane-a-card.test.tsx` (no Esc decline, Skip closed, Dismiss) | `lane-a.spec.ts` "an asynchronous question’s form stands in its call’s row…", "Stop while a terminal session’s asynchronous question waits… (probe 9b, stop then answer)" (lane-a) | yes: "Stop ends the turn and leaves the question open" rests on the scene |
+| 5 | `lane-a/answer-join.test.ts`; `transcript/view/rows/question-receipt.test.tsx`; `lane-a/remote-connect.test.ts`; `lane-a/source/ask-answer.test.ts`; `transcript/model/arrivals.test.ts`; `transcript/model/derive.test.ts` (the turn an answer opened) | `lane-a.spec.ts` "an asynchronous question’s form stands in its call’s row…" (lane-a) | yes: the reload path in the app |
+| 6 | `request-card/finding-waiting.test.tsx` (the column's card, choosing the younger, the gone line, the pill) | `requests.spec.ts` "the column’s card lists what waits…"; `transcript.spec.ts` "an asynchronous question waiting far above a reader at the end…" (requests, transcript) | yes |
+| 7 | `in-transcript.test.tsx`; `finding-waiting.test.tsx` | `requests.spec.ts` "several wait: one prompt open at the end…" (requests) | yes |
+| 8 | `transcript/model/disk.test.ts` (probe 9a's file form); `request-card/variants/Question.test.tsx` (Dismiss); `AskSheetTool.test.tsx`; `question-receipt.test.tsx`; `request-card/receipts.test.tsx` | `maws-tools.spec.ts` "a message sent while a blocking ask waits…", "the ask’s Dismiss in its row…"; `lane-a.spec.ts` "…then Dismiss: the bridge settles it withdrawn by MAWS… (probe 9b, stop then dismiss)" (tools, lane-a) | yes; probe 9a's Stop variant has no scene (Surprises) |
+| 9 | `variants/Question.test.tsx` (double-click); `AskSheetTool.test.tsx` | `requests.spec.ts`, `maws-tools.spec.ts` (double-click scenes) | no |
+| 10 | `finding-waiting.test.tsx` (the compact line, and the keyboard kept on the row as the card's composer mounts); `shell/FloatingCard.test.tsx` (the line hands the composer no keyboard) | `panel.spec.ts` "a closed card’s compact composer reads Waiting for you · N…" (panel) | yes: red on the early run, fixed (1409), unrun since |
+| 11 | `RequestCard.test.tsx` (Overview); `sidebar/HoverCard.test.tsx`; `channel/ChannelView.test.tsx`; `stores/attention.test.ts` | `requests.spec.ts`, `maws-tools.spec.ts`, `lane-a.spec.ts` (the hover card, Overview, Needs you) | no |
+| 12 | `RequestCard.test.tsx` (no "Answered"); `in-transcript.test.tsx` (failed write and Retry, the three-second receipt, "Already answered elsewhere"); `stores/attention.test.ts` (the settling receipt) | `requests.spec.ts` "an allowed command whose result never comes…"; `lane-a.spec.ts` "a permission the bridge raised…", "a question answered elsewhere while its row waits…" (requests, lane-a) | yes for the app |
+| 13 | `harness/questions.test.ts` (the fixture only); `RequestCard.test.tsx` (picks kept across placements) | `transcript.spec.ts` "an asynchronous question raised above and below a reader mid-transcript…" (transcript; Proof 3) | yes: the anchoring rests wholly on the scene |
+| 14 | `transcript/model/fixtures.test.ts`, `journals.test.ts`, `snapshots.test.ts`; `finding-waiting.test.tsx` (a desk key places nothing); desk web's project; `sessions/cards.test.tsx` | `transcript.spec.ts` "every fixture renders…"; `sessions.spec.ts`; `apps/desk-web/e2e/session-view-tail.spec.ts` (transcript, default, desk-web) | yes: desk web in a browser |
+
+**What the early Mac run showed** (hosted, run 43753870789 at `fbec1c0cc`): e2e:tools, e2e:to-human, e2e:remote and e2e:side green. e2e:panel red on two scenes, both product faults, both fixed (decisions above: the card's 200 px floor; the line that hands the composer no keyboard), unrun since. lane-a (21 passed) and agents (27 passed) ended red at their artifact upload, information only. design-systems, transcript and c7 never started. Before it, on `d7fc71272`: requests 21 of 22 (the helper fault at 420, fixed) and tools red at 434 (the Markdown premise, fixed; the scene's surface came with U6b).
+
+**Where each look default is built:**
+- Card 1: `request-card/EndRegion.tsx` `END_FRAME`.
+- Card 2: `transcript/view/rows/Question.tsx` `answerOf`.
+- Card 3: `request-card/receipts.ts` `followSettlements`.
+- Card 4: `transcript/view/Transcript.tsx` `NEEDS_INPUT.mark`.
+- Card 5: `request-card/variants/Question.tsx` `FormHeader`.
+
+The owner's answers kept cards 1 to 4 at their defaults and changed A5 to two lines (built in M3).
+
+**Not verified.**
+- Every Electron scene since the fixes: the composer, tools, lane-a, requests, panel, transcript and desk-web groups at minimum.
+- The 200 px floor's premise that a one-line command's card fits it at the card's 360 px width.
+- Proof 3's frame bound read base against landing.
+- The paid live groups.
+- The owner's sitting.
+
+**Residue.**
+- Ticket candidates are in the tracker rows M7b added: the compact toolbar wrap (U10), `applyAskEvents`' unread return, `sessionsInFront()` under the narrow sheet, and `TranscriptSlot.test.tsx`'s hidden TypeError.
+- The answer notice twice in the to-human view is U2b's, fixed on its branch.
+- The floor drops while the end row is unmounted far from view, which returns the card's transcript box to its pre-U1b size until the reader scrolls back; the panel fixes' review found it benign (unmounting shrinks the viewport rather than widening the mounted range, so nothing oscillates).
+- Probe 9a's Stop variant needs a probe that records MAWS's own Stop.
+
+**Retrospective.**
+- Moving an element between layout regions moves it between scroll containers. The docked request's height used to count toward the card body's scroll. Inside the transcript's `flex-1` region it no longer counted, and nothing on a unit DOM could show that.
+- A layout-bearing move deserves a scene run early, before the record, not at the end.
+- Scenes written to an acceptance sentence before their surface exists (434) cost a red run and a ruling. Naming the surface's landing in the scene's first comment would have saved both.
+- Engine facts settled by a probe (8 and 9) turned two speculative scenes into recorded ones and found a product difference: MAWS's Stop holds a waiting message.
