@@ -1109,106 +1109,72 @@ function storedValue(key: LayoutKey, slice: unknown): unknown {
 // would clobber them) or for hydration itself.
 // l1-sessions-13: main's inactivity sweep keeps every session `main.tabs` holds open, so a session tab (or one of its
 // agents') joining the tabs is written at once rather than after the delay; a tab leaving waits as any change does.
-// UX wave U6b-1 (Decision 19; M4's fix wave): a move's keys in order. `writeInOrder` makes a gate that holds the source's
-// keys (a key held writes nothing, its changes owed) until every destination key of that gate has a write answered ok
-// (its own, or a later one of the same key). A destination key that an earlier gate holds is not written at once either:
-// its value already carries that earlier move's removal, so it waits for that gate as the earlier source keys do, and
-// this gate waits for it in turn. So gates compose, and no write sends a removal before the place the file went to is
-// stored. A failed write keeps its gate until a later write of the key answers ok; two moves whose writes wait on each
-// other after a failure wait until `beforeunload` or the stop, the only times everything is sent (the destination keys
-// first). A session joining a held `main.tabs` waits for the gate too, and is written as soon as it lets go.
-interface WriteGate {
-  waiting: Map<LayoutKey, number>; // each destination key written and the write whose answer (or a later one's) the gate waits for
-  deferred: Set<LayoutKey>; // destination keys an earlier gate holds, written once no gate does
-  held: Set<LayoutKey>;
-}
+// UX wave U6b-1 (Decision 19; M4's fix waves): the keys that say where a file is, `main.tabs`, each session's
+// `panel.<session>` list and `panelTools.params` (`LOGGED_KEY`), are stored through one first-in-first-out log, every
+// write of them alike: an ordinary change at its debounce moment, a move (`writeInOrder`) at once, its destination's
+// values as it left them and then its source's. One write of the log is in flight at a time; a failed one stays at the
+// head and is sent again at the next change of the layout; `beforeunload` and the stop send the whole log at once, in
+// its order (main stores each `layout.set` as it arrives). So what is stored is always a prefix of the log, and since a
+// move's destination comes before its source, after every prefix each file is in one place at least (a value that
+// brings back a tab closed since is a tab too many, never a file too few). An entry of the same key as the log's last,
+// not yet sent, takes that entry's place: the prefix it drops added nothing the later one lacks.
+// The other keys keep the debounce alone: none of them says whether a file is open (the stacks, the groups and the widths
+// order and size tabs the lists hold; `panel.pinned` never holds a file, Decision 16).
+const LOGGED_KEY = (key: LayoutKey) => key === 'main.tabs' || key === 'panelTools.params' || (key !== 'panel.pinned' && PANEL_KEY.test(key));
 const orderedWriters = new Map<typeof useLayout, (first: LayoutKey[], then: LayoutKey[]) => void>();
 
 export function persistLayout(client: MawsBridge, store = useLayout): () => void {
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
   let published = new Set(written ? openSessionsOf(store.getState().main) : []); // the sessions main's `main.tabs` holds open
-  let gates: WriteGate[] = []; // oldest first
-  const owed = new Set<LayoutKey>(); // held keys with a change not yet written
+  const log: { key: LayoutKey; slice: unknown }[] = []; // a null slice deletes the key
+  let flight: number | null = null; // the write of the log's head in flight
+  let failed = false; // the head's last write failed: it waits for the next change
   let writes = 0;
 
-  const write = (key: LayoutKey, slice: unknown) => {
+  const write = (key: LayoutKey, slice: unknown): number => {
     if (key === 'main.tabs') published = new Set(openSessionsOf(slice as Strip));
     const sent = ++writes;
     void client.invoke('layout.set', { key, value: storedValue(key, slice) }).then((result) => {
       if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
-      else answered(key, sent);
+      answered(sent, result.ok);
     });
+    return sent;
   };
-  const isHeld = (key: LayoutKey) => gates.some((gate) => gate.held.has(key));
+  const pump = () => {
+    if (flight === null && !failed && log.length > 0) flight = write(log[0].key, log[0].slice);
+  };
+  const answered = (sent: number, ok: boolean) => {
+    if (sent !== flight) return; // not the log's (or sent by an unload)
+    flight = null;
+    // a failed write of a key that left the state (a removed session's list, which main deletes) is not sent again
+    if (ok || (log[0].slice !== null && !persistedKeys(store.getState()).has(log[0].key))) log.shift();
+    else failed = true;
+    pump();
+  };
+  const append = (key: LayoutKey, slice: unknown) => {
+    const tail = log.at(-1);
+    if (tail?.key === key && !(log.length === 1 && flight !== null)) tail.slice = slice;
+    else log.push({ key, slice });
+  };
   const unschedule = (key: LayoutKey) => {
     clearTimeout(pending.get(key)?.timer);
     pending.delete(key);
   };
-  // The key written from the state as it is now (a key that left the state is not written back); the write's number.
-  const writeNow = (key: LayoutKey, now: Map<LayoutKey, unknown>): number | null => {
-    owed.delete(key);
-    unschedule(key);
-    if (!now.has(key)) return null;
-    write(key, now.get(key));
-    return writes;
+  const persist = (key: LayoutKey, slice: unknown) => {
+    if (!LOGGED_KEY(key)) return void write(key, slice);
+    append(key, slice);
+    pump();
   };
-  // Every destination key no gate holds any more is written (one write for every gate deferring it), every owed change
-  // no gate holds is written, and every gate with nothing left to wait for lets go; again, until none does.
-  const unblock = () => {
-    if (gates.length === 0) return; // nothing held: nothing owed
-    for (;;) {
-      const now = persistedKeys(store.getState());
-      const due = new Set<LayoutKey>();
-      for (const gate of gates) for (const key of gate.deferred) if (!isHeld(key)) due.add(key);
-      for (const key of due) {
-        const sent = writeNow(key, now);
-        for (const gate of gates) if (gate.deferred.delete(key) && sent !== null) gate.waiting.set(key, sent);
-      }
-      for (const key of [...owed]) if (!isHeld(key)) writeNow(key, now);
-      const done = gates.filter((gate) => gate.waiting.size === 0 && gate.deferred.size === 0);
-      if (done.length === 0) return;
-      gates = gates.filter((gate) => !done.includes(gate));
-    }
-  };
-  const answered = (key: LayoutKey, sent: number) => {
-    for (const gate of gates) {
-      const from = gate.waiting.get(key);
-      if (from !== undefined && sent >= from) gate.waiting.delete(key);
-    }
-    unblock();
-  };
-  // beforeunload and the stop: every gate let go, every destination key sent before every owed change.
-  const sendAll = () => {
-    const now = persistedKeys(store.getState());
-    const all = gates;
-    gates = [];
-    for (const gate of all) for (const key of [...gate.waiting.keys(), ...gate.deferred]) writeNow(key, now);
-    for (const key of [...owed]) writeNow(key, now);
-  };
+  // A move: its destination's values as it left them, then its source's, after everything the log holds already.
   const inOrder = (first: LayoutKey[], then: LayoutKey[]) => {
     if (written === null) return; // before hydration nothing is written
-    const gate: WriteGate = { waiting: new Map(), deferred: new Set(), held: new Set() };
-    for (const key of then) {
-      if (first.includes(key)) continue;
-      if (pending.has(key)) {
-        unschedule(key);
-        owed.add(key);
-      }
-      gate.held.add(key);
-    }
     const now = persistedKeys(store.getState());
-    for (const key of first) {
-      if (isHeld(key)) {
-        unschedule(key); // an earlier gate holds it: written when that gate lets go
-        gate.deferred.add(key);
-        continue;
-      }
-      const sent = writeNow(key, now);
-      if (sent !== null) gate.waiting.set(key, sent);
+    for (const key of [...first, ...then.filter((key) => !first.includes(key))]) {
+      unschedule(key);
+      if (now.has(key)) append(key, now.get(key));
     }
-    gates.push(gate);
-    unblock();
+    pump();
   };
   orderedWriters.set(store, inOrder);
   const schedule = (key: LayoutKey, value: unknown) => {
@@ -1216,51 +1182,63 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     if (before) clearTimeout(before.timer);
     const timer = setTimeout(() => {
       pending.delete(key);
-      write(key, value);
+      persist(key, value);
     }, LAYOUT_WRITE_DELAY_MS);
     pending.set(key, { timer, value });
   };
   const flush = () => {
-    sendAll();
     for (const [key, { timer, value }] of pending) {
       clearTimeout(timer);
-      write(key, value);
+      if (LOGGED_KEY(key)) append(key, value);
+      else write(key, value);
     }
     pending.clear();
+    const unsent = log.splice(flight === null ? 0 : 1); // the head in flight is on its way already
+    log.length = 0;
+    flight = null;
+    failed = false;
+    for (const { key, slice } of unsent) write(key, slice);
   };
 
   const unsubscribe = store.subscribe((state) => {
     if (!state.hydrated) return;
     const now = persistedKeys(state);
     let marks = false; // UX wave U8b: this change writes the side column's state while the first read is pending
+    let changed = false;
     if (written) {
       for (const [key, value] of now) {
         if (written.get(key) === value) continue;
+        changed = true;
         if (state.firstReadPending && (key === 'panelTools.surfaces' || key === 'panelTools.groups' || PANEL_KEY.test(key))) marks = true;
-        if (isHeld(key)) {
-          // UX wave U6b-1: a held key's change waits with it, a session joining `main.tabs` included (written as the gate
-          // lets go, with no delay)
-          owed.add(key);
-          continue;
-        }
         if (key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id))) {
-          clearTimeout(pending.get(key)?.timer);
-          pending.delete(key);
-          write(key, value);
+          unschedule(key);
+          persist(key, value);
         } else schedule(key, value);
       }
     } else published = new Set(openSessionsOf(state.main)); // hydration wrote what differs from layout.json, open tabs included
     // A key that left the state (a removed session's `panel.<id>`, which main deletes) must not be written back by a
-    // write still pending from before.
+    // write still pending from before, nor by the log (but for the head in flight, whose failure drops it).
     for (const [key, { timer }] of pending) {
       if (now.has(key)) continue;
       clearTimeout(timer);
       pending.delete(key);
     }
-    for (const key of owed) if (!now.has(key)) owed.delete(key);
+    for (let i = log.length - 1; i >= (flight === null ? 0 : 1); i--) {
+      if (log[i].slice !== null && !now.has(log[i].key)) {
+        log.splice(i, 1);
+        if (i === 0) failed = false; // the failed head is gone: the next is sent below
+      }
+    }
     // P5 O6 M4: main deletes the panel key of its own removed session, never another machine's, so the page deletes that.
-    for (const key of written?.keys() ?? []) if (!now.has(key) && otherMachinePanelKey(key, client.localMachine)) write(key, null);
+    for (const key of written?.keys() ?? []) {
+      if (now.has(key) || !otherMachinePanelKey(key, client.localMachine)) continue;
+      changed = true;
+      persist(key, null);
+    }
     written = now;
+    // UX wave U6b-1: a change of the layout sends the log's failed head again
+    if (changed) failed = false;
+    pump();
     // UX wave U8b (Decision Log 3): after a deferred first read, this build's first write of a list, the stacks or the
     // groups marks the profile read, so no later launch prunes a tab this build may have shown.
     if (marks) {
@@ -1278,8 +1256,7 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
 }
 
 // UX wave U6b-1 (Decision 19; Interfaces §D): a move's stored writes in order, through the persistence running over
-// `store` (nothing while none runs): `first` written now, `then` held until every `first` is answered ok; at
-// `beforeunload` all sent, `first` first.
+// `store` (nothing while none runs): the values of `first` as the move left them, then those of `then`, at the log's end.
 export function writeInOrder(first: LayoutKey[], then: LayoutKey[], store = useLayout): void {
   orderedWriters.get(store)?.(first, then);
 }
