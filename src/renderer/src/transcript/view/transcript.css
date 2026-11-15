@@ -562,6 +562,9 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-notice-detail > .transcript-quiet-button { margin: 0 0 6px 24px; }
 .transcript-consent { display: flex; min-width: 0; padding: 4px 0 8px; color: var(--fg-muted); font-size: var(--text-ui); line-height: 1.5; }
 .transcript-consent-subject { color: var(--fg); font-family: var(--font-mono); font-size: var(--text-code); }
+/* UX wave U1c: a grant the engine never ran keeps its line with the dropped bubble's mark, at the meta line's gap */
+.transcript-consent[data-dropped] { gap: 8px; }
+.transcript-consent .transcript-not-sent { flex: none; font-size: var(--text-ui-sm); }
 /* UX wave U3 end */
 .transcript-peer { padding-bottom: 4px; }
 .transcript-peer > .transcript-lifecycle { flex-wrap: wrap; padding-bottom: 4px; } /* the desk's agent runs (desk-web StreamView) */

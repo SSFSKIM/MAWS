@@ -181,7 +181,9 @@ const isUnread = (row: Row): boolean => row.kind === 'user' && row.unread === tr
 // UX wave U4a (decision 12): a mount with a stack (`'stacked'`) draws a message there while it is unread, so no row
 // marked unread either.
 export function withQueueTail(rows: Row[], withdrawn: ReadonlySet<string>, tail: readonly Row[], waiting?: 'stacked'): Row[] {
-  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && row.messageUuid !== null && withdrawn.has(row.messageUuid) && (row.dropped || row.pending !== undefined)));
+  // UX wave U1c: an approval row drawn beside a message goes with it (`beside`)
+  const ofMessage = (row: RowOf<'user'>) => row.messageUuid ?? row.beside ?? null;
+  const kept = withdrawn.size === 0 ? rows : rows.filter((row) => !(row.kind === 'user' && ofMessage(row) !== null && withdrawn.has(ofMessage(row)!) && (row.dropped || row.pending !== undefined)));
   const read = waiting === 'stacked' && kept.some(isUnread) ? kept.filter((row) => !isUnread(row)) : kept;
   return tail.length === 0 ? read : [...read, ...tail];
 }
@@ -469,6 +471,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (marks.length === 0) return [userRow(event, id, editable, steer)];
     const beside = (from: number) => marks.slice(from).map((mark, n): RowOf<'user'> => ({
       ...userRow(event, rowId.grant(event.messageUuid ?? event.id, from + n), false, steer, consentMessage(mark.kind, mark.subject)), messageUuid: null, consent: mark,
+      ...(event.messageUuid !== null && { beside: event.messageUuid }),
     }));
     const words = wordsBesideGrants(event.content, marks);
     if (words === undefined) return [userRow(event, id, editable, steer), ...beside(0)];
@@ -1558,8 +1561,10 @@ function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['
 
 // UX wave U1c (Interfaces §C, 5): the person's words beside the grants a message's lines hold, when those grants are
 // exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
-// when the lines do not give the marks, or the words cannot be told apart from content that is not one string.
+// when the lines do not give the marks, when the content holds anything but text (an image, a document: the whole
+// bubble keeps it), or when the words cannot be told apart from content that is not one string.
 function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
+  if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
   const text = messageText(content);
   const whole = readConsents(text);
   const lines = whole.length > 0 ? [{ line: text, grants: whole }] : text.split('\n').map((line) => ({ line, grants: readConsents(line) }));

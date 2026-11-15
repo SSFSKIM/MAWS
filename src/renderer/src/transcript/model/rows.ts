@@ -73,6 +73,9 @@ export type Row = RowBase &
         // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): the prompt is MAWS's "Approve and retry" for
         // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
         consent?: { kind: 'command' | 'call'; subject: string };
+        // UX wave U1c (the U1c document, Design 2): on an approval row drawn beside a message (its own `messageUuid` is
+        // null: no point to rewind to, no prompt to edit), the message it stands beside, so the rows go where it goes
+        beside?: MessageUuid;
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
     | {

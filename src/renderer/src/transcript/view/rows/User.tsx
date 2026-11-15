@@ -49,18 +49,22 @@ function segmentsOf(row: UserRowData): Segment[] {
 }
 
 export function UserRow({ row }: { row: UserRowData }) {
-  return row.consent ? <ConsentLine consent={row.consent} /> : <UserBubble row={row} />;
+  return row.consent ? <ConsentLine row={row} consent={row.consent} /> : <UserBubble row={row} />;
 }
 
 // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): MAWS's "Approve and retry" for a call auto mode
 // blocked is the person's act, not their prose: one line, "You approved `<subject>`", never a bubble, with no Copy and
-// no Edit. The subject is cut at the column's edge; its tooltip holds it whole.
-function ConsentLine({ consent }: { consent: NonNullable<UserRowData['consent']> }) {
+// no Edit. The subject is cut at the column's edge; its tooltip holds it whole. UX wave U1c (M1's review): a grant the
+// engine never ran carries the mark a dropped bubble carries, so the line never stands alone for it.
+function ConsentLine({ row, consent }: { row: UserRowData; consent: NonNullable<UserRowData['consent']> }) {
+  const actions = useActions();
+  const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
   return (
-    <div className="transcript-consent" data-consent={consent.kind}>
+    <div className="transcript-consent" data-consent={consent.kind} data-dropped={row.dropped ? '' : undefined}>
       <span className="transcript-line-text" title={consent.subject}>
         {CONSENT.approved} <code className="transcript-consent-subject">{consent.subject}</code>
       </span>
+      {notSent !== null && <span className="transcript-not-sent">{notSent}</span>}
     </div>
   );
 }
