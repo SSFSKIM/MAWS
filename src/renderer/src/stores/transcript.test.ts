@@ -5,7 +5,6 @@ import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
 import { api, BASH_RESULT, builder, request, tool, uuid } from '../transcript/model/test-events';
-import { foldedInReport } from '../owner/report/project';
 import type { TranscriptSource } from '../transcript/source/types';
 import { synthesise } from '../../../../test/support/synth-transcript';
 import { turnDerivations } from '../transcript/model/derive';
@@ -863,7 +862,7 @@ describe('transcript store: the calls that hold a waiting form', () => {
     expect(marked(rows())).toEqual(['question:q-raised']);
   });
 
-  it('a waiting plan of a pending request stays in view in a turn the reader collapsed and in the to-human view’s fold; one that waits for nothing folds', async () => {
+  it('a waiting plan of a pending request stays in view in a turn the reader collapsed, and in the to-human view never inside a record; one that waits for nothing folds with its turn', async () => {
     const store = createTranscriptStore();
     const b = pendingTurns();
     b.end(['u3']);
@@ -872,12 +871,11 @@ describe('transcript store: the calls that hold a waiting form', () => {
     expect(plan()).toBeUndefined(); // its turn folded: a plan that waits for nothing goes with the turn's work
     store.getState().setWaitingForms(KEY, calls('plan-1'));
     expect(plan()?.toolUseId).toBe('plan-1');
-    expect(foldedInReport(plan()!)).toBe(false);
+    // the to-human view (U2b's mirror, UC-3): a plan is never inside a record, waiting or answered
+    const mirrored = (rows: readonly Row[]) => mirrorRows(rows, { openStretches: new Set<string>() });
+    expect(mirrored(store.getState().rows(KEY)).filter((row) => row.kind === 'plan').map((row) => row.toolUseId)).toEqual([tool('plan-1')]);
     store.getState().expandAll(KEY);
-    const open = store.getState().rows(KEY).find((row) => row.kind === 'plan' && row.toolUseId === tool('plan-1'))!;
     store.getState().setWaitingForms(KEY, new Set());
-    const unmarked = store.getState().rows(KEY).find((row) => row.kind === 'plan' && row.toolUseId === tool('plan-1'))!;
-    expect(foldedInReport(unmarked)).toBe(true);
-    expect(foldedInReport(open)).toBe(false);
+    expect(mirrored(store.getState().rows(KEY)).filter((row) => row.kind === 'plan').map((row) => row.toolUseId)).toEqual([tool('plan-1')]);
   });
 });
