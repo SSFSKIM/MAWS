@@ -3,13 +3,16 @@
 // view's line with its chunk count, ↑ ↓ through the chunks, Reload and Keep mine), the document's conflict blocks
 // counted with ↑ ↓, and Save, shown while there is anything to save and disabled while a save runs. No CodeMirror here:
 // the bar is in the main chunk; the counts and the stepping come from the shown code view (`navigation.ts`).
+// UX wave U6e (K1, K14, K15; the named exception of docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md
+// §D): the last save's failure is `SaveFailure`, which the bar lays out on a line of its own at its full width, wrapped
+// and never cut, in every file tab.
 import { useChordHint } from '../../../app/IconButton';
 import { EDITOR_COPY } from '../copy';
 import { useViewer, type ViewerEntry } from '../viewer/viewer-store';
 import { step, useEditorNavigation } from './navigation';
 
-// The buttons and counts keep their size in a narrow bar; the notice and a save's failure are what truncate (M4: the
-// merge view's bar at a 600 px viewer wrapped Keep mine and drew Save over Wrap).
+// The buttons and counts keep their size in a narrow bar; the notice is what truncates (M4: the merge view's bar at a
+// 600 px viewer wrapped Keep mine and drew Save over Wrap).
 const control = 'shrink-0 whitespace-nowrap rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint';
 const primary = 'shrink-0 whitespace-nowrap rounded-sm border border-border-strong bg-bg-raised px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover disabled:text-fg-faint';
 const arrow = 'rounded-sm px-1 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:text-fg-faint';
@@ -42,11 +45,6 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
   const viewer = useViewer.getState;
   return (
     <span data-editor-controls className="flex min-w-0 shrink items-center gap-1">
-      {saveError !== null ? (
-        <span role="alert" title={EDITOR_COPY.saveFailed(saveError)} className="min-w-0 truncate text-danger">
-          {EDITOR_COPY.saveFailed(saveError)}
-        </span>
-      ) : null}
       {diskUnusable !== null && theirs === null ? (
         <span role="status" data-disk-unusable={diskUnusable} title={EDITOR_COPY.diskUnusable[diskUnusable]} className="min-w-0 truncate text-warning">
           {EDITOR_COPY.diskUnusable[diskUnusable]}
@@ -87,6 +85,17 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
           {saving ? EDITOR_COPY.saving : EDITOR_COPY.save}
         </button>
       ) : null}
+    </span>
+  );
+}
+
+// UX wave U6e (K1, K14): the last save's failure, a line of its own below the path (`basis-full` in the bar's wrapping
+// row, after everything else in it), wrapped to as many lines as it needs and never cut.
+export function SaveFailure({ entry }: { entry: ViewerEntry }) {
+  if (entry.saveError === null) return null;
+  return (
+    <span role="alert" className="basis-full break-words text-danger">
+      {EDITOR_COPY.saveFailed(entry.saveError)}
     </span>
   );
 }

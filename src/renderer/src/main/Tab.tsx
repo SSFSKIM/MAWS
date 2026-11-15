@@ -159,7 +159,7 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      title={name}
+      title={tab.kind === 'file' ? tab.path : name} // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5

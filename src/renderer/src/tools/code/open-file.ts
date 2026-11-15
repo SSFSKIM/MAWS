@@ -10,6 +10,10 @@
 // session's preview tab unless the opener keeps it (`keep`). A person's open leaves an open page first; an agent's
 // (`asked`) leaves it and the Settings dialog open. An open made before the layout is read is kept, once, and made when
 // it is read, in call order, so it meets the restored tabs; `openFileWhenRead` answers when it is made (`show_pane`).
+//
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 19): an agent's open of a
+// file the session already has a tab of (beside the chat or in the main area) selects it and reads nothing new; a tab it
+// adds or reuses holds the mark `agent`, so its reads skip the person's grants. A person's open, and `keep`, remove it.
 import type { AppSessionId } from '@shared/graph/ids';
 import { normalizeLexically } from '@shared/files/named';
 import { machineFor } from '../../ipc/machine';
@@ -119,25 +123,31 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   const machine = machineFor(appSessionId);
   const key = fileKey(machine, path);
   const placement = placeOpen(layout, { appSessionId, path, main: options.main ?? false, keep: options.keep ?? false });
+  const agent = options.asked === 'agent';
   if (placement.to === 'main') {
     holdSideViews(key);
     layout.openTab({ kind: 'file', path, line, appSessionId, machine });
     dropSideViews(key);
-    useViewer.getState().revisit(key, appSessionId);
+    if (!agent) useViewer.getState().revisit(key, appSessionId); // U6e: the agent's show of a main tab of the file reads nothing
     return { surface: 'main', tabId: key };
   }
   const session = appSessionId!;
-  if (options.asked !== 'agent') layout.closeDestination();
-  const params = (preview: boolean): FilesTabParams => ({ file: path, line, ...(preview ? { preview: true as const } : {}) });
+  if (!agent) layout.closeDestination();
+  const params = (preview: boolean, marked: boolean): FilesTabParams => ({ file: path, line, ...(preview ? { preview: true as const } : {}), ...(marked ? { agent: true as const } : {}) });
   let tabId: string;
   if (placement.tabId === null) {
-    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep), asked: options.asked });
+    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep, agent && !options.keep), asked: options.asked });
   } else {
-    // a reused tab is the preview unless kept; a selected one stays what it was, unless the opener keeps it
-    const preview = placement.how === 'reuse' ? !options.keep : fileOfTab(layout.panelParams[placement.tabId])?.preview === true && !options.keep;
-    layout.setPanelParams(placement.tabId, params(preview));
+    // a reused tab is the preview unless kept; a selected one stays what it was, unless the opener keeps it. U6e: a reused
+    // tab takes the agent's mark with the agent's open; a selected one keeps the mark it has from the agent's show, and
+    // loses it with a person's open or a keep
+    const held = fileOfTab(layout.panelParams[placement.tabId]);
+    const preview = placement.how === 'reuse' ? !options.keep : held?.preview === true && !options.keep;
+    const marked = agent && !options.keep && (placement.how === 'reuse' || held?.agent === true);
+    layout.setPanelParams(placement.tabId, params(preview, marked));
     tabId = placement.tabId;
     showTab(session, tabId, options.asked);
+    if (agent && placement.how === 'select') return { surface: 'side', tabId }; // U6e: the tab the session has, read as it is
   }
   useViewer.getState().revisit(key, appSessionId);
   return { surface: 'side', tabId };

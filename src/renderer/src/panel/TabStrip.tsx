@@ -310,7 +310,7 @@ function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, body
         aria-selected={selected}
         aria-controls={selected ? bodyId : undefined}
         aria-label={iconOnly ? name : undefined}
-        title={iconOnly ? name : undefined}
+        title={file ? file.file : iconOnly ? name : undefined} // UX wave U6e (decision 11): a file's tab has its full path as its tooltip
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
         onFocus={() => revealTab(outer.current)} // the F6 stop and the arrows focus without scrolling

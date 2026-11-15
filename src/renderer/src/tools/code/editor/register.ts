@@ -15,6 +15,7 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../../../keymap/actions-runtime';
 import { tabOnScreen, useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
+import { connectOpenFile } from '../files/open-chosen'; // UX wave U6e: File › Open File… (⌘O)
 import type { SideFilesViewer } from '../files/tabs';
 import { useViewer } from '../viewer/viewer-store';
 import { askClose } from './EditorDialogs';
@@ -116,6 +117,7 @@ export function registerEditor(): () => void {
     registerReplaceVerdict('file', fileReplaceVerdict), // E11 F2b
     registerAction('file.save', saveFocusedFile),
     registerAction('file.commentLine', commentOnFocusedLine),
+    connectOpenFile(),
   ];
   return () => offs.forEach((off) => off());
 }

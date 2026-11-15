@@ -18,6 +18,15 @@
 // follows a refusal, so `revisit` reads a failed or named entry again when its tab is shown again or its file opened
 // again (decision 15).
 //
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §D; decisions 5, 6, 18, 19): a
+// file outside the folders that this build's daemon admits for a save is editable. Every answered read sets the latest
+// admission (`named`, and `locked`: MAWS's own, only added, or named only by a tool's result), under unsaved edits too;
+// the entry also keeps the pin, the real path of the document it holds, which a read moves only where it lands on an
+// entry with no unsaved edits (or one that has none), and Reload moves to the version taken. An entry with a pin is saved
+// by `files.writeOutside` with it, and never by `files.write`; a locked one, or one named with no pin (a daemon of the
+// parent pin, which answers no `outside`), is not saved at all. A tab the agent's open made (`agent`) reads with
+// `agent`, so a grant alone admits nothing there.
+//
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
 //
@@ -41,7 +50,7 @@ import { machineOf } from '@shared/machine/address';
 import { useFiles, type WatchHold } from '../files/store';
 import { sideFileKeys } from '../files/tabs'; // UX wave U6b-1
 import { dirname, sameFile } from '../files/tree';
-import { EDITOR_COPY } from '../copy';
+import { EDITOR_COPY, REFUSAL } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
 
 export const VIEWER_ENTRIES_MAX = 20;
@@ -89,6 +98,11 @@ export interface ViewerEntry {
   // E5 end
   readOnly: boolean; // E2: mounted read-only (the File artifact viewer; E2's Decision Log 7): never editable, whatever the file
   named: boolean; // U6c: the last load's answer carried `named`: the file is outside the session's folders, admitted by the transcript
+  // UX wave U6e (§D; decision 6)
+  locked: 'maws' | 'added' | 'result' | null; // the latest answered read: `own` → 'maws'; else `outside.writable === false` → its `why`
+  pin: string | null; // the real path of the document the entry holds; null for a document read with no `outside`
+  agent: boolean; // the entry's reads carry `agent` (the tab's mark, decision 19)
+  textEditable: boolean; // the baseline is a text the editor takes losslessly (`isEditable` where it landed); with the admission it decides `editable`
 }
 
 // E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found
@@ -97,6 +111,7 @@ export interface Theirs {
   text: string;
   hash: string;
   view: 'notice' | 'merge';
+  real: string | null; // UX wave U6e: the real path of the read that gave this version (Reload pins it)
 }
 
 export type SaveResult = 'ok' | 'conflict' | 'error' | 'noop';
@@ -126,7 +141,8 @@ export interface ViewerStore {
   wrap: boolean; // the Wrap toggle, one for every code view
   // P3-L (M6b fix wave 2): `artifact` reads the file by the artifact alone, the session (null for none) kept for what
   // the view offers beside the read
-  mount(tabId: string, target: { appSessionId: AppSessionId | null; path: string; line: number | null; readOnly?: boolean; artifact?: ArtifactRead }): () => void;
+  // UX wave U6e (decision 19): `agent`, the tab holds the mark of an open the agent asked for
+  mount(tabId: string, target: { appSessionId: AppSessionId | null; path: string; line: number | null; readOnly?: boolean; artifact?: ArtifactRead; agent?: boolean }): () => void;
   loadMore(tabId: string): void;
   toggleSource(tabId: string): void;
   setWrap(wrap: boolean): void;
@@ -202,10 +218,24 @@ export function lineBreakOf(text: string): '\n' | '\r\n' {
 export const isEditable = (file: Pick<ViewerEntry, 'kind' | 'complete' | 'encoding' | 'hash'> & { utf8: boolean | null }): boolean =>
   (file.kind === 'code' || file.kind === 'markdown') && file.complete && file.encoding === 'utf8' && file.hash !== null && file.utf8 === true;
 
+// UX wave U6e (decision 6, §D): what one read's answer says of the file now, the latest admission (`named`, `locked`),
+// and the real path it read for a file outside the folders (`real`).
+type Admission = Pick<ViewerEntry, 'named' | 'locked'> & { real: string | null };
+const admissionOf = (read: FilesReadOutput): Admission => ({
+  named: read.named === true,
+  locked: read.own === true ? 'maws' : read.outside?.writable === false ? (read.outside.why ?? 'added') : null,
+  real: read.outside?.real ?? null,
+});
+// Whether the admission and the pin let a text the editor takes be edited: not mounted read-only, not locked, and outside
+// the folders only with the real path pinned (a daemon of the parent pin answers `named` with no `outside`: W6).
+const admits = (entry: Pick<ViewerEntry, 'readOnly' | 'locked' | 'named' | 'pin'>): boolean => !entry.readOnly && entry.locked === null && (!entry.named || entry.pin !== null);
+
 // E5: why a code view is read-only, shown as its content's title; null when it is editable or no reason is the owner's
-// to know (an svg's source). U6c: a file the transcript names is read-only for being outside the folders, first.
-export function readOnlyReason(entry: ViewerEntry): 'outside' | 'head' | 'encoding' | 'loading' | null {
-  if (entry.named) return 'outside';
+// to know (an svg's source). U6c: a file the transcript names is read-only for being outside the folders, first. U6e:
+// first what locks it, then a file outside the folders with no pin (W6); a savable outside file has no reason.
+export function readOnlyReason(entry: ViewerEntry): 'maws' | 'added' | 'result' | 'outside' | 'head' | 'encoding' | 'loading' | null {
+  if (entry.locked !== null) return entry.locked;
+  if (entry.named && entry.pin === null) return 'outside';
   if (entry.editable) return null;
   if (entry.kind === 'head') return 'head';
   if (entry.readOnly) return null; // E2: a read-only mount is read-only by design, not for a reason of the file's
@@ -214,7 +244,7 @@ export function readOnlyReason(entry: ViewerEntry): 'outside' | 'head' | 'encodi
   return 'loading';
 }
 
-async function settled<N extends 'files.read' | 'files.write' | 'library.read'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+async function settled<N extends 'files.read' | 'files.write' | 'files.writeOutside' | 'library.read'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
   try {
     return await call;
   } catch (error) {
@@ -223,12 +253,18 @@ async function settled<N extends 'files.read' | 'files.write' | 'library.read'>(
 }
 
 const isNotFound = (message: string) => message.startsWith('not found:');
+
+// UX wave U6e (decision 18): an outside save's refusal in words that say the way on, and a daemon that does not know the
+// command in its own; every other failure (`FILES_MOVED`, `not writable: <path>`) in the service's words.
+const outsideFailure = (error: { code: string; message: string }): string =>
+  error.code === 'unknown_command' ? EDITOR_COPY.outsideUnavailable : error.message === REFUSAL ? EDITOR_COPY.outsideRefused : error.message;
 const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
 // the read's answer about the hashed bytes, which decides `editable` and is not kept on the entry; `named` (U6c) is set
-// when any read of the load answers it (the branch review's finding 3: the roots can change between two chunks).
-type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash' | 'named'> & { utf8: boolean | null };
+// when any read of the load answers it (the branch review's finding 3: the roots can change between two chunks). U6e:
+// `locked` and `real` are the last chunk's that says them.
+type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'text' | 'base64' | 'loaded' | 'complete' | 'hash' | 'named' | 'locked'> & { utf8: boolean | null; real: string | null };
 
 // What made a load: an event (`files.changed`, or one left for the next showing), or the person asking again (U6c's
 // `revisit`, or showing a failed or named tab again).
@@ -273,13 +309,15 @@ export function createViewerStore(client: MawsBridge) {
     const supersede = (tabId: string) => generations.set(tabId, ++lastGeneration);
     // One chunk of the entry's file: under its session (`files.read`), or by its artifact alone (`library.read`, P3-L
     // M6b fix wave 2), which answers alike. U6c (M3 decision 1): `named` for a session on this Mac alone; a session on
-    // another machine is asked as today, to the byte (decision 10).
-    const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path'>, offset: number, length: number, hash: boolean): Promise<CommandResult<'files.read'>> => {
+    // another machine is asked as today, to the byte (decision 10). U6e (decision 19): and `agent` beside it while the
+    // entry holds the agent's mark.
+    const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path' | 'agent'>, offset: number, length: number, hash: boolean): Promise<CommandResult<'files.read'>> => {
       const chunk = { offset, length, ...(hash ? { hash: true } : {}) };
       if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
       const { appSessionId } = entry;
       const local = appSessionId !== null && machineOf(appSessionId) === client.localMachine;
-      return settled(client.invoke('files.read', { appSessionId: appSessionId!, path: entry.path, ...chunk, ...(local ? { named: true as const } : {}) }));
+      const asking = local ? { named: true as const, ...(entry.agent ? { agent: true as const } : {}) } : {};
+      return settled(client.invoke('files.read', { appSessionId: appSessionId!, path: entry.path, ...chunk, ...asking }));
     };
 
     const remove = (tabId: string) => {
@@ -319,6 +357,9 @@ export function createViewerStore(client: MawsBridge) {
 
     // E5: an entry with unsaved edits, or with the disk's newer version still on offer.
     const unsaved = (entry: ViewerEntry | undefined) => entry !== undefined && (entry.dirty || entry.theirs !== null);
+    // U6e (decision 6): the pin after a read that answered `real`: the read's where it lands on an entry with no unsaved
+    // edits, else the one the entry holds, or the read's when it holds none.
+    const pinAfter = (entry: ViewerEntry, real: string | null): string | null => (unsaved(entry) ? (entry.pin ?? real) : real);
 
     // U6c (decision 15): an entry read again when it is asked for again: its last read failed, or no watch keeps it
     // current (a file the transcript names), and no load of it is in flight nor edits of it unsaved. A failed entry is
@@ -333,10 +374,11 @@ export function createViewerStore(client: MawsBridge) {
       // answers `not found` (decision 16), so the entry is still read again when asked for again.
       if (reason === 'change' && isNotFound(message) && entry?.status === 'ready') return patch(tabId, { removed: true, loadingMore: false });
       // E5: unsaved edits keep their baseline and their document (the view's) under a refusal, which shows over them; a
-      // later read lands as any change load does.
-      if (unsaved(entry)) return patch(tabId, { status: 'error', error: message, loadingMore: false, named: false });
+      // later read lands as any change load does. U6e (decision 6): a refusal moves neither the lock nor the pin, so the
+      // label stays and a save asks the daemon, which decides.
+      if (unsaved(entry)) return patch(tabId, { status: 'error', error: message, loadingMore: false, named: false, editable: entry!.textEditable && admits({ ...entry!, named: false }) });
       patch(tabId, {
-        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false,
+        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false, textEditable: false,
       });
     };
 
@@ -344,38 +386,38 @@ export function createViewerStore(client: MawsBridge) {
     // commit-time rule). Clean: the text is replaced as before, unless the read is the baseline itself (an own save, a
     // spurious event), which lands nothing. Unsaved edits: the document stands, and a read that is neither the baseline
     // nor the theirs already shown becomes theirs, when it is a text the editor could take; the baseline itself
-    // withdraws a theirs shown earlier. U6c (M3 decision 2): `named` is the read's, also when it lands nothing else, and
-    // a named entry is never editable; a read of the same bytes whose `named` differs sets editable again from the read.
+    // withdraws a theirs shown earlier. U6c (M3 decision 2): `named` is the read's, also when it lands nothing else. U6e
+    // (decision 6): so is the whole latest admission, under unsaved edits too, the document standing; the pin moves by
+    // `pinAfter`; and `editable` is the baseline's text with the admission, so it moves both ways (W4).
     const commitChange = (tabId: string, read: LoadedFile, cause: LoadCause) => {
       const entry = get().entries.get(tabId);
       if (!entry) return;
-      const named = read.named;
-      const nameMoved = named !== entry.named;
+      const admission = { named: read.named, locked: read.locked, pin: pinAfter(entry, read.real) };
       const ready = {
         status: 'ready' as const, error: null, removed: false, loadingMore: false, diskUnusable: null,
-        ...(nameMoved ? { named, editable: !named && !entry.readOnly && isEditable(read) } : {}),
+        ...admission, editable: entry.textEditable && admits({ readOnly: entry.readOnly, ...admission }),
       };
-      const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore && entry.diskUnusable === null && !nameMoved;
+      const admissionMoved = admission.named !== entry.named || admission.locked !== entry.locked || admission.pin !== entry.pin || ready.editable !== entry.editable;
+      const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore && entry.diskUnusable === null && !admissionMoved;
       if (unsaved(entry)) {
-        // the document stands, so editability moves only one way: a file named now is no longer writable
-        const unsavedReady = { ...ready, ...(nameMoved ? { named, editable: !named && entry.editable } : {}) };
         // E11 W-D: a disk version the editor cannot take is not offered, and the bar says why; a theirs shown earlier is
         // withdrawn, the disk no longer holding it (W-D review I1)
-        if (!isEditable(read)) return patch(tabId, { ...unsavedReady, theirs: null, diskUnusable: unusableReason(read) });
+        if (!isEditable(read)) return patch(tabId, { ...ready, theirs: null, diskUnusable: unusableReason(read) });
         const differs = read.hash !== null && read.hash !== entry.hash && read.hash !== entry.theirs?.hash;
-        if (differs) return patch(tabId, { ...unsavedReady, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice' } });
+        if (differs) return patch(tabId, { ...ready, theirs: { text: read.text, hash: read.hash!, view: entry.theirs?.view ?? 'notice', real: read.real } });
         // P4 W2-C (tracker 2026-10-06): the disk back at the baseline withdraws a theirs shown earlier, so a save from the
         // merge view sends the baseline's hash and lands; safe because a save's conflict read supersedes older loads
-        if (read.hash !== null && read.hash === entry.hash && entry.theirs !== null) return patch(tabId, { ...unsavedReady, theirs: null });
-        if (!settledAlready) patch(tabId, unsavedReady);
+        if (read.hash !== null && read.hash === entry.hash && entry.theirs !== null) return patch(tabId, { ...ready, theirs: null });
+        if (!settledAlready) patch(tabId, ready);
         return;
       }
       if ((read.hash !== null && read.hash === entry.hash) || sameUnhashed(entry, read, cause)) {
         if (!settledAlready) patch(tabId, ready);
         return;
       }
-      const { utf8, ...file } = read;
-      patch(tabId, { ...ready, ...file, editable: !named && !entry.readOnly && isEditable({ ...file, utf8 }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
+      const { utf8, real: _real, ...file } = read;
+      const textEditable = isEditable({ ...file, utf8 });
+      patch(tabId, { ...ready, ...file, textEditable, editable: textEditable && admits({ readOnly: entry.readOnly, ...admission }), epoch: entry.epoch + 1, updated: entry.updated + 1 });
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
@@ -410,16 +452,21 @@ export function createViewerStore(client: MawsBridge) {
       }
       const head = first.value;
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
-      const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes, named: head.named === true };
+      // U6e: the head's admission is on the entry from the first frame that shows the file (K11), the label with it
+      const admitted = admissionOf(head);
+      const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes, named: admitted.named, locked: admitted.locked };
       const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
-      const commit = ({ utf8, ...loaded }: LoadedFile) =>
-        reason === 'change'
-          ? commitChange(tabId, { ...loaded, utf8 }, cause)
-          : patch(tabId, { ...opened, ...loaded, editable: !loaded.named && !entry.readOnly && isEditable({ ...loaded, utf8 }) });
+      // An open load puts the document on the entry, so the pin is the real path it read (decision 6).
+      const commit = ({ utf8, real, ...loaded }: LoadedFile) => {
+        if (reason === 'change') return commitChange(tabId, { ...loaded, utf8, real }, cause);
+        const textEditable = isEditable({ ...loaded, utf8 });
+        const landed = { ...opened, ...loaded, pin: real, textEditable };
+        patch(tabId, { ...landed, editable: textEditable && admits({ readOnly: entry.readOnly, ...landed }) });
+      };
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external') return commit({ ...file, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
+      if (kind === 'external') return commit({ ...file, real: admitted.real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
@@ -429,17 +476,19 @@ export function createViewerStore(client: MawsBridge) {
           whole = all.value;
         }
         const utf8 = whole.encoding === 'utf8';
-        return commit({ ...file, named: file.named || whole.named === true, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
+        const again = admissionOf(whole);
+        return commit({ ...file, named: file.named || again.named, locked: again.locked ?? file.locked, real: again.real ?? admitted.real, text: utf8 ? whole.content : '', base64: utf8 ? null : whole.content, loaded: whole.length, complete: true, hash: null, utf8: null });
       }
 
       const hash = kind === 'head' ? null : head.hash;
       const utf8 = hash === null ? null : head.utf8; // the whole hashed file's, so every chunk of one hash answers the same
       let text = head.content;
       let loaded = head.offset + head.length;
-      let { named } = file;
+      let { named, locked } = file;
+      let { real } = admitted;
       const wanted = () => kind !== 'head' || loaded < extent;
       let more = head.truncated && wanted();
-      if (reason === 'open') patch(tabId, { ...opened, ...file, text, base64: null, loaded, complete: !head.truncated, hash: null, editable: false, ...(sourceView ? { sourceView } : {}) });
+      if (reason === 'open') patch(tabId, { ...opened, ...file, pin: real, text, base64: null, loaded, complete: !head.truncated, hash: null, editable: false, textEditable: false, ...(sourceView ? { sourceView } : {}) });
       while (more && loaded < CODE_CAP) {
         const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH, hash !== null);
         if (!live()) return;
@@ -450,13 +499,16 @@ export function createViewerStore(client: MawsBridge) {
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
         if (hash !== null && next.value.hash !== hash) return;
         if (next.value.length === 0) break; // the file shrank under an unhashed read (a head)
-        if (next.value.named === true) named = true;
+        const continued = admissionOf(next.value);
+        if (continued.named) named = true;
+        locked = continued.locked ?? locked;
+        real = continued.real ?? real;
         text += next.value.content;
         loaded = next.value.offset + next.value.length;
         more = next.value.truncated && wanted();
         if (reason === 'open') patch(tabId, { text, loaded, complete: !more });
       }
-      commit({ ...file, named, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
+      commit({ ...file, named, locked, real, text, base64: null, loaded, complete: kind !== 'head', hash, utf8 });
     };
 
     // E5: a load is `pending` from its issue and counted in `loads` once it is over, however it ended (it replaced the
@@ -530,18 +582,21 @@ export function createViewerStore(client: MawsBridge) {
         return true;
       }
       if (!answer.ok) {
-        patch(tabId, { saving: false, saveError: answer.error.message });
+        // U6e (decision 18): an outside file's conflict read refused says the way on, as its save's refusal does
+        patch(tabId, { saving: false, saveError: entry.pin !== null ? outsideFailure(answer.error) : answer.error.message });
         return true;
       }
       const read = answer.value;
+      const admitted = admissionOf(read);
       const file: LoadedFile = {
         kind: kindOf({ name: entry.path, mime: read.mime, bytes: read.bytes, encoding: read.encoding }), mime: read.mime, encoding: read.encoding, bytes: read.bytes,
-        text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8, named: read.named === true,
+        text: read.content, base64: null, loaded: read.length, complete: !read.truncated, hash: read.hash, utf8: read.utf8, ...admitted,
       };
-      // U6c (Decision Log 15 e): the answer's `named` is the entry's, the document standing: a file named now is no longer
-      // writable, so no later save reaches the service with it.
+      // U6c (Decision Log 15 e): the answer's `named` is the entry's, the document standing. U6e (decision 6, W3): so is the
+      // whole latest admission; the pin moves by `pinAfter`, so a swap the read meets leaves the pin the save then sends.
       const shown = get().entries.get(tabId)!;
-      const naming = file.named !== shown.named ? { named: file.named, editable: !file.named && shown.editable } : {};
+      const pin = pinAfter(shown, admitted.real);
+      const naming = { named: admitted.named, locked: admitted.locked, pin, editable: shown.textEditable && admits({ readOnly: shown.readOnly, named: admitted.named, locked: admitted.locked, pin }) };
       if (file.hash !== null && file.hash === shown.hash) {
         patch(tabId, { saving: false, theirs: null, diskUnusable: null, ...naming });
         return true;
@@ -551,7 +606,7 @@ export function createViewerStore(client: MawsBridge) {
       patch(
         tabId,
         isEditable(file)
-          ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge' }, diskUnusable: null, ...naming }
+          ? { saving: false, theirs: { text: file.text, hash: file.hash!, view: 'merge', real: admitted.real }, diskUnusable: null, ...naming }
           : { saving: false, saveError: EDITOR_COPY.conflictOnSave, theirs: null, diskUnusable: unusableReason(file), ...naming },
       );
       return true;
@@ -561,7 +616,7 @@ export function createViewerStore(client: MawsBridge) {
       entries: new Map(),
       wrap: false,
 
-      mount(tabId, { appSessionId, path, line, readOnly = false, artifact }) {
+      mount(tabId, { appSessionId, path, line, readOnly = false, artifact, agent = false }) {
         used.set(tabId, ++clock);
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
         const entry = get().entries.get(tabId);
@@ -582,7 +637,7 @@ export function createViewerStore(client: MawsBridge) {
           holds.get(tabId)?.release();
           stale.delete(tabId);
           supersede(tabId);
-          patch(tabId, { appSessionId, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
+          patch(tabId, { appSessionId, agent, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
           watchThenRead('change');
         } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
           holds.get(tabId)?.release();
@@ -593,16 +648,24 @@ export function createViewerStore(client: MawsBridge) {
             tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false,
+            locked: null, pin: null, agent, textEditable: false,
           };
           incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
           watchThenRead('open');
         } else {
-          if (line !== entry.line) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
-          // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again
+          const moved = line !== entry.line;
+          const marked = agent !== entry.agent;
+          if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
+          if (marked) patch(tabId, { agent });
+          // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e: not for a line
+          // moved under a view that stays mounted (a person's open reads through `revisit`; an agent's show of an open tab
+          // reads nothing, decision 19); and again when the agent's mark changes, a read in flight under the other mark
+          // superseded, since its admission differs
           const left = stale.get(tabId);
           stale.delete(tabId);
-          if (left !== undefined || revisitable(entry)) readAgain(tabId, entry, left ?? 'revisit');
+          const again = left !== undefined || (!moved && revisitable(entry)) || (marked && (entry.status === 'error' || entry.named) && !unsaved(entry));
+          if (again) readAgain(tabId, entry, left ?? 'revisit');
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
         held.delete(tabId); // the move's destination has mounted: the hold has done its work
@@ -627,7 +690,11 @@ export function createViewerStore(client: MawsBridge) {
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
           if (!next.ok) return fail(tabId, next.error.message, 'open');
           const current = get().entries.get(tabId)!;
-          patch(tabId, { text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false, ...(next.value.named === true ? { named: true } : {}) });
+          const admitted = admissionOf(next.value); // U6e: a continuation adds to the admission and never loosens it
+          patch(tabId, {
+            text: current.text + next.value.content, loaded: next.value.offset + next.value.length, loadingMore: false,
+            ...(admitted.named ? { named: true } : {}), ...(admitted.locked !== null ? { locked: admitted.locked } : {}), ...(current.pin === null && admitted.real !== null ? { pin: admitted.real } : {}),
+          });
         });
       },
 
@@ -664,17 +731,24 @@ export function createViewerStore(client: MawsBridge) {
       async save(tabId) {
         const entry = get().entries.get(tabId);
         const expectedHash = entry?.theirs?.view === 'merge' ? entry.theirs.hash : (entry?.hash ?? null);
-        if (!entry || entry.named || entry.saving || !unsaved(entry) || expectedHash === null) return 'noop'; // U6c: a named file is never written
+        // U6c: a file named with no pin is never written (U6e: a daemon of the parent pin's answer, W6); U6e: nor a locked one
+        if (!entry || entry.locked !== null || (entry.named && entry.pin === null) || entry.saving || !unsaved(entry) || expectedHash === null) return 'noop';
         const content = documentOf(tabId);
         if (content === undefined) return 'noop';
         const incarnation = incarnations.get(tabId);
         const current = () => incarnations.get(tabId) === incarnation;
         patch(tabId, { saving: true, saveError: null });
-        if (entry.appSessionId === null) return 'noop'; // P3-L: an artifact's file read by the artifact is never written
-        const answer = await settled(client.invoke('files.write', { appSessionId: entry.appSessionId, path: entry.path, content, expectedHash }));
+        const { appSessionId, path, pin } = entry;
+        if (appSessionId === null) return 'noop'; // P3-L: an artifact's file read by the artifact is never written
+        // U6e (decision 5): an entry with a pin is saved by the outside save with it, and never by files.write, whatever the
+        // answer; a daemon that does not know the command writes nothing and is said so
+        const answer =
+          pin !== null
+            ? await settled(client.invoke('files.writeOutside', { appSessionId, path, content, expectedHash, real: pin }))
+            : await settled(client.invoke('files.write', { appSessionId, path, content, expectedHash }));
         if (!current()) return 'noop';
         if (!answer.ok) {
-          patch(tabId, { saving: false, saveError: answer.error.message });
+          patch(tabId, { saving: false, saveError: pin !== null ? outsideFailure(answer.error) : answer.error.message });
           return 'error';
         }
         if (answer.value.status === 'conflict') return (await conflicted(tabId, get().entries.get(tabId)!, current)) ? 'conflict' : 'noop';
@@ -687,10 +761,15 @@ export function createViewerStore(client: MawsBridge) {
         const entry = get().entries.get(tabId);
         if (!entry?.theirs || entry.saving) return;
         supersede(tabId);
-        const { text, hash } = entry.theirs;
+        const { text, hash, real } = entry.theirs;
         const bytes = utf8Length(text);
-        // The document is replaced whole (`epoch`); the owner's own act, so no Updated notice.
-        patch(tabId, { text, hash, bytes, loaded: bytes, complete: true, theirs: null, diskUnusable: null, dirty: false, saveError: null, status: 'ready', error: null, removed: false, epoch: entry.epoch + 1 });
+        // The document is replaced whole (`epoch`); the owner's own act, so no Updated notice. U6e (decision 6): the pin is
+        // the real path of the version taken, which the editor takes (theirs is offered only then).
+        const taken = { pin: real, textEditable: true };
+        patch(tabId, {
+          text, hash, bytes, loaded: bytes, complete: true, theirs: null, diskUnusable: null, dirty: false, saveError: null, status: 'ready', error: null, removed: false, epoch: entry.epoch + 1,
+          ...taken, editable: admits({ ...entry, ...taken }),
+        });
       },
 
       keepMine(tabId) {
