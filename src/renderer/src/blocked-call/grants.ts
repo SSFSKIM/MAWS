@@ -4,6 +4,7 @@
 // record's answer the window keeps a grant out, a store of its own that only keeps the button closed, never makes a row
 // read approved, belongs to no mounted row, and ends on evidence: the transcript's own approval row for the call, or a
 // quiet moment of `SETTLE_MS` after the send was acknowledged and the record stopped listing the grant as waiting.
+import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { consentMessage, personsGrants } from '@shared/engine/arrival';
 import { messageText } from '@shared/engine/peer-envelope';
@@ -230,14 +231,20 @@ export function resetGrantsOut(): void {
 
 /** The gate and the last press's notice, followed in a render. */
 export function useGrant(appSessionId: AppSessionId, call: BlockedCall, grant: 'none' | 'waiting'): { gate: Gate; notice: string | null } {
-  const at = outKey(appSessionId, blockedKey(call));
-  // what `gateOf` reads, subscribed so that a change renders again: the port's inputs, the grants out, the queue's
-  // snapshot, a terminal session's pending sends and state, and its transcript's newest turn
+  // The port's inputs are subscribed through its own hook, so a change renders again; the stores the gate reads besides
+  // are followed by one external store whose snapshot is the gate itself, read whenever React asks, so no memo of this
+  // component's render can keep an earlier gate.
   useSessionControls(appSessionId);
-  useGrantsOut((s) => s.out.has(at));
-  const notice = useGrantsOut((s) => s.notices.get(at) ?? null);
-  useQueueStore((s) => s.bySession.get(appSessionId));
-  useLaneA((s) => s.pendingSends.get(appSessionId));
-  useTranscriptStore((s) => newestStoppedIn(s.entries[appSessionId]?.rows));
-  return { gate: gateOf(appSessionId, call, grant), notice };
+  const gate = useSyncExternalStore(subscribeGate, () => gateWords(gateOf(appSessionId, call, grant)));
+  const notice = useGrantsOut((s) => s.notices.get(outKey(appSessionId, blockedKey(call))) ?? null);
+  return { gate: gateOfWords(gate), notice };
 }
+
+const subscribeGate = (listener: () => void): (() => void) => {
+  const offs = [useGrantsOut.subscribe(listener), useQueueStore.subscribe(listener), useLaneA.subscribe(listener), useTranscriptStore.subscribe(listener)];
+  return () => offs.forEach((off) => off());
+};
+// The gate as one string, so that the snapshot is the same value while the gate is
+const gateWords = (gate: Gate): string => (gate.state === 'unavailable' ? `unavailable\u0000${gate.reason}` : gate.state);
+const gateOfWords = (words: string): Gate =>
+  words.startsWith('unavailable\u0000') ? { state: 'unavailable', reason: words.slice('unavailable\u0000'.length) } : { state: words as 'open' | 'closed' };

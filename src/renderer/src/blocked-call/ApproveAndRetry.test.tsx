@@ -162,6 +162,8 @@ function blockedTurn(commands: readonly string[], options: { running?: boolean; 
   else b.end(['u1'], options.stopped ? { terminalReason: 'aborted_streaming', isError: true, result: 'error_during_execution' } : {});
   return b;
 }
+/** Events of a later batch, with ids of their own (a builder numbers its events from e0, which the store has seen). */
+const later = (b: Builder, name: string): SessionEvent[] => b.events.map((event, i) => ({ ...event, id: `${name}-${i}` }) as SessionEvent);
 const grantMessage = (b: Builder, u: string, subject: string) => {
   b.emit('turn.started', { userMessageUuid: u as MessageUuid, origin: 'human' });
   b.emit('user.message', { messageUuid: u as MessageUuid, content: consentMessage('command', subject), isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject }] });
@@ -347,7 +349,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     expect(sent()).toHaveLength(1);
   });
 
-  it('when the transcript shows the grant’s row, the row follows the record at once: waiting, then approved', async () => {
+  it('when the transcript shows the grant’s row, the row follows the record at once: approved, and no button', async () => {
     const store = await oneBlock('follows');
     const row = drawn(store, blockedIds(store)[0]!);
     fireEvent.click(row.button()!);
@@ -355,7 +357,7 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
     const b = builder('2026-09-28T11:00:00.000Z');
     grantMessage(b, UUID, 'make build');
-    await store.push(b.events);
+    await store.push(later(b, 'grant'));
     expect(row.line()).toBe('Auto mode blocked: make build · approved');
     expect(row.button()).toBeNull();
   });

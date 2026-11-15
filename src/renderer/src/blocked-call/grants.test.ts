@@ -62,6 +62,8 @@ const entry = (id: AppSessionId, content: string, state: QueueEntry['state'] = '
   queueId: `q-${state}`, appSessionId: id, content, createdAt: T0, state, messageUuid: null, submittedAt: null, uncertain: false, steer: false,
 });
 const grant = (call: BlockedCall) => consentMessage(call.kind, call.subject);
+/** Events of a later batch, with ids of their own (a builder numbers its events from e0, which the store has seen). */
+const later = (events: SessionEvent[], name: string): SessionEvent[] => events.map((event, i) => ({ ...event, id: `${name}-${i}` }) as SessionEvent);
 const flush = async () => {
   for (let i = 0; i < 20; i += 1) await Promise.resolve();
 };
@@ -105,7 +107,7 @@ describe('a terminal session’s state (Design 7; Decision Log 5)', () => {
     const after = builder('2026-09-28T12:00:00.000Z');
     after.turn('u3');
     after.end(['u3']);
-    await useTranscriptStore.getState().attach(at('terminal-state-2'), { key: at('terminal-state-2'), subscribe: () => () => {}, snapshot: () => Promise.resolve([...b.events, ...after.events]) });
+    await useTranscriptStore.getState().attach(at('terminal-state-2'), { key: at('terminal-state-2'), subscribe: () => () => {}, snapshot: () => Promise.resolve([...b.events, ...later(after.events, 'after')]) });
     onTerminal(at('terminal-state-2') as AppSessionId);
     expect(terminalStateOf(at('terminal-state-2') as AppSessionId), 'a turn after the stopped one').toBe('idle');
   });
@@ -312,7 +314,8 @@ describe('the grant that is out (Design 4)', () => {
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
     const b = builder('2026-09-28T11:00:00.000Z');
     b.turn(UUID, grant(BUILD)); // the person's bubble: no consent mark
-    act(() => transcript.push(b.events));
+    act(() => transcript.push(later(b.events, 'bubble')));
+    expect(useTranscriptStore.getState().rows(id).some((row) => row.kind === 'user' && row.text === grant(BUILD) && row.consent === undefined), 'the person’s bubble is drawn').toBe(true);
     expect(useGrantsOut.getState().out.size, 'no evidence: the clock decides').toBe(1);
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(useGrantsOut.getState().out.size).toBe(0);
