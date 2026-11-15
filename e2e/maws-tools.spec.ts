@@ -251,7 +251,8 @@ test('a message sent while a blocking ask waits: its queue row stands while the 
     const MESSAGE = 'Also: end your reply with the word KIWI.'; // the recorded message: its replay draws the recorded words
     await show(s, id);
     await replay(s, id, askWaitJournal(s.scratch.root, id));
-    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+    // UX wave U2b: the recording holds no message, so no to-human view is in force (the plain transcript, no switch)
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
 
     const capsule = capsuleOf(s);
     const form = formOf(s);
