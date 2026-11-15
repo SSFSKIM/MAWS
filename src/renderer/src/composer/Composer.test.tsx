@@ -275,11 +275,17 @@ describe("composer DOM under C5's dispatcher", () => {
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [uncertain, held], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    // the uncertain one waits for the human; while the turn runs the after-the-turn row goes at the next step, then is sent now (UX wave U4b, decision 15)
+    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'next' }]));
+    const promoted = '55555555-5555-4555-8555-555555555555';
+    await fake.reply('session.queue.promote', { messageUuid: promoted });
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: promoted }]));
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'look at b too', createdAt: '2026-09-29T09:59:00.000Z' };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [held], paused: false, pauseReason: null, steers: [steer] }));
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: steer.messageUuid }])); // the next step's row comes first
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toHaveLength(2));
+    expect(invoked('session.steer.sendNow')[1]).toEqual({ appSessionId: A_ID, messageUuid: steer.messageUuid }); // the next step's row comes first
     await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     expect(invoked('session.interrupt')).toHaveLength(1);
   });
