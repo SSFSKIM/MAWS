@@ -19,9 +19,10 @@ import presentationFormat from './presentation/format.md?raw';
 import presentationGuide from './presentation/SKILL.md?raw';
 
 // P3-F wave S (F14, the owner's obs 2): every guide ends under its "Before you finish" with how to name the artifact to
-// the user, a link MAWS's transcript draws as a chip that opens it, so nobody has to ask where it is.
+// the user, a link MAWS's transcript draws that opens it, so nobody has to ask where it is. UX wave U6d (O-44; the X9
+// amendment of 2026-11-14): the person opens it, from that link; the sentence that invited `show_pane` is gone.
 const LINKED = (guide: string) =>
-  `${guide.trimEnd()}\n\nWhen a message to the user names this artifact, write it as a Markdown link, [its title](maws-artifact:<artifactId>): the user opens it in MAWS with a click. Call show_pane only when the user should see it now.\n`;
+  `${guide.trimEnd()}\n\nWhen a message to the user names this artifact, write it as a Markdown link, [its title](maws-artifact:<artifactId>): the user opens it in MAWS with a click.\n`;
 
 export const KIND_GUIDES: Record<ArtifactKind, { guide: string; format: string }> = {
   document: { guide: LINKED(documentGuide), format: documentFormat },

@@ -30,6 +30,12 @@ afterEach(() => world.close());
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 20));
 
+// What a gap's CPU reading must show to say the thread ran through it. CPU time against wall clock is not a tight ratio on
+// a shared runner: the scheduler takes the thread off its core mid-spin, so a 65 ms spin has read 0.64 to 0.70 of its gap
+// (44.7 of 70 ms, 47.6 of 68 ms), where an idle gap reads about 0. A third of the gap sits well under the loaded reading
+// and well over the idle one; a thread that waited cannot reach it, however busy the runner (see the blocked-gap case).
+const RAN_THROUGH = 0.3;
+
 /** An owner-made document once the host wrote its first tab (the kind's `created` listener). */
 async function emptyDocument(): Promise<string> {
   const { id } = await world.store.create({ kind: 'document', title: 'Scale' }, HUMAN);
@@ -118,8 +124,27 @@ describe('the seam’s commands', () => {
     expect(named[0]!.at).toBeGreaterThanOrEqual(10); // after the call's turn
     expect(Object.keys(call).filter((what) => what !== 'gc').sort()).toEqual(['commit', 'mirror', 'warm']);
     expect(call.warm).toMatchObject({ count: 1 });
-    // the main thread ran through the gap, where the platform tells it (Node 23.9 and later)
-    if (longest?.cpuMs !== null) expect(longest!.cpuMs!).toBeGreaterThan(0.8 * longest!.ms - 5);
+    // the main thread ran through the gap, where the platform tells it (Node 23.9 and later): a share of the gap that a
+    // preempted thread still reaches and an idle one never does (RAN_THROUGH)
+    if (longest?.cpuMs !== null) expect(longest!.cpuMs!).toBeGreaterThan(RAN_THROUGH * longest!.ms);
+    seam.close();
+  });
+
+  // The other side of the bound above: a gap the thread waited through (a blocking sleep holds the loop and uses no CPU)
+  // reads below RAN_THROUGH, so a reading that came out near zero for a spinning thread (the wrong thread's clock, a clock
+  // not advanced since the last tick) would fail the case above. A waiting thread's CPU does not grow with the runner's load.
+  it('reads a gap the loop waited through as the thread idle', async () => {
+    const tool = {
+      call: async () => {
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 80); // the loop held 80 ms, the thread asleep
+        return { content: [{ type: 'text' as const, text: '{"revision":1}' }] };
+      },
+    };
+    const seam = new DocumentPerfSeam(world.store, { tools: () => ({ artifact_read: tool, artifact_edit: tool }) as never });
+    const answer = (await seam.run({ cmd: 'call', session: 'perf-agent-1', tool: 'artifact_edit', args: {} })) as CallAnswer;
+    const { longest } = answer.background;
+    expect(longest?.ms).toBeGreaterThanOrEqual(70);
+    if (longest?.cpuMs !== null) expect(longest!.cpuMs!).toBeLessThan(RAN_THROUGH * longest!.ms);
     seam.close();
   });
 

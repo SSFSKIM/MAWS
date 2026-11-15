@@ -38,6 +38,9 @@ export { serializeRows } from './model/serialize';
 
 // C7: the request card and queued rows render markdown through the same sanitising pipeline (one renderer).
 export { Markdown } from './lazy';
+// UX wave U6d (Interfaces §F): the one rule of an artifact mention's click, and the test of a click that ends a
+// selection, for a mod's surface, which takes the click before the link (engine-surface/SurfaceTree.tsx)
+export { endsSelection, openArtifactMention } from './view/markdown/Link';
 
 // C8: what each turn did whatever the reader disclosed (also `useTranscriptStore.activity(key)`), and the subagent
 // glyphs as the rows show them.
