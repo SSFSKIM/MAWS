@@ -33,7 +33,7 @@ How to see it working: the acceptance section's checks, each a unit run on the b
 
 - [ ] **Landing 1**, branch `ux-wave/U3b`:
   - [x] (2026-11-15 UTC) M1 — A command's output is a light line. Reviewed clean at `d19c17e25` after two fix waves (`lone` on the drawn order; the lookup made demand-driven).
-  - [ ] M2 — Code blocks and tables keep the column; the owner's message actions sit under the bubble.
+  - [x] (2026-11-15 UTC) M2 — Code blocks and tables keep the column; the owner's message actions sit under the bubble. Reviewed clean at `7e22edc3f`; every pixel claim is M6's (the list the M1 and M2 reviews collected is handed to M6's builder).
   - [ ] M3 — An answer's Copy, Fork from here and time.
   - [ ] M4 — A compaction says so.
   - [ ] M5 — The web plugin's fetch, and the word for an agent that ended with its session.
