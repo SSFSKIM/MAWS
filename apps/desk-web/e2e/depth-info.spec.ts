@@ -133,7 +133,7 @@ test("a streaming message is drawn as the message under its label and an ellipsi
   await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
   // UX wave U2b (A12; ticket 332 closes): the message is one wrapper around all its blocks (not one per Markdown leaf),
   // the mod's drawing: its label `● message` first, bold in the accent colour, then the body in the text colour,
-  // indented; no bar down the side and no "To you", in both themes.
+  // indented; no bar down the side and no 'To you', in both themes.
   const mark = settled.locator('.owner-message-ink');
   await expect(mark).toHaveCount(1);
   await expect(mark.locator('.owner-message-label')).toHaveText('● message');
@@ -155,7 +155,7 @@ test("a streaming message is drawn as the message under its label and an ellipsi
     expect(look.text, `${theme}: text is not the accent`).not.toBe(look.accent);
     expect([look.labelColor, look.labelWeight], `${theme}: the label, bold in the accent`).toEqual([look.accent, '600']);
     expect(look.indent, `${theme}: the body indented under the label`).toBeGreaterThan(0);
-    expect([look.barWidth, look.before], `${theme}: no bar and no "To you"`).toEqual(['0px', 'none']);
+    expect([look.barWidth, look.before], `${theme}: no bar and no 'To you'`).toEqual(['0px', 'none']);
   }
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await expect(settled.locator('li')).toHaveText([

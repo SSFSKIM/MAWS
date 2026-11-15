@@ -1,6 +1,6 @@
 // A message to the person where MAWS draws it (UX wave U2b; the execution document, A12 and M2): the mod's drawing,
 // reproduced. A bold `● message` label in the accent colour over the body in the normal text colour, indented two
-// columns; one drawing for a `<message>` span and for a message-tool call; no bar and no "To you". The label follows
+// columns; one drawing for a `<message>` span and for a message-tool call; no bar and no 'To you'. The label follows
 // the mod's `spanRows` (`to-human/hooks/mods/to-human.tsx`, 1411, at 0.8.2) over the engine's own reading of a reply's
 // first text (ruling 4: `isFirstOfReply`, which the engine gives every text row of its conversation list; the Decision
 // Log of the execution document cites the bundle's lines), tested on recorded sessions. Every other text is invented.
@@ -40,7 +40,7 @@ const CALL: Extract<Row, { kind: 'to_human' }> = {
 };
 
 describe('the drawing', () => {
-  it('a span is its label, then its body in a wrapper indented two columns; no bar, no "To you"', () => {
+  it('a span is its label, then its body in a wrapper indented two columns; no bar, no To-you line', () => {
     const view = draw('<message>The table has **three** columns.</message>');
     const ink = view.container.querySelector('.owner-message-ink')!;
     expect(labels(view.container)).toEqual(['● message']);
