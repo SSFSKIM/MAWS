@@ -34,11 +34,14 @@ export function AssistantTextRow({ row, text }: { row: Extract<Row, { kind: 'ass
 export const CUT_NOTE = 'Cut off by the interrupt: the session didn’t keep it';
 export const PARTWAY_NOTE = 'Only its end was kept, so it starts partway through';
 
+// The ellipsis of a text kept partway is drawn beside its words, not written into them: the words are read and drawn as
+// the mirror classed them (an ellipsis before a fence glued to its tag would hide the fence from the one reading).
 export function CutTextRow({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
-  const markdown = row.partway ? `…${row.markdown.trimStart()}` : row.markdown;
+  const { markdown } = row;
   return (
     <div className="transcript-cut" data-cut="" data-partway={row.partway ? '' : undefined}>
       <div className="transcript-cut-note">{row.partway ? `${CUT_NOTE}. ${PARTWAY_NOTE}` : CUT_NOTE}</div>
+      {row.partway && <span className="transcript-cut-partway" aria-hidden="true">…</span>}
       {hasMessages(markdown) ? <MarkedText text={markdown} live={false} /> : <Markdown markdown={markdown} live={false} />}
     </div>
   );
