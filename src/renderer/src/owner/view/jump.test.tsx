@@ -81,6 +81,8 @@ it('a jump to work after a standalone browser activity opens the stretch the lis
   expect(records()).toHaveLength(1);
 });
 
+const CARRY_KEY = at('App-carry' as AppSessionId); // the store keeps a key's entry across cases
+
 it('an opened thought with no text that its call replaces stays open as the call, beside a closed stretch a standalone browser activity splits off', async () => {
   const b = builder('2026-10-08T10:00:00.000Z');
   b.turn('u0', 'Look at the notes');
@@ -93,10 +95,10 @@ it('an opened thought with no text that its call replaces stays open as the call
   b.emit('assistant.block.delta', { apiMessageId: api('m2'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
   let listener: ((events: SessionEvent[]) => void) | null = null;
   const snapshot = b.events.slice();
-  const source: TranscriptSource = { key: KEY, subscribe: (l) => ((listener = l), () => (listener = null)), snapshot: () => Promise.resolve(snapshot) };
+  const source: TranscriptSource = { key: CARRY_KEY, subscribe: (l) => ((listener = l), () => (listener = null)), snapshot: () => Promise.resolve(snapshot) };
   render(<Transcript source={source} variant="session" ownerLane />);
-  await waitFor(() => expect(useTranscriptStore.getState().entries[KEY]?.phase).toBe('live'));
-  act(() => fake.event('browser.agent.activity', { appSessionId: KEY, tabId: 'b_000000000001', at: between, activity: { kind: 'navigated', url: 'http://127.0.0.1:17391/notes.html', title: '' } }));
+  await waitFor(() => expect(useTranscriptStore.getState().entries[CARRY_KEY]?.phase).toBe('live'));
+  act(() => fake.event('browser.agent.activity', { appSessionId: CARRY_KEY, tabId: 'b_000000000001', at: between, activity: { kind: 'navigated', url: 'http://127.0.0.1:17391/notes.html', title: '' } }));
   await waitFor(() => expect(document.querySelector('[data-kind="browser_activity"]')).not.toBeNull());
   expect(closedLines()).toHaveLength(2); // the words before the activity, and the thought after it
   act(() => closedLines()[1].click()); // the reader opens the thought's record
