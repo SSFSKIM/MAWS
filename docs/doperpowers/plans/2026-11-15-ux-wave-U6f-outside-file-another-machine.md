@@ -473,7 +473,7 @@ Working directory for every command: the branch's worktree (the controller's bri
 
    - M1: `src/services/files src/services/spine-root.test.ts src/services/machine src/shared/ipc src/shared/files src/shared/machine src/mawsd test/mawsd`
    - M2: `src/endpoint test/endpoint test/lane-b test/cross-build src/services/machine-ops.test.ts src/shared/ipc src/shared/host apps/org-protocol src/main/lane-b src/main/files src/main/ipc`
-   - M3: `src/main/lane-b src/main/machines src/main/files src/main/ipc src/main/app.test.ts src/shared/ipc src/shared/files src/renderer/src/lane-b test/lane-b`
+   - M3: `src/main/lane-b src/main/machines src/main/files src/main/ipc src/shared/ipc src/shared/files src/renderer/src/lane-b test/lane-b`
    - M4: `src/renderer/src/tools/code src/renderer/src/lane-b src/renderer/src/panel test/lane-b test/support/tokens-guard.test.ts`
 
    as `~/.local/share/maws-ux-wave/tools/vmcheck.sh ux-wave/U6f -- 'timeout 1800 pnpm exec vitest run <the list>'`. Expected: every file passes but the ones the build brief lists as failing on master on the VM too. `service.test.ts`'s cases guarded for macOS are skipped there and run in the Mac lane; M1 says in its report which of its new cases are among them.
