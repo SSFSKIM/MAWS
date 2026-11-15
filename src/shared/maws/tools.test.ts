@@ -8,6 +8,7 @@ import {
   ARTIFACT_SCREENSHOT_MAX_BYTES,
   ArtifactCreateInputSchema,
   ArtifactCreateResultSchema,
+  ArtifactDeleteResultSchema, // UX wave U10b (M4)
   ArtifactListInputSchema,
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
@@ -54,6 +55,7 @@ describe('X9: the maws server and its twelve tools', () => {
       // P3-B (M7): the document tools, appended after A's
       'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
       'artifact_search', // P4-B4: the search tool, after B's
+      'artifact_delete', // UX wave U10b (M4): last
     ]);
     expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
     expect(MAWS_TOOL_NAMES).not.toContain('message'); // P4-R7z: a session messages through the to-human plugin's tool
@@ -118,6 +120,7 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }],
       ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { readOnlyHint: true, openWorldHint: false, title: 'Search artifacts' }], // P4-B4
+      ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4)
     ]);
     // U6d: six panes and no `at`
     const showPane = list.find((t) => t.name === 'show_pane')!.inputSchema;
@@ -565,5 +568,30 @@ describe('artifact_edit’s reply', () => {
     expect(description).toContain(`${answering} ${sentence} Returns the new revision`);
     expect(description.split(sentence)).toHaveLength(2);
     expect(mawsToolList().find((tool) => tool.name === 'artifact_edit')!.inputSchema).toMatchObject({ properties: { reply: { type: 'string', minLength: 1, maxLength: 2000 } } });
+  });
+});
+
+// UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.1): the agent's delete of its own draft
+describe('artifact_delete', () => {
+  it('is described, titled and annotated word for word, and names its artifact by id or handle alone', () => {
+    expect(MAWS_TOOLS.artifact_delete.title).toBe('Delete artifact');
+    expect(MAWS_TOOLS.artifact_delete.description).toBe(
+      "Delete a MAWS artifact this session made and no longer needs, such as an abandoned draft; without this tool, ask the user to delete it in the Library. Only an artifact that this session, or the session a side thread was opened from, created and that only agents have written to; anything else is refused with the reason. The user can undo it from the transcript. Returns the deleted artifact's id, kind and title.",
+    );
+    expect(MAWS_TOOLS.artifact_delete.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false });
+    expect(z.toJSONSchema(MAWS_TOOLS.artifact_delete.input)).toMatchObject({ type: 'object', properties: { artifact: { type: 'string' } }, required: ['artifact'], additionalProperties: false });
+    expect(parseToolArguments('artifact_delete', { artifact: 'draft-plan' })).toEqual({ ok: true, data: { artifact: 'draft-plan' } });
+    expect(parseToolArguments('artifact_delete', { artifact: 'draft-plan', force: true }).ok).toBe(false);
+    expect(parseToolArguments('artifact_delete', {}).ok).toBe(false);
+  });
+
+  it('answers the deleted artifact’s id, kind and title, and refuses with the four sentences of §C.1', () => {
+    const answer = { status: 'deleted', artifactId: '11111111-1111-4111-8111-111111111111', kind: 'document', title: 'Draft plan' };
+    expect(ArtifactDeleteResultSchema.parse(answer)).toEqual(answer);
+    expect(ArtifactDeleteResultSchema.safeParse({ ...answer, extra: 1 }).success).toBe(false);
+    expect(TOOL_ERRORS.deleteByUser('Notes')).toBe('artifact_delete: "Notes" was created by the user; ask them to delete it in the Library');
+    expect(TOOL_ERRORS.deleteEdited('Notes')).toBe('artifact_delete: the user has edited "Notes"; ask them to delete it in the Library');
+    expect(TOOL_ERRORS.deleteOtherSession('Notes')).toBe('artifact_delete: "Notes" was created by another session; ask the user to delete it in the Library');
+    expect(TOOL_ERRORS.deleteUnknown('Notes')).toBe('artifact_delete: MAWS cannot tell that only agents have written to "Notes"; ask the user to delete it in the Library');
   });
 });
