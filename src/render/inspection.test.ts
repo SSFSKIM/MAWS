@@ -91,6 +91,8 @@ describe('document visual inspection', () => {
     const context: ExportContext = { title: 'Memo', state: async () => state, assets: { list: async () => [] }, readAsset: async () => null, printToPdf: async () => new Uint8Array(), writeFile: async () => {}, signal: new AbortController().signal };
     await documentPngExporter(DOCUMENT_EXPORTERS.find((exporter) => exporter.format === 'html')!, render).run(request, context);
     const [html] = render.mock.calls[0] as unknown as [string];
-    expect(html).toMatch(/\.ds-doc h1 \{[^}]*font-size: 23\.4px;/);
+    // the page's own rules at compact values (this project reads the editor's theme as empty): space-3 and the title size
+    expect(html).toContain('.ds-doc .doc-tab > * + * { margin-top: 9px; }');
+    expect(html).toMatch(/\.ds-doc \.doc-tab-title \{[^}]*font-size: 30\.6px;/);
   });
 });
