@@ -648,6 +648,9 @@ Tests: `test/endpoint/artifact-rows.test.ts` (the row's exact shape; the artifac
 
     deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
     couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`
+    neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`   // E11, as `neverAnswered` of create and update (ruled 2026-11-15)
+
+The heading of a delete reads its refusal first, then `neverAnsweredDelete` when its turn closed with no answer, then "Deleted" once answered, else "Deleting". A delete that was never answered offers no control.
 
 The reason the row draws, for the person, by `why`; a `why` it does not know is drawn as `refusalForHuman` leaves the agent's sentence:
 
@@ -1157,6 +1160,13 @@ M5's executor, 2026-11-15 (U10b-2), on means the document leaves open. Folded by
 - With no editor held, the notice and Undo stand alone under the title, and the editor mounts once the artifact is restored.
 - The library scene cannot place a keystroke between the delete's commit and the window's word of it. So "an edit typed just before the notice is saved after Undo" is held by unit cases (`artifacts/host.test.ts`, M4's fence cases), and the scene asserts that an edit after the restore is the store's.
 - "(deleted draft, both ways)" skips only when the peer's own `src/engine-host/documents/storage.ts` holds `agentDraft`. Neither older build does, so it runs against both. It asserts the peer's `artifacts.status` with `toMatchObject({ status: 'ok' })`.
+
+The architect's rulings of 2026-11-15 (UTC) on M5's review, and M5's fix wave 1, folded by the controller.
+
+- A delete whose turn closed with no answer reads "Deleting <title> was never answered" (`ARTIFACT.neverAnsweredDelete`). That is the E11 form of the artifact family, read in `artifactHeading` after the refusal and before "Deleted"; §C.4 gains the sentence. "Stopped: <title>" was rejected: the row belongs to the artifact family and reads as its siblings do. Such a row offers no Undo, even when the artifact is in fact gone. That is a tracker row, since the Library's own restore still reaches it.
+- A delete the person denies, or that is stopped with an error result, reads "Could not delete <title>: <the engine's text>". The engine's denial carries no `why` and passes through `refusalForHuman` whole, so it can name "the user", as a denied create's row does today. §C.4's rule that the row never names the tool or "the user" holds for the delete's own refusals, the ones with a `why`.
+- The edit typed just before the notice is proved by the scene through a seam: `src/renderer/src/artifacts/held-frames.ts`, about 40 lines, renderer only. It is installed only under the existing e2e flag and inert without it, which a unit case pins. The scene holds the window's outgoing document frames, types, has the agent delete the artifact, releases the frames, reads the unsent notice, presses Undo, and finds the text in the store. The Acceptance line stands as written.
+- The replica's read of the deletion state takes a ticket. A later read, or a `created`, makes an earlier answer stale, and a stale answer decides nothing. A read that gets no answer leaves the standing unknown: the replica stays read-only with its unacknowledged edit and asks again on the reconnect backoff, at the host's next `ready`, and when the link comes up. A read the host refuses (not found, not viewable) counts as gone.
 
 ## Outcomes & Retrospective
 
