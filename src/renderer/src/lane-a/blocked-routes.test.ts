@@ -42,14 +42,13 @@ async function fromFile(text: string, agent: { agentId: AgentId; parentToolUseId
   follower.stop();
   return events;
 }
-/** The same while the file is still being written: what the follower emitted before it stops (its stop ends the session). */
+/** The same while the file is still being written: a live engine holds the session, so the follower synthesises no exit. */
 async function fromFileFollowed(text: string): Promise<SessionEvent[]> {
   const events: SessionEvent[] = [];
-  const follower = new ChainFollower(new MemoryFileReader(text), SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+  const follower = new ChainFollower(new MemoryFileReader(text), SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 1 });
   await follower.start();
-  const followed = [...events];
   follower.stop();
-  return followed;
+  return events;
 }
 const fromRows = (text: string, agentId: string | null = null): Promise<SessionEvent[]> =>
   freshSource(rowsIn(text).filter((row) => typeof row.uuid === 'string'), SESSION, subagentLookupOf([]), agentId).snapshot();
