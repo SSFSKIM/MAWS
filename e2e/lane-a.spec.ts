@@ -14,10 +14,10 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../test/support/fake-bridge';
+import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions, type FakeRaised } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
-import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { menu } from './support/menu';
@@ -97,6 +97,49 @@ function fileRows(sessionId: string, cwd: string, after: string, at: string) {
     pluginPrompt: (text: string) =>
       next({ type: 'user', origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: `The sminos plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.` } }),
     hookContext: (text: string, call: string) => next({ type: 'attachment', attachment: { type: 'hook_additional_context', content: [text], hookName: 'tool.call', toolUseID: `${call}-context`, hookEvent: 'PostToolUse' } }),
+    // a recorded row's own fields (its kind, message, origin and flags), chained here (probe 9b's records)
+    recorded: (row: Record<string, unknown>) => next(Object.fromEntries(Object.entries(row).filter(([key]) => RECORDED_FIELDS.has(key)))),
+  };
+}
+const RECORDED_FIELDS = new Set(['type', 'message', 'isMeta', 'origin', 'subtype', 'content', 'level', 'toolUseResult']);
+
+// UX wave U1b, probe 9b (spikes/protocol-probe/findings-uxwave-u1b-message-and-stop-while-asked.txt; sminos 1.47.0, engine
+// 2.1.322): a terminal session's Stop while its sminos asynchronous question waits, then the question answered or
+// dismissed (`fixtures/uxwave/u1b-askwait-stop-{answer,dismiss}-r2`, the runs whose record holds the bridge's lists). From
+// the record: the bridge's events (the turn's start, the question raised, the turn's end `aborted`, the settlement), its
+// answer to the interrupt, and the rows the session's file holds before the Stop, after it, and after the answer.
+type FileRow = Record<string, unknown> & { type?: string; isMeta?: boolean; subtype?: string; origin?: { kind?: string }; message?: { content?: unknown } };
+function stopRecord(then: 'answer' | 'dismiss') {
+  const base = join(REPO_ROOT, 'spikes/protocol-probe/fixtures/uxwave', `u1b-askwait-stop-${then}-r2`);
+  const record = JSON.parse(readFileSync(`${base}.terminal.json`, 'utf8')) as { bridge: { events: Record<string, unknown>[]; answers: { op: string; body: Record<string, unknown> }[] } };
+  const file = readFileSync(`${base}.transcript.jsonl`, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as FileRow);
+  const event = (match: (e: Record<string, unknown>) => boolean) => {
+    const found = record.bridge.events.find(match);
+    if (!found) throw new Error(`${base}: no such bridge event`);
+    return Object.fromEntries(Object.entries(found).filter(([key]) => !['ms', 'n', 't'].includes(key))); // the record's clock and count
+  };
+  const raised = event((e) => e.type === 'raised');
+  const call = String(raised.request);
+  const blocks = (row: FileRow) => (Array.isArray(row.message?.content) ? (row.message!.content as { type?: string; id?: string; name?: string; tool_use_id?: string }[]) : []);
+  const at = (match: (row: FileRow) => boolean) => file.findIndex(match);
+  const ask = at((row) => row.type === 'assistant' && blocks(row).some((b) => b.type === 'tool_use' && b.id === call));
+  const bash = at((row) => row.type === 'assistant' && blocks(row).some((b) => b.type === 'tool_use' && b.name === 'Bash'));
+  const bashId = blocks(file[bash]!).find((b) => b.type === 'tool_use')!.id;
+  const bashResult = at((row) => row.type === 'user' && blocks(row).some((b) => b.type === 'tool_result' && b.tool_use_id === bashId));
+  const conversation = (row: FileRow) => (row.type === 'user' || row.type === 'assistant' || (row.type === 'system' && row.subtype !== undefined)) && !(row.type === 'assistant' && blocks(row).every((b) => b.type === 'thinking'));
+  const prompt = file.find((row) => row.type === 'user' && typeof row.message?.content === 'string' && row.origin === undefined)!;
+  const { ok, result } = record.bridge.answers.find((a) => a.op === 'interrupt')!.body;
+  return {
+    call,
+    raised: Object.fromEntries(Object.entries(raised).filter(([key]) => key !== 'type')) as unknown as FakeRaised,
+    question: ((raised.input as { questions: { question: string; header: string }[] }).questions)[0]!,
+    turn: event((e) => e.type === 'turn' && e.phase === 'start'),
+    aborted: event((e) => e.type === 'turn' && e.phase === 'complete' && e.reason === 'aborted'),
+    settled: event((e) => e.type === 'settled') as { request: string; winner: 'web'; outcome: string; by: string },
+    interrupted: { ok, result },
+    before: [prompt, ...file.slice(ask, bash + 1).filter(conversation)],
+    afterStop: file.slice(bash + 1, bashResult + 1).filter(conversation),
+    afterAnswer: file.slice(bashResult + 1).filter(conversation),
   };
 }
 
@@ -1209,6 +1252,95 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     // the delivery of the answer that won: the row reads its own answers
     await c.store.appendLines(c.transcript, [rows.pluginPrompt(delivery(ask.call, answered({ [week]: 'Sunday', [cover]: 'Green' }))), rows.text('Noted: Sunday, a green cover.'), ...rows.turnEnd()].map((r) => JSON.stringify(r)));
     await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'the row’s own answers win' }).toEqual(['Week start→Sunday', 'Cover→Green']);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U1b, acceptance 4's last sentence ("Stop ends the turn and leaves the question open"; probe 9b, the architect's
+  // ruling of 2026-11-15): Stop posts the interrupt; the bridge ends the turn (`aborted`) and keeps the sminos
+  // asynchronous question pending, and nobody writes a settlement. So the form stays in its call's row and answers. Staged
+  // from the record (`stopRecord`): the file's rows to the running Bash call, the bridge's turn and its raise, its answer to
+  // the interrupt, and the interrupt's rows and the turn's end as the engine and the bridge wrote them.
+  async function stoppedWhileAsked(then: 'answer' | 'dismiss') {
+    const record = stopRecord(then);
+    let rows!: ReturnType<typeof fileRows>;
+    const c = await begin((sid, cwd, after) => {
+      rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return record.before.map((row) => rows.recorded(row));
+    });
+    const { page } = c;
+    const controls = { ...FULL_CAPABILITIES.controls, 'decide.dismiss': { available: true } }; // sminos 1.47.0: Dismiss is sent
+    const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
+    bridge.answer('interrupt', () => ({ status: 200, body: record.interrupted }));
+    const row = questionRow(page, record.call);
+    const form = row.locator('[data-request-card]');
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'its row before any request' }).toEqual([`${record.question.header}→Not answered`]);
+    bridge.emit(record.turn);
+    bridge.raise(record.raised);
+    await expect(form, 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    const stop = main(page).getByRole('button', { name: 'Stop', exact: true });
+    await expect(stop, 'the turn runs').toBeVisible({ timeout: 10_000 });
+
+    await stop.click();
+    await expect.poll(() => bodies(bridge, 'interrupt')).toEqual([{ op: 'interrupt' }]);
+    await c.store.appendLines(c.transcript, record.afterStop.map((r) => JSON.stringify(rows.recorded(r))));
+    bridge.emit(record.aborted);
+    await expect(stop, 'the turn ended').toHaveCount(0, { timeout: 10_000 });
+
+    // the question is still open: its form in its row, nothing at the end, the item listed, no decision posted
+    await expect(form, 'the form stays in its row after Stop').toBeVisible();
+    await expect(end(page), 'nothing at the end').toHaveCount(0);
+    const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((i) => i.request.requestId === record.call).map((i) => i.state);
+    expect(await listed(), 'the item still waits').toEqual(['pending']);
+    expect(decided(bridge), 'nothing decided').toEqual([]);
+    return { c, bridge, rows, record, row, form, listed };
+  }
+
+  test('Stop while a terminal session’s asynchronous question waits ends the turn and leaves the question open: its form stays in its row and answers, and the row reads the answer once delivered (probe 9b, stop then answer)', async () => {
+    test.setTimeout(150_000);
+    const { c, bridge, rows, record, row, form, listed } = await stoppedWhileAsked('answer');
+    const { page } = c;
+    // the record's answer, as its delivery quotes it ("<question>"="<answer>")
+    const delivered = record.afterAnswer.find((r) => r.type === 'user' && r.origin?.kind === 'plugin');
+    const answer = /="([^"]+)"/.exec(String(delivered?.message?.content ?? ''))?.[1] ?? '';
+    expect(answer, 'the record’s delivery names the answer').not.toBe('');
+    await form.getByRole('radiogroup', { name: record.question.question }).getByRole('radio', { name: answer }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'allow', updatedInput: { answers: { [record.question.question]: answer } }, ...AS_MAWS }]);
+    expect(bridge.requestReads, 'read at its request URL first, still pending there').toContain(record.call);
+    await expect(form).toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => receiptLines(row), { message: 'the answer this window gave, at once' }).toEqual([`${record.question.header}→${answer}`]);
+    bridge.settle(record.call, record.settled.winner, record.settled.outcome, record.settled.by);
+    await expect.poll(listed, { message: 'it leaves the list at its settlement' }).toEqual([]);
+
+    // the delivery as recorded: the plugin's prompt opens a new turn on the idle session, and the reply
+    await c.store.appendLines(c.transcript, record.afterAnswer.map((r) => JSON.stringify(rows.recorded(r))));
+    await expect(main(page).getByText(/The answer reached me/).first(), 'the delivery’s turn is drawn').toBeVisible({ timeout: 15_000 });
+    expect(await receiptLines(row), 'the row reads the answer after the delivery').toEqual([`${record.question.header}→${answer}`]);
+    await expect(main(page).getByText('The sminos plugin sent a message'), 'no bubble holds the engine’s framing').toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('Stop while a terminal session’s asynchronous question waits, then Dismiss: the bridge settles it withdrawn by MAWS and nothing reaches the session; the row reads Dismissed from the settlement, after a reload too (probe 9b, stop then dismiss)', async () => {
+    test.setTimeout(150_000);
+    const { c, bridge, record, row, form, listed } = await stoppedWhileAsked('dismiss');
+    const { page } = c;
+    expect(record.settled, 'the record: withdrawn, by MAWS').toMatchObject({ winner: 'web', outcome: 'withdrawn', by: 'maws' });
+    expect(record.afterAnswer, 'the record: no row reached the session').toEqual([]);
+    const linesBefore = readFileSync(c.transcript, 'utf8').trim().split('\n').length;
+    await form.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
+    await expect(form).toHaveCount(0, { timeout: 2_000 });
+    bridge.settle(record.call, record.settled.winner, record.settled.outcome, record.settled.by);
+    await expect.poll(listed, { message: 'it leaves the list at its settlement' }).toEqual([]);
+    await expect.poll(() => receiptLines(row)).toEqual([`${record.question.header}→Dismissed`]);
+
+    // this window's own dismissal goes with a reload; the bridge's snapshot still lists the settlement, and no row came
+    await page.reload();
+    await expect(main(page)).toBeVisible({ timeout: 60_000 });
+    await open(c);
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'from the settlement alone' }).toEqual([`${record.question.header}→Dismissed`]);
+    expect(readFileSync(c.transcript, 'utf8').trim().split('\n').length, 'no row reached the session').toBe(linesBefore);
+    await expect(end(page)).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 });

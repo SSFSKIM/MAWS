@@ -27,7 +27,7 @@ import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
 import { parseAskSteer } from '../src/shared/maws/ask';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
-import { invoke, value } from './support/c7-replay';
+import { askWaitJournal, invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // P3-D (the P3 spec's Decision Log 67)
 import { REPO_ROOT } from './support/launch';
@@ -234,6 +234,63 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
     await expect(sectionOf(readOnly, 'q1')).toContainText('Blue');
     await expect(sectionOf(readOnly, 'q3')).toContainText('Skipped');
     await expect(sheet.getByRole('button', { name: /^Submit/ })).toHaveCount(0);
+  });
+});
+
+// UX wave U1b, acceptance 8's first sentence (probe 9a; the architect's ruling of 2026-11-15 on it): a message sent from
+// the composer while MAWS's blocking ask waits is a message, and waits as any message sent during a turn waits: the
+// queue's row above the composer, by U4a's rules. It reaches the agent with the answer. The ask's form does not leave,
+// keep less of its draft, or change. Over the engine's own frames (`askWaitJournal`, `uxwave/u1b-askwait-mcp-answer-r1`):
+// the replay holds at the recorded message until the composer writes it, and at the ask's answer until the row's form
+// submits; then the ask's result, and the message's replay and start (10 to 30 ms after it on the recording).
+test('a message sent while a blocking ask waits: its queue row stands while the form keeps its draft; after the answer it leaves the queue and is drawn after the ask', async () => {
+  await scene({ titles: ['U1b: a message while the ask waits'] }, async (s) => {
+    const [id] = s.ids;
+    const MESSAGE = 'Also: end your reply with the word KIWI.'; // the recorded message: its replay draws the recorded words
+    await show(s, id);
+    await replay(s, id, askWaitJournal(s.scratch.root, id));
+    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+
+    const capsule = capsuleOf(s);
+    const form = formOf(s);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'pending', { timeout: 30_000 });
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    expect(opened).toMatchObject({ blocking: true, questions: [{ id: 'q1', question: 'Which fruit do you prefer?' }] });
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+    const mango = sectionOf(form, 'q1').getByRole('radio', { name: 'Mango' });
+    await mango.click(); // a draft, before the message
+    await expect(mango).toBeChecked();
+
+    // the message: written at once as a steer, queued by the engine (64), and waiting in the queue's row; nothing of the ask moves
+    const box = s.pane.getByRole('textbox', { name: 'Message', exact: true });
+    await box.click();
+    await box.pressSequentially(MESSAGE);
+    await box.press('Enter');
+    await expect(box, 'the box is cleared by the send').toHaveText('');
+    const stack = s.pane.getByRole('region', { name: 'Queued messages' });
+    const row = stack.locator('li[data-queue-state="next"]');
+    await expect(row, 'the queue’s row while the ask waits').toContainText(MESSAGE);
+    await expect(row.locator('[data-mark]')).toHaveText('Next step');
+    await expect.poll(() => s.journal(id).some((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && ((r.frame as Frame).message as { content?: unknown } | undefined)?.content === MESSAGE), { message: 'written to the engine' }).toBe(true);
+    await expect.poll(() => s.journal(id).some((r) => r.direction === 'in' && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).state === 'queued'), { message: 'the engine queued it' }).toBe(true);
+    const transcript = s.pane.locator('[data-transcript-scroller]');
+    await expect(transcript.locator('.transcript-row[data-kind="user"]').filter({ hasText: MESSAGE }), 'no bubble while it waits').toHaveCount(0);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
+    await expect(form, 'the form stays').toHaveAttribute('data-hover-ask', opened!.askId);
+    await expect(mango, 'with its draft').toBeChecked();
+    await expect(sheetOf(s)).toHaveCount(0);
+
+    // the answer: the ask's result, then the message's replay and start; it leaves the queue and stands after the ask
+    await clearToasts(s.page);
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Which fruit do you prefer?', status: 'answered', value: ['Mango'] }]);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await expect(stack, 'it leaves the queue').toHaveCount(0);
+    const bubble = transcript.locator('.transcript-row[data-kind="user"]').filter({ hasText: MESSAGE });
+    await expect(bubble, 'drawn as the person’s message').toHaveCount(1);
+    const indexOf = (locator: Locator) => locator.evaluate((element) => Number(element.closest<HTMLElement>('[data-row-id]')?.dataset.index ?? -1));
+    expect(await indexOf(bubble), 'after the ask’s row').toBeGreaterThan(await indexOf(capsule));
+    await idle(s, id);
   });
 });
 

@@ -207,6 +207,20 @@ export function stopPendingJournal(dir: string, name: string): string {
   return writeJournal(dir, `${name}-stop-pending`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
 
+// UX wave U1b (acceptance 8's first sentence, probe 9a): a message sent while MAWS's blocking ask waits, as
+// `uxwave/u1b-askwait-mcp-answer-r1` recorded it on engine 2.1.322 under MAWS's launch. C3's prelude stands in for the
+// probe's handshake (its initialize 3 and answer 6, the surface's attach and panes 7, 11 to 13 and 15, the
+// thinking-display write 16 and its answer 21); the engine's own handshake with the `maws` server stays (4, 5, 8 to 10,
+// 14; the tool listing 19, 20, 24), answered by the host's real server. Then the probe's prompt (18), the ask's
+// `tools/call` (58), held; the message (63), which the engine queues (64); the ask's answer (66), its result (68), the
+// message's replay (69) and start (70), the reply and the turn's end (80) and idle (82). The meta rows go, and the
+// probe's end_session and exit (85 to 87), so the replay waits for the test's end.
+export function askWaitJournal(dir: string, name: string): string {
+  const prelude = new Set([3, 6, 7, 11, 12, 13, 15, 16, 21]);
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1b-askwait-mcp-answer-r1.jsonl').filter((r) => r.direction !== 'meta' && !prelude.has(r.seq) && r.seq <= 82);
+  return writeJournal(dir, `${name}-ask-wait`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
 // UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
 // promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
 // Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
