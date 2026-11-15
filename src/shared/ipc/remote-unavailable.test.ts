@@ -1,8 +1,10 @@
 // UC-7.5's two tables (UX wave U9, M1; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §3):
 // the sentence a control issuing an act on a session on another machine is disabled with, and the sentence of an act
-// that ended without its effect. One function each, so every child words them alike. The machine is invented.
+// that ended without its effect. One function each, so every child words them alike. The machine is invented. The UX
+// wave (U4b, docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C and D): Send now on a
+// waiting message is offered behind a capability of its own, and it and taking a message back have their words.
 import { describe, expect, it } from 'vitest';
-import { ACT_WORDS, disabledWords, failureWords, REMOTE_NEEDS, REMOTE_UNAVAILABLE, refusalWords, SESSION_ACTS_CAPABILITY, type RemoteStanding } from './remote-unavailable';
+import { ACT_WORDS, disabledWords, failureWords, REMOTE_NEEDS, REMOTE_UNAVAILABLE, refusalWords, SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY, type RemoteStanding } from './remote-unavailable';
 
 const M = 'Loft';
 const UP: RemoteStanding = { machine: M, phase: 'up', capabilities: [SESSION_ACTS_CAPABILITY], owner: true };
@@ -11,7 +13,7 @@ const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fie
 describe('the acts the wave offers', () => {
   it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
     const built = ['session.archive', 'session.update', 'session.rename', 'session.list', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.fork'] as const;
-    expect(Object.keys(REMOTE_NEEDS).sort()).toEqual([...built].sort());
+    expect(Object.keys(REMOTE_NEEDS).sort()).toEqual([...built, 'session.steer.sendNow'].sort());
     for (const command of built) {
       expect(REMOTE_NEEDS[command], command).toBe('rl2.session-acts');
       expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
@@ -21,8 +23,50 @@ describe('the acts the wave offers', () => {
 
   it('word the menu acts as closing while the link connects, and Send, Stop and Dismiss as held', () => {
     expect(Object.entries(ACT_WORDS).filter(([, words]) => words?.closes === true).map(([command]) => command).sort()).toEqual(['session.archive', 'session.fork', 'session.rename', 'session.update']);
-    expect(ACT_WORDS['session.steer.cancel']).toBeUndefined();
     expect(ACT_WORDS['maws.pane.answer']).toBeUndefined();
+  });
+});
+
+describe('Send now and taking back (U4b)', () => {
+  it('offer Send now behind `rl2.send-now`, its own capability, and no longer declare it', () => {
+    expect(SEND_NOW_CAPABILITY).toBe('rl2.send-now');
+    expect(REMOTE_NEEDS['session.steer.sendNow']).toBe('rl2.send-now');
+    expect(REMOTE_UNAVAILABLE['session.steer.sendNow']).toBeUndefined();
+  });
+
+  it('give the two acts their words, held under the link’s hold as Send and Stop are', () => {
+    expect(ACT_WORDS['session.steer.cancel']).toEqual({ act: 'take back', done: 'taken back' });
+    expect(ACT_WORDS['session.steer.sendNow']).toEqual({ act: 'send now', done: 'sent now' });
+  });
+
+  it('close each control with its own label: the update sentence, then the offline one; held while the link reconnects', () => {
+    const buildG = at({ capabilities: [SESSION_ACTS_CAPABILITY] });
+    expect(disabledWords('session.steer.sendNow', buildG, 'send now')).toBe('Can’t send now on Loft yet. Update MAWS on Loft and try again.');
+    expect(disabledWords('session.steer.sendNow', buildG)).toBe('Can’t send now on Loft yet. Update MAWS on Loft and try again.');
+    expect(disabledWords('session.steer.sendNow', at({ capabilities: [SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY] }), 'send now')).toBeNull();
+    const buildF = at({ capabilities: ['rl2.executor.machine'] });
+    expect(disabledWords('session.steer.cancel', buildF, 'edit')).toBe('Can’t edit on Loft yet. Update MAWS on Loft and try again.');
+    expect(disabledWords('session.steer.cancel', buildF, 'delete')).toBe('Can’t delete on Loft yet. Update MAWS on Loft and try again.');
+    const offline = at({ phase: 'offline', capabilities: null });
+    expect(disabledWords('session.steer.sendNow', offline, 'send now')).toBe('Send now is unavailable while Loft is offline.');
+    expect(disabledWords('session.steer.cancel', offline, 'edit')).toBe('Edit is unavailable while Loft is offline.');
+    expect(disabledWords('session.steer.cancel', offline, 'delete')).toBe('Delete is unavailable while Loft is offline.');
+    for (const phase of ['connecting', 'reconnecting'] as const) {
+      expect(disabledWords('session.steer.sendNow', at({ phase, capabilities: null }), 'send now'), phase).toBeNull();
+      expect(disabledWords('session.steer.cancel', at({ phase, capabilities: null }), 'edit'), phase).toBeNull();
+    }
+  });
+
+  it('word a refusal after the act, an earlier engine host’s apart from the endpoint’s own `unavailable`', () => {
+    expect(refusalWords('session.steer.sendNow', M, 'host-older')).toBe('Not sent now: the engine host on Loft is finishing an update; this works once it has handed the session over');
+    expect(refusalWords('session.steer.sendNow', M, 'unavailable')).toBe('Not sent now: Loft is busy; try again in a moment');
+    expect(refusalWords('session.steer.sendNow', M, 'offline')).toBe('Not sent now: Loft is offline');
+    expect(refusalWords('session.steer.sendNow', M, 'not-offered')).toBe('Not sent now: update MAWS on Loft and try again');
+    expect(refusalWords('session.steer.sendNow', M, 'grade')).toBe('Not sent now: you can read this session but not act on it');
+    expect(refusalWords('session.steer.sendNow', M, 'read-only')).toBe('Not sent now: Loft is in read-only mode');
+    expect(refusalWords('session.steer.cancel', M, 'offline')).toBe('Not taken back: Loft is offline');
+    expect(failureWords('session.steer.sendNow', 'the session isn’t running on Loft')).toBe('Not sent now: the session isn’t running on Loft');
+    expect(failureWords('session.steer.cancel', 'the session isn’t running on Loft')).toBe('Not taken back: the session isn’t running on Loft');
   });
 });
 
@@ -55,7 +99,7 @@ describe('disabledWords: before the act', () => {
     expect(disabledWords('session.send', offline)).toBe('Send is unavailable while Loft is offline.');
     expect(disabledWords('session.list', offline, 'list archived sessions')).toBe('List archived sessions is unavailable while Loft is offline.');
     // an act with no words and no label is not worded here
-    expect(disabledWords('session.steer.cancel', offline)).toBeNull();
+    expect(disabledWords('maws.pane.answer', offline)).toBeNull();
   });
 
   it('closes the menu acts while the link connects or reconnects, and holds Send, Stop and Dismiss', () => {
