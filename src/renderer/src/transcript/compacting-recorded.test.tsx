@@ -88,8 +88,10 @@ async function play(name: string, from: number, drawnFrom = 0) {
     /** Plays every row up to and including `seq`, one row at a time. */
     to(seq: number) {
       for (const row of journal.filter((candidate) => candidate.seq > played && candidate.seq <= seq)) {
-        const events = host([row]);
-        act(() => (events.length > 0 ? push(events) : undefined));
+        act(() => {
+          const events = host([row]);
+          if (events.length > 0) push(events);
+        });
       }
       played = seq;
     },
