@@ -79,7 +79,7 @@ describe('opening an owner-channel item at its mark', () => {
   it('opens the tab, waits for its history, then shows the report and jumps to the anchored text (opening its record)', async () => {
     const later = laterSource(history());
     const attached = useTranscriptStore.getState().attach(APP, later.source);
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     useTranscriptStore.getState().setView(APP, 'transcript'); // the reader had chosen the full transcript
     openAnchor(APP, anchor);
     expect(active()).toMatchObject({ kind: 'session', appSessionId: APP });
@@ -98,7 +98,7 @@ describe('opening an owner-channel item at its mark', () => {
     stale.release();
     await act(() => first);
     useTranscriptStore.getState().detach(APP); // the tab closed: its entry is kept, live, without the newer text
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     openAnchor(APP, anchor);
     expect(useTranscriptStore.getState().entries[APP]!.jump).toBeNull(); // the kept history has nothing to jump to yet
     const fresh = laterSource(history());
@@ -115,7 +115,7 @@ describe('opening an owner-channel item at its mark', () => {
     const source: TranscriptSource = { subscribe: () => () => {}, snapshot: () => (fail ? Promise.reject(new Error('host down')) : Promise.resolve(history())) };
     await useTranscriptStore.getState().attach(APP, source);
     expect(useTranscriptStore.getState().entries[APP]!.phase).toBe('failed');
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     openAnchor(APP, anchor);
     expect(useTranscriptStore.getState().entries[APP]!.reach).toBeUndefined(); // no jump started over a history that never came
     fail = false;
@@ -125,7 +125,7 @@ describe('opening an owner-channel item at its mark', () => {
 
   it('a notification’s click on an owner item opens it at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     const question = owner('async_input', 'Question — Which backend?');
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [question] }, TEST_MACHINE));
     fake.event('attention.navigate', { appSessionId: bareOf(APP), attentionId: bareOf(question.id), source: 'notification' });
@@ -139,7 +139,7 @@ const laterSourceNow = (events: SessionEvent[]): TranscriptSource => ({ subscrib
 describe('the surfaces', () => {
   it('the Needs-you row reads the item’s summary and opens at its mark', async () => {
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('essential_unread', 'Must read — The README is unverified.')] }, TEST_MACHINE));
     render(<Sidebar />);
     const row = within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!;
@@ -158,7 +158,7 @@ describe('the surfaces', () => {
     const other = nine.sessions.find((r) => r.appId !== APP)!.appId as AppSessionId;
     act(() => useLayout.getState().openSession(other));
     await useTranscriptStore.getState().attach(APP, laterSourceNow(history()));
-    useTranscriptStore.getState().setOwnerLane(APP, true);
+    useTranscriptStore.getState().setToHumanView(APP, { lane: true, tailMessage: false });
     act(() => useAttention.getState().applyChanged({ appSessionId: APP, items: [owner('async_input', 'Question — Which backend?')] }, TEST_MACHINE));
     render(<Sidebar />);
     activate(within(screen.getByRole('list', { name: 'Needs you' })).getAllByRole('button').find((b) => b.dataset.needsYou === APP)!);

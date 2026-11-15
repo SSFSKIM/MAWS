@@ -38,14 +38,16 @@ export function PastedView({ node, selected, decorations, editor, getPos }: Reac
     view.focus();
   };
   return (
-    <NodeViewWrapper as="span" contentEditable={false} data-pasted={unavailable ? 'unavailable' : 'text'} title={unavailable ? UNAVAILABLE_TITLE : text.length > 400 ? `${text.slice(0, 400)}…` : text} className="mx-px inline-flex align-baseline">
+    <NodeViewWrapper as="span" contentEditable={false} data-pasted={unavailable ? 'unavailable' : 'text'} title={unavailable ? UNAVAILABLE_TITLE : text.length > 400 ? `${text.slice(0, 400)}…` : text} className="mx-px inline-flex max-w-full align-baseline">
       <Popover.Root open={open} onOpenChange={setOpen}>
         <Popover.Trigger asChild>
           <button
             type="button"
-            className={`inline-flex items-center rounded-sm border px-1 text-ui-sm ${unavailable ? 'border-dashed border-border-strong text-fg-faint' : 'border-border bg-bg-hover text-fg-muted'} ${selected || open ? 'outline outline-1 outline-accent' : ''}`}
+            className={`inline-flex max-w-full min-w-0 items-center rounded-sm border px-1 text-ui-sm ${unavailable ? 'border-dashed border-border-strong text-fg-faint' : 'border-border bg-bg-hover text-fg-muted'} ${selected || open ? 'outline outline-1 outline-accent' : ''}`}
           >
-            {unavailable ? `${name} · unavailable` : `${name} +${lines} lines`}
+            {/* UX wave U10b (L6): no wider than its line; a long name is cut with an ellipsis, what follows it stays whole */}
+            <span className="min-w-0 truncate">{name}</span>
+            <span className="shrink-0 whitespace-pre">{unavailable ? ' · unavailable' : ` +${lines} lines`}</span>
           </button>
         </Popover.Trigger>
         <Popover.Portal>

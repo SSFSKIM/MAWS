@@ -141,8 +141,9 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E7 end
   // E2 start
   z.strictObject({
-    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update']), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
+    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update', 'delete'] /* UX wave U10b */), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
     deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(), neverAnswered: z.literal(true).optional() /* E11 */,
+    why: z.string().optional() /* UX wave U10b */,
   }),
   // E2 end
   // E4c start

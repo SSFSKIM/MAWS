@@ -147,8 +147,94 @@ export interface BackgroundAgent {
   at: string;
 }
 
-export async function backgroundAgentSidecars(store: StoreFixture, sessionId: string, cwd: string, agent: BackgroundAgent): Promise<void> {
-  await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.meta.json`, { agentType: 'general-purpose', description: agent.description, toolUseId: `toolu_${agent.agentId}`, spawnDepth: 1, requestShape: 'background' });
+// The agent's sidecars: its meta (a nested agent's names `parent`, at spawn depth 2, as 2.1.322 writes it:
+// spikes/protocol-probe/fixtures/uxwave/u8d-p3-nested-r1-subagents) and its own transcript, its prompt the first row.
+// The transcript's path and the prompt row's uuid, which the agent's next rows follow (`nestedAgentRecords`).
+export async function backgroundAgentSidecars(store: StoreFixture, sessionId: string, cwd: string, agent: BackgroundAgent, parent?: string): Promise<{ transcript: string; last: string }> {
+  await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.meta.json`, {
+    agentType: 'general-purpose', description: agent.description, toolUseId: `toolu_${agent.agentId}`, requestShape: 'background',
+    ...(parent === undefined ? { spawnDepth: 1 } : { parentAgentId: parent, spawnDepth: 2 }),
+  });
   const prompt = { parentUuid: null, isSidechain: true, agentId: agent.agentId, type: 'user', message: { role: 'user', content: agent.prompt }, uuid: randomUUID(), timestamp: agent.at, userType: 'external', cwd, sessionId, version: '2.1.300' };
-  await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.jsonl`, `${JSON.stringify(prompt)}\n`);
+  const transcript = await store.addSidecar(sessionId, `subagents/agent-${agent.agentId}.jsonl`, `${JSON.stringify(prompt)}\n`);
+  return { transcript, last: prompt.uuid };
+}
+
+// UX wave U8d (M4): a nested agent's start in its parent's own transcript, after `parentUuid`: the parent's Agent call
+// and its launch result, as rows of the parent (`isSidechain`, its `agentId`), the result with no `toolUseResult` (the
+// engine drops it from a subagent's rows, B:1146825), so its launch text names it (u8d-p5-late-r1-subagents).
+export function nestedAgentRecords(sessionId: string, cwd: string, parent: string, parentUuid: string, agent: BackgroundAgent): Record<string, unknown>[] {
+  const base = { cwd, sessionId, timestamp: agent.at, isSidechain: true, agentId: parent, userType: 'external', version: '2.1.300' };
+  const toolUseId = `toolu_${agent.agentId}`;
+  const call = randomUUID();
+  return [
+    {
+      ...base, type: 'assistant', uuid: call, parentUuid,
+      message: { id: `msg_${call.slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-haiku-4-5', content: [{ type: 'tool_use', id: toolUseId, name: 'Agent', input: { description: agent.description, prompt: agent.prompt, subagent_type: 'general-purpose', run_in_background: true } }], stop_reason: 'tool_use', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+    },
+    {
+      ...base, type: 'user', uuid: randomUUID(), parentUuid: call,
+      message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: toolUseId, content: [{ type: 'text', text: `Async agent launched successfully.\nagentId: ${agent.agentId} (internal ID - do not mention to user.)` }] }] },
+    },
+  ];
+}
+
+// UX wave U8d (M4): what 2.1.322 writes about background tasks once they end, as P1 and P2 recorded it
+// (spikes/protocol-probe/findings-uxwave-u8d-resume-orphans.txt, -bridge-stop-agent.txt). One block names its tasks (a
+// resume ends several orphans with one block, R9), the call that started one, its output file, its status and a summary.
+export interface TaskNote {
+  taskIds: readonly string[];
+  status: string;
+  summary: string;
+  at: string;
+  toolUseId?: string;
+  outputFile?: string;
+}
+
+function noteBlock(note: TaskNote): string {
+  return [
+    '<task-notification>',
+    ...note.taskIds.map((id) => `<task-id>${id}</task-id>`),
+    ...(note.toolUseId === undefined ? [] : [`<tool-use-id>${note.toolUseId}</tool-use-id>`]),
+    ...(note.outputFile === undefined ? [] : [`<output-file>${note.outputFile}</output-file>`]),
+    `<status>${note.status}</status>`,
+    `<summary>${note.summary}</summary>`,
+    '</task-notification>',
+  ].join('\n');
+}
+
+// In the main transcript, after `parentUuid`: the engine's queue record that enqueues the block (no uuid), its dequeue,
+// then the user row of origin task-notification (u8d-p1-one-r1 lines 55 to 57; u8d-p2-bg-r1 lines 42, 43 and 45). A
+// resume's notification of its orphans marks that row `queueTranscriptOnly` (P1: it opens no model turn); a stop's
+// does not (P2).
+export function queuedNotificationRecords(sessionId: string, cwd: string, parentUuid: string, note: TaskNote, { resume = false }: { resume?: boolean } = {}): Record<string, unknown>[] {
+  const block = noteBlock(note);
+  return [
+    { type: 'queue-operation', operation: 'enqueue', timestamp: note.at, sessionId, content: block },
+    { type: 'queue-operation', operation: 'dequeue', timestamp: note.at, sessionId },
+    {
+      type: 'user', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: note.at, isSidechain: false, userType: 'external', version: '2.1.322',
+      promptSource: 'system', origin: { kind: 'task-notification' }, ...(resume && { queueTranscriptOnly: true }), message: { role: 'user', content: block },
+    },
+  ];
+}
+
+// In an agent's own transcript, after `parentUuid`: the notification of a task it started, which the engine hands to
+// that agent's loop as an isMeta user row behind its notice (u8d-p5-late-r1-subagents, the parent's file, line 31).
+export function agentNotificationRecord(sessionId: string, cwd: string, agentId: string, parentUuid: string, note: TaskNote): Record<string, unknown> {
+  const notice = '[SYSTEM NOTIFICATION - NOT USER INPUT]\nThis is an automated background-task event, NOT a message from the user.';
+  return {
+    type: 'user', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: note.at, isSidechain: true, agentId, isMeta: true, userType: 'external', version: '2.1.322',
+    origin: { kind: 'task-notification', producer: 'session-task' }, message: { role: 'user', content: `${notice}\n\n${noteBlock(note)}` },
+  };
+}
+
+// The sminos plugin's note when its bridge's `stop-agent` stopped an agent (u8d-p2-bg-r1 line 40): an isMeta user row
+// of origin plugin, written before the engine's `killed` notification.
+export function pluginStopNoteRecord(sessionId: string, cwd: string, parentUuid: string, stop: { agentId: string; at: string }): Record<string, unknown> {
+  return {
+    type: 'user', uuid: randomUUID(), parentUuid, cwd, sessionId, timestamp: stop.at, isSidechain: false, isMeta: true, userType: 'external', version: '2.1.322',
+    origin: { kind: 'plugin', name: 'sminos' },
+    message: { role: 'user', content: [{ type: 'text', text: `Agent ${stop.agentId} was stopped by the person from outside the terminal: it is not running. Do not start it again or redo its task unless the person asks.` }] },
+  };
 }

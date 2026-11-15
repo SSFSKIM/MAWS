@@ -145,8 +145,10 @@ test('a blocking ask: the capsule waits with its form in its row, which holds ev
     const [id] = s.ids;
     await show(s, id);
     await replay(s, id, ASK_BLOCKING);
-    // P2-C Design §7 defaults lane-on panes to Report; this case checks transcript follow mode.
-    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+    // P2-C Design §7 defaults lane-on panes to Report, and this case checks transcript follow mode. UX wave U2b: the
+    // recording holds no message, so no to-human view is in force: the pane is the plain transcript, the switch that
+    // would offer the full transcript is absent, and there is nothing to press.
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
     await allowNext(s, id); // mcp__maws__ask (seq 129)
 
     const capsule = capsuleOf(s);
@@ -989,7 +991,7 @@ test('an artifact link in the agent’s reply: link text that wraps, a click ope
 
 // ---- G1 and G7 in the app: E0a's round trip ------------------------------------------------------------------------
 
-test('the SDK MCP round trip: the app answers the engine’s handshake with the eighteen tools and refuses the probe’s own tool', async () => {
+test('the SDK MCP round trip: the app answers the engine’s handshake with the nineteen tools and refuses the probe’s own tool', async () => {
   // The probe's journal: its scratch directory is the engine cwd, and from seq 96 on it holds at the probe's own writes,
   // which the app never makes (M1's decisions), so the case ends after the first turn.
   await scene({ titles: ['E1 tools: round trip'] }, async (s) => {
@@ -1028,6 +1030,8 @@ test('the SDK MCP round trip: the app answers the engine’s handshake with the 
       ['artifact_resolve', { title: 'Resolve a document comment', readOnlyHint: false, openWorldHint: false }],
       // P4-B4 (X33): the search tool, after B's; read-only
       ['artifact_search', { title: 'Search artifacts', readOnlyHint: true, openWorldHint: false }],
+      // UX wave U10b (M4, §C.1): the agent's delete of its own draft, last, the one tool annotated destructive
+      ['artifact_delete', { title: 'Delete artifact', readOnlyHint: false, destructiveHint: true, openWorldHint: false }],
     ]);
     const [echo] = mcpCalls(rows);
     expect(mcpResultOf(rows, echo!.requestId)).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.unknownTool('echo_file') }], isError: true });

@@ -45,7 +45,8 @@ describe('the pane bridge, window side (E1)', () => {
     show(fake, { pane: 'file', target: '/repo/src/../src/a.ts', line: 3 });
     await settle();
     const [tab] = filesOf(A);
-    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/repo/src/a.ts', line: 3, preview: true });
+    // UX wave U6e (decision 19): the tab the agent's show opens holds the agent's mark
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/repo/src/a.ts', line: 3, preview: true, agent: true });
     expect(surfaceTabs(useLayout.getState(), A).map((ref) => ref.id)).toEqual([tab.id]);
     expect(mainFiles()).toEqual([]);
     expect(fake.invoked('maws.pane.answer')).toEqual([

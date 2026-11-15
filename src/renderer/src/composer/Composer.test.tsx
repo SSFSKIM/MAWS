@@ -51,6 +51,8 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../stores/transcript'; // UX wave U2b
+import { builder } from '../transcript/model/test-events'; // UX wave U2b
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
@@ -842,6 +844,34 @@ describe("composer DOM under C5's dispatcher", () => {
 
 // UX wave U4a (l3-input-08, l3-input-03): Enter always sends, ⌘Enter keeps a message for after the running turn, and
 // the empty box says which key does what while a turn runs
+// UX wave U2b (M2; A14, decision 16): the view's switch is one line above the composer, mounted directly after the mods'
+// band, while MAWS draws the session's to-human view in force; absent otherwise.
+describe('the view’s switch above the composer', () => {
+  afterEach(() => useTranscriptStore.getState().drop(A));
+  const inForce = (on: boolean) => useTranscriptStore.getState().setToHumanView(A, { lane: on, tailMessage: false });
+
+  it('stands above the frame while the view is in force, reads the view to switch to, and goes when the view leaves force', async () => {
+    live(A);
+    const b = builder();
+    b.turn('u1', 'Count the files');
+    b.text('m1', 0, '<message>Three files.</message>');
+    b.end(['u1']);
+    const events = b.events;
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+    act(() => inForce(true));
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    const line = composerOf(0).querySelector('[data-view-switch]')!;
+    expect(line.textContent).toBe('to-human view · full transcript ›');
+    expect(line.compareDocumentPosition(editorOf()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(composerOf(0)).getByRole('button', { name: 'full transcript ›' }));
+    expect(useTranscriptStore.getState().entries[A]?.state.ui.view).toBe('transcript');
+    expect(composerOf(0).querySelector('[data-view-switch]')?.textContent).toBe('to-human view · report only ›');
+    act(() => inForce(false));
+    expect(composerOf(0).querySelector('[data-view-switch]')).toBeNull();
+  });
+});
+
 describe('sending from the box', () => {
   const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
   const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });

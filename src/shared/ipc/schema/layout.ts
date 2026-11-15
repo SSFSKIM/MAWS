@@ -785,6 +785,21 @@ const p4b2Commands = {
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 // P4-B2 end
 
+// UX wave U6e start (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §C; decisions 3, 14 and 18):
+// Open File…, the system's chooser for one file, run by main on the asking app window, then main's own `files.grant` for
+// the session. Answered with the real path the daemon granted (what the tab opens), a cancel, or a refusal: `not-a-file`
+// for a folder or a package, `unavailable` when the chooser or the grant failed (a daemon of an older build among them).
+export const OpenFileOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('opened'), path: z.string() }),
+  z.strictObject({ status: z.literal('cancelled') }),
+  z.strictObject({ status: z.literal('refused'), reason: z.enum(['not-a-file', 'unavailable']) }),
+]);
+export type OpenFileOutput = z.infer<typeof OpenFileOutputSchema>;
+const u6eCommands = {
+  'layout.openFile': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: OpenFileOutputSchema, owner: 'main' },
+} as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
+// UX wave U6e end
+
 export const commands = {
   'layout.get':          { input: z.strictObject({ key: LayoutKeySchema }), output: z.strictObject({ value: z.unknown().nullable() }), owner: 'main' },
   'layout.set':          { input: z.strictObject({ key: LayoutKeySchema, value: z.unknown() }), output: z.void(), owner: 'main' },
@@ -799,6 +814,7 @@ export const commands = {
   ...e5Commands, // E5
   ...p3gCommands, // P3-G
   ...p4b2Commands, // P4-B2 K6
+  ...u6eCommands, // UX wave U6e: Open File…
 } as const satisfies Record<`layout.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

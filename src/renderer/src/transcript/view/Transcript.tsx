@@ -29,11 +29,10 @@ import { useTranscriptWaiting, WaitingViewProvider } from './waiting-view'; // U
 import { END_ROW } from '../model/keys'; // UX wave U1b
 import { useBrowserActivityAttachment } from './rows/BrowserActivity'; // E13
 import { listBrowserActivity } from '../../tools/browser/agent/activity'; // E13
-import { withBrowserActivityRows } from '../model/browser-activity'; // E13
+import { withBrowserActivityRows, type BrowserActivityAttachment } from '../model/browser-activity'; // E13
+import type { TranscriptState } from '../model/reduce';
 import type { AppSessionId } from '@shared/graph/ids'; // E13
-// P2-C start (2026-10-09)
-import { liveMarkedRowIds, reportRows, reportViewOf } from '../../owner/report/project';
-// P2-C end
+import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
 import './transcript.css';
 
 // Leaving the end, and the logical end (the virtualiser's total against the committed sizer), are read within a pixel:
@@ -59,7 +58,7 @@ const ESTIMATES: Record<RowKind, number> = {
   artifact: 44, // E2
   browser_action: 34, // E4c: one line and its bottom padding
   browser_activity: 34, // E13: as a browser action's
-  owner_record: 32, // P2-C: one line
+  record_fold: 32, // UX wave U2b: one line
   to_human: 96, // P4-R7: a message card, its label and a few lines
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
@@ -522,12 +521,25 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
+// The rows the mirror runs over (UX wave U2b): the key's rows as a mount composes them, at rest or not, with its placed
+// rows, then the session's browser activity and the queue's tail. The list draws them; the store's jump reads the same
+// composition (`mountView`), so it opens the stretch the list draws.
+interface Composition { atRest: boolean; placed: readonly Row[]; activity: BrowserActivityAttachment; withdrawn: ReadonlySet<string>; tail: readonly Row[]; waiting?: 'stacked' }
+const placedRows = (state: TranscriptState | undefined, stored: Row[], { atRest, placed }: Pick<Composition, 'atRest' | 'placed'>) => withPlacedRows(atRest && state ? restingRows(state, stored) : stored, placed);
+const queuedRows = (rows: Row[], { activity, withdrawn, tail, waiting }: Omit<Composition, 'atRest' | 'placed'>) => withQueueTail(withBrowserActivityRows(rows, activity), withdrawn, tail, waiting);
+
+// UX wave U2b (the flag's outside term, R5): whether the rows each mounted view of a key hands in from outside the store
+// hold a message. The key's term is any mount's, so a mount holding none never clears another's, and a mount that
+// unmounts takes its part with it.
+const outsideMessages = new Map<string, Map<symbol, boolean>>();
+const outsideHolds = (key: string) => [...(outsideMessages.get(key)?.values() ?? [])].some(Boolean);
+
 export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
     const state = atRest ? useTranscriptStore.getState().entries[storeKey]?.state : undefined; // read when the rows change, as the rows are
-    return withPlacedRows(state ? restingRows(state, stored) : stored, placed);
+    return placedRows(state, stored, { atRest, placed });
   }, [stored, atRest, storeKey, placed]);
   // E13: a session's browser activity as rows, under the `js` call each happened in or at its time (a child's transcript
   // shows none: the session's rows carry them); what main kept is listed on mount, so a reload shows them again
@@ -536,23 +548,62 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   useEffect(() => {
     if (activitySession !== null) void listBrowserActivity(activitySession);
   }, [activitySession]);
-  const queued = useMemo(() => withQueueTail(withBrowserActivityRows(derived, activity), withdrawn, tail, waiting), [derived, activity, withdrawn, tail, waiting]);
-  // P2-C start (2026-10-09; the P2-C document, Design §7): the session's owner-channel lane, when the mount knows it,
-  // told to the store (a marked commentary then stays in view when its turn folds), and while the lane is on and the
-  // reader has not chosen the transcript, the report projection of the rows: a marked turn's work in one working record
-  const storedLane = useTranscriptStore((state) => (state.entries[storeKey] ? (state.entries[storeKey].state.ui.ownerLane ?? false) : null));
-  useEffect(() => {
-    // again whenever the key's state starts over (an attach, a source's reset), which starts its ui afresh
-    if (ownerLane !== undefined && storedLane !== null && storedLane !== ownerLane) useTranscriptStore.getState().setOwnerLane(storeKey, ownerLane);
-  }, [storeKey, ownerLane, storedLane]);
-  const report = useTranscriptStore((state) => reportViewOf(state.entries[storeKey]?.state.ui));
-  const openRecords = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.reportOpenTurns);
-  const liveMarked = useTranscriptStore((state) => (report ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
-  const merged = useMemo(() => {
-    const state = useTranscriptStore.getState().entries[storeKey]?.state; // read when the rows change, as the rows are
-    return report && state ? reportRows(queued, state, { reportOpenTurns: openRecords }, liveMarked) : queued;
-  }, [queued, report, openRecords, liveMarked, storeKey]);
-  // P2-C end
+  const queued = useMemo(() => queuedRows(derived, { activity, withdrawn, tail, waiting }), [derived, activity, withdrawn, tail, waiting]);
+  // The same composition, handed to the store for its jumps while this view is mounted (read when a jump is asked for)
+  const composition = useRef<Composition>({ atRest, placed, activity, withdrawn, tail, waiting });
+  useLayoutEffect(() => {
+    composition.current = { atRest, placed, activity, withdrawn, tail, waiting };
+  });
+  useLayoutEffect(
+    () =>
+      useTranscriptStore.getState().mountView(storeKey, (entry) => {
+        const parts = composition.current;
+        return { rows: queuedRows(placedRows(entry.state, entry.rows, parts), parts), liveMarked: liveMarksOf(liveMarkedRowIds(entry.state), parts.tail) };
+      }),
+    [storeKey],
+  );
+  // UX wave U2b (the execution document, M1, "The flag"; R5): the session's owner-channel lane, when the mount knows
+  // it, and whether the rows handed in from outside the store hold a message (a streaming reply's open mark included),
+  // told to the store before paint, which sets `noTurnFold` from them in the same update; again whenever the key's state
+  // starts over (an attach, a source's reset), which starts its ui afresh. This mount's reading is its own part of the
+  // key's outside term (`outsideMessages`), and what it writes is the term, any mount's part, so two mounts of one key
+  // never undo each other; its part goes when it unmounts. While the flag is set, the view is the report and MAWS draws
+  // it, the rows are mirrored: a render that sees a first mark in the tail before the flag is written draws them as they
+  // are, with the turn fold, and is replaced before paint.
+  const outsideMessage = useMemo(() => holdsMessage(tail) || holdsMessage(placed), [tail, placed]);
+  const storedView = useTranscriptStore((state) => {
+    const ui = state.entries[storeKey]?.state.ui;
+    return ui ? `${ui.ownerLane ?? false} ${ui.tailMessage ?? 'unset'}` : null;
+  });
+  const [mount] = useState(() => Symbol('transcript mount'));
+  useLayoutEffect(() => {
+    let parts = outsideMessages.get(storeKey);
+    if (!parts) outsideMessages.set(storeKey, (parts = new Map()));
+    parts.set(mount, outsideMessage);
+    const ui = useTranscriptStore.getState().entries[storeKey]?.state.ui;
+    if (!ui || storedView === null) return;
+    const lane = ownerLane ?? ui.ownerLane ?? false;
+    const tailMessage = outsideHolds(storeKey);
+    if (lane !== (ui.ownerLane ?? false) || tailMessage !== (ui.tailMessage ?? false)) useTranscriptStore.getState().setToHumanView(storeKey, { lane, tailMessage });
+  }, [storeKey, ownerLane, outsideMessage, storedView, mount]);
+  useLayoutEffect(
+    () => () => {
+      const parts = outsideMessages.get(storeKey);
+      parts?.delete(mount);
+      if (parts?.size === 0) outsideMessages.delete(storeKey);
+      const ui = useTranscriptStore.getState().entries[storeKey]?.state.ui;
+      const tailMessage = outsideHolds(storeKey);
+      if (ui && tailMessage !== (ui.tailMessage ?? false)) useTranscriptStore.getState().setToHumanView(storeKey, { lane: ui.ownerLane ?? false, tailMessage });
+    },
+    [storeKey, mount],
+  );
+  const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
+  const openStretches = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.openStretches);
+  const storedMarks = useTranscriptStore((state) => (mirrored ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
+  const merged = useMemo(
+    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail)) : queued),
+    [queued, mirrored, openStretches, storedMarks, tail],
+  );
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
   const rows = useMemo(() => {
@@ -582,10 +633,12 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   }, [storeKey, sendFollowRequest]);
   const disclosures = useDisclosures();
   const [motion] = useState(() => new WorkMotion());
+  // UX wave U2b (R5): no turn folds while the view is in force, so a fold the reader started is settled at once, before
+  // paint, as the flag sets: the view draws no row that waits on its close, and the turn is folded once the flag clears
+  const noTurnFold = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.noTurnFold === true);
   useLayoutEffect(() => {
-    // Restoring Report reopens its saved records in the store; retire this view's older fold intents as well.
-    if (report) for (const turn of openRecords ?? []) motion.unfold(turn);
-  }, [report, openRecords, motion]);
+    if (noTurnFold) motion.settleFolds();
+  }, [noTurnFold, motion]);
   const idPrefix = `transcript${useId().replace(/[^a-zA-Z0-9]/g, '')}`;
   // UX wave U1b (Interfaces §C, §D): the session's waiting requests, each in its call's row or at the end row appended
   // last, after the tail, the projection and the first-row cut; and the transcript's one way to show one of them

@@ -4,7 +4,9 @@
 // asked at every read (U8c-1): the engine renames a session's transcript into another project folder when its agent
 // enters or leaves a worktree, and the same inode at the new path is read on from where it was. The engine's request
 // records hold no row and repeat the conversation, so they are skipped unparsed, as sminos's `task_rows` skips them.
-// Read-only: the file is opened with 'r' per read and no descriptor is held between reads.
+// Read-only: the file is opened with 'r' per read and no descriptor is held between reads. UX wave U8d M2: the same
+// follower reads a parent agent's own transcript for its nested agents, and says whether its last read found the file
+// and when its ledger gained a fact (`version`), which is when the driver derives again.
 import { open } from 'node:fs/promises';
 import type { Job } from 'desk-hub/protocol';
 import { Ledger } from './jobs';
@@ -16,7 +18,9 @@ const REQUEST_RECORD = Buffer.from('{"type":"api-request');
 const missing = (error: unknown): boolean => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException)?.code ?? '');
 
 export class TranscriptJobs {
-  private ledger = new Ledger();
+  private held = new Ledger();
+  private resets = 0; // how many times the file was read again from its start
+  private seen = false;
   private ino: number | null = null;
   private offset = 0;
   private rest: Buffer = Buffer.alloc(0); // the last line's bytes while it has no end
@@ -33,14 +37,30 @@ export class TranscriptJobs {
   }
 
   body(sessionRunning: boolean): Job[] {
-    return this.ledger.jobsBody(sessionRunning);
+    return this.held.jobsBody(sessionRunning);
   }
 
   running(task: string): boolean {
-    return this.ledger.running(task);
+    return this.held.running(task);
+  }
+
+  // The rows read so far.
+  get ledger(): Ledger {
+    return this.held;
+  }
+
+  // Whether the last read found the file (false while none is known or it is missing).
+  get found(): boolean {
+    return this.seen;
+  }
+
+  // Moves when, and only when, the ledger gained a fact or was started over: the follow derives on a change of it.
+  get version(): string {
+    return `${this.resets}:${this.held.facts}`;
   }
 
   private async catchUp(): Promise<void> {
+    this.seen = false;
     const path = await this.locate();
     if (path === null) return;
     let file;
@@ -50,10 +70,12 @@ export class TranscriptJobs {
       if (missing(error)) return; // moved or not written yet: the next read, located again, catches up
       throw error;
     }
+    this.seen = true;
     try {
       const { ino, size } = await file.stat();
       if (ino !== this.ino || size < this.offset) {
-        this.ledger = new Ledger();
+        if (this.ino !== null || this.held.facts > 0) this.resets += 1;
+        this.held = new Ledger();
         this.ino = ino;
         this.offset = 0;
         this.rest = Buffer.alloc(0);
@@ -76,7 +98,7 @@ export class TranscriptJobs {
       const line = bytes.subarray(start, end);
       if (line.length === 0 || line.subarray(0, REQUEST_RECORD.length).equals(REQUEST_RECORD)) continue;
       try {
-        this.ledger.add(JSON.parse(line.toString('utf8')));
+        this.held.add(JSON.parse(line.toString('utf8')));
       } catch {
         // a line that is no JSON is no row
       }

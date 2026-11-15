@@ -156,10 +156,12 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
           const untracked = git(root, 'status', '--porcelain', '--untracked-files=all').split('\n').filter((l) => l.startsWith('??')).length;
           const files = numstat.length + untracked;
-          const expected = `${files} ${files === 1 ? 'file' : 'files'} changed · +${added} −${removed} · Uncommitted`;
+          // UX wave U5b: the totals no longer name the scope (card 1 at its default); a file is a section of the stack
+          const expected = `${files} ${files === 1 ? 'file' : 'files'} changed · +${added} −${removed}`;
           await addTool(page, 'Review');
+          await expect(panel.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
           await expect(panel.locator('[data-review-header]')).toHaveText(expected, { timeout: 15_000 });
-          await expect(panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`)).toHaveAttribute('data-kind', 'untracked');
+          await expect(panel.locator(`[data-review-file="${basename(probe)}"]`)).toHaveAttribute('data-kind', 'untracked');
           observed.review = { header: expected, numstat: numstat.length, untracked };
         });
 
@@ -180,14 +182,13 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
           const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
           if (numstat.length === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${current} beyond ${base}`, { timeout: 15_000 });
-          else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed} · This branch`, { timeout: 15_000 });
+          else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed}`, { timeout: 15_000 });
           observed.thisBranch = { current, base, files: numstat.length, added, removed };
           await panel.locator('[data-chip="uncommitted"]').click(); // back, for the steps below
         });
 
         await test.step('the viewer follows an edit made outside MAWS', async () => {
-          await panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`).click();
-          await panel.locator('[data-open-file]').click();
+          await panel.locator(`[data-review-file="${basename(probe)}"] [data-open-file]`).click();
           const viewer = page.locator(`[data-file-viewer][data-path="${probe}"]`);
           await expect(viewer.locator('.cm-content')).toContainText('two');
           const written = Date.now();
@@ -295,11 +296,12 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     const panel = page.locator('[data-region="panel"]');
     await panel.locator('[data-chip="turn"]').click();
     await expect(panel.locator('[data-chip="turn"]')).toHaveAttribute('aria-pressed', 'true');
-    const file = panel.locator(`[role="option"] button[data-path="${join(record!.directory, target)}"]`);
+    // UX wave U5b: the file is a section of the stack, by its identity (absolute for Last turn); its header names it
+    const file = panel.locator(`[data-review-file="${join(record!.directory, target)}"]`);
     await expect(file).toBeVisible();
-    observed.review = { header: await panel.locator('[data-review-header]').textContent(), file: await file.textContent() };
+    observed.review = { header: await panel.locator('[data-review-header]').textContent(), file: await file.locator('[data-review-file-header]').textContent() };
 
-    await panel.locator('[data-open-file]').click();
+    await file.locator('[data-open-file]').click();
     await expect.poll(async () => (await flashed(page))?.text, { timeout: 5_000 }).toBe(edited);
     const landed = (await flashed(page))!;
     expect(landed.centred).toBe(true);

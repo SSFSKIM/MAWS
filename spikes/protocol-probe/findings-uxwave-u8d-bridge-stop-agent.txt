@@ -1,0 +1,85 @@
+UX wave, landing U8d, probe P2: what engine 2.1.322 and the sminos bridge write when the bridge's stop-agent stops a
+subagent (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, "Probes to arrange" P2; it serves card
+C1, the "stopped" row of the table for this route, "Engine facts" 11 and 12, and the last step of M4's scene of the
+controls; 2026-11-15, VM dc-uxwave5-26dc, branch ux-wave/U8d-probes)
+
+Question. An agent launched in the background is stopped by the bridge's `stop-agent` (a TaskStop the plugin calls);
+and an agent the main loop waits for is stopped the same way. Which rows reach the main transcript (a queue record
+with <status>killed</status>, a result row, none), and what does the meta gain?
+
+Verdict.
+  - A background agent in a terminal session (3 of 3 runs): the main transcript gets the engine's ordinary stop
+    notification. It is a queue record, enqueue then dequeue, <status>killed</status>, "Agent "…" was stopped by
+    Claude", with <tool-use-id> and <output-file>, and then the `user` row of origin task-notification, which opens a
+    model turn. It is preceded by the plugin's own note: an isMeta `user` row, origin {kind: plugin, name: sminos},
+    "Agent <id> was stopped by the person from outside the terminal: it is not running. …", and a `system`
+    informational row. All of it lands 0.17 to 0.31 s after the POST. So the rows say `killed`: the ledger's rules
+    give "stopped". The document's default ("none is assumed; the agent then reads C1's word") did not apply. C1's
+    "known to have ended with no record of how" does not arise for a stop made from MAWS: there is a record, and it
+    reads "stopped". It remains for an agent the bridge reports stopped before its row is read (seen below: the
+    bridge's stop event comes 37 to 530 ms after the POST, sometimes before the row and sometimes after).
+  - An agent the main loop waits for: in a terminal session there is none on this configuration (every Agent call is
+    launched in the background: findings-uxwave-u8d-waited-agent.txt). The interactive run asked for a waited-for
+    agent (p2-fg-r1) got a background one and read as above. In print mode (`claude -p`, the same plugin, 3 of 3 runs)
+    the main transcript gets NO queue record and NO notification. The Agent call's result row has is_error true and
+    toolUseResult "Error: [Request interrupted by user for tool use]" (content "[Request interrupted by user for tool
+    use]"), then the plugin's note row, written after the result in file order though its timestamp is earlier. By
+    the ledger's rules that is an error, so "finished with errors", not "stopped".
+  - The meta gains NOTHING in any run (6 of 6). No `stoppedByUser`, no `finished`. "Engine facts" 11's "the sidecar's
+    meta gains `stoppedByUser: true` when a host or the person stops it (B:378462)" did not hold for the bridge's stop
+    path (a plugin's TaskStop). Nor did it hold for the main loop's own TaskStop in P5's runs.
+  - The agent's own file gets its in-flight tool call's result, is_error true, "User rejected tool use", and a `user`
+    row "[Request interrupted by user for tool use]" (6 of 6).
+  - The bridge (recorded on its /events stream; "Engine facts" 12 had no recording): an `agent` event `phase: "spawn"`
+    with agentId, parentAgentId null, subagentType, description, name, background, model, toolUseId. At the stop, an
+    `agent` event `phase: "stop"` with agentType and `status: "killed"` for a background agent. For a waited-for agent
+    (print mode) the stop event carries NO status. /agents then lists the agent with `running: false, status:
+    "killed"` (background). For the waited-for agent, read just after the answer, /agents still said `running: true`.
+    The stream also carried `phase: "stop"` events for ids that are no subagent of the session (agentType "", no
+    spawn, no sidecar): one to three per run, at times with no agent call (the engine's own side queries). /agents
+    keeps them with `running: false`.
+
+Method.
+  Engine 2.1.322, model haiku (claude-haiku-5-5), gateway route, the owner's feature-gate cache seeded; sminos 1.47.0
+  from the VM's marketplace copy (/var/lib/devcloud/marketplaces/doperpowers/sminos, the plugin's own install there,
+  nothing installed by the probe), loaded with `--plugin-dir` and CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1. Before launch:
+  `sminos project init --name uxw` in the scratch work folder. The plugin's state is the scratch HOME's
+  ($HOME/.claude/sminos), checked before the run (HOME under /tmp, no SMINOS_HOME/DAEMON_HOME/SMINOS_RL10/
+  MAWS_USER_DATA/XDG_CONFIG_HOME, the owner's sminos state and mawsd endpoint not visible, no enrolment, no managed
+  settings): the checks of uxwave-u3-sminos.mjs. The bridge's /status lists `stop-agent` among its ops (capabilities
+  sminos 1.47.0, protocol 2, engine 2.1.322). The stop is posted as MAWS's lane A driver posts it
+  (src/services/lane-a/driver.ts `stopAgent`: `{op: "stop-agent", agentId}`), as `POST /command?wait=30000` on the
+  session's socket $HOME/.claude/sminos/bridge/<session>.sock, 3 s after the agent's file holds its sleep's Bash call.
+  The /events stream is subscribed from before the launch. scenarios/pass3/uxwave-u8d-terminal.mjs: p2-bg (the
+  interactive engine in tmux; a background agent with a 120 s sleep), p2-fg (the same asking for a waited-for agent),
+  p2p-fg (print mode: `-p <prompt> --permission-mode auto`, a waited-for agent).
+  Fixtures (fixtures/uxwave/): u8d-p2-bg-r{1,2}, u8d-p2-fg-r1, u8d-p2p-fg-r{1,2,3}: .terminal.json (with the bridge's
+  events in `bridge`, its /agents before and after, its /status), .transcript.jsonl, -subagents/. In p2p-fg-r1 and -r2
+  the bridge's stream was received but not kept (a scenario fault, fixed for r3), and their /agents reads are kept.
+
+Observed (main-transcript line numbers; times after the POST).
+  p2-bg-r1: answer 200 {ok: true, result: {agentId, accepted: true}} at +77 ms; the bridge's stop event (status
+    killed) at +37 ms, before the answer; +209 ms line 40 the plugin's note, 41 system informational; +210 ms the
+    agent's file line 17 "User rejected tool use", 19 the interrupted marker; +309 ms 42 enqueue <status>killed</status>
+    "Agent "uxw slow A" was stopped by Claude", 43 dequeue, 45 the task-notification user row; a model turn follows
+    (51 turn_duration). Meta: one version (the launch's).
+  p2-bg-r2: the same rows (41, 43, 46); the bridge's stop event at +390 ms, after the rows. Meta unchanged.
+  p2-fg-r1: the call asked for run_in_background false and was launched in the background. Rows 47 (note), 49 (killed
+    enqueue), 52 (user row); the bridge's stop event at +530 ms. Meta unchanged.
+  p2p-fg-r1: line 24 the Agent result, is_error true, "Error: [Request interrupted by user for tool use]"; the agent's
+    file 17 and 19; line 27 the note. No queue record, no notification. /agents after the answer: running true.
+    Meta one version (requestShape "foreground"). r2: 24, 27, the same. r3: 26 the result; 29 the note; the bridge's
+    stop event at +289 ms, `{phase: "stop", agentId, agentType: "general-purpose"}`, no status. The engine then
+    finished the print run.
+
+Inference.
+  - For this route: a stop from MAWS reads "stopped" (the rows' `killed`), with no new word and no use of C1. C1's word
+    is left only for the moment between the bridge's stop event and the row's read. That is at most one poll, and the
+    order varied (2 runs bridge first, 2 runs row first).
+  - The table's "stopped" row ("when the rows say `stopped`, `killed` … or hold a TaskStop call that names the agent")
+    holds through `killed`. No TaskStop call row is written in the main transcript for the bridge's stop: the plugin's
+    tool call leaves no tool_use row.
+  - Where a waited-for agent exists (print mode), a stop reads "finished with errors". Telling it apart needs the
+    result's text (the interrupted marker) or the plugin's note row. That is the same gap as P4's interrupt.
+  - The bridge's map holds non-agent ids, stopped. DX4 derives one entry per meta, so they produce no entry, but a
+    reader of the bridge's list alone would count them.

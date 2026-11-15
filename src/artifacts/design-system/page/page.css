@@ -63,7 +63,9 @@
 .dsp-type-cell { display: flex; flex-direction: column; gap: calc(var(--space) * 2); min-width: 0; }
 .dsp-type-fields { display: flex; gap: calc(var(--space) * 2); }
 .dsp-specimen { overflow: hidden; padding: calc(var(--space) * 3); border-radius: var(--radius-sm); background: var(--ds-color-bg, var(--bg-raised)); color: var(--ds-color-text, var(--fg)); }
-.dsp-specimen p { margin: 0; }
+/* UX wave U10b (M11 decision 1): a word wider than its cell breaks inside it, so the sample is whole; the system's own
+   word-break (keep-all by default) still decides wherever a word fits */
+.dsp-specimen p { margin: 0; overflow-wrap: anywhere; }
 .dsp-specimen-deck p { zoom: 0.5; }
 
 /* Space, radius, shadow */

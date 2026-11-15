@@ -10,14 +10,19 @@ import type { ArtifactKind } from '@shared/artifacts/entity';
 import { ARTIFACT_KINDS } from '@shared/artifacts/entity';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { LibraryFilter, LibraryRow, LibrarySpace } from '@shared/ipc/schema/library';
+import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { registerArtifactEditor, resetArtifactEditors } from '../artifacts/registry';
 import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
+import { useSettings } from '../stores/settings';
 import { useLayout } from '../stores/layout';
-import { allTabs } from '../stores/layout-model';
+import { allTabs, currentSet } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
+import { prefillToDoc } from '../composer/editor/recall';
+import { serializeDraft } from '../composer/editor/serialize';
+import { askClaudePrefill } from './copy';
 import { useLibraryDialog } from './dialogs';
 import { resetExportFormats } from './export';
 import { Library } from './Library';
@@ -52,6 +57,15 @@ function row(n: number, over: Partial<LibraryRow> = {}): LibraryRow {
     sessions: [],
     ...over,
   };
+}
+
+// UX wave U10b: two design systems in the library, and the owner's and the Spaces' defaults (settings 14) as read
+const HARBOR = id(0xd1);
+const CLASSROOM = id(0xd2);
+const SYSTEMS = [row(0xd1, { kind: 'design_system', title: 'Harbor' }), row(0xd2, { kind: 'design_system', title: 'Classroom' })];
+function readDefaults(defaults: { owner?: string; spaces?: Record<string, string> }): void {
+  const artifacts = { ...SETTINGS_DEFAULTS_V21.artifacts, defaultDesignSystem: defaults.owner ?? null, spaceDesignSystems: defaults.spaces ?? {} };
+  useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, artifacts }, resolvedTheme: 'light' } });
 }
 
 // What main's index holds, and how `library.list` filters it (as M1's store does: counts without the kind).
@@ -145,6 +159,7 @@ beforeEach(() => {
 afterEach(() => {
   cleanup();
   vi.useRealTimers();
+  useSettings.setState({ state: null });
   delete (window as { maws?: unknown }).maws;
   offs.splice(0).forEach((off) => off());
 });
@@ -188,7 +203,7 @@ describe('the views and the groups', () => {
     await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: WORK }));
     expect(screen.getByRole('radio', { name: 'By Space' }).getAttribute('aria-checked')).toBe('true');
     expect(screen.getByRole('heading', { level: 2, name: 'Work' })).toBeTruthy();
-    await user.click(screen.getByRole('button', { name: 'New document' }));
+    await user.click(screen.getByRole('button', { name: 'Blank document' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document', spaceId: WORK }]));
 
     await user.click(screen.getByRole('button', { name: 'All Spaces' }));
@@ -270,7 +285,7 @@ describe('General home', () => {
     await waitFor(() => expect(libraryCalls()).toContainEqual({ spaceId: null }));
     await waitFor(() => expect(screen.queryByRole('article', { name: 'Launch plan' })).toBeNull());
     expect(screen.getByRole('article', { name: 'Pricing page' })).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'New document' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Blank document' }));
     await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
   });
 });
@@ -378,6 +393,23 @@ describe('the tab stop across virtualization', () => {
     expect(stops()).toHaveLength(1);
     const inView = screen.getAllByRole('article').filter((a) => startOf(a) + 56 > 2_000).sort((a, b) => startOf(a) - startOf(b));
     expect(stop).toBe(inView[0]);
+  });
+
+  // UX wave U10b (M8 decision 3): the design-system choice holds while the page is open, scrolled away or not
+  it('"Make something new" keeps its choice while the list scrolls away from it and back', async () => {
+    rows = [...rows, ...SYSTEMS];
+    readDefaults({});
+    render(<Library />);
+    const made = await screen.findByRole('region', { name: 'Make something new' });
+    const user = userEvent.setup();
+    await waitFor(() => expect(within(made).getByRole('button', { name: /^Design system/ }).textContent).toBe('MAWS · default'));
+    await user.click(within(made).getByRole('button', { name: /^Design system/ }));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await scrollTo(3_000);
+    await waitFor(() => expect(screen.queryByRole('article', { name: 'Note 1' })).toBeNull());
+    await scrollTo(0);
+    const back = await screen.findByRole('region', { name: 'Make something new' });
+    expect(within(back).getByRole('button', { name: /^Design system/ }).textContent).toBe('Harbor');
   });
 
   it('a row holding the keyboard stays mounted, focused and the tab stop while the list scrolls away from it', async () => {
@@ -630,37 +662,67 @@ describe('a late answer to a dismissed sheet', () => {
 });
 
 describe('Make something new', () => {
-  it('a kind with an editor makes an untitled one and opens it; the others ask Claude; HTML only asks Claude; File adds a file', async () => {
-    registerArtifactEditor('document', { Panel: () => null });
-    const creator = vi.fn(async () => at(S(7)));
-    offs.push(registerSessionCreator(creator));
-    answers['layout.pickFiles'] = () => ok({ files: [{ path: '/Users/me/report.pdf', name: 'report.pdf', bytes: 10, mediaType: null, data: null }] });
-    const user = userEvent.setup();
-    render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const card = (kind: string) => within(section).getByRole('group', { name: kind });
+  // UX wave U10b (l6-artifacts-08): four cards that ask Claude, a Blank beside each, More, and one design-system choice
+  const CARD_KINDS = ['document', 'presentation', 'dashboard', 'design'] as const;
+  const section = () => screen.findByRole('region', { name: 'Make something new' });
+  const card = (within_: HTMLElement, label: string) => within(within(within_).getByRole('group', { name: label })).getByRole('button', { name: label });
+  const blank = (within_: HTMLElement, label: string) => within(within(within_).getByRole('group', { name: label })).getByRole('button', { name: `Blank ${label.toLowerCase()}` });
+  const choice = (within_: HTMLElement) => within(within_).getByRole('button', { name: /^Design system/ });
+  const prefillOf = (n: number) => useComposerStore.getState().prefills.get(at(S(n)));
+  const withSystems = (defaults: { owner?: string; spaces?: Record<string, string> } = {}) => {
+    rows = [...rows, ...SYSTEMS];
+    readDefaults(defaults);
+  };
+  const editors = (...kinds: ArtifactKind[]) => kinds.forEach((kind) => registerArtifactEditor(kind, { Panel: () => null }));
 
-    expect(within(card('Document')).getAllByRole('button').map((b) => b.textContent)).toEqual(['New', 'Ask Claude']);
-    expect(within(card('Presentation')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Ask Claude']);
-    expect(within(card('HTML page')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Ask Claude']);
-    expect(within(card('File')).getAllByRole('button').map((b) => b.textContent)).toEqual(['Add a file…', 'Ask Claude']);
-
-    await user.click(within(card('Document')).getByRole('button', { name: 'New document' }));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'document', title: 'Untitled document' }]));
-    await waitFor(() => expect(tabIds()).toContain(artifactTab(id(99))));
-
-    await user.click(within(card('File')).getByRole('button', { name: 'Add a file…' }));
-    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'file', title: 'report.pdf', content: { path: '/Users/me/report.pdf' } }));
-    expect(main.callsOf('layout.pickFiles')).toEqual([{ kind: 'files', directory: null, multiple: false, pathsOnly: true }]);
-
-    await user.click(within(card('Presentation')).getByRole('button', { name: 'Ask Claude to make a presentation' }));
-    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(at(S(7)))).toEqual({ text: 'Make a presentation: ' });
-    expect(tabIds()).toContain(`session:${at(S(7))}`);
+  it('opens with the words for the kind, its Space and a chosen system that is not the default', () => {
+    for (const kind of CARD_KINDS) {
+      const noun = kind;
+      expect(askClaudePrefill(kind)).toBe(`Make a ${noun}: `);
+      expect(askClaudePrefill(kind, 'Work')).toBe(`Make a ${noun} in the Space “Work”: `);
+      expect(askClaudePrefill(kind, undefined, 'Classroom')).toBe(`Make a ${noun}, in the design system “Classroom”: `);
+      expect(askClaudePrefill(kind, 'Work', 'Classroom')).toBe(`Make a ${noun} in the Space “Work”, in the design system “Classroom”: `);
+    }
+    expect(askClaudePrefill('html', 'Work')).toBe('Make an HTML page in the Space “Work”: ');
+    expect(askClaudePrefill('design_system')).toBe('Make a design system: ');
   });
 
-  // P3-F wave S (F5, the owner's DL13 change): Ask Claude from a Space starts in the Space's folder and names the Space
-  it('Ask Claude from a Space starts in its linked folder’s project, else the focused project, and the prefill names the Space', async () => {
+  it('is four cards, each one button that asks Claude, with Blank beside it, not in it', async () => {
+    editors(...CARD_KINDS);
+    render(<Library />);
+    const made = await section();
+    expect(within(made).getAllByRole('group').map((g) => g.getAttribute('aria-label'))).toEqual(['Document', 'Presentation', 'Dashboard', 'Design']);
+    for (const [label, blurb] of [['Document', 'Notes, specs and reports'], ['Presentation', 'A slide deck'], ['Dashboard', 'Charts bound to data'], ['Design', 'Artboards on a canvas']]) {
+      const group = within(made).getByRole('group', { name: label });
+      expect(within(group).getAllByRole('button')).toEqual([card(made, label!), blank(made, label!)]);
+      expect(card(made, label!).textContent).toBe(`${label}${blurb}`);
+      expect(card(made, label!).contains(blank(made, label!))).toBe(false); // siblings: no button inside a button
+      expect(blank(made, label!).textContent).toBe('Blank');
+    }
+    expect(within(made).queryByRole('group', { name: 'HTML page' })).toBeNull();
+    expect(within(made).queryByRole('group', { name: 'File' })).toBeNull();
+  });
+
+  it('a card leaves the page for a new chat whose composer holds the opening words; it is disabled until the chat is made, so a second press starts none', async () => {
+    const made = deferred<AppSessionId>();
+    const creator = vi.fn(() => made.promise);
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    render(<Library />);
+    const presentation = card(await section(), 'Presentation');
+    await user.click(presentation);
+    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
+    expect((presentation as HTMLButtonElement).disabled).toBe(true);
+    await user.click(presentation);
+    expect(creator).toHaveBeenCalledTimes(1);
+    await act(async () => made.resolve(at(S(7))));
+    expect(prefillOf(7)).toEqual({ text: 'Make a presentation: ' });
+    expect(tabIds()).toContain(`session:${at(S(7))}`);
+    expect((presentation as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  // P3-F wave S (F5, the owner's DL13 change): from a Space a card starts in the Space's folder and names the Space
+  it('a card from a Space starts in its linked folder’s project, else the focused project, and the words name the Space', async () => {
     const creator = vi.fn(async () => at(S(8)));
     offs.push(registerSessionCreator(creator));
     const location = { kind: 'directory', path: '/Users/me/work' };
@@ -668,25 +730,25 @@ describe('Make something new', () => {
     const user = userEvent.setup();
     act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const card = (kind: string) => within(section).getByRole('group', { name: kind });
-
-    await user.click(await within(card('Presentation')).findByRole('button', { name: 'Ask Claude to make a presentation in the Space “Work”' }));
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Presentation') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Presentation'));
     await waitFor(() => expect(creator).toHaveBeenCalledWith(at('p-9'), location));
     expect(main.callsOf('session.projects.addFolder')).toEqual([{ directory: '/Users/me/work' }]);
-    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a presentation in the Space “Work”: ' });
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a presentation in the Space “Work”: ' }));
 
     act(() => setLibraryView({ spaceId: HOME })); // a Space with no linked folder
-    await user.click(await within(card('Document')).findByRole('button', { name: 'Ask Claude to make a document in the Space “Home”' }));
+    await user.click(card(made, 'Document'));
     await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
     expect(creator).toHaveBeenLastCalledWith(null);
     expect(main.callsOf('session.projects.addFolder')).toHaveLength(1);
-    expect(useComposerStore.getState().prefills.get(at(S(8)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
   });
 
-  // P4: before the Spaces list has answered, a narrowed view's Ask Claude would start in the focused project with no
-  // Space words; it waits, disabled, until the Space is known, and stays so for a Space the list does not hold
-  it('Ask Claude from a narrowed Space is disabled until the Spaces list names the Space, then its prefill names it', async () => {
+  // H23 (ruled 2026-11-15, L5): before the Spaces list has answered, a card would start in the focused project with no
+  // Space words and Blank would make an artifact the page cannot yet name the Space of; both wait, disabled
+  it('while the narrowed Space loads, each card and its Blank are disabled, Add a file… is not', async () => {
+    editors(...CARD_KINDS);
     const creator = vi.fn(async () => at(S(9)));
     offs.push(registerSessionCreator(creator));
     let answerSpaces: (() => void) | null = null;
@@ -694,30 +756,209 @@ describe('Make something new', () => {
     const user = userEvent.setup();
     act(() => setLibraryView({ view: 'bySpace', spaceId: HOME }));
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    const ask = () => within(within(section).getByRole('group', { name: 'Document' })).getByRole('button', { name: /^Ask Claude/ });
+    const made = await section();
     await waitFor(() => expect(answerSpaces).not.toBeNull());
-    expect((ask() as HTMLButtonElement).disabled).toBe(true);
-    await user.click(ask());
+    for (const label of ['Document', 'Presentation', 'Dashboard', 'Design']) {
+      expect((card(made, label) as HTMLButtonElement).disabled, label).toBe(true);
+      expect((blank(made, label) as HTMLButtonElement).disabled, label).toBe(true);
+    }
+    await user.click(card(made, 'Document'));
+    await user.click(blank(made, 'Document'));
     expect(creator).not.toHaveBeenCalled();
+    expect(main.callsOf('artifacts.create')).toEqual([]);
+    await user.click(within(made).getByRole('button', { name: 'More' }));
+    expect(screen.getByRole('menuitem', { name: 'Add a file…' }).hasAttribute('data-disabled')).toBe(false);
+    await user.keyboard('{Escape}');
 
     await act(async () => answerSpaces!());
-    await waitFor(() => expect((ask() as HTMLButtonElement).disabled).toBe(false));
-    expect(ask().getAttribute('aria-label')).toBe('Ask Claude to make a document in the Space “Home”');
-    await user.click(ask());
-    await waitFor(() => expect(creator).toHaveBeenCalledWith(null));
-    expect(useComposerStore.getState().prefills.get(at(S(9)))).toEqual({ text: 'Make a document in the Space “Home”: ' });
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    expect((blank(made, 'Document') as HTMLButtonElement).disabled).toBe(false);
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(9)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
 
-    act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile)
-    expect((ask() as HTMLButtonElement).disabled).toBe(true);
+    act(() => setLibraryView({ spaceId: 'gone' })); // a Space the loaded list does not hold (deleted meanwhile): every Space
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
   });
 
-  it('a kind whose editor lands later gains its New at once', async () => {
+  it('More holds Design system (Ask Claude, Blank), HTML page and Add a file…', async () => {
+    editors('design_system');
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    answers['layout.pickFiles'] = () => ok({ files: [{ path: '/Users/me/report.pdf', name: 'report.pdf', bytes: 10, mediaType: null, data: null }] });
+    const user = userEvent.setup();
     render(<Library />);
-    const section = await screen.findByRole('region', { name: 'Make something new' });
-    expect(within(section).queryByRole('button', { name: 'New design' })).toBeNull();
+    const more = within(await section()).getByRole('button', { name: 'More' });
+    await user.click(more);
+    expect(within(screen.getByRole('menu')).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Design system', 'HTML page', 'Add a file…']);
+    await user.click(screen.getByRole('menuitem', { name: 'Design system' }));
+    const sub = await screen.findByRole('menuitem', { name: 'Ask Claude' });
+    expect(within(sub.closest<HTMLElement>('[role="menu"]')!).getAllByRole('menuitem').map((item) => item.textContent)).toEqual(['Ask Claude', 'Blank']);
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Blank' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'design_system', title: 'Untitled design system' }]));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Design system' }));
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Ask Claude' }));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a design system: ' }));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'HTML page' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make an HTML page: ' }));
+
+    await user.click(more);
+    await user.click(screen.getByRole('menuitem', { name: 'Add a file…' }));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'file', title: 'report.pdf', content: { path: '/Users/me/report.pdf' } }));
+    expect(main.callsOf('layout.pickFiles')).toEqual([{ kind: 'files', directory: null, multiple: false, pathsOnly: true }]);
+  });
+
+  it('the choice shows the system a new artifact here gets, "<name> · default", first; a system chosen is named in a card’s words and bound by Blank; the default binds none', async () => {
+    editors(...CARD_KINDS);
+    withSystems({ spaces: { [HOME]: CLASSROOM } });
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: HOME })); // a Space with no linked folder
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
+    expect(choice(made).textContent).toBe('Classroom · default');
+    await user.click(choice(made));
+    expect(screen.getAllByRole('menuitemradio').map((item) => [item.textContent, item.getAttribute('aria-checked')])).toEqual([['Classroom · default', 'true'], ['Harbor', 'false']]);
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Harbor'));
+
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document in the Space “Home”, in the design system “Harbor”: ' }));
+    await user.click(blank(made, 'Presentation'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: HOME, designSystemId: HARBOR }]));
+
+    await user.click(choice(made));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Classroom · default' }));
+    await waitFor(() => expect(choice(made).getAttribute('aria-label')).toBe('Design system: Classroom · default'));
+    await user.click(blank(made, 'Design'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toContainEqual({ kind: 'design', title: 'Untitled design', spaceId: HOME }));
+    await user.click(card(made, 'Dashboard'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a dashboard in the Space “Home”: ' }));
+  });
+
+  it('on All the default is the owner’s, else the bundled floor', async () => {
+    withSystems({ owner: HARBOR });
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(choice(made).textContent).toBe('Harbor · default'));
+    act(() => readDefaults({}));
+    await waitFor(() => expect(choice(made).textContent).toBe('MAWS · default'));
+  });
+
+  it('while the design systems or the defaults are read, the choice says "Design system", disabled, and a card starts its chat with no system in the words', async () => {
+    withSystems({ owner: HARBOR });
+    let answerSystems: (() => void) | null = null;
+    answers['library.list'] = (input) => {
+      const filter = (input as { filter?: LibraryFilter }).filter;
+      if (filter?.kind !== 'design_system') return ok(list(filter));
+      return new Promise((resolve) => (answerSystems = () => resolve(ok(list(filter)))));
+    };
+    const creator = vi.fn(async () => at(S(7)));
+    offs.push(registerSessionCreator(creator));
+    const user = userEvent.setup();
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect(answerSystems).not.toBeNull());
+    expect(choice(made).textContent).toBe('Design system');
+    expect((choice(made) as HTMLButtonElement).disabled).toBe(true);
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(prefillOf(7)).toEqual({ text: 'Make a document: ' }));
+    await act(async () => answerSystems!());
+    await waitFor(() => expect(choice(made).textContent).toBe('Harbor · default'));
+    act(() => useSettings.setState({ state: null })); // the defaults not read (yet)
+    expect(choice(made).textContent).toBe('Design system');
+    expect((choice(made) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  // M8 decision 3 (fix wave 1): the choice is the page's; the views that do not draw the section do not forget it
+  it('the choice holds while the page is open: across a search typed and cleared, Pinned and back, and every Space and back; a page opened again starts at the default', async () => {
+    editors(...CARD_KINDS);
+    withSystems();
+    const user = userEvent.setup();
+    const page = render(<Library />);
+    const shown = async () => choice(await section()).textContent;
+    await waitFor(async () => expect(await shown()).toBe('MAWS · default'));
+    await user.click(choice(await section()));
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Harbor' }));
+    await waitFor(async () => expect(await shown()).toBe('Harbor'));
+
+    act(() => setLibraryView({ query: 'plan' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ query: '' }));
+    expect(await shown()).toBe('Harbor');
+    act(() => setLibraryView({ view: 'pinned' }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ view: 'all' }));
+    expect(await shown()).toBe('Harbor');
+    act(() => setLibraryView({ view: 'bySpace', spaceId: null }));
+    await waitFor(() => expect(screen.queryByRole('region', { name: 'Make something new' })).toBeNull());
+    act(() => setLibraryView({ spaceId: HOME }));
+    expect(await shown()).toBe('Harbor');
+    await user.click(blank(await section(), 'Presentation'));
+    await waitFor(() => expect(main.callsOf('artifacts.create')).toEqual([{ kind: 'presentation', title: 'Untitled presentation', spaceId: HOME, designSystemId: HARBOR }]));
+
+    page.unmount();
+    act(() => setLibraryView({ view: 'all', spaceId: null }));
+    render(<Library />);
+    await waitFor(async () => expect(await shown()).toBe('MAWS · default'));
+  });
+
+  // M8 decision 6 (fix wave 2): a tab the person moved to while the Space's folder was being added stays in front
+  it('a card whose Space’s folder is still being added opens its chat behind a tab the person moved to meanwhile', async () => {
+    const creator = vi.fn(async () => at(S(8)));
+    offs.push(registerSessionCreator(creator));
+    const location = { kind: 'directory', path: '/Users/me/work' };
+    const folder = deferred<unknown>();
+    answers['session.projects.addFolder'] = () => folder.promise;
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK })); // linked to a folder
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(main.callsOf('session.projects.addFolder')).toHaveLength(1));
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at(S(5)) })); // the person moved meanwhile
+    await act(async () => folder.resolve(ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location })));
+    await waitFor(() => expect(tabIds()).toContain(`session:${at(S(8))}`));
+    expect(currentSet(useLayout.getState().main).panes[0]!.activeTabId).toBe(`session:${at(S(5))}`);
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Work”: ' }));
+  });
+
+  // §I's card row, Constraint 9: the awaited start fails
+  it('a linked folder that cannot be added ends in a toast, and a chat that cannot be made in nothing; either way the card is enabled again', async () => {
+    const { useNotices } = await import('../stores/notices');
+    const creator = vi.fn(async (): Promise<AppSessionId | null> => null);
+    offs.push(registerSessionCreator(creator));
+    answers['session.projects.addFolder'] = () => ({ ok: false, error: { code: 'invalid_input', message: 'the folder is gone' } });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK })); // linked to a folder
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toContain('the folder is gone'));
+    expect(creator).not.toHaveBeenCalled();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+
+    act(() => setLibraryView({ spaceId: HOME })); // no folder: the session's creation itself fails
+    await user.click(card(made, 'Presentation'));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect((card(made, 'Presentation') as HTMLButtonElement).disabled).toBe(false));
+    expect([...useComposerStore.getState().prefills.values()].map((prefill) => prefill.text)).not.toContain('Make a presentation in the Space “Home”: ');
+  });
+
+  it('a kind whose editor lands later gains its Blank at once', async () => {
+    render(<Library />);
+    const made = await section();
+    expect(within(made).queryByRole('button', { name: 'Blank design' })).toBeNull();
     act(() => void registerArtifactEditor('design', { Panel: () => null }));
-    expect(within(section).getByRole('button', { name: 'New design' })).toBeTruthy();
+    expect(blank(made, 'Design')).toBeTruthy();
   });
 });
 
@@ -777,5 +1018,261 @@ describe('Spaces', () => {
     await changed();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'All Spaces' })).toBeNull());
     expect(screen.getByRole('radio', { name: 'By Space' }).getAttribute('aria-checked')).toBe('true');
+  });
+});
+
+// UX wave U10b (l8-settings-13; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M9 and §E.2, §E.3): a
+// Space carries instructions for agents, written from its menu in a sheet with one field, held by the engine host's
+// `spaces.instructions` and `spaces.setInstructions`; a Space that has them shows the mark "Instructions" on its heading
+// line; a chat a card starts from such a Space carries them as one chip after the opening words.
+describe('a Space’s instructions', () => {
+  type Held = { spaceId: string; text: string; at: number };
+  let held: Held[];
+  const RECEIVERS = 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.';
+  const prefillOf = (n: number) => useComposerStore.getState().prefills.get(at(S(n)));
+  // the engine host's answer, then its announcement, as a write there makes them
+  const store = async (next: Held[], spaceId: string) => {
+    held = next;
+    await act(async () => main.emit('spaces.changed', { spaceId, change: 'updated' }));
+  };
+  const bySpace = async (user: ReturnType<typeof userEvent.setup>) => {
+    render(<Library />);
+    await user.click(screen.getByRole('radio', { name: 'By Space' }));
+  };
+  const headingOf = async (name: string) => (await screen.findByRole('heading', { name, level: 2 })).parentElement as HTMLElement; // the Space's heading line
+  const markOf = (heading: HTMLElement) => within(heading).queryByRole('button', { name: 'Instructions' });
+  const markFound = async (space: string) => within(await headingOf(space)).findByRole('button', { name: 'Instructions' });
+  const field = (sheet: HTMLElement) => within(sheet).getByRole('textbox') as HTMLTextAreaElement;
+  const button = (sheet: HTMLElement, name: string) => within(sheet).getByRole('button', { name }) as HTMLButtonElement;
+
+  beforeEach(() => {
+    held = [];
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+  });
+
+  it('are written from the Space’s menu, “Instructions…” directly after “Rename…”, in a sheet that says who receives them; Enter makes a new line; the Space then shows the mark, which opens the sheet', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    expect(markOf(await headingOf('Home'))).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    const items = within(await screen.findByRole('menu')).getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items).toEqual(['Show only this Space', 'Rename…', 'Instructions…', 'Link a folder…', 'Delete Space…']);
+    await user.click(screen.getByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(within(sheet).getByText(RECEIVERS)).toBeTruthy();
+    expect(field(sheet).value).toBe('');
+    expect(button(sheet, 'Save').disabled).toBe(true); // nothing differs from what is stored
+    await user.type(field(sheet), 'Use metres.{Enter}Cite the field log.');
+    expect(field(sheet).value).toBe('Use metres.\nCite the field log.');
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.\nCite the field log.' }]);
+
+    await store([{ spaceId: HOME, text: 'Use metres.\nCite the field log.', at: 5 }], HOME);
+    const mark = await markFound('Home');
+    expect(markOf(await headingOf('Work'))).toBeNull();
+    await user.click(mark);
+    const again = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(again).value).toBe('Use metres.\nCite the field log.');
+    expect(button(again, 'Save').disabled).toBe(true);
+  });
+
+  it('show the mark on the narrowed Space’s bar too, after its folder and before its menu', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const bar = (await screen.findByRole('button', { name: 'All Spaces' })).parentElement as HTMLElement;
+    const mark = await within(bar).findByRole('button', { name: 'Instructions' });
+    const order = [...bar.querySelectorAll('span, button')].map((el) => el.textContent || el.getAttribute('aria-label'));
+    expect(order.indexOf('Mirrored to /Users/me/work/artifacts')).toBeLessThan(order.indexOf('Instructions'));
+    expect(order.indexOf('Instructions')).toBeLessThan(order.indexOf('Actions for the Space Work'));
+    expect(mark.className).toContain('h-6'); // a pressed area 24 px tall
+  });
+
+  it('saving an empty text removes the instructions, and the mark with them', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await markFound('Work'));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await user.clear(field(sheet));
+    expect(button(sheet, 'Save').disabled).toBe(false); // the empty text differs from what is stored
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: WORK, text: '' }]));
+    await store([], WORK);
+    await waitFor(async () => expect(markOf(await headingOf('Work'))).toBeNull());
+  });
+
+  it('take at most 8,000 characters: a paste is cut there, a line under the field counts from 7,500, and 8,001 cannot be saved', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(sheet).maxLength).toBe(8000);
+    fireEvent.change(field(sheet), { target: { value: 'x'.repeat(7499) } });
+    expect(within(sheet).queryByText(/of 8,000 characters/)).toBeNull();
+    fireEvent.change(field(sheet), { target: { value: 'x'.repeat(7500) } });
+    expect(within(sheet).getByText('7,500 of 8,000 characters')).toBeTruthy();
+    fireEvent.change(field(sheet), { target: { value: 'y'.repeat(8001) } });
+    expect(field(sheet).value).toBe('y'.repeat(8000));
+    expect(within(sheet).getByText('8,000 of 8,000 characters')).toBeTruthy();
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'y'.repeat(8000) }]));
+  });
+
+  it('a save held open disables both buttons and is not cancelled by closing the sheet; a failed save keeps the sheet open with its text and says why', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => answer.promise;
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    await user.type(field(sheet), 'Use metres.');
+    await user.click(button(sheet, 'Save'));
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    expect(button(sheet, 'Cancel').disabled).toBe(true);
+    await user.click(button(sheet, 'Save'));
+    expect(main.callsOf('spaces.setInstructions')).toHaveLength(1);
+    await act(async () => answer.resolve({ ok: false, error: { code: 'internal', message: 'the store is read-only' } }));
+    expect(within(sheet).getByText('the store is read-only')).toBeTruthy();
+    expect(field(sheet).value).toBe('Use metres.');
+    expect(button(sheet, 'Save').disabled).toBe(false);
+
+    const second = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => second.promise;
+    await user.click(button(sheet, 'Save'));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await act(async () => second.resolve(ok()));
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }, { spaceId: HOME, text: 'Use metres.' }]);
+  });
+
+  // the task review of M9: what is saved is what the field shows, so nothing typed while the save runs is lost
+  it('a save in flight leaves the field read-only, so what is stored is what was shown', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => answer.promise;
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(sheet).readOnly).toBe(false);
+    await user.type(field(sheet), 'Use metres.');
+    await user.click(button(sheet, 'Save'));
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), ' And Celsius.');
+    expect(field(sheet).value).toBe('Use metres.');
+    await act(async () => answer.resolve(ok()));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }]);
+  });
+
+  // the branch review of U10b-4: text the person never saw is never overwritten. Until the stored text is read the field
+  // is held (it takes no typing), and a read that failed offers no Save; once shown, a later answer does not replace
+  // what the person typed.
+  it('hold the field until the read answers, and a late answer never replaces what the person typed after the text was shown', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    const first = deferred<ReturnType<typeof ok>>();
+    answers['spaces.instructions'] = () => first.promise;
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), 'Use feet.');
+    expect(field(sheet).value).toBe('');
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    await act(async () => first.resolve(ok({ instructions: held })));
+    await waitFor(() => expect(field(sheet).value).toBe('Use metres.'));
+    expect(field(sheet).readOnly).toBe(false);
+    await user.type(field(sheet), ' And Celsius.');
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+    await store([{ spaceId: WORK, text: 'Use kilometres.', at: 6 }], WORK); // a later answer
+    await waitFor(() => expect(main.callsOf('spaces.instructions').length).toBeGreaterThan(1));
+    expect(field(sheet).value).toBe('Use metres. And Celsius.');
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: WORK, text: 'Use metres. And Celsius.' }]));
+  });
+
+  // the task review of the branch fix: a refresh that fails after a good answer may hide text written since (here from
+  // another window), so the sheet treats it as failed until a later read succeeds
+  it('a refresh that fails after a successful read shows the failure, holds the field and offers no Save until a read succeeds', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await waitFor(() => expect(field(sheet).readOnly).toBe(false)); // read: no instructions yet
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }]; // written from another window
+    answers['spaces.instructions'] = () => ({ ok: false, error: { code: 'internal', message: 'the engine host is unavailable' } });
+    await act(async () => main.emit('spaces.changed', { spaceId: WORK, change: 'updated' }));
+    await within(sheet).findByText('Couldn’t read this Space’s instructions: the engine host is unavailable');
+    expect(field(sheet).readOnly).toBe(true);
+    expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+    await store(held, WORK);
+    await waitFor(() => expect(field(sheet).value).toBe('Use metres.'));
+    expect(field(sheet).readOnly).toBe(false);
+    expect(within(sheet).queryByText(/Couldn’t read/)).toBeNull();
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+  });
+
+  it('a failed read shows the failure, holds the field and offers no Save', async () => {
+    answers['spaces.instructions'] = () => ({ ok: false, error: { code: 'internal', message: 'the engine host is unavailable' } });
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Work' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await within(sheet).findByText('Couldn’t read this Space’s instructions: the engine host is unavailable');
+    expect(field(sheet).readOnly).toBe(true);
+    await user.type(field(sheet), 'Use feet.{Enter}');
+    expect(field(sheet).value).toBe('');
+    expect(within(sheet).queryByRole('button', { name: 'Save' })).toBeNull();
+    fireEvent.submit(field(sheet).closest('form')!);
+    await user.click(button(sheet, 'Cancel'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+  });
+
+  it('ride in a chat a card starts from the Space as one chip after the opening words, its body sent with the first message; a Space without them adds no chip', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.\nCite the field log.', at: 5 }];
+    const creator = vi.fn(async () => at(S(8)));
+    offs.push(registerSessionCreator(creator));
+    answers['session.projects.addFolder'] = () => ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location: { kind: 'directory', path: '/Users/me/work' } });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const bar = (await screen.findByRole('button', { name: 'All Spaces' })).parentElement as HTMLElement;
+    await within(bar).findByRole('button', { name: 'Instructions' }); // the instructions are read
+    const made = await screen.findByRole('region', { name: 'Make something new' });
+    const documentCard = within(within(made).getByRole('group', { name: 'Document' })).getByRole('button', { name: 'Document' });
+    await waitFor(() => expect((documentCard as HTMLButtonElement).disabled).toBe(false));
+    await user.click(documentCard);
+    const body = 'Instructions of the Space “Work”, set by the user in MAWS:\nUse metres.\nCite the field log.';
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Work”: [Pasted text #1 +3 lines]', pasted: [{ name: 'Instructions for “Work”', text: body }] }));
+    const doc = prefillToDoc(prefillOf(8)!);
+    const chips = (doc.content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === 'pasted');
+    expect(chips.map((chip) => [chip.attrs?.name, chip.attrs?.lines])).toEqual([['Instructions for “Work”', 3]]);
+    const sent = serializeDraft(doc, { sessionId: 'eng-8', cwd: '/Users/me/work' });
+    expect(sent.pastedContents['1']?.content).toBe(body);
+    expect(String(sent.content)).toContain(`Make a document in the Space “Work”: `);
+    expect(String(sent.content)).toContain(body);
+
+    act(() => setLibraryView({ spaceId: HOME })); // a Space with no instructions
+    await user.click(within(within(made).getByRole('group', { name: 'Document' })).getByRole('button', { name: 'Document' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
   });
 });

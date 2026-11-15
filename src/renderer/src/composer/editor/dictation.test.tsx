@@ -351,7 +351,7 @@ describe('editor dictation replaces interim text and settles the final', () => {
 
     it('a caret inside a pasted chip’s label selects the chip, and the words go after it', async () => {
       const { handle, editor, content } = await mount(PASTED, 1);
-      moveDOMSelection(content.querySelector('[data-pasted] button')!.firstChild!, 2);
+      moveDOMSelection(content.querySelector('[data-pasted] button span')!.firstChild!, 2); // inside the name (UX wave U10b: the label's name and count are spans)
       const sink = handle.current!.beginDictation(() => {})!;
       expect(editor.state.selection).toBeInstanceOf(NodeSelection);
       expect([editor.state.selection.from, editor.state.selection.to]).toEqual([CHIP, CHIP + 1]);
@@ -378,7 +378,7 @@ describe('editor dictation replaces interim text and settles the final', () => {
 
     it('a caret at the very end of a chip’s label is a text caret after it, and the words go after it', async () => {
       const { handle, editor, content } = await mount(PASTED, 1);
-      const label = content.querySelector('[data-pasted] button')!.firstChild!;
+      const label = content.querySelector('[data-pasted] button')!.lastChild!.firstChild!; // the label's last text (UX wave U10b: its count's span)
       moveDOMSelection(label, label.nodeValue!.length);
       const sink = handle.current!.beginDictation(() => {})!;
       expect(editor.state.selection).toBeInstanceOf(TextSelection);

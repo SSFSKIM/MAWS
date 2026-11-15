@@ -44,7 +44,8 @@ export type CardStyle =
   | { mode: 'above'; left: number; bottom: number; width: number; maxHeight: number }
   | { mode: 'docked'; width: number; maxHeight: number }
   | { mode: 'strip'; width: number; maxHeight: number } // P2-E2: in flow, under a native view
-  | { mode: 'margin'; width: number; maxHeight: number }; // P4-B1: in flow, in the document margin's stack
+  | { mode: 'margin'; width: number; maxHeight: number } // P4-B1: in flow, in the document margin's stack
+  | { mode: 'inline'; width: number; maxHeight: number }; // UX wave U5b: in flow, in a row a surface gives the card (Review's, under a line)
 
 interface Box {
   width: number;
@@ -75,6 +76,13 @@ export function stripCard(column: Box): CardStyle {
 // anchored card's cap, max(320, 60 % of the box), and no bound by the box itself, the card scrolling inside itself past it.
 export function marginCard(box: Box): CardStyle {
   return { mode: 'margin', width: Math.max(0, box.width), maxHeight: Math.max(NO_FLIP, Math.round(0.6 * box.height)) };
+}
+
+// UX wave U5b (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §B; card 5 at its default): the
+// card in a row a surface gives it, at its usual width, or the row's where the row is narrower. It is in the scroll
+// content, as the margin's card is, so nothing is located or pinned; its height takes the floor that never flips.
+export function inlineCard(row: Box): CardStyle {
+  return { mode: 'inline', width: Math.max(0, Math.min(CARD_WIDTH, row.width)), maxHeight: NO_FLIP };
 }
 
 // P2-E2: the most the strip itself takes of its column, a hard limit: in a column too short for the card's own floor
@@ -116,6 +124,7 @@ export function cardPosition(style: CardStyle): CardPosition {
     case 'strip': // P2-E2: in flow in its host's strip, the margin its inset
       return { margin: INSET, width: style.width, maxHeight: style.maxHeight };
     case 'margin': // P4-B1: in flow in the document margin's stack, at the column's width
+    case 'inline': // UX wave U5b: in flow in the surface's row
       return { width: style.width, maxHeight: style.maxHeight };
   }
 }

@@ -197,7 +197,10 @@ async function hostText(page: Page, artifactId: string): Promise<string> {
 }
 
 // An HTML5 drag of `source` onto `target` by the mouse: pressed on the source, moved in steps (Chromium starts the drag
-// past its threshold), over the target until it highlights (`over`, when given), released.
+// past its threshold), over the target until it highlights (`over`, when given), released. The last point is sampled
+// twice: Chromium fires `dragover` only on a second sample over the same innermost element (the first one there gets
+// `dragenter` alone), and Playwright sends nothing while the pointer rests, so a target that answers `dragover` only (the
+// main strip, whose tabs' parts change the element from one step to the next) would otherwise never hear one.
 async function drag(page: Page, source: Locator, target: Locator, over?: Locator): Promise<void> {
   const from = (await source.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -205,6 +208,7 @@ async function drag(page: Page, source: Locator, target: Locator, over?: Locator
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2 + 12, { steps: 4 });
   const to = (await target.boundingBox())!;
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2);
   if (over) await expect(over).toBeVisible();
   await page.mouse.up();
 }

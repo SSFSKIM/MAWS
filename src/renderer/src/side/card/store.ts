@@ -38,7 +38,7 @@ export type CardTarget =
   | { kind: 'artifact'; artifactId: string; threadId: string }; // P3-B (docs/doperpowers/plans/2026-10-12-p3-b-documents.md D9): a comment thread of a document artifact
 // UX wave U5a: a composing card names the comment it edits and its pass; the checkbox is the pass's (`toMain`)
 export type CardPhase = { kind: 'composing'; pass: string; comment: string } | { kind: 'thread'; child: AppSessionId; echo: string | null };
-export type CardHostKind = 'browser' | 'artifact-page' | 'artifact' /* P3-B */;
+export type CardHostKind = 'browser' | 'artifact-page' | 'artifact' /* P3-B */ | 'review' /* UX wave U5b: a session's Review, its subject the session */;
 export type CardHostMode = 'panel' | 'tab';
 
 export interface OpenCard {
@@ -78,6 +78,8 @@ export const SENT_NOTE_MS = 4_000;
 export interface PassComment {
   id: string; // stable for the comment's life
   anchor: Anchor; // without its screenshot
+  // UX wave U5b (§B): the commented line's text, quoted in the words at the send; absent or null, none
+  quote?: string | null;
   text: string;
   screenshot: AnchorScreenshot | null;
   rect: CardRect | null; // the pick's rect, for an anchored card
@@ -183,7 +185,7 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
     return;
   }
   const entry = hostId === null ? undefined : hosts.get(hostId);
-  const subject = entry?.subject ?? subjectOf(target) ?? hostId ?? '';
+  const subject = entry?.subject ?? (host === 'review' ? context.appSessionId /* UX wave U5b: Review's pass is the session's */ : subjectOf(target)) ?? hostId ?? '';
   const key = passKey(host, subject, context.appSessionId);
   const left = leaving(useCommentCard.getState());
   const passes = new Map(left.passes);
@@ -208,7 +210,7 @@ export function openCard(anchor: Anchor, context: CommentContext & { phase?: Car
     claimBy(newest.serial, hostId);
     return;
   }
-  const comment: PassComment = { id: String(++comments), anchor: withoutScreenshot(anchor), text: '', screenshot: anchor.screenshot ?? null, rect: placement?.rect ?? null, flight: null, refused: null };
+  const comment: PassComment = { id: String(++comments), anchor: withoutScreenshot(anchor), quote: context.quote ?? null /* UX wave U5b */, text: '', screenshot: anchor.screenshot ?? null, rect: placement?.rect ?? null, flight: null, refused: null };
   const next = { ...pass, comments: [...pass.comments, comment] };
   passes.set(key, next);
   const card = { ...cardOn(key, next, comment, hostId), claimMode: context.claimMode ?? null };
@@ -405,6 +407,7 @@ export function placeNoteOf(notes: ReadonlyMap<string, PlaceNote>, host: CardHos
 export interface Flight {
   id: number;
   pass: string;
+  host: CardHostKind; // UX wave U5b: its pass's host kind, which says where a side thread it opens is shown
   appSessionId: AppSessionId;
   toMain: boolean;
   comments: PassComment[]; // what it carries, oldest first, as they set out
@@ -432,7 +435,7 @@ export function launchFlight(key: string): Flight | null {
   const onEmpty = state.open?.phase.kind === 'composing' && state.open.phase.pass === key && empty.some((comment) => state.open?.phase.kind === 'composing' && comment.id === state.open.phase.comment);
   if (empty.length > 0) tellDiscarded(pass, empty);
   useCommentCard.setState({ passes, ...(onEmpty && { open: null }) });
-  return { id, pass: key, appSessionId: pass.appSessionId, toMain: pass.toMain, comments: flying };
+  return { id, pass: key, host: pass.host, appSessionId: pass.appSessionId, toMain: pass.toMain, comments: flying };
 }
 
 /** The host callbacks of a flight's comments as it sets out (a document's settlement), each told once whether it went. */

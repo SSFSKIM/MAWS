@@ -1,0 +1,521 @@
+{
+ "provenance": {
+  "plan": "docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md",
+  "section": "Probes to arrange",
+  "case": "p4p-fail",
+  "stale": false,
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "model": "haiku",
+  "launch": "interactive engine in tmux (vm-run.sh term's launch), --model haiku",
+  "route": "gateway (vm-run.sh loopback forward)",
+  "startedAt": "2026-11-15T11:12:59.494Z",
+  "timeUnit": "ms since startedAt; file lines seen by a 100 ms poll"
+ },
+ "failure": null,
+ "agents": [
+  {
+   "id": "a1a311089a46926cd",
+   "description": "uxw fg broken"
+  }
+ ],
+ "timeline": [
+  {
+   "ms": 38,
+   "cause": "engine started",
+   "args": [
+    "--model",
+    "haiku",
+    "-p",
+    "Call the Agent tool once, with subagent_type \"uxw-broken\", run_in_background false, description \"uxw fg broken\" and prompt \"Reply with only the word PONG.\". When it returns, whatever it says, reply with only the word OK.",
+    "--permission-mode",
+    "auto",
+    "--session-id",
+    "<session>"
+   ],
+   "env": []
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 1,
+   "type": "queue-operation",
+   "operation": "enqueue",
+   "timestamp": "2026-11-15T11:13:00.152Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 2,
+   "type": "queue-operation",
+   "operation": "dequeue",
+   "timestamp": "2026-11-15T11:13:00.156Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 3,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "sdk",
+   "turnOrigin": "sdk",
+   "text": "Call the Agent tool once, with subagent_type \"uxw-broken\", run_in_background false, description \"uxw fg broken\" and prompt \"Reply with only the word PONG.\". When it returns, whatever it says, reply wi",
+   "timestamp": "2026-11-15T11:13:00.304Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 4,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "environment",
+   "timestamp": "2026-11-15T11:13:00.301Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 5,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "model",
+   "timestamp": "2026-11-15T11:13:00.302Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T11:13:00.302Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "agent_listing_delta",
+   "timestamp": "2026-11-15T11:13:00.302Z"
+  },
+  {
+   "ms": 1009,
+   "file": "main",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T11:13:00.302Z"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 9,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T11:13:00.355Z"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 11,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "date",
+   "timestamp": "2026-11-15T11:13:00.355Z"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 12,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T11:13:00.388Z"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 13,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:00.391Z"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 14,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 1010,
+   "file": "main",
+   "line": 15,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 1110,
+   "file": "main",
+   "line": 16,
+   "type": "api-request-shape",
+   "timestamp": "2026-11-15T11:13:00.458Z"
+  },
+  {
+   "ms": 1110,
+   "file": "main",
+   "line": 17,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 1111,
+   "file": "main",
+   "line": 18,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 1111,
+   "file": "main",
+   "line": 19,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:13:00.458Z"
+  },
+  {
+   "ms": 1111,
+   "file": "main",
+   "line": 20,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 1111,
+   "file": "main",
+   "line": 21,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 2719,
+   "file": "main",
+   "line": 22,
+   "type": "tools-used"
+  },
+  {
+   "ms": 2719,
+   "file": "main",
+   "line": 23,
+   "type": "assistant",
+   "isSidechain": false,
+   "toolUses": [
+    {
+     "id": "toolu_016z4nhrTWgAemhm51kNL8Sz",
+     "name": "Agent",
+     "bg": false,
+     "description": "uxw fg broken"
+    }
+   ],
+   "timestamp": "2026-11-15T11:13:01.651Z"
+  },
+  {
+   "ms": 2719,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 1,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "text": "Reply with only the word PONG.",
+   "timestamp": "2026-11-15T11:13:02.062Z"
+  },
+  {
+   "ms": 2719,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 2,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T11:13:02.083Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 3,
+   "type": "user",
+   "isMeta": true,
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "text": "<system-reminder>\nYour final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your las",
+   "timestamp": "2026-11-15T11:13:02.084Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 4,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "environment",
+   "timestamp": "2026-11-15T11:13:02.089Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 5,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "model",
+   "timestamp": "2026-11-15T11:13:02.089Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T11:13:02.093Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T11:13:02.138Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "date",
+   "timestamp": "2026-11-15T11:13:02.138Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 9,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T11:13:02.143Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:02.144Z"
+  },
+  {
+   "ms": 2720,
+   "file": "subagents/agent-a1a311089a46926cd.meta.json",
+   "meta": "written",
+   "version": 1
+  },
+  {
+   "ms": 2820,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 11,
+   "type": "api-request-shape",
+   "agentId": "a1a311089a46926cd",
+   "timestamp": "2026-11-15T11:13:02.187Z"
+  },
+  {
+   "ms": 2820,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 12,
+   "type": "api-request-blob",
+   "agentId": "a1a311089a46926cd"
+  },
+  {
+   "ms": 2820,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 13,
+   "type": "api-request-blob",
+   "agentId": "a1a311089a46926cd"
+  },
+  {
+   "ms": 2820,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 14,
+   "type": "api-request",
+   "agentId": "a1a311089a46926cd",
+   "timestamp": "2026-11-15T11:13:02.187Z"
+  },
+  {
+   "ms": 3223,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 15,
+   "type": "api-request",
+   "agentId": "a1a311089a46926cd",
+   "timestamp": "2026-11-15T11:13:02.516Z"
+  },
+  {
+   "ms": 3524,
+   "file": "main",
+   "line": 24,
+   "type": "user",
+   "isSidechain": false,
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_016z4nhrTWgAemhm51kNL8Sz",
+     "is_error": true
+    }
+   ],
+   "toolUseResult": "Error: Agent terminated early due to an API error: There's an issue with the selected model (claude-uxw-no-such-model-1). It may not exist or you may not have access to it. Run --model to pick a diffe",
+   "timestamp": "2026-11-15T11:13:02.891Z"
+  },
+  {
+   "ms": 3525,
+   "file": "main",
+   "line": 25,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:13:02.896Z"
+  },
+  {
+   "ms": 3525,
+   "file": "main",
+   "line": 26,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:13:02.941Z"
+  },
+  {
+   "ms": 3525,
+   "file": "main",
+   "line": 27,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 3525,
+   "file": "main",
+   "line": 28,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 3525,
+   "file": "subagents/agent-a1a311089a46926cd.jsonl",
+   "line": 16,
+   "type": "assistant",
+   "isSidechain": true,
+   "agentId": "a1a311089a46926cd",
+   "timestamp": "2026-11-15T11:13:02.874Z"
+  },
+  {
+   "ms": 3526,
+   "file": "subagents/agent-a1a311089a46926cd.meta.json",
+   "meta": "written",
+   "version": 2
+  },
+  {
+   "ms": 4329,
+   "file": "main",
+   "line": 29,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:13:03.722Z"
+  },
+  {
+   "ms": 4330,
+   "file": "main",
+   "line": 30,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:13:03.724Z"
+  },
+  {
+   "ms": 4330,
+   "file": "main",
+   "line": 31,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 4330,
+   "file": "main",
+   "line": 32,
+   "type": "cost-state"
+  },
+  {
+   "ms": 4557,
+   "cause": "engine exited"
+  }
+ ],
+ "metas": {
+  "subagents/agent-a1a311089a46926cd.meta.json": [
+   {
+    "ms": 2720,
+    "meta": {
+     "agentType": "uxw-broken",
+     "isBuiltIn": false,
+     "description": "uxw fg broken",
+     "toolUseId": "toolu_016z4nhrTWgAemhm51kNL8Sz",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   },
+   {
+    "ms": 3526,
+    "meta": {
+     "agentType": "uxw-broken",
+     "isBuiltIn": false,
+     "description": "uxw fg broken",
+     "toolUseId": "toolu_016z4nhrTWgAemhm51kNL8Sz",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5",
+     "finished": true
+    }
+   }
+  ]
+ },
+ "snapshots": [
+  {
+   "label": "after",
+   "ms": 9560,
+   "lines": {
+    "main": 32,
+    "subagents/agent-a1a311089a46926cd.jsonl": 16
+   },
+   "metas": {
+    "subagents/agent-a1a311089a46926cd.meta.json": {
+     "agentType": "uxw-broken",
+     "isBuiltIn": false,
+     "description": "uxw fg broken",
+     "toolUseId": "toolu_016z4nhrTWgAemhm51kNL8Sz",
+     "spawnDepth": 1,
+     "requestShape": "foreground",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5",
+     "finished": true
+    }
+   }
+  }
+ ],
+ "panes": [
+  {
+   "label": "after",
+   "ms": 9560,
+   "pane": ""
+  }
+ ]
+}

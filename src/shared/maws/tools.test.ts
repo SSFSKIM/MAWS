@@ -8,6 +8,8 @@ import {
   ARTIFACT_SCREENSHOT_MAX_BYTES,
   ArtifactCreateInputSchema,
   ArtifactCreateResultSchema,
+  ArtifactDescribeTypeResultSchema, // UX wave U10b (M10)
+  ArtifactDeleteResultSchema, // UX wave U10b (M4)
   ArtifactListInputSchema,
   ArtifactListResultSchema,
   ArtifactDeliverySchema,
@@ -16,6 +18,7 @@ import {
   ArtifactPublishInputSchema,
   ArtifactPublishResultSchema,
   ArtifactReadInputSchema,
+  ArtifactReadResultSchema, // UX wave U10b (M10)
   artifactRefusalOf,
   DOCUMENT_READ_FIELDS,
   ArtifactScreenshotInputSchema,
@@ -23,6 +26,7 @@ import {
   ASK_MODALITIES, // P3-D
   ASK_NOTE_MAX,
   ASK_PREVIEW_MAX,
+  DESIGN_SYSTEM_KINDS, // UX wave U10b
   AskAnswerSchema,
   AskInputSchema,
   AskResultSchema,
@@ -55,6 +59,7 @@ describe('X9: the maws server and its twelve tools', () => {
       // P3-B (M7): the document tools, appended after A's
       'artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve',
       'artifact_search', // P4-B4: the search tool, after B's
+      'artifact_delete', // UX wave U10b (M4): last
     ]);
     expect(MAWS_TOOL_NAMES).not.toContain('artifact_update');
     expect(MAWS_TOOL_NAMES).not.toContain('message'); // P4-R7z: a session messages through the to-human plugin's tool
@@ -119,6 +124,7 @@ describe('X9: the maws server and its twelve tools', () => {
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }],
       ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { readOnlyHint: true, openWorldHint: false, title: 'Search artifacts' }], // P4-B4
+      ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4)
     ]);
     // U6d: six panes and no `at`
     const showPane = list.find((t) => t.name === 'show_pane')!.inputSchema;
@@ -127,9 +133,10 @@ describe('X9: the maws server and its twelve tools', () => {
   });
 
   // U6d (O-44): the agent opens no artifact by itself, and nothing it is served invites the call that did
-  it('invites no call of show_pane for an artifact: artifact_create ends on the link, and no other tool names show_pane', () => {
-    expect(MAWS_TOOLS.artifact_create.description.endsWith('To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.')).toBe(true);
-    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1275);
+  it('invites no call of show_pane for an artifact: artifact_create ends on the link’s sentence followed only by the sentence on a Space’s instructions, and no other tool names show_pane', () => {
+    // UX wave U10b (M10, §E.4): only the sentence on a Space's instructions follows the link's, and it names no pane
+    expect(MAWS_TOOLS.artifact_create.description.endsWith("To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.")).toBe(true);
+    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458 + 184); // UX wave U10b: designSystem's sentence; M10: the instructions' sentence
     for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
   });
 });
@@ -460,6 +467,45 @@ describe('X9 artifact tools (E2)', () => {
     expect(ArtifactListResultSchema.safeParse({ status: 'listed', artifacts: [listed] }).success).toBe(true);
   });
 
+  // UX wave U10b (l6-artifacts-08): a create bound to a design system, by its id or its name, for the kinds a system governs
+  it('admits a design system on artifact_create by its id or its name, for the four kinds a system governs, and says so after the Space', () => {
+    expect(DESIGN_SYSTEM_KINDS).toEqual(['document', 'presentation', 'design', 'dashboard']);
+    expect(parseToolArguments('artifact_create', { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' })).toEqual({ ok: true, data: { kind: 'presentation', title: 'Deck', designSystem: 'Harbor' } });
+    expect(parseToolArguments('artifact_create', { kind: 'dashboard', title: 'Board', designSystem: UUID, space: 'P3 sitting' }).ok).toBe(true);
+    for (const designSystem of ['', 'x'.repeat(201), 7]) expect(ArtifactCreateInputSchema.safeParse({ kind: 'design', title: 'Site', designSystem }).success, JSON.stringify(designSystem)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_create')!.inputSchema).toMatchObject({ properties: { designSystem: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_create.description).toContain(
+      "a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id",
+    );
+    expect(TOOL_ERRORS.noDesignSystem('Harbour', ['Harbor', 'Classroom'])).toBe('artifact_create: no design system "Harbour"; the design systems are: Harbor, Classroom');
+    expect(TOOL_ERRORS.designSystemAmbiguous('Harbor', [UUID, '22222222-2222-4222-8222-222222222222'])).toBe(`artifact_create: more than one design system is named "Harbor"; give one of these ids: ${UUID}, 22222222-2222-4222-8222-222222222222`);
+    expect(TOOL_ERRORS.designSystemNotForKind('file')).toBe('artifact_create: kind "file" takes no design system; designSystem is for document, presentation, design, dashboard');
+    expect(TOOL_ERRORS.noDesignSystem('Harbor', [])).toBe('artifact_create: no design system "Harbor"; there are no design systems');
+  });
+
+  // UX wave U10b (M10, §E.4; l8-settings-13): `space` on artifact_describe_type, and a Space's instructions in three answers
+  it('admits a Space on artifact_describe_type, answers spaceInstructions from create, read and describe, and says so in their descriptions', () => {
+    expect(parseToolArguments('artifact_describe_type', { kind: 'document', space: 'Field notes' })).toEqual({ ok: true, data: { kind: 'document', space: 'Field notes' } });
+    expect(parseToolArguments('artifact_describe_type', { kind: 'presentation', space: UUID }).ok).toBe(true);
+    for (const space of ['', 'x'.repeat(201), 7]) expect(parseToolArguments('artifact_describe_type', { kind: 'document', space }).ok, JSON.stringify(space)).toBe(false);
+    expect(mawsToolList().find((t) => t.name === 'artifact_describe_type')!.inputSchema).toMatchObject({ properties: { space: { type: 'string', minLength: 1, maxLength: 200 } } });
+    expect(MAWS_TOOLS.artifact_describe_type.description).toContain(
+      "without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system",
+    );
+    const closing = " When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.";
+    for (const name of ['artifact_create', 'artifact_read', 'artifact_describe_type'] as const) expect(MAWS_TOOLS[name].description.endsWith(`.${closing}`), name).toBe(true);
+    for (const name of MAWS_TOOL_NAMES.filter((n) => !['artifact_create', 'artifact_read', 'artifact_describe_type'].includes(n))) expect(MAWS_TOOLS[name].description, name).not.toContain('spaceInstructions');
+    const given = { spaceId: UUID, name: 'Field notes', text: 'Write dates as 14 March.\nUse metres.' };
+    const created = { status: 'created', artifactId: UUID, kind: 'document', title: 'Note', revision: 1, spaceId: UUID, spaceName: 'Field notes', spaceInstructions: given };
+    const read = { status: 'read', artifactId: UUID, kind: 'html', title: 'Page', revision: 1, files: { 'index.html': '<p>x</p>' }, versions: [], spaceInstructions: given };
+    const described = { status: 'described', kind: 'document', guide: 'g', format: 'f', home: 'Field notes', spaceInstructions: given };
+    for (const [schema, answer] of [[ArtifactCreateResultSchema, created], [ArtifactReadResultSchema, read], [ArtifactDescribeTypeResultSchema, described]] as const) {
+      expect(schema.safeParse(answer).success).toBe(true);
+      expect(schema.safeParse({ ...answer, spaceInstructions: { ...given, at: 1 } }).success).toBe(false); // the stamp stays the host's
+      expect(schema.safeParse({ ...answer, spaceInstructions: { ...given, spaceId: 'not-a-uuid' } }).success).toBe(false);
+    }
+  });
+
   it('parses the results and refuses a stray key; the delivery fields read alike from every answer that registered an X12 version', () => {
     const created = { status: 'created', artifactId: UUID, kind: 'html', title: 'Dashboard', revision: 1, handle: 'dash', id: 'dash', deliverableId: UUID, version: 1, externalReferences: 0 };
     expect(ArtifactCreateResultSchema.safeParse(created).success).toBe(true);
@@ -627,5 +673,30 @@ describe('a document’s page in the tools', () => {
     expect(ArtifactExportResultSchema.safeParse({ ...exported, pages: 2 }).success).toBe(true);
     expect(ArtifactExportResultSchema.safeParse(exported).success).toBe(true);
     for (const pages of [0, 1.5, -1]) expect(ArtifactExportResultSchema.safeParse({ ...exported, pages }).success, String(pages)).toBe(false);
+  });
+});
+
+// UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.1): the agent's delete of its own draft
+describe('artifact_delete', () => {
+  it('is described, titled and annotated word for word, and names its artifact by id or handle alone', () => {
+    expect(MAWS_TOOLS.artifact_delete.title).toBe('Delete artifact');
+    expect(MAWS_TOOLS.artifact_delete.description).toBe(
+      "Delete a MAWS artifact this session made and no longer needs, such as an abandoned draft; without this tool, ask the user to delete it in the Library. Only an artifact that this session, or the session a side thread was opened from, created and that only agents have written to; anything else is refused with the reason. The user can undo it from the transcript. Returns the deleted artifact's id, kind and title.",
+    );
+    expect(MAWS_TOOLS.artifact_delete.annotations).toEqual({ readOnlyHint: false, destructiveHint: true, openWorldHint: false });
+    expect(z.toJSONSchema(MAWS_TOOLS.artifact_delete.input)).toMatchObject({ type: 'object', properties: { artifact: { type: 'string' } }, required: ['artifact'], additionalProperties: false });
+    expect(parseToolArguments('artifact_delete', { artifact: 'draft-plan' })).toEqual({ ok: true, data: { artifact: 'draft-plan' } });
+    expect(parseToolArguments('artifact_delete', { artifact: 'draft-plan', force: true }).ok).toBe(false);
+    expect(parseToolArguments('artifact_delete', {}).ok).toBe(false);
+  });
+
+  it('answers the deleted artifact’s id, kind and title, and refuses with the four sentences of §C.1', () => {
+    const answer = { status: 'deleted', artifactId: '11111111-1111-4111-8111-111111111111', kind: 'document', title: 'Draft plan' };
+    expect(ArtifactDeleteResultSchema.parse(answer)).toEqual(answer);
+    expect(ArtifactDeleteResultSchema.safeParse({ ...answer, extra: 1 }).success).toBe(false);
+    expect(TOOL_ERRORS.deleteByUser('Notes')).toBe('artifact_delete: "Notes" was created by the user; ask them to delete it in the Library');
+    expect(TOOL_ERRORS.deleteEdited('Notes')).toBe('artifact_delete: the user has edited "Notes"; ask them to delete it in the Library');
+    expect(TOOL_ERRORS.deleteOtherSession('Notes')).toBe('artifact_delete: "Notes" was created by another session; ask the user to delete it in the Library');
+    expect(TOOL_ERRORS.deleteUnknown('Notes')).toBe('artifact_delete: MAWS cannot tell that only agents have written to "Notes"; ask the user to delete it in the Library');
   });
 });

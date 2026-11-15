@@ -5,7 +5,8 @@
 // P5 O7 M4: for a lane B session on another machine it would open the file on that machine's desktop. P5 O7 M5a (A10):
 // it opens a copy of the file here (lane-b/open-copy.ts), and says where the file is ("on <machine>").
 // UX wave U6c (M3 decision 1): a session on this Mac asks with `named`, so a file outside its folders that its transcript
-// links opens too; a session on another machine is asked as before.
+// links opens too; a session on another machine is asked as before. UX wave U6e (decision 19): with `agent` while the
+// tab holds the agent's mark, so a grant alone opens nothing there.
 import { useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { opensExternally } from '@shared/ipc/schema/files';
@@ -19,11 +20,11 @@ import type { ViewerEntry } from './viewer-store';
 
 const button = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover';
 
-export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessionId; path: string }) {
+export function OpenExternally({ appSessionId, path, agent = false }: { appSessionId: AppSessionId; path: string; agent?: boolean }) {
   const [problem, setProblem] = useState<string | null>(null);
   const elsewhere = useElsewhereMachine(appSessionId);
   const open = async () => {
-    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true }) : await openSessionFile(appSessionId, path, ipc);
+    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true, ...(agent ? { agent: true as const } : {}) }) : await openSessionFile(appSessionId, path, ipc);
     if (!result.ok) setProblem(VIEWER_COPY.refused(result.error.message));
     else setProblem(result.value.opened ? null : VIEWER_COPY.notOpened(result.value.message ?? ''));
   };
@@ -49,7 +50,7 @@ export function ExternalRow({ entry }: { entry: ViewerEntry }) {
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-ui text-fg">{kind === 'Binary' ? VIEWER_COPY.binary(entry.bytes) : VIEWER_COPY.externalKind(kind)}</p>
         {kind === 'Binary' ? null : <p className="text-ui-sm text-fg-muted">{formatSize(entry.bytes)}</p>}
-        {opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
+        {opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} agent={entry.agent} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
       </div>
     </div>
   );

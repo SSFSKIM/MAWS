@@ -2997,7 +2997,7 @@ async function readWhileDown(page: Page, electron: ElectronApplication, before: 
  * machine's own project takes no row key on A, so the session's row stays under B's machine row however its listing,
  * its record and B's registry entry reach A, and in whichever order they arrive (ticket 644's filing).
  */
-async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[] }, held: TerminalHeld) {
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[]; bEnv?: Record<string, string> /* UX wave U10b */ }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-checkout');
   const journals = join(opts.root, 'journals');
   for (const dir of [checkout, journals]) mkdirSync(dir);
@@ -3008,7 +3008,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
     aUserData: opts.aUserData,
     b: {
       root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
-      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1', ...opts.bEnv },
       prepare: ({ claudeConfigDir }) => {
         writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
         writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
@@ -3046,7 +3046,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
     await row.click();
     await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
   }
-  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject };
+  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject, projectId: project.id /* UX wave U10b */ };
 }
 
 test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
@@ -3564,6 +3564,88 @@ test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the wo
     const refusalOf = async () => { const answer = await status(); return answer.ok ? 'admitted' : ((answer.error.issues as { refusal?: unknown } | undefined)?.refusal ?? answer.error.message); }; // prettier-ignore
     await expect.poll(refusalOf, { timeout: 30_000, message: 'the read is refused at B’s endpoint once the worktree is not registered' }).toBe('no-target');
     expect((await b.request<Folders | null>('session.get', { appSessionId: app }))?.agentFolder?.checkout, 'B’s record still names it: the refusal is the admission’s, at the act').toBe(worktree);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4 on another machine, §C.3, §C.4): a
+// second session of B's makes its draft through its own tools (B's host runs the agent's seam, MAWS_DASHBOARD_E2E) and
+// its turn deletes it (`artifact_delete`, served by B's tool server; its journal is written once the draft exists, before
+// the session's launch reads it). In A, the transcript's row of B's session reads "Deleted Draft plan" with Undo, which
+// goes to B as the undelete over the link (`rl2.artifact-undelete`, the owners'): B's store has the draft again and the row
+// reads "Restored Draft plan". The session's next turn deletes it again; with B stopped, past the minute its link
+// reconnects, the row's Undo is disabled with "Restore is unavailable while B is offline." as a line of the row.
+const DRAFTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e1'; // the engine session ids the journals pin
+const DRAFTER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e2';
+
+test('U10b A4 on B: B’s agent deletes its own draft; A’s row of B’s session reads Deleted with Undo, which restores it on B, then Restored; with B stopped, Undo is disabled with its sentence as a line of the row', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-undelete-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-undelete-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(DRAFTS_SESSION, checkout);
+    journal.turn('B is ready for its drafts.');
+    const drafter = new SideJournal(DRAFTER_SESSION, checkout); // its turns are written below, once its draft exists
+    const { scene, b, page, bProject, projectId } = await laneBOpened(
+      { root, aUserData, journal, first: 'Get ready for the drafts.', firstReply: 'B is ready for its drafts.', title: 'B’s first session', open: false, launches: [drafter], bEnv: { MAWS_DASHBOARD_E2E: '1' } },
+      held,
+    );
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists the undelete\n${mainSaid(page)}` }).toContain('rl2.artifact-undelete');
+
+    // B's drafting session: its draft made by its own tools, then its turns written and its first started
+    const app = (await b.request<{ appSessionId: string }>('session.create', { projectId, location: null })).appSessionId;
+    await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    const draft = await new AgentSeam(join(b.userData, 'dashboard-e2e')).ok<{ artifactId: string }>(app, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nB’s agent wrote this.' });
+    const answer = { status: 'deleted', artifactId: draft.artifactId, kind: 'document', title: 'Draft plan' };
+    for (const reply of ['The draft plan is deleted.', 'Deleted it again.']) {
+      const prompt = drafter.prompt();
+      drafter.mawsToolCall('artifact_delete', { artifact: draft.artifactId }, answer, { asked: false });
+      drafter.reply(prompt, reply);
+      drafter.completed(prompt);
+    }
+    drafter.write(join(root, 'journals'), 'b-launch-1');
+    type Status = { process: string; turn: unknown; engineSessionId: string | null };
+    const turnOver = async () => {
+      const status = await b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+      return status !== null && status.process === 'ready' && status.turn === null;
+    };
+    const deletedOnB = async () => (await b.request<{ deleted?: { undoable: boolean } }>('artifacts.get', { artifactId: draft.artifactId })).deleted?.undoable ?? null;
+    await b.request('session.start', { appSessionId: app, message: { content: 'Delete the draft plan.', display: 'Delete the draft plan.' }, options: {} });
+    // fix wave 3: the state the scene needs, B's store with the agent's delete, then the turn's end; a status read between
+    // the launch's ready and the turn's start reads as a turn over, so the turn's end alone says nothing of the delete
+    await expect.poll(deletedOnB, { timeout: 60_000, message: `B deleted the draft, as an agent’s delete Undo can take back\n${b.log().slice(-4000)}` }).toBe(true);
+    await expect.poll(turnOver, { timeout: 60_000, message: `B's drafting session ends its turn\n${b.log().slice(-4000)}` }).toBe(true);
+
+    // A: the session's row, its artifact row, and Undo over the link
+    const engine = (await b.request<Status>('session.status', { appSessionId: app })).engineSessionId ?? DRAFTER_SESSION;
+    await scene.sminos.list({ engine, app, owners: [scene.member], project: bProject, title: 'B’s drafting session', cwd: checkout });
+    const row = sessionRow(page, addressOf(b.ref, app));
+    await expect(row, `the drafting session is a row of A's\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+    await row.click();
+    const rows = main(page).locator(`section.transcript-artifact[data-artifact="${draft.artifactId}"]`);
+    await quoting(expect(rows.locator('[data-artifact-heading]'), 'the delete’s row').toHaveText(['Deleted Draft plan'], { timeout: 60_000 }), () => mainSaid(page));
+    const undo = rows.first().getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo, 'once B’s library has answered').toBeEnabled({ timeout: 30_000 });
+    await undo.click();
+    await quoting(expect(rows.first().locator('[data-artifact-heading]'), 'B’s library lists it again').toHaveText('Restored Draft plan', { timeout: 60_000 }), () => mainSaid(page));
+    expect(await deletedOnB(), 'B’s store has the draft again').toBeNull();
+    expect((await b.request<{ artifact: { title: string } | null }>('artifacts.get', { artifactId: draft.artifactId })).artifact?.title).toBe('Draft plan');
+
+    // the session's next turn deletes it again; B stopped, its Undo is disabled with the sentence as a line of the row
+    await b.request('session.send', { appSessionId: app, content: 'Delete it again.' });
+    await expect.poll(deletedOnB, { timeout: 60_000, message: 'deleted again on B' }).toBe(true);
+    await expect(rows.locator('[data-artifact-heading]'), 'read, not remembered: both rows say Deleted').toHaveText(['Deleted Draft plan', 'Deleted Draft plan'], { timeout: 60_000 });
+    const last = rows.last();
+    await expect(last.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled({ timeout: 30_000 });
+    await b.stop();
+    await quoting(expect(last.locator('[data-artifact-line]'), 'past the minute B’s link reconnects').toHaveText(`Restore is unavailable while ${B_NAME} is offline.`, { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), () => mainSaid(page));
+    await expect(last.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+    await expect(last.locator('[data-artifact-heading]')).toHaveText('Deleted Draft plan');
   } finally {
     await held.a?.cleanup();
     await held.scene?.stop();

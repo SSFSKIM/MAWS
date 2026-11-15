@@ -8,7 +8,8 @@
 // works one row in bounded steps). It starts a search for that path, which finds nothing, and while it runs times fifty `files.list` calls, one after another, to a real files
 // service over a small scratch folder in the same process. Timing only, so it runs on request, on the build VM:
 // `MAWS_NAMED_MEASURE=1 pnpm exec vitest run src/services/files/named.measure.test.ts`. It writes about 1 GiB and
-// removes it.
+// removes it. UX wave U6e adds the same reading for a path that only a tool's result names, which the search now follows
+// to the bound.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { open } from 'node:fs/promises';
 import { join } from 'node:path';
@@ -43,45 +44,70 @@ function block(): Buffer {
   return Buffer.from(`${lines.join('\n')}\n`);
 }
 
+// The search's whole bound, written once into a scratch store: the block repeated to NAMED_SCAN_BYTES, then `newest`.
+async function transcriptOfTheBound(fixture: StoreFixture, newest: string[]): Promise<string> {
+  const file = await fixture.addTranscript('/work/repo', 'engine-session-measured', []);
+  const handle = await open(file, 'a');
+  const bytes = block();
+  for (let written = 0; written < NAMED_SCAN_BYTES; written += bytes.length) await handle.write(bytes);
+  for (const line of newest) await handle.write(`${line}\n`);
+  await handle.close();
+  return file;
+}
+
+// Fifty files.list calls one after another while `searched` runs, and the reading printed under `label`.
+async function listsDuring(fixture: StoreFixture, label: string, search: () => Promise<unknown>): Promise<unknown> {
+  const root = join(fixture.configHome, 'listed');
+  mkdirSync(root, { recursive: true });
+  for (let i = 0; i < 40; i += 1) writeFileSync(join(root, `file-${i}.txt`), `content ${i}\n`);
+  const LISTED = 'app-listed' as AppSessionId;
+  const files = createFilesService({ records: (id) => (id === LISTED ? { directory: root, additionalDirectories: [], worktree: null } : null) });
+  const started = performance.now();
+  let searchEnded = 0;
+  const searched = search().then((value) => ((searchEnded = performance.now()), value));
+  const lists: number[] = [];
+  let listsEnded = 0;
+  for (let i = 0; i < LISTS; i += 1) {
+    const before = performance.now();
+    const listed = await files.list({ appSessionId: LISTED, path: root });
+    lists.push(performance.now() - before);
+    expect(listed.entries.length).toBe(40);
+    listsEnded = performance.now();
+  }
+  const answer = await searched;
+  files.dispose();
+  const sorted = [...lists].sort((a, b) => a - b);
+  const median = (sorted[LISTS / 2 - 1]! + sorted[LISTS / 2]!) / 2;
+  console.log(`${label}: search ${Math.round(searchEnded - started)} ms; list median ${median.toFixed(1)} ms, worst ${sorted[LISTS - 1]!.toFixed(1)} ms`);
+  expect(listsEnded).toBeLessThan(searchEnded); // every list was answered while the search ran
+  return answer;
+}
+
 describe.skipIf(process.env.MAWS_NAMED_MEASURE !== '1')('the daemon is not held by a search of the whole bound', () => {
   it(`fifty files.list calls while a ${NAMED_SCAN_BYTES} byte search finds nothing`, { timeout: 15 * 60_000 }, async () => {
     const fixture = await StoreFixture.create();
     try {
-      const file = await fixture.addTranscript('/work/repo', 'engine-session-measured', []);
-      const handle = await open(file, 'a');
-      const bytes = block();
-      for (let written = 0; written < NAMED_SCAN_BYTES; written += bytes.length) await handle.write(bytes);
       const dense = JSON.stringify({ type: 'assistant', uuid: 'a-dense', message: { role: 'assistant', content: [{ type: 'text', text: `[b](${P}.bak) `.repeat(DENSE_LINKS) }] } });
       expect(Buffer.byteLength(dense)).toBeLessThan(NAMED_ROW_BYTES); // a row the search parses, not one it passes over
-      await handle.write(`${dense}\n`);
-      await handle.close();
-
-      const root = join(fixture.configHome, 'listed');
-      mkdirSync(root);
-      for (let i = 0; i < 40; i += 1) writeFileSync(join(root, `file-${i}.txt`), `content ${i}\n`);
-      const LISTED = 'app-listed' as AppSessionId;
-      const files = createFilesService({ records: (id) => (id === LISTED ? { directory: root, additionalDirectories: [], worktree: null } : null) });
-
+      const file = await transcriptOfTheBound(fixture, [dense]);
       const named = createNamedPaths({ transcript: async () => file, bounds: { waitMs: 15 * 60_000 } }); // the search's own time, past a waiter's patience
-      const started = performance.now();
-      let searchEnded = 0;
-      const searched = named.names(S, P).then((value) => ((searchEnded = performance.now()), value));
-      const lists: number[] = [];
-      let listsEnded = 0;
-      for (let i = 0; i < LISTS; i += 1) {
-        const before = performance.now();
-        const listed = await files.list({ appSessionId: LISTED, path: root });
-        lists.push(performance.now() - before);
-        expect(listed.entries.length).toBe(40);
-        listsEnded = performance.now();
-      }
-      expect(await searched).toBe(false);
-      files.dispose();
+      expect(await listsDuring(fixture, 'named', () => named.names(S, P))).toBe(false);
+    } finally {
+      await fixture.dispose();
+    }
+  });
 
-      const sorted = [...lists].sort((a, b) => a - b);
-      const median = (sorted[LISTS / 2 - 1]! + sorted[LISTS / 2]!) / 2;
-      console.log(`named: search ${Math.round(searchEnded - started)} ms; list median ${median.toFixed(1)} ms, worst ${sorted[LISTS - 1]!.toFixed(1)} ms`);
-      expect(listsEnded).toBeLessThan(searchEnded); // every list was answered while the search ran
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 22; the dispatch's item 4):
+  // a path that only a tool's result names no longer stops the search at that result: it goes on to the bound for a
+  // counted form, which costs what a miss costs. A reading, not a bound: the case asserts the answer and the order alone.
+  it(`fifty files.list calls while a ${NAMED_SCAN_BYTES} byte search finds a result form alone`, { timeout: 15 * 60_000 }, async () => {
+    const fixture = await StoreFixture.create();
+    try {
+      const call = JSON.stringify({ type: 'assistant', uuid: 'a-call', message: { role: 'assistant', content: [{ type: 'tool_use', id: 'toolu_measured', name: 'mcp__docs__find', input: { query: 'report' } }] } });
+      const result = JSON.stringify({ type: 'user', uuid: 'u-result', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_measured', content: `Found [the report](${P}).` }] } });
+      const file = await transcriptOfTheBound(fixture, [call, result]);
+      const named = createNamedPaths({ transcript: async () => file, bounds: { waitMs: 15 * 60_000 } });
+      expect(await listsDuring(fixture, 'named, result only', () => named.names(S, P))).toBe('result');
     } finally {
       await fixture.dispose();
     }

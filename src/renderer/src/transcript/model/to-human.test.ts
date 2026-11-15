@@ -138,6 +138,23 @@ describe('a message tool’s call', () => {
     expect(isPersistentRow(message)).toBe(true);
   });
 
+  // UX wave U2b (decision 8): once the session holds a message, with the lane on, no turn folds: the message's turn
+  // derives open, its work in sight between the rows the person reads (the mirror folds it by stretch, owner/view/).
+  it('derives its closed turn open while the view is in force', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('m1', MAWS, { text: 'Stage 1 is done.' }, 'a2', 0);
+    b.result('m1', SENT);
+    b.toolUse('t1', 'Bash', { command: 'sh stage.sh 2' }, 'a2', 1);
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.end(['u1']);
+    const state = laneOn(reduce(b.events));
+    const inForce = withUi(state, { ...state.ui, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 });
+    const rows = rowsOf(inForce);
+    expect(ofKind(rows, 'divider')[0]).toMatchObject({ state: 'completed', expanded: true });
+    expect(kinds(rows)).toEqual(['user', 'divider', 'to_human', 'cell']);
+  });
+
   // A subagent's text draws in its own transcript and never in its parent's (the parent shows the agent's row); its
   // message call does the same.
   it('a subagent’s call draws in the subagent’s transcript as its text does, and not in its parent’s', () => {

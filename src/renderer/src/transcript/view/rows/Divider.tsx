@@ -77,6 +77,32 @@ export function useDividerSummary(row: DividerRowData | undefined, open: boolean
 
 export function DividerRow({ row }: { row: DividerRowData }) {
   const { storeKey } = useTranscriptContext();
+  // UX wave U2b (decision 8): while the to-human view is in force MAWS folds no turn, so its line folds nothing
+  const unfolding = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.noTurnFold === true);
+  return unfolding ? <TurnLine row={row} /> : <FoldingDividerRow row={row} />;
+}
+
+// A turn's line where no turn folds: its words, its counts and its summary, with no chevron. Ruling 3 of 2026-11-15,
+// item vii: the line keeps the indent its chevron gave, the chevron's slot left empty.
+function TurnLine({ row }: { row: DividerRowData }) {
+  const { storeKey } = useTranscriptContext();
+  const { durationMs, label } = useDividerSummary(row, false);
+  return (
+    <>
+      <div className="transcript-divider">
+        <span className="transcript-turn-line">
+          <span className="transcript-chevron" aria-hidden="true" />
+          {label}
+        </span>
+        <DividerDetails row={row} durationMs={durationMs} />
+      </div>
+      {row.state === 'working' && <PluginStatusLine storeKey={storeKey} />}
+    </>
+  );
+}
+
+function FoldingDividerRow({ row }: { row: DividerRowData }) {
+  const { storeKey } = useTranscriptContext();
   const motion = useWorkMotion();
   const turn = row.turnId!;
   const open = !useSyncExternalStore(motion.subscribe, () => motion.isFolding(turn)) && row.expanded;

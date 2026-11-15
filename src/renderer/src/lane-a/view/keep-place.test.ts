@@ -178,10 +178,10 @@ describe('the reader’s place through an older page', () => {
     expect(s.at()).toBe(400);
   });
 
-  it('in the report, a row the list has not drawn is jumped to by its index among the rows the list draws, not the held rows', async () => {
-    // Two turns held: the first marked, its three responses of unmarked text folded into one working record; the second
-    // the reader's place. The page brings the first turn's prompt. In the report the list draws the record in place of
-    // the three responses, so the held rows put the reader's row two places further down than the list does.
+  it('in the to-human view, a row the list has not drawn is jumped to by its index among the rows the list draws, not the held rows', async () => {
+    // Two turns held: the first marked, its three responses of unmarked text one stretch under one record line; the
+    // second's message the reader's place. The page brings the first turn's prompt. In the view the list draws the record
+    // in place of the three responses, so the held rows put the reader's row further down than the list does.
     const recorded = readRecording().session;
     const prompt = recorded[0];
     const textRow = recorded.find((r) => r.type === 'assistant' && JSON.stringify(r.message).includes('"type":"text"'))!;
@@ -193,17 +193,18 @@ describe('the reader’s place through an older page', () => {
       said('work-2', 'work-1', 'Step three.'),
       said('answer', 'work-2', '<message>All three are done.</message>'),
       { ...prompt, uuid: 'second-prompt', parentUuid: 'answer', message: { role: 'user', content: 'And one more thing.' } },
-      said('second-answer', 'second-prompt', 'The second answer, unmarked.'),
+      said('second-answer', 'second-prompt', '<message>The second answer.</message>'),
     ];
     const key = `keep-place-report-${Math.random()}`;
     const store = useTranscriptStore.getState();
     await store.attach(key, freshSource(rows, 'sess-1', subagentLookupOf([])), { agentId: null as never });
-    store.setOwnerLane(key, true);
+    store.setToHumanView(key, { lane: true, tailMessage: false });
     try {
       const held = useTranscriptStore.getState().entries[key].rows;
       const kept = held.find((r) => r.kind === 'assistant_text' && r.id.includes('second-answer'))!.id;
       const drawn = drawnRows(key, []);
-      expect(drawn.findIndex((r) => r.id === kept)).toBe(held.findIndex((r) => r.id === kept) - 2);
+      expect(drawn.findIndex((r) => r.id === kept)).toBeGreaterThan(0);
+      expect(drawn.findIndex((r) => r.id === kept)).toBeLessThan(held.findIndex((r) => r.id === kept) - 1);
 
       const s = scene({ kept, rows: held.slice(1), indexOf: (id) => drawnRows(key, []).findIndex((r) => r.id === id) });
       s.view.rerender({ rows: held.slice(1), loading: true });

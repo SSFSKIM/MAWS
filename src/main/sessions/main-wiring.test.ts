@@ -23,7 +23,7 @@ vi.mock('electron', () => ({
   safeStorage: {}, // P5 O4 M2: the legacy grants' sealer, asked nothing with no format 1 file
   systemPreferences: { promptTouchID: vi.fn() }, // P5 O7 M2: the step-up sheet's Touch ID, behind the confirm every signer takes
 }));
-vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, beforeCommand: () => () => {} /* P5 O4 M2 */, CommandFailure: class extends Error {} }));
+vi.mock('../ipc/router', () => ({ installRouter: vi.fn(), registerMainHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn), registerMachineHandler: (name: string, fn: (input?: unknown) => unknown) => state.handlers.set(name, fn) /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, beforeCommand: () => () => {} /* P5 O4 M2 */, guardCommand: () => () => {} /* UX wave U6e */, CommandFailure: class extends Error {} }));
 vi.mock('../machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('@shared/host/shell-env', () => ({ captureShellEnvironment: async () => ({ HOME: join(state.root, 'home') }) }));
 const daemonWatch = { status: () => null, refresh: () => {}, onStatus: () => () => {} };

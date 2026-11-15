@@ -155,7 +155,7 @@ describe('editor registrations', () => {
       fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
       await act(() => closing);
       expect(tabOpen()).toBe(true);
-      expect(entry().theirs).toEqual({ text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge' });
+      expect(entry().theirs).toEqual({ text: 'const a = 2;\n', hash: fakeHash('const a = 2;\n'), view: 'merge', real: null });
       expect(disk.files[APP]).toBe('const a = 2;\n');
     });
 
@@ -226,6 +226,174 @@ describe('editor registrations', () => {
       act(() => useLayout.getState().closeDestination());
       runAction('file.save');
       await waitFor(() => expect(disk.callsOf('files.write')).toHaveLength(1));
+    });
+  });
+
+  // UX wave U6e (M3; write rule 2, the page's half): an outside file is written only by a press, each of the four sending
+  // one `files.writeOutside` with the real path the page pinned; nothing else the page does sends a save.
+  describe('an outside file is saved only by a press (U6e)', () => {
+    const OUT = '/elsewhere/notes.txt';
+    const OUT_ID = `file:${TEST_MACHINE}:${OUT}`;
+    const outsideEntry = () => useViewer.getState().entries.get(OUT_ID);
+    const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+    async function openOutside(by: 'names' | 'results') {
+      const disk = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], [by]: () => true });
+      offs.push(connectCodeEvents());
+      openFile(A, OUT, null, { main: true });
+      const shown = render(
+        <>
+          <FileViewer tab={fileTab(OUT)} />
+          <EditorDialogs />
+        </>,
+      );
+      await waitFor(() => expect(outsideEntry()?.status).toBe('ready'));
+      return { disk, shown, saves: () => [...disk.callsOf('files.write'), ...disk.callsOf('files.writeOutside')] };
+    }
+    const typeAndWait = async (text: string) => {
+      await waitFor(() => expect(view()?.state.facet(EditorView.editable)).toBe(true));
+      type(text);
+      await waitFor(() => expect(outsideEntry()!.dirty).toBe(true));
+    };
+
+    it('opening, a re-read, typing, the tab shown again and an agent’s open send no save; Save, ⌘S, the close question’s Save and Save all each send one', async () => {
+      const { disk, shown, saves } = await openOutside('names');
+      act(() => void openFile(A, OUT, null, { main: true })); // opened again: a re-read
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(2));
+      await typeAndWait('a ');
+      shown.rerender(<EditorDialogs />);
+      shown.rerender(
+        <>
+          <FileViewer tab={fileTab(OUT)} />
+          <EditorDialogs />
+        </>,
+      ); // shown again
+      act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+      await settle();
+      expect(saves()).toEqual([]);
+      expect(disk.files[OUT]).toBe('one\n');
+
+      fireEvent.click(screen.getByRole('button', { name: 'Save' })); // the bar's Save
+      await waitFor(() => expect(disk.files[OUT]).toBe('a one\n'));
+      await typeAndWait('b ');
+      runAction('file.save'); // ⌘S
+      await waitFor(() => expect(disk.files[OUT]).toBe('b a one\n'));
+      await typeAndWait('c ');
+      const closing = requestCloseTab(OUT_ID); // the close question's Save
+      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
+      await act(() => closing);
+      expect(disk.files[OUT]).toBe('c b a one\n');
+      shown.unmount();
+      openFile(A, OUT, null, { main: true });
+      render(<FileViewer tab={fileTab(OUT)} />);
+      await waitFor(() => expect(outsideEntry()?.text).toBe('c b a one\n'));
+      await typeAndWait('d ');
+      await act(() => useViewer.getState().saveAll()); // the quit question's Save all
+      expect(disk.files[OUT]).toBe('d c b a one\n');
+      expect(disk.callsOf('files.writeOutside').map((input) => [input.path, input.real])).toEqual([[OUT, OUT], [OUT, OUT], [OUT, OUT], [OUT, OUT]]);
+      expect(disk.callsOf('files.write')).toEqual([]);
+    });
+
+    it('a file named only by a tool’s result takes no typing and no save by any of the four', async () => {
+      const { saves } = await openOutside('results');
+      expect(outsideEntry()).toMatchObject({ locked: 'result', editable: false });
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull();
+      runAction('file.save');
+      await act(() => useViewer.getState().saveAll());
+      expect(await act(() => useViewer.getState().save(OUT_ID))).toBe('noop');
+      await act(() => requestCloseTab(OUT_ID));
+      expect(sheet()).toBeNull();
+      await settle();
+      expect(saves()).toEqual([]);
+    });
+  });
+
+  // The panel's finding 3: a dirty tab in the merge view whose latest admission locks the file (a save's conflict read
+  // that answers only a tool's result, or the edits moved to a session whose transcript names the file only by one) keeps
+  // the ways out that write nothing: Reload takes theirs, and the close question's Don't save closes it, the bytes as they
+  // are. Save stays locked: none of the routes writes.
+  describe('a locked, dirty tab in the merge view keeps its ways out (U6e)', () => {
+    const OUT = '/elsewhere/notes.txt';
+    const OUT_ID = `file:${TEST_MACHINE}:${OUT}`;
+    const B = at('app-b' as AppSessionId);
+    const outsideEntry = () => useViewer.getState().entries.get(OUT_ID)!;
+    const outTab = (appSessionId: AppSessionId): Extract<TabRef, { kind: 'file' }> => ({ id: OUT_ID, kind: 'file', path: OUT, line: null, appSessionId, machine: TEST_MACHINE, pinned: false });
+
+    async function lockedInMerge(route: 'conflict read' | 'session move') {
+      const names = new Set(['app-a']); // the sessions whose transcript links the file by a counted form
+      const results = new Set<string>(); // … by a tool's result only
+      const disk = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], names: (session) => names.has(session), results: (session) => results.has(session) });
+      offs.push(connectCodeEvents());
+      openFile(A, OUT, null, { main: true });
+      const viewer = (appSessionId: AppSessionId) => (
+        <>
+          <FileViewer tab={outTab(appSessionId)} />
+          <EditorDialogs />
+        </>
+      );
+      const shown = render(viewer(A));
+      await waitFor(() => expect(view()?.state.facet(EditorView.editable)).toBe(true));
+      type('mine ');
+      await waitFor(() => expect(outsideEntry().dirty).toBe(true));
+      disk.files[OUT] = 'theirs\n'; // changed on disk: the save finds it
+      if (route === 'conflict read') {
+        const write = disk.hold('files.writeOutside');
+        const saving = useViewer.getState().save(OUT_ID);
+        await waitFor(() => expect(disk.callsOf('files.writeOutside')).toHaveLength(1));
+        names.delete('app-a'); // the conflict's read answers: named only by a tool's result
+        results.add('app-a');
+        write.release();
+        expect(await act(() => saving)).toBe('conflict');
+      } else {
+        expect(await act(() => useViewer.getState().save(OUT_ID))).toBe('conflict');
+        expect(outsideEntry()).toMatchObject({ locked: null, theirs: { view: 'merge' } });
+        results.add('app-b'); // the edits move to a session whose transcript names the file only by a tool's result
+        shown.rerender(viewer(B));
+      }
+      await waitFor(() => expect(outsideEntry()).toMatchObject({ dirty: true, locked: 'result', editable: false, theirs: { view: 'merge', text: 'theirs\n' } }));
+      await waitFor(() => expect(outsideEntry().pending).toBe(0));
+      expect(screen.queryByRole('button', { name: 'Save' })).toBeNull(); // Save stays locked
+      expect(await act(() => useViewer.getState().save(OUT_ID))).toBe('noop');
+      return { disk, writes: () => disk.callsOf('files.writeOutside').length + disk.callsOf('files.write').length };
+    }
+
+    it.each(['conflict read', 'session move'] as const)('Reload takes theirs (%s), and nothing is written', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      fireEvent.click(screen.getByRole('button', { name: 'Reload' }));
+      await waitFor(() => expect(outsideEntry()).toMatchObject({ dirty: false, theirs: null, text: 'theirs\n' }));
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
+    });
+
+    it.each(['conflict read', 'session move'] as const)('the close question’s Don’t save closes it (%s), the bytes unchanged', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      const closing = requestCloseTab(OUT_ID);
+      const question = await screen.findByRole('dialog');
+      expect(within(question).queryByRole('button', { name: 'Save' })).toBeNull(); // the task review's finding 3
+      fireEvent.click(within(question).getByRole('button', { name: 'Don’t save' }));
+      await act(() => closing);
+      expect(allTabs(useLayout.getState().main).some((tab) => tab.id === OUT_ID)).toBe(false);
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
+    });
+    // The task review's finding 3: the locked question offers no Save, a save that cannot happen; its two answers are
+    // Cancel and Don't save, and Cancel, which keeps the tab and writes nothing, holds the keyboard.
+    it.each(['conflict read', 'session move'] as const)('the close question offers no Save (%s); Cancel holds the keyboard and keeps the tab, the bytes unchanged', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      const closing = requestCloseTab(OUT_ID);
+      const question = await screen.findByRole('dialog');
+      expect(within(question).getAllByRole('button').map((button) => button.textContent)).toEqual(['Don’t save', 'Cancel']);
+      expect(within(question).queryByRole('button', { name: 'Save' })).toBeNull();
+      const cancel = within(question).getByRole('button', { name: 'Cancel' });
+      await waitFor(() => expect(document.activeElement).toBe(cancel));
+      fireEvent.click(cancel);
+      await act(() => closing);
+      expect(allTabs(useLayout.getState().main).some((tab) => tab.id === OUT_ID)).toBe(true);
+      expect(outsideEntry()).toMatchObject({ dirty: true, locked: 'result' });
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
     });
   });
 
@@ -328,7 +496,7 @@ describe('a file beside the chat as an editor', () => {
       const asked = await screen.findByRole('dialog', { name: 'Save changes to app.ts?' });
       expect(sheet()!.getAttribute('data-editor-close')).toBe(ID);
       fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
       expect(entry().dirty).toBe(true);
 
@@ -346,7 +514,7 @@ describe('a file beside the chat as an editor', () => {
       disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it
       let closing = closeSide(tabId);
       fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
       expect(entry().theirs?.view).toBe('merge');
 
@@ -355,7 +523,7 @@ describe('a file beside the chat as an editor', () => {
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).not.toContain(tabId);
       const writes = disk.callsOf('files.write').length;
       closing = closeSide(tabId);
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sheet()).toBeNull();
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toContain(tabId);
       expect(disk.callsOf('files.write')).toHaveLength(writes);
@@ -402,7 +570,7 @@ describe('a file beside the chat as an editor', () => {
       act(() => void openFile(A, LIB, null, { keep: true }));
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).not.toContain(tabId);
       fireEvent.click(within(asked).getByRole('button', { name: 'Save' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toContain(tabId);
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toContain(tabId);
       expect(disk.callsOf('files.write')).toHaveLength(1);

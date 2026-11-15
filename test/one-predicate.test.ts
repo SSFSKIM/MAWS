@@ -28,7 +28,6 @@ const comparisons = (text: string): number => (text.includes('delivered') ? COMP
 
 // A file whose `state` is not an attention item's. Adding one is an edit here, with its count and its reason.
 const EXCEPTIONS: Record<string, { count: number; why: string }> = {
-  'src/renderer/src/owner/report/QuestionCard.tsx': { count: 2, why: "an owner-channel question's own state (src/shared/owner/state.ts), not an attention item's" },
   'src/services/channel/lane-b.ts': { count: 1, why: "an owner mark's question state, not an attention item's" },
 };
 

@@ -16,8 +16,8 @@ import type { Row } from '../../transcript/model/rows';
 import type { TranscriptListHandle } from '../../transcript/view/Transcript';
 import { watchReaderIntent } from './reader-intent';
 
-/** Rows keyed by their turn (which a rebuild can rename: the report's working record too) or drawn by the stream (which a row replaces). */
-const VOLATILE = /^(time|divider|owner-record|desk-stream):/;
+/** Rows keyed by their turn (which a rebuild can rename), a record line of the to-human view (whose id changes as it opens or folds), or drawn by the stream (which a row replaces). */
+const VOLATILE = /^(time|divider|record-fold|desk-stream):/;
 /** Frames the offset must hold, after an index jump, before the place is the list's again; and the most it waits. */
 const STEADY_FRAMES = 5;
 const MAX_FRAMES = 120;

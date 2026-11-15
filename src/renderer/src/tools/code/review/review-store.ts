@@ -44,6 +44,7 @@ export interface ReviewStore {
   refresh(target: DiffTarget): void; // re-read now (the tool shown again, a focus request)
   statusChanged(checkout: string): void; // a new status for the git store's checkout: every held scope of it re-reads, trailing
   loadFile(target: DiffTarget, path: string, untracked?: boolean): void; // P5 O7 M8: `untracked`, a file the status lists untracked
+  retryFile(target: DiffTarget, path: string, untracked?: boolean): void; // UX wave U5b: Retry, a file's own read that failed
   lookupBase(machine: MachineRef, repoRoot: string, branch: string, session?: AppSessionId): void; // P5 O7 M4: `session`, the read's
   reset(): void; // tests
 }
@@ -85,6 +86,12 @@ export function createReviewStore(
       // `untracked` scope (the file against /dev/null, as `git add` would stage it), so it shows as added
       loadFile(target, path, untracked = false) {
         heldDiffs.loadFile(target, path, untracked ? { directory: target.directory, scope: 'untracked', path } : undefined);
+      },
+
+      // UX wave U5b (§F, the bodies): Retry in a file's row asks its own read again; a read in flight or answered is left
+      retryFile(target, path, untracked = false) {
+        if (fileDiffOf(get(), target, path)?.status !== 'error') return;
+        heldDiffs.reloadFile(target, path, untracked ? { directory: target.directory, scope: 'untracked', path } : undefined);
       },
 
       lookupBase(machine, repoRoot, branch, session) {
@@ -143,6 +150,7 @@ export interface ReviewData {
   branch: BranchAvailability;
   staged: boolean; // the index differs from HEAD
   target: DiffTarget | null; // the git scope held, for a file fetched past the cap and a refresh
+  pastCap: boolean; // the scope's patch is past REVIEW_SCOPE_BYTES_CAP: its files open folded and each is read on its own
   list: ReviewList;
 }
 
@@ -205,7 +213,7 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
     if (scope === null) return { phase: 'pending' };
     if (scope === 'turn') {
       if (!turn) return { phase: 'unavailable', message: REVIEW_COPY.unavailable(REVIEW_COPY.turnNotLoaded) };
-      return { phase: 'ready', files: turnScopeFiles(turn.divider?.files ?? [], turn.activity) };
+      return { phase: 'ready', files: turnScopeFiles(turn.divider?.files ?? [], turn.activity, status?.repoRoot ?? null) };
     }
     if (!status) {
       if (gitError === NOT_A_REPOSITORY) return { phase: 'unavailable', message: REVIEW_COPY.notRepository };
@@ -218,5 +226,6 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
     return { phase: 'ready', files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status }) };
   }, [scope, turn, status, gitError, branch, diff]);
 
-  return { status, gitFailed: status === null && gitError !== null, branch, staged: indexDiffers(status), target, list };
+  const pastCap = diff?.status === 'ok' && diff.patch === null;
+  return { status, gitFailed: status === null && gitError !== null, branch, staged: indexDiffers(status), target, pastCap, list };
 }

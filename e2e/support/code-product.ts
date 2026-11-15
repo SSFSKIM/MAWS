@@ -5,7 +5,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { addressed } from './address';
 import { buildCodeScratch, type CodeScratch } from './code-scratch';
-import { launchMaws, type MawsLaunch } from './launch';
+import { launchMaws, type MawsLaunch, type ShellLaunchOptions } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
 import { mainTabById, openSurface, sideColumn, surface } from './shell';
@@ -76,12 +76,13 @@ export interface Product {
   scratch: CodeScratch;
 }
 
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void): Promise<void> {
+// `launch`: the app's AppKit defaults for this launch (classic scroll bars, for a scene that drags one).
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, launch: Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
   const scratch = buildCodeScratch();
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
-    maws = await launchMaws({ env: scratch.env });
+    maws = await launchMaws({ env: scratch.env, ...launch });
     const { page } = maws;
     // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
@@ -136,17 +137,209 @@ export async function openInViewer(p: Product, relative: string): Promise<Locato
 export const sideFileTab = (page: Page, name: string): Locator =>
   sideColumn(page).locator('[data-side-strip] [data-tab-id]').filter({ has: page.getByRole('tab', { name, exact: true }) });
 
-// Review in the panel on its default scope (Uncommitted on this dirty tree).
+// Review in the panel on its default scope (Uncommitted on this dirty tree), its toolbar measured as drawn. UX wave U5b:
+// the totals no longer name the scope (card 1 at its default), the pressed chip above them does.
 export async function openReview(p: Product): Promise<Locator> {
   await addTool(p, 'Review');
   const review = surface(p.page, 'review').locator('[data-review]');
-  await expect(review.locator('[data-review-header]')).toContainText('· Uncommitted');
+  await expect(review.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true');
+  await expect(review.locator('[data-review-header]')).toContainText(' changed · ');
+  await expectToolbarAsDrawn(review, "Review's toolbar as drawn in the panel"); // measured, in every scene that opens it here
   return review;
 }
 
-export async function selectReviewFile(review: Locator, path: string): Promise<void> {
-  await review.locator(`[role="option"] button[data-path="${path}"]`).click();
-  await expect(review.locator(`[role="option"][aria-selected="true"] button[data-path="${path}"]`)).toBeVisible();
+// ---- UX wave U5b (M6): Review as one stack of sections (the U5b execution document's §F) -----------------------------------
+
+export const reviewSection = (review: Locator, path: string): Locator => review.locator(`[data-review-file="${path}"]`);
+
+// The paths of the stack's sections, in order.
+export const sectionPaths = (review: Locator): Promise<string[]> => review.locator('[data-review-stack] > [data-review-file]').evaluateAll((sections) => sections.map((s) => s.getAttribute('data-review-file') ?? ''));
+
+// A file's section brought to the top of the stack as a reader scrolls to it: a wheel, then the scroll (the stack reads a
+// scroll with no input before it as a layout change, M4 decision 17 b), as the harness's `selectFile` does. Answers the
+// section; at the end of the stack the scroller stops short and the section is in view below its top.
+export async function selectReviewFile(review: Locator, path: string): Promise<Locator> {
+  const section = reviewSection(review, path);
+  await expect(section).toHaveCount(1);
+  await scrollIntoSection(review, path, 0);
+  await expect(section).toBeInViewport();
+  return section;
+}
+
+// A reader's scroll to `depth` pixels below the top of a file's section (the same wheel, then the scroll).
+export async function scrollIntoSection(review: Locator, path: string, depth: number): Promise<void> {
+  await review.locator('[data-review-stack]').evaluate(
+    (scroller, { path, depth }) => {
+      const section = Array.from(scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')).find((each) => each.dataset.reviewFile === path);
+      if (!section) throw new Error(`no section for ${path}`);
+      scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+      scroller.scrollTop = section.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop + depth;
+    },
+    { path, depth },
+  );
+}
+
+// The hunk counter as drawn ("Showing hunk 3 of 6", or "3 of 6" where the long form does not fit, card 1): null while no
+// file is loaded.
+export const hunkCounter = async (review: Locator): Promise<{ index: number; count: number } | null> => {
+  const counter = review.locator('[data-review-hunk]');
+  if ((await counter.count()) === 0) return null;
+  const found = /(\d+) of (\d+)/.exec((await counter.textContent()) ?? '');
+  return found ? { index: Number(found[1]), count: Number(found[2]) } : null;
+};
+
+// Where the stack is being read, measured on the page (unified rows): the section at the scroller's top, the diff row at
+// the reading edge under its sticky header (M4 decision 16 b) by its line numbers ("old 12 new 13"), and the pixels of
+// that row above the edge; with the header's and the section's tops from the scroller's top (a header that sticks reads
+// 0 while its section's top is above the scroller's).
+export interface StackTop {
+  path: string;
+  row: string | null; // null: no diff row reaches the edge (a body of words, or the edge on the header)
+  offset: number;
+  header: number;
+  section: number;
+}
+
+// `want` names a place read earlier: its row's offset from today's edge is answered too (null: that row is not drawn in
+// the section at the top), so a place is compared by its own row, never by whichever row a sub-pixel puts at the edge.
+function readTop(review: Locator, want: { path: string; row: string } | null): Promise<(StackTop & { wanted: number | null }) | null> {
+  return review.locator('[data-review-stack]').evaluate((scroller, want) => {
+    const top = scroller.getBoundingClientRect().top;
+    const section = Array.from(scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')).find((each) => {
+      const box = each.getBoundingClientRect();
+      return box.top <= top + 0.5 && box.bottom > top + 0.5;
+    });
+    if (!section) return null;
+    const header = section.querySelector<HTMLElement>(':scope > [data-review-file-header]')!.getBoundingClientRect();
+    const edge = header.bottom;
+    const lines = (tr: Element) =>
+      Array.from(tr.querySelectorAll<HTMLElement>('[data-line-old-num], [data-line-new-num]'))
+        .map((cell) => (cell.dataset.lineOldNum ? `old ${cell.dataset.lineOldNum}` : cell.dataset.lineNewNum ? `new ${cell.dataset.lineNewNum}` : ''))
+        .filter(Boolean)
+        .join(' ');
+    let row: string | null = null;
+    let offset = 0;
+    let wanted: number | null = null;
+    for (const tr of Array.from(section.querySelectorAll(':scope > [data-review-body] tr'))) {
+      const name = lines(tr);
+      if (name === '') continue;
+      const box = tr.getBoundingClientRect();
+      if (want !== null && want.path === section.dataset.reviewFile && want.row === name) wanted = edge - box.top;
+      if (box.top > edge + 0.5) continue;
+      row = name;
+      offset = edge - box.top;
+    }
+    return { path: section.dataset.reviewFile!, row, offset, header: header.top - top, section: section.getBoundingClientRect().top - top, wanted };
+  }, want);
+}
+
+export const stackTop = async (review: Locator): Promise<StackTop | null> => {
+  const read = await readTop(review, null);
+  return read === null ? null : { path: read.path, row: read.row, offset: read.offset, header: read.header, section: read.section };
+};
+
+// The place once the stack has come to rest: two reads a poll apart that agree.
+export async function settledTop(review: Locator): Promise<StackTop> {
+  let last = '';
+  let read: StackTop | null = null;
+  await expect
+    .poll(
+      async () => {
+        read = await stackTop(review);
+        const now = JSON.stringify(read);
+        const same = read !== null && read.row !== null && now === last;
+        last = now;
+        return same;
+      },
+      { message: 'the stack comes to rest on a diff row' },
+    )
+    .toBe(true);
+  return read!;
+}
+
+// The same file and line at the top: the section at the scroller's top is the place's, and the place's own row stands
+// at the reading edge within a pixel of where it stood; once reached, and again once the stack has come to rest (so a
+// layout still settling cannot pass on a passing frame).
+export async function expectPlaceAtTop(review: Locator, place: StackTop, message: string): Promise<void> {
+  const there = async () => {
+    const read = await readTop(review, place.row === null ? null : { path: place.path, row: place.row });
+    return { path: read?.path ?? null, row: place.row, there: read?.wanted !== null && read?.wanted !== undefined && Math.abs(read.wanted - place.offset) <= 1 };
+  };
+  const want = { path: place.path, row: place.row, there: true };
+  await expect.poll(there, { message }).toEqual(want);
+  await settledTop(review);
+  expect(await there(), `${message}, at rest`).toEqual(want);
+}
+
+// The sticky header, measured: the section at the top has scrolled under its header, which stands at the scroller's top.
+export function expectHeaderSticks(top: StackTop, message: string): void {
+  expect(Math.abs(top.header), `${message}: the header at the scroller's top`).toBeLessThanOrEqual(1);
+  expect(top.section, `${message}: the section's top scrolled above it`).toBeLessThan(-1);
+}
+
+// The toolbar's parts measured (§F: it wraps by measure, not by a width): the bar's box, the totals' and the controls'
+// (Collapse all to View, one box around them), each with its vertical middle, and the lines the toolbar says it drew.
+interface Box {
+  top: number;
+  bottom: number;
+  left: number;
+  right: number;
+  middle: number;
+}
+export function toolbarLayout(review: Locator): Promise<{ lines: number; bar: Box; totals: Box; controls: Box }> {
+  return review.locator('[data-review-toolbar]').evaluate((bar) => {
+    const box = (rects: DOMRect[]) => {
+      const top = Math.min(...rects.map((r) => r.top));
+      const bottom = Math.max(...rects.map((r) => r.bottom));
+      return { top, bottom, left: Math.min(...rects.map((r) => r.left)), right: Math.max(...rects.map((r) => r.right)), middle: (top + bottom) / 2 };
+    };
+    const of = (selector: string) => bar.querySelector(selector)!.getBoundingClientRect();
+    return { lines: Number(bar.getAttribute('data-lines')), bar: box([bar.getBoundingClientRect()]), totals: box([of('[data-review-header]')]), controls: box([of('[data-review-collapse]'), of('[data-review-nav]')]) };
+  });
+}
+
+// The toolbar as drawn at whatever width it has, measured against the lines it says it drew: on one line its totals
+// beside its controls, on two or three (a comment chip of its own line) its controls under its totals; its controls
+// inside the bar either way.
+export async function expectToolbarAsDrawn(review: Locator, message: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { lines, bar, totals, controls } = await toolbarLayout(review);
+        const laid = lines === 1 ? Math.abs(totals.middle - controls.middle) <= 2 : (lines === 2 || lines === 3) && controls.top >= totals.bottom - 0.5;
+        return { laid, inside: controls.left >= bar.left - 0.5 && controls.right <= bar.right + 0.5 };
+      },
+      { message },
+    )
+    .toEqual({ laid: true, inside: true });
+}
+
+// The View menu opened by a press on its button, then measured: it stands against the button (below it, or above where
+// the window has no room below, within the menu's offset) and over it horizontally, and wholly inside the window.
+// Answers the open menu; the caller closes it.
+export async function expectViewMenuPlaced(review: Locator): Promise<Locator> {
+  const page = review.page();
+  const trigger = review.locator('[data-review-view]');
+  await trigger.click();
+  const menu = page.getByRole('menu').filter({ has: page.locator('[data-review-view-item]') });
+  await expect(menu).toBeVisible();
+  await expect
+    .poll(
+      async () => {
+        const [button, open, room] = [await trigger.boundingBox(), await menu.boundingBox(), await page.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }))];
+        if (!button || !open) return null;
+        const below = open.y - (button.y + button.height);
+        const above = button.y - (open.y + open.height);
+        return {
+          against: (below >= -0.5 && below <= 8) || (above >= -0.5 && above <= 8),
+          over: open.x <= button.x + button.width && open.x + open.width >= button.x,
+          inside: open.x >= -0.5 && open.y >= -0.5 && open.x + open.width <= room.width + 0.5 && open.y + open.height <= room.height + 0.5,
+        };
+      },
+      { message: 'the View menu against its button, inside the window' },
+    )
+    .toEqual({ against: true, over: true, inside: true });
+  return menu;
 }
 
 // The flashed line of the code view: its text, where its middle sits in the scroller (0 top, 1 bottom), and whether
@@ -196,7 +389,7 @@ export async function recordNotices(page: Page): Promise<() => Promise<string[]>
 }
 
 // A short window, so a 33-line file and a three-hunk diff scroll.
-export async function shortWindow({ maws, page }: Product): Promise<void> {
+export async function shortWindow({ maws, page }: Pick<Product, 'maws' | 'page'>): Promise<void> {
   await maws.app.evaluate(({ BrowserWindow }) => {
     const win = BrowserWindow.getAllWindows()[0];
     win.setMinimumSize(600, 300);

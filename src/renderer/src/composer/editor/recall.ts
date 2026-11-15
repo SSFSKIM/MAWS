@@ -55,10 +55,11 @@ const unavailable = (placeholder: Placeholder): PastedAttrs =>
     ? { id: atomId('pasted'), kind: 'text', name: `Pasted text #${placeholder.n}`, lines: placeholder.lines, text: null }
     : { id: atomId('pasted'), kind: placeholder.kind, name: `${placeholder.kind === 'image' ? 'Image' : 'PDF'} #${placeholder.n}`, lines: 0, text: null };
 
-const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string): PastedAttrs => ({
+// UX wave U10b (M9, §E.3): a prefill's pasted entry names its chip when it gives a name (a Space's instructions do)
+const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string, name?: string): PastedAttrs => ({
   id: atomId('pasted'),
   kind: 'text',
-  name: `Pasted text #${placeholder.n}`,
+  name: name ?? `Pasted text #${placeholder.n}`,
   lines: body.split('\n').length,
   text: body,
 });
@@ -104,9 +105,10 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     prefill.text,
     (placeholder) => {
       if (placeholder.kind !== 'pasted') return unavailable(placeholder);
-      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : prefill.pasted?.[k]?.text;
+      const entry = bodies ? undefined : prefill.pasted?.[k];
+      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : entry?.text;
       if (!bodies) k++;
-      return body !== undefined ? available(placeholder, body) : unavailable(placeholder);
+      return body !== undefined ? available(placeholder, body, entry?.name) : unavailable(placeholder);
     },
     images,
   );

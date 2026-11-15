@@ -131,7 +131,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // E4c end
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
-import { openArtifactTab, showOpenArtifactTab } from './library/actions'; // P3-F wave S (F14); UX wave U6d: showOpenArtifactTab
+import { openArtifactTab, showOpenArtifactTab, undeleteSessionArtifact } from './library/actions'; // P3-F wave S (F14); UX wave U6d: showOpenArtifactTab; UX wave U10b: undeleteSessionArtifact
 import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsTool';
 import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
@@ -309,7 +309,7 @@ export function App() {
   useEffect(() => {
     registerPanelTool(artifactsTool);
   }, []);
-  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel, openArtifactTab, showOpenArtifactTab }), []); // P3-F wave S (F14): openArtifactTab, an artifact link's ⌘-click; UX wave U6d: showOpenArtifactTab, the main tab a mention's click shows when one holds the artifact
+  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel, openArtifactTab, showOpenArtifactTab, undeleteArtifact: undeleteSessionArtifact }), []); // P3-F wave S (F14): openArtifactTab, an artifact link's ⌘-click; UX wave U6d: showOpenArtifactTab, the main tab a mention's click shows when one holds the artifact; UX wave U10b: undeleteArtifact, the delete row's Undo
   // E2 end
   // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
   // connects the hosts store app-wide (Diagnostics and Settings read it too)

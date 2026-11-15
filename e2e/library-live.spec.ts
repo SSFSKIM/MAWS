@@ -296,3 +296,194 @@ test('an agent makes an html artifact and a file artifact through the tools; the
   }
   if (failure !== null) throw failure;
 });
+
+// UX wave U10b-4 (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, "Proof that an executor does not run" 10,
+// A7 and A8; ruled 2026-11-15, allowed once at the landing): the only proof that an agent acts on the opening words. A
+// Space with instructions and the Classroom design system chosen, the words a card of "Make something new" puts in the
+// box for a document (askClaudePrefill: "Make a document in the Space “…”, in the design system “…”: ") completed with
+// a short ask and sent from the real composer. The prompt names the tool, never its inputs: the agent reads `space` and
+// `designSystem` off the words and the tool's description. Its `artifact_create` passes `designSystem` (Classroom by id or
+// by name), the new document is in the Space and bound to Classroom, and the answer carries the Space's instructions as
+// `spaceInstructions`. The same scratch, relay, engine, cap and bookkeeping as the case above; it runs with it in the
+// group, or alone: MAWS_LIBRARY_LIVE=1 pnpm e2e:library-live -g "the opening words".
+const U10B_SPACE = 'Science fair';
+const U10B_INSTRUCTIONS = 'Write for ninth graders.\nEnd every document with one question for the class.';
+const U10B_TITLE = 'Bus departure';
+const U10B_PROMPT =
+  'Make a document in the Space “Science fair”, in the design system “Classroom”: ' +
+  `a two-sentence note titled "${U10B_TITLE}" saying the bus leaves the north gate at 8:15. ` +
+  'Make it yourself with one call of mcp__maws__artifact_create, never through an agent, and do not read, list or inspect any file. ' +
+  'Then reply with exactly one word: DONE.';
+
+test('from the opening words, with a design system chosen and a Space with instructions, the agent’s artifact_create passes designSystem and its answer carries the Space’s instructions', async () => {
+  const root = realpathSync(mkdtempSync('/tmp/maws-u10b-live-'));
+  const config = join(root, 'claude-config');
+  const repo = join(root, 'repo');
+  const userData = join(root, 'user-data');
+  for (const dir of [config, repo, userData]) mkdirSync(dir, { recursive: true });
+  const logFile = join(root, 'live-run.txt');
+  const note = (line: string) => {
+    appendFileSync(logFile, `${line}\n`);
+    console.log(line);
+  };
+
+  let relay = relaySkipReason(RELAY_URL);
+  if (relay !== null) {
+    note(`relay not ready (${relay}); waiting two minutes and retrying once`);
+    await new Promise((resolve) => setTimeout(resolve, 120_000));
+    relay = relaySkipReason(RELAY_URL);
+  }
+  if (relay !== null) {
+    note(`blocked: relay (${relay}) at ${new Date().toISOString()}`);
+    test.skip(true, `blocked: relay: ${relay}`);
+  }
+  let engine: { bin: string; version: string };
+  try {
+    engine = installedEngine();
+    if (!/^\d+\.\d+\.\d+$/.test(engine.version)) throw new Error(`no version from ${engine.bin} --version`);
+  } catch (error) {
+    note(`blocked: engine (${String(error)})`);
+    test.skip(true, `blocked: engine: ${String(error)}`);
+    return;
+  }
+
+  writeFileSync(join(config, 'settings.json'), '{}\n');
+  writeFileSync(join(config, '.claude.json'), `${JSON.stringify({ hasCompletedOnboarding: true, theme: 'light', projects: { [repo]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2)}\n`);
+  assertConfigHomeSafe({ configHome: config, controls: [] });
+  writeFileSync(join(repo, 'README.md'), 'A scratch repository for the live run.\n');
+  const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=U10b', '-c', 'user.email=u10b@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: repo, stdio: 'ignore' });
+  git('init', '-q');
+  git('add', '-A');
+  git('commit', '-qm', 'seed');
+  const [engineId] = seedTranscripts(config, repo, ['U10b live: the opening words']);
+
+  const a15First = a15Reading();
+  const ours = [root];
+  note(`==== UX wave U10b-4 live run (Proof 10), ${new Date().toISOString()}`);
+  note(`engine: ${engine.bin.replace(homedir(), '~')} (${engine.version}), unmodified, through ClaudeUsage's relay ${RELAY_URL}, Haiku, default permission mode, --max-budget-usd ${CAP_USD} (MAWS_LIBRARY_LIVE_MAX_USD)`);
+  note(a15Line('before the launch', a15First, a15First, ours));
+
+  let maws: MawsLaunch | null = null;
+  let id = '' as AppSessionId;
+  let journalPath: string | null = null;
+  let enginePid: number | null = null;
+  let prompted = false;
+  const allowed: string[] = [];
+  let failure: unknown = null;
+  try {
+    maws = await launchMaws({ defaultRoute: 'gateway', userData, env: { MAWS_E2E_ENGINE_BIN: engine.bin, MAWS_HARNESS: '0', CLAUDE_CONFIG_DIR: config } });
+    const { page } = maws;
+    const pane = page.locator('[data-region="main"] [data-pane="0"]');
+    await recordEvents(page);
+    await expect
+      .poll(async () => {
+        const { sessions } = value(await invoke(page, 'session.list', {}));
+        id = (sessions.find((r) => r.engineSessionId === engineId)?.appId ?? '') as AppSessionId;
+        return id !== '';
+      }, { timeout: 30_000 })
+      .toBe(true);
+    const statusOf = async () => value(await invoke(page, 'session.status', { appSessionId: id }));
+    const events = (): Promise<SessionEvent[]> => eventsOf(page, id);
+    const mainTurnsEnded = (all: SessionEvent[]) => ofKind(all, 'turn.ended').filter((e) => e.parentToolUseId === null && !e.isEchoReceipt);
+
+    // the Space with its instructions, and Classroom among the seeded systems
+    const { space } = value(await invoke(page, 'spaces.create', { name: U10B_SPACE }));
+    value(await invoke(page, 'spaces.setInstructions', { spaceId: space.id, text: U10B_INSTRUCTIONS }));
+    let classroom: { id: string } | undefined;
+    await expect
+      .poll(async () => (classroom = value(await invoke(page, 'artifacts.list', { filter: { kind: 'design_system' } })).artifacts.find((a) => a.title === 'Classroom')), { timeout: 15_000, message: 'Classroom is seeded' })
+      .toBeDefined();
+    note(`the Space ${JSON.stringify(U10B_SPACE)} (${space.id}) with instructions ${JSON.stringify(U10B_INSTRUCTIONS)}; Classroom ${classroom!.id}`);
+
+    // the session shown and launched (Haiku, default mode, the cap); the words sent from the real composer
+    await (await sidebarRow(page, { appSessionId: id })).click();
+    await page.mouse.move(700, 20);
+    await expect(pane.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
+    const spec = { ...launchDefaults(id, repo), model: 'haiku', permissionMode: 'default' as const, subagentModel: 'haiku', maxBudgetUsd: CAP_USD };
+    expect(value(await invoke(page, 'session.launch', { spec }))).toMatchObject({ status: 'launching' });
+    journalPath = (await statusOf()).journalPath;
+    await expect.poll(async () => (await statusOf()).process, { timeout: 120_000 }).toBe('ready');
+    enginePid = (await statusOf()).pid;
+    const message = pane.getByRole('textbox', { name: 'Message', exact: true });
+    await message.click();
+    await page.keyboard.insertText(U10B_PROMPT);
+    prompted = true;
+    await page.keyboard.press('Enter');
+
+    // the turn, every permission it asks allowed once through the card docked in the composer
+    const idleNow = async () => {
+      const status = await statusOf();
+      return status.turn === null && status.pendingRequests === 0;
+    };
+    const deadline = Date.now() + TURN_MS;
+    for (;;) {
+      if (mainTurnsEnded(await events()).length > 0 && (await idleNow())) break;
+      if (Date.now() > deadline) throw new Error('timed out waiting for the turn to end');
+      const all = await events();
+      const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));
+      const open = ofKind(all, 'permission.requested').filter((e) => !resolved.has(e.requestId));
+      if (open.length > 0) {
+        const frame = pane.getByRole('group', { name: 'Approval needed' });
+        const allow = frame.getByRole('button', { name: 'Allow once', exact: true });
+        if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) {
+          await allow.click();
+          allowed.push(open[0]!.toolName);
+          await expect.poll(async () => ofKind(await events(), 'permission.resolved').some((e) => e.requestId === open[0]!.requestId), { timeout: 30_000 }).toBe(true);
+          continue;
+        }
+      }
+      await page.waitForTimeout(400);
+    }
+
+    // the create, its input and its answer, from the journal
+    const rows = journal(journalPath);
+    const calls = mcpCalls(rows);
+    const reply = mainTurnsEnded(await events()).at(-1)?.resultText ?? '';
+    note(`the turn: maws calls ${JSON.stringify(calls.map((c) => [c.name, c.args]))}; permissions allowed once through the card ${JSON.stringify(allowed)}; reply ${JSON.stringify(reply)}`);
+    const [init] = ofKind(await events(), 'session.init');
+    expect(ownerPlugins(init?.plugins ?? [], [root]), 'none of the owner plugins').toEqual([]);
+    note(`init plugins ${JSON.stringify(initPluginsOf(rows))} (none of the owner's)`);
+    const create = calls.find((c) => c.name === 'artifact_create');
+    expect(create, 'the agent called artifact_create').toBeDefined();
+    const chosen = create!.args.designSystem;
+    expect(typeof chosen === 'string' && (chosen === classroom!.id || chosen.replace(/\s+/g, '').toLowerCase() === 'classroom'), `artifact_create passed designSystem for Classroom (it passed ${JSON.stringify(chosen)})`).toBe(true);
+    const answer = mcpResultOf(rows, create!.requestId);
+    expect(answer?.isError, `artifact_create answered ${answer ? resultText(answer) : 'nothing'}`).toBeUndefined();
+    const created = JSON.parse(resultText(answer!)) as ArtifactCreateResult;
+    expect(created).toMatchObject({ status: 'created', kind: 'document' });
+    expect(created.spaceInstructions, 'the answer carries the Space’s instructions').toEqual({ spaceId: space.id, name: U10B_SPACE, text: U10B_INSTRUCTIONS });
+    const made = value(await invoke(page, 'artifacts.get', { artifactId: created.artifactId })).artifact;
+    expect([made?.spaceId, made?.designSystemId], 'the document is in the Space and bound to Classroom').toEqual([space.id, classroom!.id]);
+    note(`artifact_create: input ${JSON.stringify(create!.args)}; answer ${JSON.stringify({ status: created.status, artifactId: created.artifactId, kind: created.kind, title: created.title, spaceInstructions: created.spaceInstructions })}; the artifact's Space ${made?.spaceId}, its system ${made?.designSystemId}`);
+
+    const errors = maws.consoleErrors();
+    note(`the window's console errors: ${JSON.stringify(errors)}`);
+    expect.soft(errors).toEqual([]);
+    note(`tool time (P4-A2, X34): ${guardToolTime(journalPath).line}`);
+    note('PASS: from the opening words the agent’s artifact_create passed designSystem; the document is in the Space, bound to Classroom; its answer carried the Space’s instructions');
+  } catch (error) {
+    failure = error;
+    note(`FAILED: ${error instanceof Error ? error.message : String(error)}`);
+  } finally {
+    const page = maws?.page;
+    const ended = await endLiveRun({
+      session: page && id !== '' ? { status: async () => value(await invoke(page, 'session.status', { appSessionId: id })), stop: async () => void value(await invoke(page, 'session.stop', { appSessionId: id, reason: 'stop' })) } : null,
+      enginePid,
+      cleanup: maws === null ? null : () => maws!.cleanup(),
+      note,
+    });
+    failure ??= ended.errors[0] ?? null;
+    const spend = liveSpend(journalPath !== null && existsSync(journalPath) ? journal(journalPath) : [], CAP_USD, prompted);
+    note(`spend: receipt ${spend.receipts.length > 0 ? `total_cost_usd ${spend.receipted.toFixed(4)}` : 'none'}; accounted exposure US$${spend.accounted.toFixed(4)} (${spend.basis}); cap US$${CAP_USD}; journal ${journalPath ?? 'none (no launch)'}`);
+    const a15After = a15Reading();
+    note(a15Line('after the app closed', a15First, a15After, ours));
+    note(`scratch kept for inspection: ${root}`);
+    expect(compareA15(a15First.keys, a15After.keys, ours).breach, 'no project of the run’s scratch in the owner file (A-15)').toEqual([]);
+    expect(spend.accounted, 'within the cap').toBeLessThanOrEqual(CAP_USD);
+    if (failure === null) {
+      expect(spend.receipts.length, 'a passing run has the engine’s receipt for its turn').toBeGreaterThan(0);
+      expect(spend.settled, 'the receipt came after the prompt').toBe(true);
+    }
+  }
+  if (failure !== null) throw failure;
+});

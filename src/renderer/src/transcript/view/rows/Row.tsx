@@ -17,7 +17,8 @@ import { AgentListRow } from './AgentList'; // E7
 import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
-import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
+import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
+import { ReportOnly } from '../../../owner/view/Message'; // UX wave U2b
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { BashRow } from './Bash';
@@ -38,7 +39,7 @@ function body(row: Row) {
   switch (row.kind) {
     case 'time': return <TimeRow row={row} />;
     case 'user': return <SurfaceUserRow row={row} />;
-    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />; // P5 O9: a cut reply is no answer a surface draws
+    case 'assistant_text': return <ReportOnly value={row.reportOnly === true}>{row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />}</ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages, a cut one's under its note
     case 'thinking': return <ThinkingRow row={row} />;
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;
@@ -65,7 +66,7 @@ function body(row: Row) {
     case 'artifact': return <ArtifactRowView row={row} />; // E2
     case 'browser_action': return <BrowserActionRow row={row} />; // E4c
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
-    case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
+    case 'record_fold': return <RecordFold row={row} />; // UX wave U2b: placed by the mirror
     case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
   }
 }

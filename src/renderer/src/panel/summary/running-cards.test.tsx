@@ -94,6 +94,7 @@ async function mount(events: SessionEvent[] = []) {
 
 const card = (name: 'Subagents' | 'Background tasks') => screen.queryByRole('region', { name });
 const cardNames = () => screen.queryAllByRole('region').filter((r) => r.tagName === 'SECTION').map((r) => r.getAttribute('aria-label'));
+const running = () => cardNames().filter((name) => name === 'Subagents' || name === 'Background tasks'); // the two running cards, in their order
 const headingOf = (name: 'Subagents' | 'Background tasks') => within(card(name)!).getByRole('heading').textContent;
 const agentRow = (id: string) => card('Subagents')!.querySelector<HTMLElement>(`[data-agent-row="${id}"]`)!;
 const disclosure = (id: string) => agentRow(id).querySelector<HTMLButtonElement>(':scope > [data-part="under"]');
@@ -308,25 +309,64 @@ describe('the Background tasks card', () => {
     expect(cardNames()).toEqual(['Environment', 'Context', 'Connectors']);
   });
 
-  it('a terminal session this Mac drives: its running job gives the card, from its watch, and its end removes it; there is no Subagents card', async () => {
+  // UX wave U8d (A2, A4; M3): the same session's agents, their statuses derived in main and carried by the same watch,
+  // laid over the agents its sidecars list.
+  it('a terminal session this Mac drives: its running job and its running agents give the two cards, from its watch, and each leaves when the last of its kind ends', async () => {
     const job = (taskId: string, over: Partial<Job> = {}): Job => ({ taskId, kind: 'shell', toolUseId: `toolu_${taskId}`, startedAt: T, description: `run ${taskId}`, command: 'sleep 60', outputFile: `/tmp/${taskId}.output`, status: 'running', ...over });
-    const plane = (kind: 'snapshot' | 'subagents', jobs: Job[]) =>
-      act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs } : { subagents: [], jobs, mcp: [] } }] }));
+    const meta = (agentId: string, parent: string | null = null) => ({ agentType: 'general-purpose', description: `Agent ${agentId}`, toolUseId: `toolu_${agentId}`, requestShape: 'background', spawnDepth: parent === null ? 1 : 2, ...(parent !== null && { parentAgentId: parent }) });
+    const sidecar = (agentId: string, parent: string | null = null) => ({ agentId: agentId as AgentId, meta: meta(agentId, parent), transcriptPath: `/work/agents/agent-${agentId}.jsonl`, size: 10, mtimeMs: 1_790_000_000_000, runId: null });
+    const runs = (agentId: string, parent: string | null = null) => ({ agentId, meta: meta(agentId, parent), status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: T }, startedAt: T });
+    const ends = (agentId: string, parent: string | null = null) => ({ agentId, meta: meta(agentId, parent), status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: at(30), summary: 'all green' }, startedAt: T });
+    const plane = (kind: 'snapshot' | 'subagents', jobs: Job[], subagents: unknown[]) =>
+      act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs, subagents } : { subagents, jobs, mcp: [] } }] }));
     seed(null, { holder: { kind: 'terminal', pid: 4242 } });
     applyLaneAState(A, laneAState(A));
     render(column());
     await act(async () => {
-      await fake.answer('subagents', []);
+      await fake.answer('subagents', [sidecar('p'), sidecar('q')]);
       await fake.answer('workflows', []);
     });
     await waitFor(() => expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: bareOf(A) }]));
-    expect(card('Background tasks')).toBeNull();
-    plane('snapshot', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })]);
+    expect(running()).toEqual([]); // the sidecars alone: every agent's status unknown
+    const above = cardNames().map((name) => screen.getByRole('region', { name: name! }));
+    plane('snapshot', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q')]);
+    expect(running()).toEqual(['Subagents', 'Background tasks']);
+    expect(headingOf('Subagents')).toBe('Subagents 1 running');
+    expect(tree()).toEqual(['p']);
     expect(taskRows()).toEqual(['bsleep01']);
     expect(button('Background tasks', '1 finished')).toBeTruthy();
-    expect(card('Subagents')).toBeNull();
-    plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T }), job('bdone02', { status: 'completed', endedAt: T })]);
-    expect(card('Background tasks')).toBeNull();
+    act(() => fake.subagentsChanged(A, [sidecar('p'), sidecar('q'), sidecar('c', 'p')])); // the nested agent's sidecar, then its status
+    plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q'), runs('c', 'p')]);
+    expect(headingOf('Subagents')).toBe('Subagents 2 running');
+    expect(tree()).toEqual(['p (+1)▸']);
+    toggleUnder('p');
+    expect(tree()).toEqual(['p ▾', '  c']);
+    plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [runs('p'), ends('q'), ends('c', 'p')]);
+    expect(tree()).toEqual(['p']);
+    plane('subagents', [job('bsleep01'), job('bdone02', { status: 'completed', endedAt: T })], [ends('p'), ends('q'), ends('c', 'p')]);
+    expect(running()).toEqual(['Background tasks']);
+    plane('subagents', [job('bsleep01', { status: 'stopped', endedAt: T }), job('bdone02', { status: 'completed', endedAt: T })], [ends('p'), ends('q'), ends('c', 'p')]);
+    expect(running()).toEqual([]);
+    cardNames().forEach((name, i) => expect(screen.getByRole('region', { name: name! })).toBe(above[i])); // nothing above them moved
+    expect(cardNames()).toHaveLength(above.length);
+  });
+
+  // R8: an older driver sends `subagents: []` in its message and no agents key in its snapshot: the jobs as before, and
+  // the agents as their sidecars say (no card).
+  it('a terminal session on an older driver: its job gives the Background tasks card and no body gives a Subagents card', async () => {
+    const job: Job = { taskId: 'bsleep01', kind: 'shell', toolUseId: 'toolu_bsleep01', startedAt: T, description: 'run bsleep01', command: 'sleep 60', outputFile: '/tmp/bsleep01.output', status: 'running' };
+    seed(null, { holder: { kind: 'terminal', pid: 4242 } });
+    applyLaneAState(A, laneAState(A));
+    render(column());
+    await act(async () => {
+      await fake.answer('subagents', [{ agentId: 'p' as AgentId, meta: { agentType: 'general-purpose', description: 'Agent p' }, transcriptPath: '/work/agents/agent-p.jsonl', size: 10, mtimeMs: 1_790_000_000_000, runId: null }]);
+      await fake.answer('workflows', []);
+    });
+    await waitFor(() => expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: bareOf(A) }]));
+    act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind: 'snapshot', sub: 'w1', n: 0, body: { streaming: [], usage: null, jobs: [job] } }] }));
+    act(() => bridge.event('laneA.plane', { appSessionId: bareOf(A), watch: 'w1', messages: [{ project: '', machine: 'm', session: `eng-${A}`, kind: 'subagents', sub: 'w1', n: 1, body: { subagents: [], jobs: [job], mcp: [] } }] }));
+    expect(running()).toEqual(['Background tasks']);
+    expect(taskRows()).toEqual(['bsleep01']);
   });
 
   it('another machine’s listed terminal session gives both cards from its feed', async () => {

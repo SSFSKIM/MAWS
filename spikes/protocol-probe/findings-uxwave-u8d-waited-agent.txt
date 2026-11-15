@@ -1,0 +1,81 @@
+UX wave, landing U8d, probe P4: what the main transcript's result row carries for an agent the main loop waits for,
+when it completes, fails and is interrupted (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md,
+"Probes to arrange" P4; it serves "Engine facts" 5 and the ledger's reading of an Agent call's result; 2026-11-15, VM
+dc-uxwave5-26dc, branch ux-wave/U8d-probes)
+
+Question. An agent the main loop waits for completes, fails, and is interrupted by the person. What does each result
+row in the main transcript carry (`toolUseResult.status`, `is_error`)?
+
+Verdict.
+  - In a TERMINAL session, as the owner's sessions are configured on 2.1.322 (the owner's feature-gate cache), the
+    main loop never waits for an agent. Every Agent call is launched in the background, even with
+    `run_in_background` set to false. The tool's own text says "Subagents run in the background; you'll be notified
+    when one completes". The call's result is `status: "async_launched"`, the meta has `requestShape: "background"`,
+    and the end comes as a task notification. 5 of 5 terminal runs, plus 2 of 2 nested calls in P3. So on this
+    landing's route, P4's case does not arise. A terminal agent's outcome is always read from its notification.
+    That notification's words were recorded: `completed` (2 of 2), and `failed` for an agent whose API call failed
+    (1 of 1). This is the first `failed` for an AGENT recorded on disk; "Engine facts" 4 had only `completed`.
+    Pressing Escape while a background agent ran wrote nothing and did not stop it (2 of 2).
+  - In PRINT mode (`claude -p`, the same engine and gate cache) the tool says "Subagents run in the background by
+    default". The model passed `run_in_background: false` (a boolean), and the loop waited (meta `requestShape:
+    "foreground"`). The three result rows:
+      completed: `toolUseResult.status: "completed"`, no `is_error` (2 of 2). The ledger reads `completed`. Held.
+      failed (an API error inside the agent): `is_error: true`, and `toolUseResult` is a STRING, "Error: Agent
+        terminated early due to an API error: …" (2 of 2). The ledger reads an error, so "finished with errors".
+        Held.
+      interrupted (SIGINT to the print-mode engine while the agent ran its command): `is_error: true`,
+        `toolUseResult: "User rejected tool use"`, content "The user doesn't want to proceed with this tool use. The
+        tool use was rejected …". It is followed by a `user` row "[Request interrupted by user for tool use]" (2 of
+        2). Nothing in the result row says "interrupted" or "stopped"; it is an error row. The ledger's rule
+        therefore reads an interrupted agent as `error`, so "finished with errors" (danger colour), not "stopped".
+        This is the case the document asked to have reported.
+  - Metas: a completed or failed agent's meta is rewritten with `finished: true`, in both modes, at the end. A failure
+    is not told apart in the meta: the fields are the same as for a completion. An interrupted waited-for agent's
+    meta is NOT rewritten: no `finished`, no `stoppedByUser`. That `stoppedByUser` key ("Engine facts" 11, B:378462)
+    appeared in no meta in any run of P1 to P4.
+
+Method.
+  Engine 2.1.322, model haiku (claude-haiku-5-5), gateway route, the owner's feature-gate cache seeded, under
+  vm-run.sh; scenarios/pass3/uxwave-u8d-terminal.mjs (recorder as in findings-uxwave-u8d-process-end.txt).
+  Terminal cases (the interactive engine in tmux): p4-done: "Call the Agent tool once, with subagent_type
+  "general-purpose", run_in_background false, description "uxw fg ok" and prompt "Reply with only the word PONG. Use
+  no tools."". p4-fail: the same with subagent_type "uxw-broken", a project agent (work/.claude/agents/uxw-broken.md)
+  whose `model` is claude-uxw-no-such-model-1, so its first API call fails with model_not_found (HTTP 404). Run once,
+  because every terminal call was a background launch. p4-interrupt: an agent whose prompt runs a 90 s sleep;
+  Escape pressed 3 s after its Bash call appeared, then 15 s and 8 s watched.
+  Print-mode cases (UXW_CASE p4p-*): the same three prompts as `claude --model haiku -p <prompt> --permission-mode auto
+  --session-id <id>` in the pane. The interrupt is SIGINT to the engine 3 s after the agent's Bash call appeared.
+  Fixtures (fixtures/uxwave/): u8d-p4-done-r{1,2}, u8d-p4-fail-r1, u8d-p4-interrupt-r{1,2}, u8d-p4p-done-r{1,2},
+  u8d-p4p-fail-r{1,2}, u8d-p4p-interrupt-r{1,2}: .terminal.json, .transcript.jsonl, -subagents/.
+
+Observed (main-transcript line numbers).
+  p4-done-r1: line 26 the Agent call, input run_in_background "false" (a string); line 27 its result, toolUseResult
+    {isAsync: true, status: "async_launched", …}; line 40 queue enqueue <status>completed</status> "Agent "uxw fg
+    ok" finished"; line 49 the user row of origin task-notification. Meta: requestShape "background"; version 2
+    adds finished: true. r2: 26, 27, 39, 48; the same.
+  p4-fail-r1: line 27 async_launched (resolvedModel "claude-uxw-no-such-model-1"); line 35 queue enqueue
+    <status>failed</status> "Agent "uxw fg broken" failed: Agent terminated early due to an API error: There's an
+    issue with the selected model …"; line 40 the user row. Meta version 2: finished: true, otherwise as before.
+  p4-interrupt-r1, -r2: async_launched (line 26). Escape at ms 10988 wrote no row in either file and changed no meta.
+    The agent's sleep ran on; the terminal closed at ms 40466 gave its file the P3 Exit-137 row (line 16).
+  The tool text sent in the terminal runs (in the transcript's request rows): "Subagents run in the background;
+    you'll be notified when one completes" (no foreground option). In print mode: "Subagents run in the background by
+    default; … Pass `run_in_background: false` only when …" (B:460511-460512 hold both sentences).
+  p4p-done-r1: line 23 the call (run_in_background false, boolean); line 26 the result, toolUseResult {status:
+    "completed", agentId, agentType, handback "send", handbackReport {text: "PONG"}, totalDurationMs, …}, no is_error.
+    Meta requestShape "foreground"; version 2 finished: true. r2: line 24, the same.
+  p4p-fail-r1: line 24, is_error true, toolUseResult "Error: Agent terminated early due to an API error: … (error type
+    model_not_found, HTTP 404 …)". Meta version 2 finished: true. r2: line 23, the same.
+  p4p-interrupt-r1: SIGINT at ms 8059; +109 ms line 25, the result: is_error true, toolUseResult "User rejected tool
+    use"; line 27 user "[Request interrupted by user for tool use]". The agent's own file at the same moment: its
+    Bash call's result "User rejected tool use" (is_error true, line 16) and the same marker (line 18). The engine
+    exited at +407 ms. Meta: one version, not rewritten. r2: lines 25 and 27, the same; meta not rewritten.
+
+Inference.
+  - For U8d nothing changes in code: on a terminal session every agent is a background one, and its end is a
+    notification with `completed`, `failed`, or (P2) `killed`. The document's "Where the source cannot know" 1 (an
+    agent the main loop waits for, known only from the bridge) does not arise in the owner's terminal sessions on
+    2.1.322. It can arise in print mode, and in a configuration whose gate allows foreground agents.
+  - Where a waited-for agent exists (print mode, other gates), an interrupted agent reads "finished with errors" by the
+    ledger's rule. Telling it apart would take the row's text ("User rejected tool use" / the "[Request interrupted by
+    user for tool use]" row after it). That is sminos's rule to change, not the port's (R10).

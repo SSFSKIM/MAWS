@@ -68,4 +68,8 @@ export const ENDPOINT_CAPABILITIES = [
   // a device sends a machine none of them unless its `h2` listed it (SESSION_ACTS_CAPABILITY), since an older one has no
   // row for them and answers `not-offered`.
   'rl2.session-acts',
+  // The UX wave (U10b, M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.3): this endpoint offers
+  // `artifacts.undelete`, the undo of an agent's delete of its own draft, to the machine's owners; a device sends a
+  // machine none unless its `h2` listed it, since an older one has no row for it and answers `not-offered`.
+  'rl2.artifact-undelete',
 ] as const;
