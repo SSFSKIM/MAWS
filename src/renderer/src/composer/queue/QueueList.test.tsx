@@ -8,6 +8,7 @@ import { STALE_DRAFT_WORDS } from '@shared/ipc/schema/session';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
 import { askSteerText } from '@shared/maws/ask';
+import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
 import { remoteRow } from '../../../../../test/support/builders';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
@@ -170,6 +171,50 @@ describe('the stack’s rows and their marks', () => {
     expect(row.getAttribute('data-queue-state')).toBe('handed');
     expect(mark(row)).toBe('Next step');
     expect(within(row).queryAllByRole('button')).toEqual([]);
+  });
+});
+
+// UX wave U1c (the U1c document, Interfaces §G; card 2): a waiting "Approve and retry" reads as the line it becomes, with
+// Send now and Delete and no More (an edited grant is no grant); a message that only holds the sentence among other words
+// is the person's own message and reads as any message.
+describe('a waiting grant’s row', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const labels = (row: HTMLElement) => within(row).getAllByRole('button').map((b) => b.getAttribute('aria-label') ?? b.textContent);
+
+  it('at the next step: “You approved make build”, Next step, Send now and Delete, no More; Delete withdraws the steer', async () => {
+    const { client, invoke } = bridge({ 'session.steer.cancel': { ok: true, value: { outcome: 'cancelled' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, GRANT)] })} client={client} />);
+    const [row] = rows();
+    expect(within(row).getByText('You approved make build')).toBeTruthy();
+    expect(mark(row)).toBe('Next step');
+    expect(labels(row)).toEqual(['Send now', 'Delete']);
+    await userEvent.setup().click(within(row).getByRole('button', { name: 'Delete' }));
+    expect(invoke).toHaveBeenCalledWith('session.steer.cancel', { appSessionId: APP, messageUuid: U1 });
+  });
+
+  it('after the turn: the same line, After the turn, Send now (now) and Delete, no More', async () => {
+    const { client, invoke } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1', { content: GRANT })])} client={client} />);
+    const [row] = rows();
+    expect(within(row).getByText('You approved make build')).toBeTruthy();
+    expect(mark(row)).toBe('After the turn');
+    expect(labels(row)).toEqual(['Send now', 'Delete']);
+    await userEvent.setup().click(within(row).getByRole('button', { name: 'Send now' }));
+    expect(invoke).toHaveBeenCalledWith('session.queue.promote', { appSessionId: APP, queueId: 'q-1', priority: 'now' });
+  });
+
+  it('folded, its line names it so', () => {
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1', { content: GRANT }), entry('q-2'), entry('q-3')])} client={client} />);
+    expect(within(stack()).getByRole('button', { name: '3 queued · Next: You approved make build' })).toBeTruthy();
+  });
+
+  it('a message that holds a grant line among other words reads as any message, with its menu', () => {
+    const { client } = bridge();
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1', { content: `Go ahead.\n${GRANT}` })])} client={client} />);
+    const [row] = rows();
+    expect(row.querySelector('[data-row-text]')!.textContent).toBe(`Go ahead.\n${GRANT}`);
+    expect(labels(row)).toEqual(['Send now', 'Delete', 'More']);
   });
 });
 

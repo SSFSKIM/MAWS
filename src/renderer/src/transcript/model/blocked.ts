@@ -55,6 +55,15 @@ export interface BlockedState { call: BlockedCall; again: boolean; grant: 'none'
 /** Whether the row reads approved: a grant that was read (card 1's one place). */
 export const readsApproved = (state: BlockedState): boolean => state.grant === 'read';
 
+// UX wave U1c (Design 6; Interfaces §E; Decision Log 8): the line names the grant's subject whole only up to this many
+// UTF-16 units, so a row's line never grows to many lines; a longer command stands in the subject's block.
+export const LINE_SUBJECT_MAX = 200;
+/** Whether the row's line shows the grant's subject whole and exactly: a command with no line break and no backtick, drawn as that same string. */
+export function lineNamesWhole(drawn: Cell, call: BlockedCall): boolean {
+  void drawn; void call; // M3's tests first: a stub of today's drawing, where the line never names it
+  return false;
+}
+
 /** A call auto mode blocked that has a name, as the model drew it (a mod's draw-time status is not one). */
 export const isBlockedCell = (cell: Cell): cell is Cell & { blocked: BlockedCall } =>
   cell.blocked !== undefined && cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';

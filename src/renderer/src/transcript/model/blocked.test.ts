@@ -16,7 +16,7 @@ import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
-import { approvalsFor, blockedCallOf, blockedKey, blockedStates, classifierReason, readsApproved, STAND_IN_REASONS, type BlockedState } from './blocked';
+import { approvalsFor, blockedCallOf, blockedKey, blockedStates, classifierReason, LINE_SUBJECT_MAX, lineNamesWhole, readsApproved, STAND_IN_REASONS, type BlockedState } from './blocked';
 import { blockedLabel } from './cells';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState, type TranscriptState } from './reduce';
@@ -405,4 +405,27 @@ describe('probe B’s joined grants: each blocked row before them reads approved
       expect(readings(stateOf(await fromFile(name))), `${name}, from the file`).toEqual(expected);
     });
   }
+});
+
+// M3 (Design 6; Interfaces §E; Decision Log 8): where the row's line names the grant's subject whole, a rule of strings.
+describe('whether the line names the subject whole (lineNamesWhole)', () => {
+  const shell = (command: string): Cell => ({ toolName: 'Bash', detail: { kind: 'shell', command } }) as unknown as Cell;
+  const command = (subject: string) => ({ kind: 'command' as const, subject });
+
+  it('a one-line command drawn as that same string, up to LINE_SUBJECT_MAX (200) units; 201 is not', () => {
+    expect(LINE_SUBJECT_MAX).toBe(200);
+    const at200 = `echo ${'a'.repeat(195)}`;
+    const at201 = `${at200}a`;
+    expect([at200.length, at201.length]).toEqual([200, 201]);
+    expect(lineNamesWhole(shell(at200), command(at200))).toBe(true);
+    expect(lineNamesWhole(shell(at201), command(at201))).toBe(false);
+    expect(lineNamesWhole(shell('make build'), command('make build'))).toBe(true);
+  });
+
+  it('not for a line break, a carriage return or a backtick, a drawn command that differs from the grant’s, a call, or a drawing that is no shell’s', () => {
+    for (const subject of ['make build\nmake test', 'make build\r', 'echo `date`']) expect(lineNamesWhole(shell(subject), command(subject)), JSON.stringify(subject)).toBe(false);
+    expect(lineNamesWhole(shell('rm -rf build '), command('rm -rf build\u00a0')), 'a mod’s rewrite').toBe(false);
+    expect(lineNamesWhole(shell('make build'), { kind: 'call', subject: 'make build' })).toBe(false);
+    expect(lineNamesWhole({ toolName: 'Write', detail: { kind: 'edit', filePath: '/tmp/x' } } as unknown as Cell, command('/tmp/x'))).toBe(false);
+  });
 });
