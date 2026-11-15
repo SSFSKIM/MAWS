@@ -198,7 +198,7 @@ function eventsHoldMark(state: TranscriptState): boolean {
     if (turn === undefined) continue;
     let marked = turnMarks.get(turn);
     if (marked === undefined) {
-      marked = turn.events.some((event) => event.kind === 'assistant.block.complete' && event.agentId === turn.agentId && event.block.type === 'text' && marksOfText(event.block.text).marked);
+      marked = turn.events.some((event) => event.kind === 'assistant.block.complete' && event.agentId === turn.agentId && event.block.type === 'text' && typeof event.block.text === 'string' && marksOfText(event.block.text).marked);
       turnMarks.set(turn, marked);
     }
     if (marked) return true;
