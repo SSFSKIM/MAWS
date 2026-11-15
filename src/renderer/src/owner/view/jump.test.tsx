@@ -51,7 +51,9 @@ const KEY = at('App-jump' as AppSessionId);
 const BEFORE = 'Listed the notes first.';
 const AFTER = 'Checked the rest of them.';
 const records = () => screen.queryAllByRole('button', { name: '› working record' });
-const folds = () => screen.queryAllByRole('button', { name: '‹ fold to report' });
+// the record lines as drawn, by their frames (a live turn's lines are counted the same way as a finished one's)
+const closedLines = () => [...document.querySelectorAll<HTMLButtonElement>('.owner-record-fold:not([data-open]) > button')];
+const openLines = () => [...document.querySelectorAll<HTMLButtonElement>('.owner-record-fold[data-open] > button')];
 
 it('a jump to work after a standalone browser activity opens the stretch the list draws it in, and only that one', async () => {
   const b = builder('2026-10-08T10:00:00.000Z');
@@ -95,9 +97,9 @@ it('an opened thought with no text that its call replaces stays open as the call
   await waitFor(() => expect(useTranscriptStore.getState().entries[KEY]?.phase).toBe('live'));
   act(() => fake.event('browser.agent.activity', { appSessionId: KEY, tabId: 'b_000000000001', at: between, activity: { kind: 'navigated', url: 'http://127.0.0.1:17391/notes.html', title: '' } }));
   await waitFor(() => expect(document.querySelector('[data-kind="browser_activity"]')).not.toBeNull());
-  expect(records()).toHaveLength(2); // the words before the activity, and the thought after it
-  act(() => records()[1].click()); // the reader opens the thought's record
-  expect(folds()).toHaveLength(1);
+  expect(closedLines()).toHaveLength(2); // the words before the activity, and the thought after it
+  act(() => closedLines()[1].click()); // the reader opens the thought's record
+  expect(openLines()).toHaveLength(1);
   expect(screen.queryByText(BEFORE)).toBeNull();
   const at = b.events.length;
   b.thinking('m2', 0, ''); // finished with no text: the thought has no row any more
@@ -106,6 +108,6 @@ it('an opened thought with no text that its call replaces stays open as the call
   act(() => listener?.(b.events.slice(at)));
   await waitFor(() => expect(document.querySelector('[data-kind="thinking"]')).toBeNull());
   expect(screen.queryByText(BEFORE)).toBeNull(); // the words before the activity stay folded
-  expect(records()).toHaveLength(1);
-  expect(folds()).toHaveLength(1); // the call, in the thought's place, is open
+  expect(closedLines()).toHaveLength(1);
+  expect(openLines()).toHaveLength(1); // the call, in the thought's place, is open
 });
