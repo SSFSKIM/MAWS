@@ -25,7 +25,7 @@ How to see it working: launch the app on the recorded session `spikes/protocol-p
 - [x] (2026-11-15) Document written against master `63c97b5c0`; two checks of today's behaviour run on the build VM (Surprises 1 to 4).
 - [x] (2026-11-15) Adversarial review (seven findings) and the architect's rulings; revision 2.
 - [x] (2026-11-15) Probes T, B, C, D and E answered on `ux-wave/U1c-probes`, merged into this branch at its final head `54dd334a4`; the architect's rulings at the build edge (A to K) recorded (Decision Log 7 to 19) and written into the places they name. The values B and T move are moved in M3 and M4, each in a commit that names its recording.
-- [ ] M1 — the grant as the reader knows it: the engine's encoding, both forms, several in one message, and the join.
+- [x] (2026-11-15) M1 — the grant as the reader knows it: the engine's encoding, both forms, several in one message, and the join. Commits `3fde30f1b`..`f1ad201ef` (one fix wave: rows beside a message withdrawn with it, an attachment beside grants kept), reviewed clean.
 - [ ] M2 — the row's words, what an approval names, and what the transcript's rows say of it.
 - [ ] M3 — the button, its subject, the press and the waiting row.
 - [ ] M4 — the terminal route, state by state (starts only when probe T has answered).
@@ -363,7 +363,7 @@ The child's line A15, as behaviour. Items 1 to 4 are over the probe's recordings
 12. **Where there is no button.** A subagent's transcript; a row of a rewound branch; a call of kind `automode-parsing-error`; an MCP tool's blocked call; a blocked `Write`; a blocked shell call with `run_in_background: true`; a mount that supplies no control. Each draws the row with its short label and no button. *(M2, M3.)*
 13. **The button stands beside its whole subject.** For a blocked command of one line the row's line wraps and holds the whole command, and the button is under it. For a command of several lines, and for one that holds a backtick, the row shows the subject in its block, equal to the string the grant quotes, and the button under the block. Two blocked rows whose lines draw the same command while their recorded commands differ each show their own subject in a block and each send their own. *(M3; scenes S1 and S3.)*
 14. **A join keeps every approval.** A grant and an ordinary message that waited together, in both orders, and two grants: in both of probe B's recorded forms, mid-turn and not joined (`u1c-b-join-grant-first-*`, `u1c-b-join-other-first-*`, `u1c-b-two-*`) and at the turn's end and joined (`u1c-b-joinend-grant-first-*`, `u1c-b-joinend-other-first-*`, `u1c-b-twoend-*`), one recording of each form for each of the three pairings, live from its journal and from its transcript file, the transcript draws each grant's approval line and the ordinary message's bubble without the grant's sentence, and each blocked row before them reads approved. *(M1 for the rows; M2 for the blocked rows.)*
-15. **The encoding.** For a command that holds U+00A0 and U+200B, the grant spells them ` ` and `​`, and the reader reads that text and the plain form of it to the same subject. The engine's sentence for two commands reads as two grants. Either sentence with one word changed reads as none. *(M1.)*
+15. **The encoding.** For a command that holds U+00A0 and U+200B, the grant spells them `\u00a0` and `\u200b`, and the reader reads that text and the plain form of it to the same subject. The engine's sentence for two commands reads as two grants. Either sentence with one word changed reads as none. *(M1.)*
 16. **The desk web app.** With no control registered, a blocked row draws its label ("again", "· approved" included) and no button and no block; the approval's line is drawn. Its typecheck, build and tests pass at every milestone. *(M2, M3.)*
 
 ## Constraints that bind every milestone
@@ -471,7 +471,7 @@ M1, after each push:
     ~/.local/share/maws-ux-wave/tools/vmcheck.sh ux-wave/U1c -- 'timeout 600 pnpm exec eslint src/shared/engine src/engine-host/normalizer.ts src/engine-host/normalizer-send-now.ts src/renderer/src/transcript/model'
     ~/.local/share/maws-ux-wave/tools/vmcheck.sh ux-wave/U1c -- 'timeout 1500 pnpm exec vitest run src/shared/engine src/engine-host/normalizer src/engine-host/fs src/renderer/src/transcript src/renderer/src/lane-a src/renderer/src/composer/queue test/support/tokens-guard.test.ts'
 
-Expect each to exit 0, and the new cases of `arrival.test.ts` to have failed before their source existed (for the encoding, a line such as `expected '…"a b"…' to be '…"a b"…'`).
+Expect each to exit 0, and the new cases of `arrival.test.ts` to have failed before their source existed (for the encoding, a line such as `expected '…"a b"…' to be '…"a\u00a0b"…'`).
 
 M2:
 
@@ -570,7 +570,7 @@ M1:
 
    with two or more JSON strings joined by `, `. Each string is parsed with `JSON.parse`; the text is a grant when it equals the sentence rebuilt from the parsed subjects with every subject in the engine's encoding, or with every subject in the plain one. Any other text gives none.
 3. `arrival.ts`, `personsGrants(text: string)`, exported, which `personsText` calls: the grants of the whole text; when there are none and the text holds `\n`, the grants of each line that is a whole sentence, in order. MAWS's answer envelope is read as today, on the whole text only. `personsText`'s callers do not change: a row of origin `human`, a queued prompt of origin `human`, and the frame MAWS writes (`userOut`).
-4. `normalizer.ts` and `normalizer-send-now.ts`: where `userOut` puts consent marks on a frame it writes, it also remembers them by the frame's uuid; where `userIn` forwards a joined replay, the `user.message` carries `arrival`: the remembered marks of each uuid in `joined`, in order, then its own. A joined message with no remembered mark carries no `arrival`, as today. The memory is bounded and dropped as the written digests are.
+4. `normalizer.ts` and `normalizer-send-now.ts`: where `userOut` puts consent marks on a frame it writes, it also remembers them by the frame's uuid; where `userIn` forwards a joined replay, the `user.message` carries `arrival`: the remembered marks of each uuid in `joined`, in order, then its own. A joined message with no remembered mark carries no `arrival`, as today. The memory is bounded (64 entries, the oldest dropped first) and outlives a member's own echo, because the first member is echoed before the joined replay (`u1c-b-joinend-grant-first-1` seq 345, then 350); it is dropped when a join takes it, when the prompt is cancelled, discarded or refused, and once the prompt started and the main lane answered (Decision Log 20).
 5. `transcript/model/derive.ts` and `keys.ts`, the rows of a person's message whose event carries consent marks (Design 2): the message's text is split at `\n`; a line is a grant line when `readConsents` reads it; when the grant lines' grants are the event's marks, the rows are the bubble for the other lines (under the message's id and uuid, omitted when no other line holds a character) and one `user` row with `consent` per mark, in order, each with `messageUuid: null`, `editable: false` and the id `rowId.grant(messageUuid, n)`; when no other line is left, the first mark's row takes the message's own id and uuid. When they are not the marks, the bubble keeps the whole text and every mark gets its row. One mark on a text that is its sentence is today's row, unchanged.
 
 M4, each built only for a state `TERMINAL_OFFERED` holds `true`:
@@ -690,6 +690,7 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
 - Observation 11: on the recording date the classifier lets a `soft_deny` rule yield to the person's own request in the prompt.
   Evidence: `findings-uxwave-u1c-during-turn.txt`, "The rule and a stated request": 1 block in 6 for the prompt's own request (`u1c-e-prompt-1..3`), every time as a task file's step.
 - Observation 12: the two test cases that walk every recorded journal pass the 5 s default only narrowly once the probe set is merged (Decision Log 15).
+- Observation 13: a third test walks every recorded fixture and times out at the 5 s default under the VM's load: `src/engine-host/journal.test.ts`, "numbersReadBack > passes every line of the probe's recordings …" (passes alone). It is not among the two cases of `ux-wave/fixture-walk-timeouts`.
 
 ## Decision Log
 
@@ -741,6 +742,16 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   Date/Author: 2026-11-15, the architect; recorded by the controller.
 - Decision 19 (ruling K): a terminal grant during a turn reaches the model as a plain text block, without the wrapper the engine puts around a person's mid-turn message, and was honoured 3 of 3; listed under What is not proven, 1, as a behaviour of the service that may change.
   Date/Author: 2026-11-15, the architect; recorded by the controller.
+- Decision 20 (M1): the host's consent marks outlive their member's own echo. §C 4's "dropped as the written digests are" read literally breaks the recorded join, since the first member's digest goes at its echo (seq 345) before the joined replay (350) needs its marks; they are dropped when a join takes them, when the prompt is cancelled, discarded or refused, once it started and the main lane answered, and past 64 entries.
+  Date/Author: 2026-11-15, M1's executor; folded by the controller.
+- Decision 21 (M1): `personsText` reads MAWS's answer envelope before the grants, so a grant line quoted inside an envelope is never the person's grant; for a whole text the order is equivalent to today's. `personsGrants` reads by lines only when the text holds the sentence's opening.
+  Date/Author: 2026-11-15, M1's executor; folded by the controller.
+- Decision 22 (M1): the rows of a person's message that carries marks. An approval row beside its message has the grant's sentence (`consentMessage(mark)`) as its text, `messageUuid: null`, `editable: false`, the id `rowId.grant(<message uuid or event id>, n)` and `beside: <message uuid>` (optional in `rows.ts` and `schema.ts`), so `withQueueTail` withdraws every row of a withdrawn message (`messageUuid ?? beside`). A message whose only words are grants keeps its whole text on its own row. Design 2's fallback (the whole bubble, then one approval row per mark) also takes a mark whose text is no grant (hand-made events only; `serialize.test.ts`'s fixture became the real sentence) and any content that holds a block other than text, so an attachment beside grants stays drawn.
+  Rationale: the M1 review (two Important findings, fixed in `f1ad201ef`): a withdrawn message left its approval rows, and an image beside grant-only text blocks was hidden.
+  Date/Author: 2026-11-15, M1's executor and reviewer; folded by the controller.
+- Decision 23 (M1): a dropped approval row draws "You approved `cmd`" with the mark a dropped bubble already shows (`droppedRowMark`, else "Not sent") and `data-dropped`, in today's tokens (`transcript.css`: the meta line's gap, `--text-ui-sm`). This also changes U3a's single dropped grant, which drew the line unmarked. No new words.
+  Rationale: a grant that was never sent must not read as an unqualified approval; the view marks every dropped person's row this way today.
+  Date/Author: 2026-11-15, M1's executor; folded by the controller; sent to the architect as a visible change.
 
 ## Outcomes & Retrospective
 
