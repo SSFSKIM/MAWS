@@ -231,28 +231,44 @@ describe('what a press sends (Design 5 and 7)', () => {
     expect(client.invoked('session.steer')).toHaveLength(1);
   });
 
-  it('a session MAWS runs: the press is the sentence, `origin: answer`, at GRANT_DURING_TURN’s value', async () => {
+  it('a session MAWS runs, while a turn runs: the press is the sentence as one session.steer at the next step, `origin: answer` (GRANT_DURING_TURN, probe B)', async () => {
+    expect(GRANT_DURING_TURN).toBe('next');
     const id = at('press-b') as AppSessionId;
     ready(id, { turn: humanTurn });
     vi.useFakeTimers();
     void approve(id, BUILD);
     await flush();
-    expect(fake.invoked('session.send')).toEqual([{ appSessionId: 'press-b', content: grant(BUILD) }]);
-    expect(fake.invoked('session.steer')).toEqual([]);
+    expect(fake.invoked('session.steer')).toEqual([{ appSessionId: 'press-b', content: grant(BUILD), priority: 'next' }]);
+    expect(fake.invoked('session.send')).toEqual([]);
   });
 
-  it('another machine’s session (Acceptance 8): the press is one session.send with the sentence as its content and no steer, idle and while a turn runs there', async () => {
+  // Acceptance 8 as Decision Log 29 rewrites it: the press sends as Enter does on that machine
+  const onStudio = () => {
     const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
     useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'Studio', local: false, state: 'up', since: T0, generation: 0 }]);
     useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-r', { lane: 'B' }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]), records: new Map([[remote, record(remote)]]) });
     applyRemoteSession(remoteSessionState(remote));
+    return remote;
+  };
+
+  it('another machine’s session with a running status held (Acceptance 8): the press is one session.steer at the next step with the sentence, and no send', async () => {
+    const remote = onStudio();
+    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote, { turn: humanTurn }) }, OTHER_MACHINE);
     vi.useFakeTimers();
-    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote) }, OTHER_MACHINE);
     void approve(remote, BUILD);
     await flush();
-    await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
+    expect(fake.invoked('session.steer')).toEqual([{ appSessionId: 'app-r', content: grant(BUILD), priority: 'next' }]);
+    expect(fake.invoked('session.send')).toEqual([]);
+  });
+
+  it('another machine’s session with no status held, and with one held and no turn running (Acceptance 8): the press is one session.send with the sentence, and no steer', async () => {
+    const remote = onStudio();
+    vi.useFakeTimers();
+    void approve(remote, BUILD);
+    await flush();
+    await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-1' });
     resetGrantsOut();
-    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote, { turn: humanTurn }) }, OTHER_MACHINE);
+    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote) }, OTHER_MACHINE);
     void approve(remote, BUILD);
     await flush();
     expect(fake.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: grant(BUILD) }, { appSessionId: 'app-r', content: grant(BUILD) }]);

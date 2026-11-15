@@ -24,6 +24,8 @@ import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { freshSource, subagentLookupOf } from '../lane-a/plane-transcript';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
+import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
+import { QueueList } from '../composer/queue/QueueList';
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session';
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
@@ -40,7 +42,7 @@ import { NO_ACTIONS } from '../transcript/view/context';
 import { registeredActions } from '../transcript/view/registry';
 import { renderRow } from '../transcript/view/rows/test-support';
 import { Transcript } from '../transcript/view/Transcript';
-import { resetGrantsOut, SETTLE_MS } from './grants';
+import { resetGrantsOut, SETTLE_MS, useGrantsOut } from './grants';
 import { registerBlockedCalls } from './index';
 
 const MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"';
@@ -393,26 +395,92 @@ describe('the press and the grant that is out (Design 4; Acceptance 9, 10)', () 
   });
 });
 
-describe('while the grant waits, during a turn (Design 5; Acceptance 11 at GRANT_DURING_TURN’s value)', () => {
-  it('after the turn: the press is one session.send kept for after the turn; the button stays closed while the queue holds it, after a fresh mount too; Delete takes it out and the button returns when the clock has run', async () => {
-    const store = await storeAt(at('busy-after'), blockedTurn(['make build'], { running: true }).events);
+describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_DURING_TURN at the next step, probe B)', () => {
+  const G1 = '22222222-2222-4222-8222-222222222222' as MessageUuid;
+  const G2 = '33333333-3333-4333-8333-333333333333' as MessageUuid;
+  const GRANT = consentMessage('command', 'make build');
+  /** The host's echo of the steer it wrote, marked as the person's grant. */
+  const echo = (uuid: MessageUuid, name: string) => {
+    const b = builder('2026-09-28T11:00:00.000Z');
+    b.emit('user.message', { messageUuid: uuid, content: GRANT, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'make build' }] });
+    return later(b, name);
+  };
+  const stackRow = () => within(document.querySelector<HTMLElement>('section[aria-label="Queued messages"]')!).getAllByRole('listitem')[0]!;
+
+  it('the press is one session.steer at the next step; the row’s button is disabled, after a fresh mount too; the stack reads “You approved make build” with Next step, Send now and Delete, no More; Delete withdraws the steer and the button returns at once; pressed again, the grant is read at the running call’s boundary and the row reads approved', async () => {
+    const store = await storeAt(at('busy-next'), blockedTurn(['make build'], { running: true }).events);
     ready(store.key, { turn: humanTurn });
     vi.useFakeTimers();
     const id = blockedIds(store)[0]!;
-    const row = drawn(store, id);
+    let row = drawn(store, id);
+    const press = async (uuid: MessageUuid, name: string) => {
+      fireEvent.click(row.button()!);
+      await flush();
+      await answer('session.steer', { messageUuid: uuid });
+      await store.push(echo(uuid, name));
+      act(() => queueOf(store.key, { steers: [{ messageUuid: uuid, content: GRANT, createdAt: T0 }] }));
+    };
+
+    await press(G1, 'g1');
+    expect(sent('session.send')).toEqual([]);
+    expect(sent('session.steer')).toEqual([{ appSessionId: 'busy-next', content: GRANT, priority: 'next' }]);
+    expect(row.button()!.disabled, 'waiting at the next step').toBe(true);
+    expect(row.line()).toBe('Auto mode blocked: make build');
+    const stack = render(<QueueList appSessionId={store.key} busy queue={useQueueStore.getState().bySession.get(store.key)!} />);
+    expect(within(stackRow()).getByText('You approved make build')).toBeTruthy();
+    expect(stackRow().querySelector('[data-mark]')!.textContent).toBe('Next step');
+    expect(within(stackRow()).getAllByRole('button').map((b) => b.getAttribute('aria-label'))).toEqual(['Send now', 'Delete']);
+    row.unmount();
+    row = drawn(store, id);
+    expect(row.button()!.disabled, 'a waiting grant, mounted afresh').toBe(true);
+
+    fireEvent.click(within(stackRow()).getByRole('button', { name: 'Delete' }));
+    await flush();
+    await answer('session.steer.cancel', { outcome: 'cancelled' });
+    expect(fake.invoked('session.steer.cancel')).toEqual([{ appSessionId: 'busy-next', messageUuid: G1 }]);
+    const cancelled = builder('2026-09-28T11:01:00.000Z');
+    cancelled.emit('command.lifecycle', { commandUuid: G1, state: 'cancelled' });
+    await store.push(later(cancelled, 'cancelled'));
+    act(() => queueOf(store.key, { steers: [], withdrawn: [G1] }));
+    stack.unmount();
+    expect(row.button()!.disabled, 'withdrawn: the button returns at once').toBe(false);
+
+    await press(G2, 'g2');
+    expect(row.button()!.disabled).toBe(true);
+    const taken = builder('2026-09-28T11:02:00.000Z');
+    taken.emit('command.lifecycle', { commandUuid: G2, state: 'started' });
+    taken.result('t-held', 'done', { structured: { stdout: 'done', stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+    await store.push(later(taken, 'taken'));
+    act(() => queueOf(store.key, { steers: [] }));
+    expect(row.line()).toBe('Auto mode blocked: make build · approved');
+    expect(row.button()).toBeNull();
+    expect(sent('session.steer')).toHaveLength(2);
+  });
+
+  it('another machine whose endpoint does not take a waiting message back: the steered grant’s Delete is refused in the stack’s words, the grant stays out, and the row keeps its button disabled', async () => {
+    const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 1, carrier: 'relay', capabilities: [] }]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-r', { lane: 'B' }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]), records: new Map([[remote, record(remote)]]) });
+    applyRemoteSession(remoteSessionState(remote));
+    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote, { turn: humanTurn }) }, OTHER_MACHINE);
+    const store = await storeAt(remote, blockedTurn(['make build'], { running: true }).events);
+    vi.useFakeTimers();
+    const row = drawn(store, blockedIds(store)[0]!);
     fireEvent.click(row.button()!);
     await flush();
-    expect(sent('session.steer')).toEqual([]);
-    expect(sent()).toEqual([{ appSessionId: 'busy-after', content: consentMessage('command', 'make build') }]);
-    await answer('session.send', { disposition: 'queued', messageUuid: null, queueId: 'q-1' });
-    act(() => queueOf(store.key, { entries: [entry(store.key, consentMessage('command', 'make build'))] }));
-    row.unmount();
-    const fresh = drawn(store, id);
-    expect(fresh.button()!.disabled, 'a waiting grant, mounted afresh').toBe(true);
-    act(() => queueOf(store.key, { entries: [] })); // Delete took the entry out of the queue
-    expect(fresh.button()!.disabled).toBe(true);
-    await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS));
-    expect(fresh.button()!.disabled).toBe(false);
+    expect(sent('session.steer')).toEqual([{ appSessionId: 'app-r', content: GRANT, priority: 'next' }]);
+    await answer('session.steer', { messageUuid: G1 });
+    act(() => queueOf(remote, { steers: [{ messageUuid: G1, content: GRANT, createdAt: T0 }] }));
+    render(<QueueList appSessionId={remote} busy queue={useQueueStore.getState().bySession.get(remote)!} />);
+    const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+    expect(del.disabled).toBe(true);
+    expect(remoteUnavailableOf(remote, 'session.steer.cancel')).toContain('Update MAWS on mini');
+    expect(del.getAttribute('title')).toBe(remoteUnavailableOf(remote, 'session.steer.cancel'));
+    expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now over the link').toBe(true);
+    await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
+    expect(useGrantsOut.getState().out.size, 'the grant stays out').toBe(1);
+    expect(row.button()!.disabled).toBe(true);
+    expect(fake.invoked('session.steer.cancel')).toEqual([]);
   });
 });
 

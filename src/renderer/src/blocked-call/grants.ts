@@ -21,8 +21,8 @@ import { approvalsFor, blockedKey, hiddenTurnsOf, type BlockedCall } from '../tr
 import { isAbortedReason } from '../transcript/model/classify';
 
 export const SETTLE_MS = 5_000;
-/** Probe B's one place: how a grant is sent to a session MAWS runs while a turn runs. 'after' until probe B's recordings are named here. */
-export const GRANT_DURING_TURN: 'after' | 'next' = 'after';
+/** Probe B's one place: how a grant is sent to a session MAWS runs while a turn runs. 'next' by probe B's recordings (u1c-b-*, 27 of 27; spikes/protocol-probe/findings-uxwave-u1c-during-turn.txt). */
+export const GRANT_DURING_TURN: 'after' | 'next' = 'next';
 /** Probe T's one place: the states of a terminal session in which the button is offered. M3 writes all false; M4 turns each true by its recording (u1c-t-*, 3 of 3 each). */
 export const TERMINAL_OFFERED: Readonly<Record<TerminalState, boolean>> = { idle: false, running: false, stopped: false };
 
