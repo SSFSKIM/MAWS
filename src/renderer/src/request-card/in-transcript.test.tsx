@@ -263,6 +263,7 @@ describe('show, the transcript’s one way to a waiting request', () => {
     expect(shown).toBe('gone');
     expect(document.activeElement).toBe(before);
     expect(within(end()!).getByRole('group', { name: 'Approval needed' }).textContent).toContain('make lint');
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' })); // the store holds one answer in flight per item, past the case
   });
 
   it('a request in its row: scrolls there and puts the keyboard on the row', async () => {
@@ -292,6 +293,7 @@ describe('a card’s delivery, in a row and at the end', () => {
     fireEvent.click(within(end()!).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(answered()).toHaveLength(2));
     expect(answered()[1]).toEqual(answered()[0]);
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' })); // the store holds one answer in flight per item, past the case
   });
 
   it('a question answered in its row whose write is out while the transcript is unmounted comes back sending, and answers once', async () => {
@@ -305,6 +307,7 @@ describe('a card’s delivery, in a row and at the end', () => {
     render(<section data-pane={0}><TranscriptSlot appSessionId={APP} /></section>);
     await waitFor(() => expect(questionRow()?.querySelector('[data-request-card]')?.getAttribute('aria-busy')).toBe('true'));
     expect(answered()).toHaveLength(1);
+    await act(() => fake.reply('session.answer', { outcome: 'delivered' })); // the store holds one answer in flight per item, past the case
   });
 });
 
