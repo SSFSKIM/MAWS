@@ -194,13 +194,16 @@ export function sendNowJournal(dir: string, name: string): string {
   return writeJournal(dir, `${name}-send-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
 
-// UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
-// promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
-// Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
-// which has the command moved (46) and the turn cut (`success`, `aborted_tools`, 49); the `now` message's own turn, and
-// the waiting message read at its first tool boundary (120 to 122). C3's prelude stands in for the probe's handshake,
-// and the answer at 14 and the meta rows go, as in `sendNowJournal`.
-export function promoteNowJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p3-promote-late-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
-  return writeJournal(dir, `${name}-promote-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+// UX wave U4b (M3's conditional step; the Decision Log's line on the first Mac run): Send now on a row that waits after
+// the turn while a turn runs is a promote at `next` and then the engine's send-now request for the uuid it answered, as
+// `uxwave/u4b-two-1` recorded it early in a shell call with a message already waiting (spikes/protocol-probe/
+// findings-uxwave-u4b-send-now-early.txt): the probe's prompt (seq 12) and its Bash call (32); the message at the next
+// step (37, queued 39); the promoted message at `next` (40) and the request naming it (41), answered `delivering` with
+// both still queued (44); the command moved (46 to 48) and the turn cut (`success`, `aborted_tools`, 50); both messages
+// `started` (53, 54) and read as one turn (the joined replay, 58). The replay matches a user write by its type and maps
+// each recorded uuid onto the one the host minted, so the request's `message_uuid` is held to the promoted message's own.
+// C3's prelude stands in for the probe's handshake, and the answer at 14 and the meta rows go, as in `sendNowJournal`.
+export function sendNowAfterJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4b-two-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-send-now-after`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
