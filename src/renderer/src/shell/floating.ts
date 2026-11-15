@@ -9,11 +9,16 @@
 // yields (`floating` on the set: the divider's release or Expand); the card then draws S's session at the bottom right of
 // the main area, over the other pane ("A"). One card at a time: `cardHost` answers which one is up, `cardSession` what it
 // draws. Both cards share the pill, the raise on a new request, the transcript's scroll carry and the rect.
+//
+// UX wave U10b (O-43; its execution document §F.1, §F.2, M6): the float has three presentations, the card, the bar (what
+// Close and Expand leave, the composer's box alone; in code still the pill) and hidden (nothing floats, and the header of
+// what the float sat over holds Show chat). `closed` keeps its meaning, "not the card"; `hidden` says which closed one.
 import { create } from 'zustand';
 import type { AttentionKind } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FloatingCardSize, LayoutRegions, Strip } from '@shared/ipc/schema/layout';
 import { panelInMain } from '../app/regions';
+import { editorHostOf, useEditorHostRegistration } from '../panel/editor-host'; // UX wave U10b, M6
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { markFocusOnMount, useComposerStore } from '../stores/composer';
@@ -45,9 +50,13 @@ export interface CardRect {
 }
 
 export interface FloatingCardState {
-  closed: boolean; // the card closed to its pill
+  closed: boolean; // the card closed to its pill: the bar, or hidden
+  // UX wave U10b (§F.1): the closed float is hidden, not the bar; meaningful only while `closed`, false otherwise
+  hidden: boolean;
   // Close unmounted the focused Close button with the card: the pill that mounts next takes the keyboard, once (P3-F)
   pillTakesFocus: boolean;
+  // UX wave U10b (§F.1): Hide chat unmounted the focused bar: the Show chat that mounts next takes the keyboard, once
+  showChatTakesFocus: boolean;
   column: ColumnReservation | null;
   // The column's width while the card's edge is dragged (the pane's spacer follows it, so the page moves with the drag);
   // null otherwise. `regions` is written once, on release.
@@ -57,7 +66,7 @@ export interface FloatingCardState {
   // layout effect and its resize observer; null for a pill or no card. Editors may keep their controls out from under it.
   rect: CardRect | null;
   host: CardHost | null;
-  setClosed(closed: boolean): void;
+  setClosed(closed: boolean): void; // either way, not hidden
   // The latest reservation, drag or host wins; each one's release clears only itself.
   reserveColumn(element: HTMLElement): () => void;
   startColumnDrag(): ColumnDrag;
@@ -68,13 +77,15 @@ export const useFloatingCard = create<FloatingCardState>()((set, get) => {
   let drag: object | null = null; // the current column drag's token
   return {
     closed: false,
+    hidden: false,
     pillTakesFocus: false,
+    showChatTakesFocus: false,
     column: null,
     columnDrag: null,
     pillHost: null,
     rect: null,
     host: null,
-    setClosed: (closed) => set({ closed, pillTakesFocus: false }),
+    setClosed: (closed) => set({ closed, hidden: false, pillTakesFocus: false, showChatTakesFocus: false }),
     reserveColumn(element) {
       const reservation: ColumnReservation = { element };
       set({ column: reservation });
@@ -138,6 +149,10 @@ export function cardSession(layout: Layout): AppSessionId | null {
   return host === 'split' ? (splitFloat(layout.main)?.appSessionId ?? null) : null;
 }
 
+// UX wave U10b (§F.1): what the float shows, read from its two flags.
+export type ChatPresentation = 'card' | 'bar' | 'hidden';
+export const chatPresentation = (state: Pick<FloatingCardState, 'closed' | 'hidden'>): ChatPresentation => (!state.closed ? 'card' : state.hidden ? 'hidden' : 'bar');
+
 // The session the open card draws on screen (null while it is a pill).
 export const openCardSession = (layout: Layout, closed: boolean = useFloatingCard.getState().closed): AppSessionId | null => (closed ? null : cardSession(layout));
 
@@ -146,10 +161,13 @@ export const openCardSession = (layout: Layout, closed: boolean = useFloatingCar
 // active tab of the pane beside it (`main:<tab id>`).
 export function cardSizeKey(state: Layout): string {
   const split = cardHost(state) === 'split' ? splitFloat(state.main) : null;
-  if (split !== null) return mainCardKey(currentSet(state.main).panes[otherPane(split.pane)]?.activeTabId ?? '');
+  if (split !== null) return mainCardKey(besideSplitCard(state.main, split.pane) ?? '');
   const shown = sessionOfTab(activeTab(state.main));
   return (shown === null ? null : state.panelBySession.get(shown)?.activeTabId) ?? SUMMARY_CARD_KEY;
 }
+
+// The active tab of the pane beside the split's floating pane: what the split's card sits over.
+const besideSplitCard = (main: Strip, pane: 0 | 1): string | null => currentSet(main).panes[otherPane(pane)]?.activeTabId ?? null;
 
 // ---- the pill's state, the raise, focus into a split card -------------------------------------------------------------
 
@@ -169,7 +187,26 @@ useLayout.subscribe((state, before) => {
       markFocusOnMount(tab.appSessionId);
     }
   }
-  if (floatIdentity(state) !== floatIdentity(before) && useFloatingCard.getState().closed) useFloatingCard.setState({ closed: false, pillTakesFocus: false });
+  // Every end of the float clears both flags and both keyboard marks (UX wave U10b, M6 decision 4); none is stored.
+  if (floatIdentity(state) !== floatIdentity(before) && useFloatingCard.getState().closed) useFloatingCard.getState().setClosed(false);
+});
+
+// UX wave U10b (§F.1; the owner's answer of 2026-11-15 to the card "Other session", "As you left it"): over a side
+// surface the card follows the session in front, and when another session's tab comes in front the chat shows what
+// `presentationForNewSession` answers, the keyboard left where it was. The one place a different answer changes.
+export function presentationForNewSession(left: ChatPresentation): ChatPresentation {
+  return left;
+}
+useLayout.subscribe((state, before) => {
+  if (cardHost(state) !== 'panel' || cardHost(before) !== 'panel') return;
+  const session = cardSession(state);
+  const was = cardSession(before);
+  if (session === null || was === null || session === was) return;
+  const left = chatPresentation(useFloatingCard.getState());
+  const next = presentationForNewSession(left);
+  if (next === left) return;
+  if (next === 'card') useFloatingCard.getState().setClosed(false);
+  else useFloatingCard.setState({ closed: true, hidden: next === 'hidden', pillTakesFocus: false, showChatTakesFocus: false });
 });
 
 // A compact composer still stands for S for keyboard actions, but typing in it is not a request to expand. Only its
@@ -187,7 +224,8 @@ export function focusCompactCard(): void {
 }
 
 // P4-B3 (its Decision Log 7): the split's card stands for S. While it is a pill, the focused pane moving to S (a sidebar
-// click on S's session, attention navigation, ⌘⇧\) opens it, and its composer takes the keyboard.
+// click on S's session, attention navigation, ⌘⇧\) opens it, and its composer takes the keyboard. UX wave U10b (§F.1):
+// the same from hidden, whose Hide chat left the focused pane on A.
 useLayout.subscribe((state, before) => {
   if (focusingCompact || !useFloatingCard.getState().closed || cardHost(state) !== 'split') return;
   const split = splitFloat(state.main);
@@ -197,7 +235,8 @@ useLayout.subscribe((state, before) => {
 // P4-B3 (its Decision Log 13; Codex: elicitations force its card open (source); a command approval did not (LC-3, live)):
 // a pill opens when its session gains an open request that asks for an answer (the kinds the composer docks), one no
 // pending list held before. A pill closed while that request is still pending stays closed for it; the next new one
-// raises it again. It hands over the keyboard only when the departing compact surface owned it.
+// raises it again. It hands over the keyboard only when the departing compact surface owned it. UX wave U10b (§F.1, the
+// root's UC-1): a hidden chat is not raised, and a request it saw arrive is no new one for the bar Show chat brings back.
 const RAISING: ReadonlySet<AttentionKind> = new Set<AttentionKind>(['permission', 'question', 'plan', 'elicitation', 'dialog']);
 let raised: { session: AppSessionId | null; ids: ReadonlySet<string> } = { session: null, ids: new Set() };
 function raiseOnRequest(): void {
@@ -206,7 +245,7 @@ function raiseOnRequest(): void {
   const ids = new Set(items.filter((item) => RAISING.has(item.kind)).map((item) => item.id as string));
   const fresh = session !== null && session === raised.session && [...ids].some((id) => !raised.ids.has(id));
   raised = { session, ids };
-  if (fresh && useFloatingCard.getState().closed) {
+  if (fresh && chatPresentation(useFloatingCard.getState()) === 'bar') {
     const compact = document.activeElement?.closest<HTMLElement>('[data-compact-session]');
     if (session !== null && compact?.dataset.compactSession === session) markFocusOnMount(session);
     useFloatingCard.getState().setClosed(false);
@@ -367,12 +406,13 @@ export function dockCard(): void {
 // The card's Close: its pill (the layer's, or a browser chrome's row's) takes the keyboard the Close button held. The
 // split's card no longer stands for S once it is a pill: the focused pane goes to A, which is what is on screen.
 export function closeCard(): void {
-  useFloatingCard.setState({ closed: true, pillTakesFocus: true });
+  useFloatingCard.setState({ closed: true, hidden: false, pillTakesFocus: true, showChatTakesFocus: false });
   const split = cardHost(layout()) === 'split' ? splitFloat(layout().main) : null;
   if (split !== null) layout().showPane(otherPane(split.pane));
 }
 
-// The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again.
+// The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again. From the bar or
+// from hidden (U1b's line "Waiting for you · N" calls it too).
 export function openCard(): void {
   const session = cardSession(layout());
   if (session !== null) markFocusOnMount(session);
@@ -382,8 +422,9 @@ export function openCard(): void {
 }
 
 // `panel.float` (⌥⌘B, the header's Float): floats a panel that is not floating (refused with no session to show); on a
-// floating one, brings a closed card back, else docks (and docks when there is no session to show). P4-B3 (its Decision
-// Log 8): with the split's card up it docks that card and does nothing else; a second press floats the panel.
+// floating one, brings a closed card back (the bar's or a hidden chat's: UX wave U10b, B7), else docks (and docks when
+// there is no session to show). P4-B3 (its Decision Log 8): with the split's card up it docks that card and does nothing
+// else; a second press floats the panel.
 export function togglePanelFloat(): void {
   if (cardHost(layout()) === 'split') dockSplit();
   else if (!isFloating(layout().regions)) floatPanel();
@@ -420,4 +461,51 @@ export function focusSplitCard(): void {
   if (useFloatingCard.getState().closed) return openCard();
   layout().showPane(split.pane);
   useComposerStore.getState().focusTargets.get(split.appSessionId)?.focusFrame();
+}
+
+// ---- Hide chat and Show chat (UX wave U10b, §F.1, §F.2) -----------------------------------------------------------------
+
+// The main tab whose header would hold Show chat for the split's float: the one in front of the other pane.
+function splitHeaderTab(state: Layout): string | null {
+  const split = cardHost(state) === 'split' ? splitFloat(state.main) : null;
+  return split === null ? null : besideSplitCard(state.main, split.pane);
+}
+// Show chat has a place: the panel's float always (the side column's controls are drawn); the split's while that tab
+// registers a header (the editor host's registration for it).
+const holdsShowChat = (host: CardHost | null, headerRegistered: boolean): boolean => host === 'panel' || (host === 'split' && headerRegistered);
+
+// §F.2: whether Hide chat is offered. The bar draws it only while this is true, and the float's layer calls
+// `showChatHeaderGone` when it turns false.
+export function useShowChatHeader(): boolean {
+  const host = useLayout(cardHost);
+  const tab = useLayout(splitHeaderTab);
+  return holdsShowChat(host, useEditorHostRegistration(tab === null ? null : { surface: 'main', tabId: tab }) !== null);
+}
+
+// The bar's Hide chat: bar → hidden, Show chat in the header taking the keyboard. Only from the bar, and only where a
+// header holds Show chat (hidden exists only then). The split's float no longer stands for S: the focused pane goes to
+// A, as the card's Close leaves it, so the sidebar, S's tab and ⇧⌘\ bring the card back from there.
+export function hideChat(): void {
+  const state = layout();
+  const tab = splitHeaderTab(state);
+  if (chatPresentation(useFloatingCard.getState()) !== 'bar' || !holdsShowChat(cardHost(state), tab !== null && editorHostOf({ surface: 'main', tabId: tab }) !== null)) return;
+  useFloatingCard.setState({ hidden: true, pillTakesFocus: false, showChatTakesFocus: true });
+  const split = cardHost(state) === 'split' ? splitFloat(state.main) : null;
+  if (split !== null) state.showPane(otherPane(split.pane));
+}
+
+// The header's Show chat: hidden → bar, the bar's editor taking the keyboard when it mounts; the split's float stands for
+// S again as Expand leaves it (its compact composer's own focus does the same, without opening the card).
+export function showChat(): void {
+  if (chatPresentation(useFloatingCard.getState()) !== 'hidden') return;
+  const session = cardSession(layout());
+  if (session !== null) markFocusOnMount(session);
+  useFloatingCard.setState({ hidden: false, showChatTakesFocus: false });
+  focusCompactCard();
+}
+
+// What the float sits over no longer has a header for Show chat: hidden → bar, once, the keyboard left where it is. It
+// does not hide again by itself when the header comes back. A no-op in any other state.
+export function showChatHeaderGone(): void {
+  if (chatPresentation(useFloatingCard.getState()) === 'hidden') useFloatingCard.setState({ hidden: false, showChatTakesFocus: false });
 }
