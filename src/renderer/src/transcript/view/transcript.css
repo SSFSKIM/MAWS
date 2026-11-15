@@ -241,8 +241,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* UX wave U3b (O-18, and the architect's rulings R1 to R5 on the drawn example): a slash command's output is a light line
    under its command's bubble, with no frame and no heading: a dim ⎿, then the output in muted 12 px type at 1.5, with
    16 px under the line. One line of text sits on the bubble's side, as wide as its words; text with a line end is a block
-   of the column's width, its words starting after the mark (R2). Closed, the one drawing of the output is bound to two
-   lines of the row's type (2 × 1.5em) and fades over at most a third of a line (R3); open, it has no bound. Markdown is
+   of the column's width, its words starting after the mark (R2). Closed, the one drawing of the output is cut at the
+   bottom of its second drawn line, which the row measures (R19), and fades over at most a third of a line ending there
+   (R3); open, it has no bound. Markdown is
    drawn at the line's scale: headings the line's size in bold, blocks 4 px apart, a table's text the line's size (R1).
    A terminal's text keeps its columns and scrolls sideways (R5). */
 .transcript-command { display: flex; justify-content: flex-end; align-items: baseline; gap: 6px; min-width: 0; padding: 0 0 16px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.5; }
@@ -252,9 +253,9 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-command[data-block] .transcript-command-body { flex: 1 1 auto; }
 .transcript-command-text { display: flex; align-items: baseline; gap: 6px; min-width: 0; max-width: 100%; }
 .transcript-command[data-block] .transcript-command-text { width: 100%; }
-.transcript-command-name { flex: none; font-family: var(--font-mono); white-space: nowrap; }
+.transcript-command-name { flex: none; white-space: nowrap; } /* R23: the line's own font; monospace is only a terminal's grid */
 .transcript-command-output { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
-.transcript-command-output:not([data-open]) { max-height: 3em; overflow: hidden; }
+.transcript-command-output:not([data-open]) { max-height: var(--command-bound, none); overflow: hidden; } /* R19: set by the row where it is cut */
 .transcript-command-output[data-collapsed] { mask-image: linear-gradient(to bottom, var(--fg) calc(100% - 0.5em), transparent); }
 .transcript-command[data-error] .transcript-command-output { color: var(--danger); }
 .transcript-command-output > pre { margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: inherit; line-height: inherit; white-space: pre; overflow-wrap: normal; }
