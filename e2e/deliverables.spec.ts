@@ -29,7 +29,7 @@ import { randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ArtifactConsole } from '@shared/ipc/schema/artifacts';
 import type { MawsArtifactCapture, MawsArtifactCapturedResult } from '@shared/ipc/schema/maws';
@@ -891,6 +891,170 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     // the seam saw exactly the opens and reveals asked for, the outside files' included
     expect(opened()).toEqual(expected);
     for (const record of [webm, png, code]) expect(expected).toContain(`reveal ${record.path}`);
+  });
+});
+
+// ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M4 decision 10; A1, R7) ----------
+// The scene of record for the owner's check: a scheme handler is told nothing of the window that asks, so main judges the
+// asker in the partition's request filter, and nothing in the tree shows that every request the file frames' responder
+// answers was decided there first. Under MAWS_E2E=1 the filter writes `frame-decision <pass|cancel> <web contents id |
+// none> <method> <url>` for every request of a token host and the responder writes `frame-entry <method> <range | -> <url>`
+// at its entry, through one ordered writer; this scene walks those lines. It asks `layout.frameFile` through the page's
+// bridge and mounts each URL itself, so it needs nothing of the window's viewer. No byte is judged by what is drawn.
+
+type FrameLine = { kind: 'decision'; verdict: 'pass' | 'cancel'; asker: string; method: string; url: string } | { kind: 'entry'; method: string; range: string; url: string };
+const withoutFragment = (url: string) => url.replace(/#.*$/s, '');
+
+/** The seam's file frame lines, in the order they were written. */
+function frameLines(lines: string[]): FrameLine[] {
+  const read: FrameLine[] = [];
+  for (const line of lines) {
+    const decision = /^frame-decision (pass|cancel) (\S+) (\S+) (.+)$/.exec(line);
+    if (decision) read.push({ kind: 'decision', verdict: decision[1] as 'pass' | 'cancel', asker: decision[2]!, method: decision[3]!, url: withoutFragment(decision[4]!) });
+    const entry = /^frame-entry (\S+) (\S+) (.+)$/.exec(line);
+    if (entry) read.push({ kind: 'entry', method: entry[1]!, range: entry[2]!, url: withoutFragment(entry[3]!) });
+  }
+  return read;
+}
+
+/** One URL's lines walked in order: its entries, the entries no passed decision of their method came before, who was passed. */
+function walkFrame(lines: FrameLine[], url: string) {
+  const passes = new Map<string, number>();
+  const passedFor = new Set<string>();
+  const ranges: string[] = [];
+  let unmatched = 0;
+  for (const line of lines.filter((l) => l.url === url)) {
+    if (line.kind === 'decision') {
+      if (line.verdict === 'pass') {
+        passes.set(line.method, (passes.get(line.method) ?? 0) + 1);
+        passedFor.add(line.asker);
+      }
+      continue;
+    }
+    ranges.push(line.range);
+    const left = (passes.get(line.method) ?? 0) - 1;
+    passes.set(line.method, left);
+    if (left < 0) unmatched++;
+  }
+  return { entries: ranges.length, unmatched, passedFor: [...passedFor], ranges };
+}
+
+type FramedKindName = 'pdf' | 'html' | 'video' | 'audio';
+
+/** Each URL mounted in `page` above everything: a PDF or a page in a frame, a video or a sound in a media element. */
+async function mountFrames(page: Page, items: Array<{ id: string; kind: FramedKindName; url: string }>): Promise<void> {
+  await page.evaluate((list) => {
+    for (const { id, kind, url } of list) {
+      document.getElementById(id)?.remove();
+      const element = kind === 'video' || kind === 'audio' ? document.createElement(kind) : document.createElement('iframe');
+      element.id = id;
+      if (kind === 'html') element.setAttribute('sandbox', 'allow-scripts');
+      if (element instanceof HTMLMediaElement) {
+        element.preload = 'metadata';
+        element.muted = true;
+        element.controls = true;
+      }
+      element.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:240px;border:0;z-index:2147483647;background:#fff';
+      element.setAttribute('src', url);
+      document.body.appendChild(element);
+    }
+  }, items);
+}
+
+/** The elements gone, a media element's load ended first so it asks for nothing more. */
+async function unmountFrames(page: Page, ids: string[]): Promise<void> {
+  await page.evaluate((list) => {
+    for (const id of list) {
+      const element = document.getElementById(id);
+      if (element instanceof HTMLMediaElement) {
+        element.pause();
+        element.removeAttribute('src');
+        element.load();
+      }
+      element?.remove();
+    }
+  }, ids);
+}
+
+const FRAME_PAGE = '<!doctype html><html><head><title>Invented ledger</title></head><body><p id="marker">waiting</p><script>document.getElementById("marker").textContent = "SCRIPT_RAN";</script></body></html>';
+
+test("a token's requests: every request that occurs for a PDF, a page, a video and a sound, a media seek's range among them, was first passed by the request filter for the owning window; another window and the capture partition deliver no byte", async () => {
+  test.setTimeout(240_000);
+  await scene({ titles: ['U6b-2: a token’s requests'] }, async (s) => {
+    const [id] = s.ids;
+    const files: Record<FramedKindName, [string, Buffer | string]> = {
+      pdf: ['report.pdf', minimalPdf()],
+      html: ['ledger.html', FRAME_PAGE],
+      video: ['clip.webm', await recordedWebm(s.page)],
+      audio: ['tone.wav', silentWav(120, 44_100)], // two minutes, so a seek near its end asks a range the element has not read
+    };
+    const kinds = Object.keys(files) as FramedKindName[];
+    const urls = {} as Record<FramedKindName, string>;
+    for (const kind of kinds) {
+      const [name, bytes] = files[kind];
+      writeFileSync(join(s.repo, name), bytes);
+      const answer = value(await invoke(s.page, 'layout.frameFile', { appSessionId: id, path: join(s.repo, name) }));
+      if (answer.status !== 'ready') throw new Error(`${name}: ${JSON.stringify(answer)}`);
+      expect(answer.framed).toBe(kind);
+      expect(answer.url).toBe(`maws-artifact://${answer.token}/${encodeURIComponent(name)}`);
+      urls[kind] = answer.url;
+    }
+    const owner = String(await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.id));
+    const lines = () => frameLines(seamLines(s));
+
+    // the owning window: each kind mounted; the video and the sound seeked to a time not yet loaded
+    const mounted = kinds.map((kind) => ({ id: `u6b2-${kind}`, kind, url: urls[kind] }));
+    await mountFrames(s.page, mounted);
+    for (const kind of ['pdf', 'html'] as const) await expect.poll(() => walkFrame(lines(), urls[kind]).entries, { message: `${kind}: its request reached the responder` }).toBeGreaterThan(0);
+    for (const kind of ['video', 'audio'] as const) {
+      const media = s.page.locator(`#u6b2-${kind}`);
+      await expect.poll(() => media.evaluate((element: HTMLMediaElement) => element.readyState), { message: `${kind}: its metadata loaded` }).toBeGreaterThanOrEqual(1);
+      await media.evaluate((element: HTMLMediaElement) => {
+        element.currentTime = Number.isFinite(element.duration) ? element.duration * 0.9 : 1.8;
+      });
+    }
+    // every media request carries a range; the sound's seek asks one that does not start at the file's start
+    await expect.poll(() => walkFrame(lines(), urls.video).ranges.some((range) => range.startsWith('bytes=')), { message: 'the video asked a range' }).toBe(true);
+    await expect.poll(() => walkFrame(lines(), urls.audio).ranges.some((range) => /^bytes=[1-9]\d*-/.test(range)), { message: 'the sound’s seek asked a range past its start' }).toBe(true);
+    await expect.poll(() => s.page.locator('#u6b2-audio').evaluate((element: HTMLMediaElement) => element.seeking)).toBe(false);
+    for (const kind of kinds) {
+      const walked = walkFrame(lines(), urls[kind]);
+      console.log(`[u6b2-record] ${kind}: entries ${walked.entries}, ranges ${walked.ranges.join(', ')}, passed for ${walked.passedFor.join(',')} (owner ${owner})`);
+      expect(walked.entries, kind).toBeGreaterThan(0);
+      expect(walked.unmatched, `${kind}: an entry with no passed decision before it`).toBe(0);
+      expect(walked.passedFor, `${kind}: every passed decision names the owning window`).toEqual([owner]);
+    }
+    await unmountFrames(s.page, mounted.map((m) => m.id));
+
+    // a second app window told every URL: its requests are cancelled with its own id, and none reaches the responder
+    const [second, windowId] = await Promise.all([s.maws.app.waitForEvent('window'), s.maws.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
+    await second.waitForLoadState('domcontentloaded');
+    const asker = String(await s.maws.app.evaluate(({ BrowserWindow }, ref) => BrowserWindow.fromId(ref)!.webContents.id, windowId));
+    expect(asker).not.toBe(owner);
+    let from = seamLines(s).length;
+    await mountFrames(second, kinds.map((kind) => ({ id: `u6b2-other-${kind}`, kind, url: urls[kind] })));
+    const since = () => frameLines(seamLines(s).slice(from));
+    for (const kind of kinds) {
+      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.verdict === 'cancel' && line.asker === asker), { message: `${kind}: the second window’s request cancelled` }).toBe(true);
+    }
+    let after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
+    expect(after.filter((line) => line.kind === 'entry'), 'no entry for the second window').toEqual([]);
+    expect(after.filter((line) => line.kind === 'decision' && line.verdict === 'pass'), 'no pass for the second window').toEqual([]);
+
+    // the capture partition: a request for each live token is cancelled there too, and none reaches a responder
+    from = seamLines(s).length;
+    const fromCapture = await s.maws.app.evaluate(
+      async ({ session }, list) => Promise.all(list.map((url) => session.fromPartition('maws-capture').fetch(url).then((answer) => `answered ${answer.status}`, () => 'refused'))), // CAPTURE_PARTITION, src/render/capture.ts
+      kinds.map((kind) => urls[kind]),
+    );
+    console.log(`[u6b2-record] the capture partition answered ${fromCapture.join(', ')}`);
+    for (const kind of kinds) {
+      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.verdict === 'cancel' && line.asker === 'none'), { message: `${kind}: the capture partition’s request cancelled` }).toBe(true);
+    }
+    after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
+    expect(after.filter((line) => line.kind === 'entry'), 'no entry for the capture partition').toEqual([]);
+    expect(after.filter((line) => line.kind === 'decision' && line.verdict === 'pass'), 'no pass on the capture partition').toEqual([]);
+    expect(fromCapture.filter((answer) => answer === 'answered 200' || answer === 'answered 206')).toEqual([]);
   });
 });
 
