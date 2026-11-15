@@ -271,16 +271,23 @@ export type ArtifactReadInput = z.infer<typeof ArtifactReadInputSchema>;
 // `files` maps a path to its whole new text, `null` removing it (Decision Log 10); an `html` page is its one file
 // (`index.html`, or the name it was created under). `mode: 'suggest'` writes the files as a suggestion the user accepts
 // or rejects (M8; parent Decision Log 27), as does any publish to an artifact whose owner set `agentEditsAsSuggestions`;
-// the default is a direct write, which never overrides the owner's setting.
+// the default is a direct write, which never overrides the owner's setting. UX wave U10b (l6-artifacts-18; the execution
+// document's §A.2): an html page may come from `path` instead, the .html file whose bytes become the new version, read
+// as `artifact_create`'s is; exactly one of the two, the refusal `publishPathOrFiles`.
 export const PUBLISH_MODES = ['direct', 'suggest'] as const;
-export const ArtifactPublishInputSchema = z.strictObject({
-  artifact: ArtifactIdSchema,
-  baseRevision: z.number().int().min(0),
-  files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }),
-  force: z.boolean().optional(), // default false
-  message: z.string().max(2000).optional(),
-  mode: z.enum(PUBLISH_MODES).optional(), // default 'direct'
-});
+export const ArtifactPublishInputSchema = z
+  .strictObject({
+    artifact: ArtifactIdSchema,
+    baseRevision: z.number().int().min(0),
+    files: z.record(FilePathSchema, FileTextSchema.nullable()).refine((files) => Object.keys(files).length > 0, { message: 'name at least one file' }).optional(),
+    path: z.string().min(1).optional(), // U10b
+    force: z.boolean().optional(), // default false
+    message: z.string().max(2000).optional(),
+    mode: z.enum(PUBLISH_MODES).optional(), // default 'direct'
+  })
+  .superRefine((input, ctx) => {
+    if ((input.path === undefined) === (input.files === undefined)) ctx.addIssue({ code: 'custom', path: [], message: TOOL_ERRORS.publishPathOrFiles });
+  });
 export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
 export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
@@ -549,7 +556,7 @@ export const MAWS_TOOLS = {
   artifact_publish: {
     title: 'Publish artifact',
     description:
-      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
+      "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html) For an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files.; baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
     input: ArtifactPublishInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
     meta: ALWAYS_LOAD, // P4-A3: an edit needs it
@@ -570,7 +577,7 @@ export const MAWS_TOOLS = {
   artifact_export: {
     title: 'Export artifact',
     description:
-      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
+      'Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file\'s path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format\'s own default; fonts chooses a presentation\'s pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.', // P3-C: fonts and the deck's formats; P3-E (E1 M5): the design's
     input: ArtifactExportInputSchema,
     annotations: ARTIFACT_WRITER_ANNOTATIONS,
   },
@@ -626,6 +633,9 @@ export const TOOL_ERRORS = {
   tooLarge: (tool: ArtifactToolName, path: string, bytes: number) => `${tool}: too large: ${path} (${bytes} bytes; the limit is ${ARTIFACT_MAX_BYTES / MIB} MiB)`,
   artifactExists: (id: string) => `artifact_create: an artifact "${id}" already exists in this session; use artifact_publish`,
   // P2-E1 (D10, D12): a side thread's create of an id one of its ancestors holds
+  // UX wave U10b (l6-artifacts-18, §A.2): a publish names path or files, exactly one; path is an html page's alone
+  publishPathOrFiles: 'artifact_publish: give path or files, not both and not neither',
+  publishPathHtmlOnly: (kind: string) => `artifact_publish: path publishes an html page; send files for a ${kind}`,
   artifactExistsInParent: (id: string) => `artifact_create: an artifact "${id}" already exists in the conversation this side thread was opened from; use artifact_publish`,
   noArtifact: (tool: ArtifactToolName, id: string) => `${tool}: no artifact "${id}" in this session`,
   noVersion: (id: string, version: number, versions: number) => `artifact_screenshot: version ${version} does not exist; "${id}" has ${versions} version(s)`,
@@ -665,11 +675,13 @@ type ToolInput<N extends MawsToolName> = z.infer<(typeof MAWS_TOOLS)[N]['input']
 // A call's arguments through the tool's input schema: the data, or the refusal text the host answers (an unknown pane
 // named with the known ones, every other refusal by its issues). U6d (decision 17): a `show_pane` that names the retired
 // `artifact` pane is answered `artifactPaneRetired` before the schema is consulted, so the agent always reads the sentence
-// that teaches the link, never a list of issues.
+// that teaches the link, never a list of issues. UX wave U10b (§A.2): a publish the schema refused for naming both or
+// neither of path and files is answered `publishPathOrFiles` alone, the sentence that says what to send.
 export function parseToolArguments<N extends MawsToolName>(name: N, args: unknown): { ok: true; data: ToolInput<N> } | { ok: false; error: string } {
   if (name === 'show_pane' && (args as { pane?: unknown } | null | undefined)?.pane === 'artifact') return { ok: false, error: TOOL_ERRORS.artifactPaneRetired };
   const parsed = MAWS_TOOLS[name].input.safeParse(args);
   if (parsed.success) return { ok: true, data: parsed.data as ToolInput<N> };
+  if (name === 'artifact_publish' && parsed.error.issues.some((issue) => issue.message === TOOL_ERRORS.publishPathOrFiles)) return { ok: false, error: TOOL_ERRORS.publishPathOrFiles };
   const pane = (args as { pane?: unknown } | null | undefined)?.pane;
   if (name === 'show_pane' && pane !== undefined && parsed.error.issues.some((issue) => issue.path.length === 1 && issue.path[0] === 'pane')) return { ok: false, error: TOOL_ERRORS.unknownPane(String(pane)) };
   return { ok: false, error: TOOL_ERRORS.invalidArguments(name, issuesText(parsed.error)) };

@@ -22,6 +22,11 @@
 // artifact itself does not move, so the answer carries its live revision and no turn version follows. An html page,
 // which has no document to suggest into, is refused.
 //
+// UX wave U10b (l6-artifacts-18; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M1 and §A): an html page
+// may name `path`, the .html file the agent wrote, read as `artifact_create` reads one (`readHtmlSource`) before anything
+// is written and published byte for byte through the same layers as `files`; another kind refuses `path`. What the
+// answer counts in the page is read from the version stored, so a replay reads no file.
+//
 // P3-C (docs/doperpowers/plans/2026-10-12-p3-c-presentations.md; the parent's Decision Log 53 and 58): a kind's loader
 // fields (`added`, `warnings`, `notes`, `held`) reach the answer, a deck's with the pictures its assets do not hold; the
 // answer's `kept` and `removed` come from the kind's paths, and the session's base keeps the files it knows, so a
@@ -30,13 +35,14 @@ import { createHash } from 'node:crypto';
 import { actorDisplay } from '@shared/artifacts/actor';
 import { isDocKind, type Artifact } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { parseToolArguments, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
+import { parseToolArguments, TOOL_ERRORS, type ArtifactPublishInput, type ArtifactPublishResult } from '@shared/maws/tools';
 import { assetWarnings } from '@artifacts/slides/answer'; // P3-C
 import { boardAssetWarnings } from '@artifacts/design/answer'; // P3-E
 import { stateV2 } from '@artifacts/yjs';
 import { legacyDashboardFiles, legacyDashboardReason } from '@artifacts/dashboard/legacy'; // P3-E
+import type { ContentRef } from '../documents/bytes';
 import type { ArtifactStore } from '../documents/store';
-import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
+import { actorOf, answering, filesOf, lineageOf, loaderFields, opIdOf, pathsOf, publisherOf, readHtmlSource, refuse, refusedAfterCommit, resolveArtifact, storeOf, ToolRefusal, withDoc, type ArtifactToolDeps } from './artifact-context';
 import { externalReferenceCount } from './artifacts';
 import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
@@ -59,11 +65,12 @@ export function artifactPublishTool(deps: PublishDeps): McpToolDefinition {
       const replayed = await store.replayOf(opIdOf(ctx));
       if (replayed.found) {
         const recorded = replayed.result as ArtifactPublishResult;
-        return toolText(recorded.kind === 'html' ? await placed(store, recorded, input, ctx) : recorded);
+        return toolText(recorded.kind === 'html' ? await placed(store, recorded, ctx) : recorded);
       }
       const artifactId = await resolveArtifact(TOOL, store, input.artifact, lineageOf(ctx, deps));
       const artifact = await store.readCommitted(() => store.get(artifactId));
       if (!artifact) throw refuse(TOOL, { reason: 'notFound', artifactId }, `the artifact ${input.artifact} was deleted`);
+      if (input.path !== undefined && artifact.kind !== 'html') throw new ToolRefusal(TOOL_ERRORS.publishPathHtmlOnly(artifact.kind)); // U10b
       if (artifact.kind === 'file') throw refuse(TOOL, { reason: 'invalid', kind: 'file' }, 'a file artifact is delivered again with send_file, not published');
       if (artifact.kind === 'document') throw refuse(TOOL, { reason: 'invalid', kind: 'document' }, 'a document is edited block by block, not published');
       // P3-E (E2 M2; ledger X25; parent Decision Log 16): a dashboard is a document, its data bound by artifact_dataset
@@ -74,10 +81,12 @@ export function artifactPublishTool(deps: PublishDeps): McpToolDefinition {
         throw refuse(TOOL, { reason: 'invalid', kind: 'dashboard' }, 'a dashboard is edited block by block (artifact_edit) and its data bound with artifact_dataset, not published');
       }
       suggestionPolicy(artifact, input); // a refusal before anything is migrated; read again where the publish writes
+      // U10b: the page's file, read and checked before anything is written (a refusal writes nothing)
+      const source = input.path === undefined ? null : (await readHtmlSource(TOOL, ctx.cwd, input.path)).bytes;
       // P3-E (E1's M2; Decision Log 11 (1)): an earlier build's shape is migrated by this session before its replica and
       // base are looked at, so the publish lands on the kind's model
       await store.ensureMigrated(artifact.id, actorOf(ctx));
-      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, ctx) : await placed(store, await publishPage(deps, store, artifact, input, ctx), input, ctx);
+      const result = isDocKind(artifact.kind) ? await publishDoc(deps, store, artifact, input, input.files!, ctx) : await placed(store, await publishPage(deps, store, artifact, input, source, ctx), ctx);
       return toolText(result);
     }))),
   );
@@ -119,9 +128,9 @@ function conflict(conflicts: { path: string; detail?: string }[], forced: boolea
   return refuse(TOOL, { reason: 'conflict', paths, conflicts }, sentence);
 }
 
-async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+// `source`: the bytes of the file `path` named (U10b), else the page is the one entry of `files`.
+async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, source: Buffer | null, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
-  const paths = Object.keys(input.files);
   const base = deps.session.byteBases.get(artifact.id);
   const recorded = await store.writeCommitted(() =>
     store.withOp(
@@ -131,11 +140,7 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
       async (op) => {
         // checked and written in one turn of the event loop: the state checked is the state written over
         const live = store.contentRef(artifact.id);
-        const names = new Set([PAGE, live.ref.name]);
-        const text = input.files[paths[0]!];
-        if (paths.length !== 1 || !names.has(paths[0]!) || text === null || text === undefined) {
-          throw refuse(TOOL, { reason: 'invalid', paths }, `an html artifact is one file: send files: {"${PAGE}": "<the whole page>"}`);
-        }
+        const bytes = source ?? pageOfFiles(input.files!, live.ref.name);
         try {
           suggestionPolicy(store.get(artifact.id) ?? artifact, input); // P3-F: the owner's setting where the publish writes
         } catch (refusal) {
@@ -143,7 +148,6 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
         }
         if (!base) return refusedAfterCommit(store, staleBase(live.revision, NEVER_READ));
         if (input.baseRevision !== base.revision) return refusedAfterCommit(store, staleBase(live.revision, notLastRead(input.baseRevision, base.revision)));
-        const bytes = Buffer.from(text, 'utf8');
         const sha256 = createHash('sha256').update(bytes).digest('hex');
         if (live.ref.sha256 !== base.sha256 && sha256 !== live.ref.sha256 && !input.force) return refusedAfterCommit(store, conflict([{ path: PAGE, detail: 'changed since your read' }], false));
         const answer = (revision: number): ArtifactPublishResult => ({
@@ -171,25 +175,40 @@ async function publishPage(deps: ArtifactToolDeps, store: ArtifactStore, artifac
   return recorded;
 }
 
+// The page's bytes from `files`, which must name the one page (`index.html`, or the name it was created under).
+function pageOfFiles(files: Record<string, string | null>, name: string): Buffer {
+  const paths = Object.keys(files);
+  const text = files[paths[0]!];
+  if (paths.length !== 1 || !new Set([PAGE, name]).has(paths[0]!) || text === null || text === undefined) {
+    throw refuse(TOOL, { reason: 'invalid', paths }, `an html artifact is one file: send files: {"${PAGE}": "<the whole page>"}`);
+  }
+  return Buffer.from(text, 'utf8');
+}
+
 // An html publish's answer with E2's fields for the transcript's artifact row: `version` is the place, from 1, of the
 // version the publish wrote among the artifact's versions in the order of their revisions (the viewers' `v1 … vN`,
 // P3-L's Decision Log 4), `ownerAppSessionId` the session that made the page when another (P2-E1). Nothing is added
 // for a publish that changed nothing, or a version no longer kept. A repeated call's answer is placed the same way.
-async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+// U10b: the external references are counted in the page that version stored, so a call by `path` (or its replay) reads
+// no file again.
+async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   if (recorded.changed.length === 0) return recorded;
   const found = await store.readCommitted(() => {
     const artifact = store.get(recorded.artifactId, { includeDeleted: true });
-    const place = artifact ? store.listVersions(artifact.id).findIndex((version) => version.seq === recorded.revision) + 1 : 0;
+    if (!artifact) return null;
+    const versions = store.listVersions(artifact.id);
+    const place = versions.findIndex((version) => version.seq === recorded.revision) + 1;
+    if (place === 0) return null;
     const owner = (store.links(recorded.artifactId).find((link) => link.role === 'created')?.appSessionId as AppSessionId | undefined) ?? null;
-    return artifact && place > 0 ? { artifact, place, owner } : null;
+    const ref = JSON.parse(store.versions.get(artifact.id, versions[place - 1]!.id)!.content!) as ContentRef;
+    return { artifact, place, owner, text: Buffer.from(store.files.read(artifact.id, ref)).toString('utf8') };
   });
   if (found === null) return recorded;
-  const { artifact, place, owner } = found;
-  const text = input.files[Object.keys(input.files)[0]!] ?? '';
+  const { artifact, place, owner, text } = found;
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, files: Record<string, string | null>, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
   let suggest = false;
@@ -221,7 +240,7 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
           actor,
           (doc) => {
             try {
-              const published = publish(doc, baseFiles, input.files, input.force ?? false);
+              const published = publish(doc, baseFiles, files, input.force ?? false);
               if (published.conflicts.length > 0) outcome.conflicts = published.conflicts;
               else outcome.result = { status, artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [], ...loaderFields(published) /* P3-C */ };
             } catch (error) {
@@ -271,7 +290,7 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
   if (outcome.result) {
     try {
       replica.base = withDoc(base!.state, (doc) => {
-        const { changed } = publish(doc, baseFiles, input.files, true);
+        const { changed } = publish(doc, baseFiles, files, true);
         const after = filesOf(store, artifact.kind, doc);
         const files = { ...baseFiles }; // P3-C: kept for the next publish
         for (const path of changed) {
