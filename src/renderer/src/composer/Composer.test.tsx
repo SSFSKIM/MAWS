@@ -55,6 +55,7 @@ import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
 import { ComposerAppKeys } from './ComposerAppKeys';
+import { ComposerBarContext } from './frame/bar'; // UX wave U10b (M7)
 import { resetStops } from '../lane-b/stop-act'; // the UX wave, U9 (S-01)
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a'; // the UX wave, U9 (S-01): a terminal session's Stop; UX wave U4a
 import { laneAState } from '../lane-a/test-support/lane-a-state'; // the UX wave, U9; UX wave U4a
@@ -1204,6 +1205,36 @@ describe('the three menu chords', () => {
     expect(useComposerStore.getState().chipWidgets.size).toBe(0);
     expect(useComposerStore.getState().modeMenus.size).toBe(0);
     act(() => undock());
+  });
+
+  // UX wave U10b (O-43; §F.3, M7 decision 5, ruled 2026-11-15 as F5): in the float's bar the toolbar is mounted and
+  // hidden, so its menus have no place. A chord pressed with the keyboard in the bar leaves the composer store's menu
+  // state as it was, and no chip opens to read the engine's lists (the open callback).
+  it.each([
+    ['model', MODEL],
+    ['effort', EFFORT],
+    ['mode', MODE],
+  ] as const)('in the float’s bar, the %s menu’s chord leaves the menu state as it was and calls no open callback', async (_, pressed) => {
+    live(A);
+    tabs(0);
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Pane index={0}>
+          <ComposerBarContext.Provider value>
+            <Composer appSessionId={A} paneIndex={0} />
+          </ComposerBarContext.Provider>
+        </Pane>
+        <ComposerAppKeys />
+      </QueryClientProvider>,
+    );
+    act(() => editorOf(0).focus());
+    const { chipWidgets, modeMenus } = useComposerStore.getState();
+    await chord(...pressed);
+    await chord(...pressed);
+    await act(async () => {});
+    expect(useComposerStore.getState().chipWidgets).toBe(chipWidgets);
+    expect(useComposerStore.getState().modeMenus).toBe(modeMenus);
+    expect(invoked('session.listModels'), 'no chip opened to read the engine’s models').toEqual([]);
   });
 });
 
