@@ -33,35 +33,82 @@ export async function answerByKey(page: Page, opts: { focus: Locator; control: L
   }).toPass({ timeout: 15_000 });
 }
 
-// When each request card first drew a keyed button (page time), so a scene can say a key answered nothing after the
-// prompt's first 400 ms, where it would have answered had it been bound: a key pressed inside them answers nothing
-// whether or not it is bound. Installed once per page, before the cards it watches are drawn.
+// When each request card first drew a keyed button (page time), and, for a prompt (a card with its row of decision
+// buttons, `[data-decision-buttons]`), what of the page its guard reads (UX wave U1b, Interfaces §F): whether the card
+// is in view and its buttons' row wholly visible (intersection observers rooted at the viewport, which clip by every
+// scrolling ancestor as the guard's own test does), whether a menu, dialog or popover is open (the dispatcher's
+// `OPEN_OVERLAY`), whether the card shows its keyed control enabled (live), and the page time each of those last turned
+// true (an overlay: closed). A scene waits on that observed state, never on time from the first drawing: the guard
+// re-arms on each of those events. Installed once per page, before the cards it watches are drawn.
 export async function watchPrompts(page: Page): Promise<void> {
   await page.evaluate(() => {
-    const w = window as unknown as { __u1aDrawn?: Record<string, number> };
+    type Watch = { inView: boolean; whole: boolean; live: boolean; shownAt: number; wholeAt: number; liveAt: number };
+    const w = window as unknown as { __u1aDrawn?: Record<string, number>; __u1bPrompts?: { cards: Record<string, Watch>; overlay: boolean; clearedAt: number } };
     if (w.__u1aDrawn) return;
     const drawn: Record<string, number> = (w.__u1aDrawn = {});
+    const prompts = (w.__u1bPrompts = { cards: {} as Record<string, Watch>, overlay: false, clearedAt: 0 });
+    const OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]:not([data-hover-card])`).join(', ');
+    const watched = new WeakSet<Element>();
+    const watch = (card: Element, id: string, buttons: Element) => {
+      watched.add(card);
+      const state: Watch = (prompts.cards[id] = { inView: false, whole: false, live: false, shownAt: 0, wholeAt: 0, liveAt: 0 });
+      new IntersectionObserver((entries) => {
+        const now = performance.now();
+        const inView = entries.at(-1)!.isIntersecting;
+        if (inView && !state.inView) state.shownAt = now;
+        state.inView = inView;
+      }, { threshold: [0] }).observe(card);
+      new IntersectionObserver((entries) => {
+        const now = performance.now();
+        const entry = entries.at(-1)!;
+        const whole = entry.isIntersecting && entry.intersectionRatio >= 0.999;
+        if (whole && !state.whole) state.wholeAt = now;
+        state.whole = whole;
+      }, { threshold: [0, 1] }).observe(buttons);
+    };
     const read = () => {
+      const now = performance.now();
       for (const card of Array.from(document.querySelectorAll('[data-request-card]'))) {
         const id = card.getAttribute('data-request-card')!;
-        if (drawn[id] === undefined && card.querySelector('[aria-keyshortcuts]') !== null) drawn[id] = performance.now();
+        if (drawn[id] === undefined && card.querySelector('[aria-keyshortcuts]') !== null) drawn[id] = now;
+        const buttons = card.querySelector('[data-decision-buttons]');
+        if (buttons !== null && !watched.has(card)) watch(card, id, buttons);
+        const state = prompts.cards[id];
+        if (state === undefined) continue;
+        const live = card.querySelector('[aria-keyshortcuts]:not([disabled])') !== null;
+        if (live && !state.live) state.liveAt = now;
+        state.live = live;
       }
+      const overlay = document.querySelector(OVERLAY) !== null;
+      if (prompts.overlay && !overlay) prompts.clearedAt = now;
+      prompts.overlay = overlay;
     };
     read();
-    new MutationObserver(read).observe(document.body, { childList: true, subtree: true });
+    new MutationObserver(read).observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-state', 'disabled'] });
   });
 }
 
-// Waits until the prompt `card` (a `[data-request-card]` element) has been drawn for its 400 ms.
-export async function pastGrace(page: Page, card: Locator): Promise<void> {
+// Waits until the prompt `card` (a `[data-request-card]` element with its buttons' row) is armed as its guard arms it
+// (§F): in view, live, no overlay open, and for the two chords that allow (the default) its buttons' row wholly visible,
+// each of those for at least the grace (400 ms, and a frame's margin) since it last turned true. `deny`: Esc's rule,
+// which does not wait on the buttons' row. A premise of every press that must answer, and of every assertion that a
+// key answered nothing although the prompt would have taken it.
+export async function pastGrace(page: Page, card: Locator, opts: { deny?: boolean } = {}): Promise<void> {
   const id = await card.getAttribute('data-request-card');
   expect(id, 'the request card').not.toBeNull();
   await expect
-    .poll(() => page.evaluate((cardId) => {
-      const at = (window as unknown as { __u1aDrawn?: Record<string, number> }).__u1aDrawn?.[cardId];
-      return at === undefined ? -1 : performance.now() - at;
-    }, id!), { message: `the prompt ${id} drawn for 400 ms (watchPrompts installed before it)` })
-    .toBeGreaterThanOrEqual(400);
+    .poll(() => page.evaluate(([cardId, deny]) => {
+      const prompts = (window as unknown as { __u1bPrompts?: { cards: Record<string, { inView: boolean; whole: boolean; live: boolean; shownAt: number; wholeAt: number; liveAt: number }>; overlay: boolean; clearedAt: number } }).__u1bPrompts;
+      const state = prompts?.cards[cardId];
+      if (prompts === undefined || state === undefined) return 'not watched (watchPrompts installed before it?)';
+      if (!state.inView) return 'out of view';
+      if (!state.live) return 'not live';
+      if (prompts.overlay) return 'an overlay is open';
+      if (!deny && !state.whole) return 'its buttons not wholly visible';
+      const since = Math.max(state.shownAt, state.liveAt, prompts.clearedAt, deny ? 0 : state.wholeAt);
+      return performance.now() - since >= 450 ? 'armed' : 'within its grace';
+    }, [id!, opts.deny === true] as const), { message: `the prompt ${id} armed as its guard arms it` })
+    .toBe('armed');
 }
 
 // A chord dispatched by the page itself at the frame `frame` (a selector: since U1b, the transcript row that holds the

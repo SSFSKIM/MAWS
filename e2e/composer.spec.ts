@@ -23,7 +23,7 @@ import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/c
 import { invoke, launchReady, promoteNowJournal, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
-import { ALLOW_ONCE_KEY, answerByKey } from './support/request-keys';
+import { ALLOW_ONCE_KEY, answerByKey, pastGrace, watchPrompts } from './support/request-keys';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -1440,6 +1440,7 @@ function firstRecordedPrompt(fixture: string): string {
 test('U1b, a prompt waits at the transcript’s end while the editor takes text: ⌘Enter with a draft queues it and leaves the prompt, with none it allows', async ({ editor }) => {
   const { page } = editor;
   await openComposerPage(page);
+  await watchPrompts(page);
   let id = '';
   await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
   await launchReady(page, id, PERMISSION_FIXTURE);
@@ -1456,7 +1457,8 @@ test('U1b, a prompt waits at the transcript’s end while the editor takes text:
   await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
   await expect(pane(page, 0).getByText('Composer paused')).toHaveCount(0);
 
-  // a draft: ⌘Enter is the composer's, kept for after the turn; the prompt still waits and nothing is written
+  // a draft: ⌘Enter is the composer's, kept for after the turn; the prompt, armed, still waits and nothing is written
+  await pastGrace(page, card);
   const later = 'Then list the tags as well.';
   await page.keyboard.type(later);
   await page.keyboard.press(ALLOW_ONCE_KEY);
