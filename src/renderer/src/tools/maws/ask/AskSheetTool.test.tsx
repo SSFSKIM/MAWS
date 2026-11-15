@@ -19,8 +19,14 @@ import { useMachines } from '../../../stores/machines';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
-import type { AskSheetParams } from '../actions';
+import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
+import { registerPanelTool } from '../../../panel/host';
+import { surfaceTabs } from '../../../panel/surface-model';
+import { useLayout } from '../../../stores/layout';
+import { A as SHOWN, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { mawsTranscriptActionsOver, type AskSheetParams } from '../actions';
 import { askSheetTool } from './AskSheetTool';
+import { connectAsks } from './connect';
 import { HoverAsk } from './HoverAsk';
 import { applyAskEvents, askSheet, resetAskSheets } from './store';
 
@@ -593,3 +599,46 @@ describe('a session on a machine that doesn’t offer the answer', () => {
   });
 });
 
+
+// UX wave U1b (M6; O-17): the sheet opens only when the person opens it. An ask that arrives draws its form in its
+// capsule's row (the in-place form) and opens no sheet; "Open beside" (`openAsk`, as the capsule's button calls it)
+// opens the sheet with the same form and the draft the row holds, one draft in the session's store.
+describe('Open beside', () => {
+  const opened = (ask: PendingAsk) => ({
+    id: 'e-opened', sessionId: 'eng-a', at: '2026-10-06T00:00:01.000Z', seq: 1, agentId: null, parentToolUseId: null,
+    kind: 'maws.ask.opened', askId: ask.askId, toolUseId: ask.toolUseId, requestId: ask.requestId, blocking: ask.blocking, title: ask.title, context: ask.context, questions: ask.questions,
+  });
+  beforeEach(() => resetPanelStores());
+  afterEach(() => resetPanelStores());
+
+  it('opens the sheet with the row’s draft', async () => {
+    const files = { id: 'files:aaaa0002', toolId: 'files', pinned: false };
+    const { tool, probe } = probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false });
+    registerPanelTool(tool);
+    useLayout.setState({
+      panelBySession: new Map([[SHOWN, { tabs: [files], activeTabId: files.id }]]),
+      panelSurfaces: { version: 2, stacks: { [SHOWN]: [files.id] }, pinnedTools: [], contexts: {} },
+    });
+    const off = connectAsks();
+    try {
+      act(() => fake.event('session.eventBatch', { appSessionId: SHOWN, events: [opened(ASK)] }));
+      expect(probe.created).toEqual([]); // the ask arrived in the session on screen and opened nothing
+      render(<div data-testid="row"><HoverAsk appSessionId={SHOWN} askId={ASK.askId} /></div>);
+      await fake.reply('maws.asks.list', { asks: [ASK] });
+      const row = screen.getByTestId('row');
+      fireEvent.click(within(row.querySelector<HTMLElement>('[data-question-id="q1"]')!).getByRole('radio', { name: 'Blue' }));
+      const data: AskRowData = { askId: ASK.askId, toolUseId: ASK.toolUseId, title: ASK.title, context: ASK.context, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null };
+      act(() => mawsTranscriptActionsOver(fake.client).openAsk(SHOWN, data)); // Open beside
+      expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([[SHOWN, { askId: ASK.askId, historical: data }]]);
+      expect(surfaceTabs(useLayout.getState(), SHOWN).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
+      const state = askSheetTool.createState({ appSessionId: SHOWN, session: record(SHOWN), instanceId: 'ask-sheet:beside', params: probe.created[0]!.params as AskSheetParams });
+      const Sheet = askSheetTool.render;
+      render(<div data-testid="sheet"><Sheet state={state} ctx={ctx({ appSessionId: SHOWN, session: record(SHOWN) })} /></div>);
+      const sheetQ1 = screen.getByTestId('sheet').querySelector<HTMLElement>('[data-question-id="q1"]')!;
+      expect(within(sheetQ1).getByRole('radio', { name: 'Blue' }).getAttribute('aria-checked')).toBe('true');
+      expect(within(sheetQ1).getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('false');
+    } finally {
+      off();
+    }
+  });
+});
