@@ -505,6 +505,18 @@ describe('a side tab dragged between the groups', () => {
     expect(useLayout.getState().dragging).toBeNull();
   });
 
+  // The branch review's fifth finding: the menu's move keeps a preview file tab, as the drag does (Decision 6).
+  it('by its menu’s Move below a preview file tab joins the other group and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()).toEqual([[review], [file], file]);
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
   it('onto the lower part of a one-group column it makes the second group; the target shows only while a side tab drags', () => {
     renderHost();
     const review = add('review');
