@@ -1,20 +1,28 @@
 // D14 §4, the canon rendered in the system: each layout as a 1920×1080 slide scaled to the page's width, each component
-// on the system's ground on such a slide (L279: it is drawn at the deck's scale, so 1:1 it overflowed its card), and
-// `components/document.css` applied to a fixed sample document. Each renders in its own sandboxed frame (frame.ts); a
-// change of the system rewrites the frames' sources.
+// on the system's ground at the deck's scale (L279: 1:1 it overflowed its card) on the smallest canvas that holds it
+// (UX wave U10b, M11: component-canvas.ts, up to twice the size a slide gave it), and `components/document.css` applied
+// to a fixed sample document. Each renders in its own sandboxed frame (frame.ts); a change of the system rewrites the
+// frames' sources.
 import { useLayoutEffect, useRef, useState } from 'react';
 import { fontFaceCss, rewriteCssUrls, type AssetUrl } from '../assets';
 import { canonKind, DOCUMENT_CSS_PATH } from '../canon';
 import { generateTokensCss } from '../css';
 import type { TokenSet } from '../tokens';
+import { defaultSystem } from '../../types/design_system/defaults';
+import { COMPONENT_CANVASES, componentCanvas, componentFrameCss, type ComponentCanvas } from './component-canvas';
 import { assetSource, frameCsp, frameDocument, rewriteHtmlAssets } from './frame';
 
 const SLIDE = { width: 1920, height: 1080 };
 const BASE = 'html, body { margin: 0; }';
-const CANVAS = `body { width: ${SLIDE.width}px; height: ${SLIDE.height}px; overflow: hidden; }`;
-const SLIDE_BASE = `${CANVAS} body > section { width: ${SLIDE.width}px; height: ${SLIDE.height}px; box-sizing: border-box; overflow: hidden; }`;
-// a component held in the middle of the slide, inside a content layout's inset (the defaults' 128px)
-const COMPONENT_BASE = `${CANVAS} body { box-sizing: border-box; padding: 128px; display: flex; flex-direction: column; justify-content: safe center; background: var(--ds-color-bg); }`;
+const SLIDE_BASE = `body { width: ${SLIDE.width}px; height: ${SLIDE.height}px; overflow: hidden; } body > section { width: ${SLIDE.width}px; height: ${SLIDE.height}px; box-sizing: border-box; overflow: hidden; }`;
+const LARGEST = COMPONENT_CANVASES[2]; // the largest
+
+// A component's canvas: the table's for a bundled system's component as it was bundled (a default's, or a duplicate's,
+// which keeps its key), else the largest, since a component since changed was not measured (§J).
+function canvasOf(bundledKey: string | null, path: string, html: string): ComponentCanvas {
+  if (bundledKey === null || defaultSystem(bundledKey)?.files[path] !== html) return LARGEST;
+  return componentCanvas(bundledKey, path);
+}
 
 // A US high-school handout (the product's frame, the spec's Decision Log 6), in the blocks B's editor writes.
 export const SAMPLE_DOCUMENT = `<article class="ds-doc">
@@ -33,8 +41,9 @@ export const SAMPLE_DOCUMENT = `<article class="ds-doc">
 <pre><code>Δm = 52.07 g − 51.32 g = 0.75 g</code></pre>
 </article>`;
 
-/** The frames' sources for a system's canon, from its tokens and files, its assets loading through `toUrl`. */
-export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, string>>, toUrl: AssetUrl) {
+/** The frames' sources for a system's canon, from its tokens and files, its assets loading through `toUrl`; `bundledKey`
+ * names the bundled system it holds, when it does. */
+export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, string>>, toUrl: AssetUrl, bundledKey: string | null = null) {
   const csp = frameCsp(assetSource(toUrl));
   const documentCss = files[DOCUMENT_CSS_PATH];
   const faces = fontFaceCss(documentCss, tokens, toUrl);
@@ -44,10 +53,13 @@ export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, str
   return {
     layouts: paths
       .filter((path) => canonKind(path) === 'layout')
-      .map((path) => ({ path, srcDoc: frameDocument({ csp, styles: [BASE, SLIDE_BASE, faces, deck], body: html(path) }) })),
+      .map((path) => ({ path, canvas: SLIDE, srcDoc: frameDocument({ csp, styles: [BASE, SLIDE_BASE, faces, deck], body: html(path) }) })),
     components: paths
       .filter((path) => canonKind(path) === 'component')
-      .map((path) => ({ path, srcDoc: frameDocument({ csp, styles: [BASE, COMPONENT_BASE, faces, deck], body: html(path) }) })),
+      .map((path) => {
+        const canvas = canvasOf(bundledKey, path, files[path]!);
+        return { path, canvas, srcDoc: frameDocument({ csp, styles: [BASE, componentFrameCss(canvas), faces, deck], body: html(path) }) };
+      }),
     document:
       documentCss === undefined
         ? null
@@ -55,40 +67,42 @@ export function canonFrames(tokens: TokenSet, files: Readonly<Record<string, str
   };
 }
 
-/** A slide frame drawn at 1920×1080 and scaled to its box's width (a sandboxed frame's content cannot be measured). */
-function SlideFrame(props: { title: string; srcDoc: string }) {
+/** A frame drawn at its canvas's size and scaled to the room inside its box's border (a sandboxed frame's content cannot
+ * be measured): the client width, since the bounding width counts the 1 px border on each side (L7). */
+function SlideFrame(props: { title: string; srcDoc: string; canvas: { width: number; height: number } }) {
+  const { canvas } = props;
   const box = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(0.25);
   useLayoutEffect(() => {
     const element = box.current;
     if (!element) return;
     const measure = () => {
-      const width = element.getBoundingClientRect().width;
-      if (width > 0) setScale(width / SLIDE.width);
+      const width = element.clientWidth;
+      if (width > 0) setScale(width / canvas.width);
     };
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
     return () => observer.disconnect();
-  }, []);
+  }, [canvas.width]);
   return (
-    <div ref={box} className="dsp-slide" style={{ aspectRatio: `${SLIDE.width} / ${SLIDE.height}` }}>
+    <div ref={box} className="dsp-slide" style={{ aspectRatio: `${canvas.width} / ${canvas.height}` }}>
       <iframe
         title={props.title}
         sandbox=""
         referrerPolicy="no-referrer"
         srcDoc={props.srcDoc}
-        width={SLIDE.width}
-        height={SLIDE.height}
+        width={canvas.width}
+        height={canvas.height}
         style={{ transform: `scale(${scale})` }}
       />
     </div>
   );
 }
 
-export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, string>>; toUrl: AssetUrl }) {
-  const frames = canonFrames(props.tokens, props.files, props.toUrl);
+export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, string>>; toUrl: AssetUrl; bundledKey: string | null }) {
+  const frames = canonFrames(props.tokens, props.files, props.toUrl, props.bundledKey);
   const empty = !frames.layouts.length && !frames.components.length && frames.document === null;
   return (
     <section className="dsp-section" data-ds-section="canon" aria-labelledby="dsp-canon">
@@ -100,7 +114,7 @@ export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, 
         <div className="dsp-canon-grid">
           {frames.layouts.map((frame) => (
             <figure key={frame.path} className="dsp-canon-item">
-              <SlideFrame title={frame.path} srcDoc={frame.srcDoc} />
+              <SlideFrame title={frame.path} srcDoc={frame.srcDoc} canvas={frame.canvas} />
               <figcaption className="dsp-name">{frame.path}</figcaption>
             </figure>
           ))}
@@ -110,7 +124,7 @@ export function Canon(props: { tokens: TokenSet; files: Readonly<Record<string, 
         <div className="dsp-canon-grid">
           {frames.components.map((frame) => (
             <figure key={frame.path} className="dsp-canon-item">
-              <SlideFrame title={frame.path} srcDoc={frame.srcDoc} />
+              <SlideFrame title={frame.path} srcDoc={frame.srcDoc} canvas={frame.canvas} />
               <figcaption className="dsp-name">{frame.path}</figcaption>
             </figure>
           ))}
