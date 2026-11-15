@@ -101,8 +101,9 @@ export function DiscoverHome({ tab, cwd, onOpen }: { tab: Tab; cwd: string | nul
         {featured && <Featured item={featured} tab="plugins" onOpen={(item) => onOpen(item, 'plugins')} />}
         {shelves.map((shelf) => {
           const kind = KIND_OF_SHELF[shelf.key];
-          // a kind with nothing to show (no copy of the directory's servers) draws no empty shelf
-          if (kind === undefined || shelf.items.length === 0) return null;
+          // a kind with nothing at all (no copy of the directory's servers) draws no shelf; one whose cards all stand on
+          // Plugins' keeps its heading and See all
+          if (kind === undefined || shelf.total === 0) return null;
           return (
             <KindLines key={shelf.key} tab={kind}>
               <Shelf
