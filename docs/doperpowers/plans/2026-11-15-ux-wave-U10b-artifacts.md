@@ -41,7 +41,7 @@ After the four pull requests of this landing:
 - [x] (2026-11-15 UTC) M8 — "Make something new": four cards, More, and a design-system choice that binds. Commits `1dbcaefcb`..`642dee896`, fix waves `015228fb4`..`b9b939868` and `3451c949c`..`1444eca1a`; task review clean after two fix waves.
 - [x] (2026-11-15 UTC) M9 — A Space carries instructions: the store, the sheet, the mark and the chip. Commits `149e9b750`..`a89795356` (the wire minor alone in `ce39ac9c1`, provisional), fix wave `d7e88a86c`..`e4dc4e1b7`; task review clean after one fix wave.
 - [x] (2026-11-15 UTC) M10 — The artifact tools give a Space's instructions. Commits `ee97576ec`..`d70ea917a`, fix wave `ee62ae471`..`c81f3cfc3`; task review clean after one fix wave.
-- [ ] M11 — The design system's page, and the scenes and the record of U10b-4.
+- [x] (2026-11-15 UTC) M11 — The design system's page, and the scenes and the record of U10b-4. Commits `81d9b9b32`..`f73207135`; task review clean but for one deferred finding (the paid case's copied scaffolding, Decision Log). Acceptance outputs at `f73207135`, on the build VM: `pnpm typecheck` 0 and `pnpm lint` 0; vitest `src/artifacts/design-system/` with the tokens guard 27 files, 346 passed; the gate's script tests 588 of 588; `maws-app-scan` 8 of 8; the e2e typecheck 0. "U10b-4 (M11): no migration, no entity field, no offer": `git diff 015c2a727...f73207135 --stat -- src/engine-host/documents/migrations.ts src/shared/artifacts/entity.ts src/endpoint/offers.ts src/shared/maws/instructions.ts` prints nothing (compared with the branch's base, since the branch merges nothing). The whole unit suite (`pnpm test`): 12 files failed and 2,648 passed; every failure is a VM-known file or a 5 s timeout under load, and the five timed-out files pass alone with `--testTimeout 60000` (165 of 165). Six scenes written and typechecked, none run (the architect's, on a Mac).
 - [ ] Per pull request: the proofs an executor does not run ("Proof that an executor does not run").
 
 ## The cut: four pull requests
@@ -1147,7 +1147,31 @@ Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's 
 - M11 (2026-11-15): `componentCanvas`'s `systemId` is the bundled system's key (`maws`, `classroom`, `official`), read from the system's origin (`route: 'default'`), because a seeded system's artifact id differs per store; a duplicate keeps route and key and so the same canvases. A bundled component whose file differs from the bundled file takes the largest canvas, as one the table does not name; edited tokens are not compared (tracker row 7's evidence). "Holds" applies the 8 px spare to the height; sideways the margin boxes' union lies inside the inset (to half a pixel). The rule, the table and the component frame's CSS live in `component-canvas.ts`, which the measuring scene imports, so page and scene share one rule; the scene measures in the app's own renderer, in an unsandboxed off-screen iframe of the page's origin at 1:1 with the faces loaded.
 - M11 (2026-11-15): the canvas table was filled from the drawn and measured page 6 against the canon's files and tokens. Three entries are uncertain and are settled by the measuring scene's first Mac run: `maws/table` (960, 18 px to spare against 8), `official/fact-table` (1,120, derived, not measured) and `official/signature` (1,120: 7.1 px to spare at 960, short of the 8). The drawn page marks the signature "fits, 7 px to spare" at 960; the document's 8 px rule was built.
 - M11 (2026-11-15): A10's Korean break is asserted in the deck's sample cell (the largest, H21) and reported for the document's, where a 26 px title can fit the word whole. "(space instructions, both ways)" skips only when the peer's source holds `documents/space-instructions.ts` (neither older build does) and never reads `sameWire`; the chip's stored name is written through `session.drafts.set` onto the seeded session both builds file, as the take-back scenes do, since whether a peer restores an unstarted card chat is another landing's question. The stored form is read with `sqlite3 -readonly -json`, as `indexed` reads the index. The paid case is a second case in `e2e/library-live.spec.ts` with its own copy of the first's scaffolding. The Acceptance `--stat` for U10b-4 is compared with the branch's base `015c2a727`, since the branch merges nothing.
+- M11 (2026-11-15, the controller): the task review's one Important finding, that the new paid case in `e2e/library-live.spec.ts` copies the first paid case's permission loop and its cleanup and spend check, is deferred rather than fixed: extracting shared helpers would rewrite a paid case that no one runs before the landing, with no proof that it still works, for a maintenance gain. Carried to the pull request's unresolved review findings for the branch review.
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**U10b-4 (M8 to M11), 2026-11-15.** Built on `ux-wave/U10b-4` from `015c2a727`, merging nothing. Each milestone was reviewed clean at its frontier: M8 after two fix waves, M9 and M10 after one each, and M11 with one finding deferred. On the Library page, "Make something new" is four cards with Blank beside each, a More menu, and one design-system choice that lasts as long as the page is open; `artifact_create` takes `designSystem`. A Space carries instructions in the store's `meta`, under one key with no migration, read and written by two engine-host commands that are not offered over the link, with the wire minor alone in `ce39ac9c1` (49, provisional). A Space can be edited from a sheet, shows a mark, and passes its instructions to a card's chat as one chip. The artifact tools give the instructions once per session and Space, and again after a change or a compaction. A design system's page draws each bundled component on the smallest of three canvases that holds it, and scales each frame by its client width.
+
+What the reviews caught that the document had not foreseen:
+- A card's press awaited the linked folder before `createSession` read the place in front, so a chat could open in front of a tab the person had moved to. The fix is `front`, an insertion in U6's file.
+- The design-system choice was lost when the section's line unmounted.
+- Text typed while a held save was in flight was lost.
+- Two overlapping document creates with one tool-use id could mark instructions that were never given.
+- Three insertions in other children's files were ruled during the build: `keymap/actions-runtime.ts` (U6), `composer/editor/recall.ts` and `composer/editor/nodes/Pasted.tsx` (U4).
+- Two fixed agent sentences were reworded by ruling.
+
+**Not proved yet**, each owned by the architect:
+- The six scenes on a Mac.
+- The cross-build runs against `f1852de3a` and `2c7044231`.
+- The paid case, run once.
+- The owner's look at the component cards.
+- Class 1a.
+- The branch's xhigh review.
+
+Three entries of the canvas table (`maws/table`, `official/fact-table`, `official/signature`) are uncertain, and the measuring scene's first Mac run settles them.
+
+**Lessons:**
+- A milestone that awaits before calling a shared helper must check what the helper reads at its own call.
+- Component state that the document calls "the page's" needs an owner whose lifetime is the page's, not the line's.
+- A join keyed by tool-use id has to cover every create path that marks session state.
