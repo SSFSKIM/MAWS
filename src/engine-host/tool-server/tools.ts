@@ -53,7 +53,7 @@ export function mawsTools(deps: {
   });
   // P3-B (M7): the document tools' session memory, sharing A's kinds-given-their-guide; A's create and read answer a
   // document through P3-B's wrappers, every other kind as before
-  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided, artifacts.session.instructed /* UX wave U10b (M10) */), log: deps.log, provisional: deps.provisional /* P4-A2 */ };
+  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided, artifacts.session.instructed /* UX wave U10b (M10) */, artifacts.session.ops /* M10 fix wave 1 */), log: deps.log, provisional: deps.provisional /* P4-A2 */ };
   const genericRead = artifactReadTool(artifacts);
   const legacyRead = artifactReadTool(artifacts, { instructs: false }); // P3-E: the raw read of a held legacy dashboard (UX wave U10b M10: it gives no Space's instructions)
   return [

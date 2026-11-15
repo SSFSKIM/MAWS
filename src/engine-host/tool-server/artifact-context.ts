@@ -28,17 +28,15 @@ export interface ByteBase {
   sha256: string;
 }
 
-// One session's memory, made with its tools and gone with its process (so a base never outlives the session, as its
-// replicas do not).
-export class ArtifactSession {
-  readonly byteBases = new Map<string, ByteBase>(); // by artifact id
-  readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
-  readonly instructed = new Map<string, number>(); // UX wave U10b (M10, §E.4): per Space, the stamp of the instructions this session was given
+// One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
+// for the first one's whole response (its write and its decorations) and answers it, never a bare recorded result while
+// the first call is still decorating its answer. Once answered, a repeat is the op ledger's (`replayOf`). UX wave U10b
+// (M10 fix wave 1): one per session, shared by A's tools and the document tools (`DocumentToolSession.ops`), so an
+// overlapping call never settles decorations of its own (a Space's instructions it would mark given) and answers
+// another's.
+export class OpJoin {
   private readonly calls = new Map<string, Promise<McpToolResult>>(); // by op id: the writing calls still answering
 
-  // One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
-  // for the first one's whole response (its write and its decorations) and answers it, never a bare recorded result
-  // while the first call is still decorating its answer. Once answered, a repeat is the op ledger's (`replayOf`).
   joined(opId: string | null, answer: () => Promise<McpToolResult>): Promise<McpToolResult> {
     if (opId === null) return answer();
     const running = this.calls.get(opId);
@@ -46,6 +44,19 @@ export class ArtifactSession {
     const call = answer().finally(() => this.calls.delete(opId));
     this.calls.set(opId, call);
     return call;
+  }
+}
+
+// One session's memory, made with its tools and gone with its process (so a base never outlives the session, as its
+// replicas do not).
+export class ArtifactSession {
+  readonly byteBases = new Map<string, ByteBase>(); // by artifact id
+  readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+  readonly instructed = new Map<string, number>(); // UX wave U10b (M10, §E.4): per Space, the stamp of the instructions this session was given
+  readonly ops = new OpJoin(); // the writing calls still answering, by op id
+
+  joined(opId: string | null, answer: () => Promise<McpToolResult>): Promise<McpToolResult> {
+    return this.ops.joined(opId, answer);
   }
 
   // UX wave U10b (M10): the session's context was compacted, so what it was given may be gone from it: every Space's
