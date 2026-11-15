@@ -85,6 +85,7 @@
 "commands.laneA.tell.input":[".appSessionId AppSessionId"],
 "commands.laneA.unwatch.input":[".appSessionId AppSessionId"],
 "commands.laneA.watch.input":[".appSessionId AppSessionId"],
+"commands.layout.openFile.input":[".appSessionId AppSessionId"],
 "commands.library.entry.output":[".artifact.createdBy<kind=session>.appSessionId AppSessionId",".artifact.lastEditor<kind=session>.appSessionId AppSessionId",".artifact.projectId ProjectId",".links[].appSessionId AppSessionId"],
 "commands.library.fileLinkedPaths.input":[".appSessionId AppSessionId"],
 "commands.library.get.output":[".row.createdBy<kind=session>.appSessionId AppSessionId",".row.lastEditor<kind=session>.appSessionId AppSessionId",".row.project.id ProjectId",".row.projectId ProjectId",".row.sessions[].appSessionId AppSessionId"],

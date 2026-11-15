@@ -61,6 +61,7 @@
   "layout.list",
   "layout.nativeEdit",
   "layout.openExternal",
+  "layout.openFile",
   "layout.pickFiles",
   "layout.quitWait",
   "layout.quitWaitAnswer",
