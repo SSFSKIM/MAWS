@@ -613,7 +613,7 @@ describe('plugins widget: loaded in this session and the reloads', () => {
 });
 
 describe('plugins widget: management', () => {
-  it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Plugins › Discover for the session’s directory, its project’s page here, and closes', async () => {
+  it('lists installed plugins and reads no catalogue; Open Discover opens Customize › Discover, Show: Plugins, for the session’s directory, its project’s page here, and closes', async () => {
     const close = vi.fn();
     const project = at('project-e8' as ProjectId);
     useSessions.setState({ engine: new Map([[ID, lifted(backend.status(BARE))]]), projects: new Map([[project, projectRecord(project, 0, { directory: cwd })]]) });

@@ -629,7 +629,7 @@ export const SKILLS_LIBRARY = {
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
   pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',
   firstTitle: 'Add your first skills',
-  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Discover, with Show set to Skills, lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",
   invoke: 'Type',
   plugin: 'Plugin',

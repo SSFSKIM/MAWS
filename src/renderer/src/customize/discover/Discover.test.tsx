@@ -223,7 +223,7 @@ const found = (selector: string) =>
   });
 const invoked = (name: string) => calls.filter((c) => c.name === name).map((c) => c.input);
 
-describe('Customize › Plugins › Discover', () => {
+describe('Customize › Discover, Show: Plugins', () => {
   it('is the library’s second view: Featured, the shelves, All; it reads the catalog with the page’s cwd and never the engine’s listing', async () => {
     mountPlugins();
     await discover();
@@ -502,7 +502,7 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
   }
 });
 
-describe('Customize › Skills › Discover', () => {
+describe('Customize › Discover, Show: Skills', () => {
   it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
     mountAt('skills', 'discover');
     expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
