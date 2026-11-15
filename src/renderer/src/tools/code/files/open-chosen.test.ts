@@ -130,6 +130,14 @@ describe('file.open (connectOpenFile)', () => {
     expect(isActionEnabled('file.open')).toBe(true);
   });
 
+  it('is removed while the Overview is open over a session’s chat of this Mac, and registered again once it closes (decision 15)', () => {
+    expect(isActionEnabled('file.open')).toBe(true);
+    act(() => useLayout.getState().setOverviewOpen(true));
+    expect(isActionEnabled('file.open')).toBe(false);
+    act(() => useLayout.getState().setOverviewOpen(false));
+    expect(isActionEnabled('file.open')).toBe(true);
+  });
+
   it('is mounted by the editor’s registrations', () => {
     offs.splice(0).forEach((off) => off()); // this suite's own connection and the tool
     expect(isActionEnabled('file.open')).toBe(false);
