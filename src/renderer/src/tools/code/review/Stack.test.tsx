@@ -13,6 +13,9 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { A, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { fakeStackLayout, type FakeStackLayout } from '../../../test-support/review-layout';
 import { useTranscriptStore } from '../../../transcript';
+import { openComment } from '../../../side/register';
+import { closeCard, resetPlaceNotes, useCommentCard } from '../../../side/card/store';
+import { registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { resetDiffTabs } from './DiffTab';
 import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
@@ -413,6 +416,35 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     expect(hunkLabel()).toBe('Showing hunk 10 of 10');
     expect(screen.getByLabelText('Next hunk')).toHaveProperty('disabled', true);
   });
+  // UX wave U5b, M5: a comment's card opening under a line, and closing, is a layout change; the place holds through both.
+  it('keeps the row the person reads at the top when a comment’s card opens under a line above it, and when it closes', async () => {
+    const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+    offs.push(registerCommentComposer(openComment));
+    await mount(files);
+    page.scrollTo(page.topOf(sectionOf(files[2].path)) + HEADER + 15 * ROW + 5); // by hand, into the third file
+    await page.settle();
+    const reading = page.rowAtTop();
+    expect(reading).toEqual(expect.objectContaining({ path: files[2].path }));
+    // the second file's added line, drawn above the reading edge: its add button, pressed as a pointer does
+    const line = sectionOf(files[1].path).querySelector(`[data-line-new-num="${files[1].added[0]}"]`)!.closest('tr')!;
+    const add = line.querySelector<HTMLButtonElement>('[data-add-widget="new"] button')!;
+    fireEvent.pointerDown(add);
+    fireEvent.mouseDown(add);
+    fireEvent.pointerUp(window);
+    await page.settle();
+    expect(document.querySelector('[data-comment-card]')).not.toBeNull();
+    expect(sectionOf(files[1].path).querySelector('tr[data-state="widget"]')).not.toBeNull();
+    expect(page.rowAtTop()).toEqual(reading);
+    act(() => closeCard());
+    await page.settle();
+    expect(sectionOf(files[1].path).querySelector('tr[data-state="widget"]')).toBeNull();
+    expect(page.rowAtTop()).toEqual(reading);
+    act(() => {
+      useCommentCard.setState({ open: null });
+      resetPlaceNotes();
+    });
+  });
+
   // §F's gesture (Decision Log 17 b): a scroll event the stack did not make is the person's while a pointer is held in the
   // scroller or within GESTURE_MS (500) of their last wheel, touch, key or pointer release there, and a layout change
   // otherwise; a reveal starting ends the window. The clock is the test's: `performance.now` answers `clock`, so each

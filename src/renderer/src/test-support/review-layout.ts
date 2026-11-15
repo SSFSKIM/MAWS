@@ -3,7 +3,8 @@
 // change of its offset as a browser does, and a ResizeObserver reports every element it watches when the test lets the
 // page settle. When the page shrinks under the scroller, the browser's clamp is reported as a browser does it: a scroll
 // event of its own, at the next turn and before the observers, with no input before it. The model is one column: sections one under the other, a header over a body or a spacer, a body as tall
-// as its diff rows (or one line of words when it holds no table), each row `row` high or as `rowOf` says for its file.
+// as its diff rows (or one line of words when it holds no table), each row `row` high or as `rowOf` says for its file, a
+// widget row (a comment's card) and an extend row (unsent comments) as high as the options say.
 // Unified rows only: Split's two tables side by side are not modelled. Imported only by happy-dom suites.
 import { act } from '@testing-library/react';
 import { vi } from 'vitest';
@@ -15,6 +16,8 @@ export interface StackLayoutOptions {
   header?: number; // a section's header (30)
   row?: number; // a diff row (20)
   note?: number; // a body of words: "Loading", "Binary file" (24)
+  widget?: number; // the library's widget row under a line, holding a comment's card (160; UX wave U5b, M5)
+  extend?: number; // an extend row under a line, holding unsent comments (32)
 }
 
 export interface StackPageRow {
@@ -35,7 +38,10 @@ export function fakeStackLayout(options: StackLayoutOptions) {
   const sectionOf = (el: Element) => el.closest<HTMLElement>('[data-review-file]');
   const pathOf = (el: Element) => sectionOf(el)?.dataset.reviewFile ?? '';
   const trsOf = (body: Element) => [...body.querySelectorAll('tr')];
-  const rowHeight = (tr: Element) => rowOf(pathOf(tr), width) * zoom;
+  const rowHeight = (tr: Element) => {
+    const state = (tr as HTMLElement).dataset.state;
+    return (state === 'widget' ? (options.widget ?? 160) : state === 'extend' ? (options.extend ?? 32) : rowOf(pathOf(tr), width)) * zoom;
+  };
   const bodyHeight = (body: Element) => {
     const trs = trsOf(body);
     return trs.length > 0 ? trs.reduce((sum, tr) => sum + rowHeight(tr), 0) : note * zoom;
@@ -86,6 +92,11 @@ export function fakeStackLayout(options: StackLayoutOptions) {
   const maxTop = () => Math.max(0, scrollHeight() - options.viewport);
 
   vi.spyOn(reviewLayout, 'height').mockImplementation(height);
+  // The diff library draws a widget or an extend row only where its table's wrapper has a width (M5).
+  const rect = Element.prototype.getBoundingClientRect;
+  vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
+    return this.matches('.unified-diff-table-wrapper, .old-diff-table-wrapper, .new-diff-table-wrapper') ? ({ x: 0, y: 0, top: 0, left: 0, right: width, bottom: 0, width, height: 0, toJSON: () => ({}) } as DOMRect) : rect.call(this);
+  });
   vi.spyOn(reviewLayout, 'offsetWithin').mockImplementation((el, container) => topOf(el) - topOf(container));
   vi.spyOn(reviewLayout, 'width').mockImplementation((el) => (el.matches('[data-review], [data-review-stack]') ? width : 0));
 
