@@ -3765,8 +3765,11 @@ test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine th
       await expect(fork).toHaveAttribute('aria-disabled', 'true');
       await fork.hover();
       await expect(page.locator('#composer-slash-detail')).toContainText('Wait for the turn to end, or stop it first');
-      // emptied, not Esc'd: Esc in the box while B's turn runs with nothing waiting is the plain stop
-      await composerOf(page).click();
+      // the disabled row's detail lies over the box and would intercept a click, so the palette is closed the way a person does: Esc is safe here
+      // because the open palette takes the key first (it closes the popup and returns), so it reaches nothing else and cannot stop B's turn
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox', { name: 'Commands' }), 'Esc closed the palette').toHaveCount(0);
+      expect(await turnRuns(back.app), 'Esc closed only the palette: B’s turn runs on').toBe(true);
       await page.keyboard.press('ControlOrMeta+a');
       await page.keyboard.press('Backspace');
       await expect(composerOf(page)).toHaveText('');
