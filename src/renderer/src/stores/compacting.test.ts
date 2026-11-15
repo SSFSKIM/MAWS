@@ -160,7 +160,8 @@ describe('a terminal session: its bridge’s `compact` messages', () => {
   // boundary in drawn order, with an id not known. The lane A plane's pager reaches the store the same way: an older
   // page rebuilds its rows under a new source (`PlaneTranscript.rebuild`), which the view attaches, so the key hydrates.
   describe('a compaction’s boundary over the transcript’s lifecycle', () => {
-    const C = at('app-compacting-lifecycle') as AppSessionId;
+    let keys = 0;
+    let C = at('app-compacting-lifecycle-0') as AppSessionId; // a key of its own per case: a detached key is kept, rows and all
     const compaction = (b: Builder, id: string) => b.emit('boundary.compaction', { trigger: 'manual', preTokens: 90_000, postTokens: 12_000, logicalParentUuid: null, historical: false }, { id });
     const answered = (b: Builder, n: string) => {
       b.turn(`u-${n}`, `Check gauge ${n}.`);
@@ -183,6 +184,7 @@ describe('a terminal session: its bridge’s `compact` messages', () => {
     }
     const compactions = () => useTranscriptStore.getState().entries[C]!.rows.filter((row) => row.kind === 'boundary' && row.boundaryKind === 'compaction').length;
     beforeEach(() => {
+      C = at(`app-compacting-lifecycle-${++keys}`) as AppSessionId;
       disconnect = connectCompacting();
     });
     afterEach(() => useTranscriptStore.getState().detach(C));
