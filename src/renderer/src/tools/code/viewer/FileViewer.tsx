@@ -22,6 +22,7 @@ import { lazy, Suspense, useEffect, useRef, useState, type CSSProperties, type R
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
+import { ChevronDownIcon } from '../../../app/IconButton';
 import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
@@ -88,7 +89,9 @@ const labelled = (reason: ReturnType<typeof readOnlyReason>): reason is Labelled
 
 // UX wave U6e (§D, K2, K5, K8, K10, K11, K13): "Read-only", in the normal text colour, a button whose accessible
 // description is the reason's sentence; a press (Enter or Space with the keyboard on it) opens the panel under it with the
-// sentence and, where choosing the file makes it editable (only added, named only by a tool's result), "Open File…".
+// sentence and, under it at the left, where choosing the file makes it editable (only added, named only by a tool's
+// result), "Open File…". Decision Log 18: a small chevron after the words, in the muted colour, inside the same button
+// and hidden from assistive technology, so the button keeps one target and one accessible name.
 // The panel is never wider than the file's column: min(24rem, the column's width less 1rem), the column measured as it
 // opens and its edges the panel's boundary.
 function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSessionId: AppSessionId }) {
@@ -106,8 +109,11 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
   return (
     <Popover.Root onOpenChange={opened}>
       <Popover.Trigger asChild>
-        <button ref={trigger} type="button" data-read-only={reason} aria-description={sentence} className="shrink-0 rounded-sm px-1 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+        <button ref={trigger} type="button" data-read-only={reason} aria-description={sentence} className="flex shrink-0 items-center gap-0.5 rounded-sm px-1 py-0.5 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
           {VIEWER_COPY.readOnly}
+          <span data-read-only-chevron="" aria-hidden="true" className="text-fg-muted">
+            <ChevronDownIcon className="size-3" />
+          </span>
         </button>
       </Popover.Trigger>
       <Popover.Portal>
@@ -123,7 +129,7 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
           <p>{sentence}</p>
           {offersOpenFile ? (
             <Popover.Close asChild>
-              <button type="button" className="self-end rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosen(appSessionId)}>
+              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosen(appSessionId)}>
                 {OPEN_FILE_COPY.row}
               </button>
             </Popover.Close>
