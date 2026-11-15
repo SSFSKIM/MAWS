@@ -4,7 +4,7 @@
 // refresh after a mutation delivers it.
 import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { StoreApi } from 'zustand/vanilla';
 import { connectPanelEvents } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
@@ -61,6 +61,12 @@ afterEach(() => {
   cleanup();
   off();
   vi.useRealTimers();
+});
+
+// E11 W-E, as Review's suite does: the diff view's lazy chunk is loaded once here, so no case's one-second `waitFor`
+// spends itself on the import's transform, the step that grows with the machine's load (Decision Log 12's case).
+beforeAll(async () => {
+  await import('../code/review/ReviewView');
 });
 
 describe('source control tool renders groups, selects a file and draws its hunks', () => {
