@@ -430,7 +430,7 @@ describe('a file in the merge view moved to the main area', () => {
     });
     await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
     disk.files[APP] = numbered({ 8: 'theirs 8' });
-    act(() => disk.emit('files.changed', { appSessionId: 'app-a', path: APP, kind: 'changed' }));
+    act(() => disk.emit('files.changed', { appSessionId: 'app-a' as AppSessionId, path: APP, kind: 'changed' }));
     fireEvent.click(await within(region('panel')).findByRole('button', { name: 'Compare' }));
     await waitFor(() => expect(chunksIn('panel')).toHaveLength(2));
     act(() => void moveFileToMain(sideTabOf(APP)!));
