@@ -89,13 +89,15 @@ function commentsMain() {
     patch: REPORT() + OTHER(),
     files: FILES(),
     content: null as null | (() => Promise<ReturnType<typeof ok>>), // a test's own answer to the comments' content
+    status: STATUS,
+    staged: null as null | { patch: string; files: GitDiffFile[] }, // the Staged scope's read; null, Uncommitted's
   };
-  const main = installFakeMain((name) => {
+  const main = installFakeMain((name, input) => {
     switch (name) {
       case 'git.watch':
-        return ok(STATUS);
+        return ok(state.status);
       case 'git.diff':
-        return ok({ patch: state.patch, files: state.files });
+        return ok(input.scope === 'staged' && state.staged ? state.staged : { patch: state.patch, files: state.files });
       case 'git.worktree.branch':
         return ok({ repoRoot: '/repo', branch: 'main', head: STATUS.head, checkedOutAt: '/repo', base: 'main', ahead: 0, merged: true });
       case 'layout.get':
@@ -142,6 +144,8 @@ const sendButton = () => within(card()!).getByRole('button', { name: /^(Send|Sen
 const box = () => within(card()!).getByRole('checkbox', { name: 'Send to main' }) as HTMLInputElement;
 const leave = () => fireEvent.keyDown(field(), { key: 'Escape' }); // a draft is kept: the card goes, its comment stays
 const chip = () => document.querySelector<HTMLElement>('[data-review-toolbar] [data-unsent-chip]');
+const surfaceChip = () => document.querySelector<HTMLElement>('[data-review] [data-unsent-chip]'); // in the toolbar or where it stands
+const scopeChip = (id: string) => document.querySelector<HTMLButtonElement>(`[data-chip="${id}"]`);
 const unsentRows = (path?: string) => [...((path ? bodyOf(path) : document)?.querySelectorAll<HTMLElement>('[data-review-unsent-comment]') ?? [])];
 const changedLine = (path: string) => sectionOf(path)?.querySelector<HTMLElement>('[data-review-file-changed]') ?? null;
 const openReview = () => act(() => void panelHost.addTool('review', { appSessionId: A }));
@@ -338,6 +342,63 @@ describe('comments on lines in Review', () => {
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
   });
 
+  it('keeps the card’s host while the scope has no files: the chip stands for a draft, and when the file returns the card opens on its words', async () => {
+    await mountReview();
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+    await reread('', []); // the agent reverts everything
+    await painted(() => document.querySelector('[data-review-empty]') !== null && surfaceChip() !== null);
+    expect(surfaceChip()!.textContent).toBe('1 unsent comment');
+    expect(card()).toBeNull();
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote only where a comma is.']);
+
+    await reread(REPORT() + OTHER(), FILES());
+    await drawn('src/report.ts');
+    await painted(() => chip() !== null);
+    fireEvent.click(chip()!);
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:12' && card() !== null);
+    expect(field().value).toBe('Quote only where a comma is.');
+  });
+
+  it('keeps the place line after a confirmed send while the scope has no files', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    fireEvent.click(sendButton());
+    await painted(() => document.querySelector('[data-review-toolbar] [data-sent-note]') !== null);
+    await reread('', []);
+    await painted(() => document.querySelector('[data-review-empty]') !== null);
+    expect(document.querySelector('[data-review] [data-sent-note]')?.textContent).toBe('Sent to Berth import');
+  });
+
+  it('draws each scope’s own hunks for a file under an open card: Uncommitted’s hold is let go when Staged, already read, is chosen', async () => {
+    main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
+    main.state.staged = { patch: MOVED, files: [FILES(2)[0]] }; // Staged holds the file with two lines more above the commented one
+    await mountReview();
+    await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
+    fireEvent.click(scopeChip('staged')!);
+    await painted(() => bodyOf('src/report.ts')?.textContent?.includes('// one') ?? false);
+    fireEvent.click(scopeChip('uncommitted')!);
+    await painted(() => (bodyOf('src/other.ts')?.querySelector('table') ?? null) !== null);
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+
+    fireEvent.click(scopeChip('staged')!);
+    await painted(() => bodyOf('src/other.ts') === null && (bodyOf('src/report.ts')?.querySelector('table') ?? null) !== null);
+    expect(bodyOf('src/report.ts')!.textContent).toContain('// one'); // Staged's hunks, not Uncommitted's held ones
+    expect(changedLine('src/report.ts')).toBeNull();
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:14' && card() !== null);
+    expect(field().value).toBe('Quote only where a comma is.');
+
+    fireEvent.click(scopeChip('uncommitted')!);
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:12' && card() !== null);
+    expect(bodyOf('src/report.ts')!.textContent).not.toContain('// one');
+    expect(changedLine('src/report.ts')).toBeNull();
+  });
+
   it('keeps the pass when the session’s working folder changes', async () => {
     await mountReview();
     addOn('src/other.ts', 'new', 2);
@@ -395,6 +456,21 @@ describe('comments on lines in Review', () => {
     await painted(() => unsentRows().length === 1);
     expect(unsentRows()[0].querySelector('[data-review-unsent-edit]')!.className).toMatch(/(^| )min-h-6( |$)/);
     expect(unsentRows()[0].querySelector('[data-review-unsent-remove]')!.className).toMatch(/(^| )size-6( |$)/);
+  });
+
+  it('takes no room in the toolbar while the host draws neither a chip nor a place line', async () => {
+    const css = readFileSync(resolve(__dirname, '../code.css'), 'utf8');
+    const empty = '[data-review-toolbar-chip]:has([data-card-inline]:empty)';
+    expect(css).toContain(`${empty} {\n  display: none;`);
+    await mountReview();
+    const slot = document.querySelector<HTMLElement>('[data-review-toolbar] [data-review-toolbar-chip]')!;
+    expect(slot.matches(empty)).toBe(true);
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await painted(() => chip() !== null);
+    expect(slot.matches(empty)).toBe(false);
   });
 
   it('works in a diff tab as in the panel: the card under its line there, and the panel’s comment a row', async () => {
