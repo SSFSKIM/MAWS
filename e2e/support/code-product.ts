@@ -160,7 +160,7 @@ export async function selectReviewFile(review: Locator, path: string): Promise<L
 export async function scrollIntoSection(review: Locator, path: string, depth: number): Promise<void> {
   await review.locator('[data-review-stack]').evaluate(
     (scroller, { path, depth }) => {
-      const section = [...scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')].find((each) => each.dataset.reviewFile === path);
+      const section = Array.from(scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')).find((each) => each.dataset.reviewFile === path);
       if (!section) throw new Error(`no section for ${path}`);
       scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
       scroller.scrollTop = section.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop + depth;
@@ -195,7 +195,7 @@ export interface StackTop {
 function readTop(review: Locator, want: { path: string; row: string } | null): Promise<(StackTop & { wanted: number | null }) | null> {
   return review.locator('[data-review-stack]').evaluate((scroller, want) => {
     const top = scroller.getBoundingClientRect().top;
-    const section = [...scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')].find((each) => {
+    const section = Array.from(scroller.querySelectorAll<HTMLElement>(':scope > [data-review-file]')).find((each) => {
       const box = each.getBoundingClientRect();
       return box.top <= top + 0.5 && box.bottom > top + 0.5;
     });
@@ -203,14 +203,14 @@ function readTop(review: Locator, want: { path: string; row: string } | null): P
     const header = section.querySelector<HTMLElement>(':scope > [data-review-file-header]')!.getBoundingClientRect();
     const edge = header.bottom;
     const lines = (tr: Element) =>
-      [...tr.querySelectorAll<HTMLElement>('[data-line-old-num], [data-line-new-num]')]
+      Array.from(tr.querySelectorAll<HTMLElement>('[data-line-old-num], [data-line-new-num]'))
         .map((cell) => (cell.dataset.lineOldNum ? `old ${cell.dataset.lineOldNum}` : cell.dataset.lineNewNum ? `new ${cell.dataset.lineNewNum}` : ''))
         .filter(Boolean)
         .join(' ');
     let row: string | null = null;
     let offset = 0;
     let wanted: number | null = null;
-    for (const tr of section.querySelectorAll(':scope > [data-review-body] tr')) {
+    for (const tr of Array.from(section.querySelectorAll(':scope > [data-review-body] tr'))) {
       const name = lines(tr);
       if (name === '') continue;
       const box = tr.getBoundingClientRect();
