@@ -3,11 +3,19 @@
 // `artifact` (E2's `deliverable` until P3-L's cutover, the Artifacts tool since), `browser` (E4) and `source-control`
 // (E6); until a build registers one, the renderer answers the bridge with `paneUnavailableText`, so the model reads that
 // the pane is absent, never a crash.
+// UX wave U6d (O-44; docs/doperpowers/plans/2026-11-14-ux-wave-U6d-artifact-link.md, Interfaces §B; the X9 amendment):
+// the agent opens no artifact by itself, so `show_pane` carries out six panes. `PANE_NAMES` keeps every pane a record
+// can name, the retired `artifact` among them, for the result, the event and the window's request; a new pane goes into
+// both lists, and a retired one leaves `AGENT_PANE_NAMES` only.
 import * as z from 'zod';
 
 export const PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'artifact', 'browser', 'source-control'] as const;
 export const PaneSchema = z.enum(PANE_NAMES);
 export type Pane = z.infer<typeof PaneSchema>;
+
+// U6d: the panes `show_pane` carries out
+export const AGENT_PANE_NAMES = ['diff', 'file', 'terminal', 'tasks', 'browser', 'source-control'] as const;
+export const AgentPaneSchema = z.enum(AGENT_PANE_NAMES);
 
 // P3-L (Decision Log 10): the Artifacts tool's X5 id (the `artifact` pane's tool), E2's `deliverables` before the cutover.
 export const ARTIFACTS_TOOL_ID = 'artifacts';

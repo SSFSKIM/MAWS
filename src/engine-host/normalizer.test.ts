@@ -906,6 +906,70 @@ describe('maws tools/call admission follows the server envelope (E1)', () => {
   });
 });
 
+// UX wave U6d (O-44; the execution document's Interfaces §C): `show_pane` no longer takes the `artifact` pane, and a
+// journal is still read with the pane list it was written under. Each journal below is one call's frames (the tool use,
+// the `tools/call`, the host's answer, the tool result) and the whole list of events it yields is compared: an earlier
+// build's call answered `shown` and answered with an error, this build's call answered with the refusal, and the forms
+// that yield no pane event. Each case fails when either of the normaliser's two gates (the admission at the call, the read
+// at the answer) parses with the execution schema in place of the recorded one.
+describe('maws.pane.shown for the artifact pane, from journals of every build (UX wave U6d)', () => {
+  const TOOL_USE = 'toolu_pane';
+  const ARTIFACT = '0b9c7d2e-4f1a-4e3b-9c6d-8a7f5e4d3c2b';
+  // the host's refusal as this build's journals hold it
+  const RETIRED = 'show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.';
+  const OPENED = { kind: 'panel-tool', toolId: 'artifacts', tabId: 'artifacts:app-1', title: 'Artifacts' };
+  const shownText = JSON.stringify({ status: 'shown', pane: 'artifact', opened: OPENED }, null, 2);
+
+  const journal = (args: Record<string, unknown>, answer: { text: string; isError: boolean }) => [
+    inRow({ type: 'assistant', message: { id: 'msg_pane', role: 'assistant', model: 'm', content: [{ type: 'tool_use', id: TOOL_USE, name: 'mcp__maws__show_pane', input: args }] }, parent_tool_use_id: null, session_id: 'sess-1', uuid: 'a-pane' }),
+    inRow({ type: 'control_request', request_id: 'r-pane', request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'show_pane', arguments: args, _meta: { 'claudecode/toolUseId': TOOL_USE } } } } }),
+    outRow({ type: 'control_response', response: { subtype: 'success', request_id: 'r-pane', response: { mcp_response: { jsonrpc: '2.0', id: 2, result: { content: [{ type: 'text', text: answer.text }], ...(answer.isError && { isError: true }) } } } } }),
+    answer.isError
+      ? inRow({ type: 'user', uuid: 'u-pane', session_id: 'sess-1', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TOOL_USE, content: answer.text, is_error: true }] }, tool_use_result: `Error: ${answer.text}` })
+      : inRow({ type: 'user', uuid: 'u-pane', session_id: 'sess-1', parent_tool_use_id: null, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: TOOL_USE, content: [{ type: 'text', text: answer.text }] }] }, tool_use_result: [{ type: 'text', text: answer.text }] }),
+  ];
+
+  // The events of a journal above, in order: the call's rows, and the pane event when one is expected.
+  const envelope = (seq: number, index: number) => ({ id: `app-1:LAUNCH01:${seq}:${index}`, sessionId: SESSION, at: AT, seq, agentId: null, parentToolUseId: null });
+  const expected = (args: Record<string, unknown>, answer: { text: string; isError: boolean }, pane: { target: string | null; opened: unknown; error: string | null } | null) => [
+    { ...envelope(1, 0), kind: 'assistant.block.complete', messageUuid: 'a-pane', apiMessageId: 'msg_pane', blockIndex: 0, block: { type: 'tool_use', id: TOOL_USE, name: 'mcp__maws__show_pane', input: args }, model: 'm', supersedes: [], aborted: false, userMessageUuids: [] },
+    { ...envelope(1, 1), kind: 'tool.use', toolUseId: TOOL_USE, toolName: 'mcp__maws__show_pane', input: args, apiMessageId: 'msg_pane', messageUuid: 'a-pane' },
+    ...(pane === null ? [] : [{ ...envelope(3, 0), kind: 'maws.pane.shown', toolUseId: TOOL_USE, requestId: 'r-pane', pane: 'artifact', ...pane }]),
+    {
+      ...envelope(4, 0), kind: 'tool.result', toolUseId: TOOL_USE, content: answer.isError ? answer.text : [{ type: 'text', text: answer.text }], isError: answer.isError,
+      structured: answer.isError ? `Error: ${answer.text}` : [{ type: 'text', text: answer.text }], spillPath: null, denial: null, safeguard: 'not_evaluated', messageUuid: 'u-pane',
+    },
+  ];
+  const normalise = (args: Record<string, unknown>, answer: { text: string; isError: boolean }) => feed(make(), journal(args, answer));
+
+  it("reads an earlier build's call for the artifact pane, with a target and an at, answered shown", () => {
+    const args = { pane: 'artifact', target: ARTIFACT, at: { tab: 't2', block: 'b7' } };
+    const answer = { text: shownText, isError: false };
+    expect(normalise(args, answer)).toEqual(expected(args, answer, { target: ARTIFACT, opened: OPENED, error: null }));
+  });
+
+  it("reads an earlier build's call for the artifact pane answered with an error", () => {
+    const args = { pane: 'artifact', target: 'launch-plan', at: { version: 2 } };
+    const answer = { text: 'show_pane: no artifact "launch-plan" in this session', isError: true };
+    expect(normalise(args, answer)).toEqual(expected(args, answer, { target: 'launch-plan', opened: null, error: answer.text }));
+  });
+
+  it("reads this build's call for the artifact pane answered with the refusal", () => {
+    const args = { pane: 'artifact', target: ARTIFACT, at: { slide: 's3' } };
+    const answer = { text: RETIRED, isError: true };
+    expect(normalise(args, answer)).toEqual(expected(args, answer, { target: ARTIFACT, opened: null, error: RETIRED }));
+  });
+
+  it('yields no pane event for the artifact pane with a line, nor for an at on another pane', () => {
+    const line = { pane: 'artifact', target: ARTIFACT, line: 3 };
+    const refused = { text: RETIRED, isError: true };
+    expect(normalise(line, refused)).toEqual(expected(line, refused, null));
+    const at = { pane: 'terminal', at: { slide: 's3' } };
+    const invalid = { text: 'show_pane: invalid arguments: at: at is for the artifact pane only', isError: true };
+    expect(normalise(at, invalid)).toEqual(expected(at, invalid, null));
+  });
+});
+
 // E7 start: a message from another session, beside the user.message that carries it (E7 execution document, Design §4,
 // over M0's recorded frames: pass3/e7-peer-a and e7-peer-b; C8b's hand-back: test/fixtures/engine/handback-pointer)
 describe('peer messages (E7)', () => {

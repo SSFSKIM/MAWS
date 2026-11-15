@@ -12,7 +12,9 @@
 //   differs on another machine (Open externally opens a copy, Reveal is greyed).
 // - A local id never enters: an answer from this Mac takes the id out, so an id two machines answered keeps the later
 //   answer (a v4 collision does not happen; a copied profile directory could make one, the spec's known residual).
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandName } from '@shared/ipc/schema';
+import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
 
 const table = new Map<string, MachineRef>();
@@ -24,6 +26,17 @@ const changed = () => {
 
 /** The artifact's machine when it is another machine's; null for this Mac's (or an id the page has not heard of). */
 export const artifactMachineOf = (artifactId: string): MachineRef | null => table.get(artifactId) ?? null;
+
+/**
+ * The machine a session's view reads the artifact on (P5 O7 M5a): the session's when it is another machine's, else the
+ * table's, else this Mac. UX wave U6d: the side column's open (`openArtifactInPanel`) and the look for the main tab that
+ * already shows the artifact (`showOpenArtifactTab`) both ask it, so the tab found is a view of what the side column
+ * would have opened.
+ */
+export function sessionArtifactMachine(appSessionId: AppSessionId | null, artifactId: string, local: MachineRef): MachineRef {
+  const remote = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== local ? machineOf(appSessionId) : null;
+  return remote ?? artifactMachineOf(artifactId) ?? local;
+}
 
 /** The artifact is on `machine` (this Mac's when it is `local`): the later word wins. */
 export function recordArtifactMachine(artifactId: string, machine: MachineRef, local: MachineRef): void {

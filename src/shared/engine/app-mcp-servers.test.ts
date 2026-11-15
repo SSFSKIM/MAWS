@@ -1,7 +1,7 @@
 // P4-R8 (2026-10-21): the app's HTTP servers, bounded at the settings boundary and mapped to the engine's launch flag.
 import { describe, expect, it } from 'vitest';
 import { MAWS_SERVER_NAME } from '../maws/tools';
-import { AppMcpServerSchema, AppMcpServersSchema, appMcpConfig, RESERVED_SERVER_NAME } from './app-mcp-servers';
+import { AppMcpServerSchema, AppMcpServersSchema, appMcpConfig, isReservedServerName, RESERVED_SERVER_NAME } from './app-mcp-servers';
 
 const notion = { name: 'notion', type: 'http' as const, url: 'https://mcp.notion.com/mcp' };
 const loopback = { name: 'local_tools-1', type: 'http' as const, url: 'http://127.0.0.1:8765/mcp' };
@@ -65,5 +65,14 @@ describe('the app MCP servers', () => {
       'local_tools-1': { type: 'http', url: loopback.url },
     } });
     expect(Object.keys(config!.mcpServers)).toEqual(['notion', 'local_tools-1']);
+  });
+});
+
+// UX wave U11g (§A "The reserved names"): the one predicate the custom connector's form and its command's schema read
+describe('isReservedServerName', () => {
+  it('is true for maws and every name of the engine’s list, false for an ordinary name', () => {
+    expect(isReservedServerName(RESERVED_SERVER_NAME)).toBe(true);
+    for (const name of ['hearthbot', 'claude_ai', 'workspace', 'computer-use', '__proto__', 'constructor']) expect(isReservedServerName(name), name).toBe(true);
+    for (const name of ['files-probe', 'Maws', 'notion']) expect(isReservedServerName(name), name).toBe(false);
   });
 });

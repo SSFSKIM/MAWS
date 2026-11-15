@@ -1,10 +1,10 @@
 // E8 M2: the plugin-management presenters — the sheet's argument list and write manifest (both from M1's shared
 // module, so the sheet cannot drift from the runner), the reload words, and a row's operation line in the engine's words.
 import { describe, expect, it } from 'vitest';
-import { commandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, writesOf, type PluginsAction } from '@shared/plugins/cli';
+import { commandLine, mcpCommandLine, PLUGINS_ACTIONS, PLUGINS_SCOPES, writesOf, type PluginsAction } from '@shared/plugins/cli';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import { argvOf, commandWords, declaredOf, dependencyWords, operationWords, overridesWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
+import { argvOf, commandWords, declaredOf, shownRequestOf, dependencyWords, operationWords, overridesWords, requestFor, sourceKindOfTyped, thenWords, uninstallsWords, writesWords, type PluginOpState, type PluginsRequest } from './present';
 
 const HOME = '/tmp/scratch/claude-config';
 const CWD = '/work/app';
@@ -190,3 +190,33 @@ describe('a marketplace-declared command', () => {
   });
 });
 
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §A, §D): an MCP action's command is the
+// shown line, the same as today's for every request but a custom add, whose value slots read •••.
+describe('a connector’s command, and the request a window keeps', () => {
+  const custom = requestFor('mcp-add', { name: 'files-probe', scope: 'local', entry: { type: 'stdio', command: '/opt/probe', args: ['--root', 'value-one'], env: [{ name: 'MODE', value: 'value-two' }, { name: 'LEVEL', value: '' }] } }, null);
+
+  it('today’s line for Discover’s add and for a removal', () => {
+    const remote = requestFor('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'sse', scope: 'project' }, null);
+    expect(argvOf(remote)).toEqual(['mcp', 'add', '--transport', 'sse', 'linear', 'https://mcp.linear.app/mcp', '--scope', 'project']);
+    expect(argvOf(remote)).toEqual(mcpCommandLine('mcp-add', remote.input as never));
+    const removal = requestFor('mcp-remove', { name: 'linear', scope: 'user' }, null);
+    expect(argvOf(removal)).toEqual(['mcp', 'remove', 'linear', '--scope', 'user']);
+  });
+
+  it('a custom add: ••• in every value slot, empty ones too; an argument is a public field, shown as typed', () => {
+    const argv = argvOf(custom);
+    expect(argv).toEqual(['mcp', 'add-json', 'files-probe', '{"type":"stdio","command":"/opt/probe","args":["--root","value-one"],"env":{"MODE":"•••","LEVEL":"•••"}}', '--scope', 'local']);
+    expect(argv.join(' ')).not.toContain('value-two');
+  });
+
+  it('a custom add is kept with ••• in every slot; every other request is kept as it is', () => {
+    const kept = shownRequestOf({ ...custom, folder: '/work/files-lab' });
+    expect(kept.input).toEqual({ name: 'files-probe', scope: 'local', entry: { type: 'stdio', command: '/opt/probe', args: ['--root', 'value-one'], env: [{ name: 'MODE', value: '•••' }, { name: 'LEVEL', value: '•••' }] } });
+    expect(kept.folder).toBe('/work/files-lab');
+    const remote = requestFor('mcp-add', { name: 'linear', url: 'https://mcp.linear.app/mcp', transport: 'http', scope: 'user' }, null);
+    expect(shownRequestOf(remote)).toBe(remote);
+    const install = requestFor('install', { plugin: 'e8-probe@e8-scratch' }, null);
+    expect(shownRequestOf(install)).toBe(install);
+  });
+});
