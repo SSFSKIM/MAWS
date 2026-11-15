@@ -967,10 +967,10 @@ describe('a parked replica leaves only on a current read that answers live (fix 
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const h = harness();
     const handle = await h.artifacts.open(ARTIFACT);
-    handle.doc.get('root').insert(0, 'Typed just before. ');
     const reads = heldReads(h);
     h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' }); // the first direct read, out
     await settle();
+    handle.doc.get('root').insert(0, 'Typed just before. ');
     h.answers.set('artifacts.open', NOT_FOUND);
     h.host.dropAll();
     await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the second direct read
