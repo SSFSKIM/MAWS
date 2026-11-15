@@ -302,7 +302,7 @@ describe('what a press sends (Design 5 and 7)', () => {
       onTerminal(id, turn);
       void approve(id, BUILD, PRESSED);
       await flush();
-      expect(fake.invoked('laneA.send').at(-1), name).toEqual({ appSessionId: id, text: grant(BUILD) });
+      expect(fake.invoked('laneA.send').at(-1), name).toEqual({ appSessionId: bareOf(id), text: grant(BUILD) });
     }
     expect(fake.invoked('laneA.send')).toHaveLength(2);
   });
@@ -703,11 +703,15 @@ describe('another machine’s terminal session, state by state (Acceptance 7a to
     const plane = (messages: SessionMessage[]) => fake.event('laneA.plane', { appSessionId: APP, watch: 'w1', messages }, OTHER_MACHINE);
     await settleTask();
     plane([snapshot(before)]);
+    // the blocked call's turn is closed, and a closed turn folds its work away: the pane's reader opens it
     const blocked = () => {
       const entry = useTranscriptStore.getState().entries[APP];
-      return entry === undefined ? undefined : [...blockedStates(entry.rows, hiddenTurnsOf(entry.state))].find(([, s]) => s.call.subject === command);
+      if (entry === undefined) return undefined;
+      useTranscriptStore.getState().expandAll(APP);
+      const open = useTranscriptStore.getState().entries[APP]!;
+      return [...blockedStates(open.rows, hiddenTurnsOf(open.state))].find(([, s]) => s.call.subject === command);
     };
-    await until(() => blocked() !== undefined);
+    await until(() => useTranscriptStore.getState().entries[APP]?.phase === 'live' && blocked() !== undefined);
     expect(terminalStateOf(APP)).toBe(state);
     const [pressed, unapproved] = blocked()!;
     expect(unapproved.grant).toBe('none');
@@ -717,7 +721,7 @@ describe('another machine’s terminal session, state by state (Acceptance 7a to
     void approve(APP, call, pressed);
     await flush();
     expect(sentence).toBe(grant(call));
-    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: APP, text: sentence }]);
+    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: bareOf(APP), text: sentence }]);
     await fake.reply('laneA.send', { state: 'entered', uuid: after[0]!.uuid });
     await flush();
     expect(useGrantsOut.getState().out.size, 'delivered: out until the record says').toBe(1);

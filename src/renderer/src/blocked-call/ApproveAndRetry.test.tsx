@@ -13,7 +13,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import type { JournalRow } from '@shared/wire/journal';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -553,7 +553,7 @@ describe('where there is no button, where it is disabled, and a terminal session
     fireEvent.click(row.button()!);
     await flush();
     expect(run.sentence).toBe(consentMessage('command', MARKER));
-    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: store.key, text: run.sentence }]);
+    expect(fake.invoked('laneA.send'), 'once, the sentence whole').toEqual([{ appSessionId: bareOf(store.key), text: run.sentence }]);
     expect(row.button()!.disabled, 'out').toBe(true);
     await answer('laneA.send', { state: 'entered', uuid: run.uuid });
     await store.push(run.after);
