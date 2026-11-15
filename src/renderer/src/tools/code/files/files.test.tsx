@@ -723,6 +723,7 @@ describe('files tool', () => {
 describe('a file beside the chat as an editor', () => {
   const APP = '/r/app.ts';
   const LIB = '/r/lib.ts';
+  const OTHER = '/r/c.ts';
   const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
   const offs: (() => void)[] = [];
   let disk: ReturnType<typeof installDisk>;
@@ -733,7 +734,7 @@ describe('a file beside the chat as an editor', () => {
     resetKeptOpens();
     useViewer.getState().reset();
     useFiles.getState().reset();
-    disk = installDisk({ [APP]: 'const a = 1;\n', [LIB]: 'export const b = 2;\n' });
+    disk = installDisk({ [APP]: 'const a = 1;\n', [LIB]: 'export const b = 2;\n', [OTHER]: 'c\n' });
     offs.push(registerPanelTool(filesTool), registerEditor(), connectSideFiles(sideFilesViewer), connectCodeEvents());
   });
   afterEach(() => {
@@ -799,6 +800,25 @@ describe('a file beside the chat as an editor', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the unmounts' prunes
     expect(entryOf(APP)?.dirty).toBe(true);
     expect(entryOf(LIB)).toBeUndefined();
+  });
+
+  // The review's finding: each main tab the rule opens notifies the viewer's own layout subscriber, whose prune would take
+  // the next unsaved file's entry before its tab exists; every file to keep is held as the side's across the opens.
+  it('a session that goes with two unsaved files not in view leaves both as main tabs, not in front, each with its edit', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// app\n');
+    await openBeside(LIB, { keep: true });
+    type('// lib\n');
+    await waitFor(() => expect([entryOf(APP)?.dirty, entryOf(LIB)?.dirty]).toEqual([true, true]));
+    await openBeside(OTHER); // a third file in view: both edited views unmount, their entries and documents stay
+    act(() => useLayout.getState().dropSession(A));
+    expect([mainTab(APP)?.id, mainTab(LIB)?.id]).toEqual([KEY(APP), KEY(LIB)]);
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the unmounts' prunes
+    expect([entryOf(APP)?.dirty, entryOf(LIB)?.dirty]).toEqual([true, true]);
+    expect([documentOf(APP), documentOf(LIB)]).toEqual(['// app\nconst a = 1;\n', '// lib\nexport const b = 2;\n']);
+    expect(mainTab(OTHER)).toBeUndefined();
   });
 
   it('a session that goes while its file saves leaves the file as a main tab; the save lands there', async () => {

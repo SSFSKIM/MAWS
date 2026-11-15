@@ -178,6 +178,31 @@ describe('editor registrations', () => {
     });
   });
 
+  // M2's review: a save under way when the question opens may settle as a conflict before the answer; the merge view's
+  // veto holds after the answer too (the guard is the side tab's as well).
+  describe('a conflict that lands while the question is open', () => {
+    it('Save then writes nothing more, and the main tab stays in front in the merge view', async () => {
+      const { disk } = await openApp({ dirty: true });
+      const write = disk.hold('files.write');
+      const saving = useViewer.getState().save(ID);
+      await waitFor(() => expect(entry().saving).toBe(true));
+      disk.files[APP] = 'const a = 2;\n'; // another writer, before the held write is answered
+      const closing = requestCloseTab(ID);
+      const asked = await screen.findByRole('dialog');
+      await act(async () => write.release());
+      expect(await saving).toBe('conflict');
+      expect(entry().theirs?.view).toBe('merge');
+      act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at('app-s' as AppSessionId) }));
+      fireEvent.click(within(asked).getByRole('button', { name: 'Save' }));
+      await act(() => closing);
+      expect(tabOpen()).toBe(true);
+      expect(activeTab(useLayout.getState().main)?.id).toBe(ID);
+      expect(disk.callsOf('files.write')).toHaveLength(1);
+      expect(disk.files[APP]).toBe('const a = 2;\n');
+      expect(entry()).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
+    });
+  });
+
   describe('file.save', () => {
     it('saves the focused pane’s file tab, and writes nothing while a session tab is active', async () => {
       const { disk } = await openApp({ dirty: true });
@@ -361,6 +386,28 @@ describe('a file beside the chat as an editor', () => {
       expect(docOf(ID)).toBe('// mine\nconst a = 1;\n');
       expect(disk.callsOf('files.write')).toHaveLength(0);
       expect(disk.files[APP]).toBe('const a = 1;\n');
+    });
+
+    it('a conflict that lands while the question is open: Save writes nothing more, the tab stays and comes into view', async () => {
+      const tabId = await openBeside({ dirty: true });
+      const write = disk.hold('files.write');
+      const saving = useViewer.getState().save(ID);
+      await waitFor(() => expect(entry().saving).toBe(true));
+      disk.files[APP] = 'const a = 2;\n'; // another writer, before the held write is answered
+      const closing = closeSide(tabId);
+      const asked = await screen.findByRole('dialog');
+      await act(async () => write.release());
+      expect(await saving).toBe('conflict');
+      expect(entry().theirs?.view).toBe('merge');
+      act(() => void openFile(A, LIB, null, { keep: true }));
+      expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).not.toContain(tabId);
+      fireEvent.click(within(asked).getByRole('button', { name: 'Save' }));
+      expect(await act(() => closing)).toBe(false);
+      expect(sideTabs().map((tab) => tab.id)).toContain(tabId);
+      expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toContain(tabId);
+      expect(disk.callsOf('files.write')).toHaveLength(1);
+      expect(disk.files[APP]).toBe('const a = 2;\n');
+      expect(entry()).toMatchObject({ dirty: true, theirs: { view: 'merge' } });
     });
 
     it('a question never answered keeps the tab', async () => {
