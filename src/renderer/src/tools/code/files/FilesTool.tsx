@@ -131,32 +131,39 @@ const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-bord
 // A Files tab: the tree alone when it holds no file; with a file, the tree in a column at the file's left, folded away,
 // or in the file's place (`treePlace`). The file is drawn as a main file tab draws it (law 3): the same viewer and its bar,
 // under the key the file's main tab would have, with the tree's button at the bar's start. While the tab is visible the
-// file's own column is where the keyboard can hold the file (R4); the tree beside it is not.
+// file's own column is where the keyboard can hold the file (R4); the tree beside it is not. While the tree stands in the
+// file's place the viewer stays mounted, hidden and inert, so the file keeps its editor's state and its viewer entry
+// stays mounted (the cap never takes it), and it is not where the keyboard is.
 function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean }) {
   const machine = machineFor(appSessionId);
   const key = held ? fileKey(machine, held.file) : null;
   const [tabWidth, measure] = useWidth();
-  const [fileColumn, setFileColumn] = useState<HTMLDivElement | null>(null); // absent while the tree is in the file's place
-  useEffect(() => (visible && key !== null && fileColumn ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn]);
+  const [fileColumn, setFileColumn] = useState<HTMLDivElement | null>(null);
   useEffect(() => void useTreeState.getState().load(), []);
   const loaded = useTreeState((s) => s.loaded);
   const tree = useTreeState((s) => treeOf(s, appSessionId));
-  const [shownFor, setShownFor] = useState<string | null>(null); // the file this tab's button was pressed over while too narrow (not stored)
+  // The button pressed in this tab while it is too narrow for both (not stored), for the file it was pressed over: any
+  // change of the file the tab holds ends it (a file chosen, a reuse of the tab from a link), so a file that comes back
+  // later is shown, not the tree.
+  const file = held?.file ?? null;
+  const [shown, setShown] = useState<{ file: string | null; on: boolean }>({ file, on: false });
+  if (shown.file !== file) setShown({ file, on: false });
   const treeWidth = Math.max(TREE_WIDTH_MIN, tree.width ?? TREE_WIDTH_DEFAULT);
   const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
-  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: held !== null && shownFor === held.file });
+  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on });
+  useEffect(() => (visible && key !== null && fileColumn && place !== 'instead' ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn, place]);
   // The button: with room for both it folds the tree for the session (stored); too narrow, it shows the tree in the file's
   // place in this tab, until a file is chosen or it is pressed again.
   const toggleTree = () => {
     if (held === null) return;
     if (roomy) useTreeState.getState().setFolded(appSessionId, !tree.folded);
-    else setShownFor(place === 'instead' ? null : held.file);
+    else setShown({ file, on: place !== 'instead' });
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} />;
   const treeId = `files-tree-${tabId}`;
-  const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={held?.file ?? null} chosen={() => setShownFor(null)} /> : null;
+  const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
   return (
-    <div ref={measure} data-files-tab data-file={held?.file ?? ''} className="flex h-full min-h-0 min-w-0">
+    <div ref={measure} data-files-tab data-file={file ?? ''} onClickCapture={secondClick} onDoubleClick={keepChosen} className="flex h-full min-h-0 min-w-0">
       {place === 'alone' ? (
         <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 min-w-0 flex-1">
           {sessionTree}
@@ -172,7 +179,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
             controls={treeId}
             value={treeWidth}
             min={TREE_WIDTH_MIN}
-            max={tabWidth - FILE_WIDTH_MIN}
+            max={Math.floor(tabWidth) - FILE_WIDTH_MIN}
             defaultValue={TREE_WIDTH_DEFAULT}
             onChange={(width) => useTreeState.getState().setWidth(appSessionId, width)}
             onReset={() => useTreeState.getState().setWidth(appSessionId, null)}
@@ -189,13 +196,32 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
           <div className="min-h-0 flex-1">{sessionTree}</div>
         </div>
       ) : null}
-      {held && place !== 'instead' ? (
-        <div ref={setFileColumn} className="h-full min-h-0 min-w-0 flex-1">
+      {held ? (
+        <div ref={setFileColumn} hidden={place === 'instead'} inert={place === 'instead'} className="h-full min-h-0 min-w-0 flex-1">
           <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} />
         </div>
       ) : null}
     </div>
   );
+}
+
+// A double-click on a tree row keeps the tab its first click opened (L1). Where the tree stood in the file's place, the
+// first click ends it and the second lands on the file now drawn there, so the row's own double-click never fires: the
+// file chosen by a click is remembered until the next click that is not the second of a pair (its `detail`, the
+// system's click count, is under two), and a double-click elsewhere in a Files tab keeps it. A single click is not
+// delayed. One record for the window: the second click can land in another Files tab, when the chosen file opened one.
+let chosenByClick: { appSessionId: AppSessionId; path: string } | null = null;
+function chosenFile(appSessionId: AppSessionId, path: string): void {
+  chosenByClick = { appSessionId, path };
+}
+function secondClick(event: { detail: number }): void {
+  if (event.detail < 2) chosenByClick = null;
+}
+function keepChosen(event: { target: EventTarget }): void {
+  const chosen = chosenByClick;
+  chosenByClick = null;
+  if (chosen === null || (event.target instanceof Element && event.target.closest('[role="treeitem"]'))) return; // a row keeps by itself
+  openFile(chosen.appSessionId, chosen.path, null, { keep: true });
 }
 
 function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {
@@ -274,7 +300,9 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     if (directory) useTreeState.getState().toggle(appSessionId, row.path);
     if (row.kind !== 'entry' || row.entry.kind !== 'file') return;
     chosen();
-    openFile(appSessionId, row.path, null, main ? { main: true } : {});
+    if (main) return void openFile(appSessionId, row.path, null, { main: true });
+    chosenFile(appSessionId, row.path); // before the open, which may draw the file where the row stood
+    openFile(appSessionId, row.path, null);
   };
   // A double-click on a file keeps the tab its first click opened (L1).
   const keepRow = (row: TreeRow) => {

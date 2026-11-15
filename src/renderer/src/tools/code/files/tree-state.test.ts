@@ -112,6 +112,28 @@ describe('the session’s tree state', () => {
     expect(treeOf(store.getState(), A).expanded.size).toBe(paths.length);
   });
 
+  // M3's review: a width measured in fractional pixels must not reach the stored value, whose schema takes whole numbers
+  // (a refused read gives every session its defaults)
+  it('stores a width as a whole number, and never writes a value its schema would refuse', async () => {
+    const fake = fakeClient({ 'layout.get': { value: stored({ [B]: { width: 400, folded: true, expanded: ['/r'] } }) }, 'layout.set': undefined });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    vi.useFakeTimers();
+    store.getState().setWidth(A, 380.5);
+    vi.advanceTimersByTime(DELAY);
+    const written = (fake.invoked('layout.set')[0] as { value: unknown }).value;
+    expect(written).toEqual(stored({ [B]: { width: 400, folded: true, expanded: ['/r'] }, [A]: { width: 381, folded: false, expanded: [] } }));
+    const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+    store.getState().setWidth(A, Number.NaN);
+    vi.advanceTimersByTime(DELAY);
+    expect(fake.invoked('layout.set')).toHaveLength(1); // not written
+    expect(error).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+    const again = createTreeStateStore(fakeClient({ 'layout.get': { value: written } }).client, { writeDelayMs: DELAY, knows: () => true });
+    await again.getState().load();
+    expect([treeOf(again.getState(), A).width, treeOf(again.getState(), B)]).toMatchObject([381, { width: 400, folded: true, expanded: new Set(['/r']) }]);
+  });
+
   it('drops at a write a session the window no longer knows', async () => {
     const fake = fakeClient({ 'layout.get': { value: stored({ [A]: { width: null, folded: false, expanded: ['/r'] }, [B]: { width: 400, folded: false, expanded: [] } }) }, 'layout.set': undefined });
     const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: (id) => id !== B });

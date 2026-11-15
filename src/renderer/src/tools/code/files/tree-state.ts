@@ -108,6 +108,8 @@ export function createTreeStateStore(
         version: 1,
         sessions: Object.fromEntries([...kept].map(([id, tree]) => [id, { width: tree.width, folded: tree.folded, expanded: [...tree.expanded].slice(-FILES_TREE_EXPANDED_MAX) }])),
       };
+      // Never a value the next read would refuse: that read would give every session its defaults.
+      if (!FilesTreeSchema.safeParse(value).success) return console.error(`[files] ${FILES_TREE_KEY} not written: the value is not one its schema reads`);
       const failed = (error: unknown) => console.error(`[files] layout.set ${FILES_TREE_KEY} failed`, error);
       void client.invoke('layout.set', { key: FILES_TREE_KEY, value }).then((result) => void (!result.ok && failed(result.error)), failed);
     };
@@ -166,7 +168,8 @@ export function createTreeStateStore(
         act(id, (tree) => ({ expanded: withFolder(tree.expanded, path, open) })); // the state the person saw it reach
       },
       setWidth(id, width) {
-        act(id, () => ({ width }));
+        const whole = width === null ? null : Math.round(width); // the stored width is a whole number of pixels
+        act(id, () => ({ width: whole }));
       },
       setFolded(id, folded) {
         act(id, () => ({ folded }));
