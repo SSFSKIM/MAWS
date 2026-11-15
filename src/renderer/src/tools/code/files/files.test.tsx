@@ -954,6 +954,74 @@ describe('the tree at the file’s left', () => {
     expect(paramsOf(preview.id)).toEqual({ file: APP, line: null, preview: true });
   });
 
+  // M3's review, the record's bounds: the file a row's click chose is kept by the pair's second click only. Each case
+  // interrupts the row's first click before a click with `detail` 2 and a double-click arrive; none keeps a file.
+  describe('a double-click keeps only the file its own first click chose', () => {
+    const ENV = '/r/.env';
+    // `path` in the preview tab, the tree in its place, and a click on ENV's row: the preview reused, ENV shown
+    async function chooseFromNarrowTree(path: string) {
+      await openBeside(path);
+      widen(NARROW);
+      fireEvent.click(toggle()!, { detail: 1 });
+      await shown(ENV);
+      fireEvent.click(row(ENV)!, { detail: 1 });
+      await waitFor(() => expect(document.querySelector('[data-file-viewer]')?.getAttribute('data-path')).toBe(ENV));
+      return sideTabs().find((ref) => paramsOf(ref.id) && (paramsOf(ref.id) as { file: string }).file === ENV)!;
+    }
+    const secondClickOn = (element: Element) => {
+      fireEvent.click(element, { detail: 2 });
+      fireEvent.dblClick(element, { detail: 2 });
+    };
+
+    it('an unrelated change of the tab in view between the two clicks', async () => {
+      render(<TestHost />);
+      await openBeside(APP, { keep: true });
+      const other = sideTabs()[0];
+      act(() => void openFile(A, STAGED, null)); // a second tab, the preview
+      await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(STAGED));
+      const chosen = await chooseFromNarrowTree(STAGED);
+      act(() => panelHost.selectTab(other.id)); // not the row's doing
+      await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe(APP));
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+      expect(filesTab().getAttribute('data-file')).toBe(APP); // still in view
+    });
+
+    it('a key pressed between the two clicks', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      fireEvent.keyDown(document.querySelector('[data-file-viewer]')!, { key: 'Enter' });
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+    });
+
+    it('a click outside every Files tab between the two clicks', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      fireEvent.click(document.body, { detail: 1 }); // a pair's first click elsewhere
+      secondClickOn(document.querySelector('[data-file-viewer]')!);
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+    });
+
+    it('a second click on the tree’s button or on the divider does that control’s own thing and keeps no file', async () => {
+      render(<TestHost />);
+      const chosen = await chooseFromNarrowTree(APP);
+      secondClickOn(toggle()!); // the button where the tree's own stood: it shows the tree again
+      expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+      expect(paramsOf(chosen.id)).toEqual({ file: ENV, line: null, preview: true });
+      widen(WIDE); // room for both: the tree beside the file
+      fireEvent.keyDown(divider(), { key: 'End' });
+      await shown('/r/src');
+      fireEvent.click(row('/r/src')!, { detail: 1 }); // a folder's click: nothing chosen …
+      await shown(STAGED);
+      fireEvent.click(row(STAGED)!, { detail: 1 }); // … then a file's, which reuses the preview
+      await waitFor(() => expect(paramsOf(chosen.id)).toEqual({ file: STAGED, line: null, preview: true }));
+      secondClickOn(divider()); // the divider's own double-click: the default width
+      expect(treeOf(useTreeState.getState(), A).width).toBeNull();
+      expect(paramsOf(chosen.id)).toEqual({ file: STAGED, line: null, preview: true });
+    });
+  });
+
   it('a reuse of the tab ends the tree in the file’s place: a file opened again from a link shows, not the tree', async () => {
     render(<TestHost />);
     await openBeside(APP);
