@@ -481,7 +481,9 @@ describe('the chat over the artifact beside the split (UX wave U10b)', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
     try {
       useLayout.setState({ main: { ...splitOf(), focusedPane: 0 } });
-      shell();
+      window.maws = fakeClient({}).client as unknown as PreloadBridge;
+      render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><Shell /></QueryClientProvider>);
+      resize(area(), { width: W, height: 800 });
       const read = () => ({
         focusedPane: set().focusedPane,
         floating: set().floating ?? null,
@@ -495,6 +497,7 @@ describe('the chat over the artifact beside the split (UX wave U10b)', () => {
       expect({ before, pressed }).toEqual({});
     } finally {
       delete (window as { innerWidth?: number }).innerWidth;
+      delete (window as { maws?: unknown }).maws;
     }
   });
 
