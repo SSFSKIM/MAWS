@@ -206,6 +206,7 @@ it('is the composer’s box alone: no toolbar in the accessibility tree, no titl
 
 it('draws attached files and a waiting message above the box, on the raised surface', async () => {
   queued = [{ queueId: 'q-9', appSessionId: BARE_A, content: 'Then tidy the summary', createdAt: '2026-11-15T10:00:00.000Z', state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false }];
+  window.maws = { ...(fake.client as unknown as PreloadBridge), pathForFile: () => '' } as PreloadBridge; // a dropped file's path, as the preload gives it
   mount();
   await waitFor(() => expect(message()).toBeTruthy());
   queueComposerAttachment(A, { files: [new File(['invented'], 'seating-plan.txt', { type: 'text/plain' })], text: '' });
@@ -226,7 +227,7 @@ it('a comment sent to the session while the chat is hidden is delivered and open
   act(() => hideChat());
   expect(chatPresentation(useFloatingCard.getState())).toBe('hidden');
   expect(screen.queryByRole('region', { name: 'Chat' })).toBeNull();
-  await act(async () => void (await sendToSession(A, 'Shorten the second paragraph', { origin: 'comment' }, fake.client)));
+  await act(async () => void (await sendToSession(A, 'Shorten the second paragraph', { origin: 'comment' })));
   expect(fake.invoked('session.send')).toEqual([expect.objectContaining({ appSessionId: BARE_A, content: 'Shorten the second paragraph' })]);
   expect(chatPresentation(useFloatingCard.getState())).toBe('hidden');
   expect(screen.queryByRole('region', { name: 'Session card' })).toBeNull();
