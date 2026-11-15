@@ -11,6 +11,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -658,7 +659,7 @@ describe('the grant that is out, against what outlives a press (M3’s review, f
 // and a fresh snapshot (the plane rebuilt) while the grant is out, then the rows the bridge left from the grant's on.
 describe('another machine’s terminal session, state by state (Acceptance 7a to 7c; the hold through a press)', () => {
   const APP = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
-  const UP = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null } as const;
+  const UP: LaneAState['link'] = { state: 'up', refusal: null, carrier: 'direct', member: 'm', clientClass: 'native-mac', rights: [], reason: null };
   const recordedRows = (name: string): JsonObject[] =>
     readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as JsonObject);
   let n = 0;
