@@ -4,7 +4,7 @@
 // deliverable id (the artifact's) and version to `openArtifact`, and the console chip while the console store holds
 // what that version's frame logged (P3-L M6b: the revision a viewer placed at the row's version).
 import type { AppSessionId } from '@shared/graph/ids';
-import { act, cleanup, fireEvent, screen } from '@testing-library/react';
+import { act, cleanup, fireEvent, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import type { MachineState } from '@shared/ipc/schema/machines';
@@ -223,13 +223,13 @@ describe('the row of an agent’s delete', () => {
     await act(async () => asked.resolve(null));
     listed = true;
     await libraryChanged();
-    expect(heading(container)).toBe('Restored Draft plan');
+    await waitFor(() => expect(heading(container)).toBe('Restored Draft plan'));
     expect(container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('restored');
     fireEvent.click(screen.getByRole('button', { name: 'Open' }));
     expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, DRAFT);
     listed = false; // deleted again elsewhere: read, not remembered
     await libraryChanged();
-    expect(heading(container)).toBe('Deleted Draft plan');
+    await waitFor(() => expect(heading(container)).toBe('Deleted Draft plan'));
   });
 
   it('an Undo that ends without its effect leaves its sentence as a line of the row, and Undo enabled again', async () => {
