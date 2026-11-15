@@ -9,6 +9,6 @@ import type { CatalogItem } from '@shared/ipc/schema/catalog';
 import { DiscoverPane } from './DiscoverPane';
 
 /** Skills' Discover view; inside the page's `Manage`. */
-export function SkillsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
-  return <DiscoverPane tab="skills" cwd={cwd} onOpenInstalled={onOpenInstalled} />;
+export function SkillsDiscover({ cwd, onOpenInstalled, onDetail, toList }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void; onDetail?(open: boolean): void; toList?: number }) {
+  return <DiscoverPane tab="skills" cwd={cwd} onOpenInstalled={onOpenInstalled} onDetail={onDetail} toList={toList} />;
 }

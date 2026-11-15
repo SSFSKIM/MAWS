@@ -3,7 +3,8 @@
 // - one kept book, `customize:<folder>` or `customize:user`, for plugins, skills and connectors alike, so a line outlives
 //   a change of view, of Show and of project, for connectors now as for plugins before;
 // - one `Manage`: `ask` opens the connector sheet for `mcp-add` and `mcp-remove` and the install sheet for every other
-//   action; `askIn` is the connector sheet's, for a removal in its own folder;
+//   action; `askIn` is the connector sheet's, for a removal in its own folder; its `reloadMods` is the attached
+//   session's, which a plugin's line offers as Reload again (the other kinds' bodies withhold it, ./bodies.tsx);
 // - the sheets and the two marketplace dialogs, drawn once, over the page; a change of project closes them;
 // - the attached session's plugin facts (its loaded list and reloads), read without ever acquiring a process;
 // - the read at a custom connector sheet's opening (U11g's, `useConnectorManage`).

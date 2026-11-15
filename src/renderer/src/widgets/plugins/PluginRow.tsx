@@ -150,7 +150,8 @@ export function PluginRow({ identity, now, iconUrl, onOpen }: { identity: Plugin
         </div>
       </div>
       {(version !== null || date !== null) && (
-        <span className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums">
+        // Customize's narrow page (under its container's 24rem) gives them up; /plugins' dialog has no such container
+        <span data-plugin-version className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums @max-sm/customize:hidden">
           {version}
           {version !== null && date !== null && ' · '}
           {date && (

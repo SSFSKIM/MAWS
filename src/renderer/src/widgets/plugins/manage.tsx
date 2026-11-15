@@ -39,30 +39,37 @@ export const ManageProvider = ({ value, children }: { value: Manage; children: R
 type Asking = { key: string; request: PluginsRequest; declared: Declared | null; engine: EngineResolution; opening: number };
 
 /**
- * UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): what is asked on one place, held only
- * while that place is shown. Customize's page holds its sheets above every body and is not remounted when its project
- * changes (its head keeps the keyboard), so a sheet open on one project is closed by the change, is not drawn again on
- * the return, and a sheet that a change asked for after the page left its place (a marketplace-declared command's second
- * sheet) is not opened anywhere: an old request never becomes a change in another place.
+ * UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): what is asked on one visit to a place,
+ * held only while that visit lasts. Customize's page holds its sheets above every body and is not remounted when its
+ * project changes (its head keeps the keyboard), so a sheet open on one project is closed by the change, is not drawn
+ * again on the return, and a sheet that a change asked for after the page left (a marketplace-declared command's second
+ * sheet) is not opened anywhere, the same place visited again included: each visit has its own setter, and a setter of
+ * an earlier visit sets nothing, so an old request never becomes a change on a later visit.
  */
 export function usePlaceHeld<T>(place: string): [T | null, Dispatch<SetStateAction<T | null>>] {
-  const [held, setHeld] = useState<{ place: string; value: T } | null>(null);
-  const shown = useRef(place);
+  const [visited, setVisited] = useState<{ place: string; visit: number }>({ place, visit: 0 });
+  let visit = visited.visit;
+  if (visited.place !== place) {
+    visit += 1; // another place, or this one again after another: a new visit
+    setVisited({ place, visit });
+  }
+  const [held, setHeld] = useState<{ visit: number; value: T } | null>(null);
+  const current = useRef(visit);
   useLayoutEffect(() => {
-    shown.current = place;
-  }, [place]);
-  if (held !== null && held.place !== place) setHeld(null); // the place left: what it held goes
+    current.current = visit;
+  }, [visit]);
+  if (held !== null && held.visit !== visit) setHeld(null); // the visit ended: what it held goes
   const set = useCallback<Dispatch<SetStateAction<T | null>>>(
     (update) =>
       setHeld((prior) => {
-        if (shown.current !== place) return prior; // asked for a place no longer shown
-        const before = prior !== null && prior.place === place ? prior.value : null;
+        if (current.current !== visit) return prior; // asked on a visit that has ended
+        const before = prior !== null && prior.visit === visit ? prior.value : null;
         const next = typeof update === 'function' ? (update as (prior: T | null) => T | null)(before) : update;
-        return next === null ? null : { place, value: next };
+        return next === null ? null : { visit, value: next };
       }),
-    [place],
+    [visit],
   );
-  return [held !== null && held.place === place ? held.value : null, set];
+  return [held !== null && held.visit === visit ? held.value : null, set];
 }
 
 // The widget's management state and the sheet to draw beside its frame. `resolveEngine` reads `plugins.env` again: every

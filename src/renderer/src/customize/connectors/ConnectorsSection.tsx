@@ -69,7 +69,7 @@ function Adding() {
 }
 
 /** Discover's connectors; with no copy of Anthropic's directory at all, its words and Retry in the list's place. */
-export function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
+export function ConnectorsDiscover({ cwd, onOpenInstalled, onDetail, toList }: { cwd: string | null; onOpenInstalled(item: CatalogItem): void; onDetail?(open: boolean): void; toList?: number }) {
   const sources = useCatalogSources();
   const { refresh, running } = useCatalogRefresh();
   const directory = sources.data?.find((source) => source.key === DIRECTORY_SERVERS);
@@ -82,7 +82,7 @@ export function ConnectorsDiscover({ cwd, onOpenInstalled }: { cwd: string | nul
         </button>
       </div>
     );
-  return <DiscoverPane tab="connectors" cwd={cwd} onOpenInstalled={onOpenInstalled} />;
+  return <DiscoverPane tab="connectors" cwd={cwd} onOpenInstalled={onOpenInstalled} onDetail={onDetail} toList={toList} />;
 }
 
 // The configured servers, with a removal's result kept at the head once its row has left.

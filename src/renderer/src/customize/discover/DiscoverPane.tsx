@@ -49,9 +49,17 @@ function LeftResult({ opKey, cwd }: { opKey: string; cwd: string | null }) {
   );
 }
 
-export function DiscoverPane({ tab, cwd, onOpenInstalled }: { tab: Tab; cwd: string | null; onOpenInstalled(item: CatalogItem): void }) {
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): on Customize's page a card's detail is
+// told to the head (`onDetail`: no tools while it is open), and a press of the view shown or a Show value (`toList`, a
+// count the page raises) returns it to the list, with the list's scroll and the card's focus as Back returns them.
+export function DiscoverPane({ tab, cwd, onOpenInstalled, onDetail, toList = 0 }: { tab: Tab; cwd: string | null; onOpenInstalled(item: CatalogItem): void; onDetail?(open: boolean): void; toList?: number }) {
   const choices = useDiscoverStore((s) => s[tab]);
   const [detail, setDetail] = useState<CatalogItem | null>(null);
+  const [listed, setListed] = useState(toList);
+  if (listed !== toList) {
+    setListed(toList);
+    if (detail !== null) setDetail(null);
+  }
   const pane = useRef<HTMLDivElement>(null);
   const left = useRef<{ id: string; scrollTop: number } | null>(null);
   const open = (item: CatalogItem) => {
@@ -68,6 +76,8 @@ export function DiscoverPane({ tab, cwd, onOpenInstalled }: { tab: Tab; cwd: str
     const target = pane.current.querySelector<HTMLElement>(`[data-catalog-card="${CSS.escape(from.id)}"] [data-card-open], [data-featured="${CSS.escape(from.id)}"] [data-card-open]`);
     target?.focus();
   }, [showing]);
+  useLayoutEffect(() => onDetail?.(showing), [showing, onDetail]);
+  useLayoutEffect(() => () => onDetail?.(false), [onDetail]);
 
   const narrowed = filtering(choices);
   return (

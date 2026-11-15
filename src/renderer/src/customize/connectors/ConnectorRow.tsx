@@ -3,7 +3,8 @@
 // sign-in state, Cancel while a sign-in runs, Sign in or why not, Remove, the file's path on the second line, and the
 // operation's line. What depends on the kind of connector (what follows the name, the second line, which sign-in it
 // sends, whether it has Remove) is decided on `row.kind` in `partsOf`, so that a second kind is one branch there.
-// The row's parts are named for what later columns read: `data-connector-main` (the name, what follows it, the state)
+// The row's parts are named for what later columns read: `data-connector-main` (the image, the name, what follows it,
+// the state; its box is the drawing's, so the image is placed where the row's first column had it)
 // and `data-connector-trailing` (Cancel, Sign in or its sentence, Remove).
 // A row the engine does not use (the same name in a scope it ranks higher, or MAWS's own server of the name; ./present.ts
 // `shadowedBy`) says which entry shadows it and offers no Sign in: the engine signs a name in, so Sign in belongs to the
@@ -64,11 +65,14 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   const state: SignInView | null = shadow !== null ? { text: shadowWords(shadow, row.name), tone: 'muted', signIn: false, cancel: false } : signInViewOf({ live, liveRead, posture, last: record, transport: row.transport });
   const busy = ops.entries.get(row.key)?.state.phase === 'working';
   return (
-    <li data-connector={row.name} data-connector-scope={row.scope} className="flex min-w-0 items-start gap-3 border-b border-border px-2 py-2 last:border-b-0">
-      <ItemImage kind="connector" seed={row.name} iconUrl={iconUrl} size="row" />
-      <div className="flex min-w-0 flex-1 flex-col gap-1">
+    // the image's column, kept as padding: 0.5rem, the 2.25rem image, the 0.75rem gap; the text at least the image's height
+    <li data-connector={row.name} data-connector-scope={row.scope} className="relative flex min-w-0 items-start border-b border-border py-2 pr-2 pl-14 last:border-b-0">
+      <div className="flex min-h-9 min-w-0 flex-1 flex-col gap-1">
         <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
           <span data-connector-main className="contents">
+            <span className="absolute top-2 left-2 flex">
+              <ItemImage kind="connector" seed={row.name} iconUrl={iconUrl} size="row" />
+            </span>
             <span className="font-medium [overflow-wrap:anywhere]">{row.name}</span>
             <span className="text-ui-sm text-fg-muted">{after}</span>
             {state?.text && (

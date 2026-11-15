@@ -4,13 +4,17 @@
 // groups, MAWS's built-in mods, a plugin's detail in the list's place), the skills on disk (their groups and detail), the
 // configured connectors with what the attached session has live. Discover: that kind's catalog. Until M3 and M4 draw
 // their own, All draws what Plugins draws. A body is keyed by the place, so a change of project resets its details.
-import { Fragment, useEffect, useLayoutEffect, useMemo, useState } from 'react';
+// A detail, My items' or Discover's, is told to the head (`onDetail`) and returns to its list on `toList`.
+// Keep means keep (§D): the kinds share the place's one book, and each kind's lines offer what they offered: Reload again
+// on a plugin's line alone, as Skills' Discover and the connectors had no session's reload to offer (`WithoutReload`).
+import { Fragment, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { McpBody, present } from '../widgets/McpWidget';
 import { useLibraryStore } from '../widgets/plugins/library-store';
 import { usePluginsEnv } from '../widgets/plugins/read';
 import { PluginsList, useLibrarySelection, usePluginsLibrary } from '../widgets/PluginsWidget';
 import { useEngineRead } from '../widgets/read';
+import { ManageProvider, useManage } from '../widgets/plugins/manage';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
 import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
 import { ConnectorsDiscover, ConnectorsMine } from './connectors/ConnectorsSection';
@@ -32,34 +36,45 @@ export function CustomizeBody({ view, show, onDetail, toList }: { view: PageView
   const kind = show === 'all' ? 'plugins' : show; // until M3 (My items) and M4 (Discover) draw All
   return (
     <Fragment key={cwd ?? 'user'}>
-      {view === 'discover' ? <DiscoverBody kind={kind} /> : kind === 'plugins' ? <PluginsMine show={show} onDetail={onDetail} toList={toList} /> : kind === 'skills' ? <SkillsMine onDetail={onDetail} toList={toList} /> : <ConnectorsBody />}
+      {view === 'discover' ? <DiscoverBody kind={kind} onDetail={onDetail} toList={toList} /> : kind === 'plugins' ? <PluginsMine show={show} onDetail={onDetail} toList={toList} /> : kind === 'skills' ? <SkillsMine onDetail={onDetail} toList={toList} /> : <ConnectorsBody />}
     </Fragment>
   );
 }
 
-function DiscoverBody({ kind }: { kind: Exclude<CustomizeShow, 'all'> }) {
+function DiscoverBody({ kind, onDetail, toList }: { kind: Exclude<CustomizeShow, 'all'>; onDetail(open: boolean): void; toList: number }) {
   const { cwd } = usePlace();
   switch (kind) {
     case 'plugins':
       return (
         <div data-customize-body="plugins" className="flex min-h-0 flex-1 flex-col px-1 pt-2">
-          <DiscoverPane tab="plugins" cwd={cwd} onOpenInstalled={(item) => openMine('plugins', { pluginId: pluginIdOf(item) ?? undefined })} />
+          <DiscoverPane tab="plugins" cwd={cwd} onOpenInstalled={(item) => openMine('plugins', { pluginId: pluginIdOf(item) ?? undefined })} onDetail={onDetail} toList={toList} />
         </div>
       );
     case 'skills':
       // a card installed here opens My items searched to its plugin
       return (
-        <div data-customize-body="skills" className="flex min-h-0 flex-1 flex-col p-3">
-          <SkillsDiscover cwd={cwd} onOpenInstalled={(item) => openMine('skills', { search: item.install.kind === 'plugin' ? item.install.pluginName : item.name })} />
-        </div>
+        <WithoutReload>
+          <div data-customize-body="skills" className="flex min-h-0 flex-1 flex-col p-3">
+            <SkillsDiscover cwd={cwd} onOpenInstalled={(item) => openMine('skills', { search: item.install.kind === 'plugin' ? item.install.pluginName : item.name })} onDetail={onDetail} toList={toList} />
+          </div>
+        </WithoutReload>
       );
     case 'connectors':
       return (
-        <div data-customize-body="connectors" className="flex min-h-0 flex-1 flex-col pt-3">
-          <ConnectorsDiscover cwd={cwd} onOpenInstalled={() => openMine('connectors')} />
-        </div>
+        <WithoutReload>
+          <div data-customize-body="connectors" className="flex min-h-0 flex-1 flex-col pt-3">
+            <ConnectorsDiscover cwd={cwd} onOpenInstalled={() => openMine('connectors')} onDetail={onDetail} toList={toList} />
+          </div>
+        </WithoutReload>
       );
   }
+}
+
+// The place's Manage with no session's reload: the lines below offer no Reload again, as this kind's never did.
+function WithoutReload({ children }: { children: ReactNode }) {
+  const manage = useManage();
+  const value = useMemo(() => ({ ...manage, reloadMods: null }), [manage]);
+  return <ManageProvider value={value}>{children}</ManageProvider>;
 }
 
 // My items' plugins, over the folder the CLI runs in (the engine's configuration directory for the user configuration).
@@ -139,20 +154,22 @@ function ConnectorsBody() {
   const { cwd, name, inventory, attached, askIn } = usePlace();
   const search = useCustomizePage((s) => s.search);
   return (
-    <div data-customize-body="connectors" className="flex min-h-0 flex-1 flex-col pt-3">
-      <ConnectorsMine
-        cwd={cwd}
-        place={name}
-        servers={inventory.data?.servers}
-        readAt={inventory.dataUpdatedAt}
-        inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
-        attached={attached}
-        askIn={askIn}
-        search={search}
-        onResetSearch={clearSearch}
-        live={attached ? <LiveConnectors appSessionId={attached} /> : <p className="mt-4 px-2 text-ui-sm text-fg-muted">{CONNECTORS.noLive}</p>}
-      />
-    </div>
+    <WithoutReload>
+      <div data-customize-body="connectors" className="flex min-h-0 flex-1 flex-col pt-3">
+        <ConnectorsMine
+          cwd={cwd}
+          place={name}
+          servers={inventory.data?.servers}
+          readAt={inventory.dataUpdatedAt}
+          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
+          attached={attached}
+          askIn={askIn}
+          search={search}
+          onResetSearch={clearSearch}
+          live={attached ? <LiveConnectors appSessionId={attached} /> : <p className="mt-4 px-2 text-ui-sm text-fg-muted">{CONNECTORS.noLive}</p>}
+        />
+      </div>
+    </WithoutReload>
   );
 }
 
