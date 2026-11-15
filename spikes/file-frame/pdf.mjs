@@ -92,51 +92,50 @@ export const largePdf = () => buildPdf({ pages: Array.from({ length: 5 }, (_, i)
 export const pagesPdf = () => buildPdf({ pages: textPages(6, 'Several pages') });
 
 const js = (code) => `<< /S /JavaScript /JS ${str(code)} >>`;
-const openAction = (action) => () => `/OpenAction ${action}`;
 
-// A text field "f" on the first page, with the AcroForm that names it.
-function withField(extra) {
+// Row e: one document per behaviour, each acting by itself when it opens (no click), from the two places a document
+// names an action for its opening: the catalog's OpenAction and the first page's open action (/AA /O). Controls show
+// what the viewer runs of each: a script or an action that moves to page 3, from each place, and a link that is clicked.
+export function hostilePdfs() {
+  // `action` both as the document's OpenAction and as its first page's open action.
+  const acting = (title, action, n = 1, more = {}) => buildPdf({
+    pages: textPages(n, title).map((p, i) => (i === 0 ? { ...p, ...more, extra: () => `/AA << /O ${action} >>` } : p)),
+    catalog: (w) => `/OpenAction ${action}${more.catalog ? ` ${more.catalog(w)}` : ''}`,
+  });
   let field;
-  return {
+  const formField = {
     annots: (w, pageRef) => {
       field = w.add(`<< /Type /Annot /Subtype /Widget /FT /Tx /T (f) /V (empty) /Rect [72 500 400 530] /P ${pageRef} 0 R /F 4 /DA (/Helv 14 Tf 0 g) >>`);
       return [field];
     },
-    catalog: (w) => `/AcroForm << /Fields [${field} 0 R] /NeedAppearances true /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >> ${extra(w)}`,
+    catalog: () => `/AcroForm << /Fields [${field} 0 R] /NeedAppearances true /DA (/Helv 0 Tf 0 g) /DR << /Font << /Helv << /Type /Font /Subtype /Type1 /BaseFont /Helvetica >> >> >> >>`,
   };
-}
-
-// Row e: one document per behaviour, each acting by itself when it opens (no click), and two controls that show
-// whether the viewer runs a document's actions at all (a script that moves to page 3, an action that does the same).
-export function hostilePdfs() {
-  const one = (title, catalog, pages = textPages(1, title)) => buildPdf({ pages, catalog });
-  const form = withField(() => `/OpenAction << /S /SubmitForm /F << /FS /URL /F (https://example.com/submit-action) >> /Flags 4 /Next ${js('this.submitForm("https://example.com/submit-script");')} >>`);
-  const formPages = textPages(1, 'Form submit');
-  formPages[0].annots = form.annots;
   let attachment;
+  const embedded = {
+    catalog: (w) => {
+      const ef = w.stream('/Type /EmbeddedFile /Subtype /text#2Fplain', 'Invented attachment text.\n');
+      attachment = w.add(`<< /Type /Filespec /F (note.txt) /UF (note.txt) /EF << /F ${ef} 0 R >> >>`);
+      return `/Names << /EmbeddedFiles << /Names [(note.txt) ${attachment} 0 R] >> >>`;
+    },
+  };
   return {
-    'baseline': one('Baseline', () => ''),
-    'control-script': one('Control: script', openAction(js('this.pageNum = 2;')), textPages(3, 'Control: script')),
-    'control-action': buildPdf({ pages: textPages(3, 'Control: action'), catalog: (w, refs) => `/OpenAction [${refs[2]} 0 R /Fit]` }),
+    'baseline': buildPdf({ pages: textPages(1, 'Baseline') }),
+    'control-open-script': buildPdf({ pages: textPages(3, 'Control: open script'), catalog: () => `/OpenAction ${js('this.pageNum = 2;')}` }),
+    'control-open-action': buildPdf({ pages: textPages(3, 'Control: open action'), catalog: (w, refs) => `/OpenAction [${refs[2]} 0 R /Fit]` }),
     'control-document-script': buildPdf({ pages: textPages(3, 'Control: document script'), catalog: () => `/Names << /JavaScript << /Names [(init) ${js('this.pageNum = 2;')}] >> >>` }),
-    'control-page-open': buildPdf({ pages: textPages(3, 'Control: page open action').map((p, i) => (i === 0 ? { ...p, extra: (refs) => `/AA << /O << /S /GoTo /D [${refs[2]} 0 R /Fit] >> >>` } : p)), catalog: () => '' }),
+    'control-page-open-action': buildPdf({ pages: textPages(3, 'Control: page open action').map((p, i) => (i === 0 ? { ...p, extra: (refs) => `/AA << /O << /S /GoTo /D [${refs[2]} 0 R /Fit] >> >>` } : p)) }),
+    'control-page-open-script': buildPdf({ pages: textPages(3, 'Control: page open script').map((p, i) => (i === 0 ? { ...p, extra: () => `/AA << /O ${js('this.pageNum = 2;')} >>` } : p)) }),
     // A positive control for main's record, with a click (not part of R4's test): a link over the whole page.
-    'control-click-link': buildPdf({ pages: textPages(1, 'Control: a clicked link').map((p) => ({ ...p, annots: (w) => [w.add('<< /Type /Annot /Subtype /Link /Rect [0 0 612 792] /Border [0 0 0] /A << /S /URI /URI (https://example.com/clicked) >> >>')] })), catalog: () => '' }),
-    'alert': one('Alert', openAction(js('app.alert("Invented alert from the spike");'))),
-    'print': one('Print', openAction(js('this.print();'))),
-    'submit': buildPdf({ pages: formPages, catalog: form.catalog }),
-    'launch': one('Launch', openAction('<< /S /Launch /F (spike-launch-target.sh) /NewWindow true >>')),
-    'goto-other-relative': one('Go to another file, relative', openAction('<< /S /GoToR /F (other.pdf) /D [0 /Fit] >>')),
-    'goto-other-absolute': one('Go to another file, absolute', openAction('<< /S /GoToR /F << /Type /Filespec /F (/tmp/file-frame-other.pdf) /UF (/tmp/file-frame-other.pdf) >> /D [0 /Fit] >>')),
-    'uri-action': one('A link action', openAction('<< /S /URI /URI (https://example.com/uri-action) >>')),
-    'uri-script': one('A link by script', openAction(js('app.launchURL("https://example.com/launch-url", true);'))),
-    'attachment': buildPdf({
-      pages: textPages(1, 'Attachment'),
-      catalog: (w) => {
-        const ef = w.stream('/Type /EmbeddedFile /Subtype /text#2Fplain', 'Invented attachment text.\n');
-        attachment = w.add(`<< /Type /Filespec /F (note.txt) /UF (note.txt) /EF << /F ${ef} 0 R >> >>`);
-        return `/Names << /EmbeddedFiles << /Names [(note.txt) ${attachment} 0 R] >> >> /OpenAction ${js('this.exportDataObject({ cName: "note.txt", nLaunch: 2 });')}`;
-      },
-    }),
+    'control-click-link': buildPdf({ pages: textPages(1, 'Control: a clicked link').map((p) => ({ ...p, annots: (w) => [w.add('<< /Type /Annot /Subtype /Link /Rect [0 0 612 792] /Border [0 0 0] /A << /S /URI /URI (https://example.com/clicked) >> >>')] })) }),
+    'alert': acting('Alert', js('app.alert("Invented alert from the spike");')),
+    'print': acting('Print', js('this.print();')),
+    'submit': acting('Form submit', '<< /S /SubmitForm /F << /FS /URL /F (https://example.com/submit-action) >> /Flags 4 >>', 1, formField),
+    'submit-script': acting('Form submit by script', js('this.submitForm("https://example.com/submit-script");'), 1, formField),
+    'launch': acting('Launch', '<< /S /Launch /F (spike-launch-target.sh) /NewWindow true >>'),
+    'goto-other-relative': acting('Go to another file, relative', '<< /S /GoToR /F (other.pdf) /D [0 /Fit] >>'),
+    'goto-other-absolute': acting('Go to another file, absolute', '<< /S /GoToR /F << /Type /Filespec /F (/tmp/file-frame-other.pdf) /UF (/tmp/file-frame-other.pdf) >> /D [0 /Fit] >>'),
+    'uri-action': acting('A link action', '<< /S /URI /URI (https://example.com/uri-action) >>'),
+    'uri-script': acting('A link by script', js('app.launchURL("https://example.com/launch-url", true);')),
+    'attachment': acting('Attachment', js('this.exportDataObject({ cName: "note.txt", nLaunch: 2 });'), 1, embedded),
   };
 }

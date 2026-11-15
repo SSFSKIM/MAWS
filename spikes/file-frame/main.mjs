@@ -288,10 +288,13 @@ const suites = {
       await page(win, 'spike.frames(120)');
       await sleep(1500);
       if (name === 'control-click-link') {
+        win.focus();
+        win.webContents.focus();
         const st = await stateOf(win, name);
         const x = st.rect.x + Math.round(st.rect.width / 2) + 150; // right of the viewer's sidebar, on the page
         const y = st.rect.y + 300;
         win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+        await sleep(300);
         win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
         win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
         await sleep(1500);
