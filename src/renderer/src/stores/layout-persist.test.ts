@@ -73,13 +73,13 @@ describe('layout persistence', () => {
     store.getState().openTab({ kind: 'session', appSessionId: A });
     expect(written()).toHaveLength(1);
     expect(written()[0]).toEqual(storedMain(store.getState().main));
-    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS * 2);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS * 2);
     expect(written()).toHaveLength(1); // the pending diagnostics write went out with it
     store.getState().openTab({ kind: 'agent', appSessionId: 'app-b' as AppSessionId, agentId: 'agent-1' as AgentId });
     expect(written()).toHaveLength(2);
     store.getState().closeTab(`session:${A}`);
     expect(written()).toHaveLength(2);
-    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
     expect(written()).toHaveLength(3);
     expect(written()[2]).toEqual(storedMain(store.getState().main));
   });
@@ -161,17 +161,17 @@ describe('layout persistence', () => {
     store.getState().openTab({ kind: 'artifact', artifactId, machine: TEST_MACHINE });
     store.getState().openSession(A, { split: true });
     store.getState().setSplitRatio(0.4);
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     const before = JSON.stringify(sets().at(-1)!.value);
     store.getState().floatSplit(`session:${A}`);
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     const floating = sets().at(-1)!.value as LayoutMain;
     expect(stripIn(floating)).toMatchObject({ floating: { sessionTabId: `session:${A}` }, splitRatio: 0.4 });
     const again = setup({ 'main.tabs': JSON.parse(JSON.stringify(floating)) });
     await again.hydrate();
     expect(again.store.getState().main).toEqual(stripIn(floating)); // relaunch restores the float
     store.getState().dockSplit();
-    vi.advanceTimersByTime(1000);
+    await vi.advanceTimersByTimeAsync(1000);
     expect(JSON.stringify(sets().at(-1)!.value)).toBe(before);
   });
 
@@ -189,9 +189,9 @@ describe('layout persistence', () => {
       await hydrate();
       store.getState().openTab({ kind: 'artifact', artifactId, machine: TEST_MACHINE });
       store.getState().openSession(A, { split: true });
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       store.getState().floatSplit(S, { foldPanel: true });
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       return { main: last(sets(), 'main.tabs') as LayoutMain, regions: last(sets(), 'regions') as LayoutRegions };
     };
 
@@ -204,7 +204,7 @@ describe('layout persistence', () => {
       expect([again.store.getState().main, again.store.getState().regions]).toEqual([stripIn(main), regions]);
       expect(again.sets(), 'only the additive surface context is materialized').toEqual([{ key: 'panelTools.surfaces', value: surfaceState({ [NO_PROJECT]: A }) }]);
       again.store.getState().dockSplit();
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       expect((last(again.sets(), 'regions') as LayoutRegions).panel).toEqual(LAYOUT_DEFAULTS.regions.panel);
       expect(stripIn(last(again.sets(), 'main.tabs')).floating).toBeUndefined();
     });
@@ -223,7 +223,7 @@ describe('layout persistence', () => {
       const third = setup(written);
       await third.hydrate(() => false);
       third.store.getState().setPanel({ collapsed: true });
-      vi.advanceTimersByTime(1000);
+      await vi.advanceTimersByTimeAsync(1000);
       const fourth = setup(after(written, third.sets()));
       await fourth.hydrate(() => false);
       expect(fourth.store.getState().regions.panel.collapsed).toBe(true);
@@ -623,7 +623,7 @@ describe('panel tabs of a session not on screen', () => {
     await hydrate((id) => id === A || id === B);
     store.getState().openSession(B);
     store.getState().updatePanelTabs(A, (refs) => [...refs, terminal]);
-    vi.advanceTimersByTime(LAYOUT_WRITE_DELAY_MS);
+    await vi.advanceTimersByTimeAsync(LAYOUT_WRITE_DELAY_MS);
     expect(sets().filter((s) => s.key.startsWith('panel.'))).toEqual([{ key: `panel.${A}`, value: { tabs: [files, terminal], activeTabId: 'files-1' } }]);
     expect(store.getState().panelTabsOf(B)).toEqual([]);
     store.getState().openSession(A);
