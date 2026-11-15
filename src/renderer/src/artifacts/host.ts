@@ -440,15 +440,18 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
 
     private retry(): void {
-      if (this.closed || this.timer !== null || this.waitingForHost) return; // fix wave 4: armed while parked too
+      // fix wave 5: while parked the backoff never runs out: it re-reads at its last step until a read answers, whatever
+      // the host's or the link's state (a read that cannot reach it answers unknown, and is asked again)
+      const parked = this.parked();
+      if (this.closed || this.timer !== null || (this.waitingForHost && !parked)) return;
       // P5 O7 M5b: another machine's document waits for its link's `up` while the link is down, and while it isn't known
       // down keeps the backoff's last step (no host state will say when)
       const remote = this.machine() !== null;
-      if (remote && !this.live()) {
+      if (remote && !this.live() && !parked) {
         this.waitingForHost = true;
         return;
       }
-      const wait = RECONNECT_BACKOFF_MS[this.attempt] ?? (remote ? RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1] : undefined);
+      const wait = RECONNECT_BACKOFF_MS[this.attempt] ?? (remote || parked ? RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1] : undefined);
       if (wait === undefined) {
         this.waitingForHost = true;
         return;

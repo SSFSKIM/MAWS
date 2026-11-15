@@ -53,9 +53,10 @@ export function useUndoAct(undo: () => Promise<string | null>): UndoAct {
 export function useListed(artifactId: string): boolean | null {
   const read = useLibraryRow(artifactId);
   // fix wave 4 (the ruling's predicate): a row is restoration only as a successful read's answer; a read refused since
-  // keeps its last good row (library/store.ts), which proves nothing, so it is not known (a read under way keeps the last
-  // successful answer: nothing has contradicted it yet)
-  if (read.status === 'error' || read.value === undefined) return null;
+  // keeps its last good row (library/store.ts), which proves nothing, so it is not known. A read under way keeps the last
+  // successful answer when nothing has contradicted it; fix wave 5: after a refusal it does not (the store keeps the
+  // refusal's `error` through the next read, and clears it only at a success)
+  if (read.error !== null || read.value === undefined) return null;
   return read.value !== null;
 }
 
