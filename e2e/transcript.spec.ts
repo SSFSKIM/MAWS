@@ -275,7 +275,7 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
 
   // The stream window: the most rows mounted in any frame of ten seconds.
   const before = await metrics(page);
-  const mounted = await page.evaluate(async (durationMs) => {
+  const streamWindow = await page.evaluate(async (durationMs) => {
     const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
     let most = 0;
     const started = performance.now();
@@ -283,13 +283,13 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
       await new Promise((resolve) => requestAnimationFrame(resolve));
       most = Math.max(most, scroller.querySelectorAll('[data-index]').length);
     }
-    return most;
+    return { domRows: most };
   }, STREAM_WINDOW_MS);
   const after = await metrics(page);
-  console.log(`mirrored anchoring: ${JSON.stringify({ domRows: mounted, rows: after.rows, batches: after.batches - before.batches })}`);
-  test.info().annotations.push({ type: 'mirrored anchoring', description: JSON.stringify({ domRows: mounted, rows: after.rows, batches: after.batches - before.batches }) });
+  console.log(`mirrored anchoring: ${JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches })}`);
+  test.info().annotations.push({ type: 'mirrored anchoring', description: JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches }) });
   expect(after.batches - before.batches, 'the stream ran throughout the window').toBeGreaterThan(0);
-  expect(mounted, 'DOM rows').toBeLessThanOrEqual(40);
+  expect(streamWindow.domRows, 'DOM rows').toBeLessThanOrEqual(40);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
