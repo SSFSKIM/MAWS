@@ -6,6 +6,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { addressOf } from '@shared/machine/address';
+import { ARTIFACTS_TOOL_ID } from '@shared/maws/panes';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { recordArtifactMachine, resetArtifactMachines } from '../artifacts/machines';
 import { useLayout } from '../stores/layout';
@@ -133,6 +134,36 @@ describe('showing the main tab that already shows an artifact', () => {
     expect(showOpenArtifactTab(LOCAL_SESSION, A)).toBe(true);
     expect(useLayout.getState().destination).toBeNull();
     expect(activeTab(useLayout.getState().main)?.id).toBe(artifactTabOn(TEST_MACHINE));
+  });
+
+  // The architect's ruling (Decision Log 9; decision 5 and A14.4 as revised): with the side column maximized or floating,
+  // showing the main tab docks the column so the tab can be seen, and nothing it shows changes: the same tool tab in
+  // front, on the same artifact's record, with the same pins and surfaces
+  it.each(['maximized', 'floating'] as const)('with the side column %s, shows the main tab, docks the column, and leaves what it shows as it was', (mode) => {
+    const SIDE_TAB = `${ARTIFACTS_TOOL_ID}-tab`;
+    const SHOWN = '00000000-0000-4000-8000-000000000002';
+    openArtifactTab(A);
+    useLayout.getState().openTab({ kind: 'diagnostics' });
+    useLayout.setState({
+      panelBySession: new Map([[LOCAL_SESSION, { tabs: [{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }], activeTabId: SIDE_TAB }]]),
+      panelParams: { [SIDE_TAB]: { target: SHOWN, machine: TEST_MACHINE } },
+    });
+    useLayout.getState().setPanel({ [mode]: true });
+    const before = useLayout.getState();
+    expect(before.regions.panel[mode]).toBe(true);
+
+    expect(showOpenArtifactTab(LOCAL_SESSION, A)).toBe(true);
+    const after = useLayout.getState();
+    expect(activeTab(after.main)?.id, 'the main tab is selected').toBe(artifactTabOn(TEST_MACHINE));
+    expect(after.regions.panel, 'the column docks, its width and fold as they were').toEqual({ ...before.regions.panel, maximized: false, floating: false });
+    // what the column shows: the same objects, not only equal ones
+    expect(after.panelBySession).toBe(before.panelBySession);
+    expect(after.panelBySession.get(LOCAL_SESSION)).toEqual({ tabs: [{ id: SIDE_TAB, toolId: ARTIFACTS_TOOL_ID, pinned: false }], activeTabId: SIDE_TAB });
+    expect(after.panelParams).toBe(before.panelParams);
+    expect(after.panelParams[SIDE_TAB]).toEqual({ target: SHOWN, machine: TEST_MACHINE });
+    expect([after.panelPinned, after.panelActiveNoSession, after.panelSurfaces, after.panelGroups]).toEqual([before.panelPinned, before.panelActiveNoSession, before.panelSurfaces, before.panelGroups]);
+    expect(after.panelSurfaces).toBe(before.panelSurfaces);
+    expect(after.panelGroups).toBe(before.panelGroups);
   });
 
   it('asks the tab’s editor for the place the link names; with none, asks nothing', () => {
