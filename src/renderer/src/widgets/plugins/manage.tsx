@@ -81,7 +81,7 @@ export function useManageState(base: { cwd: string; readySessions: number; keep?
       setAsking({ key, request, declared, engine: { state: 'loading' }, opening });
       void resolveEngine().then((engine) => setAsking((current) => (current?.opening === opening ? { ...current, engine } : current)));
     },
-    [resolveEngine],
+    [resolveEngine, setAsking],
   );
   const ask = useCallback((key: string, request: PluginsRequest) => open(key, request, null), [open]);
   const { run } = ops;
@@ -103,7 +103,7 @@ export function useManageState(base: { cwd: string; readySessions: number; keep?
       const declared = declaredOf(done, request.action);
       if (declared) open(key, { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared);
     },
-    [run, cwd, open],
+    [run, cwd, open, setAsking],
   );
   const manage = useMemo(() => ({ cwd, ops, ask, reloadMods }), [cwd, ops, ask, reloadMods]);
   const sheet = asking && (
