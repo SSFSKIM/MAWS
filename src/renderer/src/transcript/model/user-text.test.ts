@@ -201,7 +201,7 @@ describe('a user text holding an answer envelope joined with a prompt', () => {
     for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
       const read = userTextOf(text);
       expect(read.text).toBe('Also fix the footer.');
-      expect(copiedUserText(read)).toBe('Also fix the footer.');
+      expect(copiedUserText({ text: read.text, attachments: read.attachments, placeholders: read.placeholders })).toBe('Also fix the footer.');
     }
   });
 

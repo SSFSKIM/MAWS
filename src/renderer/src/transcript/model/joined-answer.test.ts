@@ -63,8 +63,10 @@ describe('an answer envelope the engine joined with a waiting prompt', () => {
       call.toolUse(steer.askId, 'mcp__maws__ask', { blocking: false, questions: steer.result.answers.map((answer) => ({ id: answer.id, question: answer.question, modality: 'text' })) });
       call.result(steer.askId, [{ type: 'text', text: JSON.stringify({ status: 'asked', askId: steer.askId }) }]);
       call.end(['u0']);
-      // a session read from its file: the engine's file keeps the joined line, and no line of the envelope's own
-      const fromFile = journalToEvents(rows).filter((event) => !(event.kind === 'user.message' && event.messageUuid === envelope.uuid));
+      // a session read from its file: the engine's file keeps the joined line, and no line of the envelope's own (MAWS's
+      // write of it, and the engine's replay of it alone, both its whole text)
+      const fromFile = journalToEvents(rows).filter((event) => !(event.kind === 'user.message' && event.content === envelope.message.content));
+      expect(fromFile.some((event) => event.kind === 'user.message' && event.messageUuid === under && event.content !== KIWI)).toBe(true); // the joined line stays
       const drawnRows = drawn([...call.events, ...fromFile]);
       expect(drawnRows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: steer.askId, state: 'answered', answers: steer.result.answers });
       expect(users(drawnRows).find((r) => r.messageUuid === under)?.text).toBe(KIWI);
