@@ -18,15 +18,13 @@ const refusal = (run: () => unknown): EditRefusal => {
   }
   throw new Error('the batch was not refused');
 };
-/** The transactions `run` opens on `doc`, by origin. */
+/** The transactions `run` opens on `doc`, by origin; what `run` throws, it throws. */
 function transactions(doc: ReturnType<typeof seedDoc>, run: () => unknown): unknown[] {
   const origins: unknown[] = [];
   const note = (transaction: { origin: unknown }) => void origins.push(transaction.origin);
   doc.on('beforeTransaction', note);
   try {
     run();
-  } catch {
-    // the caller asserts the refusal separately
   } finally {
     doc.off('beforeTransaction', note);
   }
@@ -93,8 +91,9 @@ describe('set_page', () => {
       { op: 'set_page', size: 'a4', density: 'compact' },
       { op: 'replace_text', block: 'p1', old: 'no such words', new: 'x' },
     ];
-    expect(transactions(doc, () => applyEdit(doc, ops))).toEqual([]);
-    expect(refusal(() => applyEdit(doc, ops))).toMatchObject({ reason: 'notFound', opIndex: 1 });
+    let refused: EditRefusal | undefined;
+    expect(transactions(doc, () => (refused = refusal(() => applyEdit(doc, ops))))).toEqual([]);
+    expect(refused).toMatchObject({ reason: 'notFound', opIndex: 1 });
     expect(docPage(doc)).toEqual({ size: 'letter' });
     expect(stateV2(doc)).toEqual(before);
   });
@@ -103,7 +102,9 @@ describe('set_page', () => {
     const doc = seedDoc();
     setDocPage(doc, { size: 'a4' });
     const before = stateV2(doc);
-    expect(transactions(doc, () => applyEdit(doc, [{ op: 'set_page', size: 'a4', density: 'standard' }]))).toEqual([]);
+    let answer: ReturnType<typeof applyEdit> | undefined;
+    expect(transactions(doc, () => (answer = applyEdit(doc, [{ op: 'set_page', size: 'a4', density: 'standard' }])))).toEqual([]);
+    expect(answer!.results).toEqual([{ op: 'set_page', size: 'a4', density: 'standard' }]);
     expect(stateV2(doc)).toEqual(before);
   });
 
