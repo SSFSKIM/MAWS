@@ -38,7 +38,7 @@ After the four pull requests of this landing:
 - [ ] M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2.
 - [ ] M6 — The float has three presentations.
 - [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3.
-- [ ] M8 — "Make something new": four cards, More, and a design-system choice that binds.
+- [x] (2026-11-15 UTC) M8 — "Make something new": four cards, More, and a design-system choice that binds. Commits `1dbcaefcb`..`642dee896`, fix waves `015228fb4`..`b9b939868` and `3451c949c`..`1444eca1a`; task review clean after two fix waves.
 - [ ] M9 — A Space carries instructions: the store, the sheet, the mark and the chip.
 - [ ] M10 — The artifact tools give a Space's instructions.
 - [ ] M11 — The design system's page, and the scenes and the record of U10b-4.
@@ -1128,6 +1128,7 @@ Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's 
 - M8 (2026-11-15, the architect's ruling on the task review's finding): a card press awaits the linked folder before `createSession`, which read the place in front only at its own call, so a tab switch during the folder's await opened the chat in front. `createSession`'s `opts` gains `front?: ViewedPlace` (an insertion in U6's `keymap/actions-runtime.ts`, now a §H row), the place captured at the press, used in place of its first read; the comparison at the answer is unchanged, so one place still decides "opens behind". No other caller passes it. Named among the pull request's insertions in other children's files.
 - M8 (2026-11-15, the architect's ruling): §I's card row corrected: a refused folder is today's toast; a failed session creation is as today, logged with no toast; no new sentence in this landing. Tracker row 10 records that a failed creation shows nothing, for every caller.
 - M8 fix wave 1 (2026-11-15): the design-system choice is held by the `Library` page component and passed to the section through a context, so a search, Pinned, the list of all Spaces or a scroll does not reset it and a reopened page starts at the default; not the view store, which outlives the page. The `Rows.tsx` change of the first build is reverted as no longer needed.
+- M8 fix wave 2 (2026-11-15): `ViewedPlace` did not exist as a type; it is exported beside `createSession` as `ReturnType<typeof placeOf>`. The card reads the place in front once, at the start of its ask, before the folder's await, and passes it on both paths (with and without a linked folder), which covers the four cards and More's two Ask Claude entries. `createUnstartedSession` reads no layout place and is reached by a card only through `createSession`, so it takes no option.
 
 ## Outcomes & Retrospective
 
