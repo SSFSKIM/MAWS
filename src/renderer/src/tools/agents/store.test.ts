@@ -437,8 +437,8 @@ describe('task graph store', () => {
 
 // UX wave U8d (M3; Interfaces §C): a terminal session this Mac drives. The store holds its lane A watch while its graph is
 // watched, and publishes the graph its own reads built (the sidecars from disk; the wire of a launch by this app, when a
-// status is held) with the statuses the watch carried laid over it. What ends them is a launch by this app after they were
-// noted: the times are given here, on this Mac's clock.
+// status is held) with the statuses the watch carried laid over it. They stand while the terminal they came from holds
+// the session and after it let go of it; this app, another terminal or another machine taking it discards them.
 describe('a terminal session this Mac drives', () => {
   const D = address('drv' as AppSessionId);
   const E = address('drv-2' as AppSessionId);
@@ -593,7 +593,6 @@ describe('a terminal session this Mac drives', () => {
     plane(D, 'snapshot', [running('a1', { spawn: { parentAgentId: 'p0', subagentType: 'general-purpose', description: 'Agent a1' } })]);
     expect(entryOf(D).graph.tasks.get('a1' as TaskId)?.agent?.parentAgentId).toBe('p0');
     const laid = entryOf(D);
-    vi.setSystemTime(Date.parse(T2));
     plane(D, 'subagents', [running('a1', { spawn: { parentAgentId: 'p0', subagentType: 'general-purpose', description: 'Agent a1' } })]);
     expect(entryOf(D)).toBe(laid);
     plane(D, 'subagents', [running('a1', { startedAt: undefined })]);
@@ -634,9 +633,9 @@ describe('a terminal session this Mac drives', () => {
     await fake.answer('workflows', []);
     await flush();
     plane(D, 'snapshot', [completed('a1'), running('a2')]);
-    vi.setSystemTime(Date.parse(T2));
     plane(D, 'subagents', [completed('a1'), gone('a2')]); // the body of a gone process, then the watch's end, then the state
     watchEnded(D);
+    holderOf(D, { kind: 'none' });
     applyLaneAState(D, null);
     expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'exited' });
     setStatusOf(D, earlierRun(D)); // the earlier run's exited status, reaching the page after the noting
@@ -653,25 +652,31 @@ describe('a terminal session this Mac drives', () => {
     await flush();
     plane(D, 'snapshot', [gone('a1')]);
     watchEnded(D);
+    holderOf(D, { kind: 'none' });
     applyLaneAState(D, null);
     expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    holderOf(D, { kind: 'self' });
     setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER });
     expect(useLaneA.getState().agents.get(D)).toBeUndefined();
     await fake.answer('events', { events: [event('subagent.started', { taskId: 'fresh' }, { seq: 1, launch: 'second' })], lastSeq: 1, complete: true });
     expect(statusesOf(D)).toEqual({ a1: 'unknown', fresh: 'running' });
+    holderOf(D, { kind: 'none' });
     setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER, process: 'exited' });
     expect(statusesOf(D)).toEqual({ a1: 'unknown', fresh: 'exited' });
     expect(useLaneA.getState().agents.get(D)).toBeUndefined();
   });
 
-  it('a launch by this app that came and went while nobody watched the graph discards them when it is next watched', async () => {
+  it('a launch by this app that came and went while nobody watched the graph discards them all the same', async () => {
     const release = await watchDisk(D, [sidecar('a1')]);
     plane(D, 'snapshot', [completed('a1')]);
     watchEnded(D);
+    holderOf(D, { kind: 'none' });
     applyLaneAState(D, null);
     release();
+    holderOf(D, { kind: 'self' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined(); // the holder's change, watched or not
+    holderOf(D, { kind: 'none' });
     setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER, process: 'exited' });
-    expect(useLaneA.getState().agents.get(D)?.agents).toHaveLength(1); // nobody watched: not yet applied
     store.getState().watch(D);
     expect(useLaneA.getState().agents.get(D)).toBeUndefined();
     expect(statusesOf(D)).toEqual({ a1: 'unknown' });
@@ -681,10 +686,10 @@ describe('a terminal session this Mac drives', () => {
     const R = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
     const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'r1' }, { seq: 1 })]);
     const off = registerRemoteTaskFeed((id) => (id === R ? (onGraph) => (onGraph(fed), () => {}) : null));
-    noteLaneAAgents(R, [completed('r1')], T1);
+    noteLaneAAgents(R, [completed('r1')], null);
     store.getState().watch(R);
     expect(entryOf(R).graph).toBe(fed);
-    noteLaneAAgents(R, [gone('r1')], T2);
+    noteLaneAAgents(R, [gone('r1')], null);
     expect(entryOf(R).graph).toBe(fed);
     off();
   });

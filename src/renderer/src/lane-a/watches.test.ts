@@ -3,9 +3,12 @@
 // followed, and its `op` and `compact` messages kept by id for a caller that learns an op's id after it ended.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
+import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { at } from '../../../../test/support/machine';
 import { applyLaneAState, resetLaneAStore, useLaneA } from '../stores/lane-a';
+import { useSessions } from '../stores/sessions';
 import { laneAState } from './test-support/lane-a-state';
 import { opMessagesOf, readLaneA, resetLaneAWatches, watchLaneA, type PlaneEvent } from './watches';
 
@@ -122,9 +125,13 @@ describe('watchLaneA', () => {
 });
 
 // UX wave U8d (M3 decision 1; Interfaces §B and §C): a terminal session's subagents, as main derives them, ride the watch
-// beside its jobs. A watch's end keeps them only when none still runs; an older driver's message, with no agents key,
-// notes none.
+// beside its jobs, noted with the terminal the session's record names while the watch is open. A watch's end keeps them
+// only when none still runs; an older driver's message, with no agents key, notes none.
 describe('the subagents a watch carries', () => {
+  const TERMINAL = { kind: 'terminal', pid: 4242 } as const;
+  const holderIs = (holder: SessionRecord['holder']) => useSessions.setState({ records: new Map([[A, record(A, { holder })]]) });
+  beforeEach(() => holderIs(TERMINAL));
+  afterEach(() => useSessions.setState({ records: new Map() }));
   const T1 = '2026-11-15T10:00:00.000Z';
   const T2 = '2026-11-15T10:05:00.000Z';
   const ran = { agentId: 'a1', meta: { agentType: 'general-purpose', description: 'survey the tests' }, status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: T1 }, startedAt: T1 };
@@ -140,28 +147,42 @@ describe('the subagents a watch carries', () => {
     return { fake, off, plane: (...messages: unknown[]) => fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', messages }) };
   };
 
-  it('keeps a snapshot’s agents, then each subagents message’s, beside the jobs, with the time each was noted', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+  it('keeps a snapshot’s agents, then each subagents message’s, beside the jobs, with the terminal they came from', async () => {
     const { plane } = await opened();
-    vi.setSystemTime(Date.parse(T1));
     plane(msg('snapshot', { streaming: [], usage: null, jobs: [job], subagents: [ran] }, 0));
-    expect(agentsOf()).toEqual({ agents: [ran], notedAt: T1 });
+    expect(agentsOf()).toEqual({ agents: [ran], origin: 'terminal:4242' });
     expect(useLaneA.getState().jobs.get(A)).toEqual([job]);
-    vi.setSystemTime(Date.parse(T2));
     plane(msg('subagents', { subagents: [finished], jobs: [job], mcp: [] }));
-    expect(agentsOf()).toEqual({ agents: [finished], notedAt: T2 });
+    expect(agentsOf()).toEqual({ agents: [finished], origin: 'terminal:4242' });
   });
 
-  it('keeps the same list when a body says the same again, noting the later time', async () => {
-    vi.useFakeTimers({ toFake: ['Date'] });
+  it('keeps the same entry when a body says the same again', async () => {
     const { plane } = await opened();
-    vi.setSystemTime(Date.parse(T1));
     plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [ran] }, 0));
-    const held = agentsOf()!.agents;
-    vi.setSystemTime(Date.parse(T2));
+    const held = agentsOf();
     plane(msg('subagents', { subagents: [structuredClone(ran)], jobs: [], mcp: [] }));
-    expect(agentsOf()!.agents).toBe(held);
-    expect(agentsOf()!.notedAt).toBe(T2);
+    expect(agentsOf()).toBe(held);
+  });
+
+  // The branch panel's fix wave: statuses stand while their terminal holds the session, and after it let go of it; any
+  // other holder discards them, and a body the watch carries after that is not kept.
+  it('keeps the watch’s origin once the holder is none, and discards the statuses at any other holder, a later body with them', async () => {
+    const { fake, plane } = await opened();
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [ran] }, 0));
+    holderIs({ kind: 'none' });
+    plane(msg('subagents', { subagents: [gone], jobs: [], mcp: [] }));
+    expect(agentsOf()).toEqual({ agents: [gone], origin: 'terminal:4242' });
+    holderIs({ kind: 'self' });
+    expect(agentsOf()).toBeUndefined();
+    plane(msg('subagents', { subagents: [gone], jobs: [], mcp: [] })); // the dropped driver's, heard late
+    expect(agentsOf()).toBeUndefined();
+    fake.event('laneA.plane', { appSessionId: A, watch: 'w-1', ended: 'the session’s bridge went away' });
+    holderIs({ kind: 'terminal', pid: 5151 }); // a new terminal's driver is a new watch
+    await settle();
+    plane(msg('snapshot', { streaming: [], usage: null, jobs: [], subagents: [ran] }, 0));
+    expect(agentsOf()).toEqual({ agents: [ran], origin: 'terminal:5151' });
+    holderIs({ kind: 'terminal', pid: 6262 });
+    expect(agentsOf()).toBeUndefined();
   });
 
   it('keeps them past the watch’s end when none runs, and drops them when one still runs', async () => {

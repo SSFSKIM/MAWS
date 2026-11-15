@@ -11,8 +11,9 @@
 // session this Mac drives has its subagents' statuses derived in main and carried by its lane A watch (the lane A store
 // keeps them, `noteLaneAAgents`). For a session bound to this machine's reads the store publishes the graph those reads
 // built with them laid over it (`withStatuses`), and keeps the reads' graph apart: every reduction of its own starts from
-// it, so a later body is never laid over an earlier one. What ends them is a launch by this app after they were noted
-// (the status's `launchedAt`): it discards them, whatever its process says. While the graph is watched and the session's
+// it, so a later body is never laid over an earlier one. They stand only while the process whose driver sent them holds
+// the session, or nothing does (`heldByOrigin`; the lane A store discards them at any other holder); the session handed
+// to another machine's feed discards them too. While the graph is watched and the session's
 // bridge is live or starting, the store holds the session's lane A watch, so the panel alone keeps the body coming.
 import { create } from 'zustand';
 import type { EngineSessionStatus } from '@shared/engine/status';
@@ -24,7 +25,7 @@ import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { sameTasks, withStatuses, type StatusedMeta } from '../../lane-a/agents/task-feed';
 import { watchLaneA } from '../../lane-a/watches';
-import { forgetLaneAAgents, useLaneA } from '../../stores/lane-a';
+import { forgetLaneAAgents, heldByOrigin, useLaneA } from '../../stores/lane-a';
 import { useSessions } from '../../stores/sessions';
 import { agentWorkClient } from './client';
 import { applySnapshot, applyTaskEvents, emptyGraph, markExited, mergeRuns, mergeSidecars, removeTask, setStopping, TASK_EVENT_KINDS, type TaskGraph } from './model/task-graph';
@@ -82,8 +83,6 @@ export function placeInRow(eventId: string): number {
 }
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
-// U8d: the status's launch came after the time given (both this Mac's clock)
-const launchedAfter = (status: EngineSessionStatus, at: string) => Date.parse(status.launchedAt) > Date.parse(at);
 const nowIso = () => new Date().toISOString();
 
 // What the store keeps per session outside its state: the subscriptions and timers a watch owns.
@@ -119,12 +118,12 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const read = (id: AppSessionId) => get().entries.get(id) ?? blank();
 
     // U8d: the session's noted lane A agents, unless the session is bound to another machine's feed (whose graph carries
-    // them already) or the status this store applied was launched after they were noted.
+    // them already) or its holder is no longer the process they came from.
     const layable = (id: AppSessionId): readonly LaneAAgent[] | null => {
-      const w = watchOf(id);
-      const noted = w.remote ? undefined : useLaneA.getState().agents.get(id);
+      const noted = watchOf(id).remote ? undefined : useLaneA.getState().agents.get(id);
       if (noted === undefined || noted.agents.length === 0) return null;
-      return w.status !== null && launchedAfter(w.status, noted.notedAt) ? null : noted.agents;
+      const holder = sessions.getState().records.get(id)?.holder;
+      return holder !== undefined && !heldByOrigin(holder, noted.origin) ? null : noted.agents;
     };
     // The graph to publish for the reads' graph: the same object again when neither it nor the agents changed.
     const publish = (id: AppSessionId, reads: TaskGraph): TaskGraph => {
@@ -322,10 +321,6 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const applyStatus = (id: AppSessionId, status: EngineSessionStatus | null) => {
       const w = watchOf(id);
       w.status = status;
-      // U8d: a launch by this app after the terminal's statuses were noted ends them, whatever its process says; an
-      // earlier launch's status never does, whenever it arrives
-      const noted = useLaneA.getState().agents.get(id);
-      if (status !== null && noted !== undefined && launchedAfter(status, noted.notedAt)) forgetLaneAAgents(id);
       const e = read(id);
       if (status === null) {
         w.wire = false;
@@ -451,6 +446,7 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         sessions.subscribe((state, previous) => {
           if (state.listed === previous.listed && state.records === previous.records) return;
           if (((remoteFeed?.(id) ?? null) !== null) === watchOf(id).remote) return;
+          if (!watchOf(id).remote) forgetLaneAAgents(id); // U8d: handed to another machine, its statuses are that machine's to say
           unbind(id);
           watchOf(id).binding += 1; // a disk read the old binding started is dropped
           write(id, { graph: emptyGraph(), launchId: null, lastSeq: null, error: null, disk: { agents: null, runs: null, error: null, runsError: null }, pendingStops: new Map() });
