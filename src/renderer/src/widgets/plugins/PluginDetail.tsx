@@ -12,6 +12,7 @@
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { Availability } from '@shared/ipc/schema/session';
 import type { PluginsAction, PluginsScope } from '@shared/plugins/cli';
 import { ChevronLeftIcon } from '../../app/IconButton';
@@ -45,6 +46,7 @@ export interface PluginDetailProps {
   reloads: Reloads | null; // on a ready process
   allowAcquire?: boolean; // false in Customize, including its detail's reload action
   listManifests: { error: string | null; retry(): void }; // the list's read, which holds the representative installation's view
+  marketplaces: readonly Marketplace[] | undefined; // the list's read of the marketplaces: what its icon is asked with (UX wave U11c)
   listError?: string | null; // the installed list's later failed read: what the detail shows is the last list read (E8's rule)
   backTo?: string; // the view Back returns to: My items, or Browse for an installed card opened there
   onBack(): void;
@@ -57,7 +59,7 @@ const ITEM = 'flex h-7 cursor-default items-center rounded-sm px-2 outline-none 
 
 type Change = Extract<PluginsAction, 'update' | 'uninstall' | 'enable' | 'disable'>;
 
-export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, allowAcquire = true, listManifests, listError = null, backTo = L.myItems, onBack }: PluginDetailProps) {
+export function PluginDetail({ appSessionId, availability, identity, loaded, loadedIds, reloads, allowAcquire = true, listManifests, marketplaces, listError = null, backTo = L.myItems, onBack }: PluginDetailProps) {
   const { ask, cwd, ops } = useManage();
   const now = useNow();
   const root = useRef<HTMLDivElement>(null);
@@ -82,7 +84,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
   const unread = unreadNotice(view, read);
 
   const name = displayNameOf(identity.name, view ?? identity.manifest);
-  const icons = usePluginIcons(useMemo(() => [identity.id], [identity.id])); // UX wave U11c: the directory's icon, else the tile
+  const icons = usePluginIcons(useMemo(() => [identity], [identity]), marketplaces); // UX wave U11c: the directory's icon, else the tile
   const installation = chip?.installation ?? identity.representative;
   const version = versionWords(installation.version);
   const updated = chip ? (installation.lastUpdated ?? installation.installedAt) : updatedOf(identity);
@@ -248,7 +250,7 @@ const goneName = (key: string): string => {
 // list without it reads "Not loaded in this session" and, when the plugin is enabled here, offers Reload plugins (ready)
 // or the loaded line's Refresh, with A's line for a session that cannot start; no list reads "Not observed yet". The
 // last init's problems for this plugin beneath.
-type FactsProps = Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'backTo'> & { now: number };
+type FactsProps = Omit<PluginDetailProps, 'onBack' | 'listManifests' | 'marketplaces' | 'backTo'> & { now: number };
 
 function Facts(props: FactsProps) {
   return (

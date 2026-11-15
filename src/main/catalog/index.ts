@@ -20,7 +20,7 @@ import { readMarketplaceManifest } from '../../engine-host/plugins/manifest';
 import { CommandFailure, type registerMainHandler } from '../ipc/router';
 import { catalogPages, iconGet, isIconUrl, NETWORK_KEYS, type IconGet } from './fetch';
 import { CatalogIcons } from './icons';
-import { buildCatalog, pluginIconsOf } from './join';
+import { buildCatalog, pluginIconKey, pluginIconsOf } from './join';
 import { connectorRoute, engineViewFromWire, type EngineView, type TestSourceData } from './normalize';
 import { configurationFingerprint, posturesOf } from './postures';
 import { homeOf, queryOf } from './query';
@@ -150,11 +150,17 @@ export function startCatalog(deps: CatalogDeps): Catalog {
   // `ready()`, never the machine's engine view: the session's `/plugins` reads no catalog of the engine), joined once per
   // revision of the store
   let pluginIcons: { revision: number; icons: ReadonlyMap<string, string | null> } | null = null;
-  deps.register('catalog.pluginIcons', async ({ ids }) => {
+  // A plugin's icon is the seed's only where its marketplace is the seed's own repository (the branch panel's finding)
+  deps.register('catalog.pluginIcons', async ({ plugins }) => {
     await store.loaded();
     if (pluginIcons?.revision !== store.revision) pluginIcons = { revision: store.revision, icons: pluginIconsOf(store.data()) };
     const held = pluginIcons.icons;
-    return { icons: ids.map((id) => ({ id, iconUrl: onIconRoute(held.get(id) ?? null) })) };
+    return {
+      icons: plugins.map(({ id, marketplaceLocator }) => {
+        const key = pluginIconKey(marketplaceLocator, id.slice(0, Math.max(0, id.lastIndexOf('@'))));
+        return { id, iconUrl: onIconRoute(key === null ? null : (held.get(key) ?? null)) };
+      }),
+    };
   });
   // M4: from the copy held (no fetch: a posture is not worth a network read), against the configured servers' endpoints
   deps.register('catalog.postures', async ({ cwd }) => {

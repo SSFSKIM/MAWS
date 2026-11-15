@@ -10,8 +10,9 @@
 // nothing observed says it is unknown (unknown is never empty). A failed read of what the plugins say
 // about themselves keeps the rows (their names come from the listing) and says so with Retry. A change's result whose
 // installation left the list stays beneath it.
-import { useMemo, type ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { useNow } from '../../app/use-now';
 import { usePluginIcons } from '../../customize/discover/read';
@@ -30,6 +31,7 @@ export interface MyItemsProps {
   appSessionId: AppSessionId | null;
   installed: PluginsReadResult<{ plugins: InstalledPlugin[] }>;
   identities: readonly PluginIdentity[];
+  marketplaces: readonly Marketplace[] | undefined; // the list's read of the marketplaces: what the icons are asked with (UX wave U11c)
   loaded: LoadedPlugins | null;
   loadedIds: ReadonlySet<string> | null;
   onRetry(): void;
@@ -51,14 +53,14 @@ function Centered({ children, role }: { children: ReactNode; role?: 'status' | '
 
 const SECONDARY = 'rounded-md border border-border px-3 py-1 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2';
 
-export function MyItems({ appSessionId, installed, identities, loaded, loadedIds, onRetry, manifestError, onRetryManifests, onOpen, search }: MyItemsProps) {
+export function MyItems({ appSessionId, installed, identities, marketplaces, loaded, loadedIds, onRetry, manifestError, onRetryManifests, onOpen, search }: MyItemsProps) {
   const { ops } = useManage();
   const stored = useLibraryStore((s) => s.plugins);
   const view = search ? { ...stored, search: search.text } : stored;
   const now = useNow();
   const plugins = installed.data?.plugins;
   // UX wave U11c M1: one read of the directory's icons for every plugin the list may draw, whatever its search and Show
-  const icons = usePluginIcons(useMemo(() => identities.map((identity) => identity.id), [identities]));
+  const icons = usePluginIcons(identities, marketplaces);
   const iconOf = (identity: PluginIdentity) => icons.get(identity.id) ?? null;
 
   if (!plugins) {

@@ -199,6 +199,7 @@ export function PluginsList({ library, session, selection, beforeStart = false, 
   search?: { text: string; clear(): void }; // Customize's one text, in the library store's place (UX wave U11c)
 }) {
   const { installed, identities, manifests, loadedIds, retryList } = library;
+  const marketplaces = library.marketplaces.data?.marketplaces;
   const loaded = session?.loaded ?? null;
   const reloads = session?.reloads ?? null;
   const appSessionId = session?.appSessionId ?? null;
@@ -206,7 +207,7 @@ export function PluginsList({ library, session, selection, beforeStart = false, 
   return (
     <>
       {detail && (
-        <PluginDetail key={detail.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} listError={installed.error} backTo={L.myItems} onBack={close} />
+        <PluginDetail key={detail.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} marketplaces={marketplaces} listError={installed.error} backTo={L.myItems} onBack={close} />
       )}
       <div className={detail !== null ? 'hidden' : 'contents'}>
         {session ? (
@@ -224,7 +225,7 @@ export function PluginsList({ library, session, selection, beforeStart = false, 
           <p data-plugins-session-unavailable className="m-0 border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">{SESSION_UNAVAILABLE}</p>
         )}
         <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-          <MyItems appSessionId={appSessionId} installed={installed} identities={identities} loaded={loaded} loadedIds={loadedIds} onRetry={retryList} manifestError={manifests.error} onRetryManifests={manifests.retry} onOpen={open} search={search} />
+          <MyItems appSessionId={appSessionId} installed={installed} identities={identities} marketplaces={marketplaces} loaded={loaded} loadedIds={loadedIds} onRetry={retryList} manifestError={manifests.error} onRetryManifests={manifests.retry} onOpen={open} search={search} />
         </div>
       </div>
     </>

@@ -133,15 +133,26 @@ function pluginGroups(input: CatalogInput): Map<string, { listed: EntryListing[]
   return groups;
 }
 
+/** The key of an installed plugin's directory icon: its marketplace's repository, as the fold key spells it, and its name;
+ * null for a marketplace that names no repository (a folder, a file). The repository is what makes a seed's route the
+ * seed's own: a marketplace named like a seed from another repository is one the person added (normalize.ts,
+ * scalpel-1#2), and its same-named plugin is not the seed's. */
+export function pluginIconKey(marketplaceLocator: string | null, pluginName: string): string | null {
+  const repository = marketplaceLocator === null ? null : repositoryLocation(marketplaceLocator, null);
+  return repository === null ? null : `${repository} ${pluginName}`;
+}
+
 /** UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): the directory's icon of the item
- * each route installs, by the route's `<plugin>@<marketplace>`, as Discover's card of that item draws it (its first
- * record's). From the network data alone, with no engine view: the routes are the seeds' (a marketplace no seed is has
- * none here). A route two items name with different icons has none. */
+ * each route installs, by the route's repository and plugin name (`pluginIconKey`), as Discover's card of that item draws
+ * it (its first record's). From the network data alone, with no engine view: the routes are the seeds', each at the
+ * seed's own repository (a marketplace no seed is has none here). A route two items name with different icons has none. */
 export function pluginIconsOf(network: NetworkData): ReadonlyMap<string, string | null> {
   const icons = new Map<string, string | null>();
   for (const { listed, records } of pluginGroups({ network, engine: null, tests: [] }).values()) {
     const icon = records[0]?.iconUrl ?? null;
-    for (const id of new Set(listed.map(routeId))) icons.set(id, icons.has(id) && icons.get(id) !== icon ? null : icon);
+    for (const key of new Set(listed.map((l) => pluginIconKey(l.route.marketplaceSource, l.route.pluginName)))) {
+      if (key !== null) icons.set(key, icons.has(key) && icons.get(key) !== icon ? null : icon);
+    }
   }
   return icons;
 }

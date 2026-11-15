@@ -8,6 +8,7 @@ import { useInfiniteQuery, useQuery, useQueryClient, type InfiniteData, type Que
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, MawsBridge } from '@shared/ipc/schema';
 import type { CatalogPage, CatalogQueryInput, CatalogSourceStatus, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { Marketplace } from '@shared/ipc/schema/marketplaces';
 import { ipc } from '../../ipc/client';
 import { IpcCommandError, queryClient } from '../../ipc/query';
 
@@ -111,13 +112,20 @@ const ICON_IDS_MAX = 512; // the command's bound: a row past it keeps its tile
 
 /** UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): the directory's icon URL of each
  * installed plugin a list draws, by its id, in one read for the list (main's `catalog.pluginIcons`, from the directory
- * copy it holds: it asks the network nothing and reads no catalog of the engine). Empty while it is out or failed, so
+ * copy it holds: it asks the network nothing and reads no catalog of the engine). Each plugin is asked with its
+ * marketplace's locator as the engine lists it (`marketplaces`, the list's own read), so that main hands a seed's icon
+ * only to a plugin of the seed's own repository; asked once that list has answered. Empty while it is out or failed, so
  * every row keeps its tile; read again on `catalog.changed`. */
-export function usePluginIcons(ids: readonly string[]): ReadonlyMap<string, string | null> {
-  const asked = useMemo(() => [...new Set(ids)].sort().slice(0, ICON_IDS_MAX), [ids]);
+export function usePluginIcons(plugins: readonly { id: string; marketplace: string }[], marketplaces: readonly Marketplace[] | undefined): ReadonlyMap<string, string | null> {
+  const asked = useMemo(() => {
+    if (marketplaces === undefined) return [];
+    const locators = new Map(marketplaces.map((m) => [m.name, m.locator]));
+    const byId = new Map(plugins.map((p) => [p.id, locators.get(p.marketplace) ?? null]));
+    return [...byId.keys()].sort().slice(0, ICON_IDS_MAX).map((id) => ({ id, marketplaceLocator: byId.get(id)! }));
+  }, [plugins, marketplaces]);
   const read = useQuery<CommandOutput<'catalog.pluginIcons'>, IpcCommandError>({
     queryKey: [...ROOT, 'pluginIcons', asked],
-    queryFn: () => invoke('catalog.pluginIcons', { ids: asked }, LOCAL()),
+    queryFn: () => invoke('catalog.pluginIcons', { plugins: asked }, LOCAL()),
     enabled: asked.length > 0,
     refetchOnWindowFocus: false,
     staleTime: Infinity,

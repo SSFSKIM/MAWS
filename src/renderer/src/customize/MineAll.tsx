@@ -64,10 +64,11 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
   const env = usePluginsEnv();
   const library = usePluginsLibrary(directory, session);
   const { installed, identities, manifests, loadedIds, retryList } = library;
+  const marketplaces = library.marketplaces.data?.marketplaces;
   const mods = useBuiltInMods(session?.appSessionId ?? null);
   const search = useCustomizePage((s) => s.search);
   const now = useNow();
-  const icons = usePluginIcons(useMemo(() => identities.map((identity) => identity.id), [identities]));
+  const icons = usePluginIcons(identities, marketplaces);
 
   const plugins: PluginsPart =
     directory === null
@@ -155,6 +156,7 @@ export function MineAll({ onDetail, toList }: { onDetail(open: boolean): void; t
           reloads={session?.reloads ?? null}
           allowAcquire={session?.allowAcquire ?? false}
           listManifests={manifests}
+          marketplaces={marketplaces}
           listError={installed.error}
           backTo={L.myItems}
           onBack={back}

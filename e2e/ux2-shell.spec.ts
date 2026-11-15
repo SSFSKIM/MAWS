@@ -267,11 +267,11 @@ test('Chrome: live Customize keeps scopes on the head’s two rows and loaded fe
   writeFileSync(source, JSON.stringify(scenario));
   const plugins = [{ name: 'chrome-review', version: '1.0.0', description: 'Review the working narrative.' }];
   const market = scratchMarketplace(join(root, 'market'), { name: 'chrome-tools', plugins });
-  // C6: a plugin the recorded directory lists with an icon, installed from the seed marketplace that lists it
+  // C6: a plugin the recorded directory lists with an icon, installed from the seed marketplace that lists it, at the
+  // seed's own repository (a marketplace of that name from anywhere else is one the person added, and draws no seed's icon)
   const official = [{ name: 'frontend-design', version: '1.0.0', description: 'A plugin the recorded directory lists with an icon.' }];
-  const officialMarket = scratchMarketplace(join(root, 'official'), { name: 'claude-plugins-official', plugins: official });
   const cli = writePluginCliStub(root, {
-    marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }, { name: 'claude-plugins-official', source: 'directory', path: officialMarket, plugins: official }],
+    marketplaces: [{ name: 'chrome-tools', source: 'directory', path: market, plugins }, { name: 'claude-plugins-official', source: 'github', repo: 'anthropics/claude-plugins-official', plugins: official }],
     installed: [{ id: 'chrome-review@chrome-tools', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }, { id: 'frontend-design@claude-plugins-official', version: '1.0.0', scope: 'user', enabled: true, projectPath: null }],
     fail: {},
   });

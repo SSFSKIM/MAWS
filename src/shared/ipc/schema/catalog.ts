@@ -151,10 +151,11 @@ export const commands = {
     z.strictObject({ servers: z.array(z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: z.string().max(4096), authPosture: z.enum(['auth_required', 'no_auth']).nullable(), fingerprint: z.string().max(64).nullable(), revision: z.string().max(64).nullable() /* UX wave U11a M8: the engine host's, null when it answered none */, iconUrl: z.string().max(2048).nullable() /* UX wave U11c M1: the icon of the one directory record the address matches, on one of the icon routes; null for none or several */ })) }),
   ),
   // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): each installed plugin's directory
-  // icon, by its `<name>@<marketplace>`, from the copy MAWS holds (no fetch, no engine read): the icon of the item a seed's
-  // route installs, on one of the icon routes; null for none. The bytes are `catalog.icon`'s
+  // icon, by its `<name>@<marketplace>` and that marketplace's locator as the engine lists it (null where the window knows
+  // none), from the copy MAWS holds (no fetch, no engine read): the icon of the item a seed's route installs, where the
+  // marketplace is the seed's own repository, on one of the icon routes; null for none. The bytes are `catalog.icon`'s
   'catalog.pluginIcons': main(
-    z.strictObject({ ids: z.array(z.string().min(1).max(512)).max(512) }),
+    z.strictObject({ plugins: z.array(z.strictObject({ id: z.string().min(1).max(512), marketplaceLocator: z.string().max(4096).nullable() })).max(512) }),
     z.strictObject({ icons: z.array(z.strictObject({ id: z.string(), iconUrl: z.string().max(2048).nullable() })) }),
   ),
   // P5 O4 M3: the machine's half. One cwd's engine view, held until an invalidation, with the generation of the
