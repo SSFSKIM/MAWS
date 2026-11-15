@@ -38,8 +38,9 @@
 // only a regular, non-executable file of a document or media kind (`opensExternally`, an allowlist). E1: `reveal` takes
 // the same pre-check and any regular file, since showing a file in Finder runs nothing.
 //
-// `write` (E5), and U6e's `writeOutside`, are `read`'s boundary with a read-write open: it compares the file's hash and writes in place through the
-// confirmed descriptor, never by path, so it shares `read`'s guarantee and never creates, renames or replaces a file.
+// `write` (E5) is `read`'s boundary with a read-write open (and U6e's `writeOutside` shares it): it compares the file's
+// hash and writes in place through the confirmed descriptor, never by path, so it shares `read`'s guarantee and never
+// creates, renames or replaces a file.
 // Its recorded limits: a crash between the truncate and the last write leaves the file truncated (the editor keeps its
 // content and stays dirty until `ok`), and the per-file serialisation covers MAWS's own writers only, so an outside
 // writer between the compare and the write is not caught (containment is guaranteed, not an atomic compare-and-swap).
