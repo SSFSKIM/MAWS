@@ -597,7 +597,8 @@ So no two-build run is owed for a stored form: the landing takes no wire minor a
 | `test-support/shell-stores.ts` | shared test support | M2: `fillStores` resets `deliveries` (one line). Accepted by the architect on 2026-11-15 |
 | `sessions/SetupCard.tsx` | C10 | M3: the three `titleAlone` attributes removed (lines 72, 99, 182 at M3's head) with the prop itself in `DockedCardFrame.tsx`; nothing else. Approved by the architect on 2026-11-15 |
 | `shell/FloatingCard.tsx` | U10 | M3: one comment corrected (it said a docked request takes the card's composer and the transcript's pointer finds its frame); nothing else. Approved by the architect on 2026-11-15 |
-| `app/slots.ts` | U8 | M3: the `'docked'` member of the `requestCard` slot's placement type goes if no caller passes it any more; if one remains by design, this row names it and the type stays (the architect's ruling of 2026-11-15) |
+| `app/slots.ts` | U8 | M3: the `'docked'` member of the `requestCard` slot's placement type goes: no caller passes it (`overview/SessionCard.tsx` passes `card`, `sidebar/HoverCard.tsx` `hover`) (the architect's ruling of 2026-11-15) |
+| `sidebar/RequestPreview.tsx` | C5 | M3: the dead guard `placement !== 'docked'` dropped (the control it gates, Open session, shows in `card` and `hover`, as it does today) and the header comment corrected; nothing else. One test asserts Open session in both placements. Approved by the architect on 2026-11-15 |
 | `harness/` (the card page, the composer and panel harnesses), `e2e/support/` | shared test support | the `docked` placement of the card page (decision 16); `pendingRequests` of the child-transcript probe counts waiting rows and the end row |
 
 ### §J. Consumed from siblings, by name
