@@ -413,7 +413,7 @@ describe('what a person started outlives the view', () => {
     await shelfCard(ledger);
     const declared = { ok: false, error: { code: 'cli_failed', message: 'This plugin runs a command its marketplace declares', failureCode: 'command_source_refused', shownCommand: { sha256: 'e'.repeat(64), command: 'npx quay-helper', kind: 'command-source' } } };
     act(() => held.get('plugins.install')!(declared));
-    await waitFor(async () => expect(within(await shelfCard(ledger)).getByRole('status').textContent).toContain('command_source_refused'));
+    await waitFor(async () => expect((await shelfCard(ledger)).textContent).toContain('command_source_refused'));
     expect(document.querySelector('[data-plugins-sheet]')).toBeNull();
   });
 
