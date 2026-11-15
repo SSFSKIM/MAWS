@@ -752,7 +752,9 @@ describe('subagents', () => {
 
   // A launch is the engine process a bridge child serves. The next terminal's child can answer a reconnect while the
   // index still names the last terminal: its body names that terminal (the probe's holder) until the holder moves to
-  // the next one, and then, with nothing else changed, the next one; it is never left naming a holder it is not.
+  // the next one, and then, with nothing else changed, the next one. This proves the branch where the last terminal's
+  // launch was observed first; when the driver's first observation is the next terminal's child, the launch stays tied
+  // to the last holder (a tracker row, not built).
   it('names the next terminal once the holder moves to it, when that terminal’s bridge child answered before it did', async () => {
     const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
     await expect.poll(() => originOf(s.h.planes, s.watch)).toBe('terminal:4242');
