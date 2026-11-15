@@ -305,6 +305,7 @@ export function createViewerStore(client: MawsBridge) {
   const mounted = new Map<string, number>();
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const shownByAgent = new Set<string>(); // U6e (decision 19): views the agent's show brings forward, whose next mount is the agent's
+  const tabMarks = new Map<string, boolean>(); // U6e (decision 19): the tab's own mark (the view's `agent`) as last mounted
   const admittedAt = new Map<string, number>(); // U6e (decision 6): the number of the read whose answer last set the tab's admission
   let lastAsk = 0; // the numbers reads that can set an admission draw when they are sent, rising
   const used = new Map<string, number>();
@@ -336,6 +337,7 @@ export function createViewerStore(client: MawsBridge) {
 
     const remove = (tabId: string) => {
       shownByAgent.delete(tabId);
+      tabMarks.delete(tabId);
       admittedAt.delete(tabId);
       holds.get(tabId)?.release();
       holds.delete(tabId);
@@ -689,6 +691,7 @@ export function createViewerStore(client: MawsBridge) {
           stale.delete(tabId);
           supersede(tabId);
           patch(tabId, { appSessionId, agent: asAgent, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
+          tabMarks.set(tabId, agent);
           watchThenRead('change');
         } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
           holds.get(tabId)?.release();
@@ -703,14 +706,17 @@ export function createViewerStore(client: MawsBridge) {
           };
           incarnations.set(tabId, ++lastIncarnation);
           admittedAt.delete(tabId); // U6e: a new incarnation's admission is its own reads' alone
+          tabMarks.set(tabId, agent);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
           watchThenRead('open');
         } else {
           const moved = line !== entry.line;
           // the agent's show of an entry that is there reads nothing new and leaves its mark as it is; the tab's own mark
           // changing (a keep, an open that marks or unmarks the tab) reads again under it, unless the open already gave the
-          // entry that mark (`revisit`)
-          const marked = !byAgent && agent !== entry.agent;
+          // entry that mark (`revisit`). Only a change of the tab's own mark counts: an entry the agent's show read as the
+          // agent's under a tab of the person's stays the agent's when the show moves its line (a person's open takes it back)
+          const marked = !byAgent && agent !== (tabMarks.get(tabId) ?? entry.agent) && agent !== entry.agent;
+          tabMarks.set(tabId, agent);
           if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
           if (marked) patch(tabId, { agent });
           // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e (decision 19):
@@ -923,6 +929,7 @@ export function createViewerStore(client: MawsBridge) {
 
       reset() {
         shownByAgent.clear();
+        tabMarks.clear();
         admittedAt.clear();
         for (const hold of holds.values()) hold.release();
         holds.clear();
