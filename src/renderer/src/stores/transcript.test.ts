@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, EventId, TaskId, ToolUseId } from '@shared/graph/ids';
+import { mirrorRows } from '../owner/view/mirror';
 import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
@@ -505,8 +506,9 @@ describe('transcript store', () => {
   });
 });
 
-// P2-C start (2026-10-09): the owner channel's lane, the view and the report's open records (the P2-C document, §7)
-describe('transcript store: the report view', () => {
+// P2-C start (2026-10-09): the owner channel's lane and the view (the P2-C document, §7); UX wave U2b (the execution
+// document, Interfaces §C): the flag, the open stretches and the jump into a closed record
+describe('transcript store: the to-human view', () => {
   function markedTurn() {
     const b = builder();
     b.turn('u1');
@@ -517,79 +519,219 @@ describe('transcript store: the report view', () => {
     b.end(['u1']);
     return b;
   }
+  // A closed turn of work with no message, and a second one still running.
+  function plainTurns() {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m1', 0, 'Unmarked answer.');
+    b.end(['u1']);
+    b.turn('u2');
+    b.toolUse('t2', 'Bash', { command: 'pwd' });
+    b.result('t2', 'ok', { structured: BASH_RESULT('ok') });
+    return b;
+  }
   const T1 = turnId.ofMessage(uuid('u1'));
   const marked = rowId.text(api('m1'), 0);
+  const ui = (store: ReturnType<typeof createTranscriptStore>) => store.getState().entries[KEY].state.ui;
+  const turnLine = (store: ReturnType<typeof createTranscriptStore>) => store.getState().rows(KEY).find((row) => row.kind === 'divider' && row.turnId === T1);
+  const delta = (b: ReturnType<typeof builder>, text: string, apiId = 'm3') =>
+    b.emit('assistant.block.delta', { apiMessageId: api(apiId), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
 
-  it('the lane keeps a marked commentary in view when its turn folds, and off it is P1’s again', async () => {
+  it('the lane keeps a marked commentary in view, and with a message in the session no turn folds; off, it is P1’s again', async () => {
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);
     expect(store.getState().rows(KEY).some((row) => row.id === marked)).toBe(false);
-    store.getState().setOwnerLane(KEY, true);
+    expect(turnLine(store)).toMatchObject({ expanded: false });
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
     expect(store.getState().rows(KEY).find((row) => row.id === marked)).toMatchObject({ forHuman: true });
-    const ui = store.getState().entries[KEY].state.ui;
-    store.getState().setOwnerLane(KEY, true); // unchanged: no new state
-    expect(store.getState().entries[KEY].state.ui).toBe(ui);
-    store.getState().setOwnerLane(KEY, false);
+    expect(ui(store).noTurnFold).toBe(true);
+    expect(turnLine(store)).toMatchObject({ expanded: true });
+    const before = ui(store);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false }); // unchanged: no new state
+    expect(ui(store)).toBe(before);
+    store.getState().setToHumanView(KEY, { lane: false, tailMessage: false });
     expect(store.getState().rows(KEY).some((row) => row.id === marked)).toBe(false);
+    expect(ui(store).noTurnFold).toBe(false);
+    expect(turnLine(store)).toMatchObject({ expanded: false });
   });
 
-  it('the view and the open records are the reader’s, and survive another ui change', async () => {
+  it('the flag’s three terms: the stored events, the store’s streaming block, the rows from outside; never without the lane', async () => {
+    const b = plainTurns();
+    const { source, push } = pushSource(b.events);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    expect(ui(store).noTurnFold).toBe(false); // no message yet: the plain transcript with the turn fold
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: true });
+    expect(ui(store).noTurnFold).toBe(true);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false }); // not sticky
+    expect(ui(store).noTurnFold).toBe(false);
+    store.getState().setToHumanView(KEY, { lane: false, tailMessage: true });
+    expect(ui(store).noTurnFold).toBe(false);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    let at = b.events.length;
+    delta(b, 'Partial <mess');
+    push(b.events.slice(at));
+    expect(ui(store).noTurnFold).toBe(false); // a partial tag is no mark
+    at = b.events.length;
+    delta(b, 'age>Both done');
+    push(b.events.slice(at));
+    expect(ui(store).noTurnFold).toBe(true); // the store's own streaming block, read by its buffer
+    at = b.events.length;
+    b.end(['u2'], { terminalReason: 'aborted_streaming' });
+    push(b.events.slice(at));
+    expect(ui(store).noTurnFold).toBe(false); // an interrupt cut it inside its open mark: no message after all
+    at = b.events.length;
+    b.turn('u3');
+    b.text('m4', 0, '<message>Here it is.</message>');
+    push(b.events.slice(at));
+    expect(ui(store).noTurnFold).toBe(true); // the stored events
+  });
+
+  it('the flip derives every turn once, and no token batch after it derives any', async () => {
+    const b = builder();
+    for (let i = 1; i <= 4; i += 1) {
+      b.turn(`u${i}`);
+      b.toolUse(`t${i}`, 'Bash', { command: 'ls' });
+      b.result(`t${i}`, 'ok', { structured: BASH_RESULT('ok') });
+      b.text(`a${i}`, 0, 'Unmarked.');
+      b.end([`u${i}`]);
+    }
+    b.turn('u5');
+    delta(b, 'Looking at it. ', 'm5');
+    const { source, push } = pushSource(b.events);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    expect(ui(store).noTurnFold).toBe(false);
+    const turns = store.getState().entries[KEY].state.order.length;
+    let derivations = turnDerivations.count;
+    let at = b.events.length;
+    delta(b, '<message>Found it', 'm5'); // the first mark, in the running turn's streaming block
+    push(b.events.slice(at));
+    expect(ui(store).noTurnFold).toBe(true);
+    expect(turnDerivations.count - derivations).toBe(turns);
+    for (const piece of [' and', ' fixed', ' it.']) {
+      derivations = turnDerivations.count;
+      at = b.events.length;
+      delta(b, piece, 'm5');
+      push(b.events.slice(at));
+      expect(turnDerivations.count - derivations).toBe(0);
+    }
+  });
+
+  it('a lane turned on over a history that holds a message derives every turn once', async () => {
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);
-    store.getState().setOwnerLane(KEY, true);
+    const derivations = turnDerivations.count;
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    expect(ui(store).noTurnFold).toBe(true);
+    expect(turnDerivations.count - derivations).toBe(store.getState().entries[KEY].state.order.length);
+  });
+
+  it('the view and the open stretches are the reader’s, survive another ui change, and derive no turn', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const derivations = turnDerivations.count;
     store.getState().setView(KEY, 'transcript');
-    store.getState().toggleReportRecord(KEY, T1);
-    store.getState().toggleTurn(KEY, T1);
-    expect(store.getState().entries[KEY].state.ui).toMatchObject({ ownerLane: true, view: 'transcript', reportOpenTurns: new Set([T1]) });
-    store.getState().toggleReportRecord(KEY, T1);
-    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
-  });
-
-  it('opening a record shows its work directly, whatever its divider was', async () => {
-    const store = createTranscriptStore();
-    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
-    store.getState().setOwnerLane(KEY, true);
-    store.getState().toggleTurn(KEY, T1); // the reader had opened its work in the transcript
-    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
-    store.getState().toggleReportRecord(KEY, T1);
-    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
-  });
-
-  it('returning to Report keeps an open record open even if its transcript work was folded', async () => {
-    const store = createTranscriptStore();
-    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
-    store.getState().setOwnerLane(KEY, true);
-    store.getState().toggleReportRecord(KEY, T1);
-    store.getState().setView(KEY, 'transcript');
-    store.getState().toggleTurn(KEY, T1);
-    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: false });
+    store.getState().toggleStretch(KEY, 'toolu_x');
     store.getState().setView(KEY, 'report');
-    expect(store.getState().rows(KEY).find((row) => row.kind === 'divider')).toMatchObject({ expanded: true });
+    expect(turnDerivations.count - derivations).toBe(0);
+    store.getState().toggleGroup(KEY, rowId.group(cellId.tool(tool('t1'))));
+    expect(ui(store)).toMatchObject({ ownerLane: true, view: 'report', openStretches: new Set(['toolu_x']) });
+    store.getState().toggleStretch(KEY, 'toolu_x');
+    expect(ui(store).openStretches).toEqual(new Set());
   });
 
-  it('a jump in the report to a row the closed record holds opens the record', async () => {
+  // The whole-branch review's finding 4: an open key names a row, so a stretch can hold two (two opened stretches that
+  // since met, or one opened as its run stood and once more by a jump): its `‹ fold to report` folds it in one press.
+  it('folding an open stretch takes every open key it holds, and leaves another stretch’s', async () => {
     const store = createTranscriptStore();
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);
-    store.getState().setOwnerLane(KEY, true);
-    store.getState().jumpTo(KEY, rowId.text(api('m2'), 0)); // the unmarked answer: in view in the transcript, folded in the report
-    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set([T1]));
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const stretch = rowId.text(api('m1'), 0); // the marked commentary heads the stretch; its call is inside it
+    store.getState().toggleStretch(KEY, 't1');
+    store.getState().toggleStretch(KEY, 'elsewhere');
+    store.getState().jumpTo(KEY, rowId.text(api('m2'), 0)); // already open by its call's key: nothing more opens
+    expect(ui(store).openStretches).toEqual(new Set(['t1', 'elsewhere']));
+    store.getState().toggleStretch(KEY, stretch); // a second key of the same stretch, as a press on its closed line writes one
+    expect(ui(store).openStretches).toEqual(new Set(['t1', 'elsewhere', stretch]));
+    store.getState().toggleStretch(KEY, stretch); // its open line carries the first open key it holds, its head's
+    expect(ui(store).openStretches).toEqual(new Set(['elsewhere']));
+  });
+
+  // The whole-branch review's second look: a thought with no text keeps a row only while it streams or inside a run;
+  // opened while it streams alone, the stretch keeps its opening when the run of its one call unwraps without it.
+  it('a stretch opened by a thought with no text stays open once the run of its one call unwraps without the thought', async () => {
+    const b = builder();
+    b.turn('u0');
+    b.text('m0', 0, '<message>Ready.</message>');
+    b.end(['u0']);
+    b.turn('u1');
+    b.emit('assistant.block.delta', { apiMessageId: api('m2'), blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
+    const { source, push } = pushSource(b.events);
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const rows = () => store.getState().entries[KEY].rows;
+    const thought = rows().find((row) => row.kind === 'thinking')!;
+    store.getState().toggleStretch(KEY, thought.id); // the press on its record line writes the thought's id
+    const openLine = () => mirrorRows(rows(), ui(store)).filter((row) => row.kind === 'record_fold').at(-1);
+    expect(openLine()).toMatchObject({ open: true });
+    let at = b.events.length;
+    b.thinking('m2', 0, '');
+    b.toolUse('t1', 'Bash', { command: 'ls' }, 'm2', 1);
+    push(b.events.slice(at));
+    expect(rows().some((row) => row.kind === 'group')).toBe(true);
+    expect(openLine()).toMatchObject({ open: true });
+    at = b.events.length;
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.end(['u1']);
+    push(b.events.slice(at));
+    expect(rows().some((row) => row.kind === 'thinking' || row.kind === 'group')).toBe(false); // unwrapped, the thought gone
+    expect(openLine()).toMatchObject({ open: true });
+  });
+
+  it('a jump in the view to a row a closed record holds opens the stretch that holds it, and only there', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(markedTurn().events).source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    const stretch = rowId.text(api('m1'), 0); // the marked commentary has words outside its mark: it heads the stretch
+    store.getState().jumpTo(KEY, rowId.text(api('m2'), 0)); // the unmarked answer: folded in the view
+    expect(ui(store).openStretches).toEqual(new Set([stretch]));
     expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: rowId.text(api('m2'), 0) });
-    store.getState().toggleReportRecord(KEY, T1);
-    store.getState().jumpTo(KEY, marked); // a mark is in view at level 0: nothing opens
-    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
+    expect(ui(store).revealed).toBe(rowId.text(api('m2'), 0)); // still the tab's revealed row
+    store.getState().toggleStretch(KEY, stretch);
+    store.getState().jumpTo(KEY, marked); // the head is in sight: nothing opens
+    expect(ui(store).openStretches).toEqual(new Set());
+    store.getState().jumpTo(KEY, cellId.tool(tool('t1'))); // a call: its stretch opens
+    expect(ui(store).openStretches).toEqual(new Set([stretch]));
+    store.getState().toggleStretch(KEY, stretch);
     store.getState().setView(KEY, 'transcript');
-    store.getState().jumpTo(KEY, cellId.tool(tool('t1'))); // the transcript chosen: the record is not the reader's to open
-    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set());
+    store.getState().jumpTo(KEY, cellId.tool(tool('t1'))); // the transcript chosen: nothing is the reader's to open
+    expect(ui(store).openStretches).toEqual(new Set());
+  });
+
+  it('with no view in force a jump opens the turn as before', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(plainTurns().events).source);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
+    store.getState().jumpTo(KEY, cellId.tool(tool('t1')));
+    expect(ui(store).openStretches).toEqual(new Set());
+    expect(ui(store).expandedTurns.has(T1)).toBe(true);
   });
 
   it('jumps to an assistant text by its message uuid and block index (a mark’s anchor, M6), and says when it has none', async () => {
     const store = createTranscriptStore();
     expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 0 })).toBe(false); // nothing attached
     await store.getState().attach(KEY, pushSource(markedTurn().events).source);
-    store.getState().setOwnerLane(KEY, true);
+    store.getState().setToHumanView(KEY, { lane: true, tailMessage: false });
     expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m2-u0'), blockIndex: 0 })).toBe(true); // folded in the record: it opens
     expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: rowId.text(api('m2'), 0) });
-    expect(store.getState().entries[KEY].state.ui.reportOpenTurns).toEqual(new Set([T1]));
+    expect(ui(store).openStretches).toEqual(new Set([marked]));
     expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 0 })).toBe(true);
     expect(store.getState().entries[KEY].jump).toMatchObject({ rowId: marked });
     expect(store.getState().jumpToMessage(KEY, { messageUuid: uuid('m1-u0'), blockIndex: 1 })).toBe(false);

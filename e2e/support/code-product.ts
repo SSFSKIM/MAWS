@@ -8,7 +8,7 @@ import { buildCodeScratch, type CodeScratch } from './code-scratch';
 import { launchMaws, type MawsLaunch, type ShellLaunchOptions } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
-import { mainTabById, openSurface, surface } from './shell';
+import { mainTabById, openSurface, sideColumn, surface } from './shell';
 import { storedMain, stripOf, type LayoutMain, type Strip, type TabRef } from '../../src/shared/ipc/schema/layout';
 
 // ---- themes: C5's smoke's scan, with the `--code-*` tokens in the palette -------------------------------------------------
@@ -122,12 +122,20 @@ export async function reveal(p: Product, relative: string): Promise<Locator> {
   return row;
 }
 
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a row's click opens
+// the file beside the chat, as a tab of the side column, so the viewer is found there; the locator answered is the
+// window's, so a case that moves the file to the main area keeps it.
 export async function openInViewer(p: Product, relative: string): Promise<Locator> {
   await (await reveal(p, relative)).click();
-  const viewer = p.page.locator(`[data-file-viewer][data-path="${p.scratch.path(relative)}"]`);
-  await expect(viewer).toBeVisible();
-  return viewer;
+  const selector = `[data-file-viewer][data-path="${p.scratch.path(relative)}"]`;
+  await expect(sideColumn(p.page).locator(selector), `${relative} beside the chat`).toBeVisible();
+  return p.page.locator(selector);
 }
+
+// A file's tab in the side column's strip, by the file's name: the element that carries the tab's marks (`data-preview`,
+// `data-dirty`), its unsaved dot and its close glyph, beside the tab's own button, which the name is the name of.
+export const sideFileTab = (page: Page, name: string): Locator =>
+  sideColumn(page).locator('[data-side-strip] [data-tab-id]').filter({ has: page.getByRole('tab', { name, exact: true }) });
 
 // Review in the panel on its default scope (Uncommitted on this dirty tree), its toolbar measured as drawn. UX wave U5b:
 // the totals no longer name the scope (card 1 at its default), the pressed chip above them does.

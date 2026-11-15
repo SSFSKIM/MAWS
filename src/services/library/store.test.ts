@@ -184,6 +184,35 @@ describe('LibraryStore', () => {
     expect(ids(index.library.list({ appSessionId: root, lineage: true }).rows)).toEqual([uuid(1)]);
   });
 
+  // UX wave U6e (decision 20): the paths of the File artifacts the session's own agent made, by the record's maker, which
+  // the page's commands never write; the session's side-thread ancestors included, never a descendant or another session
+  it('answers the linked paths of the live File artifacts a session of the line made, by their maker alone (U6e)', () => {
+    const parent = session('Parent');
+    const thread = session('Thread');
+    const other = session('Other');
+    index.sideThreads.opened(thread, parent, 't1');
+    const made = (appSessionId: AppSessionId) => ({ createdBy: { kind: 'session' as const, appSessionId } });
+    index.library.reconcile({
+      artifacts: [
+        entry(1, { kind: 'file', linkedPath: '/work/parent-sent.md', ...made(parent) }),
+        entry(2, { kind: 'file', linkedPath: '/work/thread-sent.md', ...made(thread) }),
+        entry(3, { kind: 'file', linkedPath: '/work/added.md' }), // the person's, linked to the parent
+        entry(4, { kind: 'file', linkedPath: '/work/other-sent.md', ...made(other) }), // linked to the parent, made by another session
+        entry(5, { kind: 'document', linkedPath: '/work/page.md', ...made(parent) }), // no file
+        entry(6, { kind: 'file', ...made(parent) }), // no linked path
+        entry(7, { kind: 'file', linkedPath: '/work/gone.md', ...made(parent) }),
+      ],
+      links: [link(1, parent), link(3, parent), link(4, parent)],
+      spaces: [],
+    });
+    index.library.remove(uuid(7));
+    expect(index.library.fileSentPaths(parent)).toEqual(['/work/parent-sent.md']);
+    expect(index.library.fileSentPaths(thread).sort()).toEqual(['/work/parent-sent.md', '/work/thread-sent.md']);
+    expect(index.library.fileSentPaths(other)).toEqual(['/work/other-sent.md']);
+    // what fileLinkedPaths admits beside them: the person's and another session's linked to it, and every unlinked one
+    expect(index.library.fileLinkedPaths(parent).sort()).toEqual(['/work/added.md', '/work/other-sent.md', '/work/parent-sent.md', '/work/thread-sent.md']);
+  });
+
   describe('search', () => {
     beforeEach(() => {
       index.library.reconcile({

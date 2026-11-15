@@ -4,11 +4,12 @@
 // `readFileSync` after each save, an external change is a `writeFileSync` on the scratch file, and its notice is
 // awaited with the measured wait. The last case scans both themes for other-theme colours and, under MAWS_E5_SHOTS=1
 // (E11 W-E: a gate run leaves the committed evidence alone), writes the six screenshots of the editor, the merge view
-// and the conflict view into the evidence directory.
+// and the conflict view into the evidence directory. UX wave U6b-1 (Interfaces §G): a file opens beside the chat, so its
+// tab is the side column's (`sideFileTab`): the dot, the close question and the quit question are read on that tab.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
-import { menu, openInViewer, otherThemeColours, withProduct, type Product } from './support/code-product';
+import { menu, openInViewer, otherThemeColours, sideFileTab, withProduct, type Product } from './support/code-product';
 import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
@@ -25,7 +26,7 @@ const write = (p: Product, relative: string, content: string) => writeFileSync(p
 // `text` with its line `n` (1-based) replaced.
 const withLine = (text: string, n: number, line: string) => text.split('\n').map((l, i) => (i === n - 1 ? line : l)).join('\n');
 
-const fileTab = (page: Page, name: string) => page.getByRole('tab', { name, exact: true });
+const fileTab = sideFileTab;
 const controls = (viewer: Locator) => viewer.locator('[data-editor-controls]');
 const barButton = (viewer: Locator, name: string) => controls(viewer).getByRole('button', { name, exact: true });
 const lineTexts = (viewer: Locator) => viewer.locator('.cm-content .cm-line').allTextContents();
@@ -144,8 +145,10 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       const viewer = await openEditor(p, APP);
       await typeAtTop(p, viewer, TYPED);
       const tab = fileTab(p.page, 'app.ts');
+      // the side tab's own close (its glyph, shown on the tab in view), which asks as a main file tab's close asks
+      const close = () => tab.getByRole('button', { name: 'Close app.ts', exact: true }).click();
 
-      await tab.click({ button: 'middle' });
+      await close();
       const sheet = p.page.getByRole('dialog', { name: 'Save changes to app.ts?' });
       await expect(sheet).toBeVisible();
       await expect(sheet).toContainText('Your changes will be lost if you don’t save them.');
@@ -155,7 +158,7 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       await expectDirtyTab(p.page, 'app.ts', true);
       await expect(viewer).toHaveAttribute('data-dirty', 'true');
 
-      await tab.click({ button: 'middle' });
+      await close();
       await expect(sheet).toBeVisible();
       await sheet.getByRole('button', { name: 'Don’t save' }).click();
       await expect(sheet).toHaveCount(0);
@@ -224,8 +227,13 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // E11 W-D: at a viewer about 600 px wide the merge bar's controls take the directory's width, never the file's name
       const [width, height] = await p.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0].getSize());
       const resize = (next: number) => p.maws.app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0].setSize(w, h), [next, height] as const);
-      // Files otherwise takes 60 % of the room (and becomes a sheet below 700 px). Hide the side column from its
-      // strip (Files stays a tab); at 600 px the sidebar yields and the real viewer fills main.
+      // Files otherwise takes 60 % of the room (and becomes a sheet below 700 px). UX wave U6b-1: the file is beside the
+      // chat, so it is moved to the main area first, from its bar, in the merge view as it is (a move asks nothing and
+      // keeps the entry); then the side column is hidden from its strip (if a tab is left there); at 600 px the sidebar
+      // yields and the real viewer fills main.
+      await viewer.locator('[data-move-to-main]').click();
+      await expect(p.page.locator('[data-region="main"]').locator(`[data-file-viewer][data-path="${p.scratch.path(APP)}"]`), 'the file in the main area').toBeVisible();
+      await expect(viewer, 'still in the merge view').toHaveAttribute('data-theirs', 'merge');
       await hideSurface(p.page, 'Files');
       await resize(600);
       await expect.poll(async () => Math.abs((await viewer.boundingBox())!.width - 600), { message: 'the viewer about 600 px wide' }).toBeLessThan(40);

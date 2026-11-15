@@ -419,6 +419,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       // P5 O5 M5: the daemon's own socket for the session, stable for its life, listening while a tab engine is attached
       // (the app's machine.client) and relayed to it; P5 O3-D M5b told the app's own, absent while no app was attached
       browserSocket: (appSessionId) => browserSocketFor(appSessionId),
+      appBundles: () => front.appBundles(), // UX wave U6e: MAWS's own folders, as the apps told them (decision 8)
       trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
       env,
@@ -1365,6 +1366,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
 
   // --- the services front (P5 O3-D M2, M4; front.ts): machine.sock's commands, events, streams and client port --------
   let engineAppPid: number | null = null; // the app welcomed on engine-host.sock: the port's requests with no client go to its machine.sock connection
+  let retellHandover = (): void => {}; // #473: the handover's tell, from its start below
   const front = createServicesFront({
     spine,
     work: () => idle.work(), // P5 Decision Log 273
@@ -1376,7 +1378,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       return { ref, name, project: machineProject(ref, name, enrollment()) };
     },
     isApp: (appPid) => engineAppPid !== null && engineRelay.attachedApp() && appPid === engineAppPid,
-    readiness: () => (presenceChanged(), syncCacheWatch()), // P5 O5 M6: the cache's watch follows the event clients too
+    readiness: () => (presenceChanged(), syncCacheWatch(), retellHandover()), // P5 O5 M6: the cache's watch follows the event clients too; #473: the handover under way, to a client that just said ready
     beforeSpineCommand: wakeForDiscovery,
     // P5 O5 M4: a render client hears the engine-host link's loss count at its ready, before any work (and at each loss,
     // onState above), so its dashboard exports capture again once across an engine host's restart
@@ -1406,6 +1408,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
   });
   // P5 O16 M3c fix wave 2 (D63): the engine host's update under way, told to machine.sock's clients (engine-handover-event.ts)
   const engineHandover = tellEngineHandover({ hosts, emit: (payload) => front.bus.emit('daemon.engineHandover', payload) });
+  retellHandover = () => engineHandover.retell();
 
   // --- the artifact endpoint (P5 O5 M2; artifacts-endpoint.ts): resolved through the engine host, never the spine -------
   const artifacts = createArtifactsEndpoint({

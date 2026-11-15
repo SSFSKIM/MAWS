@@ -74,7 +74,7 @@ export type Row = RowBase &
         // a call auto mode blocked, drawn as one line of the person's act, never a bubble; absent on every other prompt
         consent?: { kind: 'command' | 'call'; subject: string };
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
-    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through
+    | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true; reportOnly?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through; reportOnly (UX wave U2b): set by the mirror alone, on a closed stretch's head, whose words outside its messages are out of sight
     | {
         kind: 'divider'; state: 'working' | 'completed' | 'stopped' | 'failed'; cause?: 'crash' | 'message' /* E11: present when the engine, not the reader, stopped it; UX wave U4a: `message`, a message sent now ended it */; origin: 'human' | 'engine' | 'peer'; startedAt: string; endedAt: string | null;
         toolCalls: number; denied: number; autoDenied: number; firstDeniedCell: CellId | RowId | null; expanded: boolean; summary: TurnSummary; files?: ChangedFile[];
@@ -147,9 +147,10 @@ export type Row = RowBase &
     // is in (a result that does not parse leaves the version null on an answered row)
     // P2-E1: `ownerAppSessionId`, from the result or the event, when the version is a side thread's ancestor's record's
     | {
-        kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
+        kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update' | 'delete' /* UX wave U10b */; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
         neverAnswered?: true /* E11: as the delivery row's */; ownerAppSessionId?: AppSessionId /* P2-E1 */;
         revision?: number /* P3-L (M6b fix wave 2): the revision the call wrote, when its answer or event named it */;
+        why?: string /* UX wave U10b (M5, §C.4): a refused delete's reason key, read from the refusal's JSON */;
       }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,
@@ -170,13 +171,10 @@ export type Row = RowBase &
     // MAWS answered by default). Never derived from X1 events: the transcript view places it (browser-activity.ts)
     | { kind: 'browser_activity'; toolUseId: ToolUseId | null; appSessionId: AppSessionId; tabId: string; activity: BrowserActivity }
     // E13 end
-    // P2-C start (2026-10-09): a marked turn's working record in the report view (the P2-C document, Design §7), one
-    // row in place of everything between the prompt and the marks: never derived here, placed by the report projection
-    // (`owner/report/project.ts`). `open` once the reader opened it (the turn then draws as the full transcript does);
-    // `working` while the turn runs; the counts are the divider's tool calls and the turn's assistant text blocks with
-    // text outside any mark
-    | { kind: 'owner_record'; open: boolean; working: boolean; toolCalls: number; messages: number; divider?: Extract<Row, { kind: 'divider' }> }
-    // P2-C end
+    // UX wave U2b (the execution document, Interfaces §C): a stretch's line in the to-human view where MAWS draws it,
+    // never derived here, placed by the mirror (`owner/view/mirror.ts`): `stretch` is the stretch's key, `open` once the
+    // reader opened it (the line then stands under the stretch's last row)
+    | { kind: 'record_fold'; stretch: string; open: boolean }
     // P4-R7: a call of a message tool the host reads (`@shared/owner/message-call`; classify.ts, `presentationOf`) as the
     // to-human message it sends, at the call's place among the turn's rows, drawn as a message and never as an MCP row:
     // `pending` until its result is in.

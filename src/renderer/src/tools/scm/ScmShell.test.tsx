@@ -11,13 +11,15 @@ import { queryClient } from '../../ipc/query';
 import { REVIEW_FILE_LINES_CAP, REVIEW_SCOPE_BYTES_CAP } from '../code/review/review-model';
 import { useGit } from '../../stores/git';
 import { useLayout } from '../../stores/layout';
+import { registerPanelTool } from '../../panel/host'; // UX wave U6b-1
+import { filesTool } from '../code/files/FilesTool'; // UX wave U6b-1
 import { fail, ok } from '../../test-support/code';
 import { A, DIR, planOf, prOf, prStateOf, refusal, SCRATCH_FILES, scmFile, scmMain, scmStatusOf, scmUntracked, statusOf, stubCanvas, TOKEN } from '../../test-support/scm';
 import { useViewer } from '../code/viewer/viewer-store';
 import { ScmShell } from './ScmShell';
 import { connectScmRunEnds, SCM_REFRESH_MS, useScm } from './store';
 import { createScmUi, type ScmUi } from './view-state';
-import { at, TEST_MACHINE } from '../../../../../test/support/machine';
+import { at } from '../../../../../test/support/machine';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
 vi.mock('@git-diff-view/shiki', () => ({ getDiffViewHighlighter: () => new Promise(() => {}) }));
@@ -42,6 +44,14 @@ const rowsOf = (name: string) => [...group(name).querySelectorAll<HTMLElement>('
 const rowButton = (name: string, path: string) => group(name).querySelector<HTMLButtonElement>(`[data-scm-row][data-path="${CSS.escape(path)}"] [data-scm-select]`)!;
 const wait = (ms: number) => act(() => new Promise((resolve) => setTimeout(resolve, ms)));
 const untrackedReads = () => main.callsOf('git.diff').filter((input) => input.scope === 'untracked');
+
+// UX wave U6b-1: a file opens beside the chat, as a tab of Files in the session's list: the tool registered and the layout
+// read, and what the session's Files tabs then hold
+function besideTheChat(): () => void {
+  useLayout.setState({ hydrated: true, panelBySession: new Map(), panelParams: {} });
+  return registerPanelTool(filesTool);
+}
+const sideFiles = () => (useLayout.getState().panelBySession.get(at(A))?.tabs ?? []).filter((tab) => tab.toolId === 'files').map((tab) => useLayout.getState().panelParams[tab.id]);
 
 beforeEach(() => {
   queryClient.clear();
@@ -187,9 +197,7 @@ describe('source control tool renders groups, selects a file and draws its hunks
 
   it('offers Mark resolved and Open file on a conflict row, never a discard, and draws no diff for it', async () => {
     main.change(statusOf({ files: [scmFile('f.txt', 'U', 'U'), scmFile('src/app.ts', '.', 'M')] }));
-    const openTab = vi.fn();
-    const original = useLayout.getState().openTab;
-    useLayout.setState({ openTab });
+    const unregister = besideTheChat();
     try {
       renderShell();
       await waitFor(() => expect(rowsOf('Conflicts')).toEqual(['f.txt']));
@@ -202,9 +210,9 @@ describe('source control tool renders groups, selects a file and draws its hunks
       fireEvent.click(screen.getByRole('button', { name: 'Mark f.txt resolved' }));
       await waitFor(() => expect(main.callsOf('scm.stage')).toEqual([{ appSessionId: A, paths: ['f.txt'] }]));
       fireEvent.click(screen.getByRole('button', { name: 'Open f.txt' }));
-      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/f.txt`, line: null, appSessionId: at(A), machine: TEST_MACHINE });
+      expect(sideFiles()).toEqual([{ file: `${DIR}/f.txt`, line: null, preview: true }]);
     } finally {
-      useLayout.setState({ openTab: original });
+      unregister();
     }
   });
 
@@ -479,16 +487,14 @@ describe('the diff body’s other states', () => {
   it('says a file past the line cap is too large and offers it at its first changed line', async () => {
     const lines = Array.from({ length: REVIEW_FILE_LINES_CAP + 1 }, (_, i) => `+line ${i}`);
     main.state.diffs.worktree = { patch: ['diff --git a/src/app.ts b/src/app.ts', 'index 1..2 100644', '--- a/src/app.ts', '+++ b/src/app.ts', `@@ -3,0 +4,${lines.length} @@`, ...lines, ''].join('\n'), files: [] };
-    const openTab = vi.fn();
-    const original = useLayout.getState().openTab;
-    useLayout.setState({ openTab });
+    const unregister = besideTheChat();
     try {
       await select('Unstaged', 'src/app.ts');
       await waitFor(() => expect(note()).toBe('Diff too large to display. Open the file'));
       fireEvent.click(screen.getByRole('button', { name: 'Open the file' }));
-      expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: `${DIR}/src/app.ts`, line: 4, appSessionId: at(A), machine: TEST_MACHINE });
+      expect(sideFiles()).toEqual([{ file: `${DIR}/src/app.ts`, line: 4, preview: true }]);
     } finally {
-      useLayout.setState({ openTab: original });
+      unregister();
     }
   });
 

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { ClientRef } from '@shared/ipc/client'; // UX wave U5a
 import { THREAD_FROM_ONE_COMMENT } from '@shared/side/copy'; // UX wave U5a
-import type { BeforeHook } from './ipc/router'; // UX wave U5a
+import type { BeforeHook, CommandGuard } from './ipc/router'; // UX wave U5a; U6e: CommandGuard
 import { SIDE_THREAD_MORE_MINOR } from './machines/side-thread-peer'; // UX wave U5a
 
 // P5 O3-D M5b (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, acceptance 3; Interfaces §F, §G): main's root.
@@ -72,8 +72,8 @@ vi.mock('./browser', () => ({ startBrowser: () => ({ stop: vi.fn(), partitions: 
 vi.mock('./artifacts', () => ({ registerStoreSchemes: vi.fn() /* M7 */, installStorePolicies: vi.fn() /* P3-L M6b: E2's startDeliverables' policies */, startArtifacts: () => ({ stop: vi.fn(), exporters: { register: () => () => {} } /* P3-B: the document exporters register here */ }) })); // P3-A: the artifact store's main side
 vi.mock('./presentations/present', () => ({ registerPresenter: vi.fn(() => ({ end: vi.fn() })) })); // P3-C M6: the presenter's windows
 vi.mock('./browser/import', () => ({ ImportedProfiles: { open: () => ({ list: () => [] }) }, sweepBrowserImports: vi.fn(), startBrowserImport: () => ({ stop: vi.fn() }) })); // E4b: the Chrome import's main side
-const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as string[][] /* P5 O4 M2 */, hooks: [] as [string[], BeforeHook][] /* UX wave U5a */ })); // plain records: the suite clears mocks between cases
-vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[], hook: BeforeHook) => (router.before.push(names), router.hooks.push([names, hook]), () => {}) /* P5 O4 M2; UX wave U5a: the hook too */, CommandFailure: Error /* C11 */ }));
+const router = vi.hoisted(() => ({ installs: [] as unknown[], before: [] as string[][] /* P5 O4 M2 */, hooks: [] as [string[], BeforeHook][] /* UX wave U5a */, guards: [] as { names: string[]; guard: CommandGuard; installed: number }[] /* UX wave U6e */ })); // plain records: the suite clears mocks between cases
+vi.mock('./ipc/router', () => ({ installRouter: (options: unknown) => void router.installs.push(options), registerMainHandler: vi.fn() /* C3 */, registerMachineHandler: vi.fn() /* P5 O6 M1 */, interceptCommand: vi.fn(), dispatchLocal: vi.fn() /* P5 O6 M3 */, invokeOwn: vi.fn() /* P5 O3-E */, beforeCommand: (names: string[], hook: BeforeHook) => (router.before.push(names), router.hooks.push([names, hook]), () => {}) /* P5 O4 M2; UX wave U5a: the hook too */, guardCommand: (names: string[], guard: CommandGuard) => (router.guards.push({ names, guard, installed: router.installs.length }), () => {}) /* UX wave U6e */, CommandFailure: Error /* C11 */ }));
 vi.mock('./machines', () => ({ startMachines: vi.fn(() => ({ dispatch: vi.fn(), serve: vi.fn(), stop: vi.fn(), onRemote: vi.fn(() => () => {}) /* P5 O8 M2: the rows read the roster */ })) })); // P5 O6 M3: no links, no stand-in
 vi.mock('./client/settings', () => ({ startSettings: () => ({ state: () => ({ settings: SETTINGS_DEFAULTS_V21, resolvedTheme: 'light' }), onChange: vi.fn(() => vi.fn()) }) })); // P5 O3-A: the client half
 // P5 O15 M2: of the library main takes only the command budgets (none here, every name at the host's 10 s); the
@@ -125,6 +125,16 @@ describe('main’s root on mawsd', () => {
   it('composes the app’s connectors over the machine host’s streamings and the router’s seam', async () => {
     expect(fake.streamingOwners).toContain('machine');
     expect(router.before).toEqual(expect.arrayContaining([expect.arrayContaining(['connectors.open', 'connectors.call']), ['delivery.cancel']]));
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 9): the sender's guard
+  // stands for the outside save and the chooser before the router takes its first command, and refuses an asker that is
+  // no app page (main itself here)
+  it('guards files.writeOutside and layout.openFile for an app page before the router is installed', async () => {
+    const { mainClient } = await import('./ipc/clients');
+    const guards = router.guards.filter(({ names }) => names.includes('files.writeOutside'));
+    expect(guards.map(({ names, installed }) => ({ names, installed }))).toEqual([{ names: ['files.writeOutside', 'layout.openFile'], installed: 0 }]);
+    expect(guards[0]!.guard('files.writeOutside', {}, { client: mainClient, target: 'LocalMachineRef0000000' as never })).toMatchObject({ code: 'forbidden_sender' });
   });
 
   // UX wave U5a (Decision Log 52): on the route that carries it, a side thread of several comments that this Mac's daemon

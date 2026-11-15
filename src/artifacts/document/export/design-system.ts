@@ -258,11 +258,55 @@ export interface ExportDesign {
   officeThemeXml(): string;
 }
 
-export function exportDesign<T>(system: DesignSystemExport<T>, overrides: TokenOverrides): ExportDesign {
+/**
+ * Compact (UX wave U10b, §B.4 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; the owner's answer of
+ * 2026-11-15 to the card "Compact"): the type sizes at 90 %, the spaces between blocks at 75 %, and a page margin no wider
+ * than 0.75 in.
+ */
+export const COMPACT = { type: 0.9, space: 0.75, margin: '0.75in' } as const;
+
+// The tokens Compact scales: X28's eight type roles' sizes and its eight spaces.
+const COMPACT_TYPE: readonly DsName[] = ['title', 'subtitle', 'h1', 'h2', 'h3', 'body', 'caption', 'quote'].map((role) => `--ds-type-${role}-size` as DsName);
+const COMPACT_SPACE: readonly DsName[] = [1, 2, 3, 4, 5, 6, 7, 8].map((n) => `--ds-space-${n}` as DsName);
+
+/** A length scaled in its own unit, rounded to two decimals; null for a value that is not one number and a unit. */
+function scaledLength(value: string, by: number): string | null {
+  const match = /^\s*(-?(?:\d+\.?\d*|\.\d+))([a-z%]*)\s*$/i.exec(value);
+  return match ? `${Math.round(parseFloat(match[1]) * by * 100) / 100}${match[2]}` : null;
+}
+
+/** Compact's values over the system's own (its tokens alone, before the document's overrides). */
+function compactOf<T>(system: DesignSystemExport<T>): TokenOverrides {
+  const own = (name: DsName): string | null => {
+    const value = system.resolveDsVars(`var(${name})`, system.tokens, 'document').trim();
+    return value.startsWith('var(') ? null : value;
+  };
+  const out: TokenOverrides = {};
+  const scale = (names: readonly DsName[], by: number) => {
+    for (const name of names) {
+      const value = own(name);
+      const scaled = value === null ? null : scaledLength(value, by);
+      if (scaled !== null) out[name] = scaled;
+    }
+  };
+  scale(COMPACT_TYPE, COMPACT.type);
+  scale(COMPACT_SPACE, COMPACT.space);
+  const margin = twipsOf(own('--ds-page-margin') ?? '1in'); // a system that names none prints at 1in (`pageOf`)
+  if (margin !== null && margin > twipsOf(COMPACT.margin)!) out['--ds-page-margin'] = COMPACT.margin;
+  return out;
+}
+
+/**
+ * The governing system (the house system when none is given) with the document's overrides on top; at compact density
+ * Compact's values lie between the two, so a token the document overrides keeps the document's value.
+ */
+export function exportDesign<T>(system: DesignSystemExport<T> | undefined, overrides: TokenOverrides, density?: 'compact'): ExportDesign {
+  const governing = (system ?? houseSystem) as DesignSystemExport<unknown>;
+  const over = density === 'compact' ? { ...compactOf(governing), ...overrides } : overrides;
   return {
-    name: system.name,
-    resolveCss: (cssText) => system.resolveDsVars(cssText, system.tokens, 'document', overrides),
-    officeThemeXml: () => system.officeThemeXml(system.tokens, system.name, overrides),
+    name: governing.name,
+    resolveCss: (cssText) => governing.resolveDsVars(cssText, governing.tokens, 'document', over),
+    officeThemeXml: () => governing.officeThemeXml(governing.tokens, governing.name, over),
   };
 }
 

@@ -70,7 +70,9 @@ describe('replay fixtures in the index', () => {
     expect(index.fixtures.list()).toEqual(fixtures);
     seedReplayFixtures(index.fixtures, join(dir.path, 'no-checkout'));
     expect(index.fixtures.list()).toEqual(fixtures);
-  });
+    // The seed reads the first line of every file under the fixture trees, so its time grows with the fixture set
+    // (each engine probe adds files); its own bound, as the journal walk's in the normaliser's fidelity test.
+  }, 60_000);
 
   it('classifies a probe-tree file by its physical first line: a corrupt line 1 is not a journal, whatever follows', () => {
     const probe = join(dir.path, 'checkout/spikes/protocol-probe/fixtures');

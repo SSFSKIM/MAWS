@@ -831,9 +831,12 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const root = files.locator(`[role="treeitem"][data-kind="root"][data-path="${worktree}"]`);
       await expect(root).toBeVisible({ timeout: 15_000 });
       if ((await root.getAttribute('aria-expanded')) !== 'true') await root.click();
-      await files.locator(`[data-path="${worktree}/one.txt"]`).click();
-      await expect(page.locator(`[data-file-viewer][data-path="${worktree}/one.txt"]`)).toBeVisible({ timeout: 15_000 });
-      out.viewer = { path: 'one.txt in the worktree', screenshots: await shoot(page, '10.4-viewer') };
+      await files.locator(`[role="treeitem"][data-path="${worktree}/one.txt"]`).click();
+      // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens
+      // beside the chat, as a tab of the side column; the session's tab and its composer stay in front in the main area
+      await expect(panel(page).locator(`[data-file-viewer][data-path="${worktree}/one.txt"]`)).toBeVisible({ timeout: 15_000 });
+      await expect(main(page).locator(`[data-composer="${await addressed(page, id!)}"]`), 'the composer still in the main area').toBeVisible();
+      out.viewer = { path: 'one.txt in the worktree, beside the chat', screenshots: await shoot(page, '10.4-viewer') };
     });
 
     await step('a workflow shows its phases and agents in Background tasks', async () => {
@@ -861,9 +864,9 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
     });
     // C8's sitting item "a monitor started from a live session", run here so the owner's script carries a tested prompt
     await step('a monitor started from the live session shows in Background tasks and stops', async () => {
-      // the viewer piece before this one leaves its file tab active in the main area, where no composer is, so the
-      // session's own tab is opened again first, whichever pieces ran before
-      await openRow(page, id!);
+      // the viewer piece before this one opens its file beside the chat (UX wave U6b-1), so the session's composer is still
+      // in the main area, whichever pieces ran before
+      await expect(main(page).locator(`[data-composer="${await addressed(page, id!)}"]`)).toBeVisible({ timeout: 20_000 });
       const from = log.seq;
       await send(page, MONITOR_PROMPT);
       // the Monitor tool sits behind an engine feature gate (tengu_amber_sentinel, default off on 2.1.283), so the answer is

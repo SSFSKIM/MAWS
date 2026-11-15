@@ -19,6 +19,8 @@ import { applyV1, applyV2, newDoc, stateV2, type Doc } from '@artifacts/yjs';
 import { YNode } from '@artifacts/yjs/document';
 import { pmnodeToDelta, ynodeToPmnode } from '@artifacts/yjs/prosemirror';
 import { schemaFor } from '@artifacts/document/schema';
+import { docPage } from '@artifacts/document/meta';
+import { applyEdit } from '@artifacts/document/patch-writer';
 import { createDocument, tabBody } from '@artifacts/document/tabs';
 import { DocumentEditor } from '@artifacts/document/editor/DocumentEditor';
 import type { DocumentHandle } from '@artifacts/document/editor/host-types';
@@ -26,6 +28,8 @@ import { memoryEditorHost } from '@artifacts/document/editor/memory-host';
 import { ticks } from '@artifacts/document/editor/test-world';
 import { HUMAN, openDocumentWorld, sessionActor, type DocumentWorld } from '../../engine-host/documents/kinds/document-world.fixture';
 import { fromNodePort } from '../../engine-host/documents/ports';
+import { choosePage } from '../../renderer/src/tools/document/page'; // UX wave U10b M3: the Export menu's page item
+import { LETTER_SYSTEM } from '../../renderer/src/test-support/page-systems'; // UX wave U10b
 
 const TAB = 't1';
 const AGENT = sessionActor('app-agent');
@@ -247,5 +251,37 @@ describe('the editor’s repairs through the store', () => {
     applyV1(replay, after[2]!.bytes);
     const expected = ['paragraph:From the agent.', 'paragraph:Quarterly sales.', 'chart:', 'paragraph:x'];
     expect([shape(replay), shape(world!.service.live(id)), shape(second.doc)]).toEqual([expected, expected, expected]);
+  });
+
+  // UX wave U10b (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.2, U10a's A2 for this write): a
+  // session's set_page reaches an open editor and a second replica, and neither sends anything back
+  it('take a session’s set_page in an open editor and a second replica with no row of theirs', async () => {
+    const id = await made(para('p1', 'Quarterly sales.'), chart('c1'));
+    const { mine, second } = await mounted(id);
+    expect(await actors(id), 'the open').toEqual(['session:app-agent']);
+    await world!.service.writeAs(id, AGENT, (d) => void applyEdit(d, [{ op: 'set_page', size: 'a4', density: 'compact' }]));
+    await until(() => docPage(mine.doc).size === 'a4' && docPage(second.doc).size === 'a4', 'the page at both replicas');
+    await ticks(30);
+    expect([await actors(id), mine.state().unsaved, second.state().unsaved], 'after the page').toEqual([['session:app-agent', 'session:app-agent'], 0, 0]);
+    expect(shape(world!.service.live(id))).toEqual(['paragraph:Quarterly sales.', 'chart:']);
+  });
+
+  // UX wave U10b (M3; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.5): the person's page item, written
+  // on the editor's own replica, is one row of theirs and adds no paragraph after a final chart: the editor's binding
+  // never sees it as a change of the tab it binds, so no repair answers it
+  it('take the person’s page item on the open editor’s replica as one row of theirs that adds no paragraph after the chart', async () => {
+    const id = await made(para('p1', 'Quarterly sales.'), chart('c1'));
+    const { mine, second } = await mounted(id);
+    expect(await actors(id), 'the open').toEqual(['session:app-agent']);
+    expect(choosePage(mine.doc, 'a4', LETTER_SYSTEM)).toBe(true);
+    await until(() => mine.state().unsaved === 0 && docPage(second.doc).size === 'a4', 'the page at the second replica');
+    await ticks(30);
+    expect([await actors(id), second.state().unsaved], 'one row of the person’s').toEqual([['session:app-agent', 'human'], 0]);
+    expect([shape(world!.service.live(id)), shape(second.doc), shape(mine.doc)]).toEqual([
+      ['paragraph:Quarterly sales.', 'chart:'],
+      ['paragraph:Quarterly sales.', 'chart:'],
+      ['paragraph:Quarterly sales.', 'chart:'],
+    ]);
+    expect(docPage(world!.service.live(id))).toEqual({ size: 'a4' });
   });
 });

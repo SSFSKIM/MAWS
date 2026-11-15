@@ -13,10 +13,19 @@
 // - Each watch (`laneA.watch`, one per page) is a stream of its own, whose own snapshot seeds that watcher; its events go
 //   out as `laneA.plane` reshaped to DX4 (./reshape.ts). A stream that ends under a live watch is announced as a reset
 //   and resubscribed.
-// - Jobs: while a session has a watch, its transcript is followed (./transcript-jobs.ts) and its background shells and
-//   monitors, derived by sminos's rules (./jobs.ts), go to each watch in its snapshot and as a `subagents` message each
-//   time they change. When the session's holder ends or its bridge goes, its process is taken as gone: each watch hears
-//   its running jobs `exited` before it ends. A stop is refused for a job the transcript holds ended.
+// - Jobs and subagents: while a session has a watch, it is followed (./follow.ts): its transcript (./transcript-jobs.ts),
+//   the engine host's listing of its agents' sidecars, its parent agents' own transcripts and the bridge's agents (the
+//   state stream's, ./agents.ts). Its background shells and monitors and its subagents, derived by sminos's rules
+//   (./jobs.ts) only when one of those changed, go to each watch in its snapshot and as a `subagents` message each time
+//   they change (UX wave U8d M2). When the session's holder ends or its bridge goes, its process is taken as gone: each
+//   watch hears its running jobs and agents `exited` before it ends. A stop is refused for a job the transcript holds
+//   ended. The body names its origin (the fence review's ruling): the holder of the bridge child whose agents it holds,
+//   as the probe that opened that child's stream saw it. A holder that moves to another process reprobes in place, so
+//   the body goes on naming the last child's holder, its final body included, until the next child's snapshot replaces
+//   that child's agents. A child's process is the launch it answers with, tied one to one to the holder a probe asked
+//   under, so a child that answers before the index names its process's holder reads as that holder once it does.
+//   `/status` and the stream are two connections: a stream whose snapshot names another child (its `pid`, the child's
+//   own, as `/status` names it) than the probe found is ended unread and the session probed again.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
@@ -38,16 +47,20 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
+import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
+import { holderOrigin } from '@shared/lane-a/agents';
 import { reportsMode } from '@shared/lane-a/mode';
 import type { ServiceHandler } from '@shared/spine/bus';
 import { createGitRunner, type GitRun } from '../git/runner';
+import { BridgeAgents } from './agents';
 import { BridgeUnreachable, call, subscribe, type BridgeAnswer, type EventStream } from './bridge-client';
 import { decisionFor } from './decisions';
 import { DeliveryLane, fileSeqStore, LANE_TIMING, type LaneTiming, type PostResult, type SeqStore } from './deliveries';
 import { bridgeSocket, watchBridgeDir, type BridgeDirWatch } from './discovery';
+import { SessionFollow } from './follow';
 import { sendMedia, uploadRecords } from './media';
-import { Reshaper } from './reshape';
+import { NO_SUBAGENTS, Reshaper } from './reshape';
 import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
 import { Work, type Settling } from '../work'; // P5 O3-D M2
@@ -59,7 +72,7 @@ export interface LaneATiming {
   decisionMs: number; // a decision's post (an async question's answer is relayed to the mod, up to 5 s)
   backoff: { firstMs: number; maxMs: number; healthyMs: number };
   dirPollMs: number;
-  jobsPollMs: number; // how often a watched session's transcript is read for its jobs
+  jobsPollMs: number; // how often a watched session's transcripts are read for its jobs and subagents
   sweepMs: number; // how often the upload roots are swept of those a day old (M7)
   lane: LaneTiming;
 }
@@ -89,6 +102,11 @@ export interface LaneADeps {
   log?(line: string): void;
   git?: GitRun; // the uploads' exclude entry (M7); main's read runner by default
   timing?: Partial<LaneATiming>;
+  // UX wave U8d M2: the engine host's listing of a session's agents (`fs.subagents`; a rejection is a failed read), its
+  // change (`fs.subagentsChanged`), and the host streaming again. Without them a session lists no agents.
+  subagents?(appId: AppSessionId): Promise<SubagentEntry[]>;
+  onSubagentsChanged?(listener: (appId: AppSessionId, agents: SubagentEntry[]) => void): () => void;
+  onHostStreaming?(listener: () => void): () => void;
 }
 
 export interface SessionHold {
@@ -140,13 +158,15 @@ interface Watch {
   timer: NodeJS.Timeout | null;
   offGone: () => void;
   ended: boolean;
-  jobs: string | null; // the jobs it last carried, as JSON
+  body: string | null; // the subagents and jobs it last carried, as JSON
 }
 
 interface Session {
   appId: AppSessionId;
   engine: string;
-  holder: string; // the holder as JSON: a new process holding the same session is probed again
+  holder: string; // the holder, as an origin (`holderOrigin`): a new process holding the same session is probed again
+  child: { holder: string; launch: string | null } | null; // U8d: whose agents are held: their stream's probe (the header)
+  launches: Map<string, string>; // U8d: the holder each launch of the session is, tied one to one (the header)
   socket: { path: string; fits: boolean };
   status: Record<string, unknown> | null;
   bridge: BridgeState | null; // null: no bridge answered; the session is not lane A
@@ -160,8 +180,8 @@ interface Session {
   lane: DeliveryLane;
   watches: Map<string, Watch>;
   modelChain: Promise<unknown>;
-  jobs: TranscriptJobs | null; // followed while it has a watch
-  jobsTimer: NodeJS.Timeout | null;
+  agents: BridgeAgents; // the bridge's, from the state stream: kept while it reconnects, none once the bridge goes
+  follow: SessionFollow | null; // while it has a watch
   gone: boolean;
 }
 
@@ -169,6 +189,13 @@ const NO_BRIDGE = 'this session has no bridge MAWS can drive';
 const record = (value: unknown): Record<string, unknown> | null => (value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : null);
 const strings = (value: unknown): string[] => (Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : []);
 const refused = (code: string, message: string): ControlResult => ({ state: 'refused', code, message });
+
+// U8d: the origin the session's body names (the header): the holder its held agents' launch is tied to, else the holder
+// their stream's probe asked under; null before any stream.
+function originOf(s: Session): string | null {
+  if (s.child === null) return null;
+  return (s.child.launch === null ? undefined : s.launches.get(s.child.launch)) ?? s.child.holder;
+}
 
 export interface LaneADriver {
   observe(hold: SessionHold): void;
@@ -232,6 +259,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     if (!stopped) sweep();
   });
 
+  // U8d M2: the host's word on a session's agents, for a session followed
+  const offSubagents = deps.onSubagentsChanged?.((appId, agents) => sessions.get(appId)?.follow?.listingChanged(agents)) ?? (() => {});
+  const offStreaming = deps.onHostStreaming?.(() => {
+    for (const s of sessions.values()) s.follow?.hostStreaming();
+  }) ?? (() => {});
+
   void Promise.resolve(deps.home).then(
     (resolved) => {
       if (stopped) return;
@@ -280,9 +313,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     try {
       do {
         s.again = false;
+        const asked = s.holder; // U8d: the child that answers is this holder's
         const status = await statusOf(s);
         if (s.gone) return;
-        apply(s, status);
+        apply(s, status, asked);
       } while (s.again && !s.gone);
     } finally {
       s.probing = false;
@@ -303,25 +337,32 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     }
   }
 
-  function apply(s: Session, status: Record<string, unknown> | null): void {
+  // `holder`: the holder the probe asked under. The launch that answered is tied to it when neither is tied to another.
+  function apply(s: Session, status: Record<string, unknown> | null, holder: string): void {
     if (status === null) {
       unbridge(s, 'the session’s bridge went away');
       return;
     }
+    const launch = typeof status.launch === 'string' ? status.launch : null;
+    const origin = originOf(s);
+    if (launch !== null && !s.launches.has(launch) && ![...s.launches.values()].includes(holder)) s.launches.set(launch, holder);
     s.status = status;
     s.bridge = classify(status);
-    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s);
+    if (s.bridge.bridge === 'live' || s.bridge.bridge === 'starting') openState(s, holder, launch, typeof status.pid === 'number' ? status.pid : null);
     else {
       closeState(s);
       endWatches(s, s.bridge.reason ?? NO_BRIDGE);
+      s.agents.clear(); // nothing drives it: what its bridge held is read again from a stream's snapshot
     }
+    if (originOf(s) !== origin) s.follow?.bridgeChanged(); // the held agents' launch was just tied to its holder
     changed(s);
   }
 
   function unbridge(s: Session, reason: string): void {
     closeState(s);
-    jobsChanged(s, false); // no bridge: the session's process is taken as gone
+    s.follow?.processGone(); // no bridge: the session's process is taken as gone
     endWatches(s, reason);
+    s.agents.clear(); // what the gone bridge held runs no more (its last body kept each spawn)
     s.lane.dropQueued(reason);
     if (s.bridge === null) return;
     s.bridge = null;
@@ -330,19 +371,28 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- the state stream -----------------------------------------------------------------------------------------------
-  function openState(s: Session): void {
+  // `holder` and `launch`: the probe that opened this stream, and the child that answered it (`pid`, its own). The held
+  // agents are that child's from its snapshot on; until then the last child's, kept while the stream reconnects, are
+  // still held. A snapshot of another child (a replacement took the socket after the probe) is not read.
+  function openState(s: Session, holder: string, launch: string | null, pid: number | null): void {
     if (s.stream !== null || s.reconnect !== null) return;
     s.snapshotted = false;
+    if (s.agents.list() === null) s.child = { holder, launch }; // no child's agents are held: what follows is this one's
     const stream: EventStream = subscribe(s.socket.path, {
       onLines: (lines) => {
         if (s.stream !== stream) return;
         let dirty = false;
         const toolBefore = JSON.stringify(s.fold.mainTool());
+        const agentsBefore = s.agents.version;
+        const originBefore = originOf(s);
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
+            if (pid !== null && typeof line.pid === 'number' && line.pid !== pid) return stateEnded(s, stream, 'the stream opened on another bridge child than its probe found');
             s.snapshotted = true;
             s.fold.snapshot(line);
+            s.child = { holder, launch }; // its agents replace the last child's
+            s.agents.snapshot(line.agents);
             s.lane.snapshotArrived();
             s.backoff.holding();
             void probe(s); // a starting bridge's first snapshot: /status again, which names it live
@@ -352,8 +402,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           } else if (line.type === 'delivered') {
             const key = record(line.key) ?? {};
             s.lane.fate(key, String(line.outcome), typeof line.uuid === 'string' ? line.uuid : undefined, typeof line.reason === 'string' ? line.reason : undefined);
-          } else if (s.fold.event(line)) dirty = true;
+          } else if (line.type === 'agent') s.agents.event(line);
+          else if (s.fold.event(line)) dirty = true;
         }
+        if (s.agents.version !== agentsBefore || originOf(s) !== originBefore) s.follow?.bridgeChanged();
         if (dirty) changed(s);
         else if (JSON.stringify(s.fold.mainTool()) !== toolBefore) tell(s);
       },
@@ -401,9 +453,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           if (w.reshaper === null) {
             if (line.type !== 'snapshot') return watchEnded(s, w, stream);
             w.reshaper = new Reshaper({ machine: deps.machine, session: s.engine, sub: w.id });
-            const jobs = s.jobs?.body(true) ?? [];
-            w.jobs = JSON.stringify(jobs);
-            messages.push(...w.reshaper.snapshot(line, jobs));
+            const body = s.follow?.body ?? NO_SUBAGENTS;
+            w.body = JSON.stringify(body);
+            messages.push(...w.reshaper.snapshot(line, body));
             w.backoff.holding();
             continue;
           }
@@ -428,7 +480,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     w.backoff.broke();
     if (w.ended || s.gone) return;
     if (w.reshaper !== null) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, reset: true }); // what it drew no longer follows
-    // its reshaper stays until the stream opens again, so the jobs' last word reaches it if the bridge went meanwhile
+    // its reshaper stays until the stream opens again, so the body's last word reaches it if the bridge went meanwhile
     w.timer = setTimeout(() => {
       w.timer = null;
       if (!w.ended) openWatch(s, w);
@@ -445,7 +497,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     w.backoff.broke();
     w.offGone();
     s.watches.delete(w.id);
-    if (s.watches.size === 0) unfollowJobs(s);
+    if (s.watches.size === 0) unfollow(s);
     if (reason !== null) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, ended: reason });
   }
 
@@ -453,41 +505,42 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     for (const w of [...s.watches.values()]) endWatch(s, w, reason);
   }
 
-  // ---- jobs ---------------------------------------------------------------------------------------------------------------
-  const transcriptJobs = (s: Session) => new TranscriptJobs(() => deps.transcript?.(s.appId, s.engine) ?? Promise.resolve(null));
+  // ---- jobs and subagents -----------------------------------------------------------------------------------------------
+  const locate = (s: Session) => () => deps.transcript?.(s.appId, s.engine) ?? Promise.resolve(null);
+  const listing = deps.subagents;
 
-  function followJobs(s: Session): void {
-    if (s.jobs !== null) return;
-    const jobs = (s.jobs = transcriptJobs(s));
-    const poll = () => {
-      jobs.read().then(
-        () => jobsChanged(s, true),
-        (error: unknown) => log(`${s.engine}: its transcript could not be read for its jobs (${error instanceof Error ? error.message : String(error)})`),
-      ).finally(() => {
-        if (s.jobs !== jobs) return;
-        s.jobsTimer = setTimeout(poll, timing.jobsPollMs);
-        s.jobsTimer.unref();
-      });
-    };
-    poll();
+  function follow(s: Session): void {
+    if (s.follow !== null) return;
+    const f: SessionFollow = new SessionFollow({
+      session: s.engine,
+      locate: locate(s),
+      bridge: s.agents,
+      origin: () => originOf(s),
+      ...(listing !== undefined && { listing: () => listing(s.appId) }),
+      pollMs: timing.jobsPollMs,
+      backoff: () => new Backoff(timing.backoff),
+      changed: () => {
+        if (s.follow === f) bodyChanged(s, f);
+      },
+      log,
+    });
+    s.follow = f;
+    f.start();
   }
 
-  function unfollowJobs(s: Session): void {
-    if (s.jobsTimer) clearTimeout(s.jobsTimer);
-    s.jobsTimer = null;
-    s.jobs = null;
+  function unfollow(s: Session): void {
+    s.follow?.stop();
+    s.follow = null;
   }
 
-  // Each watch that carried other jobs hears these; `running` false once the session's process is gone, which a watch
-  // whose stream broke under it hears too.
-  function jobsChanged(s: Session, running: boolean): void {
-    if (s.jobs === null) return;
-    const jobs = s.jobs.body(running);
-    const key = JSON.stringify(jobs);
+  // Each watch that carried another body hears this one, once derived; a watch whose stream broke under it hears it
+  // only once the session's process is gone (its fresh snapshot carries it otherwise).
+  function bodyChanged(s: Session, f: SessionFollow): void {
+    const key = JSON.stringify(f.body);
     for (const w of s.watches.values()) {
-      if (w.reshaper === null || (running && w.stream === null) || w.jobs === key) continue;
-      w.jobs = key;
-      deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages: [w.reshaper.jobs(jobs)] });
+      if (w.reshaper === null || (f.sessionRunning && w.stream === null) || w.body === key) continue;
+      w.body = key;
+      deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages: [w.reshaper.subagents(f.body)] });
     }
   }
 
@@ -497,7 +550,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     const s = liveFor(appId, 'stop');
     if (!('appId' in s)) return s;
     const launch = launchOf(s);
-    const jobs = s.jobs ?? transcriptJobs(s);
+    const jobs = s.follow?.main ?? new TranscriptJobs(locate(s));
     await jobs.read().catch(() => {}); // unreadable: the bridge judges
     if (jobs.body(true).some((j) => j.taskId === taskId && j.status !== 'running')) return refused('not-running', 'that background task is not running: it ended');
     return resultOf(await post(s, { op: 'stop', taskId }, launch));
@@ -540,11 +593,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   }
 
   // ---- sessions -------------------------------------------------------------------------------------------------------
-  function create(hold: SessionHold & { engineSessionId: string }): Session {
+  function create(hold: SessionHold & { engineSessionId: string }, holder: string): Session {
     const s: Session = {
       appId: hold.appId,
       engine: hold.engineSessionId,
-      holder: JSON.stringify(hold.holder),
+      holder,
+      child: null,
+      launches: new Map(),
       socket: home === null ? { path: '', fits: false } : bridgeSocket(home, hold.engineSessionId),
       status: null,
       bridge: null,
@@ -558,8 +613,8 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       lane: new DeliveryLane({ writer, session: hold.engineSessionId, seqs: (seqs ??= fileSeqStore(join(deps.userData, 'lane-a', 'deliveries.json'), log)), launch: () => launchOf(s), post: (body, launch) => post(s, body, launch), changed: () => changed(s), timing: timing.lane }),
       watches: new Map(),
       modelChain: Promise.resolve(),
-      jobs: null,
-      jobsTimer: null,
+      agents: new BridgeAgents(),
+      follow: null,
       gone: false,
     };
     return s;
@@ -568,7 +623,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   function drop(s: Session): void {
     s.gone = true;
     closeState(s);
-    jobsChanged(s, false); // its holder ended: the session's process is gone
+    s.follow?.processGone(); // its holder ended: the session's process is gone
     for (const w of [...s.watches.values()]) endWatch(s, w, 'the session left the terminal');
     s.lane.close('the session left the terminal');
     sessions.delete(s.appId);
@@ -732,14 +787,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   return {
     observe(hold) {
       if (stopped) return;
-      const foreign = hold.engineSessionId !== null && (hold.holder.kind === 'terminal' || hold.holder.kind === 'background_job');
+      const holder = hold.engineSessionId === null ? null : holderOrigin(hold.holder); // a foreign process's, else none
       const s = sessions.get(hold.appId);
-      if (!foreign) {
+      if (holder === null) {
         if (s) drop(s);
         return;
       }
       if (s && s.engine === hold.engineSessionId) {
-        const holder = JSON.stringify(hold.holder);
         if (holder !== s.holder) {
           s.holder = holder; // another process holds it now: its bridge is another child
           void probe(s);
@@ -747,7 +801,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
         return;
       }
       if (s) drop(s); // a new engine id is a new transcript: nothing follows one into the other
-      const fresh = create(hold as SessionHold & { engineSessionId: string });
+      const fresh = create(hold as SessionHold & { engineSessionId: string }, holder);
       sessions.set(hold.appId, fresh);
       syncDirWatch();
       void probe(fresh);
@@ -768,9 +822,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     watch(appId, client) {
       const s = sessions.get(appId);
       if (!s || (s.bridge?.bridge !== 'live' && s.bridge?.bridge !== 'starting')) throw new Error(`${appId}: ${s?.bridge?.reason ?? NO_BRIDGE}`);
-      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, jobs: null };
+      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, body: null };
       s.watches.set(w.id, w);
-      followJobs(s);
+      follow(s);
       w.offGone = client.onGone(() => endWatch(s, w, null));
       if (!w.ended) openWatch(s, w);
       return { watch: w.id };
@@ -819,6 +873,8 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     stop() {
       stopped = true;
       clearInterval(sweeper);
+      offSubagents();
+      offStreaming();
       for (const s of [...sessions.values()]) drop(s);
       dirWatch?.close();
       dirWatch = null;

@@ -217,6 +217,10 @@ export interface ServicesFront {
   takes(name: string, input: unknown): boolean;
   events(listener: (name: string, payload: unknown) => void): () => void; // every event `bus.emit` sent (the endpoint's owner `machine`)
   browserSocket(): string | null; // the attached app's cua socket directory, from its machine.client; null with no app
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8): the app bundles the
+  // live connections told in their machine.client, which the files service never writes (every connection's: a told
+  // bundle only narrows what is written)
+  appBundles(): readonly string[];
   appEngine(): EngineConnection | null; // P5 O17 M9b: the attached app's connection, when its hello listed browser.engine
   // P5 O3-D fix wave (scalpel-4#1): the attached app's connection here said ready with machine.spine in its hello, so the
   // engine host's app-bound events reach it (the daemon's app presence for such an app, D40)
@@ -357,6 +361,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     'endpoint.local.grants': () => options.daemon('endpoint.local.grants', undefined), // P5 O8 M4b
     'machine.client': (input, _context, from) => {
       from!.browserSocket = (input as CommandInput<'machine.client'>).browserSocket;
+      from!.bundle = (input as CommandInput<'machine.client'>).bundle ?? null; // U6e: an app of an earlier build tells none
       options.browserChanged?.(); // P5 O5 M5
     },
     'machine.identity': () => options.identity(),
@@ -518,6 +523,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
     private refs: RemoteClients | null = null;
     readonly follower: Follower;
     browserSocket: string | null = null;
+    bundle: string | null = null; // U6e: the app bundle its machine.client told
     readonly renders: boolean; // P5 O5 M4: its hello listed render.client
     readyAt = 0; // P5 O5 M4: the order render clients said ready in (postRender's newest)
     // P5 O17: its browserEngine.work {held: true} reports per session, in flight or granted, until its held: false
@@ -647,6 +653,7 @@ export function createServicesFront(options: FrontOptions): ServicesFront {
       return () => void emitted.delete(listener);
     },
     browserSocket: () => [...clients].find((client) => options.isApp(client.facts.appPid))?.browserSocket ?? null,
+    appBundles: () => [...new Set([...clients].flatMap((client) => (client.bundle === null ? [] : [client.bundle])))],
     appEngine() {
       const app = [...clients].find((client) => options.isApp(client.facts.appPid));
       return app && app.browserSocket !== null && app.facts.capabilities.includes(BROWSER_ENGINE_CAPABILITY) ? app : null;

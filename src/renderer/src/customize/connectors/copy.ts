@@ -16,6 +16,7 @@ export const CONNECTORS = {
   live: 'Live in the attached session',
   noLive: 'Connection state and tools are unavailable without a running session in this project.',
   refresh: 'Refresh',
+  search: 'Search connectors', // UX wave U11c: My items' search while Show is Connectors (the drawing's label, ruled point 7)
   remove: 'Remove',
   removeName: (name: string) => `Remove ${name}`,
   scopeOf: (scope: string) => `${scope} scope`,

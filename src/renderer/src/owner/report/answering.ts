@@ -1,36 +1,18 @@
-// The cards' actions (the P2-C document, Design §6 "The card's send" and "Cancel", §8; M6). A choice or a Reply is
-// `answerText(head, answer)` sent through the one human-prompt seam (X22) with origin `answer` or `reply`, and the
-// seam's result, whatever it is, is reported to main with `ownerChannel.answered`: main owns the question's state from
-// there (queued, delivered, unconfirmed, or unanswered with what kept it from going out), because only main persists
-// and sees every event. A seam that throws (main or the host unreachable) is reported as a refusal in its words, so the
-// card shows it with Retry like any other; a send a trust or relay card holds (X22's `held`) is reported as held, and
-// the card says that card's words with Retry. While the seam answers the card says Sending…, or Starting… when the
-// session has no ready process and the send acquires it first (P2-A). After a Reply the session's composer takes the
-// keyboard, its draft untouched. Cancel and Mark read are main's commands. No action's failure escapes or goes unsaid:
-// a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is said where it was asked,
-// and a sent answer whose report failed is kept so that the report alone can be made again, never the prompt. It is
-// kept outside the card, since the transcript mounts only the rows in view: a card scrolled away and back, or one that
-// left while its send was out, still says it and can make it again. So is the card's own send (tech debt L118): a card
-// remounted while its answer is out still says Sending… and offers nothing, so one click stays one answer, and it says
-// what that send answered.
-import { create } from 'zustand';
+// Marking the owner channel's legacy items read (the P2-C document, Design §8; UX wave U2b, ruling R9). A request
+// card's Mark read (`request-card/RequestCard.tsx`) and the palette's command "Mark all read" (the action
+// `transcript.markAllRead`, on the focused pane's session) are main's command `ownerChannel.markRead`. No failure
+// escapes or goes unsaid: a failed command (main's failure envelope, or a rejected invoke when the bridge is gone) is
+// said where it was asked, the card under its button and Mark all read, which has no card, in a toast with Retry.
+// UX wave U2b: the report's cards and their answering are gone with the bar (M2), so this is all that is left here.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { CommandInput, MawsBridge } from '@shared/ipc/schema';
-import { answerText } from '@shared/owner/answer';
+import type { MawsBridge } from '@shared/ipc/schema';
 import type { MarkId } from '@shared/owner/marks';
-import type { AnswerOrigin } from '@shared/owner/state';
-import type { Choice } from '@shared/owner/to-human-parser';
-import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
-import { sendToSession } from '../../session/controls/controls-for'; // P5 O9 M4
+import type { OwnerChannelState } from '@shared/owner/state';
+import { focusedSession } from '../../composer/ComposerAppKeys';
 import { ipc } from '../../ipc/client';
-import { canTakeOver, takeOverSession } from '../../sessions/record-ops';
-import { useComposerStore } from '../../stores/composer';
-import { useSessions } from '../../stores/sessions';
-import { QUESTION } from './copy';
-import type { QuestionActions } from './QuestionCard';
-
-export type AnswerReport = CommandInput<'ownerChannel.answered'>;
-export interface AnswerSend { text: string; origin: AnswerOrigin }
+import { toast } from '../../stores/notices';
+import { useOwnerChannelStore } from '../../stores/owner-channel';
+import { REPORT } from './copy';
 
 const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
@@ -44,153 +26,24 @@ async function failureOf(invoke: () => Promise<{ ok: true } | { ok: false; error
   }
 }
 
-// The prompt went out (sent, steered or queued): an answer main follows. `held` and `refused` sent nothing. P5 O9 M5: a
-// lane A send whose fate was not known yet (`unconfirmed`) went to the session's bridge, and the composer's strip follows it.
-const wentOut = (result: HumanPromptResult) => result.disposition === 'sent' || result.disposition === 'steered' || result.disposition === 'queued' || result.disposition === 'unconfirmed';
-
-// The seam's result as main takes it: X22's five dispositions, as the seam said them, and when the seam was called
-// (`sentAt`: a report made again later is read by main from the host's record since then). P5 O9 M5: lane A's
-// `unconfirmed` is reported as `sent`, the words having gone to the session's bridge.
-export function reportOf(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, result: HumanPromptResult, sentAt?: string): AnswerReport {
-  const { started, messageUuid, queueId, reason } = result;
-  const disposition = result.disposition === 'unconfirmed' ? 'sent' : result.disposition;
-  return {
-    appSessionId, markId, text: send.text, origin: send.origin, disposition, started,
-    ...(messageUuid !== undefined && { messageUuid }), ...(queueId !== undefined && { queueId }), ...(reason !== undefined && { reason }),
-    ...(sentAt !== undefined && { sentAt }),
-  };
-}
-
-// The report made to main: null when main took it, else the failure's words.
-export const reportAnswer = (report: AnswerReport, client: MawsBridge = ipc): Promise<string | null> => failureOf(() => client.invoke('ownerChannel.answered', report));
-
-export interface AnswerOutcome {
-  result: HumanPromptResult;
-  report: AnswerReport;
-  unreported: string | null; // the report's failure in its words; null: main has it
-}
-
-// One answer: the seam, then the report of whatever it answered.
-export async function sendAnswer(appSessionId: AppSessionId, markId: MarkId, send: AnswerSend, client: MawsBridge = ipc): Promise<AnswerOutcome> {
-  const sentAt = new Date().toISOString();
-  let result: HumanPromptResult;
-  try {
-    result = await sendToSession(appSessionId, send.text, { origin: send.origin }, client);
-  } catch (error) {
-    result = { disposition: 'refused', started: false, reason: messageOf(error) };
-  }
-  const report = reportOf(appSessionId, markId, send, result, sentAt);
-  return { result, report, unreported: await reportAnswer(report, client) };
-}
-
 // Null when main read them, else the failure's words, for the caller to say where it was asked.
 export const markRead = (appSessionId: AppSessionId, markIds: MarkId[] | 'all', client: MawsBridge = ipc): Promise<string | null> =>
   failureOf(() => client.invoke('ownerChannel.markRead', { appSessionId, markIds }));
 
-// What the card shows while its own send or cancel runs, what its last send or cancel answered, and a sent answer's
-// report still to be made: its failure's words, and whether it is being made again now.
-export interface Answering {
-  actions: QuestionActions;
-  busy: 'sending' | 'starting' | null;
-  note: string | null;
-  unreported: { error: string; recording: boolean } | null;
+// How many legacy items the session's channel holds unread: an essential not read, a question not answered.
+export const unreadOf = (owner: Pick<OwnerChannelState, 'marks'> | null): number =>
+  owner?.marks.filter((mark) => mark.item && (mark.essential?.state === 'unread' || mark.question?.state === 'unanswered')).length ?? 0;
+
+// Every item of the session marked read, its failure said in a toast whose Retry asks again.
+export async function markAllReadOrSay(appSessionId: AppSessionId): Promise<void> {
+  const failed = await markRead(appSessionId, 'all');
+  if (failed !== null) toast({ level: 'danger', text: REPORT.notMarkedAll(failed), actions: [{ label: REPORT.retry, run: () => void markAllReadOrSay(appSessionId) }], dismissible: true });
 }
 
-// Kept until main has the report: through a Record again in flight too, so nothing offers to send the answer again
-interface Unreported { report: AnswerReport; error: string; recording: boolean }
-
-// Each question's kept report, by its mark (a mark id names its session), for the life of the window
-const useUnreported = create<{ byMark: ReadonlyMap<MarkId, Unreported> }>(() => ({ byMark: new Map() }));
-function setUnreportedOf(markId: MarkId, update: (now: Unreported | null) => Unreported | null) {
-  useUnreported.setState(({ byMark }) => {
-    const next = update(byMark.get(markId) ?? null);
-    if (next === (byMark.get(markId) ?? null)) return { byMark };
-    const changed = new Map(byMark);
-    if (next === null) changed.delete(markId);
-    else changed.set(markId, next);
-    return { byMark: changed };
-  });
-}
-
-// Each question's own sends, by its mark, for the life of the window: the one in flight, what the last send or cancel
-// answered, and the last answer (Retry's)
-interface Asked { busy: Answering['busy']; note: string | null; last: AnswerSend | null }
-const NOTHING_ASKED: Asked = { busy: null, note: null, last: null };
-const useAsked = create<{ byMark: ReadonlyMap<MarkId, Asked> }>(() => ({ byMark: new Map() }));
-const askedOf = (markId: MarkId) => useAsked.getState().byMark.get(markId) ?? NOTHING_ASKED;
-const setAskedOf = (markId: MarkId, change: Partial<Asked>) => useAsked.setState(({ byMark }) => ({ byMark: new Map(byMark).set(markId, { ...(byMark.get(markId) ?? NOTHING_ASKED), ...change }) }));
-
-export const resetQuestionAnswering = () => {
-  useUnreported.setState({ byMark: new Map() });
-  useAsked.setState({ byMark: new Map() });
-};
-
-// A question's actions for its card: null without a mark main knows (a block still streaming, or not derived yet),
-// since main can follow only a question it has.
-export function useQuestionAnswering(appSessionId: AppSessionId, markId: MarkId | null, head: string, client: MawsBridge = ipc): Answering {
-  const holder = useSessions((s) => s.records.get(appSessionId)?.holder ?? null);
-  const { busy, note, last } = useAsked((s) => (markId === null ? NOTHING_ASKED : (s.byMark.get(markId) ?? NOTHING_ASKED)));
-  const unreported = useUnreported((s) => (markId === null ? null : (s.byMark.get(markId) ?? null)));
-  if (markId === null) return { actions: {}, busy: null, note: null, unreported: null };
-
-  const send = async (answer: AnswerSend): Promise<AnswerOutcome | null> => {
-    if (askedOf(markId).busy !== null) return null; // the same answer clicked twice, on this card or a remounted one: one send
-    const sessions = useSessions.getState();
-    setAskedOf(markId, { busy: sessions.engine.get(appSessionId)?.process !== 'ready' && sessions.records.has(appSessionId) ? 'starting' : 'sending', note: null, last: answer });
-    let note: string | null = null;
-    try {
-      const outcome = await sendAnswer(appSessionId, markId, answer, client);
-      const { result } = outcome;
-      // main says what kept an unanswered question's answer from going out; a follow-up's on an answered question, and
-      // one main never heard of, the card says itself
-      if (result.disposition === 'refused') note = result.reason ?? null;
-      if (result.disposition === 'held') note = QUESTION.held(result.reason);
-      // a sent answer main never heard of is kept until its report is made; a newer sent answer's report supersedes it
-      // (the older prompt is still the engine's, and main's legacy recognition reads it, Design §6)
-      if (wentOut(result)) setUnreportedOf(markId, () => outcome.unreported === null ? null : { report: outcome.report, error: outcome.unreported, recording: false });
-      return outcome;
-    } finally {
-      setAskedOf(markId, { busy: null, note });
-    }
-  };
-  // the kept report made again (the prompt never is); it is kept until main has it, and a newer sent answer's report
-  // that replaced it meanwhile is left alone
-  const recordAgain = async (pending: Unreported) => {
-    if (pending.recording) return;
-    const mine = (now: Unreported | null) => now?.report === pending.report;
-    setUnreportedOf(markId, (now) => (mine(now) ? { ...pending, recording: true } : now));
-    const error = await reportAnswer(pending.report, client);
-    setUnreportedOf(markId, (now) => (!mine(now) ? now : error === null ? null : { ...pending, error, recording: false }));
-  };
-  const foreign = holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job') ? holder : null;
-
-  return {
-    busy,
-    note,
-    unreported: unreported === null ? null : { error: unreported.error, recording: unreported.recording },
-    actions: {
-      choose: (choice: Choice) => void send({ text: answerText(head, choice.text), origin: 'answer' }),
-      reply: async (text: string) => {
-        const outcome = await send({ text: answerText(head, text), origin: 'reply' });
-        if (outcome === null || !wentOut(outcome.result)) return false;
-        // the composer's own focus action; a report main never got keeps the keyboard on the card that says so
-        if (outcome.unreported === null) useComposerStore.getState().focusTargets.get(appSessionId)?.focusFrame();
-        return true;
-      },
-      // Retry sends the last answer again, so never while a sent answer's report is still to be made
-      ...(last !== null && unreported === null && { retry: () => void send(last) }),
-      ...(unreported !== null && { recordAgain: () => void recordAgain(unreported) }),
-      cancel: () => {
-        setAskedOf(markId, { note: null });
-        void client.invoke('ownerChannel.cancel', { appSessionId, markId }).then(
-          (result) => {
-            if (!result.ok) setAskedOf(markId, { note: result.error.message });
-            else if (result.value.outcome === 'already_delivering') setAskedOf(markId, { note: QUESTION.alreadyOnItsWay });
-          },
-          (error: unknown) => setAskedOf(markId, { note: messageOf(error) }),
-        );
-      },
-      ...(foreign !== null && canTakeOver(foreign) && { takeOver: () => void takeOverSession(appSessionId, foreign) }),
-    },
-  };
+/** `transcript.markAllRead`: the focused pane's session's legacy items marked read; nothing while none is unread. */
+export function markAllRead(): void {
+  const appSessionId = focusedSession();
+  if (appSessionId === null) return;
+  if (unreadOf(useOwnerChannelStore.getState().bySession.get(appSessionId) ?? null) === 0) return;
+  void markAllReadOrSay(appSessionId);
 }

@@ -10,13 +10,21 @@
 // P5 O9 M6: the settlements this page's answers were told (`laneA.answer`'s `not_pending`), beside those the state carries,
 // so a card whose answer lost the race says who won.
 //
+// UX wave U8d (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, Interfaces §C): a session's subagents
+// as main derives their statuses, beside its jobs, with the origin their body names: the terminal (or `--bg` job) whose
+// bridge child the facts came from. They stand while the session's record names that holder, or none (it let go of the
+// session), or no record has arrived yet; a holder of any other origin (this app, another terminal) discards them,
+// whenever their last body arrived (the branch panel's fix wave, and the fence review's ruling).
+//
 // M5 lists the local machine: main's driver serves its own sessions. M9: another machine's lane A states come from main's
 // remote adapter, for the sessions some page watches there; each machine O8's rows list (`listedMachines`) is listed by
 // that machine as the roster gains it, into its own partition, and a machine the roster loses is emptied. A
 // `laneA.changed` from any machine is applied, after the list of its machine when one is on its way.
 import type { Job } from 'desk-hub/protocol';
+import { holderOrigin, type LaneAAgent } from '@shared/lane-a/agents';
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { SessionRecord } from '@shared/graph/session';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryKey, LaneACatalog, LaneADelivery, LaneAState } from '@shared/ipc/schema/lane-a';
 import { machineOf } from '@shared/machine/address';
@@ -49,8 +57,24 @@ export interface LaneAStore {
   uploads: ReadonlyMap<AppSessionId, readonly LaneAUpload[]>; // M7: the composer's uploads, until they went on or are dismissed
   usage: ReadonlyMap<AppSessionId, LaneAUsage>; // the latest `usage` a watch of this page heard (its snapshot's, then each turn's)
   jobs: ReadonlyMap<AppSessionId, readonly Job[]>; // the latest jobs a watch of this page heard (its snapshot's, then each `subagents`)
+  agents: ReadonlyMap<AppSessionId, NotedAgents>; // UX wave U8d: the latest subagents a watch of this page heard, beside the jobs
   told: ReadonlyMap<AppSessionId, ReadonlyMap<string, RequestSettlement>>; // M6: settlements an answer of this page was told, by request
 }
+
+// UX wave U8d: one session's subagents as the latest body said them, and the origin that body named (`holderOrigin`:
+// the holder whose bridge child the facts came from). Null: the body named none (a driver older than the key; another
+// machine's sminos today), whose statuses stand only while the watch that carried them lives, as before the key.
+export interface NotedAgents {
+  agents: readonly LaneAAgent[];
+  origin: string | null;
+}
+
+// Whether statuses of that origin stand under the session's holder (undefined: no record of the session here yet). They
+// do while no record says otherwise, while nothing holds the session, or while the process they came from does; a body
+// with no origin is fenced by its watch's end alone.
+export const heldByOrigin = (holder: SessionRecord['holder'] | undefined, origin: string | null): boolean =>
+  origin === null || holder === undefined || holder.kind === 'none' || holderOrigin(holder) === origin;
+const fenced = (appSessionId: AppSessionId, origin: string | null): boolean => !heldByOrigin(useSessions.getState().records.get(appSessionId)?.holder, origin);
 
 // How a request of a bridged session was settled (DX4 `settled`'s words, `winner` 'web' | 'terminal' | 'other'), or that
 // it is the terminal's to answer (`terminalOnly`: a background request past its window). P5 O9 M6.
@@ -67,7 +91,7 @@ export interface LaneAUsage {
   cost: { usd: number } | null;
 }
 
-const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), uploads: new Map(), usage: new Map(), jobs: new Map(), told: new Map() });
+const empty = (): LaneAStore => ({ states: new Map(), catalogs: new Map(), pendingSends: new Map(), uploads: new Map(), usage: new Map(), jobs: new Map(), agents: new Map(), told: new Map() });
 
 export const useLaneA = create<LaneAStore>()(empty);
 
@@ -188,6 +212,38 @@ export function laneAJobsWatchEnded(appSessionId: AppSessionId): void {
   });
 }
 export const useLaneAJobs = (appSessionId: AppSessionId): readonly Job[] | null => useLaneA((s) => s.jobs.get(appSessionId) ?? null);
+
+// UX wave U8d: the session's subagents as main derives their statuses (its jobs' rule: kept past the watch that heard
+// them only when none still runs, and only when their body named an origin). A body from a process that no longer holds
+// the session is not kept; what is held stands or goes by its own origin. A body that says what the held one says keeps
+// the held entry, so nothing that reads it recomputes.
+export function noteLaneAAgents(appSessionId: AppSessionId, agents: readonly LaneAAgent[], origin: string | null): void {
+  if (fenced(appSessionId, origin)) return;
+  useLaneA.setState((s) => {
+    const held = s.agents.get(appSessionId);
+    if (held !== undefined && held.origin === origin && JSON.stringify(held.agents) === JSON.stringify(agents)) return {};
+    return { agents: new Map(s.agents).set(appSessionId, { agents, origin }) };
+  });
+}
+export function laneAAgentsWatchEnded(appSessionId: AppSessionId): void {
+  const noted = useLaneA.getState().agents.get(appSessionId);
+  if (noted !== undefined && (noted.origin === null || noted.agents.some((a) => a.status === 'running'))) forgetLaneAAgents(appSessionId);
+}
+// Another holder of the session, or its binding to another machine's feed: they are gone, not hidden.
+export function forgetLaneAAgents(appSessionId: AppSessionId): void {
+  if (!useLaneA.getState().agents.has(appSessionId)) return;
+  useLaneA.setState((s) => {
+    const agents = new Map(s.agents);
+    agents.delete(appSessionId);
+    return { agents };
+  });
+}
+export const useLaneAAgents = (appSessionId: AppSessionId): readonly LaneAAgent[] | null => useLaneA((s) => s.agents.get(appSessionId)?.agents ?? null);
+// A holder change discards the statuses of every other origin, whether or not anything watches the session's graph.
+useSessions.subscribe((state, before) => {
+  if (state.records === before.records) return;
+  for (const [appSessionId, noted] of useLaneA.getState().agents) if (fenced(appSessionId, noted.origin)) forgetLaneAAgents(appSessionId);
+});
 
 // P5 O9 M6: what an answer was told of its request's settlement (`not_pending`), kept while the session is in lane A.
 export function noteLaneASettlement(appSessionId: AppSessionId, request: string, settlement: RequestSettlement): void {

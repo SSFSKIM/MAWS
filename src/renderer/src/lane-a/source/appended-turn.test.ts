@@ -5,7 +5,7 @@
 // bridge's mirror of either is not drawn.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { reportRows } from '../../owner/report/project';
+import { viewRowsOf } from '../../owner/view/test-support';
 import { createTranscriptStore } from '../../stores/transcript';
 import { rowsOf, withAllExpanded } from '../../transcript/model/derive';
 import type { Row } from '../../transcript/model/rows';
@@ -19,10 +19,13 @@ type User = Extract<Row, { kind: 'user' }>;
 async function drawn(rows: JsonObject[], off: JsonObject[] = []) {
   const store = createTranscriptStore();
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([]), null, new Set(off.map((row) => row.uuid as string))), { agentId: null as never });
+  // the session view: the same rows on a key whose lane is on (UX wave U2b)
+  await store.getState().attach('view', freshSource(rows, SESSION, subagentLookupOf([]), null, new Set(off.map((row) => row.uuid as string))), { agentId: null as never });
+  store.getState().setToHumanView('view', { lane: true, tailMessage: false });
   const entry = store.getState().entries.fresh;
   const turns = entry.state.order.map((id) => entry.state.turns.get(id)!);
   // a notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): `expanded` reads it unfolded
-  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}), entry, turns };
+  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: viewRowsOf(store.getState().entries.view), entry, turns };
 }
 const user = (rows: Row[], text: string) => rows.find((row): row is User => row.kind === 'user' && row.text === text);
 /** The notices the store holds, folded turns' too: the bridge's mirror lines would be among them. */

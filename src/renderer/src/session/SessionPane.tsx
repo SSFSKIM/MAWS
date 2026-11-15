@@ -38,7 +38,7 @@ import { useMachineMark } from '../app/machine-mark'; // P5 O7 M2
 import { HolderNotice } from './HolderNotice';
 import { useSessionControls } from './controls/controls-for'; // P5 O9 M4
 import { SessionTabNotes } from '../sessions/SessionDialogs'; // C10
-import { ReportBar } from '../owner/report/ReportBar'; // P2-C
+import { ViewSwitch } from '../owner/view/Switch'; // UX wave U2b
 import { READ_REFUSED } from '@shared/org/reader'; // board 525
 import { READER } from '../sessions/share/copy'; // board 525
 import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 525
@@ -132,8 +132,6 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
 
   return (
     <div className="flex h-full flex-col">
-      {/* P2-C (2026-10-09): while the session's owner-channel lane is on, the header with the view toggle */}
-      {!compact && <ReportBar appSessionId={id} />}
       {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
       {/* UX wave U4a (M7): a positioned box around the transcript's scroller, so the session's `/btw` card is a layer of the
           pane over the transcript's bottom right corner and not of the scroller */}
@@ -152,8 +150,12 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
           {noticed ? (
-            // C10: the notice carries the session's id for its actions
-            <HolderNotice appSessionId={id} holder={holder} reason={bridgeReason} />
+            // C10: the notice carries the session's id for its actions; UX wave U2b: the view's switch stands above it,
+            // as it stands above the composer's prompt, since nothing mounted in the composer is drawn here
+            <>
+              <ViewSwitch appSessionId={id} />
+              <HolderNotice appSessionId={id} holder={holder} reason={bridgeReason} />
+            </>
           ) : (
             // eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render
             <Composer appSessionId={id} paneIndex={paneIndex} />

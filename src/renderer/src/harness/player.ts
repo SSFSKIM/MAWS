@@ -27,6 +27,7 @@ export class HarnessSession {
   lastBatchMs = 0;
   deriveMs = 0; // the last batch that changed the row list
   readonly attached: Promise<void>; // the key hydrated
+  readonly ownerLane: boolean | undefined; // the to-human lane the transcript is mounted with (a report fixture's)
 
   // `paged`: the fixture is a long session's disk history, opened on its newest window, older pages on their way after
   // `delayMs` each (paged.ts); nothing streams.
@@ -34,6 +35,7 @@ export class HarnessSession {
     this.player = replaySource(paged ? [] : fixture.events, { speed, key: this.key });
     this.eventCount = fixture.events.length;
     this.events = fixture.events;
+    this.ownerLane = fixture.ownerLane;
     const { player } = this;
     this.source = paged ? pagedSource(this.key, fixture.events, paged.delayMs) : {
       key: this.key,

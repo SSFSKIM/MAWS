@@ -6,7 +6,7 @@
 // bubble of the owner's.
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
-import { reportRows } from '../../owner/report/project';
+import { viewRowsOf } from '../../owner/view/test-support';
 import { createTranscriptStore } from '../../stores/transcript';
 import { rowsOf, withAllExpanded } from '../../transcript/model/derive';
 import type { Row } from '../../transcript/model/rows';
@@ -27,9 +27,12 @@ const delivered = (call: string, summary: string) => `The human responded to you
 async function drawn(rows: JsonObject[]) {
   const store = createTranscriptStore();
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([])), { agentId: null as never });
+  // the session view: the same rows on a key whose lane is on (UX wave U2b)
+  await store.getState().attach('view', freshSource(rows, SESSION, subagentLookupOf([])), { agentId: null as never });
+  store.getState().setToHumanView('view', { lane: true, tailMessage: false });
   const entry = store.getState().entries.fresh;
   // the notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): read it unfolded
-  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}) };
+  return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: viewRowsOf(store.getState().entries.view) };
 }
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
 const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' && r.class === 'answer' ? [r.text] : []));

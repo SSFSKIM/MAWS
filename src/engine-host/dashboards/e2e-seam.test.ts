@@ -111,6 +111,16 @@ describe('the seam’s commands', () => {
     expect(outside.isError).toBe(true);
   });
 
+  // UX wave U10b (fix wave 3): the scenes' agents delete their own drafts through the seam (e2e/cross-build.spec.ts)
+  it('serves the agent’s delete of its own draft, which Undo can take back, and refuses another session’s', async () => {
+    const mine = result<{ artifactId: string }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_create', args: { kind: 'document', title: 'Draft notes', content: '# Draft notes' } }));
+    const refused = answered(await seam.run({ cmd: 'call', session: 'B', tool: 'artifact_delete', args: { artifact: mine.artifactId } }));
+    expect(refused.isError).toBe(true);
+    expect(refused.text).toContain('"why":"otherSession"');
+    expect(result(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_delete', args: { artifact: mine.artifactId } }))).toEqual({ status: 'deleted', artifactId: mine.artifactId, kind: 'document', title: 'Draft notes' });
+    expect(world.store.deletion(mine.artifactId)).toEqual({ title: 'Draft notes', kind: 'document', undoable: true });
+  });
+
   it('serves B’s thread tools on the dashboard, and answers an unknown tool or command by name', async () => {
     const { artifactId } = result<{ artifactId: string }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_create', args: { kind: 'dashboard', title: 'Board', content: MARKDOWN } }));
     expect(result<{ threads: unknown[] }>(await seam.run({ cmd: 'call', session: 'A', tool: 'artifact_comments', args: { artifact: artifactId } })).threads).toEqual([]);

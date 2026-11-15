@@ -101,13 +101,21 @@ export interface TranscriptUi {
   stamps: Map<TurnId, number>;
   version: number;
   // P2-C start (2026-10-09; the P2-C document, Design §7): the owner channel's lane for the session (absent: off, P1's
-  // drawing), under which a commentary block with a mark stays in view when its turn folds, as an inked one does; the
-  // view the reader chose (absent: the report while the lane is on); and the turns whose working record they opened in
-  // the report. Only `ownerLane` reaches a turn's rows; the other two are read by the report projection.
+  // drawing), under which a commentary block with a mark stays in view when its turn folds, as an inked one does; and
+  // the view the reader chose (absent: the report while the lane is on).
   ownerLane?: boolean;
   view?: 'report' | 'transcript';
-  reportOpenTurns?: Set<TurnId>;
   // P2-C end
+  // UX wave U2b (the execution document, Interfaces §C): the to-human view where MAWS draws it. `openStretches`, the
+  // stretches the reader opened, by key (`owner/view/mirror.ts`); `tailMessage`, whether the rows the transcript was
+  // handed from outside the store hold a message, as `Transcript` reports it; `noTurnFold`, set by the store while the
+  // lane is on and the session holds a message (its events, a streaming block, or those outside rows): no turn folds,
+  // in either view, and the mirror applies; `modDraws` (the second pull request), the mod draws the view here.
+  // `noTurnFold` reaches every turn's rows; the others are read by the mirror's callers.
+  openStretches?: Set<string>;
+  tailMessage?: boolean;
+  noTurnFold?: boolean;
+  modDraws?: boolean;
   // UX wave U3 (UC-3; the U3a document, Interfaces F): the target of the tab's last jump (`jumpTo`, the cell jump,
   // `jumpToMessage`), each replacing the last; absent before the first. Where a mod draws a fold MAWS cannot open, the
   // row or cell it names asks no mod's site and MAWS draws it; U2 reads it for its own asks and may clear it by its rule.

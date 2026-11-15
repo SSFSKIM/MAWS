@@ -264,7 +264,7 @@ describe('shell focus actions from native browser views', () => {
     electron.focused = null;
   });
 
-  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open'])(
+  it.each(['region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther', 'shortcuts.open', 'palette.open', 'file.open'])(
     '%s focuses the browser view’s actual shell host before delivering the action to that page alone', (id) => {
       const otherPage = contents(1);
       const hostPage = contents(2);
@@ -374,13 +374,27 @@ describe('the installed menu', () => {
 describe('File ▸ Save file', () => {
   it('follows the tab items as its own group, at ⌘S', () => {
     const file = top(menuTemplate(ACTIONS, {}, ALL, vi.fn()), 'File')!.submenu as Item[];
-    expect(file.map((item) => item.id ?? item.type)).toEqual(['session.new', 'separator', 'tab.close', 'tab.reopen', 'separator', 'file.save', 'file.commentLine']);
+    expect(file.map((item) => item.id ?? item.type)).toEqual(['session.new', 'separator', 'tab.close', 'tab.reopen', 'separator', 'file.open', 'file.save', 'file.commentLine']); // U6e: Open File…
     expect(byId(file, 'file.save')).toMatchObject({ label: 'Save file', accelerator: 'Cmd+S' });
     expect(byId(file, 'file.commentLine')).toMatchObject({ label: 'Comment on this line' }); // E11: unbound by default
     expect(byId(file, 'file.commentLine')?.accelerator).toBeUndefined();
   });
 });
 // E5 end
+
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 13; A3, A11): Open File…
+describe('File ▸ Open File…', () => {
+  it('stands before Save file at ⌘O, and is disabled until the page registers its handler', () => {
+    const file = (enabled: ReadonlySet<ActionId>) => top(menuTemplate(ACTIONS, {}, enabled, vi.fn()), 'File')!.submenu as Item[];
+    expect(byId(file(ALL), 'file.open')).toMatchObject({ label: 'Open File…', accelerator: 'Cmd+O', enabled: true });
+    expect(byId(file(new Set(ACTION_IDS.filter((id) => id !== 'file.open'))), 'file.open')).toMatchObject({ enabled: false });
+    expect(byId(file(new Set()), 'file.open')).toMatchObject({ enabled: false });
+  });
+
+  it('keeps its chord from a page of the in-app browser, which leaves ⌘O to the menu', () => {
+    expect(keyAction({ type: 'keyDown', key: 'o', meta: true, control: false, alt: false, shift: false }, { findOpen: false, loading: false })).toBeNull();
+  });
+});
 
 // U6a start (the UX wave's U6, first landing; A9, A7's first sentence, decisions 2 to 5, 10 and 12): the menus drawn
 // from the table's order, placements and submenus, with separators between groups of ids. Every generic assertion runs

@@ -13,6 +13,7 @@ import { remoteSessionState } from '../lane-b/test-support/remote-session';
 import { savedOf } from '../tools/document/header';
 import { createArtifactHost, FIRST_FRAME_MS, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
 import { recordArtifactMachine, resetArtifactMachines } from './machines';
+import { resetDeletedReplicas, unsentWhileDeleted } from './deleted-replicas'; // UX wave U10b
 import { windowDocPorts } from './window-ports';
 
 type Listener = (event: { data?: unknown }) => void;
@@ -549,11 +550,753 @@ describe('an artifact on another machine (M5b)', () => {
     const states: Array<string | undefined> = [];
     handle.subscribe((state) => states.push(state.refused));
     later.answers.set('artifacts.open', refused); // the member lost `view`: the stream closed `removed`, and the reopen is refused
+    later.answers.set('artifacts.get', refused); // fix wave 1: and so is the read of why, which is the host's answer
     later.host.dropAll();
     await settle(RECONNECT_BACKOFF_MS[0]);
     expect(handle.state().refused).toBe(words);
     expect(states).toContain(words);
     await settle(60_000);
     expect(later.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+  });
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): the host's fence closes a replica's
+// port at the delete and main refuses its reopen `notFound`. A synced replica of an artifact an agent deleted waits for
+// its restore, read-only, with what the host never acknowledged; it opens again at the artifact's `created` and sends it.
+// Any other refusal for good ends it as before.
+// Fix wave 4 (the architect's ruling on the branch panel's findings): a parked replica leaves parking only on a current
+// read that answers not-deleted, issued after the deletion was observed. Each row: the trigger, what the read it makes
+// answers (and when it was issued relative to the deletion), and the state after.
+describe('a parked replica leaves only on a current read that answers live (fix wave 4)', () => {
+  afterEach(() => resetDeletedReplicas());
+  const NOT_FOUND = { ok: false, error: { code: 'invalid_input', message: `no artifact ${ARTIFACT}`, issues: { reason: 'notFound', data: {} } } } as const;
+  const DELETED = { ok: true, value: { artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable: true } } } as const;
+  const LIVE = { ok: true, value: { artifact: { id: ARTIFACT } } } as never;
+  const DOWN = { ok: false, error: { code: 'host_unavailable', message: 'restarting' } } as const;
+  // an edit the fence refused, kept by a replica parked at its reopen's refusal
+  async function parked() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', DELETED);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    const restore = () => {
+      h.answers.delete('artifacts.open');
+      h.answers.set('artifacts.get', LIVE);
+    };
+    return { h, handle, restore };
+  }
+  // fix wave 5: the read a trigger makes, held, so a row shows the replica still parked until that read answers
+  const heldRead = (h: ReturnType<typeof harness>) => {
+    let answer!: (result: unknown) => void;
+    const result = new Promise((resolve) => (answer = resolve));
+    const before = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', (() => result) as never);
+    return { issued: () => h.calls.filter((c) => c.name === 'artifacts.get').length > before, live: () => answer(LIVE) };
+  };
+  const stillParked = (handle: Awaited<ReturnType<typeof parked>>['handle']) => expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+  const writableWithTheEdit = async (h: ReturnType<typeof harness>, handle: Awaited<ReturnType<typeof parked>>['handle']) => {
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+  };
+
+  it('`created`; read after it, answering live: writable, the kept edit sent', async () => {
+    const { h, handle } = await parked();
+    const read = heldRead(h);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle); // the event alone ends nothing: its read does
+    read.live();
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('`created`; read after it, still answering deleted (an Undo that did not land): parked', async () => {
+    const { h, handle } = await parked();
+    const asked = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    expect(h.calls.filter((c) => c.name === 'artifacts.get').length).toBe(asked + 1);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    handle.close();
+  });
+
+  it('the host’s `ready` after a restart, the restore missed while it was down and the first recovery open failing; read after it, answering live: writable, the kept edit sent', async () => {
+    const { h, handle } = await parked();
+    h.hostState('restarting', 8);
+    const read = heldRead(h);
+    h.answers.set('artifacts.open', () => {
+      h.answers.delete('artifacts.open');
+      return DOWN;
+    });
+    h.hostState('ready', 9);
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
+    await settle();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('the backoff, the restore never announced; read at its next step, answering live: writable, the kept edit sent', async () => {
+    const { h, handle } = await parked();
+    const read = heldRead(h);
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  // fix wave 5: the backoff stays armed while parked, at its last step, long after it would have run out
+  it('the backoff run out, the restore never announced a minute later; read at its capped step, answering live: writable, the kept edit sent', async () => {
+    const { h, handle, restore } = await parked();
+    await settle(60_000); // every read answering deleted
+    stillParked(handle);
+    const asked = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    restore();
+    await settle(RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1]);
+    expect(h.calls.filter((c) => c.name === 'artifacts.get').length).toBeGreaterThan(asked);
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('`artifacts.resync` from its machine, the `created` lost in the feed’s gap; read after it, answering live: writable, the kept edit sent', async () => {
+    const { h, handle } = await parked();
+    const read = heldRead(h);
+    h.emit('artifacts.resync', { revision: 2 } as never, TEST_MACHINE);
+    await settle();
+    expect(read.issued()).toBe(true);
+    stillParked(handle);
+    read.live();
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('a step 2 from before the deletion, held and then applied; no read answering live: parked though it synced', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.holdRemote(true);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen: the host's step 2 is held
+    expect(handle.state().synced).toBe(false);
+    h.answers.set('artifacts.get', DELETED);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(handle.state().readOnly).toBe(true));
+    handle.holdRemote(false);
+    await settle();
+    expect(handle.state()).toMatchObject({ synced: true, readOnly: true });
+    handle.close();
+  });
+
+  it('a read issued before the deletion was observed, answering live once the replica is parked: parked', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    let early!: (answer: unknown) => void;
+    const reads: unknown[] = [new Promise((resolve) => (early = resolve)), DELETED];
+    h.answers.set('artifacts.get', (() => reads.shift()) as never);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' }); // the first read, held
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the second read parks it
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    early(LIVE);
+    await settle();
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    handle.close();
+  });
+
+  // Fix wave 6 (the architect's ruling on the delta review): while parked, exactly one of a read in flight and the
+  // backoff's timer holds. A trigger during a read marks "ask again" once; the read, once settled, issues one more read
+  // at once (unless it answered live and current), else arms the capped backoff.
+  const GONE = { ok: true, value: { artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable: false } } } as const;
+  const CAP = RECONNECT_BACKOFF_MS[RECONNECT_BACKOFF_MS.length - 1];
+  // each read the replica issues, held until the test answers it by its index
+  const eachRead = (h: ReturnType<typeof harness>) => {
+    const pending: ((result: unknown) => void)[] = [];
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', (() => new Promise((resolve) => pending.push(resolve))) as never);
+    return { count: () => pending.length, answer: (index: number, result: unknown) => pending[index]!(result) };
+  };
+  // parked with its backoff at the capped step: the read after the next one comes a step of CAP later
+  async function parkedAtCap() {
+    const parkedReplica = await parked();
+    await settle(RECONNECT_BACKOFF_MS[1]); // a poll answering deleted: the next step is the cap
+    return parkedReplica;
+  }
+  // a replica whose reopen's step 2 is held when an agent's delete parks it, a poll's read then out
+  async function parkedWithAStep2Held() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.holdRemote(true);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen: the host's step 2 is held
+    expect(handle.state().synced).toBe(false);
+    h.answers.set('artifacts.get', DELETED);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await settle();
+    expect(handle.state()).toMatchObject({ synced: false, readOnly: true });
+    const reads = eachRead(h);
+    await settle(RECONNECT_BACKOFF_MS[1]); // the poll's read, out
+    expect(reads.count()).toBe(1);
+    return { h, handle, reads };
+  }
+
+  it('fix wave 6: `created` while a poll’s read is out at the capped step issues no second read until that one settles; then one, whose live answer unparks', async () => {
+    const { h, handle } = await parkedAtCap();
+    const reads = eachRead(h);
+    await settle(CAP);
+    expect(reads.count()).toBe(1); // the poll's read, out
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    expect(reads.count()).toBe(1); // marked, not asked
+    await settle(CAP * 2);
+    expect(reads.count()).toBe(1); // no timer while a read is out
+    reads.answer(0, DELETED); // late, and not live
+    await settle();
+    expect(reads.count()).toBe(2); // the one read the mark asked for, at once
+    await settle(CAP * 2);
+    expect(reads.count()).toBe(2);
+    stillParked(handle);
+    reads.answer(1, LIVE);
+    await settle();
+    await writableWithTheEdit(h, handle);
+    expect(reads.count()).toBe(2);
+    handle.close();
+  });
+
+  it('fix wave 6: a single read that answers nothing (the host silent) is asked again at each capped step, one read at a time', async () => {
+    const { h, handle } = await parkedAtCap();
+    h.answers.set('artifacts.get', DOWN);
+    const asked = h.calls.filter((c) => c.name === 'artifacts.get').length;
+    for (let step = 1; step <= 4; step += 1) {
+      await settle(CAP);
+      expect(h.calls.filter((c) => c.name === 'artifacts.get').length).toBe(asked + step);
+    }
+    stillParked(handle);
+    handle.close();
+  });
+
+  it('fix wave 6: a step 2 from before the deletion, applied while a poll’s read is out, keeps the replica parked and asks again once that read settles', async () => {
+    const { handle, reads } = await parkedWithAStep2Held();
+    handle.holdRemote(false); // the first sync: a ticket bump while the read is out
+    await settle();
+    expect(handle.state()).toMatchObject({ synced: true, readOnly: true });
+    expect(reads.count()).toBe(1);
+    reads.answer(0, DELETED);
+    await settle();
+    expect(reads.count()).toBe(2); // asked again at once
+    expect(handle.state()).toMatchObject({ synced: true, readOnly: true });
+    reads.answer(1, DELETED);
+    await settle(CAP);
+    expect(reads.count()).toBe(3); // and the backoff armed after it
+    expect(handle.state().readOnly).toBe(true);
+    handle.close();
+  });
+
+  it('fix wave 6: the host leaving `ready` with the port already off, while a poll’s read is out, leaves a read asked; its live answer unparks with no `ready`', async () => {
+    const { h, handle } = await parked();
+    const reads = eachRead(h);
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    expect(reads.count()).toBe(1); // the poll's read, out
+    h.hostState('restarting', 8); // a ticket bump, the port off: nothing to disconnect
+    await settle();
+    expect(reads.count()).toBe(1);
+    reads.answer(0, DOWN);
+    await settle();
+    expect(reads.count()).toBe(2); // asked again at once, the host still down
+    reads.answer(1, LIVE);
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('fix wave 6: the first sync while a poll’s read is out supersedes it (its live answer decides nothing); the read asked after it unparks with no `ready`', async () => {
+    const { handle, reads } = await parkedWithAStep2Held();
+    handle.holdRemote(false);
+    await settle();
+    reads.answer(0, LIVE); // issued before the sync: not current
+    await settle();
+    expect(handle.state()).toMatchObject({ synced: true, readOnly: true });
+    expect(reads.count()).toBe(2);
+    reads.answer(1, LIVE);
+    await settle();
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false });
+    handle.close();
+  });
+
+  for (const trigger of ['created', 'artifacts.resync'] as const) {
+    it(`fix wave 6: ${trigger} during a read that answers deleted for good ends nothing: one more read, whose live answer unparks`, async () => {
+      const { h, handle } = await parked();
+      const reads = eachRead(h);
+      await settle(RECONNECT_BACKOFF_MS[1]);
+      expect(reads.count()).toBe(1);
+      if (trigger === 'created') h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+      else h.emit('artifacts.resync', { revision: 2 } as never, TEST_MACHINE);
+      await settle();
+      expect(reads.count()).toBe(1); // marked, not asked
+      reads.answer(0, GONE); // it may predate the event
+      await settle();
+      expect(handle.state().refused).toBeUndefined();
+      stillParked(handle);
+      expect(reads.count()).toBe(2);
+      reads.answer(1, LIVE);
+      await settle();
+      await writableWithTheEdit(h, handle);
+      handle.close();
+    });
+  }
+
+  // Fix 6b: the coalescer's invariant, read at each step: parked, at most one read of the standing out, and never one
+  // with the backoff's timer armed (with its port off, the one timer a parked replica holds)
+  const heldReads = (h: ReturnType<typeof harness>) => {
+    const pending: ((result: unknown) => void)[] = [];
+    let answered = 0;
+    h.answers.set('artifacts.get', (() => new Promise((resolve) => pending.push(resolve))) as never);
+    return {
+      count: () => pending.length,
+      out: () => pending.length - answered,
+      answer: (index: number, result: unknown) => {
+        answered += 1;
+        pending[index]!(result);
+      },
+    };
+  };
+  const coalesced = (reads: { out: () => number }, holds: 'read' | 'timer') => {
+    expect(reads.out(), 'reads out').toBe(holds === 'read' ? 1 : 0);
+    expect(vi.getTimerCount(), 'timers armed').toBe(holds === 'timer' ? 1 : 0);
+  };
+  // a reopen whose answer is held until the test refuses it notFound; the opens after it are answered
+  const heldOpen = (h: ReturnType<typeof harness>) => {
+    let refuse!: () => void;
+    const result = new Promise((resolve) => (refuse = () => resolve(NOT_FOUND)));
+    h.answers.set('artifacts.open', (() => result) as never);
+    return {
+      refuse: () => {
+        h.answers.delete('artifacts.open');
+        refuse();
+      },
+    };
+  };
+  // a replica with an edit the host lacks, its reopen pending, parked by the `deleted` read: the backoff armed
+  async function parkedWithAReopenPending() {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    const open = heldOpen(h);
+    const reads = heldReads(h);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen, pending
+    expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await settle();
+    expect(reads.count()).toBe(1); // unparked: the direct read
+    reads.answer(0, DELETED);
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'timer');
+    return { h, handle, open, reads };
+  }
+
+  it('fix 6b: a reopen refused only after a `deleted` parked the replica asks through the coalescer: one read out or the timer, never both', async () => {
+    const { h, handle, open, reads } = await parkedWithAReopenPending();
+    open.refuse();
+    await settle();
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2);
+    stillParked(handle);
+    reads.answer(1, DELETED);
+    await settle();
+    coalesced(reads, 'timer');
+    await settle(CAP);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(3);
+    reads.answer(2, LIVE);
+    await settle();
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('fix 6b: `ready` while a parked poll’s read is out and a reopen is still pending marks it to ask again: a gone answer then ends nothing, and one more read follows', async () => {
+    const { h, handle, open, reads } = await parkedWithAReopenPending();
+    await settle(RECONNECT_BACKOFF_MS[1]); // the poll
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2);
+    h.hostState('ready', 9);
+    await settle();
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(2); // marked, not asked
+    reads.answer(1, GONE); // it may predate the `ready`
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(3);
+    reads.answer(2, LIVE);
+    await settle();
+    expect(handle.state().readOnly).toBe(false);
+    open.refuse(); // the reopen from before the park, refused at last: unparked, the replica reads directly
+    await settle();
+    expect(reads.count()).toBe(4);
+    reads.answer(3, LIVE);
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await writableWithTheEdit(h, handle);
+    handle.close();
+  });
+
+  it('fix 6b: a direct read still out when another read parks the replica holds the backoff back until it settles, and its live answer decides nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const reads = heldReads(h);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' }); // the first direct read, out
+    await settle();
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the second direct read
+    expect(reads.count()).toBe(2);
+    reads.answer(1, DELETED); // parks the replica, the first still out
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    reads.answer(0, LIVE); // issued before the deletion was observed
+    await settle();
+    stillParked(handle);
+    coalesced(reads, 'timer');
+    expect(reads.count()).toBe(2);
+    handle.close();
+  });
+
+  it('a quick delete, Undo and delete, then a refused reopen, parks with the inherited reads out: none starts another, decides anything or arms a timer, and the last carries the wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const reads = heldReads(h);
+    const change = (to: 'created' | 'deleted') => h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: to });
+    change('deleted'); // the first direct read
+    await settle();
+    change('created'); // Undo: unparked, it reads nothing
+    await settle();
+    change('deleted'); // the second direct read
+    await settle();
+    expect(reads.count()).toBe(2);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]); // the reopen refused: the third direct read
+    expect(reads.count()).toBe(3);
+    reads.answer(2, DELETED); // parks it, two reads inherited
+    await settle();
+    stillParked(handle);
+    expect(reads.out()).toBe(2);
+    expect(vi.getTimerCount()).toBe(0); // no timer at the park
+    change('created'); // triggers while the inherited reads are out only mark
+    h.hostState('ready', 9);
+    await settle(CAP * 2);
+    expect(reads.count()).toBe(3);
+    expect(vi.getTimerCount()).toBe(0);
+    stillParked(handle);
+    reads.answer(0, LIVE); // stale: unparks nothing
+    await settle();
+    expect(reads.count()).toBe(3);
+    expect(reads.out()).toBe(1);
+    expect(vi.getTimerCount()).toBe(0);
+    stillParked(handle);
+    reads.answer(1, GONE); // stale: ends nothing; the last out carries the wait (marked: one read)
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    stillParked(handle);
+    coalesced(reads, 'read');
+    expect(reads.count()).toBe(4);
+    reads.answer(3, DELETED);
+    await settle();
+    coalesced(reads, 'timer');
+    stillParked(handle);
+    handle.close();
+  });
+});
+
+describe('an artifact an agent deleted (UX wave U10b)', () => {
+  afterEach(() => resetDeletedReplicas());
+  const NOT_FOUND = { ok: false, error: { code: 'invalid_input', message: `no artifact ${ARTIFACT}`, issues: { reason: 'notFound', data: {} } } } as const;
+  const deleted = (undoable: boolean) => ({ ok: true, value: { artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable } } }) as const;
+  const opens = (h: ReturnType<typeof harness>) => h.calls.filter((c) => c.name === 'artifacts.open').length;
+
+  it('waits read-only with the edit the fence refused, asks nothing more, and sends it once the artifact is restored', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', deleted(true));
+    h.host.dropAll(); // the fence: the port closed before the edit reached the host
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(handle.state().refused).toBeUndefined();
+    expect(savedOf(handle.state(), false, false)).toBe('readonly'); // the editor takes no edit
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    const asked = opens(h);
+    await settle(60_000);
+    expect(opens(h)).toBe(asked); // no backoff while it waits
+    h.answers.delete('artifacts.open');
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'updated' });
+    await settle(1_000);
+    expect(opens(h)).toBe(asked); // only the undelete's `created` ends the wait
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: and the read it makes, answering live
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
+    handle.close();
+  });
+
+  it('turns read-only at the artifact’s `deleted` once the host says Undo can take it back, before any edit is refused, and writable at `created`', async () => {
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.answers.set('artifacts.get', deleted(false));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(h.calls.filter((c) => c.name === 'artifacts.get')).toHaveLength(1));
+    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }); // the person's own delete: nothing to wait for
+    h.answers.set('artifacts.get', deleted(true));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: true }));
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false); // nothing typed: nothing kept
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the read `created` makes answers live
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }));
+    handle.doc.get('root').insert(0, 'After the restore. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the restore. ');
+    handle.close();
+  });
+
+  it('is done waiting at the host’s ready when the read it makes answers live, though it never heard the restore (fix wave 4: a sync alone never ends it)', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', deleted(true));
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state().readOnly).toBe(true);
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never);
+    h.hostState('ready', 9);
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false }));
+    handle.close();
+  });
+
+  it('a reopen refused while the restore lands opens again; a delete Undo cannot take back ends the replica as before', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const raced = harness();
+    const live = await raced.artifacts.open(ARTIFACT);
+    raced.answers.set('artifacts.open', () => {
+      raced.answers.delete('artifacts.open'); // refused once, restored by the time the host is asked why
+      return NOT_FOUND;
+    });
+    raced.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never);
+    raced.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    await vi.waitFor(() => expect(live.state()).toMatchObject({ phase: 'live', readOnly: false }));
+    expect(live.state().refused).toBeUndefined();
+    live.close();
+
+    const library = harness();
+    const handle = await library.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed. ');
+    library.answers.set('artifacts.open', NOT_FOUND);
+    library.answers.set('artifacts.get', deleted(false));
+    library.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state().refused).toBe(`no artifact ${ARTIFACT}`);
+    expect(handle.state().readOnly).toBe(false);
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
+  });
+
+  // Fix wave 1 (review items 2 and 3): the host's word on the deletion is read once per change, and a read that a later
+  // change overtook, or that failed, decides nothing for good.
+  const held = () => {
+    let answer!: (result: unknown) => void;
+    const result = new Promise((resolve) => (answer = resolve));
+    return { result, answer };
+  };
+  const gets = (h: ReturnType<typeof harness>) => h.calls.filter((c) => c.name === 'artifacts.get').length;
+  const FAILED = { ok: false, error: { code: 'host_unavailable', message: 'restarting' } } as const;
+
+  it('a `deleted` read the restore overtook parks nothing: `created` while the host’s answer is held leaves the editor writable', async () => {
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(gets(h)).toBe(1));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    read.answer(deleted(true)); // what the host said before the undelete
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false });
+    handle.doc.get('root').insert(0, 'After the restore. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the restore. ');
+    handle.close();
+  });
+
+  it('a refused reopen whose standing read the restore overtook opens again and sends the kept edit, read-only at no point after', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', () => {
+      h.answers.delete('artifacts.open');
+      return NOT_FOUND;
+    });
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    read.answer(deleted(true));
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    expect(handle.state().refused).toBeUndefined();
+    handle.close();
+  });
+
+  it('a standing read that fails keeps the replica read-only with its edit and asks again on the backoff; the host’s answer, then Undo, sends the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', FAILED);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(handle.state().refused).toBeUndefined();
+    h.answers.set('artifacts.get', deleted(true)); // the host answers again
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    expect(gets(h)).toBe(2);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: Undo landed, as the read after `created` says
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
+  });
+
+  it('Undo while the standing is unknown opens it again and sends the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', FAILED);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    h.answers.delete('artifacts.open');
+    h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the host answers the read `created` makes
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
+  });
+
+  // Fix wave 2 (review item 2 across a host recovery): a `deleted` read the host's restart and a newer sync overtook
+  it('a `deleted` read that a host restart and a newer writable sync overtook parks nothing when its answer lands', async () => {
+    const h = harness();
+    h.hostState('ready', 7);
+    const handle = await h.artifacts.open(ARTIFACT);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(gets(h)).toBe(1));
+    h.hostState('restarting', 8);
+    h.hostState('ready', 9);
+    await vi.waitFor(() => expect(h.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2));
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false }));
+    read.answer(deleted(true)); // what the host said before its restart
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false });
+    handle.doc.get('root').insert(0, 'After the recovery. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the recovery. ');
+    handle.close();
+  });
+
+  // Fix wave 2 (review item 3 for typed refusals): the store's own word that it is not there to ask is no answer either
+  it('a standing read refused `unavailable` or `storeTooNew` (typed, as the host refuses when its store cannot open) keeps the replica read-only with its edit, as an untyped failure does', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    for (const reason of ['unavailable', 'storeTooNew'] as const) {
+      const h = harness();
+      const handle = await h.artifacts.open(ARTIFACT);
+      handle.doc.get('root').insert(0, 'Typed just before. ');
+      h.answers.set('artifacts.open', NOT_FOUND);
+      h.answers.set('artifacts.get', { ok: false, error: { code: 'internal', message: 'the artifact store could not be opened this run', issues: { reason, data: {} } } } as const);
+      h.host.dropAll();
+      await settle(RECONNECT_BACKOFF_MS[0]);
+      expect(gets(h)).toBe(1);
+      expect(handle.state(), reason).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+      expect(handle.state().refused, reason).toBeUndefined();
+      h.answers.delete('artifacts.open');
+      h.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never); // fix wave 4: the read `created` makes answers live
+      h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+      await settle();
+      await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+      expect(text(h.host.doc), reason).toBe('Typed just before. ');
+      handle.close();
+    }
+  });
+
+  it('a refusal whose standing read went stale (the host left ready meanwhile) ends nothing: the next ready opens it again with the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    h.hostState('restarting', 8);
+    read.answer(deleted(false)); // said by the host that went
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    h.answers.delete('artifacts.open');
+    h.hostState('ready', 9);
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
   });
 });

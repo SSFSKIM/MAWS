@@ -3,8 +3,8 @@
 // through MAWS's review view; its Info tab says where the session runs, its model (from the transcript), and its
 // context use and cost from DX4 `usage` — unavailable with no bridge, then the first one, an update after a turn, and
 // the same after a reconnect. And the main transcript's `<message>` marks — drawn in the center's session view since
-// DC9's M3, as MAWS's report draws them — are its message cards while they stream and once settled, and the turn a
-// subagent's hand-back opens reads as the session's own. The desk control surface's M0 (A1): the Info tab reads the
+// DC9's M3, as MAWS's report draws them — are drawn as the to-human mod draws a message (UX wave U2b) while they stream
+// and once settled, and the turn a subagent's hand-back opens reads as the session's own. The desk control surface's M0 (A1): the Info tab reads the
 // engine's status (`read status`) when it opens and on Refresh, where the session's bridge can answer it, and otherwise
 // says the plugin cannot and what it would need.
 import { readFileSync } from 'node:fs';
@@ -109,7 +109,7 @@ test('session info: where it runs, its model, and context and cost from usage �
   await expect(info('cost')).toHaveText('$0.0053');
 });
 
-test("a streaming message stays authored text until closed, then receives unboxed ink; a hand-back's turn reads Continued", async ({ page, hub }) => {
+test("a streaming message is drawn as the message under its label and an ellipsis, then settled as the mod's drawing, its label in the accent, no bar and no \"To you\"; a hand-back's turn reads Continued", async ({ page, hub }) => {
   const { player } = await openDepth(page, hub);
   const view = page.getByTestId('session-view');
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
@@ -119,33 +119,43 @@ test("a streaming message stays authored text until closed, then receives unboxe
     player.advance(1);
     await page.waitForTimeout(20);
   }
-  // UX1-C preserves unfinished output tags literally instead of repairing them into a card.
-  await expect(stream.last()).toContainText('<message>\nBoth subagents rep');
-  await expect(stream.last().locator('.owner-message-ink')).toHaveCount(0);
+  // UX wave U2b (M2): an open message is drawn as the message it is while it streams, its label `● message …`, its
+  // mark out of sight; never repaired into a card.
+  await expect(stream.last()).not.toContainText('<message>');
+  await expect(stream.last().locator('.owner-message-ink')).toHaveCount(1);
+  await expect(stream.last().locator('.owner-message-ink')).toContainText('Both subagents rep');
+  await expect(stream.last().locator('.owner-message-label')).toHaveText('● message …');
 
   player.advance(player.script.length);
   await expect(stream).toHaveCount(0);
   const settled = view.locator('[data-kind="assistant_text"]').filter({ hasText: 'Both subagents reported back.' });
   await expect(settled).toHaveCount(1); // one answer row
   await expect(settled).toContainText('Both subagents reported back. The kettle is on the second shelf, and the last word in words.txt is "gamma".');
-  // #332 interim: the message is one mark around all its blocks (not one per Markdown leaf), in the text colour with an
-  // accent bar and an accent "To you" label, in both themes.
+  // UX wave U2b (A12; ticket 332 closes): the message is one wrapper around all its blocks (not one per Markdown leaf),
+  // the mod's drawing: its label `● message` first, bold in the accent colour, then the body in the text colour,
+  // indented; no bar down the side and no 'To you', in both themes.
   const mark = settled.locator('.owner-message-ink');
   await expect(mark).toHaveCount(1);
+  await expect(mark.locator('.owner-message-label')).toHaveText('● message');
   await expect(mark.locator('p').first()).toContainText('Both subagents reported back.');
   for (const theme of ['light', 'dark']) {
     await page.evaluate((name) => { document.documentElement.dataset.theme = name; }, theme);
     const look = await mark.evaluate((el) => {
       const paint = (property: string) => { const probe = document.createElement('i'); probe.style.color = `var(${property})`; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; };
       const box = getComputedStyle(el);
-      const label = getComputedStyle(el, '::before');
-      return { text: getComputedStyle(el.querySelector('p')!).color, fg: paint('--fg'), accent: paint('--accent'), bar: box.borderLeftColor, barWidth: box.borderLeftWidth, barStyle: box.borderLeftStyle, label: label.content, labelColor: label.color };
+      const label = getComputedStyle(el.querySelector('.owner-message-label')!);
+      const body = el.querySelector('p')!;
+      return {
+        text: getComputedStyle(body).color, fg: paint('--fg'), accent: paint('--accent'), labelColor: label.color, labelWeight: label.fontWeight,
+        indent: body.getBoundingClientRect().left - el.querySelector('.owner-message-label')!.getBoundingClientRect().left,
+        barWidth: box.borderLeftWidth, before: getComputedStyle(el, '::before').content,
+      };
     });
     expect(look.text, `${theme}: text colour`).toBe(look.fg);
     expect(look.text, `${theme}: text is not the accent`).not.toBe(look.accent);
-    expect(look.bar, `${theme}: bar colour`).toBe(look.accent);
-    expect([look.barStyle, look.barWidth], `${theme}: a thin bar`).toEqual(['solid', '2px']);
-    expect([look.label, look.labelColor], `${theme}: the label`).toEqual(['"To you"', look.accent]);
+    expect([look.labelColor, look.labelWeight], `${theme}: the label, bold in the accent`).toEqual([look.accent, '600']);
+    expect(look.indent, `${theme}: the body indented under the label`).toBeGreaterThan(0);
+    expect([look.barWidth, look.before], `${theme}: no bar and no 'To you'`).toEqual(['0px', 'none']);
   }
   await page.evaluate(() => { document.documentElement.dataset.theme = 'light'; });
   await expect(settled.locator('li')).toHaveText([
@@ -156,6 +166,9 @@ test("a streaming message stays authored text until closed, then receives unboxe
   await expect(view.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
   expect(await view.evaluate((el) => el.textContent?.includes('<message>'))).toBe(false);
   await expect(view).not.toContainText('Peer session worked');
+  // UX wave U2b: in the report a closed turn's line stands only while a record of its turn is open; the full
+  // transcript draws every turn's line
+  await page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' }).click();
   await expect(view).toContainText('Continued for');
 });
 

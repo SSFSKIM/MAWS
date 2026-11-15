@@ -27,6 +27,10 @@ export const FILES_COPY = {
   truncated: `Showing ${FILES_LIST_MAX_ENTRIES.toLocaleString('en-US')} of many entries`,
   couldNotList: (message: string) => `Could not list: ${message}`,
   refused: (message: string) => `Refused: ${message}`,
+  // UX wave U6b-1 (M3): the tree at the file's left, its button in the file's bar and its divider
+  hideTree: 'Hide files',
+  showTree: 'Show files',
+  resizeTree: 'Resize files',
 } as const;
 
 export const VIEWER_COPY = {
@@ -45,6 +49,9 @@ export const VIEWER_COPY = {
   updated: 'Updated',
   refused: (message: string) => `Refused: ${message}`,
   notOpened: (message: string) => `Not opened: ${message}`,
+  // UX wave U6e (§D): the label of a file that cannot be saved, and a savable outside file's path's tooltip and description
+  readOnly: 'Read-only',
+  savesTo: (real: string) => `Save writes to ${real}`,
   // P2-F W-V (L95): an image's or a video's sizing controls
   zoom: 'Zoom',
   zoomIn: 'Zoom in',
@@ -146,9 +153,13 @@ export const EDITOR_COPY = {
   acceptMine: 'Accept mine', acceptTheirs: 'Accept theirs', acceptBoth: 'Accept both',
   mineLabel: (name: string | null) => (name ? `mine (${name})` : 'mine'), theirsLabel: (name: string | null) => (name ? `theirs (${name})` : 'theirs'), base: 'base',
   previousConflict: 'Previous conflict', nextConflict: 'Next conflict',
-  closeTitle: (name: string) => `Save changes to ${name}?`, closeBody: 'Your changes will be lost if you don’t save them.', dontSave: 'Don’t save',
+  closeTitle: (name: string) => `Save changes to ${name}?`, closeBody: 'Your changes will be lost if you don’t save them.', dontSave: 'Don’t save', cancel: 'Cancel', // the sheet's own Cancel (SheetForm's), drawn by the locked question (U6e)
   readOnly: {
-    outside: 'Read-only: the file is outside the folders this session works in', // UX wave U6c: a file the transcript names
+    outside: 'Read-only: the file is outside the folders this session works in', // UX wave U6c: a file the transcript names; U6e: a daemon of the parent pin's answer alone (W6)
+    // UX wave U6e (§D): a file the daemon admits for a read and never for a save
+    maws: 'Read-only: MAWS does not edit its own files',
+    added: 'Read-only: this file is in the Library, not in this session’s folders. Choose it with File ▸ Open File… to edit it',
+    result: 'Read-only: only a tool’s output names this file in this conversation. Choose it with File ▸ Open File… to edit it',
     head: 'Read-only: the file is larger than the editor’s cap',
     encoding: 'Read-only: the file is not UTF-8',
     loading: 'Read-only until the file has loaded',
@@ -157,4 +168,15 @@ export const EDITOR_COPY = {
   anchorTitle: (label: string) => `Comment on ${label}`, anchorBody: 'The comment composer arrives with side threads (E3). This anchor will open it:', close: 'Close',
   // M5: the quit-when-idle banner's part (the quit question's own words are main's, in quit-guard.ts)
   unsavedFilesPart: (n: number) => `${n} unsaved ${n === 1 ? 'file' : 'files'}`,
+  // UX wave U6e (§D, decision 18): an outside save's failure, after "Could not save: "
+  outsideRefused: 'MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it',
+  outsideUnavailable: 'MAWS’s service on this Mac is from an earlier version and cannot save a file from outside the session’s folders. Try again in a moment',
+} as const;
+
+// UX wave U6e (§D): Open File…, in the File menu's row, the Files list's menu and the Read-only panel.
+export const OPEN_FILE_COPY = {
+  row: 'Open File…', // the menu row and the panel's button
+  elsewhere: (machine: string) => `Open File… (this session runs on ${machine})`,
+  notAFile: 'Open File opens one file. A folder or an app’s package cannot be opened here.',
+  unavailable: 'MAWS could not open the file just now. Try Open File again in a moment.',
 } as const;

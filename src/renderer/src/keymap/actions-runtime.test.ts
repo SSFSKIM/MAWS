@@ -9,7 +9,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machin
 import { useMachines } from '../stores/machines';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
-import { useLayout } from '../stores/layout';
+import { placeOf, useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
 import {
   createSession,
@@ -172,6 +172,23 @@ describe('session creator', () => {
     expect(error).toHaveBeenCalledWith('[actions] session creator failed', expect.any(Error));
     expect(useLayout.getState().main).toBe(LAYOUT_DEFAULTS.main);
     error.mockRestore();
+  });
+
+  // UX wave U10b (M8, ruled 2026-11-15): a caller that waited before calling (the Library's card, on a Space's folder)
+  // gives the place in front at the press; the comparison at the answer is the same
+  it('with front given, the place captured at the press decides: a switch before the call opens the chat behind, none opens it in front', async () => {
+    disposers.push(registerSessionCreator(async () => NEW));
+    const front = placeOf(useLayout.getState());
+    useLayout.getState().openTab({ kind: 'session', appSessionId: 'app-meanwhile' as AppSessionId }); // the person moved during the caller's wait
+    await createSession(P, { front });
+    const pane = currentSet(useLayout.getState().main).panes[0];
+    expect(pane.tabs.map((t) => t.id)).toEqual(['session:app-meanwhile', `session:${NEW}`]);
+    expect(pane.activeTabId).toBe('session:app-meanwhile');
+
+    const again = 'app-new-2' as AppSessionId;
+    disposers.push(registerSessionCreator(async () => again));
+    await createSession(P, { front: placeOf(useLayout.getState()) });
+    expect(currentSet(useLayout.getState().main).panes[0].activeTabId).toBe(`session:${again}`);
   });
 
   it('the last registration wins and an older disposer leaves the newer creator in place', async () => {

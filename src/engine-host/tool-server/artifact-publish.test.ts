@@ -1,20 +1,43 @@
-import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdtempSync, readFileSync, rmSync, truncateSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { KindAdapter } from '@artifacts/host';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
-import { ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
+import { ARTIFACT_MAX_BYTES, ArtifactPublishResultSchema, artifactRefusalOf, TOOL_ERRORS } from '@shared/maws/tools';
 import { Maintenance } from '../documents/maintenance';
 import { ArtifactSession } from './artifact-context';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 
+// U10b (Constraint 9, §I "publish from path"): a hold on the source file's read, so a case can keep it pending and then
+// end it. A read of `hold.path` signals `hold.started` and waits for `hold.release` (a rejection fails the read).
+const hold = vi.hoisted(() => ({ path: null as string | null, started: null as (() => void) | null, release: null as Promise<void> | null }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const readFile = (async (...args: Parameters<typeof actual.readFile>) => {
+    if (hold.path !== null && String(args[0]) === hold.path && hold.release !== null) {
+      const release = hold.release;
+      hold.path = null;
+      hold.started?.();
+      await release;
+    }
+    return actual.readFile(...args);
+  }) as typeof actual.readFile;
+  return { ...actual, readFile, default: { ...actual, readFile } };
+});
+
 let w: World;
 beforeEach(() => {
   w = openWorld();
 });
-afterEach(() => w.close());
+afterEach(() => {
+  hold.path = hold.started = hold.release = null;
+  vi.restoreAllMocks();
+  w.close();
+});
 
 type Ctx = Parameters<World['ctx']>[0];
 const create = async (args: Record<string, unknown>, over: Ctx = {}) => jsonOf<{ artifactId: string; revision: number }>(await artifactCreateTool(w.deps()).call(args, w.ctx(over)));
@@ -138,6 +161,118 @@ describe('artifact_publish of an html page', () => {
     expect(answer).toMatchObject({ id: 'dash', deliverableId: created.artifactId, version: 2, ownerAppSessionId: PARENT });
     expect(pages(created.artifactId)).toEqual(['<p>v1</p>', '<p>v2</p>']);
     expect(existsSync(join(w.userData, 'deliverables'))).toBe(false);
+  });
+});
+
+// UX wave U10b (l6-artifacts-18; the execution document's M1 and §A.1, §A.2): an html page published from the file the
+// agent wrote, its bytes stored as they are, through the same three layers as `files`
+describe('artifact_publish of an html page from a path', () => {
+  const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+  const stored = (id: string) => Buffer.from(w.store.files.read(id, w.store.contentRef(id).ref));
+  // bytes that are not UTF-8 (a lone continuation byte, an overlong form), which a decode and encode would change
+  const RAW = Buffer.concat([Buffer.from('<p>caf'), Buffer.from([0xe9, 0x80, 0xc0, 0xaf]), Buffer.from('</p>\n')]);
+
+  it('stores the file byte for byte, bytes that are not UTF-8 included, and answers as a publish of files does', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'Dashboard' });
+    writeFileSync(join(w.cwd, 'rebuilt.html'), RAW);
+    const answer = ArtifactPublishResultSchema.parse(jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'rebuilt.html' })));
+    expect(answer).toMatchObject({ status: 'published', artifactId: created.artifactId, kind: 'html', changed: ['index.html'], kept: [], removed: [], id: 'dash', deliverableId: created.artifactId, version: 2 });
+    expect(sha(stored(created.artifactId))).toBe(sha(RAW));
+    expect(w.store.contentRef(created.artifactId).ref.name).toBe('index.html'); // the page keeps its own name, not the file's
+    // the session's base is what it published: the next publish goes on from it
+    expect(jsonOf(await publish({ artifact: 'dash', baseRevision: answer.revision, files: { 'index.html': '<p>v3</p>' } }))).toMatchObject({ version: 3 });
+  });
+
+  it('reads a path as artifact_create does: relative to the working folder or absolute, .html or .htm', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    const elsewhere = mkdtempSync(join(tmpdir(), 'maws-publish-elsewhere-'));
+    try {
+      writeFileSync(join(elsewhere, 'Page.HTM'), '<p>absolute</p>');
+      const absolute = jsonOf<{ revision: number }>(await publish({ artifact: 'dash', baseRevision: created.revision, path: join(elsewhere, 'Page.HTM') }));
+      expect(stored(created.artifactId).toString('utf8')).toBe('<p>absolute</p>');
+      writeFileSync(join(w.cwd, 'next.htm'), '<p>relative</p>');
+      jsonOf(await publish({ artifact: 'dash', baseRevision: absolute.revision, path: 'next.htm' }));
+      expect(stored(created.artifactId).toString('utf8')).toBe('<p>relative</p>');
+    } finally {
+      rmSync(elsewhere, { recursive: true, force: true });
+    }
+  });
+
+  it('refuses a path that is missing, not HTML or too large, writing nothing', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    writeFileSync(join(w.cwd, 'notes.txt'), 'x');
+    writeFileSync(join(w.cwd, 'huge.html'), '');
+    truncateSync(join(w.cwd, 'huge.html'), ARTIFACT_MAX_BYTES + 1);
+    const revision = w.store.revision(created.artifactId);
+    expect(textOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'missing.html' }))).toBe(TOOL_ERRORS.artifactNotAFile('artifact_publish', join(w.cwd, 'missing.html')));
+    expect(textOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'notes.txt' }))).toBe(TOOL_ERRORS.notHtml('artifact_publish', join(w.cwd, 'notes.txt')));
+    expect(textOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'huge.html' }))).toBe(TOOL_ERRORS.tooLarge('artifact_publish', join(w.cwd, 'huge.html'), ARTIFACT_MAX_BYTES + 1));
+    expect(w.store.revision(created.artifactId)).toBe(revision);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(1);
+    expect(stored(created.artifactId).toString('utf8')).toBe('<p>v1</p>');
+  });
+
+  it('refuses path for a kind that is not an html page, with the sentence that says so', async () => {
+    writeFileSync(join(w.cwd, 'page.html'), '<p/>');
+    writeFileSync(join(w.cwd, 'report.csv'), 'a,b\n');
+    const file = await create({ kind: 'file', path: 'report.csv', title: 'Report' });
+    const doc = await w.store.create({ kind: 'document', title: 'Doc' }, HUMAN);
+    const design = await create({ kind: 'design', title: 'Site', files: { 'a.html': 'A' } });
+    expect(textOf(await publish({ artifact: file.artifactId, baseRevision: file.revision, path: 'page.html' }))).toBe(TOOL_ERRORS.publishPathHtmlOnly('file'));
+    expect(textOf(await publish({ artifact: doc.id, baseRevision: 0, path: 'page.html' }))).toBe(TOOL_ERRORS.publishPathHtmlOnly('document'));
+    const before = w.store.revision(design.artifactId);
+    expect(textOf(await publish({ artifact: design.artifactId, baseRevision: design.revision, path: 'page.html' }))).toBe(TOOL_ERRORS.publishPathHtmlOnly('design'));
+    expect(w.store.revision(design.artifactId)).toBe(before);
+  });
+
+  it('refuses a stale base and a page the user changed since the read as a publish of files does; force overwrites', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    writeFileSync(join(w.cwd, 'mine.html'), '<p>mine</p>');
+    const stale = await publish({ artifact: 'dash', baseRevision: created.revision - 1, path: 'mine.html' });
+    expect(artifactRefusalOf(textOf(stale))).toEqual({ reason: 'staleBase', liveRevision: created.revision });
+    await w.store.writeContent(created.artifactId, { bytes: Buffer.from('<p>user</p>'), name: 'index.html' }, HUMAN);
+    expect(artifactRefusalOf(textOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'mine.html' })))).toMatchObject({ reason: 'conflict', paths: ['index.html'] });
+    expect(stored(created.artifactId).toString('utf8')).toBe('<p>user</p>');
+    expect(jsonOf(await publish({ artifact: 'dash', baseRevision: created.revision, path: 'mine.html', force: true }))).toMatchObject({ changed: ['index.html'], version: 3 });
+    expect(stored(created.artifactId).toString('utf8')).toBe('<p>mine</p>');
+  });
+
+  // Constraint 9 and §I: the awaited read held open. Nothing that writes (the migration, the op's record, the content)
+  // starts while it is pending, and a read that fails leaves nothing written.
+  it('begins no write while the file is read, and writes nothing when the read fails', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    writeFileSync(join(w.cwd, 'slow.html'), '<p>slow</p>');
+    const writes = [vi.spyOn(w.store, 'ensureMigrated'), vi.spyOn(w.store, 'withOp'), vi.spyOn(w.store, 'writeContent'), vi.spyOn(w.store, 'writeCommitted')];
+    let fail!: (error: Error) => void;
+    const started = new Promise<void>((resolve) => {
+      hold.started = resolve;
+    });
+    hold.release = new Promise<void>((_, reject) => {
+      fail = reject;
+    });
+    hold.path = join(w.cwd, 'slow.html');
+    const answer = publish({ artifact: 'dash', baseRevision: created.revision, path: 'slow.html' });
+    await started;
+    for (const spy of writes) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
+    fail(Object.assign(new Error('EIO: i/o error, read'), { code: 'EIO' }));
+    const result = await answer.then((r) => r, (error: unknown) => error);
+    expect((result as { isError?: boolean }).isError ?? result instanceof Error).toBe(true);
+    for (const spy of writes) expect(spy, spy.getMockName()).not.toHaveBeenCalled();
+    expect(w.store.revision(created.artifactId)).toBe(created.revision);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(1);
+    expect(stored(created.artifactId).toString('utf8')).toBe('<p>v1</p>');
+  });
+
+  it('a replayed tool-use id answers the first result and reads no file: the file gone since changes nothing', async () => {
+    const created = await create({ handle: 'dash', content: '<p>v1</p>', title: 'D' });
+    writeFileSync(join(w.cwd, 'v2.html'), '<p>v2 <img src="https://example.com/a.png"></p>');
+    const args = { artifact: 'dash', baseRevision: created.revision, path: 'v2.html' };
+    const first = jsonOf(await publish(args, { toolUseId: 'toolu_path_once' as ToolUseId }));
+    expect(first).toMatchObject({ version: 2, externalReferences: 1 }); // counted in the page stored
+    rmSync(join(w.cwd, 'v2.html'));
+    const again = jsonOf(await publish(args, { toolUseId: 'toolu_path_once' as ToolUseId }));
+    expect(again).toEqual(first);
+    expect(w.store.listVersions(created.artifactId)).toHaveLength(2);
   });
 });
 

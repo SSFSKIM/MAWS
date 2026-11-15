@@ -6,7 +6,14 @@
 // on the host. `systemFor` is a hook: B calls it in the page's render, so the page moves when a default, the house or
 // the library's systems change. The app provides this object once, at module load, so the hook is fixed for the
 // page's life.
-import { DesignSystemScope, useGoverningSystem } from '@artifacts/design-system/apply';
+// UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `exportSystemOf`, D's export helpers
+// bound to the governing system's view (the one the page's scope shares, one open per system), as main's export binds
+// them (src/render/design-systems/documents.ts), so the Export menu reads a document's page through the export's own
+// resolver.
+import { useMemo } from 'react';
+import { DesignSystemScope, officeThemeXml, resolveDsVars, useDesignSystem, useGoverningSystem } from '@artifacts/design-system/apply';
+import type { TokenSet } from '@artifacts/design-system/tokens';
+import type { DesignSystemExport } from '@artifacts/document/export/design-system';
 import { useLibraryList } from '../../library/store';
 import { useSettings } from '../../stores/settings';
 import type { DocumentDesignSystem, GoverningSystem } from '../../tools/document/design-system';
@@ -23,4 +30,10 @@ export function useDocumentGoverningSystem(artifact: { designSystemId?: string; 
   return useGoverningSystem(artifact, { owner: defaults?.defaultDesignSystem ?? null, spaces: defaults?.spaceDesignSystems ?? NO_SPACES }, live);
 }
 
-export const DOCUMENT_DESIGN_SYSTEM: DocumentDesignSystem = { Scope: DesignSystemScope, systemFor: useDocumentGoverningSystem };
+/** `system`'s export helpers, null until its view is read (or when it cannot be). A hook. */
+export function useDocumentExportSystem(system: GoverningSystem | null): DesignSystemExport<TokenSet> | null {
+  const { view } = useDesignSystem(system);
+  return useMemo(() => (view ? { name: view.name, tokens: view.tokens, resolveDsVars, officeThemeXml } : null), [view]);
+}
+
+export const DOCUMENT_DESIGN_SYSTEM: DocumentDesignSystem = { Scope: DesignSystemScope, systemFor: useDocumentGoverningSystem, exportSystemOf: useDocumentExportSystem };

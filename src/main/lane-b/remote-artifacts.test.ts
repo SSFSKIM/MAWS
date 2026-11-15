@@ -123,6 +123,24 @@ describe('artifact writes', () => {
     expect(l.machines.machineOf(A1)).toBe(MINI);
   });
 
+  // UX wave U10b (M4, §C.3): the undelete of an agent's delete needs the capability its own entry in REMOTE_NEEDS names,
+  // so an act held while the link is down never reaches a machine that does not know the command; the others keep theirs
+  it('seal the undelete needing the peer’s `rl2.artifact-undelete`, and every other write `rl2.artifacts`', async () => {
+    const l = lab();
+    l.link.onAct = (act) => act.settle({ state: 'done', result: undefined }); // both answer nothing
+    // a peer whose handshake does not list it is sent nothing
+    expect(await l.cmd('artifacts.undelete', { artifactId: A1 })).toMatchObject({ ok: false });
+    expect(l.link.acts).toEqual([]);
+    l.link.peers = [...l.link.peers, 'rl2.artifact-undelete'];
+    expect(await l.cmd('artifacts.undelete', { artifactId: A1 })).toMatchObject({ ok: true });
+    expect(await l.cmd('artifacts.delete', { artifactId: A1 })).toMatchObject({ ok: true });
+    expect(l.link.acts.map((act) => [act.request.action, act.request.requires])).toEqual([
+      ['artifacts.undelete', 'rl2.artifact-undelete'],
+      ['artifacts.delete', 'rl2.artifacts'],
+    ]);
+    expect(l.machines.machineOf(A1)).toBe(MINI);
+  });
+
   it('record what `create` and `duplicate` answer', async () => {
     const l = lab();
     l.link.onAct = (act) => act.settle({ state: 'done', result: { artifact: row(act.request.action === 'artifacts.create' ? A2 : A3) } });

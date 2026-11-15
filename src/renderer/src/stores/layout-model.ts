@@ -5,10 +5,11 @@
 // open in the window, from every project and machine; a tab id exists once in it, since ids are computed from what a
 // tab shows. `main.tabs` stores `storedMain` of it and is read back through `stripOf` (`@shared/ipc/schema/layout`).
 import type { AppSessionId } from '@shared/graph/ids';
+import { machineOf } from '@shared/machine/address'; // UX wave U6b-1
 import { machineKey } from '@shared/machine/org-key';
 import type { MachineRef } from '@shared/machine/ref';
 import {
-  EMPTY_TAB_SET, NO_PROJECT, tabId, type PaneState, type ProjectKey, type Strip, type TabRef, type TabSet, type TabSetKey, type TabTarget,
+  EMPTY_TAB_SET, NO_PROJECT, tabId, type PaneState, type PanelSessionState, type PanelTabRef, type ProjectKey, type Strip, type TabRef, type TabSet, type TabSetKey, type TabTarget,
 } from '@shared/ipc/schema/layout';
 
 type Pane = 0 | 1;
@@ -83,6 +84,16 @@ export function paneShowsSession(set: TabSet, pane: Pane): boolean {
 export function activeTab(main: Strip): TabRef | null {
   const pane = main.panes[main.focusedPane] ?? main.panes[0];
   return pane.tabs.find((t) => t.id === pane.activeTabId) ?? null;
+}
+
+// The sessions the strip has in view, the focused pane's first: each pane's active tab's, the other pane's only while
+// it is split. What the card column and the side surfaces speak of, so a focus move between the panes of a split changes
+// neither while a session stays in view.
+export function sessionsInView(main: Strip): AppSessionId[] {
+  const shown = (pane: PaneState | undefined) => sessionOfTab(pane?.tabs.find((t) => t.id === pane.activeTabId) ?? null);
+  const focused = shown(main.panes[main.focusedPane] ?? main.panes[0]);
+  const beside = main.panes.length === 2 ? shown(main.panes[main.focusedPane === 0 ? 1 : 0]) : null;
+  return [focused, beside].filter((session): session is AppSessionId => session !== null);
 }
 
 // The session a tab belongs to, which the right panel shows (C8's tenth ask): a session, agent or diff tab's, a file
@@ -462,4 +473,77 @@ export function repairMain(main: Strip, known: (appSessionId: AppSessionId) => b
     return { tabs, activeTabId: tabs.some((t) => t.id === p.activeTabId) ? p.activeTabId : (tabs[0]?.id ?? '') };
   });
   return { ...asSet(withPanes(main, panes, main.focusedPane)), closedTabs: main.closedTabs.filter(keep) };
+}
+
+// ---- a file beside the chat (UX wave U6b-1, docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, §B) ----
+
+// A side tab's params that hold a file: an object with a non-empty string `file` (what the Files tool stores for a tab
+// that shows one). The store's pin gate and the read's repair ask it; the store cannot import a tool's module.
+export function paramsHoldFile(params: unknown): boolean {
+  if (typeof params !== 'object' || params === null || Array.isArray(params)) return false;
+  const { file } = params as { file?: unknown };
+  return typeof file === 'string' && file !== '';
+}
+
+// What hydration holds of the side column and the strip when it repairs the files beside the chat.
+export interface StoredSide {
+  main: Strip;
+  panelPinned: PanelTabRef[];
+  panelBySession: Map<AppSessionId, PanelSessionState>;
+  panelParams: Record<string, unknown>;
+}
+
+const omitKeys = (params: unknown, keys: readonly string[]): Record<string, unknown> =>
+  Object.fromEntries(Object.entries(params as Record<string, unknown>).filter(([key]) => !keys.includes(key)));
+
+// The files beside the chat as this build holds them, from a layout whatever build wrote it (Decision 17, sequence 8):
+// a pinned tab that holds a file (only build F's pin can make one) keeps its pin as the tree alone, its `file`, `line` and
+// `preview` dropped; a session's tab of a file a main tab shows is dropped, the main tab kept (rule 3); a list's second
+// preview tab is a kept one; and within a list, a tool's tab that holds no file stands before the first of that tool's
+// tabs that hold one, so build F, which shows and pins the first tab of a tool, meets the tree. Pure and idempotent; the
+// value read is answered as it came when nothing needed repair.
+export function repairFileTabs<T extends StoredSide>(read: T): T {
+  let params = read.panelParams;
+  const edit = (id: string, next: Record<string, unknown> | null) => {
+    if (params === read.panelParams) params = { ...params };
+    if (next === null || Object.keys(next).length === 0) delete params[id];
+    else params[id] = next;
+  };
+  for (const ref of read.panelPinned) if (paramsHoldFile(params[ref.id])) edit(ref.id, omitKeys(params[ref.id], ['file', 'line', 'preview']));
+  const shown = new Set(allTabs(read.main).map((tab) => tab.id));
+  let panelBySession = read.panelBySession;
+  for (const [appSessionId, own] of read.panelBySession) {
+    const machine = machineOf(appSessionId);
+    const fileOf = (ref: PanelTabRef) => (paramsHoldFile(params[ref.id]) ? (params[ref.id] as { file: string }).file : null);
+    const kept = own.tabs.filter((ref) => {
+      const file = fileOf(ref);
+      const inMain = file !== null && shown.has(tabId({ kind: 'file', path: file, line: null, appSessionId: null, machine }));
+      if (inMain) edit(ref.id, null);
+      return !inMain;
+    });
+    let preview = false;
+    for (const ref of kept) {
+      if (fileOf(ref) === null || (params[ref.id] as { preview?: unknown }).preview !== true) continue;
+      if (preview) edit(ref.id, omitKeys(params[ref.id], ['preview']));
+      preview = true;
+    }
+    const tabs = treeFirst(kept, (ref) => fileOf(ref) !== null);
+    if (tabs.length === own.tabs.length && tabs.every((ref, i) => ref === own.tabs[i])) continue;
+    if (panelBySession === read.panelBySession) panelBySession = new Map(panelBySession);
+    panelBySession.set(appSessionId, { ...own, tabs });
+  }
+  return panelBySession === read.panelBySession && params === read.panelParams ? read : { ...read, panelBySession, panelParams: params };
+}
+
+// For each tool some ref of the list holds a file of: its first ref that holds none, when it stands after the first that
+// holds one, is put just before it.
+function treeFirst(tabs: PanelTabRef[], holds: (ref: PanelTabRef) => boolean): PanelTabRef[] {
+  let out = tabs;
+  for (const toolId of new Set(tabs.filter(holds).map((ref) => ref.toolId))) {
+    const first = out.findIndex((ref) => ref.toolId === toolId && holds(ref));
+    const tree = out.findIndex((ref) => ref.toolId === toolId && !holds(ref));
+    if (tree < first) continue;
+    out = [...out.slice(0, first), out[tree], ...out.slice(first, tree), ...out.slice(tree + 1)];
+  }
+  return out;
 }

@@ -161,8 +161,12 @@ export const commands = {
 // freshness; `none` once it ended (the old host's exit, the successor's welcome, a failed ask's recycle). `waiting`: the
 // old build served until its MAWS tool calls are quiet; `draining`: its handover asked, the old host not yet gone, during
 // which `mawsd`'s relay holds an app's hello. `inFlight` and `tool`: the calls it waits for. `at`: when it was posted.
-// Main learns it from this event alone (never `daemon.status`, which wakes a parked engine host).
-export const EngineHandoverSchema = z.strictObject({ state: z.enum(['waiting', 'draining', 'none']), inFlight: z.number().int().nonnegative(), tool: z.string().optional(), at: z.string() });
+// Main learns it from this event alone (never `daemon.status`, which wakes a parked engine host). #473: the `none` that
+// ends a drain at the old host's exit carries `ended`, `mawsd`'s verdict on that exit (its pid and start as its status
+// declared them; `handedOver`, every row detached and said so, or crashed mid-drain), which main's verdict on the relayed
+// host waits for; also posted to a client as it says ready while one is under way.
+export const EngineHandoverEndedSchema = z.strictObject({ pid: z.number().int().positive(), startedAt: z.string(), handedOver: z.boolean() });
+export const EngineHandoverSchema = z.strictObject({ state: z.enum(['waiting', 'draining', 'none']), inFlight: z.number().int().nonnegative(), tool: z.string().optional(), at: z.string(), ended: EngineHandoverEndedSchema.optional() });
 export type EngineHandover = z.infer<typeof EngineHandoverSchema>;
 
 export const events = {
