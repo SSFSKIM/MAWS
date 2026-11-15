@@ -478,8 +478,8 @@ Eleven milestones in four pull requests. Each stands on this document and the co
 
    | milestone | vitest folders and files |
    |---|---|
-   | M1 | `src/shared/maws src/engine-host/tool-server src/render src/main/library src/renderer/src/library src/renderer/src/tools/artifacts src/artifacts/types` |
-   | M2 | `src/shared/maws src/artifacts/document src/engine-host/tool-server src/engine-host/documents src/render src/artifacts/types` |
+   | M1 | `src/shared/maws src/engine-host/tool-server src/render/ src/main/library src/renderer/src/library src/renderer/src/tools/artifacts src/artifacts/types` |
+   | M2 | `src/shared/maws src/artifacts/document src/engine-host/tool-server src/engine-host/documents src/render/ src/artifacts/types` |
    | M3 | `src/renderer/src/tools/document src/renderer/src/tools/dashboard src/renderer/src/panel src/artifacts/document` |
    | M4 | `src/shared/maws src/shared/ipc src/shared/machine src/engine-host/tool-server src/engine-host/documents src/engine-host/ops.test.ts src/endpoint test/endpoint test/lane-b src/main/lane-b apps/org-protocol/test` |
    | M5 | `src/renderer/src/transcript src/renderer/src/library src/renderer/src/tools/artifacts src/renderer/src/lane-b test/support/tokens-guard.test.ts` |
@@ -537,7 +537,7 @@ Its refusals are today's: `TOOL_ERRORS.artifactNotAFile`, `notHtml`, `tooLarge`.
     publishPathOrFiles: 'artifact_publish: give path or files, not both and not neither',
     publishPathHtmlOnly: (kind: string) => `artifact_publish: path publishes an html page; send files for a ${kind}`,
 
-The description gains, directly after "(an html page is its one file, index.html)": ` For an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files.`
+The description gains a clause, directly after "(an html page is its one file, index.html);": ` for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files;`, so the passage reads "… null removing it (an html page is its one file, index.html); for an html page, path (…) publishes that file's bytes in place of files; baseRevision is …" (ruled 2026-11-15, Decision Log).
 
 **§A.3** `registerHtmlExporters` (`src/render/export.ts`) registers `html/html`: the stored file, copied unchanged. `artifact_export`'s description changes one clause: "Formats: pdf or png for an html page;" becomes "Formats: pdf, png or html (the stored page, unchanged) for an html page;". In `src/renderer/src/library/export.ts` the formats shown for kind `html` leave `html` out. "Save a copy…" is offered for kinds `file` and `html` in `ByteViewer.tsx` and `RowMenu.tsx`; it calls today's `saveArtifactCopy`.
 
@@ -1119,6 +1119,7 @@ Decisions made while U10b-1 is built (2026-11-15, the controller, from the execu
 - M1: a publish with both `path` and `files`, or neither, is answered with `publishPathOrFiles` alone, not the generic invalid-arguments text (which would name the tool twice). `path` on any kind but html answers `publishPathHtmlOnly` before today's per-kind refusals. A publish by path runs: the replay check, then the kind refusals and the suggestion policy, then the file read, then any write; a replay reads no file, a refused path writes nothing. `externalReferences` is counted in the page the version stored, for `path`, `files` and a replay alike. A publish by path keeps the page's stored name, not the file's.
 - M1: the rule that leaves `html` out of an html page's formats is in `library/export.ts`, so the viewer, the row menu and the Send-to sheet agree; one predicate, `savesCopy(kind)`, drives "Save a copy…" in both menus. A Library test that clicked Export on an html row moved to a deck's row, since an html row now shows Export before main answers.
 - M1: the probe snapshot takes the switch's hunks for M1's two tools only (Surprises & Discoveries); the charter's two X9 lines are dated sentences at the end of its X9 paragraph, as U5a's are.
+- 2026-11-15 (UTC), the architect: §A.2's sentence is inserted as a clause, after the semicolon that follows "(an html page is its one file, index.html)" and ending in a semicolon, with "for" in lower case; no word changed. Read literally, the first wording left no stop after the paren and ".;" before "baseRevision", and a period there would have made "baseRevision is …", which is for every kind, read as part of the html sentence. And `src/render` as a vitest filter also matches `src/renderer`, so the folder lists write it `src/render/`.
 
 ## Outcomes & Retrospective
 
