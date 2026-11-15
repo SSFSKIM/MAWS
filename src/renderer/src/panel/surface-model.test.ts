@@ -117,6 +117,20 @@ describe('surface context and restore', () => {
     expect(surfaceSession(s())).toBeNull();
   });
 
+  it('follows the session in the other pane of a split while focus is on a document, over the remembered one', () => {
+    const store = createLayoutStore();
+    const s = () => store.getState();
+    s().openSession(A, { how: 'tab' }); // A is remembered as the strip's context
+    s().openSession(B, { how: 'tab' });
+    s().activateTab(session(A).id);
+    const doc: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    const tabs = [s().main.panes[0].tabs.find((tab) => tab.id === session(A).id)!, s().main.panes[0].tabs.find((tab) => tab.id === session(B).id)!];
+    store.setState({ main: { ...s().main, panes: [{ tabs: [doc, tabs[0]!], activeTabId: doc.id }, { tabs: [tabs[1]!], activeTabId: tabs[1]!.id }], focusedPane: 0 } });
+    expect(surfaceSession(s())).toBe(B);
+    store.setState({ main: { ...s().main, focusedPane: 1 } });
+    expect(surfaceSession(s())).toBe(B);
+  });
+
   it('upgrades a saved single-tool layout by deriving its active id, preserving refs, pins, params and saved width', async () => {
     const pin = { ...terminal, pinned: true };
     const values = {
