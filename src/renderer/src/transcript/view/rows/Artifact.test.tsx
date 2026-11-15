@@ -5,13 +5,25 @@
 // what that version's frame logged (P3-L M6b: the revision a viewer placed at the row's version).
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, screen } from '@testing-library/react';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import type { MachineState } from '@shared/ipc/schema/machines';
+import { addressOf } from '@shared/machine/address';
+import type { MachineRef } from '@shared/machine/ref';
+import { remoteRow } from '../../../../../../test/support/builders';
+import { OTHER_MACHINE } from '../../../../../../test/support/machine';
+import { artifactMachineOf, resetArtifactMachines } from '../../../artifacts/machines';
+import { connectLibrary, resetLibrary } from '../../../library/store';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session';
+import { useMachines } from '../../../stores/machines';
+import { useSessions } from '../../../stores/sessions';
+import { deferred, installFakeMain, ok } from '../../../test-support/code';
 import { loadJournal } from '../../../../../../test/support/fixtures';
 import { applyArtifactConsole, noteArtifactVersions, resetArtifactConsole } from '../../../tools/artifacts/viewers/console';
 import { useTranscriptStore } from '../../../stores/transcript';
 import { journalToEvents } from '../../dev/journal';
 import type { Row } from '../../model/rows';
-import { renderRow, storeWith } from './test-support';
+import { renderRow, spyActions, storeWith } from './test-support';
 
 afterEach(() => {
   cleanup();
@@ -149,3 +161,135 @@ describe('the artifact row', () => {
   });
 });
 
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.4): an `artifact_delete` call's row.
+// What it shows is read from the library of the session's machine: "Deleted <title>" with Undo while it does not list
+// the artifact (Undo disabled until that read has answered), "Restored <title>" with Open while it does. Undo is disabled
+// while it runs, and a second press sends nothing; an Undo that ended without its effect, and the reason Undo is
+// disabled on another machine, are a line of the row. A refusal reads in the person's words.
+describe('the row of an agent’s delete', () => {
+  const DRAFT = '6b0f6b2e-1d7a-4c35-9a59-2f1c0c4f7a11';
+  const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+  const DELETED: ArtifactRow = { ...BASE, action: 'delete', artifactId: DRAFT, title: 'Draft plan', htmlPath: '', deliverableId: null, version: null };
+  const MINI: MachineState = { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-15T09:00:00.000Z', generation: 1, carrier: 'relay' };
+  let listed: boolean;
+  let reads: (MachineRef | undefined)[];
+  let main: ReturnType<typeof installFakeMain>;
+  let offLibrary: () => void;
+  beforeEach(() => {
+    resetLibrary();
+    resetArtifactMachines();
+    resetRemoteLaneBStore();
+    listed = false;
+    reads = [];
+    main = installFakeMain((name, _input, machine) => {
+      if (name !== 'library.get') return new Promise(() => {});
+      reads.push(machine);
+      return ok({ row: listed ? ({ id: DRAFT, kind: 'document', title: 'Draft plan' } as never) : null });
+    });
+    offLibrary = connectLibrary();
+  });
+  afterEach(() => {
+    cleanup();
+    offLibrary();
+    useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    useMachines.getState().applyRoster([]);
+    delete (window as { maws?: unknown }).maws;
+  });
+  const withUndo = (undo: (appSessionId: AppSessionId, artifactId: string) => Promise<string | null>) => ({ ...spyActions(), undeleteArtifact: vi.fn(undo) });
+  const undoButton = () => screen.getByRole<HTMLButtonElement>('button', { name: 'Undo' });
+  const line = (container: HTMLElement) => container.querySelector('[data-artifact-line]')?.textContent ?? null;
+  const libraryChanged = async () => act(async () => main.emit('library.changed', { revision: 2 }));
+
+  it('reads "Deleting <reference>…" until the answer, with no control', () => {
+    const { container } = renderRow({ ...DELETED, artifactId: 'draft-plan', title: null, answered: false }, { storeKey: APP, actions: withUndo(async () => null) });
+    expect(heading(container)).toBe('Deleting draft-plan…');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('"Deleted <title>" with Undo disabled until the library has answered; Undo held open is disabled and a second press sends nothing; then "Restored <title>" with Open', async () => {
+    const asked = deferred<string | null>();
+    const actions = withUndo(() => asked.promise);
+    const { container } = renderRow(DELETED, { storeKey: APP, actions });
+    expect(heading(container)).toBe('Deleted Draft plan');
+    expect(undoButton().disabled).toBe(true); // the library has not answered yet
+    await act(async () => {});
+    expect(reads).toEqual([undefined]); // this Mac's library: the session is this Mac's
+    expect(undoButton().disabled).toBe(false);
+    fireEvent.click(undoButton());
+    fireEvent.click(undoButton());
+    expect(actions.undeleteArtifact).toHaveBeenCalledExactlyOnceWith(APP, DRAFT);
+    expect(undoButton().disabled).toBe(true);
+    await act(async () => asked.resolve(null));
+    listed = true;
+    await libraryChanged();
+    expect(heading(container)).toBe('Restored Draft plan');
+    expect(container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('restored');
+    fireEvent.click(screen.getByRole('button', { name: 'Open' }));
+    expect(actions.openArtifact).toHaveBeenCalledExactlyOnceWith(APP, DRAFT);
+    listed = false; // deleted again elsewhere: read, not remembered
+    await libraryChanged();
+    expect(heading(container)).toBe('Deleted Draft plan');
+  });
+
+  it('an Undo that ends without its effect leaves its sentence as a line of the row, and Undo enabled again', async () => {
+    const actions = withUndo(async () => 'Not restored: this artifact was deleted in the Library, not by an agent');
+    const { container } = renderRow(DELETED, { storeKey: APP, actions });
+    await act(async () => {});
+    await act(async () => fireEvent.click(undoButton()));
+    expect(line(container)).toBe('Not restored: this artifact was deleted in the Library, not by an agent');
+    expect(container.querySelector('[data-artifact-line]')!.getAttribute('data-tone')).toBe('danger');
+    expect(heading(container)).toBe('Deleted Draft plan');
+    expect(undoButton().disabled).toBe(false);
+  });
+
+  it('a session on another machine reads that machine’s library, also for an artifact the window never listed, and routes Undo by the session', async () => {
+    useMachines.getState().applyRoster([{ ...MINI, capabilities: [SESSION_ACTS_CAPABILITY, 'rl2.artifact-undelete'], owner: true }]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    expect(artifactMachineOf(DRAFT)).toBeNull();
+    const actions = withUndo(async () => null);
+    const { container } = renderRow(DELETED, { storeKey: R, actions });
+    await act(async () => {});
+    expect(artifactMachineOf(DRAFT)).toBe(OTHER_MACHINE);
+    expect(reads).toEqual([OTHER_MACHINE]);
+    expect(line(container)).toBeNull();
+    fireEvent.click(undoButton());
+    expect(actions.undeleteArtifact).toHaveBeenCalledExactlyOnceWith(R, DRAFT);
+  });
+
+  it('on another machine Undo is disabled with its sentence as a line: offline, a build without the capability, a member who does not own it', async () => {
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const cases: [Partial<MachineState>, string][] = [
+      [{ state: 'down', generation: 0, since: new Date().toISOString(), owner: true }, 'Restore is unavailable while mini is offline.'],
+      [{ capabilities: [SESSION_ACTS_CAPABILITY], owner: true }, 'Can’t restore on mini yet. Update MAWS on mini and try again.'],
+      [{ capabilities: [SESSION_ACTS_CAPABILITY, 'rl2.artifact-undelete'], owner: false }, 'Only mini’s owners can restore an artifact there.'],
+    ];
+    for (const [standing, sentence] of cases) {
+      useMachines.getState().applyRoster([{ ...MINI, ...standing }]);
+      const actions = withUndo(async () => null);
+      const view = renderRow(DELETED, { storeKey: R, actions });
+      await act(async () => {});
+      expect(line(view.container)).toBe(sentence);
+      expect(view.container.querySelector('[data-artifact-line]')!.getAttribute('data-tone')).toBe('muted');
+      expect(undoButton().disabled).toBe(true);
+      fireEvent.click(undoButton());
+      expect(actions.undeleteArtifact).not.toHaveBeenCalled();
+      view.unmount();
+    }
+  });
+
+  it('a refusal reads in the person’s words, with neither the tool’s name nor "the user", and no control', () => {
+    const { container } = renderRow({ ...DELETED, title: null, artifactId: 'budget', error: 'artifact_delete: the user has edited "Budget"; ask them to delete it in the Library {"reason":"invalid","why":"edited"}', why: 'edited' }, { storeKey: APP, actions: withUndo(async () => null) });
+    expect(heading(container)).toBe('Could not delete budget: you have edited it. Delete it from the Library if you no longer need it.');
+    expect(container.querySelector('[data-artifact-state]')!.getAttribute('data-artifact-state')).toBe('error');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+  });
+
+  it('where the host offers no Undo (the desk) it draws the heading alone and reads nothing', async () => {
+    const { container } = renderRow(DELETED, { storeKey: APP });
+    await act(async () => {});
+    expect(heading(container)).toBe('Deleted Draft plan');
+    expect(container.querySelectorAll('button')).toHaveLength(0);
+    expect(reads).toEqual([]);
+  });
+});

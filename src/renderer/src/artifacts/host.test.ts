@@ -13,6 +13,7 @@ import { remoteSessionState } from '../lane-b/test-support/remote-session';
 import { savedOf } from '../tools/document/header';
 import { createArtifactHost, FIRST_FRAME_MS, RECONNECT_BACKOFF_MS, type DocPorts } from './host';
 import { recordArtifactMachine, resetArtifactMachines } from './machines';
+import { resetDeletedReplicas, unsentWhileDeleted } from './deleted-replicas'; // UX wave U10b
 import { windowDocPorts } from './window-ports';
 
 type Listener = (event: { data?: unknown }) => void;
@@ -555,5 +556,88 @@ describe('an artifact on another machine (M5b)', () => {
     expect(states).toContain(words);
     await settle(60_000);
     expect(later.calls.filter((c) => c.name === 'artifacts.open')).toHaveLength(2);
+  });
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): the host's fence closes a replica's
+// port at the delete and main refuses its reopen `notFound`. A synced replica of an artifact an agent deleted waits for
+// its restore, read-only, with what the host never acknowledged; it opens again at the artifact's `created` and sends it.
+// Any other refusal for good ends it as before.
+describe('an artifact an agent deleted (UX wave U10b)', () => {
+  afterEach(() => resetDeletedReplicas());
+  const NOT_FOUND = { ok: false, error: { code: 'invalid_input', message: `no artifact ${ARTIFACT}`, issues: { reason: 'notFound', data: {} } } } as const;
+  const deleted = (undoable: boolean) => ({ ok: true, value: { artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable } } }) as const;
+  const opens = (h: ReturnType<typeof harness>) => h.calls.filter((c) => c.name === 'artifacts.open').length;
+
+  it('waits read-only with the edit the fence refused, asks nothing more, and sends it once the artifact is restored', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', deleted(true));
+    h.host.dropAll(); // the fence: the port closed before the edit reached the host
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(handle.state().refused).toBeUndefined();
+    expect(savedOf(handle.state(), false, false)).toBe('readonly'); // the editor takes no edit
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    const asked = opens(h);
+    await settle(60_000);
+    expect(opens(h)).toBe(asked); // no backoff while it waits
+    h.answers.delete('artifacts.open');
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'updated' });
+    await settle(1_000);
+    expect(opens(h)).toBe(asked); // only the undelete's `created` ends the wait
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
+    handle.close();
+  });
+
+  it('is done waiting when an open the host’s ready brings syncs, though it never heard the restore', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', deleted(true));
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state().readOnly).toBe(true);
+    h.answers.delete('artifacts.open');
+    h.hostState('ready', 9);
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', synced: true, readOnly: false }));
+    handle.close();
+  });
+
+  it('a reopen refused while the restore lands opens again; a delete Undo cannot take back ends the replica as before', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const raced = harness();
+    const live = await raced.artifacts.open(ARTIFACT);
+    raced.answers.set('artifacts.open', () => {
+      raced.answers.delete('artifacts.open'); // refused once, restored by the time the host is asked why
+      return NOT_FOUND;
+    });
+    raced.answers.set('artifacts.get', { ok: true, value: { artifact: { id: ARTIFACT } } } as never);
+    raced.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    await vi.waitFor(() => expect(live.state()).toMatchObject({ phase: 'live', readOnly: false }));
+    expect(live.state().refused).toBeUndefined();
+    live.close();
+
+    const library = harness();
+    const handle = await library.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed. ');
+    library.answers.set('artifacts.open', NOT_FOUND);
+    library.answers.set('artifacts.get', deleted(false));
+    library.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state().refused).toBe(`no artifact ${ARTIFACT}`);
+    expect(handle.state().readOnly).toBe(false);
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
   });
 });
