@@ -17,6 +17,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
 import { CommentCardHost, type CardFrame } from '../../../side/card/CardHost';
 import { focusAtEnd } from '../../../side/card/CommentCard';
+import { leaveCard, useCommentCard } from '../../../side/card/store';
 import { useTranscriptStore } from '../../../transcript';
 import { REFUSAL, REVIEW_COPY } from '../copy';
 import { useViewer } from '../viewer/viewer-store';
@@ -24,7 +25,7 @@ import '../code.css';
 import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
 import { defaultScope, latestTurnWithFiles, totals, type ReviewFile, type ReviewScope } from './review-model';
 import { diffOf, useReview, useReviewData, type ReviewData } from './review-store';
-import { CardSlot, LineCommentsContext, rowsIn, useCardSlot, useLeaveWithNoLines, useLineComments, type LineCommentsValue } from './LineComments';
+import { CardSlot, LineCommentsContext, LineLeftRow, rowsIn, useCardSlot, useComposingHere, useLineComments, type LineCommentsValue } from './LineComments';
 import { Stack, useStack, type HeldFile } from './Stack';
 import { everyFolded } from './stack-model';
 import { Toolbar, totalsWords } from './Toolbar';
@@ -112,20 +113,49 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
   const key = scope ? placeKey(directory, scope, turnId, null) : '';
 
   // The comment card's host (M5, §B), mounted for as long as the surface is: in the toolbar while the stack is drawn, in
-  // a line of its own where the toolbar stands while it is not; the card in the row under its line (`row`).
+  // a line of its own where the toolbar stands while it is not; the card in the row under its line (`row`), or under the
+  // toolbar while its line is in no diff here (`LineLeftRow`; with no files, every card's).
   const slot = useCardSlot();
   const [row, setRow] = useState<HTMLElement | null>(null);
   const stacked = files !== null && files.length > 0;
-  useLeaveWithNoLines(hostId, data.list.phase === 'unavailable' || (files !== null && files.length === 0));
+  const noLines = data.list.phase === 'unavailable' || (files !== null && files.length === 0);
+  const composing = useComposingHere(hostId);
+  // Escape, Close or a send that dismissed the card: the keyboard goes back to the stack's scroller, a kept draft's card
+  // goes (its comment stays, the chip stands for it).
+  const restoreFocus = useCallback(() => {
+    slot.closest('[data-review]')?.querySelector<HTMLElement>('[data-review-stack]')?.focus({ preventScroll: true });
+    const open = useCommentCard.getState().open;
+    if (open?.hostId === hostId && open.phase.kind === 'composing') leaveCard(open.serial);
+  }, [slot, hostId]);
+  // The keyboard follows the card into another row (Refresh, its line's return, the scope emptied under it): the row it
+  // left is taken out of the page before the card is, so the card's own remount rule cannot tell the keyboard was there.
+  const typing = useRef(false);
+  useEffect(() => {
+    const note = (event: FocusEvent) => {
+      const target = event.target instanceof Element ? event.target : null;
+      typing.current = target !== null && target.closest('[data-comment-card]') !== null && (slot.closest('[data-review]')?.contains(target) ?? false);
+    };
+    document.addEventListener('focusin', note);
+    return () => document.removeEventListener('focusin', note);
+  }, [slot]);
+  const keyboardToCard = useCallback(() => {
+    typing.current = true;
+  }, []);
+  useEffect(() => {
+    const field = row?.querySelector<HTMLTextAreaElement>('[data-comment-card] textarea');
+    if (!field || !typing.current || row!.contains(document.activeElement)) return;
+    focusAtEnd(field);
+  }, [row]);
   return (
     <div ref={measured} data-review data-scope={scope ?? ''} data-mode={drawnMode(mode, width)} className="flex h-full min-h-0 flex-col bg-bg">
-      {createPortal(<CommentCardHost hostId={hostId} host="review" mode={hostMode} layout="inline" row={row} accepts={acceptsNone} frame={CARD_FRAME} visible={visible} subject={appSessionId} />, slot)}
+      {createPortal(<CommentCardHost hostId={hostId} host="review" mode={hostMode} layout="inline" row={row} accepts={acceptsNone} frame={CARD_FRAME} visible={visible} restoreFocus={restoreFocus} subject={appSessionId} />, slot)}
       {chips ? <ScopeChips ui={ui} data={data} scope={scope} appSessionId={appSessionId} /> : null}
       {stacked ? null : (
         <div data-review-card-bar className="flex shrink-0 items-center border-b border-border px-3 py-1.5">
           <CardSlot element={slot} />
         </div>
       )}
+      {noLines && composing ? <LineLeftRow onRow={setRow} /> : null}
       {data.list.phase === 'unavailable' ? (
         <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
           {data.list.message}
@@ -141,8 +171,8 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
           appSessionId={appSessionId}
           hostId={hostId}
           cardSlot={slot}
-          row={row}
           setRow={setRow}
+          keyboardToCard={keyboardToCard}
           ui={ui}
           data={data}
           files={files}
@@ -165,8 +195,8 @@ interface StackViewProps {
   appSessionId: AppSessionId;
   hostId: string;
   cardSlot: HTMLElement; // the card host's element, shown in the toolbar
-  row: HTMLElement | null; // the row under the commented line the card is drawn in
-  setRow(row: HTMLElement | null): void;
+  setRow(row: HTMLElement | null): void; // the row the card is drawn in: under its line, or under the toolbar
+  keyboardToCard(): void; // Refresh asked for the card again: the keyboard goes to it once it is drawn
   ui: StoreApi<ReviewUi>;
   data: ReviewData;
   files: readonly ReviewFile[];
@@ -179,7 +209,7 @@ interface StackViewProps {
 
 // The toolbar over the stack, both from one resolution of the scope's files; the comment card's host shown in the
 // toolbar, and the comments on lines over the stack (M5).
-function StackView({ appSessionId, hostId, cardSlot, row, setRow, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
+function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
   const [held, setHeld] = useState<HeldFile | null>(null);
   const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui, held });
   const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
@@ -200,19 +230,14 @@ function StackView({ appSessionId, hostId, cardSlot, row, setRow, ui, data, file
     else if (held !== null) setHeld(null);
   }
   // Refresh: the held file takes its latest hunks, and the card is drawn again at its comment's place there, the
-  // keyboard back in its field once it is (the library drops the old row's elements before the card leaves them, so the
-  // card's own remount rule cannot tell the keyboard was there).
-  const refocus = useRef(false);
-  const onRefresh = useCallback((path: string) => {
-    refocus.current = true;
-    setHeld((was) => (was?.path === path ? null : was));
-  }, []);
-  useEffect(() => {
-    const field = row?.querySelector<HTMLTextAreaElement>('[data-comment-card] textarea');
-    if (!refocus.current || !field) return;
-    refocus.current = false;
-    focusAtEnd(field);
-  }, [row]);
+  // keyboard back in its field once it is.
+  const onRefresh = useCallback(
+    (path: string) => {
+      keyboardToCard();
+      setHeld((was) => (was?.path === path ? null : was));
+    },
+    [keyboardToCard],
+  );
   const { rows, card, add } = comments;
   const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, rows, add, setRow]);
 
@@ -232,6 +257,7 @@ function StackView({ appSessionId, hostId, cardSlot, row, setRow, ui, data, file
         onWrap={() => useViewer.getState().setWrap(!wrap)}
       />
       {refused !== null ? <RefusedPath path={refused} /> : null}
+      {comments.away ? <LineLeftRow onRow={setRow} /> : null}
       <Stack
         key={key}
         appSessionId={appSessionId}

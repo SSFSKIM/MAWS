@@ -218,13 +218,14 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     <div
       ref={scroller}
       data-review-stack
+      tabIndex={-1} /* M5 fix 2: where the keyboard goes when a comment’s card does; not a tab stop */
       onScroll={() => placer.current?.scrolled()}
       onWheel={() => placer.current?.interact()}
       onTouchStart={() => placer.current?.interact()}
       onTouchMove={() => placer.current?.interact()}
       onKeyDown={() => placer.current?.interact()}
       onPointerDown={() => placer.current?.press()}
-      className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+      className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden outline-accent -outline-offset-2 focus-visible:outline-2"
       style={NO_SCROLL_ANCHORING}
     >
       {sections.map((section) => {

@@ -4,17 +4,19 @@
 // session (`passKey('review', session, session)`) in its diff: the card in the library's widget row under the line of
 // the store's open card when that card is its own, every other comment of the pass as a row under its line (one line of
 // its words, a click that edits it, Remove). A comment is placed again from its quote at every refresh (`placeOf`); one
-// whose line left the diff stays in the pass and the chip and is drawn under no line. While the card is open on a file
-// of this surface, that file holds still in its scope (`HeldFile`, the surface's).
+// whose line left the diff stays in the pass and the chip and is drawn under no line; its card, opened, stands in a row
+// under the toolbar (`LineLeftRow`, Decision Log 20). While the card is open on a file of this surface, that file holds
+// still in its scope (`HeldFile`, the surface's).
 //
 // The context carries what the diff's rows need; with no provider (a surface that takes no comments) nothing is drawn.
 import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { FileLineAnchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { CARD_WIDTH } from '../../../side/card/placement';
-import { discardComment, editComment, leaveCard, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
+import { discardComment, editComment, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
 import { SIDE_COPY } from '../../../side/copy';
 import { openCommentComposer } from '../anchor/anchor';
+import { REVIEW_COPY } from '../copy';
 import { absolutePathOf, cardOffset, lineText, placeOf, reviewLineAnchor, type LinePlace, type LineSide } from './comment-place';
 import { reviewLayout } from './measure';
 import type { StackSection } from './Stack';
@@ -43,9 +45,10 @@ const madeIn = new Map<string, number>();
 const isFileLine = (comment: PassComment): comment is PassComment & { anchor: FileLineAnchor } => comment.anchor.kind === 'file-line' && typeof comment.anchor.path === 'string';
 
 /**
- * A surface's comments over its stack's sections: the open card's place when the card is this surface's (`card`), the
- * file it holds still (`holdPath`), every other comment placed under its line, and the opener the add button calls.
- * `repoRoot` null (the status not read yet): no comment is placed or made.
+ * A surface's comments over its stack's sections: the open card's place when the card is this surface's (`card`), or
+ * that its comment's line is in none of them (`away`: its file is not in the scope, or its loaded diff has no line with
+ * the quote), the file it holds still (`holdPath`), every other comment placed under its line, and the opener the add
+ * button calls. `repoRoot` null (the status not read yet): no comment is placed or made.
  */
 export function useLineComments(input: { appSessionId: AppSessionId; hostId: string; repoRoot: string | null; sections: readonly StackSection[] }) {
   const { appSessionId, hostId, repoRoot, sections } = input;
@@ -59,8 +62,8 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     const rows = new Map<string, PlacedComment[]>();
     let card: (LinePlace & { path: string; serial: number }) | null = null;
     let holdPath: string | null = null;
-    let found: boolean | null = ours === null ? null : false; // our card's comment: drawn here, or not drawable here
-    if (repoRoot === null || pass === null) return { rows, card, holdPath, found };
+    let waiting = false; // our card's file is in the scope and its own read has not answered: its place is not known yet
+    if (repoRoot === null || pass === null) return { rows, card, holdPath, away: false };
     const comments = pass.comments.filter(isFileLine); // M9: a commit's scope draws its commit's comments, every other scope those with none
     for (const section of sections) {
       const path = absolutePathOf(section.file, repoRoot);
@@ -70,7 +73,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
         if (comment.id === ours) {
           holdPath = section.file.path;
           if (place !== null) card = { ...place, path: section.file.path, serial: serial! };
-          found = place !== null || section.hunks === null; // a file not read yet may still draw it
+          else if (section.hunks === null) waiting = true;
           continue;
         }
         if (place === null) continue;
@@ -79,7 +82,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
         rows.set(section.file.path, list);
       }
     }
-    return { rows, card, holdPath, found };
+    return { rows, card, holdPath, away: ours !== null && card === null && !waiting };
   }, [repoRoot, pass, sections, ours, serial]);
 
   const add = useCallback(
@@ -94,14 +97,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     [sections, repoRoot, appSessionId, hostId],
   );
 
-  // A card of this surface on a comment it cannot draw (its file is not in this scope, or its line left the diff) would
-  // be open under no line and hide the chip: it is left, its comment staying in the pass, and the chip stands.
-  const stray = placed.found === false && repoRoot !== null ? serial : null;
-  useEffect(() => {
-    if (stray !== null) leaveCard(stray);
-  }, [stray]);
-
-  return { key, card: placed.card, holdPath: placed.holdPath, rows: placed.rows, add };
+  return { key, card: placed.card, away: placed.away, holdPath: placed.holdPath, rows: placed.rows, add };
 }
 
 /**
@@ -130,15 +126,23 @@ export function CardSlot({ element }: { element: HTMLElement }) {
   return <div ref={place} className="contents" />;
 }
 
+/** Whether this surface's host has a comment's card open (the composing phase: a comment of its pass). */
+export const useComposingHere = (hostId: string): boolean => useCommentCard((s) => s.open !== null && s.open.hostId === hostId && s.open.phase.kind === 'composing');
+
 /**
- * A surface with no line to draw a card under (its scope has no files, or cannot be read): its open card is left, its
- * comment staying in the pass, so the chip stands for it until a file returns.
+ * The row under the toolbar, above the stack, where the card of a comment whose line is not in this diff stands (§B,
+ * Decision Log 20; D11): one line saying so (`REVIEW_COPY.lineLeftDiff`), and under it the element the card is drawn in.
+ * The comment is read, edited, sent and removed there; it is never attached to another line.
  */
-export function useLeaveWithNoLines(hostId: string, noLines: boolean): void {
-  const serial = useCommentCard((s) => (noLines && s.open !== null && s.open.hostId === hostId && s.open.phase.kind === 'composing' ? s.open.serial : null));
-  useEffect(() => {
-    if (serial !== null) leaveCard(serial);
-  }, [serial]);
+export function LineLeftRow({ onRow }: { onRow(element: HTMLElement | null): void }) {
+  return (
+    <div data-review-line-left="" className="flex shrink-0 flex-col gap-1.5 border-b border-border px-3 py-2">
+      <p data-review-line-left-words="" className="m-0 text-ui-sm text-fg-muted">
+        {REVIEW_COPY.lineLeftDiff}
+      </p>
+      <div ref={onRow} data-review-card-row="away" className="whitespace-normal" />
+    </div>
+  );
 }
 
 const NO_ROWS: readonly PlacedComment[] = [];
