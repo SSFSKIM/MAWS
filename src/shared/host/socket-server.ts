@@ -116,7 +116,9 @@ export interface SocketClients {
   connected(): boolean; // a welcomed client holds the connection (with `many`, any)
   peer(): WirePeer | null; // P5 O1 M6: what the connected client's hello said of it (a protocol-2 one: major 2, minor 0, no capabilities); with `many`, the latest's
   count(): number; // P5 O2 M3: the welcomed clients
-  closeClient(): void; // with `many`, every client
+  // With `many`, every client. #473: settles once each closed client's socket has handed every byte written to it to the
+  // kernel, or has ended; a process that exits sooner drops what its sockets still queue (the exit order waits for it).
+  closeClient(): Promise<void>;
 }
 
 interface Client {
@@ -400,7 +402,9 @@ export function serveSocketClients(server: Server, options: SocketServerOptions)
     peer: () => [...clients].at(-1)?.peer ?? null, // P5 O1 M6
     count: () => clients.size, // P5 O2 M3
     closeClient() {
-      for (const client of clients) client.port.close();
+      const ports = [...clients].map((client) => client.port);
+      for (const port of ports) port.close();
+      return Promise.all(ports.map((port) => port.finished())).then(() => undefined);
     },
   };
 }
