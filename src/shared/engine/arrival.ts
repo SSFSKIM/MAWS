@@ -14,7 +14,7 @@
 // (decision 19); (2) sminos's frame line says whose a delivered row is: `human` is the person (`own`), any other sender
 // a peer; (3) one carrier can hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two
 // carriers is read once (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
-import { parseAskSteer } from '../maws/ask';
+import { askSteerOpening, parseAskSteer } from '../maws/ask';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
@@ -81,14 +81,24 @@ export function readAnswerEnvelope(text: string): Answer | null {
 
 type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
 const TAG_OPENS = '[MAWS ask ';
+const TAGGED_ID = /^\[MAWS ask ([^\]\s]+)\] /; // the tag's id as `parseAskSteer` reads it
+
+// A line that opens an envelope: the whole first line `askSteerText` writes, built by the writer's own function. A line
+// that only begins with the tag (the model's question, header and labels are written verbatim) opens nothing.
+function opensEnvelope(line: string): boolean {
+  const id = TAGGED_ID.exec(line)?.[1];
+  return id !== undefined && line === askSteerOpening(id);
+}
 
 /**
  * MAWS's answer envelopes inside a user text the engine may have joined from several waiting messages (members in order,
  * one newline between, under the last one's uuid; U4a's decision 32 c), and the rest of the text (the UX wave, U4b: the
- * Decision Log's line on the architect's medium review, form (b)). An envelope opens at a line that begins with its tag,
- * and is the shortest slice from there that `parseAskSteer` reads whole and that ends the text or a line, before the next
- * line that opens with a tag: shortest and bounded, so a later member is never swallowed. A tag whose slices never parse stays text. The rest
- * is the other members, the newline that separated each envelope gone; a text that is all envelope has an empty rest.
+ * Decision Log's line on the architect's medium review, form (b), and on the architect's review of the joined answer).
+ * An envelope opens at the writer's whole first line (`askSteerOpening`), and is the shortest slice from there that
+ * `parseAskSteer` reads whole and that ends the text or a line, before the next such line: shortest and bounded, so a
+ * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices never parse.
+ * The rest is the other members, the newline that separated each envelope gone; a text that is all envelope has an
+ * empty rest.
  */
 export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
   if (!text.includes(TAG_OPENS)) return { envelopes: [], rest: text }; // read on every user text the transcript draws
@@ -96,7 +106,7 @@ export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest
   const envelopes: AskSteer[] = [];
   const kept: string[] = [];
   for (let i = 0; i < lines.length; ) {
-    const end = lines[i]!.startsWith(TAG_OPENS) ? envelopeEnd(lines, i) : null;
+    const end = opensEnvelope(lines[i]!) ? envelopeEnd(lines, i) : null;
     if (end === null) {
       kept.push(lines[i]!);
       i += 1;
@@ -109,11 +119,11 @@ export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest
 }
 
 // The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does.
-// A run ends before the next line that opens with a tag: `parseAskSteer` pairs the first tag with the last result block,
-// so a malformed member would otherwise run over the words and the envelope after it (the joined answer's task review).
+// A run ends before the next opening line: `parseAskSteer` pairs the first tag with the last result block, so a
+// malformed member would otherwise run over the words and the envelope after it (the joined answer's task review).
 function envelopeEnd(lines: readonly string[], start: number): { steer: AskSteer; next: number } | null {
   for (let last = start; last < lines.length; last++) {
-    if (last > start && lines[last]!.startsWith(TAG_OPENS)) return null;
+    if (last > start && opensEnvelope(lines[last]!)) return null;
     if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
     const steer = parseAskSteer(lines.slice(start, last + 1).join('\n'));
     if (steer !== null) return { steer, next: last + 1 };
