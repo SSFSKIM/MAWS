@@ -48,6 +48,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     if (name === 'files.watch' && isOutside(input.path as string)) return fail(OUTSIDE_REFUSAL); // a folder outside is never watched
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
+    if (name === 'layout.get') return ok({ value: null }); // UX wave U6b-1 (M3): nothing stored, Files' tree state among it
+    if (name === 'layout.set') return ok();
     const path = input.path as string;
     const file = textOf(path);
     const named = isOutside(path) && (name === 'files.read' || name === 'files.openExternal') && input.named === true && options.names?.(input.appSessionId as string, path) === true;

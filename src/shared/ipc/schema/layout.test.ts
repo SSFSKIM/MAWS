@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
+import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema, FILES_TREE_EXPANDED_MAX, FilesTreeSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -676,5 +676,27 @@ describe('the one strip, read from and stored as main.tabs', () => {
     const noneElsewhere = { version: 3, current: BETA, sets: { none: set }, closedTabs: [] } as unknown as LayoutMain;
     expect(stripOf(noneElsewhere).canonical).toBe(false);
     expect(stripOf({ version: 3, current: 'none', sets: {}, closedTabs: [] }).canonical).toBe(false);
+  });
+});
+
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M3, Interfaces §A and §C): Files'
+// tree, one state per session under a key of its own
+describe('files.tree', () => {
+  const tree = { width: 260, folded: false, expanded: ['/r', '/r/src'] };
+  it('is a layout key outside the panel namespace', () => {
+    expect(LayoutKeySchema.safeParse('files.tree').success).toBe(true);
+    expect(commands['layout.set'].input.safeParse({ key: 'files.tree', value: { version: 1, sessions: {} } }).success).toBe(true);
+  });
+
+  it('holds each session’s width (or null), fold and open folders, at most two hundred of them, and nothing else', () => {
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { [at('app-a')]: tree, [at('app-b')]: { width: null, folded: true, expanded: [] } } }).success).toBe(true);
+    const many = Array.from({ length: FILES_TREE_EXPANDED_MAX }, (_, i) => `/r/d${i}`);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, expanded: many } } }).success).toBe(true);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, expanded: [...many, '/r/one-more'] } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 2, sessions: {} }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: {}, extra: true }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, scrollTop: 0 } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, width: 12.5 } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { width: 260, expanded: [] } } }).success).toBe(false);
   });
 });
