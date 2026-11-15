@@ -257,3 +257,131 @@ describe('every <task-id> of a block', () => {
     expect(body.subagents.map((e) => [e.agentId, e.status])).toEqual([['agent7', 'running']]);
   });
 });
+
+// The U8d probes' recordings on engine 2.1.322 (spikes/protocol-probe/findings-uxwave-u8d-resume-orphans.txt and
+// findings-uxwave-u8d-process-end.txt), replayed from their fixtures: a main transcript holding a process that ended and
+// the resume after it, and the agents' sidecars. Each expected body is written by hand from the rules. Where a case puts
+// the port ahead of the shared rules (several ids in one block, R9; the parent rule, N1), doperpowers issue 504 asks
+// sminos to follow.
+const PROBES = join(__dirname, '../../../spikes/protocol-probe/fixtures/uxwave');
+const jsonl = (path: string): unknown[] => readFileSync(path, 'utf8').split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as unknown);
+const recorded = (name: string): Ledger => ledgerOf(jsonl(join(PROBES, `${name}.transcript.jsonl`)));
+const sidecar = (name: string, agentId: string): AgentMeta => ({ agentId, meta: JSON.parse(readFileSync(join(PROBES, `${name}-subagents/agent-${agentId}.meta.json`), 'utf8')) as Record<string, unknown> });
+const agentLedger = (name: string, agentId: string): Ledger => ledgerOf(jsonl(join(PROBES, `${name}-subagents/agent-${agentId}.jsonl`)));
+const resumed = { bridge: null, parents: new Map<string, Ledger | null>(), sessionRunning: true }; // the resumed process runs
+
+describe('the probes’ recordings', () => {
+  // Two background agents orphaned by the process's end; the resume ends both with one block (its queue record, line
+  // 43, then its user row, line 45), two <task-id> and one <status>. sminos reads the first id only, and would leave the
+  // second running (doperpowers issue 504).
+  it('u8d-p1-two-r1: one block names both orphaned agents, and both read stopped', () => {
+    const name = 'u8d-p1-two-r1';
+    const metas = [sidecar(name, 'a9e2112e4a1755b40'), sidecar(name, 'ab58a371c69e84a69')];
+    const summary = '2 background agents didn\'t finish before the previous session ended: "uxw slow A" (a9e2112e4a1755b40), "uxw slow B" (ab58a371c69e84a69).';
+    const outcome = { status: 'stopped', raw: 'stopped', at: '2026-11-15T10:55:33.094Z', summary };
+    expect(derive(recorded(name), { ...resumed, metas })).toEqual({
+      subagents: metas.map((m) => ({ ...m, status: 'stopped', evidence: 'rows', outcome })),
+      jobs: [],
+      mcp: [],
+    });
+  });
+
+  // One agent finished before the end (its notification queued, line 42, and delivered, line 51); the other orphaned and
+  // ended at the resume with a block of its own that carries its <output-file> (lines 55 and 57).
+  it('u8d-p1-one-r1: the finished agent reads completed, the orphan stopped with its output file', () => {
+    const name = 'u8d-p1-one-r1';
+    const quick = sidecar(name, 'a1e5eb2c1a7a229a3');
+    const slow = sidecar(name, 'a48fa20e5db72d1c0');
+    const tasks = '/tmp/claude-501/-tmp-u8d-YZwo3F-work/f153eb67-d503-4016-9c1e-d538f5b4e441/tasks';
+    expect(derive(recorded(name), { ...resumed, metas: [quick, slow] }).subagents).toEqual([
+      { ...quick, status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: '2026-11-15T10:55:23.788Z', summary: 'Agent "uxw quick Q" finished', outputFile: `${tasks}/a1e5eb2c1a7a229a3.output` } },
+      { ...slow, status: 'stopped', evidence: 'rows', outcome: { status: 'stopped', raw: 'stopped', at: '2026-11-15T10:55:34.152Z', summary: 'Background agent "uxw slow B" didn\'t finish before the previous session ended', outputFile: `${tasks}/a48fa20e5db72d1c0.output` } },
+    ]);
+  });
+
+  // N5: at the process's end each running shell gets its own `killed` queue record (lines 42, 43); the resume then ends
+  // both with one block that also names the marker `__orphan_summary__:shell` (line 45, and its user row, line 47). A
+  // terminal word replaces a terminal word, so each shell ends on the resume's `stopped`, the last of its words.
+  it('u8d-p1-shells-r1: two shells killed at the exit, then stopped by one block with a marker id', () => {
+    const tasks = '/tmp/claude-501/-tmp-u8d-FsYX0Z-work/305ba1ea-fefb-436f-a2aa-7f93dbc71691/tasks';
+    const ended = { status: 'stopped', endedAt: '2026-11-15T10:55:31.408Z', summary: '2 background shell command tasks didn\'t finish before the previous session ended. Task ids: blarjjpox, b7zjm1p3t.' };
+    expect(derive(recorded('u8d-p1-shells-r1'), { ...resumed, metas: [] })).toEqual({
+      subagents: [],
+      jobs: [
+        { taskId: 'blarjjpox', kind: 'shell', toolUseId: 'toolu_01W9p9UCWqEiBRVFwpqK4YZ4', startedAt: '2026-11-15T10:55:18.406Z', description: 'uxw shell S1', command: 'python3 uxw8d_wait.py 300', outputFile: `${tasks}/blarjjpox.output`, ...ended },
+        { taskId: 'b7zjm1p3t', kind: 'shell', toolUseId: 'toolu_01V4Na5zo9AfhCLdV8eBcwVA', startedAt: '2026-11-15T10:55:18.596Z', description: 'uxw shell S2', command: 'python3 uxw8d_wait.py 300', outputFile: `${tasks}/b7zjm1p3t.output`, ...ended },
+      ],
+      mcp: [],
+    });
+  });
+
+  // One shell: killed at the exit (line 40), then a block of its own at the resume with its <tool-use-id> (lines 42, 44).
+  it('u8d-p1-shell-r1: one shell killed at the exit, then stopped by its own block', () => {
+    expect(derive(recorded('u8d-p1-shell-r1'), { ...resumed, metas: [] }).jobs).toEqual([{
+      taskId: 'b7emsuyr8', kind: 'shell', toolUseId: 'toolu_014soDweDLuLctuPdNwEE3iK', startedAt: '2026-11-15T10:57:06.452Z', description: 'uxw shell S1', command: 'python3 uxw8d_wait.py 300',
+      outputFile: '/tmp/claude-501/-tmp-u8d-VlztQ7-work/71e4a95e-ccce-4b0b-a3f6-bcf39e2139d1/tasks/b7emsuyr8.output',
+      status: 'stopped', endedAt: '2026-11-15T10:57:21.417Z', summary: 'Background shell command didn\'t finish before the previous session ended',
+    }]);
+  });
+
+  // N1: the parent P handed back while its nested background agent N still ran (P's meta `finished: true`); the rows give
+  // P no end (a hand-back is no notification), and N's launch is in P's file. The bridge's account is written here by
+  // hand, as the bridge folds an engine's SubagentStop for P: P not running, N running. sminos's parent rule would read N
+  // exited (parent) while it ran (doperpowers issue 504).
+  describe('u8d-p3-nested-r1: a nested background agent outlives its parent', () => {
+    const name = 'u8d-p3-nested-r1';
+    const parent = sidecar(name, 'a74b32748ee137457');
+    const nested = sidecar(name, 'a55be110357fb4fc5');
+    const tasks = '/tmp/claude-501/-tmp-u8d-CMS04c-work/1edf9488-5e1f-41e5-871d-fc9f9994ae5b/tasks';
+    const parentLaunch = { status: 'running', raw: 'async_launched', at: '2026-11-15T10:58:39.774Z', outputFile: `${tasks}/a74b32748ee137457.output` };
+    const nestedLaunch = { status: 'running', raw: 'async_launched', at: '2026-11-15T10:58:43.435Z', outputFile: `${tasks}/a55be110357fb4fc5.output` };
+    const parentSpawn = { parentAgentId: null, subagentType: 'general-purpose', description: 'uxw parent P' };
+    const nestedSpawn = { parentAgentId: 'a74b32748ee137457', subagentType: 'general-purpose', description: 'uxw nested N', background: true };
+    const bridge = [{ agentId: 'a74b32748ee137457', ...parentSpawn, running: false }, { agentId: 'a55be110357fb4fc5', ...nestedSpawn, running: true }];
+    const input = { metas: [parent, nested], parents: new Map([['a74b32748ee137457', agentLedger(name, 'a74b32748ee137457')]]) };
+
+    it('the parent ended on the bridge’s word and the nested agent held running reads running (bridge)', () => {
+      expect(derive(recorded(name), { ...input, bridge, sessionRunning: true }).subagents).toEqual([
+        { ...parent, status: 'exited', evidence: 'bridge', running: false, spawn: parentSpawn, outcome: parentLaunch },
+        { ...nested, status: 'running', evidence: 'bridge', running: true, spawn: nestedSpawn, outcome: nestedLaunch },
+      ]);
+    });
+
+    it('with no bridge, both read running from their launches (rows)', () => {
+      expect(derive(recorded(name), { ...input, bridge: null, sessionRunning: true }).subagents).toEqual([
+        { ...parent, status: 'running', evidence: 'rows', outcome: parentLaunch },
+        { ...nested, status: 'running', evidence: 'rows', outcome: nestedLaunch },
+      ]);
+    });
+
+    // The architect's bound: once the process is gone, every agent that was running or provisionally ended reads
+    // exited (session), background or not, nested or not, whatever its parent or the bridge's last word said.
+    it('once the process is gone, both read exited (session), whatever the bridge last said', () => {
+      expect(derive(recorded(name), { ...input, bridge, sessionRunning: false }).subagents).toEqual([
+        { ...parent, status: 'exited', evidence: 'session', spawn: parentSpawn, outcome: parentLaunch },
+        { ...nested, status: 'exited', evidence: 'session', spawn: nestedSpawn, outcome: nestedLaunch },
+      ]);
+    });
+  });
+});
+
+describe('the parent rule (N1)', () => {
+  const metas = (nested: Record<string, unknown>) => [meta('agentP', { toolUseId: 'toolu_P', requestShape: 'background' }), meta('agentN', { toolUseId: 'toolu_N', parentAgentId: 'agentP', ...nested })];
+  const main = () => ledgerOf([...launch('toolu_P', 'agentP', 'Parent'), queued(notice('<task-id>agentP</task-id>\n<status>completed</status>'))]);
+
+  it('ends a nested agent that is not a background agent with its parent', () => {
+    const parents = new Map([['agentP', ledgerOf([callRow('toolu_N', 'Agent', { description: 'Child' })])]]);
+    expect(derive(main(), { ...running, metas: metas({ requestShape: 'foreground' }), bridge: null, parents }).subagents[1]).toMatchObject({ status: 'exited', evidence: 'parent' });
+  });
+
+  // §A's three ways to know a background agent: the meta, the bridge's spawn, the call's own input.
+  const known: [string, Record<string, unknown>, unknown[], BridgeAgent[] | null][] = [
+    ['its meta', { requestShape: 'background' }, [callRow('toolu_N', 'Agent', { description: 'Child' })], null],
+    ['the bridge’s spawn', {}, [callRow('toolu_N', 'Agent', { description: 'Child' })], [{ agentId: 'agentN', parentAgentId: 'agentP', subagentType: 'general-purpose', description: 'Child', background: true, running: true }]],
+    ['its call’s input', {}, [callRow('toolu_N', 'Agent', { description: 'Child', run_in_background: 'true' })], null],
+  ];
+  it.each(known)('does not end a background nested agent known by %s', (_how, nestedMeta, parentRows, bridge) => {
+    const parents = new Map([['agentP', ledgerOf(parentRows)]]);
+    expect(derive(main(), { ...running, metas: metas(nestedMeta), bridge, parents }).subagents[1].evidence).not.toBe('parent');
+  });
+});
