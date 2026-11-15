@@ -168,6 +168,18 @@ describe('the joined answer, the architect\'s review', () => {
       expect(promptOf(rows)).toMatchObject({ text: '', attachments: [{ kind: 'image' }] });
     });
 
+    it('a document beside them: the row draws its chip', () => {
+      const document: ContentBlock = { type: 'document', title: 'brief.pdf', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0=' } };
+      const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [{ type: 'text', text: envelopeOf('toolu_ask_i') }, document]);
+      expect(promptOf(rows)).toMatchObject({ text: '', attachments: [{ kind: 'file', name: 'brief.pdf' }] });
+    });
+
+    it('a block that draws nothing (a type no attachment reads) keeps no row: there is nothing to lose', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [{ type: 'text', text: envelopeOf('toolu_ask_i') }, { type: 'container_upload' }]);
+      expect(asksOf(rows)).toEqual([['toolu_ask_i', 'answered']]);
+      expect(promptOf(rows)).toBeUndefined();
+    });
+
     it('an ask not answered here: the row draws the image and the raw text', () => {
       const text = `${envelopeOf('toolu_ask_i')}\n${envelopeOf('toolu_ask_k')}`;
       const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [IMAGE, { type: 'text', text }]);

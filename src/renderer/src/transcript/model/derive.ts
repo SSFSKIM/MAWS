@@ -448,16 +448,16 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     return envelopes.length > 0 && rest === '' && envelopes.every((envelope) => askAnsweredHere(state, envelope.askId));
   };
   // UX wave U4b (the architect's review of the joined answer, finding 2): no recording shows whether the engine joins a
-  // message holding image or document blocks with a waiting text, so a message with blocks that are not text is never
-  // hidden; where its text is envelopes alone, all answered here, its row draws those blocks without the text
-  const notText = (content: string | ContentBlock[]): ContentBlock[] => (typeof content === 'string' ? [] : content.filter((block) => block.type !== 'text'));
-  const answersHeldAsk = (event: Event<'user.message'>): boolean => envelopesAnsweredHere(event) && notText(event.content).length === 0;
+  // message holding image or document blocks with a waiting text, so a message with attachments is never hidden; where
+  // its text is envelopes alone, all answered here, its row draws the attachments without the text
+  const attachmentsAlone = (event: Event<'user.message'>): UserText => userTextOf(typeof event.content === 'string' ? [] : event.content.filter((block) => block.type !== 'text'));
+  const answersHeldAsk = (event: Event<'user.message'>): boolean => envelopesAnsweredHere(event) && attachmentsAlone(event).attachments.length === 0;
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
   const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false): RowOf<'user'> => {
-    const text = userTextOf(envelopesAnsweredHere(event) ? notText(event.content) : event.content);
+    const text = envelopesAnsweredHere(event) ? attachmentsAlone(event) : userTextOf(event.content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
