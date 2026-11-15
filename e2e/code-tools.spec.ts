@@ -839,7 +839,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         // scroll bars, as on a Mac with a mouse: an overlay one takes no width and shows only while the stack scrolls,
         // so there is no thumb standing still to press.
         const scrollTop = () => stack.evaluate((el) => el.scrollTop);
-        const bar = await stack.evaluate((el) => {
+        const bar = await stack.evaluate((el: HTMLElement) => {
           const box = el.getBoundingClientRect();
           const gutter = el.offsetWidth - el.clientLeft - el.clientWidth - parseFloat(getComputedStyle(el).borderRightWidth);
           const track = el.clientHeight; // no buttons on a Mac's scroll bar, and no horizontal one here
