@@ -168,7 +168,7 @@ describe('user row', () => {
     onTestFinished(() => desk.remove());
     expect(getComputedStyle(desk.querySelector('.transcript-user-actions')!).position).toBe('absolute');
     const { container } = renderRow(userRow('plain'));
-    expect(getComputedStyle(lineOf(container)!).position).toBe('static');
+    expect(getComputedStyle(lineOf(container)!).position).not.toBe('absolute');
   });
 
   it('renders a pasted block as a chip inside the bubble that expands to its body as text, and keeps typed <\\pasted_content> intact', () => {
