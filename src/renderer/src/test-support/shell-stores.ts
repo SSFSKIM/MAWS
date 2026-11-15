@@ -64,6 +64,7 @@ export function fillStores(bare: Scenario, opts: { loaded?: boolean } = {}): voi
     requests: new Map(),
     unreadable: new Map(),
     drafts: new Map(),
+    textDrafts: new Map(), // UX wave U1b: no box's text kept from an earlier case
     deliveries: new Map(), // UX wave U1b: no card's answer held from an earlier case
     settling: new Map(), // UX wave U1b (M3): no settling receipt held from an earlier case
     greyed: new Set(), // P5 O7 M6

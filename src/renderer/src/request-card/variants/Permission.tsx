@@ -14,6 +14,7 @@
 import { DropdownMenu } from 'radix-ui';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
+import { useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { toAnswer } from '../answers';
@@ -45,8 +46,18 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const local = options.find((o) => o.scope === 'local_settings') ?? null;
   const lasting = local ?? session; // the third button: the most lasting scope the request offers
   const entry = local !== null ? session : null; // the menu on Allow once, when the project rule takes the third place
-  const [reasoning, setReasoning] = useState(false);
-  const [message, setMessage] = useState('');
+  // UX wave U1b (the branch review): the reason for denying is the request's, kept in the window's memory while it waits,
+  // so the card swapped for another request and back keeps it; the box opened by a press here takes the keyboard, and
+  // one drawn open again does not
+  const typed = useAttention((s) => s.textDrafts.get(item.id));
+  const reasoning = typed !== undefined;
+  const message = typed ?? '';
+  const setMessage = (text: string) => useAttention.getState().setTextDraft(item.id, text);
+  const [openedHere, setOpenedHere] = useState(false);
+  const openReason = () => {
+    setMessage('');
+    setOpenedHere(true);
+  };
 
   // Armed once the prompt has been drawn for KEY_GRACE_MS; until then a key is taken by its binding and answers nothing.
   const armed = useRef(false);
@@ -93,13 +104,13 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
       )}
       {reasoning && (
         <div className="flex flex-col gap-1.5">
-          <CardTextarea label="Reason for denying" value={message} onChange={setMessage} onSubmit={() => deny('deny', message)} autoFocus disabled={busy} />
+          <CardTextarea label="Reason for denying" value={message} onChange={setMessage} onSubmit={() => deny('deny', message)} autoFocus={openedHere} disabled={busy} />
           <Muted>⌘Enter sends the deny with this reason</Muted>
         </div>
       )}
       <Controls decisions>
         {!reasoning && (
-          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={() => setReasoning(true)} className="mr-auto border-transparent text-fg-muted">
+          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={openReason} className="mr-auto border-transparent text-fg-muted">
             Deny… with a reason
           </CardButton>
         )}

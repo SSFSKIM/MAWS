@@ -20,6 +20,7 @@ import { TranscriptActionsProvider } from '../../transcript/view/context';
 import { openFile } from '../../tools/code/open-file';
 import { ipc } from '../../ipc/client';
 import { MODE_OPTIONS } from '../../statusline/mode-menu';
+import { useAttention } from '../../stores/attention';
 import { useHosts } from '../../stores/hosts';
 import { useSessions } from '../../stores/sessions';
 import { toAnswer } from '../answers';
@@ -50,7 +51,12 @@ const onThisMac = (appSessionId: AppSessionId) => !isAddress(appSessionId) || ma
 
 export function PlanBody({ item, request, busy, submit, bindKeys, capability = carried }: VariantProps<'plan.requested'>) {
   const [expanded, setExpanded] = useState(false);
-  const [feedback, setFeedback] = useState<string | null>(null); // null: the feedback box is closed
+  // UX wave U1b (the branch review): the feedback is the request's, kept in the window's memory while it waits, so the
+  // form scrolled out of a transcript's list and back keeps it (null: the box is closed); the box opened by a press
+  // here takes the keyboard, and one drawn open again does not
+  const feedback = useAttention((s) => s.textDrafts.get(item.id)) ?? null;
+  const setFeedback = (text: string) => useAttention.getState().setTextDraft(item.id, text);
+  const [openedHere, setOpenedHere] = useState(false);
   const [confirming, setConfirming] = useState(false);
   const box = useRef<HTMLDivElement>(null);
 
@@ -67,8 +73,10 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
   const implementInMode = (mode: PermissionMode) =>
     hostAppliesPlanMode(useHosts.getState().supervisor) && capability(implementIn(mode)).available && submit(implementIn(mode), implementLabel(mode));
   const keepPlanning = () => {
-    if (feedback === null) setFeedback('');
-    else box.current?.querySelector('textarea')?.focus();
+    if (feedback === null) {
+      setFeedback('');
+      setOpenedHere(true);
+    } else box.current?.querySelector('textarea')?.focus();
   };
   const sendFeedback = () => !feedbackGate.disabled && submit(toAnswer({ kind: 'plan', outcome: 'keep_planning', feedback: feedback ?? '' }), 'Keep planning');
   const clearAndImplement = () => !clearGate.disabled && submit(toAnswer({ kind: 'plan', outcome: 'clear_and_implement' }), 'Clear context and implement');
@@ -87,7 +95,7 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
       </button>
       {feedback !== null && (
         <div ref={box} className="flex flex-col gap-1.5">
-          <CardTextarea label="What should change in the plan" value={feedback} onChange={setFeedback} onSubmit={sendFeedback} submitOnEnter autoFocus disabled={busy} />
+          <CardTextarea label="What should change in the plan" value={feedback} onChange={setFeedback} onSubmit={sendFeedback} submitOnEnter autoFocus={openedHere} disabled={busy} />
           <Controls>
             <CardButton disabled={busy || feedbackGate.disabled} title={feedbackGate.title} onClick={sendFeedback}>
               Send feedback

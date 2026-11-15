@@ -37,6 +37,9 @@ export interface AttentionState {
   // W4: a question card's answers in progress, beside its request, so a remount or a move between placements resumes
   // them (`request-card/question-steps.ts`); dropped once the item no longer waits (UC-1: at the answer).
   drafts: Map<AttentionId, QuestionDraft>;
+  // UX wave U1b (the branch review's ruling of 2026-11-15 UTC): beside them, by the same lifetime, the text a card's box
+  // holds: a prompt's reason for denying, a plan's feedback. Present: the box is open with that text; absent: closed.
+  textDrafts: Map<AttentionId, string>;
   // P5 O7 M6: the sessions of every machine whose attention main holds greyed.
   greyed: ReadonlySet<AppSessionId>;
   // UX wave U1b (Interfaces §G, decisions 8 and 21): what is known of a question's answer before the transcript's own row
@@ -80,6 +83,7 @@ export interface AttentionState {
   loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failed read is retried once
   retryRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // an unreadable item's read, asked again (the card's Retry)
   setDraft(id: AttentionId, draft: QuestionDraft): void;
+  setTextDraft(id: AttentionId, text: string | null): void; // null: the box closed, its text gone
 }
 
 /** UX wave U1b (Interfaces §G): what is known of a question's answer before the transcript's own row carries it. */
@@ -147,12 +151,14 @@ function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, b
   return { requests, unreadable };
 }
 
-// The drafts of items that no longer wait (answered, retired, gone) are dropped.
-function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
-  if (drafts.size === 0) return {};
+// The drafts of items that no longer wait (answered, retired, gone) are dropped: a question's answers in progress and a
+// box's text (UX wave U1b) alike.
+function forgetClosedDrafts(state: Pick<AttentionState, 'drafts' | 'textDrafts'>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (state.drafts.size === 0 && state.textDrafts.size === 0) return {};
   const open = new Set([...bySession.values()].flatMap((items) => items.filter(waits).map((item) => item.id)));
-  const kept = new Map([...drafts].filter(([id]) => open.has(id)));
-  return kept.size === drafts.size ? {} : { drafts: kept };
+  const drafts = new Map([...state.drafts].filter(([id]) => open.has(id)));
+  const textDrafts = new Map([...state.textDrafts].filter(([id]) => open.has(id)));
+  return { ...(drafts.size !== state.drafts.size && { drafts }), ...(textDrafts.size !== state.textDrafts.size && { textDrafts }) };
 }
 
 // UX wave U1b (§G "The delivery"): the deliveries of items that no longer wait (answered, retired, gone) go, as drafts do.
@@ -227,7 +233,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
       }
       p.buffer = null;
-      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
+      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
     };
     return {
       loaded: false,
@@ -238,6 +244,7 @@ export function createAttentionStore() {
       requests: new Map(),
       unreadable: new Map(),
       drafts: new Map(),
+      textDrafts: new Map(),
       greyed: new Set(),
       receipts: new Map(),
       deliveries: new Map(),
@@ -260,7 +267,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
-        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       applyMirrored({ appSessionId, items }, machine) {
         const p = partition(machine);
@@ -269,7 +276,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
-        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       // Main's word, newer than anything an `attention.list` of the machine still outstanding could say (an RL2 machine's
       // roster can come up before its rows say it is listed): from here the feed alone speaks for the partition (`fed`),
@@ -282,7 +289,7 @@ export function createAttentionStore() {
         p.buffer = null;
         p.fed = true;
         p.greyed = grey;
-        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
+        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       applyNotified({ delivery }) {
         if (delivery !== 'in-app') set({ notificationDelivery: delivery });
@@ -326,6 +333,12 @@ export function createAttentionStore() {
       },
       setDraft(id, draft) {
         set({ drafts: new Map(get().drafts).set(id, draft) });
+      },
+      setTextDraft(id, text) {
+        const textDrafts = new Map(get().textDrafts);
+        if (text === null) textDrafts.delete(id);
+        else textDrafts.set(id, text);
+        set({ textDrafts });
       },
       recordReceipt(appSessionId, call, receipt) {
         const held = get().receipts.get(appSessionId)?.get(call);
