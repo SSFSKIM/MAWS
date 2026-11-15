@@ -389,6 +389,7 @@ export function moveFileToSide(mainTabId: string): boolean {
     layout().closeTab(mainTabId, { remember: false }); // a move is not a close: no entry for Reopen closed tab
   });
   writeInOrder([`panel.${appSessionId}`, 'panelTools.params'], ['main.tabs']);
+  movedByPerson(mainTabId, appSessionId);
   return true;
 }
 
