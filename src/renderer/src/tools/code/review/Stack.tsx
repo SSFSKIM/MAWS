@@ -88,6 +88,10 @@ function estimateLines(file: ReviewFile, hunks: readonly string[] | null, words:
   return tooLarge({ hunks }) ? 1 : bodyLines({ hunks, added: file.added, removed: file.removed });
 }
 
+// The browser's own scroll anchoring would move the scroller when a body above changes height, under the placer, which
+// keeps the place itself; it is off here (inline, so it does not depend on a utility being generated).
+const NO_SCROLL_ANCHORING = { overflowAnchor: 'none' } as const;
+
 export interface StackProps {
   appSessionId: AppSessionId;
   ui: StoreApi<ReviewUi>;
@@ -186,7 +190,8 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
       onTouchStart={() => placer.current?.cancel()}
       onKeyDown={() => placer.current?.cancel()}
       onPointerDown={() => placer.current?.cancel()}
-      className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden [overflow-anchor:none]"
+      className="review-diff min-h-0 flex-1 overflow-y-auto overflow-x-hidden"
+      style={NO_SCROLL_ANCHORING}
     >
       {sections.map((section) => {
         const { file, hunks } = section;
