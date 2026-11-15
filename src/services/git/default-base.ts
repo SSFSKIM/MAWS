@@ -41,8 +41,22 @@ export async function remoteHeadBranch(read: GitRun, directory: string, remote: 
 // local `main`, local `master`. Null when none does, when HEAD names no commit yet, when the ref shares no commit with
 // HEAD, and when it is the local branch HEAD is on (the default branch with no remote copy). A detached HEAD is compared
 // like any other.
-export async function defaultBase(_read: GitRun, _directory: string): Promise<DefaultBase | null> {
-  throw new Error('not built yet');
+export async function defaultBase(read: GitRun, directory: string): Promise<DefaultBase | null> {
+  const [names, onBranch, head] = await Promise.all([remoteNames(read, directory), currentBranchRef(read, directory), headCommit(read, directory)]);
+  if (head === null) return null;
+  const remote = names.length === 0 ? null : await defaultRemote(read, directory, names);
+  const headBranch = remote === null ? null : await remoteHeadBranch(read, directory, remote);
+  const candidates = [
+    ...(remote === null ? [] : [...(headBranch === null ? [] : [`refs/remotes/${remote}/${headBranch}`]), `refs/remotes/${remote}/main`, `refs/remotes/${remote}/master`]),
+    'refs/heads/main',
+    'refs/heads/master',
+  ];
+  const commits = await commitsNamed(read, directory, candidates);
+  const chosen = candidates.find((ref) => commits.has(ref));
+  if (chosen === undefined || chosen === onBranch) return null;
+  const mergeBase = (await read(directory, ['merge-base', commits.get(chosen)!, head], { acceptExitCodes: [1] })).trim();
+  if (mergeBase === '') return null; // exit 1: no commit in common
+  return { ref: shortName(chosen), commit: commits.get(chosen)!, mergeBase };
 }
 
 // Every configured remote with a URL, by name (git exits 1 when there is none).

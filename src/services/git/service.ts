@@ -115,15 +115,43 @@ export class GitService {
   // when the upstream holds it: false for every row with no upstream, null for every row (and null halves in `counts`)
   // when the upstream is configured and git cannot resolve it. `counts` and `behind` are of the whole range.
   async branchCommits({ directory, limit }: GitBranchCommitsInput): Promise<GitBranchCommits> {
-    void [directory, limit];
-    throw new Error('not built yet');
+    requireAbsolute(directory);
+    const [base, upstream, head] = await Promise.all([defaultBase(this.run, directory), this.currentUpstream(directory), headCommit(this.run, directory)]);
+    if (head === null) return { base: null, upstream: upstream.name, commits: [], counts: null, behind: null };
+    const range = base === null ? ['HEAD'] : ['HEAD', `^${base.mergeBase}`];
+    const [rows, notPushed, all, behind] = await Promise.all([
+      this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', String(limit), ...range, '--']).then(parseLog),
+      // the range's commits the upstream does not hold: few on a branch, and never more than the range
+      upstream.ref === null || upstream.gone ? null : this.run(directory, ['rev-list', ...range, `^${upstream.ref}`, '--']).then(shas),
+      base === null ? null : this.run(directory, ['rev-list', '--count', ...range, '--']).then(Number),
+      base === null ? null : this.run(directory, ['rev-list', '--count', base.commit, '^HEAD', '--']).then(Number),
+    ]);
+    const pushedOf = (sha: string) => (upstream.ref === null ? false : notPushed === null ? null : !notPushed.has(sha));
+    return {
+      base: base === null ? null : { ref: base.ref, mergeBase: base.mergeBase },
+      upstream: upstream.name,
+      commits: rows.map((commit) => ({ ...commit, pushed: pushedOf(commit.sha) })),
+      counts: all === null ? null : {
+        all,
+        notPushed: upstream.ref === null ? all : notPushed === null ? null : notPushed.size,
+        pushed: upstream.ref === null ? 0 : notPushed === null ? null : all - notPushed.size,
+      },
+      behind,
+    };
   }
 
   // UX wave U5b-2 (Interfaces §C): the commit read. The commit against its first parent (a merge commit so too, never a
   // combined diff), a root commit with every line added; `onHead` is whether HEAD holds it. `patch: false` reads no diff.
   async commitDiff({ directory, commit, path, context, patch = true }: GitCommitDiffInput): Promise<GitCommitDiff> {
-    void [directory, commit, path, context, patch];
-    throw new Error('not built yet');
+    requireAbsolute(directory);
+    const [read, onHead] = await Promise.all([this.commitOf(directory, commit), this.holdsCommit(directory, commit)]);
+    if (!patch) return { commit: read, onHead, patch: '', files: [] };
+    // a root commit has no parent to diff against; `log --root` shows it as created, which needs no empty tree's id
+    // (that id differs between a SHA-1 and a SHA-256 repository)
+    const diff = read.parents.length > 0
+      ? await this.diffOf(directory, [read.parents[0], commit], path, context)
+      : await this.rootDiff(directory, commit, path, context);
+    return { commit: read, onHead, ...diff };
   }
 
   // UX wave U5b-2 (Interfaces §C, R1): the working-tree read. The working tree against `against` with `git.diff`'s
@@ -131,8 +159,12 @@ export class GitService {
   // its order, a `dir/` entry not one), each with its added lines read through an opened descriptor by the service
   // itself (decision 15), never by a git run a file.
   async changesSince({ directory, against, path, context }: GitChangesSinceInput): Promise<GitChangesSince> {
-    void [directory, against, path, context];
-    throw new Error('not built yet');
+    requireAbsolute(directory);
+    const [diff, untracked] = await Promise.all([
+      this.diffOf(directory, [against], path, context),
+      path === undefined ? this.untrackedCounts(directory) : [],
+    ]);
+    return { ...diff, untracked };
   }
 
   // Ref-counted per repository root and per owner (the requesting window); answers the directory's status.
