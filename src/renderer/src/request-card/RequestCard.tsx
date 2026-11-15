@@ -8,7 +8,9 @@
 // `within` the element that owns focus for the placement, each on a fresh press only.
 // In an Overview card, that is the nearest ancestor with a `tabindex` (C5's article), since the article, not the card,
 // holds focus there; in a transcript (UX wave U1b: a waiting row's form, or the end row's open card), the transcript's
-// row, the same way; hover, a channel's inline card and a docked notice bind no key. Digits pick a question's option
+// row, the same way; hover, a channel's inline card and a docked notice bind no key. UX wave U1b M4 (§F): the end row's
+// open permission prompt (`keys="pane"`) binds its three chords as the pane's instead, claimed at the press by whose focus
+// it is and answered once its guard is armed (`prompt-guard.ts`). Digits pick a question's option
 // from the same owner. UX wave U1b: no request docks in the composer's place; `docked` draws a notice above the composer.
 // U1a §D: a permission prompt opens on one line saying what is asked (`askedLine`), where the
 // other kinds have their title; the hover placement keeps its heading, its "wants to" line and the folder line, and offers
@@ -25,7 +27,7 @@
 // answer included; past a background request's window it reads "Answer this in the terminal" (`lane-a/race.ts`).
 // UX wave U1a (M2, §E): a question's stepper has Dismiss (the decline Esc sends; on a terminal's asynchronous question,
 // the bridge's dismissal, which no key sends) and a double-click that picks a single choice and goes on.
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type MouseEvent, type PointerEvent, type RefObject } from 'react';
 import { ATTENTION_HEADINGS, type AttentionTone } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { RequestAnswer } from '@shared/engine/answers';
@@ -39,6 +41,7 @@ import type { Capability } from '../session/controls/types'; // P5 O9 M6
 import { RACE, settledWords, terminalOnlyNow, useRace } from '../lane-a/race'; // P5 O9 M6
 import { BUTTON_LIKE_INPUTS } from '../keymap/dispatcher';
 import { useKeyChord } from '../keymap/useKeyChord';
+import { composerEmpty, inView, promptFocused, watchPrompt, type PromptGuard } from './prompt-guard'; // UX wave U1b M4
 import { itemAge } from '../sidebar/derive';
 import { ANSWERED_ELSEWHERE, connectAnswers, useAttention, type Outcome } from '../stores/attention';
 import { useComposerStore } from '../stores/composer';
@@ -88,6 +91,10 @@ export interface RequestCardProps {
   // form's header is the two lines of the owner's "Form header", and the keyboard goes back to the session's composer when
   // the element holding it leaves with the request. Absent (the project channel's cards), the inline card is as before.
   region?: 'row' | 'end';
+  // UX wave U1b M4 (Interfaces §F): the end row's open card. A permission prompt's ⌘↩, ⇧⌘↩ and Esc then answer from its
+  // row, from its session's composer in its pane, and from nothing with that pane active, once its guard is armed (decision
+  // 18); any other kind keeps its row's keys.
+  keys?: 'pane';
 }
 
 // The kind line (C5's table, so the Needs-you row, the hover and the card read alike), and the card's group name.
@@ -138,7 +145,26 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
 
   const phase: Phase = entry === undefined || entry.phase === 'failed' ? 'pending' : entry.phase;
   const failed = entry?.phase === 'failed' ? { retry: () => submit(entry.answer, '', followUps.get(item.id)), detail: entry.detail } : null;
-  return { phase, failed, submit };
+  return { phase, failed, submit, entry };
+}
+
+// UX wave U1b M4 (§F): the guard of an open prompt whose chords are the pane's, watching the card and its row of decision
+// buttons while it is live. A new watch starts each time the card becomes answerable, so the grace counts from then too:
+// `live` turning true, or the delivery's entry changing while it stays live (a failed write coming back answerable).
+function usePromptGuard(watching: boolean, rootRef: RefObject<HTMLDivElement | null>, entry: unknown): RefObject<PromptGuard | null> {
+  const guard = useRef<PromptGuard | null>(null);
+  useLayoutEffect(() => {
+    const card = rootRef.current;
+    const buttons = card?.querySelector<HTMLElement>('[data-decision-buttons]') ?? null;
+    if (!watching || card === null || buttons === null) return;
+    const watch = watchPrompt(card, buttons);
+    guard.current = watch;
+    return () => {
+      watch.dispose();
+      if (guard.current === watch) guard.current = null;
+    };
+  }, [watching, rootRef, entry]);
+  return guard;
 }
 
 // Text entry, as C5's dispatcher defines it (`keymap/dispatcher.ts`, whose `BUTTON_LIKE_INPUTS` this reads): an input
@@ -232,7 +258,7 @@ function RequestCardFor(props: RequestCardProps) {
   );
 }
 
-function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed, askInPlace = false, region }: RequestCardProps & {
+function NativeRequestCard({ item, request, placement, onAnswered, loading, unreadable, concealed, askInPlace = false, region, keys: keyScope }: RequestCardProps & {
   loading: boolean;
   unreadable: string | null;
   concealed: boolean;
@@ -241,7 +267,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
   const now = useNow();
-  const { phase, failed, submit } = useDelivery(item, onAnswered);
+  const { phase, failed, submit, entry } = useDelivery(item, onAnswered);
   const pointer = usePointerOnly();
   // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
   const controls = useSessionControls(item.appSessionId);
@@ -274,12 +300,27 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
     const root = rootRef.current;
     ownerRef.current = root ? (root.parentElement?.closest<HTMLElement>('[tabindex]') ?? root) : null;
   });
-  const owns = placement === 'card' || (placement === 'inline' && region !== undefined); // U1b: a transcript's row owns an inline card's keys
-  const cardKeys = owns && live;
-  useKeyChord('request.accept', accept, { within: ownerRef, enabled: cardKeys && bound.accept, fresh: true });
-  useKeyChord('request.decline', decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true });
-  useKeyChord('request.allowOnce', allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true });
-  useKeyChord('request.allowLasting', allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true });
+  // U1b M4 (§F): the end row's open prompt binds its chords as the pane's; every other card, by the element that owns them
+  const paneKeys = keyScope === 'pane' && request?.kind === 'permission.requested';
+  const owns = !paneKeys && (placement === 'card' || (placement === 'inline' && region !== undefined)); // U1b: a transcript's row owns an inline card's keys
+  const cardKeys = (owns || paneKeys) && live;
+  const prompt = usePromptGuard(paneKeys && live, rootRef, entry);
+  const appSessionId = item.appSessionId;
+  // claimed when the press is this prompt's (its row, its composer, or nothing with its pane active) and the card is in
+  // view, and ⌘↩ only beside an empty composer; a claimed press answers only once the guard is armed, else nothing
+  const claims = (yieldsToDraft: boolean) => () => {
+    const row = ownerRef.current;
+    const card = rootRef.current;
+    return row !== null && card !== null && promptFocused(row, appSessionId) && inView(card) && (!yieldsToDraft || composerEmpty(appSessionId));
+  };
+  const guarded = (may: 'mayDeny' | 'mayAllow', run: () => void) => () => {
+    if (prompt.current?.[may](performance.now()) === true) run();
+  };
+  const pane = (yieldsToDraft: boolean) => (paneKeys ? claims(yieldsToDraft) : undefined);
+  useKeyChord('request.accept', accept, { within: ownerRef, enabled: owns && live && bound.accept, fresh: true });
+  useKeyChord('request.decline', paneKeys ? guarded('mayDeny', decline) : decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true, claims: pane(false) });
+  useKeyChord('request.allowOnce', paneKeys ? guarded('mayAllow', allowOnce) : allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true, claims: pane(true) });
+  useKeyChord('request.allowLasting', paneKeys ? guarded('mayAllow', allowLasting) : allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true, claims: pane(false) });
 
   // Digits, from the element that owns the keys (the article, or the transcript's row).
   useEffect(() => {
@@ -300,7 +341,6 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   // U1b (Interfaces §E): when the element that holds the keyboard leaves with its request (a form answered, the last card
   // at the end), the keyboard goes to the session's composer, as the docked frame gave it back; when the card did not hold
   // it, nothing moves.
-  const appSessionId = item.appSessionId;
   useLayoutEffect(() => {
     if (region === undefined) return;
     const root = rootRef.current;
@@ -371,7 +411,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   } else {
     switch (request?.kind) {
       case 'permission.requested':
-        body = <PermissionBody {...variant} request={request} proposed={proposed ?? undefined} />;
+        body = <PermissionBody {...variant} request={request} proposed={proposed ?? undefined} guarded={paneKeys} />;
         break;
       case 'question.requested': {
         // U1a §E: Dismiss sends the decline the form's Esc sends (an asynchronous question's: the bridge's dismissal),

@@ -2,7 +2,9 @@
 // decision reason, and three buttons drawn from the scopes the request offers (`scopeOptions`): Deny (Esc, its menu
 // holding "Deny and stop the turn"), the most lasting scope by name (⇧⌘↩) and Allow once (⌘↩), with "Allow for this
 // session" as the one entry of a menu on Allow once when the project rule takes the third place. "Deny… with a reason"
-// opens the reason box, whose own ⌘↩ sends. A key acts once the prompt has been drawn for 400 ms; each key is printed on
+// opens the reason box, whose own ⌘↩ sends. A key acts once the prompt has been drawn for 400 ms (UX wave U1b M4: at a
+// transcript's end, once the card's guard is armed, `guarded`, the guard seeing the row of buttons the body marks
+// `data-decision-buttons`); each key is printed on
 // its button (the row's effective chord) and a button whose key is not bound prints none. Under the quick-approval
 // policy: `button_only` (`default_to_no`) binds no allow key; `none` (`requires_user_interaction`) draws no allow button.
 // P5 O9 M6: each button, and each menu entry, is drawn disabled in place with its reason where the session's port can't
@@ -31,7 +33,7 @@ const KEY_GRACE_MS = 400;
 const MENU = 'z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
 const MENU_ITEM = 'cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint data-[highlighted]:bg-bg-hover';
 
-export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE }: VariantProps<'permission.requested'> & { proposed?: Proposed }) {
+export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE, guarded = false }: VariantProps<'permission.requested'> & { proposed?: Proposed; guarded?: boolean }) {
   const project = useSessions((s) => {
     const record = s.records.get(item.appSessionId);
     return record?.projectId ? (s.projects.get(record.projectId) ?? null) : null;
@@ -69,7 +71,7 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const declineKey = keyed('request.decline', !denyGate.disabled, () => deny('deny'));
   const onceKey = keyed('request.allowOnce', policy === 'full' && !onceGate.disabled, () => allow('once'));
   const lastingKey = lasting === null ? null : keyed('request.allowLasting', policy === 'full' && lastingGate?.disabled === false, () => allow(lasting.scope));
-  const whenArmed = (run: (() => void) | null) => run && (() => void (armed.current && run()));
+  const whenArmed = (run: (() => void) | null) => run && (() => void ((guarded || armed.current) && run()));
 
   useEffect(() => {
     bindKeys({ accept: null, decline: whenArmed(declineKey), allowOnce: whenArmed(onceKey), allowLasting: whenArmed(lastingKey), digit: null });
@@ -92,7 +94,7 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
           <Muted>⌘Enter sends the deny with this reason</Muted>
         </div>
       )}
-      <Controls>
+      <Controls decisions>
         {!reasoning && (
           <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={() => setReasoning(true)} className="mr-auto border-transparent text-fg-muted">
             Deny… with a reason

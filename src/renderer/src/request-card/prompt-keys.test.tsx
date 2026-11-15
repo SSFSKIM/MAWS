@@ -7,7 +7,7 @@
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
@@ -21,6 +21,7 @@ import { fakeClient, type FakeClient } from '../../../../test/support/fake-clien
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { Composer } from '../composer/Composer';
 import { resetDictationStore, useDictationStore } from '../composer/dictation/store';
+import { registerSlashWidget } from '../composer/mentions/widgets';
 import { resetTakeBack } from '../composer/queue/take-back';
 import { resetSurfaceRegistry } from '../engine-surface/registry';
 import { connectKeys } from '../keymap/dispatcher';
@@ -236,6 +237,8 @@ describe('a prompt’s keys reach it', () => {
   });
 
   it('Esc with the composer’s popup open closes the popup and answers nothing', async () => {
+    const off = registerSlashWidget('usage', { title: 'Usage', component: () => null }); // a row for the `/` list
+    onTestFinished(off);
     const { prompt } = scene();
     await mount([prompt]);
     arm();

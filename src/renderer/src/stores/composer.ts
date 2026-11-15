@@ -69,6 +69,9 @@ export interface FocusTarget {
   // E9: a dictation's words at the editor's caret (composer/dictation/); null while a card covers the box, the editor is
   // read-only or a submission is in flight. `onEnded` fires once when the composer ends the sink itself.
   dictation?: { begin(onEnded: () => void): DictationSink | null };
+  // UX wave U1b (§F): whether the box is empty, the emptiness that greys Send; ⌘↩ allows a prompt only beside an empty
+  // box (a target without it, like no composer at all, counts as empty)
+  empty?(): boolean;
 }
 
 // Where edit-and-resubmit stands (C7 execution document, "Edit-and-resubmit and the fork seam"); M4b drives it from

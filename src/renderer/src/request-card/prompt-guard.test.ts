@@ -3,11 +3,7 @@
 // and the geometry (each element's rectangle, what is topmost at a point, the intersection observer's callbacks) and
 // asserts the guard's answers at given moments, never wall time.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-
-// The guard's module, read at the case's run: a red run (before the module exists) fails the cases, not the file.
-const GUARD = './prompt-guard';
-type GuardModule = { watchPrompt(card: HTMLElement, buttons: HTMLElement, graceMs?: number): { mayDeny(now: number): boolean; mayAllow(now: number): boolean; dispose(): void } };
-const guardModule = (): Promise<GuardModule> => import(/* @vite-ignore */ GUARD);
+import { watchPrompt } from './prompt-guard';
 
 const GRACE = 400;
 const FRAME = 16;
@@ -95,24 +91,23 @@ afterEach(() => {
   vi.useRealTimers();
 });
 
-async function watch() {
-  const { watchPrompt } = await guardModule();
+function watch() {
   const guard = watchPrompt(card, buttons);
   return { guard, startedAt: now() };
 }
 
 describe('the guard of a prompt at a transcript’s end', () => {
-  it('arms its deny and its allows 400 ms after the watch starts, with the card in view and its buttons whole', async () => {
-    const { guard, startedAt } = await watch();
+  it('arms its deny and its allows 400 ms after the watch starts, with the card in view and its buttons whole', () => {
+    const { guard, startedAt } = watch();
     expect(guard.mayDeny(startedAt + GRACE - 1)).toBe(false);
     expect(guard.mayAllow(startedAt + GRACE - 1)).toBe(false);
     expect(guard.mayDeny(startedAt + GRACE)).toBe(true);
     expect(guard.mayAllow(startedAt + GRACE)).toBe(true);
   });
 
-  it('a card partly in view for seconds whose buttons then come wholly into view: no allow until 400 ms after that moment, and the deny acts throughout', async () => {
+  it('a card partly in view for seconds whose buttons then come wholly into view: no allow until 400 ms after that moment, and the deny acts throughout', () => {
     PARTLY();
-    const { guard } = await watch();
+    const { guard } = watch();
     vi.advanceTimersByTime(3000);
     expect(guard.mayDeny(now())).toBe(true); // any sliver in view: Esc's rule
     expect(guard.mayAllow(now())).toBe(false); // the buttons are below the scroller's edge
@@ -125,7 +120,7 @@ describe('the guard of a prompt at a transcript’s end', () => {
   });
 
   it('an overlay that closes: the deny and the allows answer nothing for 400 ms after it closed', async () => {
-    const { guard, startedAt } = await watch();
+    const { guard, startedAt } = watch();
     vi.advanceTimersByTime(2 * GRACE);
     expect(guard.mayAllow(now())).toBe(true);
     const menu = document.createElement('div');
@@ -144,8 +139,8 @@ describe('the guard of a prompt at a transcript’s end', () => {
     expect(guard.mayAllow(clearedAt + GRACE)).toBe(true);
   });
 
-  it('a card that leaves the view answers nothing, and re-arms 400 ms after it returns', async () => {
-    const { guard } = await watch();
+  it('a card that leaves the view answers nothing, and re-arms 400 ms after it returns', () => {
+    const { guard } = watch();
     vi.advanceTimersByTime(2 * GRACE);
     AWAY();
     intersect();
@@ -164,7 +159,7 @@ describe('the guard of a prompt at a transcript’s end', () => {
   });
 
   it('buttons covered by another element refuse an allow, and re-arm 400 ms after they are uncovered', async () => {
-    const { guard } = await watch();
+    const { guard } = watch();
     vi.advanceTimersByTime(2 * GRACE);
     const toast = document.createElement('div');
     rects.set(toast, rect(400, 240, 300, 60)); // over the buttons' right end
@@ -184,9 +179,9 @@ describe('the guard of a prompt at a transcript’s end', () => {
     expect(guard.mayAllow(uncoveredAt + GRACE)).toBe(true);
   });
 
-  it('buttons that became whole with no scroll, resize or intersection event are caught at the press, which stamps and refuses', async () => {
+  it('buttons that became whole with no scroll, resize or intersection event are caught at the press, which stamps and refuses', () => {
     PARTLY();
-    const { guard } = await watch();
+    const { guard } = watch();
     vi.advanceTimersByTime(3000);
     IN_VIEW(); // moved with no event the guard hears
     const pressedAt = now();
@@ -195,16 +190,16 @@ describe('the guard of a prompt at a transcript’s end', () => {
     expect(guard.mayAllow(pressedAt + GRACE)).toBe(true);
   });
 
-  it('a card below its scrolling ancestor’s edge is out of view, though the window would show it', async () => {
+  it('a card below its scrolling ancestor’s edge is out of view, though the window would show it', () => {
     place(rect(10, 650, 600, 100), rect(10, 700, 600, 40)); // inside the window (768 high), below the scroller (600)
-    const { guard } = await watch();
+    const { guard } = watch();
     vi.advanceTimersByTime(2 * GRACE);
     expect(guard.mayDeny(now())).toBe(false);
     expect(guard.mayAllow(now())).toBe(false);
   });
 
-  it('stops watching once disposed', async () => {
-    const { guard } = await watch();
+  it('stops watching once disposed', () => {
+    const { guard } = watch();
     expect(observers.size).toBe(1);
     guard.dispose();
     expect(observers.size).toBe(0);
