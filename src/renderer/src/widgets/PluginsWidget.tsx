@@ -1,18 +1,21 @@
 // `/plugins` (C11; E8 execution document, M2; P2-B execution document §5.2 to §5.9): the plugin library, Claude Desktop's
 // grouped plugin library as its 2.16120.0 bundle ships it, over E8's management through the engine's own CLI. A
 // library-sized dialog (X19) whose head carries the title and, at the left, Open Discover (P4-AGG Decision Log 10: new
-// plugins are found in Customize › Plugins › Discover, which it opens for the session's directory) and, at the right, My
-// items' Search, Show and Sort, and the Add menu (Add marketplace, Manage marketplaces). Customize's embedded library has
-// the My items | Discover switch there instead. My items: the loaded line about this session, then one row per plugin in
-// Desktop's source groups. Selecting a row opens its detail in place of the list (§5.7): the list stays mounted beneath
-// it, hidden, so Back returns to it with its search, filter, scroll and focus as they were; the head's controls and the
-// loaded line belong to the list and leave with it. The two marketplace dialogs are
-// sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
+// plugins are found in Customize's Discover, which it opens for the session's directory) and, at the right, My items'
+// Search, Filter and Sort, and the Add menu (Add marketplace, Manage marketplaces). My items: the loaded line about this
+// session, then one row per plugin in Desktop's source groups. Selecting a row opens its detail in place of the list
+// (§5.7): the list stays mounted beneath it, hidden, so Back returns to it with its search, filter, scroll and focus as
+// they were; the head's controls and the loaded line belong to the list and leave with it. The two marketplace dialogs
+// are sheets beside the frame, as E8's confirm sheet is, which stacks above them; every change is E8's CLI run after that
 // sheet. The CLI needs no engine process, so a session with no ready process still manages plugins: the frame's states
 // never stand in for the list, and A's session states (its observed facts, availability and Refresh) reach `/plugins`
 // only through the loaded line and the detail's "Loaded in this session".
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, M2, "The move, not a rewrite"): Customize
+// draws its own head and holds its own operations and sheets (customize/place.tsx), so what both draw is cut out of the
+// dialog here: the reads (`usePluginsLibrary`), the detail's selection (`useLibrarySelection`) and the list with its
+// detail (`PluginsList`); `LibraryBody` is the dialog that only the session uses.
 import { useQueryClient } from '@tanstack/react-query';
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from 'react';
+import { memo, useCallback, useLayoutEffect, useMemo, useRef, useState, type RefObject } from 'react';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandOutput } from '@shared/ipc/schema';
@@ -24,31 +27,28 @@ import { BEFORE_START, LIBRARY as L, PLUGIN_MANAGEMENT, WIDGET_TITLE } from './c
 import { AddMarketplaceDialog } from './plugins/AddMarketplaceDialog';
 import { AddMenu, type MarketplaceDialog } from './plugins/AddMenu';
 import type { EngineResolution } from './plugins/ConfirmSheet';
-import { LibrarySwitch, PluginsToolbar, type LibraryTab } from './plugins/LibraryHeader';
-import { identitiesOf, installationRef } from './plugins/library';
+import { PluginsToolbar } from './plugins/LibraryHeader';
+import { identitiesOf, installationRef, type PluginIdentity } from './plugins/library';
 import { useLibraryStore } from './plugins/library-store';
 import { LoadedLine, NotObservedLine } from './plugins/LoadedLine';
 import { ManageProvider, useManageState } from './plugins/manage';
 import { ManageMarketplaces } from './plugins/ManageMarketplaces';
-import { usePluginManifests } from './plugins/manifests';
+import { usePluginManifests, type PluginManifests } from './plugins/manifests';
 import { MyItems } from './plugins/MyItems';
 import { PluginDetail } from './plugins/PluginDetail';
 import { usePluginsEnv, usePluginsRead, type PluginsReadResult } from './plugins/read';
 import { useReloads } from './plugins/reload';
 import { SESSION_UNAVAILABLE, type PluginSession } from './plugins/session';
 import { WidgetFrame } from './WidgetFrame';
-import { pluginIdOf } from '../customize/discover/add';
 import { DISCOVER } from '../customize/discover/copy';
-import { DiscoverPane } from '../customize/discover/DiscoverPane';
-import { DiscoverToolbar } from '../customize/discover/DiscoverToolbar';
-import { openDiscover, takeDiscoverRequest, useDiscoverRequest } from '../customize/open';
+import { openDiscover } from '../customize/open';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
 import { useCloseOnLeavingForRemote, useTabPlace } from './tab-place';
 
 // The sessions a change reloads: those with a ready process (the host's fan-out targets). P5 O6 M4: this machine's, whose
 // plugin CLI the change runs (another machine's sessions are not reloaded by it).
-const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
+export const readyCount = (engine: ReadonlyMap<AppSessionId, EngineSessionStatus>): number => {
   let n = 0;
   for (const status of engine.values()) if (status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine) n += 1;
   return n;
@@ -66,42 +66,12 @@ export function resolutionOf(env: PluginsReadResult<CommandOutput<'plugins.env'>
 
 const NO_VIEWS: ReadonlyMap<string, PluginManifestView> = new Map();
 
-type LibraryPresentation = { variant: 'embedded'; scope?: ReactNode } | { variant: 'modal'; appSessionId: AppSessionId; close(): void };
+type LibraryPresentation = { variant: 'modal'; appSessionId: AppSessionId; close(): void };
 
-// P4-AGG M3: Customize's library shows Discover (the catalog over `catalog.*`, Discover's page cwd: null for the user
-// configuration) beside My items; the session's `/plugins` keeps My items and opens Discover there (Decision Log 10).
-export interface DiscoverOption {
-  cwd: string | null;
-}
-
-export interface PluginsLibraryProps {
-  cwd: string;
-  appSessionId: AppSessionId | null;
-  scope?: ReactNode;
-  discover?: DiscoverOption;
-}
-
-// Customize supplies a real directory and, optionally, a ready session. Runtime hooks are mounted only while that
-// attachment is actually ready; an exit never turns Customize into an engine-start surface. A project change resets
-// details and confirmations, so an old request cannot silently become a change in a different project.
-export function PluginsLibrary({ cwd, appSessionId, scope, discover }: PluginsLibraryProps) {
-  const ready = useSessions((s) => appSessionId !== null && s.engine.get(appSessionId)?.process === 'ready');
-  return <EmbeddedLibrary key={cwd} cwd={cwd} appSessionId={ready ? appSessionId : null} scope={scope} discover={discover} />;
-}
-
-function EmbeddedLibrary({ cwd, appSessionId, scope, discover }: PluginsLibraryProps) {
-  const [session, setSession] = useState<PluginSession | null>(null);
-  return (
-    <>
-      {appSessionId !== null && <ReadySession key={appSessionId} appSessionId={appSessionId} onChange={setSession} />}
-      <LibraryBody cwd={cwd} session={session?.appSessionId === appSessionId ? session : null} presentation={{ variant: 'embedded', scope }} discover={discover} />
-    </>
-  );
-}
-
-// Only the runtime reader follows the attachment. Memo keeps publishing its facts from rerendering the reader itself;
-// reload hooks return new callbacks on each render. The cwd-based body, operations and sheets remain mounted beside it.
-const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { appSessionId: AppSessionId; onChange(session: PluginSession): void }) {
+// Customize's attached session (customize/place.tsx): only the runtime reader follows the attachment, never acquiring a
+// process. Memo keeps publishing its facts from rerendering the reader itself; reload hooks return new callbacks on each
+// render. The cwd-based body, operations and sheets remain mounted beside it.
+export const ReadySession = memo(function ReadySession({ appSessionId, onChange }: { appSessionId: AppSessionId; onChange(session: PluginSession): void }) {
   const session = usePluginSession(appSessionId, false);
   useLayoutEffect(() => onChange(session), [onChange, session]);
   return null;
@@ -144,9 +114,9 @@ function LibraryBeforeStart({ appSessionId, folder, close }: { appSessionId: App
   return <LibraryBody key={directory} cwd={directory} session={null} presentation={{ variant: 'modal', appSessionId, close }} beforeStart={{ discoverAt: folder }} />;
 }
 
-// The session modal alone keeps dormant-session Refresh. The embedded library exposes ready-process reloads only.
+// The session modal alone keeps dormant-session Refresh. Customize's page exposes ready-process reloads only.
 function SessionLibrary({ cwd, appSessionId, presentation }: { cwd: string | null; appSessionId: AppSessionId; presentation: LibraryPresentation }) {
-  const session = usePluginSession(appSessionId, presentation.variant === 'modal');
+  const session = usePluginSession(appSessionId, true);
   return <LibraryBody cwd={cwd} session={session} presentation={presentation} />;
 }
 
@@ -158,22 +128,22 @@ function usePluginSession(appSessionId: AppSessionId, allowAcquire: boolean): Pl
   return { appSessionId, loaded, availability, reloads: ready ? reloads : null, allowAcquire };
 }
 
-// `beforeStart`: an unstarted tab's library (U11a), with the page Open Discover opens
-function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; discover?: DiscoverOption; beforeStart?: { discoverAt: string | null } }) {
-  const readySessions = useSessions((s) => readyCount(s.engine));
-  const env = usePluginsEnv();
-  const { reread } = env;
+/** What the session's `/plugins` and Customize's My items both read: the installed list, the marketplaces, what each
+ * plugin says about itself, and the plugins the session loaded. */
+export interface PluginsLibraryReads {
+  installed: PluginsReadResult<CommandOutput<'plugins.list'>>;
+  marketplaces: PluginsReadResult<CommandOutput<'marketplaces.list'>>;
+  identities: readonly PluginIdentity[];
+  manifests: PluginManifests;
+  loadedIds: ReadonlySet<string> | null;
+  retryList(): void;
+}
+
+export function usePluginsLibrary(cwd: string | null, session: PluginSession | null): PluginsLibraryReads {
   const installed = usePluginsRead('plugins.list', cwd);
   const marketplaces = usePluginsRead('marketplaces.list', cwd);
   const loaded = session?.loaded ?? null;
-  const reloads = session?.reloads ?? null;
-  const appSessionId = session?.appSessionId ?? null;
   const client = useQueryClient();
-  // the binary and the paths are the host's answer, never a guess: every sheet reads it again and confirms nothing until
-  // it names a binary (M2 review; E8 whole-branch review); the sheet names what the change writes (E11 §2.2)
-  const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
-  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions, keep: discover ? `customize:plugins:${discover.cwd ?? 'user'}` : undefined }, reloads?.reloadMods ?? null, resolveEngine); // Customize's page keeps its operations past its views
-
   const plugins = installed.data?.plugins;
   const markets = marketplaces.data?.marketplaces;
   // the plugins the session loaded, as last observed; none observed is not "loaded none"
@@ -183,19 +153,20 @@ function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cw
   const manifests = usePluginManifests(cwd, requests);
   const { views } = manifests;
   const identities = useMemo(() => identitiesOf(plugins ?? [], markets ?? [], views, loadedIds), [plugins, markets, views, loadedIds]);
+  const retryList = useCallback(() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] }), [client, cwd]);
+  return { installed, marketplaces, identities, manifests, loadedIds, retryList };
+}
 
-  // the view: My items, or (in Customize) Discover; a request from the session's `/plugins` (Open Discover, Decision Log
-  // 10) for this library's page opens it on Discover, whether it is mounted already or mounts for it
-  const [tab, setTab] = useState<LibraryTab>(() => (discover && takeDiscoverRequest(discover.cwd) ? 'discover' : 'myItems'));
-  useEffect(() => {
-    if (!discover) return;
-    return useDiscoverRequest.subscribe(() => {
-      if (takeDiscoverRequest(discover.cwd)) setTab('discover');
-    });
-  }, [discover]);
-  const [dialog, setDialog] = useState<MarketplaceDialog | null>(null);
+/** My items' detail: the plugin selected while it is listed (one uninstalled everywhere returns to the list); its leaving
+ * restores the list's scroll and puts the keyboard back on the row it was opened from, else on `fallback`. */
+export interface LibrarySelection {
+  detail: PluginIdentity | null;
+  open(id: string): void;
+  close(): void;
+  pane: RefObject<HTMLDivElement | null>;
+}
 
-  // My items' detail: the plugin selected in this open, while it is listed (one uninstalled everywhere returns to the list)
+export function useLibrarySelection(identities: readonly PluginIdentity[], fallback: string): LibrarySelection {
   const [selected, setSelected] = useState<string | null>(null);
   const detail = selected === null ? null : (identities.find((i) => i.id === selected) ?? null);
   const pane = useRef<HTMLDivElement>(null);
@@ -204,6 +175,7 @@ function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cw
     left.current = { id, scrollTop: pane.current?.scrollTop ?? 0 };
     setSelected(id);
   }, []);
+  const close = useCallback(() => setSelected(null), []);
   const showing = detail !== null;
   useLayoutEffect(() => {
     const from = left.current;
@@ -211,32 +183,83 @@ function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cw
     left.current = null;
     setSelected(null); // a plugin that left the list is not selected again by its return
     pane.current.scrollTop = from.scrollTop;
-    // the keyboard back on the row it left from, else (the row left the list) on the frame
-    const target = pane.current.querySelector<HTMLElement>(`[data-plugin-row="${CSS.escape(from.id)}"] [data-row-open]`) ?? pane.current.closest<HTMLElement>('[data-widget]');
+    // the keyboard back on the row it left from, else (the row left the list) on the frame or the page
+    const target = pane.current.querySelector<HTMLElement>(`[data-plugin-row="${CSS.escape(from.id)}"] [data-row-open]`) ?? pane.current.closest<HTMLElement>(fallback);
     target?.focus();
-  }, [showing]);
+  }, [showing, fallback]);
+  return useMemo(() => ({ detail, open, close, pane }), [detail, open, close]);
+}
 
-  // a view's switch: to the other view, or (the view already shown) back to its list
-  const switchTo = (next: LibraryTab) => {
-    if (next === tab && next === 'myItems') setSelected(null);
-    setTab(next);
-  };
+/** My items as both draw it: the loaded line and the list, or a plugin's detail in its place (the list kept beneath). */
+export function PluginsList({ library, session, selection, beforeStart = false, search }: {
+  library: PluginsLibraryReads;
+  session: PluginSession | null;
+  selection: LibrarySelection;
+  beforeStart?: boolean; // an unstarted tab's: its loaded line says "Not observed yet" alone
+  search?: { text: string; clear(): void }; // Customize's one text, in the library store's place (UX wave U11c)
+}) {
+  const { installed, identities, manifests, loadedIds, retryList } = library;
+  const marketplaces = library.marketplaces.data?.marketplaces;
+  const loaded = session?.loaded ?? null;
+  const reloads = session?.reloads ?? null;
+  const appSessionId = session?.appSessionId ?? null;
+  const { detail, open, close, pane } = selection;
+  return (
+    <>
+      {detail && (
+        <PluginDetail key={detail.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={detail} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} marketplaces={marketplaces} listError={installed.error} backTo={L.myItems} onBack={close} />
+      )}
+      <div className={detail !== null ? 'hidden' : 'contents'}>
+        {session ? (
+          <LoadedLine
+            appSessionId={session.appSessionId}
+            availability={session.availability}
+            loaded={session.loaded}
+            reloads={session.reloads}
+            allowAcquire={session.allowAcquire}
+            onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
+          />
+        ) : beforeStart ? (
+          <NotObservedLine />
+        ) : (
+          <p data-plugins-session-unavailable className="m-0 border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">{SESSION_UNAVAILABLE}</p>
+        )}
+        <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
+          <MyItems appSessionId={appSessionId} installed={installed} identities={identities} marketplaces={marketplaces} loaded={loaded} loadedIds={loadedIds} onRetry={retryList} manifestError={manifests.error} onRetryManifests={manifests.retry} onOpen={open} search={search} />
+        </div>
+      </div>
+    </>
+  );
+}
+
+// The session's dialog. `beforeStart`: an unstarted tab's library (U11a), with the page Open Discover opens.
+function LibraryBody({ cwd, session, presentation, beforeStart }: { cwd: string | null; session: PluginSession | null; presentation: LibraryPresentation; beforeStart?: { discoverAt: string | null } }) {
+  const readySessions = useSessions((s) => readyCount(s.engine));
+  const env = usePluginsEnv();
+  const { reread } = env;
+  const library = usePluginsLibrary(cwd, session);
+  const reloads = session?.reloads ?? null;
+  // the binary and the paths are the host's answer, never a guess: every sheet reads it again and confirms nothing until
+  // it names a binary (M2 review; E8 whole-branch review); the sheet names what the change writes (E11 §2.2)
+  const resolveEngine = useCallback(async () => resolutionOf(await reread()), [reread]);
+  const { manage, sheet } = useManageState({ cwd: cwd ?? '', readySessions }, reloads?.reloadMods ?? null, resolveEngine);
+  const [dialog, setDialog] = useState<MarketplaceDialog | null>(null);
+  const selection = useLibrarySelection(library.identities, '[data-widget]');
+  const showing = selection.detail !== null;
 
   const add = <AddMenu onOpen={setDialog} />;
-  const toolbar = discover && tab === 'discover' ? <DiscoverToolbar tab="plugins" add={add} /> : showing ? null : <PluginsToolbar add={add} />;
-  // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize › Plugins › Discover for the
+  const toolbar = showing ? null : <PluginsToolbar add={add} />;
+  // the session's `/plugins` finds new plugins in Discover (Decision Log 10): Customize's Discover, Plugins, for the
   // session's own directory (the CLI's cwd here), the modal closed; with no directory known there is nothing to open
   const discoverAt = beforeStart ? beforeStart.discoverAt : cwd;
-  const heading = discover ? (
-    <LibrarySwitch tab={tab} onChange={switchTo} second={DISCOVER.discover} />
-  ) : (
+  const heading = (
     <button
       type="button"
       data-open-discover
       disabled={discoverAt === null && !beforeStart}
       onClick={() => {
         if (discoverAt === null && !beforeStart) return;
-        if (presentation.variant === 'modal') presentation.close();
+        presentation.close();
         openDiscover(discoverAt);
       }}
       className="inline-flex h-7 shrink-0 items-center rounded-md border border-border px-2.5 text-ui text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint"
@@ -244,56 +267,13 @@ function LibraryBody({ cwd, session, presentation, discover, beforeStart }: { cw
       {DISCOVER.openDiscover}
     </button>
   );
-  // an item Discover shows installed here opens in My items, its detail when My items lists it under that id
-  const openInstalled = (item: Parameters<typeof pluginIdOf>[0]) => {
-    const id = pluginIdOf(item);
-    setTab('myItems');
-    if (id !== null && identities.some((identity) => identity.id === id)) open(id);
-  };
-  const pluginDetail = (identity: NonNullable<typeof detail>, backTo: string, onBack: () => void) => (
-    <PluginDetail key={identity.id} appSessionId={appSessionId} availability={session?.availability ?? null} identity={identity} loaded={loaded} loadedIds={loadedIds} reloads={reloads} allowAcquire={session?.allowAcquire ?? false} listManifests={manifests} listError={installed.error} backTo={backTo} onBack={onBack} />
-  );
 
   return (
     <ManageProvider value={manage}>
       <WidgetFrame {...presentation} title={WIDGET_TITLE.plugins} command="plugins" state="ready" error={null} size="library" heading={heading} toolbar={toolbar}>
-        {tab === 'myItems' && (
-          <>
-            {detail && pluginDetail(detail, L.myItems, () => setSelected(null))}
-            <div className={showing ? 'hidden' : 'contents'}>
-              {session ? (
-                <LoadedLine
-                  appSessionId={session.appSessionId}
-                  availability={session.availability}
-                  loaded={session.loaded}
-                  reloads={session.reloads}
-                  allowAcquire={session.allowAcquire}
-                  onShowLoaded={() => useLibraryStore.setState((s) => ({ plugins: { ...s.plugins, filter: 'loaded' } }))}
-                />
-              ) : beforeStart ? (
-                <NotObservedLine />
-              ) : (
-                <p data-plugins-session-unavailable className="m-0 border-b border-border px-2 pb-2 text-ui-sm text-fg-muted">{SESSION_UNAVAILABLE}</p>
-              )}
-              <div ref={pane} data-library-pane className="min-h-0 flex-1 overflow-y-auto px-1 pb-2">
-                <MyItems
-                  appSessionId={appSessionId}
-                  installed={installed}
-                  identities={identities}
-                  loaded={loaded}
-                  loadedIds={loadedIds}
-                  onRetry={() => void client.refetchQueries({ queryKey: ['maws', 'plugins.list', { cwd }] })}
-                  manifestError={manifests.error}
-                  onRetryManifests={manifests.retry}
-                  onOpen={open}
-                />
-              </div>
-            </div>
-          </>
-        )}
-        {tab === 'discover' && discover && <DiscoverPane tab="plugins" cwd={discover.cwd} onOpenInstalled={openInstalled} />}
+        <PluginsList library={library} session={session} selection={selection} beforeStart={beforeStart !== undefined} />
       </WidgetFrame>
-      {dialog === 'manage' && <ManageMarketplaces marketplaces={marketplaces} installed={plugins ?? []} onClose={() => setDialog(null)} />}
+      {dialog === 'manage' && <ManageMarketplaces marketplaces={library.marketplaces} installed={library.installed.data?.plugins ?? []} onClose={() => setDialog(null)} />}
       {dialog === 'add' && <AddMarketplaceDialog onClose={() => setDialog(null)} />}
       {sheet}
     </ManageProvider>

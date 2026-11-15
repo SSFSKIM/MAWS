@@ -23,13 +23,19 @@
 // The owner's setting is never bypassed by a direct write. A suggested batch takes no `answering` (refused, see
 // SUGGESTED_ANSWER).
 //
+// UX wave U10b (§B.2 and §B.3 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `set_page` sets a
+// document's page as an op of the batch (the planner's, so it is all or none with the rest and written in the batch's
+// one transaction). A batch holding it is refused whole on a dashboard, which has no page, and when it would land as
+// suggestions, whose document's settings an accept does not carry over. A document's read names its page.
+//
 // `mawsTools` lists the four tools after A's and wraps A's `artifact_read` and `artifact_create` with
 // `documentReadTool`/`documentCreateTool`, which answer a document and hand every other kind to A's tool.
 import { precheckEdit } from '@artifacts/document/edit-plan';
 import { DocIndex } from '@artifacts/document/block-index';
 import { caretsOf } from '@artifacts/document/carets';
-import { EditError, type Op } from '@artifacts/document/edit-ops';
+import { EditError, type Op, type OpResult, type PageOpResult } from '@artifacts/document/edit-ops';
 import { importMarkdown } from '@artifacts/document/import/markdown';
+import { docPage } from '@artifacts/document/meta';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { readDocument, ReadError, type ReadOptions } from '@artifacts/document/read';
 import { nanoid8 } from '@artifacts/document/schema';
@@ -51,11 +57,13 @@ import {
   DOCUMENT_LIMITS,
   documentRefused,
   parseDocumentArguments,
+  SET_PAGE_REFUSALS,
   type ArtifactEditResult,
   type ArtifactReplyResult,
   type ArtifactResolveResult,
   type CommentAuthor,
   type DocumentRefusal,
+  type DocumentPage,
   type DocumentReadResult,
   type DocumentToolName,
   type DocumentVersionSummary,
@@ -203,12 +211,12 @@ const blockIdOf = (node: Node | null): string | null => {
  * block an unscoped quote matched, a cell, a moved block) and the blocks it made (the outermost new ones), never an
  * insert's anchor or a deleted block. Read after the write, when the doc's index holds the new blocks.
  */
-function touchedBlocksOf(doc: Doc, ops: readonly Op[], results: readonly { target: string; newIds: string[] }[]): string[] {
+function touchedBlocksOf(doc: Doc, ops: readonly Op[], results: ReadonlyArray<OpResult | PageOpResult>): string[] {
   const index = DocIndex.of(doc);
   const out: string[] = [];
   results.forEach((result, i) => {
     const op = ops[i];
-    if (op.op === 'delete') return;
+    if (op.op === 'delete' || 'op' in result) return; // a set_page touches no block
     if (op.op !== 'insert') out.push(...result.target.split(','));
     const made = new Set(result.newIds);
     for (const id of result.newIds) {
@@ -290,6 +298,12 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
             if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, `${artifact.kind}s are not registered with the artifact store in this run of MAWS`);
             const id = artifact.id;
             const suggesting = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+            // UX wave U10b (§B.2): a page is a document's, and is not something the person accepts as a suggestion
+            const setPage = ops.findIndex((each) => each.op === 'set_page');
+            if (setPage >= 0 && (artifact.kind === 'dashboard' || suggesting)) {
+              const sentence = artifact.kind === 'dashboard' ? SET_PAGE_REFUSALS.dashboard : SET_PAGE_REFUSALS.suggestion;
+              return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', opIndex: setPage, message: sentence }, sentence));
+            }
             if (suggesting && input.answering !== undefined) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', message: SUGGESTED_ANSWER }, SUGGESTED_ANSWER));
             const writeId = suggesting ? store.service.suggestionDoc(id) : id;
             const live = store.revision(id);
@@ -599,6 +613,12 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           const warnings = viewWarnings(doc); // E2 M3: a retained spec's problems, read only (E's Decision Log 9)
           return { datasets: datasetFooter(doc, (actor) => authorOf(actor, ctx.appSessionId)), ...(warnings.length > 0 && { viewWarnings: warnings }) };
         };
+        // UX wave U10b (§B.3): a document's page as the read state holds it (a version's own); a dashboard names none
+        const pageField = (doc: Doc): { page?: DocumentPage } => {
+          if (artifact.kind !== 'document') return {};
+          const page = docPage(doc);
+          return { page: { size: page.size ?? 'system', density: page.density ?? 'standard' } };
+        };
         let result: DocumentReadResult;
         if (input.version !== undefined) {
           if (input.sinceRevision !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a retained version is read whole, without sinceRevision');
@@ -608,7 +628,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             const doc = newDoc();
             try {
               applyV2(doc, store.versionState(artifact.id, version.id));
-              return { version, live: store.revision(artifact.id), read: readDocument(doc, options), footer: footer(doc) /* P3-E */ };
+              return { version, live: store.revision(artifact.id), read: readDocument(doc, options), footer: footer(doc) /* P3-E */, ...pageField(doc) /* U10b */ };
             } catch (error) {
               if (error instanceof ReadError) throw readRefusal(error);
               throw error;
@@ -618,7 +638,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           });
           // the live revision, as every read answers (§4.3); the version's own in its summary. A version read records no
           // view, so a batch from this revision is validated as from a base the session never saw
-          result = { ...head, revision: read.live, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId), ...read.footer /* P3-E */ };
+          result = { ...head, revision: read.live, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId), ...read.footer /* P3-E */, ...(read.page && { page: read.page }) /* U10b */ };
         } else {
           const actor = actorOf(ctx);
           store.service.replica(ctx.appSessionId, artifact.id); // the session's replica keeps the document loaded
@@ -636,11 +656,11 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             if (only) since.changed = read.shown;
             deps.session.views.record(doc, revision);
             warmInSlices(doc);
-            return { revision, read, since, footer: footer(doc) /* P3-E */ };
+            return { revision, read, since, footer: footer(doc) /* P3-E */, ...pageField(doc) /* U10b */ };
           }).catch((error: unknown) => {
             throw error instanceof ReadError ? readRefusal(error) : error;
           });
-          result = { ...head, revision: read.revision, ...publicRead(read.read), ...(input.sinceRevision !== undefined && { sinceRevision: input.sinceRevision }), ...read.since, ...read.footer /* P3-E */ };
+          result = { ...head, revision: read.revision, ...publicRead(read.read), ...(input.sinceRevision !== undefined && { sinceRevision: input.sinceRevision }), ...read.since, ...read.footer /* P3-E */, ...(read.page && { page: read.page }) /* U10b */ };
           // a store a newer MAWS wrote is read-only: the read stands, its viewed link is not recorded (A's reader's rule)
           if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }

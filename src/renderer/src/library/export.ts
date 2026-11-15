@@ -9,6 +9,9 @@
 // client sends every artifact-keyed command there, artifacts/machines.ts) with no own file, so the export stays a row of
 // that machine's library as its own Export leaves one (the wire carries no remove for an own file), and its Save As is
 // answered here, main paging the export or the stored file from the machine before the dialog.
+// UX wave U10b (l6-artifacts-18, H9): an html page's `html` format is its stored file, which "Save a copy…" saves (also
+// from a machine of an older build), so the person's menus leave that format out for the kind: the rule is here, where
+// the formats per kind are held, and every menu and sheet that lists them agrees.
 import { useEffect, useSyncExternalStore } from 'react';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -40,7 +43,7 @@ function ask(kind: ArtifactKind, client: MawsBridge): void {
     (result) => {
       asking.delete(kind);
       if (!result.ok) return;
-      formats.set(kind, result.value.formats);
+      formats.set(kind, kind === 'html' ? result.value.formats.filter((format) => format !== 'html') : result.value.formats);
       listeners.forEach((listener) => listener());
     },
     () => void asking.delete(kind),
@@ -78,6 +81,9 @@ export async function exportArtifact(artifactId: string, format: ArtifactExportF
   if (!saved.ok) return toastFailure(VIEWERS_COPY.exportFailed(saved.error.message));
   if (saved.value.saved) savedToast(saved.value.path, exported.value.commentAuthorName);
 }
+
+// The kinds whose stored file "Save a copy…" saves: a File artifact's file, an html page's page (U10b).
+export const savesCopy = (kind: ArtifactKind): boolean => kind === 'file' || kind === 'html';
 
 // A byte kind's stored file (at `revision`, else the latest) saved where the owner chooses.
 export async function saveArtifactCopy(artifactId: string, revision?: number, client: MawsBridge = ipc): Promise<void> {

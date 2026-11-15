@@ -5,9 +5,11 @@
 // host names the output's path, `<userData>/artifacts/<id>/exports/<revision>-<format>.<ext>`, where main writes it; `to`
 // (under the working directory) gets a copy. Which kinds export to which formats is main's registry's to say (B and C
 // register DOCX and PPTX; M7 serves `html` as PDF and PNG): a pair it lacks answers `exportUnavailable`. Without a bridge
-// (a host with no session wiring, as in some tests) every export answers `exportUnavailable`.
+// (a host with no session wiring, as in some tests) every export answers `exportUnavailable`. UX wave U10b (§B.4 of
+// docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): a pdf's answer names its page count, counted here in the
+// file main wrote (whichever build's render host wrote it), and left out when no page is found or the file cannot be read.
 import { createReadStream } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, readFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import type { MawsArtifactExport, MawsArtifactExportAnswer } from '@shared/ipc/schema/maws';
 import { ARTIFACT_REFUSAL_REASONS, artifactExportName, parseToolArguments, TOOL_ERRORS, type ArtifactExportResult, type ArtifactRefusalReason } from '@shared/maws/tools';
@@ -20,6 +22,21 @@ import { defineMawsTool, toolError, toolText, type McpToolDefinition } from './s
 export type ArtifactExportRequest = MawsArtifactExport;
 export type ArtifactExportAnswer = MawsArtifactExportAnswer;
 export type ExportBridge = HostBridge<ArtifactExportRequest, ArtifactExportAnswer>;
+
+// The number of page objects in a PDF as Chromium writes it; null when none is found.
+export function countPdfPages(bytes: Uint8Array): number | null {
+  const count = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength).toString('latin1').match(/\/Type\s*\/Page(?![s\w])/g)?.length ?? 0;
+  return count > 0 ? count : null;
+}
+
+/** A pdf's page count from its file; null when it has none or the file cannot be read. */
+async function pagesOf(path: string): Promise<number | null> {
+  try {
+    return countPdfPages(await readFile(path));
+  } catch {
+    return null;
+  }
+}
 
 
 export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportBridge }): McpToolDefinition {
@@ -79,8 +96,9 @@ export function artifactExportTool(deps: ArtifactToolDeps & { exporter?: ExportB
           throw new ToolRefusal(`artifact_export: exported to ${exported}, but the copy to ${to} failed: ${messageOf(error)}`);
         }
       }
+      const pages = input.format === 'pdf' ? await pagesOf(exported) : null; // UX wave U10b (§B.4)
       const result: ArtifactExportResult = {
-        status: 'exported', artifactId, format: input.format, revision: answer.revision, path: exported, ...(to !== null && { copiedTo: to }),
+        status: 'exported', artifactId, format: input.format, revision: answer.revision, path: exported, ...(pages !== null && { pages }), ...(to !== null && { copiedTo: to }),
         ...(answer.blockedRequests !== undefined && { blockedRequests: answer.blockedRequests }),
       };
       return toolText(result);

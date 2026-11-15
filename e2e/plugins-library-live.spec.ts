@@ -35,6 +35,7 @@ import { pluginsLiveSkipReason, pluginsScratch, type PluginsScratch } from './su
 import { a15Line, a15Reading, type A15Reading } from './support/p1-live';
 import { compareA15 } from '../test/support/owner-file';
 import { backToTabs, pageRegion } from './support/shell';
+import { chooseCustomize, customizePage } from './support/customize';
 import { newChatIn } from './support/sidebar';
 
 test.skip(process.env.MAWS_E8_LIVE !== '1', 'the P2-B acceptance runs only under MAWS_E8_LIVE=1');
@@ -160,7 +161,7 @@ async function openWidget(page: Page, name: string): Promise<Locator> {
 const myItems = (w: Locator) => w.locator('[data-plugins-section="my-items"]');
 const idsIn = (scope: Locator, group: string, attr: 'plugin' | 'skill') => scope.locator(`[data-${attr === 'plugin' ? 'plugins' : 'skills'}-group="${group}"] [data-${attr}-row]`).evaluateAll((rows, a) => rows.map((r) => r.getAttribute(`data-${a}-row`)), attr);
 async function show(w: Locator, filter: string): Promise<void> {
-  await w.getByRole('button', { name: 'Show' }).click();
+  await w.getByRole('button', { name: 'Filter' }).click(); // "Show" until UX wave U11c
   await w.page().getByRole('menuitemradio', { name: filter, exact: true }).click();
 }
 // Counts the invokes main answers for each command, by wrapping their handlers where Electron keeps them (as
@@ -393,7 +394,7 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
     await step('discover', 'Open Discover from /plugins: counts on official cards, none on a directory-only card; supabase Installed in another project, installed here', async () => {
       if (!needsCatalogue()) return;
       await page.locator('[data-widget="plugins"]').getByRole('button', { name: 'Open Discover', exact: true }).click();
-      const w = pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]'); // Customize's page (UX wave U7b)
+      const w = customizePage(page); // Customize's page (UX wave U7b), on Discover with Show: Plugins (UX wave U11c)
       const discover = w.locator('[data-discover="plugins"]');
       await expect(discover.locator('[data-catalog-card]').first()).toBeVisible({ timeout: 120_000 });
       const search = w.getByRole('searchbox', { name: 'Search all sources' });
@@ -431,13 +432,13 @@ test('P2-B acceptance: the plugin and skills libraries on the installed engine, 
       // the session is running since Refresh, so E8's reload of the running sessions follows the install before its result
       await expect(supabase.getByRole('status')).toContainText(`Successfully installed plugin: ${o('supabase')} (scope: project)`, { timeout: 120_000 });
       scratch.log(`result: ${await supabase.getByRole('status').innerText()}`);
-      await w.getByRole('radio', { name: 'My items' }).click();
+      await chooseCustomize(page, { view: 'My items' }); // Show kept: Plugins
       await expect.poll(() => idsIn(myItems(w), 'here', 'plugin'), { timeout: 60_000 }).toContain(o('supabase'));
     });
 
     await step('manage', 'Add › Manage marketplaces lists claude-plugins-official', async () => {
       if (!needsCatalogue()) return;
-      const w = page.locator('[data-widget="plugins"]');
+      const w = customizePage(page); // the Add menu of My items, Plugins in the page's head (UX wave U11c)
       await w.getByRole('button', { name: 'Add', exact: true }).click();
       await page.getByRole('menuitem', { name: 'Manage marketplaces', exact: true }).click();
       const manage = page.locator('[data-marketplaces-dialog="manage"]');

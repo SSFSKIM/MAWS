@@ -280,7 +280,7 @@ const ITEM = 'flex h-7 cursor-default items-center gap-2 rounded-sm px-2 outline
 // own heading). A pressed action is a checkbox item with its check drawn; while any is, every item keeps the check's
 // room so the labels align.
 function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: { actions: readonly EditorHostAction[]; exports: readonly EditorHostExport[]; label?: string; text?: boolean }) {
-  const checks = actions.some((action) => action.pressed !== undefined);
+  const checks = actions.some((action) => action.pressed !== undefined) || checkable(exports); // UX wave U10b: an export's check too
   return (
     <HeaderMenu label={label} icon={<MoreIcon />} more text={text}>
       {actions.map((action) =>
@@ -304,7 +304,7 @@ function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: 
         <DropdownMenu.Group>
           {actions.length > 0 && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
           <DropdownMenu.Label className="px-2 py-1 text-ui-sm text-fg-muted">{HEADER_COPY.export}</DropdownMenu.Label>
-          <ExportEntries exports={exports} />
+          <ExportEntries exports={exports} room={checks} />
         </DropdownMenu.Group>
       )}
     </HeaderMenu>
@@ -314,21 +314,40 @@ function MoreMenu({ actions, exports, label = HEADER_COPY.more, text = false }: 
 function ExportMenu({ exports }: { exports: readonly EditorHostExport[] }) {
   return (
     <HeaderMenu label={HEADER_COPY.export} icon={<ExportIcon />}>
-      <ExportEntries exports={exports} />
+      <ExportEntries exports={exports} room={checkable(exports)} />
     </HeaderMenu>
   );
 }
 
-function ExportEntries({ exports }: { exports: readonly EditorHostExport[] }) {
-  return exports.map((entry) => entry.children ? (
+// UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; L3): an entry with a checked state is
+// a checkbox item, after a separator from the rows before it; in a menu where any row can be checked (`room`), every row
+// keeps the check's room, so all labels start at one edge.
+const checkable = (exports: readonly EditorHostExport[]): boolean => exports.some((entry) => entry.checked !== undefined);
+const CheckRoom = () => <span aria-hidden data-menu-check className="size-3.5 shrink-0" />;
+
+function ExportEntries({ exports, room = false }: { exports: readonly EditorHostExport[]; room?: boolean }) {
+  return exports.map((entry, i) => entry.children ? (
     <DropdownMenu.Sub key={entry.id}>
-      <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={entry.disabled} className={ITEM}>{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
+      <DropdownMenu.SubTrigger onPointerLeave={preserveSubmenuPointer} disabled={entry.disabled} className={ITEM}>{room && <CheckRoom />}{entry.label}<span aria-hidden className="ml-auto">›</span></DropdownMenu.SubTrigger>
       <DropdownMenu.Portal>
-        <DropdownMenu.SubContent sideOffset={4} className={MENU}><ExportEntries exports={entry.children} /></DropdownMenu.SubContent>
+        <DropdownMenu.SubContent sideOffset={4} className={MENU}><ExportEntries exports={entry.children} room={checkable(entry.children)} /></DropdownMenu.SubContent>
       </DropdownMenu.Portal>
     </DropdownMenu.Sub>
+  ) : entry.checked !== undefined ? (
+    <Fragment key={entry.id}>
+      {i > 0 && exports[i - 1]!.checked === undefined && <DropdownMenu.Separator className="my-1 h-px bg-border" />}
+      <DropdownMenu.CheckboxItem checked={entry.checked} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM}>
+        <span data-menu-check className="inline-flex size-3.5 shrink-0 items-center justify-center text-accent">
+          <DropdownMenu.ItemIndicator>
+            <CheckIcon />
+          </DropdownMenu.ItemIndicator>
+        </span>
+        {entry.label}
+      </DropdownMenu.CheckboxItem>
+    </Fragment>
   ) : (
     <DropdownMenu.Item key={entry.id} disabled={entry.disabled} onSelect={() => entry.onSelect()} className={ITEM} aria-label={entry.label}>
+      {room && <CheckRoom />}
       <span>{entry.label}{entry.description && <span className="block max-w-64 whitespace-normal text-ui-sm text-fg-muted">{entry.description}</span>}</span>
     </DropdownMenu.Item>
   ));

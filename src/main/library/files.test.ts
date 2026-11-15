@@ -95,7 +95,7 @@ function deps(stored: Stored, over: Partial<Omit<LibraryFilesDeps, 'port'> & Os>
   };
   const all: Omit<LibraryFilesDeps, 'port'> & Os = {
     call,
-    exporters: { get: (kind: ArtifactKind, format: ArtifactExportFormat) => (kind === 'html' && (format === 'pdf' || format === 'png') ? ({} as never) : undefined) },
+    exporters: { get: (kind: ArtifactKind, format: ArtifactExportFormat) => (kind === 'html' && (format === 'pdf' || format === 'png' || format === 'html') ? ({} as never) : undefined) }, // U10b: html/html
     root: join(dir, 'artifacts'),
     downloads: () => join(dir, 'Downloads'),
     showSaveDialog: vi.fn(async () => ({ canceled: true })),
@@ -136,7 +136,7 @@ function ownedPngExport() {
 describe('library files', () => {
   it('lists the formats the registry serves for a kind, in the formats’ order', () => {
     const files = createLibraryFiles(deps({ kind: 'html', title: 'Page', files: {} }));
-    expect(files.exportFormats({ kind: 'html' })).toEqual({ formats: ['pdf', 'png'] });
+    expect(files.exportFormats({ kind: 'html' })).toEqual({ formats: ['pdf', 'png', 'html'] });
     expect(files.exportFormats({ kind: 'file' })).toEqual({ formats: [] });
   });
 
@@ -464,6 +464,18 @@ describe('library files', () => {
     await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf', exportId: OWN } } }, null)).resolves.toEqual({ saved: false });
     await expect(cancelled.saveAs({ artifactId: ID, source: { export: { revision: 7, format: 'pdf' } } }, null)).resolves.toEqual({ saved: false });
     expect(readdirSync(exports)).toEqual([artifactExportName(7, 'pdf')]);
+  });
+
+  // UX wave U10b (l6-artifacts-18, A5): an html page's Save a copy… is its stored page, unchanged, named by its title
+  it('saves a copy of an html page’s stored file under its title, byte for byte', async () => {
+    const raw = Buffer.from([0x3c, 0x70, 0x3e, 0xe9, 0xff, 0x3c, 0x2f, 0x70, 0x3e]);
+    const page = join(dir, 'stored.html');
+    writeFileSync(page, raw);
+    const into = join(dir, 'saved');
+    mkdirSync(into);
+    const files = createLibraryFiles(deps({ kind: 'html', title: 'Pricing page', files: { 5: { name: 'index.html', path: page } } }, { env: { MAWS_E2E: '1', MAWS_E2E_SAVE_PATH: into } }));
+    await expect(files.saveAs({ artifactId: ID, source: { content: {} } }, null)).resolves.toEqual({ saved: true, path: join(into, 'Pricing page.html') });
+    expect(readFileSync(join(into, 'Pricing page.html')).equals(raw)).toBe(true);
   });
 
   it('saves a copy of a File artifact under its own name, into the e2e seam’s folder without a dialog', async () => {

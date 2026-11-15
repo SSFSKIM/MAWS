@@ -16,9 +16,15 @@
 // 1in), so the service passes no size or margins of its own; headings become the PDF's outline. Images: `inline`
 // with the asset reader, or `reference` where the capture partition serves `maws-artifact:`. Diagrams print as their
 // mermaid source unless the capture window draws `pre[data-diagram]` first.
+//
+// UX wave U10b (§B.4 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the size is the call's, else the
+// document's, else the system's, else Letter, and a compact document resolves at compact density (`exportDesign`). The
+// page removes the browser's own block margins at zero specificity, as the app's base stylesheet does for the editor, so
+// the theme's gap rule and the spacing tokens set every gap and the export is spaced as the editor shows it (the owner's
+// answer of 2026-11-15, "PDF spacing"); in print a heading is kept with what follows it.
 import type { Node as PMNode } from '@tiptap/pm/model';
 import themeCss from '../editor/theme.css?raw';
-import { dsValue, exportDesign, houseSystem, pageOf, type ExportDesign } from './design-system';
+import { dsValue, exportDesign, pageOf, type ExportDesign } from './design-system';
 import { escapeAttr, escapeText, renderBody, type RenderedImage } from './html-render';
 import { codeTokensFor, isDarkGround, type CodeTokens } from './highlight';
 import { tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
@@ -35,7 +41,11 @@ export interface HtmlExportOptions<T> extends ExportOptions<T> {
 // What the page adds to the editor's theme: the printed page, a title per tab, an empty paragraph's line, the
 // placeholders' labels, and a dark ground's colour scheme, so the native controls (a checklist's boxes) draw in the
 // page's ground (P4, tracker L308; the theme's own rule is keyed to the editor's `data-ground` and stripped below).
-// `--ds-*` only, resolved with the theme.
+// `--ds-*` only, resolved with the theme. UX wave U10b: every element's browser margin removed, as the editor's base
+// stylesheet removes it, at zero specificity so each rule that names a margin wins (padding is the theme's, which sets
+// it on each element the browser pads); a tab's blocks, which sit in its section and not directly in the page's
+// content, take the theme's gap between top-level blocks as the editor draws them in that tab; in print a heading is
+// kept with its next block.
 const pageCss = (page: { width: string; height: string; margin: string }, dark: boolean) => `
 html, body { margin: 0; }${dark ? '\n.ds-doc { color-scheme: dark; }' : ''}
 body { background: var(--ds-color-bg); }
@@ -43,6 +53,8 @@ body { background: var(--ds-color-bg); }
 .ds-doc-page { max-width: ${page.width}; }
 .ds-doc-page[data-whitespace="preserve"] { white-space: pre-wrap; }
 .ds-doc-page p:empty::after { content: "\\a0"; }
+.ds-doc :where(*) { margin: 0; }
+.ds-doc .doc-tab > * + * { margin-top: var(--ds-space-3); }
 .ds-doc .doc-tab + .doc-tab { margin-top: var(--ds-space-8); }
 .ds-doc .doc-tab-title { font-family: var(--ds-font-display); font-size: var(--ds-type-title-size); line-height: var(--ds-type-title-line); font-weight: var(--ds-type-title-weight); }
 .ds-doc pre[data-diagram]::before { content: "Diagram"; display: block; font-family: var(--ds-font-body); font-size: var(--ds-type-caption-size); color: var(--ds-color-text-muted); text-transform: uppercase; }
@@ -52,6 +64,7 @@ body { background: var(--ds-color-bg); }
   body, .ds-doc { background: none; min-height: 0; }
   .ds-doc-page { max-width: none; padding: 0; }
   .ds-doc .doc-tab + .doc-tab { margin-top: 0; break-before: page; }
+  .ds-doc :where(h1, h2, h3) { break-after: avoid; }
 }
 `;
 
@@ -106,7 +119,7 @@ async function imagesOf(bodies: PMNode[], options: HtmlExportOptions<unknown>): 
 /** The document (one tab, or every tab under its title) as one standalone HTML page. */
 export async function exportHtml<T>(source: ExportSource, options: HtmlExportOptions<T> = {}): Promise<string> {
   const tabs = tabsOf(source, options.tab);
-  const design: ExportDesign = options.system ? exportDesign(options.system, source.overrides) : exportDesign(houseSystem, source.overrides);
+  const design: ExportDesign = exportDesign(options.system, source.overrides, source.page.density);
   const dark = isDarkGround(dsValue(design, '--ds-color-bg'));
   const tokens: CodeTokens = await codeTokensFor(tabs.map(({ body }) => body));
   const image = await imagesOf(
@@ -118,7 +131,7 @@ export async function exportHtml<T>(source: ExportSource, options: HtmlExportOpt
     tabs.length === 1
       ? renderBody(tabs[0].body, env)
       : tabs.map(({ id, title, body }) => `<section class="doc-tab" data-tab="${escapeAttr(id)}"><h1 class="doc-tab-title">${escapeText(title)}</h1>${renderBody(body, env)}</section>`).join('');
-  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize), dark)}${options.viewCss ? `\n${options.viewCss}` : ''}`); // P3-E: + viewCss
+  const css = design.resolveCss(`${themeForFile(themeCss)}\n${pageCss(pageOf(design, options.pageSize ?? source.page.size), dark)}${options.viewCss ? `\n${options.viewCss}` : ''}`); // P3-E: + viewCss
   const imgSrc = options.images === 'reference' ? 'data: maws-artifact: https:' : 'data: maws-artifact:';
   return [
     '<!doctype html>',

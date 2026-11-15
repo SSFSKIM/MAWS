@@ -1,7 +1,8 @@
 // P5 O6 M4 (the task review): Customize is this machine's until O4, so its pages are only this machine's projects,
 // directories and live sessions: another machine's same path is never read or changed here as if it were this one's.
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { cleanup, render, screen, waitFor } from '@testing-library/react';
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, C9): through both views and the four Show
+// values, every command the page sends names this machine.
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it } from 'vitest';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import { addressOf, machineOf } from '@shared/machine/address';
@@ -14,7 +15,7 @@ import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { preloadOf } from '../test-support/preload-of';
 import { forgetKeptOperations } from '../widgets/plugins/operation';
-import { CustomizeView } from './CustomizeView';
+import { mountCustomize } from '../test-support/customize-page';
 import { openDiscover, useCustomizeProject } from './open';
 
 const P = at('project-one' as ProjectId);
@@ -40,7 +41,7 @@ const front = (projectId: ProjectId) => {
   useMachines.setState({ loaded: new Set([TEST_MACHINE, OTHER_MACHINE]) });
   useLayout.getState().openTab({ kind: 'session', appSessionId: id });
 };
-const mount = () => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section="skills" /></QueryClientProvider>);
+const mount = () => mountCustomize({ view: 'mine', show: 'skills' });
 const inventoryCwds = () => fake.invoked('customization.inventory').map((input) => (input as { cwd: string | null }).cwd);
 
 it('offers only this machine’s projects, and shows the user configuration when the focused project is another machine’s', async () => {
@@ -69,4 +70,25 @@ it('Open Discover names this machine’s project for a directory, never another 
   expect(useCustomizeProject.getState()).toEqual({ projectId: null, directory: '/two' });
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' }); // UX wave U7b: a page, no tab
   expect(useLayout.getState().main).toBe(strip);
+});
+
+it('with another machine’s project in front and its session ready, every command of a walk through both views and the four Show values names this machine', async () => {
+  front(R);
+  const there = { ...status('live-there'), appSessionId: addressOf(OTHER_MACHINE, 'live-there' as AppSessionId), cwd: '/one' };
+  useSessions.setState({ engine: new Map([[there.appSessionId, there]]) });
+  mountCustomize({ view: 'mine', show: 'all' });
+  await waitFor(() => expect(inventoryCwds()).toEqual([null])); // the user configuration's page
+  const header = () => document.querySelector<HTMLElement>('[data-customize-header]')!;
+  for (const view of ['My items', 'Discover'] as const) {
+    fireEvent.click(within(header()).getByRole('radio', { name: view }));
+    for (const show of ['All', 'Plugins', 'Skills', 'Connectors'] as const) {
+      fireEvent.click(within(within(header()).getByRole('radiogroup', { name: 'Show' })).getByRole('radio', { name: show }));
+      await act(async () => {});
+      expect(screen.queryByRole('combobox', { name: 'Live session' })).toBeNull();
+    }
+  }
+  const sent = [...new Set(fake.calls.filter((call) => call.startsWith('invoke ')).map((call) => call.slice('invoke '.length)))] as Parameters<FakeClient['machines']>[0][];
+  expect(sent).toEqual(expect.arrayContaining(['customization.inventory', 'catalog.home']));
+  expect(sent.filter((name) => fake.machines(name).some((machine) => machine !== TEST_MACHINE))).toEqual([]);
+  expect(inventoryCwds().every((cwd) => cwd === null)).toBe(true);
 });

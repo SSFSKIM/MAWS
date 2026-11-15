@@ -1784,10 +1784,17 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | the index: `sessions.launch_folder`,          | (moved, from this build): F shows the session where   | (moved, from this build): this build shows what F  |
 //   | `sessions.agent_folder` (UX wave U8c-2)       | its directory says, finds its transcript there (its   | shows for a session F filed last, and the facts    |
 //   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
+//   | U6b-1: files beside the chat                  | (files beside the chat, both ways): F draws its one   | the return: the files beside the chat, the preview |
+//   | (`panel.<session>` with several Files tabs,   | Files surface with its tree, refuses no value, opens  | still the preview, the file F opened a main tab    |
+//   | their `panelTools.params`; `files.tree`)      | a file as a main tab and keeps every tab and          | only; F's pin the tree-only tab, holding no file;  |
+//   |                                               | `files.tree` whole; F's pin of a file's tab           | the tree's width and open folder as stored         |
 //   | a take-back's stage (U4a): the session's      | (stage, its message waiting), (stage, its message     | the return of each: the stage carried forward      |
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
 //   |                                               | build finds                                           | standing beside the message, each said             |
+//   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
+//   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
+//   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3216,3 +3223,271 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     record(said);
   });
 });
+
+// ---- UX wave U10b-1: a document's page, read across the two builds -------------------------------------------------------
+
+// UX wave U10b-1 (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, §G and M3; the wave's root, UC-14): a
+// document's page setting is an attribute `page` on its settings node, beside `dsOverrides`, which build F and build 2c
+// read and keep without knowing it (every reader there asks for `dsOverrides` alone, and an accepted suggestion pairs
+// every root's attributes). Its row is in UC-14's coverage table above (U13a's block).
+//   (document page, both ways) this build's agent makes a document with a suggestion pending and sets its page to A4 at
+//                        compact density. The peer opens the profile: its store is `ok`, its agent's read has no page,
+//                        its PDF of the document prints on its own size (Letter, the system's), the person accepts the
+//                        suggestion in its editor, a version is saved there, and its agent makes a document of its own.
+//                        This build opens the profile again: the document reads the accepted text and its page, A4 and
+//                        compact, live and in the peer's version, and prints on A4; the peer's document reads the
+//                        system's page and prints on Letter. Skipped only for a peer whose settings node already holds
+//                        the page (its src/artifacts/document/meta.ts reads `docPage`), never for an equal wire.
+const knowsDocumentPage = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/artifacts/document/meta.ts'), 'utf8').includes('docPage');
+// A PDF's first page's size in points, rounded (Chromium writes its page objects uncompressed).
+const pdfPageSize = (path: string): { width: number; height: number } => {
+  const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(readFileSync(path).toString('latin1'));
+  return { width: Math.round(Number(box?.[1])), height: Math.round(Number(box?.[2])) };
+};
+const LETTER = { width: 612, height: 792 };
+const A4 = { width: 595, height: 842 };
+const PAGE_DOC = 'Cross-build page memo';
+const PEER_DOC = 'Cross-build peer memo';
+const PROPOSED = 'Proposed by the agent before the page was set.';
+type PageRead = { artifactId: string; markdown: string; page?: { size: string; density: string }; version?: { id: number } };
+
+test('(document page, both ways) this build sets a document’s page and leaves a suggestion; the peer, which knows no page, reads it, prints on its own size, accepts the suggestion and saves a version; this build reads the page back in force, live and in that version', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(knowsDocumentPage(peer), `the peer (wire ${wireOf(peer)}) reads a document's page (its meta.ts names docPage): a build from U10b-1 on, not one that has never heard of the setting`);
+  await withScratch('xb-document-page', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) sets a document's page; ${peer.label} (wire ${wireOf(peer)}) opens the profile; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam (e2e/support/dashboards.ts), at both builds
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const AGENT = 'xb-page-agent';
+    const read = (artifact: string, more: Record<string, unknown> = {}) => agent.ok<PageRead>(AGENT, 'artifact_read', { artifact, ...more });
+    const pdfOf = async (page: Page, artifactId: string) => pdfPageSize(value(await invoke(page, 'artifacts.export', { artifactId, format: 'pdf' })).path);
+    const storeOk = async (page: Page, build: Build) => expect(value(await invoke(page, 'artifacts.status', undefined)), `${build.label}'s store opens the profile writable`).toMatchObject({ status: 'ok' });
+
+    // this build: the agent's document, a suggestion pending on it, then its page
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const created = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PAGE_DOC, content: '# Page memo\n\nThe first paragraph of the memo.\n' });
+    const id = created.artifactId;
+    const first = /\^([A-Za-z0-9_-]+)\s*$/m.exec((await read(id)).markdown)![1]!;
+    await agent.ok(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', mode: 'suggest', ops: [{ op: 'insert', after: first, markdown: PROPOSED }] });
+    const set = await agent.ok<{ results: unknown[] }>(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', ops: [{ op: 'set_page', size: 'a4', density: 'compact' }] });
+    expect(set.results).toEqual([{ op: 'set_page', size: 'a4', density: 'compact' }]);
+    expect((await read(id)).page, 'this build reads the page it wrote').toEqual({ size: 'a4', density: 'compact' });
+    expect(await pdfOf(ours.page, id), 'and prints on it').toEqual(A4);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts its own mawsd and engine host
+    said.push(`  ${here.label}: ${id} set to A4, compact, a suggestion pending`);
+
+    // the peer: its store writable, the page unknown to its read and its export, the suggestion accepted, a version saved
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await storeOk(theirs.page, peer);
+    const peerRead = await read(id);
+    expect(peerRead.page, `${peer.label}'s agent reads no page`).toBeUndefined();
+    expect(peerRead.markdown).toContain('The first paragraph of the memo.');
+    expect(await pdfOf(theirs.page, id), `${peer.label} prints on its own size, the system's Letter`).toEqual(LETTER);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: PAGE_DOC, exact: true }).click({ timeout: 20_000 });
+    const tab = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+    await expect(tab.getByLabel('Suggested document'), `${peer.label} shows the suggestion`).toContainText(PROPOSED, { timeout: 20_000 });
+    await tab.getByRole('button', { name: 'Accept suggestion 1', exact: true }).click();
+    await expect.poll(async () => (await read(id)).markdown, { timeout: 20_000, message: `the suggestion accepted in ${peer.label}'s editor` }).toContain(PROPOSED);
+    const { versionId } = value(await invoke(theirs.page, 'artifacts.saveVersion', { artifactId: id, label: 'Accepted on the peer' }));
+    const own = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PEER_DOC, content: '# Peer memo\n\nWritten by the older build.\n' });
+    await storeOk(theirs.page, peer);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: store ok, no page read, a Letter PDF, the suggestion accepted, version ${versionId}, its own ${own.artifactId}`);
+
+    // this build again: the page in force, live and in the peer's version, and the peer's document on the system's page
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    await storeOk(again.page, here);
+    const live = await read(id);
+    expect([live.page, live.markdown.includes(PROPOSED)], 'the page kept through the peer’s accept, with the accepted text').toEqual([{ size: 'a4', density: 'compact' }, true]);
+    const version = await read(id, { version: versionId });
+    expect([version.version?.id, version.page], 'the peer’s version pins the page as any content').toEqual([versionId, { size: 'a4', density: 'compact' }]);
+    expect(await pdfOf(again.page, id), 'the document prints on its page again').toEqual(A4);
+    expect((await read(own.artifactId)).page, 'the peer’s document: the system’s page at standard density').toEqual({ size: 'system', density: 'standard' });
+    expect(await pdfOf(again.page, own.artifactId)).toEqual(LETTER);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: A4 and compact live and in version ${versionId}, an A4 PDF; ${peer.label}'s document on Letter`);
+    record(said);
+  });
+});
+
+// ---- UX wave U6b-1: the files beside the chat, build F reads (UC-14) ---------------------------------------------------
+// U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §A, R1 and R9) opens a file as a
+// tab of the Files tool in the session's side column: `panel.<session>` holds several Files refs, of F's own shape, the
+// tree-only one before those that hold a file, and `panelTools.params[<tab>]` holds `{ file, line, preview? }`, a key F's
+// Files tool does not read (it reads `path`). F shows one surface per tool, the first Files ref, as its tree; its "Keep
+// open for every session" pins the first Files ref of the session, which can hold a file. One scene, both ways, runs
+// only with a peer from before this landing (no src/renderer/src/tools/code/files/tabs.ts); a skipped scene is not
+// evidence, and the run of record is the one whose peer is F (`--peer-exact f1852de3a`), on M1's head before M2 starts.
+// M3 adds Files' tree at the left of every Files tab, its state the session's, stored under a key of its own,
+// `files.tree`, which F's renderer never names and its main keeps through its own writes.
+//   (files beside the chat, both ways)  this build opens three files beside the first session's chat from Files' tree
+//                                       (the first two kept by a double-click on their tab, the third the preview),
+//                                       opens a folder in the tree at the third's left and widens that tree, and opens
+//                                       one file beside the second session's chat, the only Files tab there; the peer
+//                                       draws its Files surface with its tree, refuses no layout value, pins Files from
+//                                       its icon's menu under the second session, and then opens the first file from
+//                                       its tree as a main tab, `files.tree` kept whole in what it wrote; this build
+//                                       shows the two files left beside the first chat, the third still the preview,
+//                                       the first as a main tab only, the tree at the file's left with the width and the
+//                                       open folder as stored, and one pinned Files tab, the tree alone, under both
+//                                       sessions, holding no file in what it wrote back; `files.tree` read back whole.
+const opensFilesBeside = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/code/files/tabs.ts'));
+const opensFilesBesideWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has src/renderer/src/tools/code/files/tabs.ts: it opens files beside the chat as this build does; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const FILE_TEXT = (name: string) => `An invented file, ${name}, for the cross-build scene.\n`;
+const TREE_WIDTH_DEFAULT = 220; // this build's width of Files' tree at a file's left, while none is stored (tools/code/files/tree-state.ts)
+type StoredTree = { version: number; sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> };
+// Files' tree beside the file in view, and its divider (this build's words, tools/code/copy.ts)
+const treeBeside = (page: Page) => sideColumn(page).locator('[data-files-tree][data-place="beside"]');
+const treeDivider = (page: Page) => sideColumn(page).getByRole('separator', { name: 'Resize files', exact: true });
+// layout.json as main last wrote it, whole
+function layoutJson(s: Scratch): Record<string, unknown> {
+  const path = join(s.userData, 'layout.json');
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : {};
+}
+// The files the session's side tabs hold, by name (the tree's root may be the scratch folder's real path), in strip order,
+// as layout.json holds them
+function filesBeside(s: Scratch, address: string): { id: string; file: string | null; preview: boolean }[] {
+  const side = sideOf(s, address);
+  const own = ((layoutJson(s)[`panel.${address}`] as { tabs?: PanelRef[] } | undefined)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  return own.map((tab) => {
+    const params = side.params[tab.id] as { file?: unknown; preview?: unknown } | undefined;
+    return { id: tab.id, file: typeof params?.file === 'string' ? basename(params.file) : null, preview: params?.preview === true };
+  });
+}
+// Files' tree in this build's side column, a row of it clicked as a person clicks it
+const treeRow = (page: Page, name: string) => sideColumn(page).getByRole('treeitem', { name, exact: true });
+async function addFilesTab(page: Page): Promise<void> {
+  await sideGroup(page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
+  await expect(sideColumn(page).locator('[data-files-tab][data-file=""]'), 'the tree-only tab in view').toBeVisible({ timeout: 20_000 });
+}
+async function openBeside(page: Page, name: string, keep: boolean): Promise<void> {
+  await treeRow(page, name).click({ timeout: 20_000 });
+  await expect(sideColumn(page).locator('[data-files-tab]'), `${name} beside the chat`).toHaveAttribute('data-file', new RegExp(`/${name.replace('.', '\\.')}$`), { timeout: 20_000 });
+  if (!keep) return;
+  await sideTab(sideColumn(page), name).dblclick();
+  await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), `${name} kept`).toHaveCount(0);
+}
+
+test('(files beside the chat, both ways) three files beside one chat and one beside another, as this build stores them, are drawn by the peer as its Files tree; its main tab of one and its pin of the other\u2019s are read back here as the main tab alone and the pinned tree', async () => {
+  const { here, peer } = builds();
+  test.skip(opensFilesBeside(peer), opensFilesBesideWhy(peer));
+  test.setTimeout(300_000);
+  await withScratch('xb-files-beside', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) opens files beside the chat; ${peer.label} (wire ${wireOf(peer)}) reads them, opens one in its main area and pins Files`];
+    for (const name of ['first.txt', 'second.txt', 'third.txt', 'other.txt']) writeFileSync(join(s.repo, name), FILE_TEXT(name));
+    const folder = 'folder'; // M3: a folder opened in the tree, as the tree's state stores it
+    mkdirSync(join(s.repo, folder));
+    writeFileSync(join(s.repo, folder, 'inside.txt'), FILE_TEXT('inside.txt'));
+    const second = randomUUID();
+    appendTurn(transcriptIn(s, s.repo, second), second, s.repo, 'main', 'A second invented session for the cross-build scene');
+    const [first, other, third, alone] = ['first.txt', 'second.txt', 'third.txt', 'other.txt'];
+
+    // this build: three files beside the first session's chat, the first two kept, the third the preview; one beside the
+    // second session's, the only Files tab there
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const id2 = await recordFor(run.page, second);
+    const [address, address2] = [await addressed(run.page, id), await addressed(run.page, id2)];
+    await showSession(run.page, id, `session:${address}`);
+    await openSurface(run.page, 'Files');
+    await openBeside(run.page, 'first.txt', true);
+    await addFilesTab(run.page);
+    await openBeside(run.page, 'second.txt', true);
+    await addFilesTab(run.page);
+    await openBeside(run.page, 'third.txt', false);
+    await expect
+      .poll(() => filesBeside(s, address).map((tab) => [tab.file, tab.preview]), { timeout: 20_000, message: `${here.label} wrote three Files tabs beside the first chat` })
+      .toEqual([[third, true], [other, false], [first, false]]);
+    // M3: the tree at the third file's left; a folder opened in it, and the tree widened from its divider
+    await expect(treeBeside(run.page), 'the tree at the file\u2019s left (a column wide enough for both)').toBeVisible({ timeout: 20_000 });
+    await treeRow(run.page, folder).click();
+    await expect(treeRow(run.page, folder), 'the folder open').toHaveAttribute('aria-expanded', 'true');
+    await treeDivider(run.page).focus();
+    await treeDivider(run.page).press('Shift+ArrowRight');
+    const width = TREE_WIDTH_DEFAULT + 32; // the divider's large step (app/Resizer.tsx)
+    await expect(treeDivider(run.page), 'the tree widened').toHaveAttribute('aria-valuenow', String(width));
+    const treeAt = () => (layoutJson(s)['files.tree'] as StoredTree | undefined)?.sessions[address] ?? null;
+    await expect
+      .poll(() => { const tree = treeAt(); return tree && [tree.width, tree.folded, tree.expanded.some((path) => basename(path) === folder)]; }, { timeout: 20_000, message: `${here.label} stored the first session's tree` })
+      .toEqual([width, false, true]);
+    await showSession(run.page, id2, `session:${address2}`);
+    await openSurface(run.page, 'Files');
+    await openBeside(run.page, 'other.txt', false);
+    await expect.poll(() => filesBeside(s, address2).map((tab) => tab.file), { timeout: 20_000, message: `${here.label} wrote the second session's one Files tab` }).toEqual([alone]);
+    expect(mainFileIds(await stripIds(run.page)), 'the main strip holds no file').toEqual([]);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const storedTree = layoutJson(s)['files.tree'];
+    said.push(`  ${here.label}: beside the first chat ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')}; beside the second, ${alone}; the first's tree ${width} px wide, ${folder} open`);
+
+    // the peer: Files kept for every session from its icon's menu under the second session, which pins that session's
+    // first Files ref; then, under the first, its one Files surface (the pin, which follows the session shown: both work in
+    // s.repo), the tree, and the first file from it as a main tab, which it writes. The open is F's last act: F, as this
+    // build, opens a session from the sidebar in the place of what the pane shows when its tab is not open and that tab is
+    // not pinned (`replaceActive`, f1852de3a's stores/layout-model.ts, "I2"), so the file's clean main tab, opened before
+    // the second session was shown, would give its place to that session's tab and F's last write would hold no file.
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await showSession(old.page, id2, `session:${address2}`);
+    await openToolMenu(old.page, 'Files', 'Keep open for every session');
+    await old.page.getByRole('menuitem', { name: 'Keep open for every session', exact: true }).click();
+    await closeMenus(old.page);
+    await expect.poll(() => sideOf(s, address2).pinned, { timeout: 20_000, message: `${peer.label} pins the second session's Files tab` }).toEqual(['files']);
+    const pinned = sideOf(s, address2).pinnedIds[0];
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'first.txt', exact: true }).click({ timeout: 20_000 });
+    await expect.poll(async () => mainFileIds(await stripIds(old.page)).some((tabId) => tabId.endsWith(`/${first}`)), { timeout: 20_000, message: `${peer.label} opens the first file as a main tab` }).toBe(true);
+    await expect.poll(() => JSON.stringify(layoutJson(s)['main.tabs'] ?? null).includes(`/${first}`), { timeout: 20_000, message: `${peer.label} writes its main tab` }).toBe(true);
+    expect(filesBeside(s, address).map((tab) => tab.file), `${peer.label} kept the first session's three tabs`).toEqual([third, other, first]);
+    expect(layoutJson(s)['files.tree'], `${peer.label} kept files.tree whole through its write`).toEqual(storedTree);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: its Files tree, ${first} as a main tab, Files pinned under the second session (${pinned}, which held ${alone})`);
+
+    // this build: the two files left beside the first chat, the third still the preview, the first a main tab alone; one
+    // pinned Files tab, the tree, under both sessions, holding no file in what hydration wrote back
+    const back = await s.launch();
+    await s.ready(back.page);
+    await showSession(back.page, id, `session:${address}`);
+    await expect.poll(async () => mainFileIds(await stripIds(back.page)).filter((tabId) => tabId.endsWith(`/${first}`)).length, { timeout: 20_000, message: 'the file the peer opened is a main tab' }).toBe(1);
+    await expect.poll(() => filesBeside(s, address).map((tab) => [tab.file, tab.preview]), { timeout: 20_000, message: 'and no longer beside the chat; the preview still the preview' }).toEqual([[third, true], [other, false]]);
+    await expect.poll(() => [sideOf(s, address2).pinnedIds, (sideOf(s, address2).params[pinned] as { file?: unknown } | undefined)?.file ?? null], { timeout: 20_000, message: 'the pin kept, its params holding no file' }).toEqual([[pinned], null]);
+    await openSurface(back.page, 'Files');
+    await expect.poll(() => titlesIn(back.page, 'upper'), { message: 'the pinned tree and the two files' }).toEqual(['Files', 'third.txt', 'second.txt']);
+    await expect(sideColumn(back.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the third the preview').toHaveText(/^third\.txt/);
+    await sideTab(sideColumn(back.page), 'second.txt').click();
+    await expect(treeBeside(back.page), 'the tree at the file\u2019s left').toBeVisible({ timeout: 20_000 });
+    await expect(treeDivider(back.page), 'the tree\u2019s width as stored').toHaveAttribute('aria-valuenow', String(width));
+    await expect(treeRow(back.page, folder), 'the folder open as stored').toHaveAttribute('aria-expanded', 'true', { timeout: 20_000 });
+    for (const [session, sessionAddress] of [[id, address], [id2, address2]] as const) {
+      await showSession(back.page, session, `session:${sessionAddress}`);
+      await openSurface(back.page, 'Files');
+      await sideTab(sideColumn(back.page), 'Files').click();
+      await expect(sideColumn(back.page).locator('[data-files-tab]'), 'the pinned Files tab is the tree alone').toHaveAttribute('data-file', '', { timeout: 20_000 });
+      expect(await titlesIn(back.page, 'upper'), 'no tab with the pinned file\u2019s name').not.toContain(alone);
+    }
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    expect(layoutJson(s)['files.tree'], 'files.tree read back whole').toEqual(storedTree);
+    said.push(`  ${here.label} again: ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')} beside the first chat, ${first} a main tab, the tree ${width} px wide with ${folder} open; the pinned Files tab the tree under both sessions`);
+    record(said);
+  });
+});
+// The main strip's file tabs among its tab ids (`file:<machine>:<path>`)
+const mainFileIds = (ids: string[]) => ids.filter((tabId) => tabId.startsWith('file:'));

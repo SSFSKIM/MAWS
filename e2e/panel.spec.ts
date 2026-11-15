@@ -673,12 +673,18 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         await panel.call('showSummary');
         await panel.unfold('Context');
 
+        // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file row
+        // opens the file beside A's chat, as every open does: a tab of Files in A's side column, in view, holding the path;
+        // the main strip gains no file tab
         await panel.section('Sources').getByRole('button', { name: /src\/util\/rows\.ts/ }).click();
+        await expect.poll(async () => (await panel.tabs()).find((tab) => tab.toolId === 'files') ?? null, { message: 'a file row opens a Files tab in A' }).toMatchObject({ active: true, pinned: false });
+        const filesTab = (await panel.tabs()).find((tab) => tab.toolId === 'files')!;
         await expect
-          .poll(async () => Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: Record<string, unknown>[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs)), {
-            message: 'a file row opens a file tab for A through C5’s openTab',
-          })
-          .toContainEqual(expect.objectContaining({ kind: 'file', path: EDIT_SOURCES[0], appSessionId: await addressed(panel.page, 'A') }));
+          .poll(async () => (await panel.layout<{ params?: Record<string, { file?: unknown }> }>('panelTools.params'))?.params?.[filesTab.id]?.file, { message: 'the tab holds the row’s file' })
+          .toBe(EDIT_SOURCES[0]);
+        await expect(panel.page.locator(`[data-region="panel"] [data-file-viewer][data-path="${EDIT_SOURCES[0]}"]`), 'the file beside the chat').toBeVisible();
+        const stored = Object.values((await panel.layout<{ sets: Record<string, { panes: { tabs: { kind: string }[] }[] }> }>('main.tabs'))?.sets ?? {}).flatMap((set) => set.panes.flatMap((pane) => pane.tabs));
+        expect(stored.filter((tab) => tab.kind === 'file'), 'no main file tab').toEqual([]);
       });
       panel.expectQuietConsole();
     });

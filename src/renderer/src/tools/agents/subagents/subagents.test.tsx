@@ -600,7 +600,7 @@ describe('drill-in', () => {
     const openFile = vi.fn();
     const off = registerTranscriptActions({ openFile });
     fireEvent.click(await within(drill).findByTitle('src/a.ts'));
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, A, { main: false }); // UX wave U6b-1: a path link says whether ⌘ was held
     off();
   });
 

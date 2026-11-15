@@ -8,7 +8,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { digest, item, project, record, remoteRow, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
-import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
+import { at, OTHER_MACHINE } from '../../../../../test/support/machine';
 import { registerSlot, resetSlots } from '../../app/slots';
 import { queryClient } from '../../ipc/query';
 import { useAttention } from '../../stores/attention';
@@ -23,6 +23,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { A, B, probeTool, resetPanelStores } from '../../test-support/panel';
 import { SUMMARY_COPY } from '../copy';
 import { panelHost, registerPanelTool } from '../host';
+import { filesTool } from '../../tools/code/files/FilesTool'; // UX wave U6b-1
 import { useHasSources } from './Sources';
 import { Summary } from './Summary';
 import { preloadOf } from '../../test-support/preload-of';
@@ -265,13 +266,14 @@ describe('floating session cards', () => {
   it('keeps transcript Sources actionable inside Context instead of losing them with the old section', async () => {
     const events = journalToEvents(loadSyntheticJournal('exploration-and-web'));
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events as SessionEvent[]) }));
-    const openTab = vi.spyOn(useLayout.getState(), 'openTab');
+    offs.push(registerPanelTool(filesTool)); // UX wave U6b-1: the file row opens beside the chat, as a tab of Files
     mount();
     await open('Context');
     const context = region('Context');
     expect(within(context).getAllByRole('listitem')).toHaveLength(8);
     await userEvent.setup().click(within(context).getByRole('button', { name: /reduce\.ts/ }));
-    expect(openTab).toHaveBeenCalledWith({ kind: 'file', path: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, appSessionId: A, machine: TEST_MACHINE });
+    const files = (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+    expect(files.map((tab) => useLayout.getState().panelParams[tab.id])).toEqual([{ file: '/tmp/maws-synth-exploration-and-web/src/model/reduce.ts', line: null, preview: true }]);
     await userEvent.setup().click(within(context).getByRole('button', { name: /tanstack\.com/ }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://tanstack.com/virtual/latest/docs/api/virtualizer' }]);
     expect(within(context).queryByRole('button', { name: /docs · search/ })).toBeNull();

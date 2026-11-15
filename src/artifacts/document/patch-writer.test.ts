@@ -7,7 +7,7 @@ import type { JSONContent } from '@tiptap/core';
 import { describe, expect, it, vi } from 'vitest';
 import { contentIdsOf, idAt, onUpdate, stateVector, transact, type Node } from '../yjs';
 import { DocIndex } from './block-index';
-import { EditError, type EditRefusal, type Op } from './edit-ops';
+import { EditError, type BlockOp, type EditRefusal, type Op } from './edit-ops';
 import { precheckEdit } from './edit-plan';
 import { applyEdit, warmWriter } from './patch-writer';
 import { getThread } from './threads';
@@ -126,7 +126,7 @@ describe('the ops (S4 1)', () => {
       { type: 'paragraph', attrs: { id: 'p1' }, content: [{ type: 'text', text: 'The alphazed plan.' }] },
       { type: 'paragraph', attrs: { id: 'p2' }, content: [{ type: 'text', text: 'Another paragraph.' }] },
     ] }, {});
-    const earlier: Array<{ name: string; op: Op; twice: RegExp }> = [
+    const earlier: Array<{ name: string; op: BlockOp; twice: RegExp }> = [
       { name: 'a pending block inserted', op: { op: 'insert', after: 'p1', markdown: ':::pending {intent="alphazed"} :::' }, twice: /^replaced 2 occurrence\(s\) in \^p1, \^pd\d+$/ },
       { name: 'a block rewritten with a link', op: { op: 'replace_block', id: 'p2', markdown: 'See [the site](https://alphazed.org).' }, twice: /^replaced 2 occurrence\(s\) in \^p1, \^p2$/ },
     ];

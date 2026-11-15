@@ -16,8 +16,9 @@ export interface TranscriptActions {
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
-  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine.
-  openFile(path: string, line?: number, appSessionId?: AppSessionId | null): void;
+  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
+  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
   // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
   openExternal(url: string, appSessionId?: AppSessionId | null): void;

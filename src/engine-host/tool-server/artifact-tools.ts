@@ -9,7 +9,7 @@
 // kind with its own `readFiles` answers no generic `json`; a deck's read names its held slides and the pictures its
 // assets do not hold; the session's base keeps the files it read.
 import { readFile, stat } from 'node:fs/promises';
-import { basename, extname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { readRoots } from '@artifacts/files';
 import { assetWarnings, heldSlides } from '@artifacts/slides/answer'; // P3-C
@@ -46,7 +46,7 @@ import {
   loaderFields,
   opIdOf,
   publisherOf,
-  readSourceFile,
+  readHtmlSource,
   refuse,
   resolveArtifact,
   storeOf,
@@ -57,7 +57,6 @@ import {
 import { externalReferenceCount } from './artifacts';
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition } from './server';
 
-const HTML_EXTENSIONS = new Set(['.html', '.htm']);
 const TEXT_READ_MAX = 1024 * 1024; // a file artifact's text is returned under this size (the file guide)
 const VERSIONS_LISTED = 10; // a read lists this many of the latest versions
 const DESIGN_CONTEXT_KINDS: readonly ArtifactKind[] = ['document', 'presentation', 'design']; // Decision Log 22d
@@ -170,11 +169,9 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       let page: { bytes: Buffer } | null = null;
       if (kind === 'html') {
         if (path !== undefined) {
-          const source = resolve(ctx.cwd, path);
-          const found = await stat(source).catch(() => null);
-          if (found?.isFile() && !HTML_EXTENSIONS.has(extname(source).toLowerCase())) return toolError(TOOL_ERRORS.notHtml('artifact_create', source));
-          page = { bytes: await readSourceFile('artifact_create', source) };
-          content = { bytes: page.bytes, name: basename(source) };
+          const source = await readHtmlSource('artifact_create', ctx.cwd, path); // U10b (§A.1): shared with artifact_publish's path
+          page = { bytes: source.bytes };
+          content = { bytes: source.bytes, name: source.name };
         } else {
           page = { bytes: Buffer.from(input.content!, 'utf8') };
           content = { bytes: page.bytes, name: 'index.html' };

@@ -16,7 +16,7 @@ import type { Actor } from '@shared/artifacts/actor';
 import { applyV1, applyV2, attributionMap, checkUpdate, contentIdsOf, newDoc, onUpdate, transact } from '@artifacts/yjs';
 import { documentAdapter } from '@artifacts/document/adapter';
 import { DocIndex } from '@artifacts/document/block-index';
-import type { Op } from '@artifacts/document/edit-ops';
+import type { BlockOp } from '@artifacts/document/edit-ops';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { readDocument } from '@artifacts/document/read';
 import { prng, SEED_TAB, seedDocument, sentence } from '../../e2e/support/document-seed';
@@ -35,7 +35,7 @@ const FIRST_AFTER_READ_ROUNDS = 7;
 const WARM_SLICE_MS = 4;
 
 /** S7b's agents' five-op mix for run `run`, quoting what `index` (the agent's replica) holds. */
-function batchOf(index: DocIndex, r: () => number, run: number, inserted: string[]): Op[] {
+function batchOf(index: DocIndex, r: () => number, run: number, inserted: string[]): BlockOp[] {
   const pick = (n: number) => Math.floor(r() * n);
   const a = pick(SECTIONS);
   const first = index.md(index.find(`s${a}p2`)!.top).split('.')[0];

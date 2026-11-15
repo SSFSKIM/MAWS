@@ -3,16 +3,20 @@
 // pane whose tool this build lacks is answered with the host's own "not available" text; a session this window does not
 // know is left to the window that does. UX wave U6d: a request for the retired `artifact` pane is refused with the
 // host's sentence, and nothing is opened or read.
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../../../test/support/machine';
-import { registerPanelTool } from '../../../panel/host';
+import { connectPanelHost, registerPanelTool } from '../../../panel/host';
+import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
-import { activeTab } from '../../../stores/layout-model';
-import { A, B, C, panelOf, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { activeTab, allTabs } from '../../../stores/layout-model';
+import { useSessions } from '../../../stores/sessions';
+import { A, B, C, heldBridge, hydrateHeld, panelOf, persisted, probeTool, resetPanelStores } from '../../../test-support/panel';
+import { filesTool } from '../../code/files/FilesTool';
+import { PANE_LAYOUT_WAIT_MS, resetKeptOpens } from '../../code/open-file';
 import { connectPaneShows } from './connect';
 
 const settle = () => new Promise((resolve) => setTimeout(resolve, 0));
@@ -22,17 +26,41 @@ let fake: FakeClient;
 let disconnect: () => void;
 beforeEach(() => {
   resetPanelStores();
+  resetKeptOpens();
+  registerPanelTool(filesTool); // UX wave U6b-1: the file pane opens beside the chat, as a tab of Files
   fake = fakeClient({ 'maws.pane.answer': { outcome: 'delivered' } });
   disconnect = connectPaneShows(fake.client);
 });
-afterEach(() => disconnect());
+afterEach(() => {
+  disconnect();
+  resetKeptOpens();
+});
+
+const filesOf = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+const mainFiles = () => allTabs(useLayout.getState().main).filter((tab) => tab.kind === 'file');
 
 describe('the pane bridge, window side (E1)', () => {
-  it('file: a main tab at the line, answered main-tab with its tab id', async () => {
+  // UX wave U6b-1 (R2): the panel-tool form, with Files and the file's name, so the row still reads "Opened a.ts"
+  it('file: beside the chat as a tab of Files at the line, answered panel-tool with its tab and the file’s name; the main strip gains nothing', async () => {
+    show(fake, { pane: 'file', target: '/repo/src/../src/a.ts', line: 3 });
+    await settle();
+    const [tab] = filesOf(A);
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/repo/src/a.ts', line: 3, preview: true });
+    expect(surfaceTabs(useLayout.getState(), A).map((ref) => ref.id)).toEqual([tab.id]);
+    expect(mainFiles()).toEqual([]);
+    expect(fake.invoked('maws.pane.answer')).toEqual([
+      { appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'files', tabId: tab.id, title: 'a.ts' } } },
+    ]);
+  });
+
+  it('file: a main tab that already shows it is selected at the line, answered main-tab with its tab id', async () => {
+    useLayout.getState().openTab({ kind: 'file', path: '/repo/src/a.ts', line: null, appSessionId: A, machine: TEST_MACHINE });
+    useLayout.getState().openSession(A);
     show(fake, { pane: 'file', target: '/repo/src/a.ts', line: 3 });
     await settle();
     const tab = activeTab(useLayout.getState().main);
     expect(tab).toMatchObject({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A, machine: TEST_MACHINE });
+    expect(filesOf(A)).toEqual([]);
     expect(fake.invoked('maws.pane.answer')).toEqual([
       { appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path: '/repo/src/a.ts', line: 3, appSessionId: A, machine: TEST_MACHINE }), path: '/repo/src/a.ts', line: 3 } } },
     ]);
@@ -223,12 +251,13 @@ describe('the pane bridge, window side (E1)', () => {
 describe('show_pane behind a page (UX wave U7b)', () => {
   const PAGE = { kind: 'projects' } as const;
 
-  it('file: its tab is in front of the strip, and the page and the dialog stay', async () => {
+  it('file: beside the chat of its session, which is in front of the strip, and the page and the dialog stay', async () => {
     useLayout.getState().openDestination(PAGE);
     useLayout.getState().openSettings();
-    show(fake, { pane: 'file', target: '/repo/src/b.ts', line: 1 });
+    show(fake, { appSessionId: B, pane: 'file', target: '/repo/src/b.ts', line: 1 });
     await settle();
-    expect(activeTab(useLayout.getState().main)).toMatchObject({ kind: 'file', path: '/repo/src/b.ts' });
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    expect(useLayout.getState().panelParams[filesOf(B)[0].id]).toMatchObject({ file: '/repo/src/b.ts', line: 1 });
     expect(useLayout.getState().destination).toEqual(PAGE);
     expect(useLayout.getState().settings).toEqual({ section: null });
   });
@@ -266,5 +295,64 @@ describe('show_pane behind a page (UX wave U7b)', () => {
       expect(panelOf(B)!.tabs.map((tab) => tab.toolId)).toEqual(['browser']);
       expect(useLayout.getState().destination).toBeNull();
     });
+  });
+});
+
+// UX wave U6b-1 (Decision 10, sequence 4): a show of a file before the window has read its layout waits for the read and
+// answers with the tab that then holds the file, once; a session the read keeps no list for, and a wait that runs out,
+// are answered without a tab, and none opens then or later.
+describe('show_pane for a file before the layout is read (UX wave U6b-1)', () => {
+  const answers = () => fake.invoked('maws.pane.answer') as { result: unknown }[];
+
+  it('is answered once, after the read, with the id of the tab the layout holds; the stored tab of the file is the one', async () => {
+    resetPanelStores({ hydrated: false });
+    registerPanelTool(filesTool);
+    const stored = { id: 'files:stored', toolId: 'files', pinned: false };
+    const bridge = heldBridge(persisted({ [`panel.${A}`]: { tabs: [stored], activeTabId: null }, 'panelTools.params': { version: 1, params: { [stored.id]: { file: '/repo/src/a.ts', line: null } } } }));
+    const off = connectPanelHost();
+    await hydrateHeld(bridge, () => show(fake, { pane: 'file', target: '/repo/src/a.ts', line: 5 }));
+    await settle();
+    await settle();
+    off();
+    expect(answers()).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'files', tabId: stored.id, title: 'a.ts' } } }]);
+    expect(filesOf(A)).toEqual([stored]);
+    expect(useLayout.getState().panelParams[stored.id]).toEqual({ file: '/repo/src/a.ts', line: 5 });
+  });
+
+  it('a session the read keeps no list for: paneUnavailable, and no tab opens', async () => {
+    resetPanelStores({ hydrated: false });
+    registerPanelTool(filesTool);
+    const bridge = heldBridge(persisted({}));
+    await hydrateHeld(bridge, () => {
+      show(fake, { pane: 'file', target: '/repo/src/a.ts', line: null });
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(A);
+        return { records };
+      });
+    });
+    await settle();
+    await settle();
+    expect(answers()).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.paneUnavailable('file') } }]);
+    expect(panelOf(A)).toBeUndefined();
+  });
+
+  it('a read that does not come within the wait: paneNotReady, word for word, and the read that comes later opens nothing', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    try {
+      resetPanelStores({ hydrated: false });
+      registerPanelTool(filesTool);
+      show(fake, { pane: 'file', target: '/repo/src/a.ts', line: null });
+      await vi.advanceTimersByTimeAsync(PANE_LAYOUT_WAIT_MS - 1);
+      expect(answers()).toEqual([]);
+      await vi.advanceTimersByTimeAsync(1);
+      expect(answers()).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: 'show_pane: the MAWS window was still loading its layout; try again' } }]);
+      useLayout.setState({ hydrated: true });
+      await vi.advanceTimersByTimeAsync(0);
+      expect(panelOf(A)).toBeUndefined();
+      expect(answers()).toHaveLength(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
