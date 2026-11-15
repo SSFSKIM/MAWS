@@ -159,7 +159,8 @@ const suites = {
       pdf: tokens.issue({ owner, name: 'large.pdf', mime: 'application/pdf', bytes: largePdf(), kind: 'pdf' }),
       html: tokens.issue({ owner, name: 'page.html', mime: 'text/html', bytes: HTML_PAGE, kind: 'html' }),
       video: tokens.issue({ owner, name: 'clip.webm', mime: 'video/webm', bytes: media('clip.webm'), kind: 'video' }),
-      audio: tokens.issue({ owner, name: 'tone.wav', mime: 'audio/wav', bytes: media('tone.wav'), kind: 'audio' }),
+      // two minutes of a tone (about 21 MB), so a seek near its end needs a range the element has not read
+      audio: tokens.issue({ owner, name: 'long.wav', mime: 'audio/wav', bytes: wav(120, 44100), kind: 'audio' }),
     };
     const sizes = { pdf: [640, 600], html: [400, 300], video: [320, 240], audio: [300, 54] };
     for (const [k, t] of Object.entries(kinds)) await mount(w1, { id: k, kind: k, url: t.url, width: sizes[k][0], height: sizes[k][1] });
@@ -167,7 +168,7 @@ const suites = {
     const v = await waitMedia(w1, 'video');
     const au = await waitMedia(w1, 'audio');
     await page(w1, 'spike.seek("video", 0.9)');
-    await page(w1, 'spike.seek("audio", 2.5)');
+    await page(w1, 'spike.seek("audio", 110)');
     await sleep(2000);
     const html = await frameText(kinds.html.url);
     await picture(w1, join(out, 'b-window.png'));
