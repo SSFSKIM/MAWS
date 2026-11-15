@@ -455,6 +455,18 @@ describe('main ipc router', () => {
       const answer = await invoke(appWindow(frameUrl), 'settings.get');
       expect(answer, `${frameUrl} under ${appUrl}`).toEqual(accepted ? { ok: true, value: LIGHT } : { ok: false, error: { code: 'forbidden_sender', message: 'settings.get may only be invoked by the app window' } });
     }
+    // a top frame whose URL cannot be read answers as an address that does not parse did, under either app URL
+    for (const appUrl of [BUILT, DEV_URL]) {
+      await load(appUrl);
+      router.registerMainHandler('settings.get', () => LIGHT);
+      const event = appWindow(appUrl);
+      Object.defineProperty(event.senderFrame, 'url', {
+        get() {
+          throw new Error('Render frame was disposed before WebFrameMain could be accessed');
+        },
+      });
+      await expect(invoke(event, 'settings.get'), `a throwing URL under ${appUrl}`).resolves.toEqual({ ok: false, error: { code: 'forbidden_sender', message: 'settings.get may only be invoked by the app window' } });
+    }
   });
 
   it('answers host-owned commands with host_unavailable when no supervisor is passed', async () => {

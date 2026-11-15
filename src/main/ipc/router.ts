@@ -388,5 +388,11 @@ function isAppSender(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>, 
   const frame = event.senderFrame;
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!frame || !win || frame !== win.webContents.mainFrame) return false;
-  return atAppOrigin(frame.url, appUrl);
+  let url: string;
+  try {
+    url = frame.url; // a frame whose URL cannot be read (disposed meanwhile) is no app sender, as before the move
+  } catch {
+    return false;
+  }
+  return atAppOrigin(url, appUrl);
 }
