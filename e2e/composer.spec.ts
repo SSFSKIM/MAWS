@@ -22,6 +22,8 @@ import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/rendere
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
 import { invoke, launchReady, promoteNowJournal, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
+import { askSteerText } from '../src/shared/maws/ask';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
@@ -911,6 +913,56 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
   const released = async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === undefined && (f.message?.content === first || f.message?.content === second)).map((f) => f.message?.content);
   await expect.poll(released).toEqual([first, second]); // the oldest at once (seq 199), the next when its turn ends
   await expect(list).toHaveCount(0);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 1 and 3): a question
+// the agent asked without waiting, answered while a turn runs, waits in the stack as what it is. The envelope MAWS sends
+// the model for one invented question is handed to the running turn through `session.steer`, as the answered sheet hands
+// it (the replay matches a user write by its type, not its text, so `steerStopJournal`'s steer at seq 146 takes it). The
+// window holds no row of the ask, so the row's title is the answer's own copy of the question. It offers Send now alone;
+// ↑ in the empty box skips it and walks the history; after the square's Stop it reads the same, marked Held.
+const ASKED: AskQuestion = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+const ANSWERED: AskAnswer = { id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] };
+const ANSWER_ROW = `Answer to ${ASKED.question}: Grid`; // Interfaces A: `answer(title, words)`, the title the answer's own question here
+
+test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers Send now alone, ↑ walks the history past it, and after Stop it reads the same, Held', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4b-answer';
+  await countRunning(page, id, steerStopJournal(scratch, id));
+  const list = stackOf(page, 0);
+  const envelope = askSteerText('u4b-ask-1', [ASKED], [ANSWERED]);
+  value(await invoke(page, 'session.steer', { appSessionId: id as never, content: envelope, priority: 'next' }));
+
+  const row = list.locator('li[data-queue-state="next"]');
+  await expect(row.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
+  await expect(row.locator('[data-row-text]'), 'the whole line in its hover title').toHaveAttribute('title', ANSWER_ROW);
+  await expect(row.locator('[data-mark]')).toHaveText('Next step');
+  await expect(list, 'not the envelope’s opening words').not.toContainText('[MAWS ask');
+  await expect(row.getByRole('button', { name: 'Send now' })).toHaveCount(1);
+  await expect(row.getByRole('button', { name: 'Delete' }), 'an answer is not deleted or edited from the stack').toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'More' })).toHaveCount(0);
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === envelope)?.priority).toBe('next');
+
+  // ↑ in the empty box takes nothing back: the answer is skipped and the history walks to the session's prompt
+  await expect(messageIn(page, 0)).toHaveText('');
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0), 'the history’s newest entry, the running turn’s prompt').toHaveText(COUNT);
+  await expect(row.locator('[data-row-text]'), 'the answer still waits').toHaveText(ANSWER_ROW);
+  await page.keyboard.press('ArrowDown'); // back to the empty draft the walk began from
+  await expect(messageIn(page, 0)).toHaveText('');
+  expect((await outFrames(page, id)).some((f) => f.request?.subtype === 'cancel_async_message'), 'nothing was taken back').toBe(false);
+
+  // the square: the answer is held into MAWS's paused queue before the interrupt, and reads the same, marked Held
+  await expect(control(page, 0)).toHaveAttribute('data-submit-state', 'stop');
+  await control(page, 0).click();
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const held = list.locator('li[data-queue-state="held"]');
+  await expect(held.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
+  await expect(held.locator('[data-mark]')).toHaveText('Held');
+  await expect(held.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
+  expect((await queueOf(page, id)).paused).toBe(true);
   expect(editor.consoleErrors()).toEqual([]);
 });
 
