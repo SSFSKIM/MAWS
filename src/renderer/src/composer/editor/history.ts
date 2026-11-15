@@ -67,12 +67,14 @@ const entryKey = (e: HistoryEntry) =>
       .map(([, c]) => c.content),
   );
 
-// A row that is MAWS's answer envelopes alone, its text as the transcript keeps it whole (`userTextOf`); a row of
-// attachments alone still recalls. The transcript read the envelopes once and the row's text is what that read left as
+// A row that is MAWS's answer envelopes alone, its text as the transcript keeps it whole (`userTextOf`), with no
+// attachment; a row with attachments recalls as it draws (an orphan envelope's raw text beside an image, the task
+// review of the fix wave), and so does a row of attachments alone. The transcript read the envelopes once and the row's text is what that read left as
 // the person's words, so this read decides only whether to skip the row: the recall is the row's text as drawn, and
 // never the rest of a second read, where fragments the first read left as text could pair (the architect's review of the
 // joined answer, finding 4).
 function allAnswer(row: UserRow): boolean {
+  if (row.attachments.length > 0) return false;
   const { envelopes, rest } = readAnswerEnvelopes(row.text);
   return envelopes.length > 0 && rest === '';
 }
