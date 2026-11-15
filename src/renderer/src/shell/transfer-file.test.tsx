@@ -395,6 +395,22 @@ describe('Reopen closed tab on a file that is beside the chat', () => {
   });
 });
 
+// ---- a second session's open of a file with unsaved edits (the branch review's fourth finding) ------------------------------
+
+describe('a file with unsaved edits opened beside a second session’s chat', () => {
+  it('is a kept tab there, not a preview, so a later open in that session does not replace it', async () => {
+    renderBoth();
+    const side = await openBeside(APP);
+    type(side, '// mine\n');
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    act(() => void openFile(B, APP)); // an open that would give B a preview
+    const tabId = sideTabOf(APP, B)!;
+    expect(useLayout.getState().panelParams[tabId]).toEqual({ file: APP, line: null });
+    act(() => void openFile(B, LIB));
+    expect(sideTabOf(APP, B)).toBe(tabId);
+  });
+});
+
 // ---- the viewer's hold (Decision 20b; sequence 11) -------------------------------------------------------------------------
 
 describe('the editor’s state across a move, at the viewer’s cap', () => {
