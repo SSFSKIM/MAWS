@@ -590,6 +590,18 @@ describe('Send now on an after-the-turn row while a turn runs', () => {
     expect(useNotices.getState().notices).toEqual([]);
   });
 
+  it('a send-now that fails after the promote is said as any Send now’s failure, and nothing more is invoked: the message stays waiting at the next step', async () => {
+    running(APP);
+    const { client, invoke } = bridge({ 'session.queue.promote': { ok: true, value: { messageUuid: U2 } }, 'session.steer.sendNow': { ok: false, error: { code: 'internal', message: 'Not sent now: mini is offline' } } });
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1')], { steers: [steer(U1, 'waits at the next step')] })} client={client} />);
+    await userEvent.setup().click(within(rows()[1]).getByRole('button', { name: 'Send now' }));
+    await waitFor(() => expect(useNotices.getState().notices.map((n) => n.text)).toEqual(['Not sent now: mini is offline']));
+    await waitFor(() => expect((within(rows()[1]).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled).toBe(false));
+    expect(invoke.mock.calls).toEqual([['session.queue.promote', NEXT], ['session.steer.sendNow', { appSessionId: APP, messageUuid: U2 }]]); // no rollback, no interrupt, no second promote
+    expect(screen.queryByText('Sending…')).toBeNull();
+    expect(notice()).toBeNull();
+  });
+
   it('is today’s promote at `now` with no turn running, in a paused queue, under an engine host of another build, and on a machine that does not list `rl2.send-now`', async () => {
     const press = async (appSessionId: AppSessionId, busy: boolean, over: Partial<SessionQueue> = {}) => {
       const { client, invoke } = bridge();
