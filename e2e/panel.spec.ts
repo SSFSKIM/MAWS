@@ -4,7 +4,8 @@
 // M4's strip, summary, R7, theme and side-column Terminal cases) run the `#panel` page, over the harness scenario's two
 // sessions (ruling O1), so that main's read model knows A and B, accepts their panel keys, and a Terminal tab has a
 // directory to start in. The last two cases run the product over a scenario derived from C5's nine-sessions.json.
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { randomUUID } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, type ElectronApplication, type Locator, type Page } from '@playwright/test';
@@ -12,7 +13,8 @@ import type { PanelChildMetrics, PanelHarnessApi, PanelHarnessTab } from '../src
 import { PANEL_CHILD_TAIL } from '../test/support/panel-child-tail';
 import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
-import { launchMaws, test, type MawsLaunch } from './support/launch';
+import { invoke, launchReady, value } from './support/c7-replay'; // UX wave U1b
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { latencyWait } from './support/latency';
 import { END_ROW } from './support/request-keys'; // UX wave U1b
 import { sidebarRow } from './support/sidebar';
@@ -1408,6 +1410,99 @@ test.describe('the floating session card (P3-G)', () => {
       await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
+  });
+
+  // UX wave U1b, the branch review (2026-11-15 UTC): the card's transcript keeps its 200 px floor while the session has a
+  // request waiting that the transcript draws, in its call's row as well as at its end. A question the engine asked (C3's
+  // round trip, replayed and held at its request, its previews dropped) stands in its call's row; at the card's minimum
+  // size, with a draft of several lines making the composer tall, the body scrolls to the question's controls, reached
+  // as the scene above reaches the prompt's.
+  test('at its minimum size, with a question waiting in its call’s row and a draft of several lines, the card’s body scrolls to the question’s controls', async () => {
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-u1b-floor-')));
+    const repo = join(root, 'repo');
+    const config = join(root, 'claude-config');
+    const title = 'A question beside a long draft';
+    mkdirSync(join(repo, 'src'), { recursive: true });
+    const project = join(config, 'projects', repo.replace(/[^a-zA-Z0-9]/g, '-'));
+    mkdirSync(project, { recursive: true });
+    const engineId = randomUUID();
+    const first = { parentUuid: null, isSidechain: false, type: 'user', message: { role: 'user', content: title }, uuid: randomUUID(), timestamp: '2026-11-15T10:00:00.000Z', cwd: repo, sessionId: engineId, version: '2.1.283' };
+    writeFileSync(join(project, `${engineId}.jsonl`), `${JSON.stringify(first)}\n`);
+    // the question round trip with its options' previews dropped, as e2e:requests replays it
+    const journal = join(root, 'question-without-previews.jsonl');
+    const recorded = readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/question-roundtrip.jsonl'), 'utf8').trim().split('\n');
+    writeFileSync(journal, recorded.map((line) => JSON.stringify(JSON.parse(line, (key, field) => (key === 'preview' ? undefined : field)))).join('\n') + '\n');
+    const prompt = recorded.map((line) => JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } }).find((row) => row.direction === 'out' && row.frame.type === 'user')!.frame.message!.content;
+    const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config } });
+    try {
+      const { page, app } = maws;
+      let id = '';
+      await expect
+        .poll(async () => {
+          id = value(await invoke(page, 'session.list', {})).sessions.find((record) => record.engineSessionId === engineId)?.appId ?? '';
+          return id;
+        }, { message: 'the session is discovered' })
+        .not.toBe('');
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      const left = page.locator('[data-region="main"] [data-pane="0"]');
+      await expect(left.locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
+      await launchReady(page, id, journal, { cwd: repo });
+      await left.getByRole('textbox', { name: 'Message' }).click();
+      await page.keyboard.type(prompt);
+      await page.keyboard.press('Enter');
+      await expect(left.locator('.transcript-row[data-kind="question"]').getByRole('group', { name: 'Question' }), 'the question’s form in its call’s row').toBeVisible({ timeout: 20_000 });
+
+      const card = page.locator('[data-region="panel"]').getByRole('region', { name: 'Session card' });
+      const body = card.locator('[data-pane="card"]');
+      const form = card.locator('.transcript-row[data-kind="question"] [data-waiting-form]');
+      await openSurface(page, 'Files'); // UX2: floating must have a real surface behind the card
+      await menu(app, 'panel.float');
+      await expect(form.getByRole('group', { name: 'Question' }), 'the form in the card’s transcript, in its row').toBeVisible();
+      await expect(card.locator('[data-request-end]'), 'nothing at the end').toHaveCount(0);
+      const handle = card.locator('[data-card-resize="top-left"]');
+      await dragBy(page, handle, 2000, 2000);
+      const frame = (await card.boundingBox())!;
+      expect([Math.round(frame.width), Math.round(frame.height)], 'the card at its minimum').toEqual([360, 240]);
+
+      // a draft of several lines, so the composer takes most of the card's height
+      await card.getByRole('textbox', { name: 'Message' }).click();
+      for (const [k, line] of ['First line of a longer note', 'a second line', 'a third line', 'and a fourth'].entries()) {
+        if (k > 0) await page.keyboard.press('Shift+Enter');
+        await page.keyboard.type(line);
+      }
+      const transcriptHeight = () => card.locator('[data-transcript-scroller]').evaluate((element) => element.getBoundingClientRect().height);
+      await expect.poll(transcriptHeight, { message: 'the transcript keeps its floor beside the tall composer' }).toBeGreaterThanOrEqual(199);
+      expect(await body.evaluate((element) => element.scrollHeight > element.clientHeight), 'the body scrolls').toBe(true);
+
+      // The question's controls, reached by the body's scroll: back to its top with the wheel over the composer's
+      // toolbar, which is no scroller of its own. Each one's centre is inside the body's rect and is what a click there
+      // would reach (the scene above's measure).
+      const box = (await body.boundingBox())!;
+      await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
+      await page.mouse.wheel(0, 2000);
+      const toolbar = (await card.getByRole('toolbar', { name: 'Composer tools' }).boundingBox())!;
+      await page.mouse.move(toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2);
+      await page.mouse.wheel(0, -2000);
+      const reachable = () =>
+        card.evaluate((cardElement) => {
+          const view = cardElement.querySelector('[data-pane="card"]')!.getBoundingClientRect();
+          return Array.from(cardElement.querySelectorAll<HTMLElement>('[data-waiting-form] button'))
+            .filter((element) => ['Dismiss', 'Skip', 'Next', 'Submit'].includes(element.textContent?.trim() ?? ''))
+            .map((element) => {
+              const r = element.getBoundingClientRect();
+              const [x, y] = [r.left + r.width / 2, r.top + r.height / 2];
+              const inside = x > view.left && x < view.right && y > view.top && y < view.bottom;
+              return `${element.textContent?.trim()}: ${inside && element.contains(document.elementFromPoint(x, y))}`;
+            });
+        });
+      await expect.poll(reachable, { message: 'the question’s controls in the card’s visible rect' }).toEqual(['Dismiss: true', 'Skip: true', 'Next: true']);
+      expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
+      await expect(card.getByRole('heading', { name: title })).toBeInViewport();
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    } finally {
+      await maws.cleanup();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 
   // UX wave U1b (acceptance 10): a closed card's compact composer shows no transcript, so it says how many requests of its
