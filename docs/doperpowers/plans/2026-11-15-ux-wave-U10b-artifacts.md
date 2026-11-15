@@ -1065,6 +1065,9 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation (M6): `floating.test.ts` runs in two renderer projects (plain and React-Compiler), so each case counts twice in a run.
   Evidence: the red run at `5c4421d12`, 140 failed (70 new cases × 2).
 
+- Observation (M7, the Mac's first run of e2e:panel, 2026-11-15): with the session's pane of a split focused and no surface open, the session's card column is placed beside main; a press on a control in the other pane's header focuses that pane, the column goes and the pane widens by 304 px at 1440 px, so the control moves from under the pointer and its click is lost (the second press works). It holds on master and is outside U10b; the scene of the split's float now focuses the document's pane before Expand. Put to the architect for a ruling.
+  Evidence: `main/Pane.tsx:66-77` (the press focuses the pane), `app/Shell.tsx:62,68` (the column placed), `panel/PanelHeader.tsx:130-138` (Expand last in the right-hand group); unit probes on the VM (pointerdown alone: `{cardColumn: true, padding: '304px', focusedPane: 0}` → `{cardColumn: false, padding: '', focusedPane: 1}`, no float), M7's report.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
