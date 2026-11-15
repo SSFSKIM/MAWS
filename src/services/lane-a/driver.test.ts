@@ -1,16 +1,44 @@
 // The local lane A driver against the fake bridge (P5 O9 M2, "Proves"): discovery, the bridge's states, the state stream
-// and its backoff, watches, each control's body, the delivery lane, decisions, and the guard on the owner's sminos.
+// and its backoff, watches, each control's body, the delivery lane, decisions, and the guard on the owner's sminos. UX
+// wave U8d M2: a watched session's subagents, and what they cost, counted (reads, derivations, messages, log lines).
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createServer } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { endableClientRef } from '@shared/ipc/client';
+import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { LaneAState, PlaneMessage } from '@shared/ipc/schema/lane-a';
+import type { LaneAAgent } from '@shared/lane-a/agents';
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeReply } from '../../../test/support/fake-bridge';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { createLaneADriver, registerLaneA, type LaneADriver, type LaneAView } from './driver';
+import { createLaneADriver, registerLaneA, type LaneADeps, type LaneADriver, type LaneAView } from './driver';
+import { Ledger } from './jobs';
+
+// What the driver costs, as the tests count it: each derivation, and one timeline of every transcript read (by the path
+// it read) and every plane payload, in the order they happened.
+const counts = vi.hoisted(() => ({ derivations: 0, timeline: [] as string[] }));
+vi.mock('./jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./jobs')>();
+  return {
+    ...actual,
+    derive: (...args: Parameters<typeof actual.derive>) => {
+      counts.derivations += 1;
+      return actual.derive(...args);
+    },
+  };
+});
+vi.mock('./transcript-jobs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./transcript-jobs')>();
+  class Counted extends actual.TranscriptJobs {
+    constructor(locate: () => Promise<string | null>) {
+      // one locate per read
+      super(() => locate().then((path) => (counts.timeline.push(`read ${String(path)}`), path)));
+    }
+  }
+  return { ...actual, TranscriptJobs: Counted };
+});
 
 const MACHINE = 'machineref0123456789';
 const APP = 'app-1' as AppSessionId;
@@ -27,6 +55,8 @@ const tmp = (prefix: string) => {
 };
 
 beforeEach(() => {
+  counts.derivations = 0;
+  counts.timeline.length = 0;
   vi.stubEnv('SMINOS_HOME', tmp('o9s-'));
   vi.stubEnv('HOME', tmp('o9h-'));
   vi.stubEnv('CLAUDE_CONFIG_DIR', tmp('o9c-'));
@@ -42,16 +72,23 @@ afterEach(async () => {
 type Changed = { appSessionId: string; state: LaneAState | null };
 type Plane = { appSessionId: string; watch: string; messages?: PlaneMessage[]; reset?: true; ended?: string };
 
-function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown> = {}, transcript: string | null = null) {
+function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown> = {}, transcript: string | null = null, more: Partial<LaneADeps> = {}) {
   const changes: Changed[] = [];
   const planes: Plane[] = [];
+  const logs: string[] = [];
   const driver = createLaneADriver({
     machine: MACHINE,
     home,
     userData: process.env.MAWS_USER_DATA!,
-    emit: (name, payload) => (name === 'laneA.changed' ? changes.push(payload as Changed) : planes.push(payload as Plane)),
-    log: () => {},
+    emit: (name, payload) => {
+      if (name === 'laneA.changed') return void changes.push(payload as Changed);
+      const plane = payload as Plane;
+      counts.timeline.push(`plane ${plane.watch} ${(plane.messages ?? []).map((m) => m.kind).join(',')}`);
+      planes.push(plane);
+    },
+    log: (line) => void logs.push(line),
     transcript: async (appId, engine) => (appId === APP && engine === ENGINE ? transcript : null),
+    ...more,
     timing: {
       jobsPollMs: 30,
       probeMs: 500, commandWaitMs: 400, requestMs: 500, decisionMs: 500, dirPollMs: 50,
@@ -63,7 +100,7 @@ function harness(home = process.env.SMINOS_HOME!, timing: Record<string, unknown
   drivers.push(driver);
   const state = () => driver.state(APP);
   const live = async () => expect.poll(() => state()?.bridge, { timeout: 3000 }).toBe('live');
-  return { driver, changes, planes, state, live, home };
+  return { driver, changes, planes, logs, state, live, home };
 }
 
 async function bridge(options: Partial<Parameters<typeof startFakeBridge>[0]> = {}) {
@@ -74,6 +111,12 @@ async function bridge(options: Partial<Parameters<typeof startFakeBridge>[0]> = 
 
 const client = (): ClientRef & { end(): void } => endableClientRef(`client-${Math.random()}`);
 const messagesOf = (planes: Plane[], watch: string) => planes.filter((p) => p.watch === watch).flatMap((p) => p.messages ?? []);
+const readsOf = (path: string, from = 0) => counts.timeline.slice(from).filter((t) => t === `read ${path}`).length;
+// Waits until `path` has been read `more` times past now (the driver's ticks go on while a test waits on them).
+const readsPast = async (path: string, more: number) => {
+  const target = readsOf(path) + more;
+  await expect.poll(() => readsOf(path), { timeout: 5000 }).toBeGreaterThanOrEqual(target);
+};
 
 describe('discovery', () => {
   it('finds a bridge when the session’s holder becomes a terminal, and keeps its state', async () => {
@@ -400,6 +443,27 @@ describe('jobs', () => {
     expect(b.commands.map((c) => c.body)).toEqual([{ op: 'stop', taskId: 'bshell001' }, { op: 'stop', taskId: 'b-agents1' }]);
   });
 
+  // U8d M2 (F5): the jobs ride the agents' rule, so a transcript that streams with no job row builds no body
+  it('builds the jobs’ body only after a row that moved a fact, never on a tick that read nothing of a job', async () => {
+    const { h, path, watch } = await watched(shell(1));
+    const built = vi.spyOn(Ledger.prototype, 'jobsBody');
+    try {
+      const sent = jobsOf(h.planes, watch).length;
+      for (let i = 0; i < 6; i++) {
+        appendFileSync(path, row({ type: 'assistant', uuid: `t${i}`, timestamp: `S${i}`, message: { role: 'assistant', content: [{ type: 'text', text: `still counting, step ${i}` }] } }));
+        await readsPast(path, 1);
+      }
+      await readsPast(path, 2);
+      expect(built).not.toHaveBeenCalled();
+      expect(jobsOf(h.planes, watch)).toHaveLength(sent);
+      appendFileSync(path, ended(1, 'completed'));
+      await expect.poll(() => jobsOf(h.planes, watch).at(-1)).toEqual(['bshell001 completed']);
+      expect(built).toHaveBeenCalled();
+    } finally {
+      built.mockRestore();
+    }
+  });
+
   it('reads the transcript at a stop no watch follows', async () => {
     const path = join(tmp('o9t-'), 'session.jsonl');
     writeFileSync(path, shell(1) + ended(1, 'completed'));
@@ -409,6 +473,510 @@ describe('jobs', () => {
     await h.live();
     expect(await h.driver.stopTask(APP, 'bshell001')).toMatchObject({ state: 'refused', code: 'not-running' });
     expect(b.commands).toEqual([]);
+  });
+});
+
+// UX wave U8d M2 (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, "What it proves"): a watch of a
+// terminal session carries the session's subagents with their statuses, from three inputs (the transcripts' rows, the
+// engine host's listing of the sidecars, the bridge's agents), derived only when one of them changed. Each sequence is
+// held open; what it costs is counted, never timed.
+describe('subagents', () => {
+  const row = (r: unknown) => `${JSON.stringify(r)}\n`;
+  const at = (n: number) => `2026-11-15T10:${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}.000Z`;
+  // invented agent ids, a toolUseId for each
+  const A1 = 'a0b1c2d3e4f500001';
+  const A2 = 'a0b1c2d3e4f500002';
+  const P = 'a0b1c2d3e4f5000p1'; // a parent
+  const N = 'a0b1c2d3e4f5000n1'; // nested under P
+  const tool = (agentId: string) => `toolu_made_up_${agentId.slice(-3)}`;
+  const call = (agentId: string, n: number, background = true) =>
+    row({ type: 'assistant', uuid: `c-${agentId}`, timestamp: at(n), message: { role: 'assistant', content: [{ type: 'tool_use', id: tool(agentId), name: 'Agent', input: { description: `count the files, part ${agentId.slice(-3)}`, prompt: 'count them', subagent_type: 'general-purpose', ...(background && { run_in_background: 'true' }) } }] } });
+  const launch = (agentId: string, n: number) =>
+    row({ type: 'user', uuid: `l-${agentId}`, timestamp: at(n), toolUseResult: { status: 'async_launched', agentId, outputFile: `/tmp/made-up/${agentId}.output` }, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tool(agentId), content: `Async agent launched successfully.\nagentId: ${agentId}` }] } });
+  const launched = (agentId: string, n: number) => call(agentId, n) + launch(agentId, n);
+  const block = (agentId: string, status: string) => `<task-notification><task-id>${agentId}</task-id><tool-use-id>${tool(agentId)}</tool-use-id><status>${status}</status><summary>made-up summary</summary></task-notification>`;
+  // the main transcript's queue record, and the notification row an agent's own file gets
+  const queued = (agentId: string, status: string, n: number) => row({ type: 'queue-operation', operation: 'enqueue', timestamp: at(n), content: block(agentId, status) });
+  const told = (agentId: string, status: string, n: number) => row({ type: 'user', uuid: `n-${agentId}-${n}`, timestamp: at(n), origin: { kind: 'task-notification' }, message: { role: 'user', content: block(agentId, status) } });
+  const answered = (agentId: string, n: number) =>
+    row({ type: 'user', uuid: `r-${agentId}`, timestamp: at(n), toolUseResult: { status: 'completed', agentId, content: [] }, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: tool(agentId), content: 'there are three files' }] } });
+  const chatter = (n: number) => row({ type: 'assistant', uuid: `t-${n}`, timestamp: at(n % 3600), message: { role: 'assistant', content: [{ type: 'text', text: `still counting, step ${n}` }] } });
+
+  // The engine host's listing as main's dependencies reach it: `fs.subagents` (each read counted; a test can fail or
+  // hold the next ones), `fs.subagentsChanged`, and the host streaming again.
+  class Listing {
+    reads = 0;
+    private failing = 0;
+    private held: { resolve(entries: SubagentEntry[]): void; reject(error: Error): void } | null = null;
+    private holding = false;
+    private readonly changed = new Set<(appId: AppSessionId, agents: SubagentEntry[]) => void>();
+    private readonly streams = new Set<() => void>();
+    constructor(public entries: SubagentEntry[]) {}
+    readonly deps: Pick<LaneADeps, 'subagents' | 'onSubagentsChanged' | 'onHostStreaming'> = {
+      subagents: (appId) => {
+        this.reads += 1;
+        if (this.failing > 0) {
+          this.failing -= 1;
+          return Promise.reject(new Error('the engine host is restarting'));
+        }
+        if (this.holding) return new Promise((resolve, reject) => (this.held = { resolve, reject }));
+        return Promise.resolve(appId === APP ? this.entries : []);
+      },
+      onSubagentsChanged: (listener) => {
+        this.changed.add(listener);
+        return () => void this.changed.delete(listener);
+      },
+      onHostStreaming: (listener) => {
+        this.streams.add(listener);
+        return () => void this.streams.delete(listener);
+      },
+    };
+    fail(times: number): void {
+      this.failing = times;
+    }
+    hold(): void {
+      this.holding = true;
+    }
+    release(answer: SubagentEntry[] | Error): void {
+      this.holding = false;
+      const held = this.held;
+      this.held = null;
+      if (answer instanceof Error) held?.reject(answer);
+      else held?.resolve(answer);
+    }
+    change(entries: SubagentEntry[]): void {
+      this.entries = entries;
+      for (const listener of this.changed) listener(APP, entries);
+    }
+    streaming(): void {
+      for (const listener of this.streams) listener();
+    }
+    listeners(): number {
+      return this.changed.size + this.streams.size;
+    }
+  }
+
+  const fileOf = (dir: string, agentId: string) => join(dir, 'subagents', `agent-${agentId}.jsonl`);
+  const entry = (dir: string, agentId: string, meta: Record<string, unknown> = {}): SubagentEntry => ({
+    agentId: agentId as AgentId,
+    meta: { agentType: 'general-purpose', description: `count the files, part ${agentId.slice(-3)}`, toolUseId: tool(agentId), requestShape: 'background', ...meta } as SubagentEntry['meta'],
+    transcriptPath: fileOf(dir, agentId),
+    size: 0,
+    mtimeMs: 0,
+    runId: null,
+  });
+  const nested = (dir: string, agentId: string, parent: string, meta: Record<string, unknown> = {}) => entry(dir, agentId, { parentAgentId: parent, spawnDepth: 2, ...meta });
+
+  interface Setup {
+    main?: string;
+    files?: Record<string, string>; // an agent's own transcript, by agent id
+    entries?: (dir: string) => SubagentEntry[];
+    timing?: Record<string, unknown>;
+    bridge?: Partial<Parameters<typeof startFakeBridge>[0]>;
+    before?: (b: FakeBridge) => void; // what the bridge holds before the driver finds it
+    prepare?: (listing: Listing) => void; // how the host answers, before the watch starts its follow
+  }
+
+  async function session(setup: Setup = {}) {
+    const dir = tmp('u8d-');
+    const path = join(dir, 'session.jsonl');
+    writeFileSync(path, setup.main ?? '');
+    mkdirSync(join(dir, 'subagents'));
+    for (const [id, rows] of Object.entries(setup.files ?? {})) writeFileSync(fileOf(dir, id), rows);
+    const listing = new Listing(setup.entries?.(dir) ?? []);
+    setup.prepare?.(listing);
+    const b = await bridge(setup.bridge);
+    setup.before?.(b);
+    // the main transcript's location, which a test can hold so that a read stays in flight
+    let gate: { promise: Promise<void>; open(): void } | null = null;
+    let located = 0;
+    const transcript = async (appId: AppSessionId, engine: string) => {
+      if (appId !== APP || engine !== ENGINE) return null;
+      located += 1;
+      if (gate !== null) await gate.promise;
+      return path;
+    };
+    const h = harness(undefined, setup.timing ?? {}, path, { ...listing.deps, transcript });
+    h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: terminal });
+    await h.live();
+    const watch = h.driver.watch(APP, client()).watch;
+    await expect.poll(() => messagesOf(h.planes, watch).length).toBeGreaterThan(0);
+    const hold = () => {
+      let open = () => {};
+      const promise = new Promise<void>((resolve) => (open = resolve));
+      gate = { promise, open };
+    };
+    const release = () => {
+      const held = gate;
+      gate = null;
+      held?.open();
+    };
+    // a marker after the bridge's events: once the driver's state shows it, it has read every event before it
+    let marks = 0;
+    const settledStream = async () => {
+      marks += 1;
+      b.emit({ type: 'model', model: `claude-haiku-mark-${marks}`, effort: null });
+      await expect.poll(() => h.state()?.override?.model).toBe(`claude-haiku-mark-${marks}`);
+    };
+    return { b, h, dir, path, listing, watch, file: (id: string) => fileOf(dir, id), hold, release, located: () => located, settledStream };
+  }
+
+  const bodiesOf = (planes: Plane[], watch: string) =>
+    messagesOf(planes, watch).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents').map((m) => (m.body as { subagents?: LaneAAgent[] }).subagents ?? []);
+  const agentsOf = (planes: Plane[], watch: string) => bodiesOf(planes, watch).at(-1) ?? [];
+  const statusOf = (planes: Plane[], watch: string, agentId: string) => {
+    const found = agentsOf(planes, watch).find((a) => a.agentId === agentId);
+    return found === undefined ? 'no entry' : `${found.status}/${found.evidence}`;
+  };
+  const messageCount = (planes: Plane[], watch: string) => messagesOf(planes, watch).filter((m) => m.kind === 'subagents').length;
+  // the timeline's index of the plane payload that first carried this status
+  const whenSaid = (watch: string, h: { planes: Plane[] }, agentId: string, status: string) => {
+    let seen = 0;
+    for (let i = 0; i < counts.timeline.length; i++) {
+      if (!counts.timeline[i]!.startsWith(`plane ${watch} `)) continue;
+      const plane = h.planes.filter((p) => p.watch === watch)[seen++]!;
+      const said = (plane.messages ?? []).some((m) => (m.kind === 'snapshot' || m.kind === 'subagents') && ((m.body as { subagents?: LaneAAgent[] }).subagents ?? []).some((a) => a.agentId === agentId && `${a.status}/${a.evidence}` === status));
+      if (said) return i;
+    }
+    return -1;
+  };
+
+  it('carries each listed agent with its status and when its call was made, in a watch’s snapshot and whenever it changes', async () => {
+    const s = await session({
+      main: launched(A1, 1) + launched(P, 2),
+      files: { [P]: launched(N, 3) },
+      entries: (dir) => [entry(dir, A1), entry(dir, P), nested(dir, N, P)],
+    });
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).map((a) => `${a.agentId} ${a.status}/${a.evidence}`)).toEqual([`${A1} running/rows`, `${P} running/rows`, `${N} running/rows`]);
+    const first = agentsOf(s.h.planes, s.watch);
+    expect(first.find((a) => a.agentId === A1)).toMatchObject({ meta: { toolUseId: tool(A1), requestShape: 'background' }, outcome: { status: 'running', raw: 'async_launched' }, startedAt: at(1) });
+    expect(first.find((a) => a.agentId === N)?.startedAt).toBe(at(3)); // its call is in its parent's transcript
+    expect(first.every((a) => !('file' in a))).toBe(true);
+    expect(messagesOf(s.h.planes, s.watch).at(-1)).toMatchObject({ kind: 'subagents', body: { jobs: [], mcp: [] } });
+
+    // a second watch of the session gets them in its own snapshot
+    const second = s.h.driver.watch(APP, client()).watch;
+    await expect.poll(() => messagesOf(s.h.planes, second).length).toBeGreaterThan(0);
+    const snapshot = messagesOf(s.h.planes, second)[0]!;
+    expect(snapshot).toMatchObject({ kind: 'snapshot', n: 0, body: { jobs: [] } });
+    expect((snapshot.body as { subagents: LaneAAgent[] }).subagents).toEqual(first);
+
+    appendFileSync(s.path, queued(A1, 'completed', 4));
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('completed/rows');
+    await expect.poll(() => statusOf(s.h.planes, second, A1)).toBe('completed/rows');
+    expect(agentsOf(s.h.planes, s.watch).find((a) => a.agentId === A1)?.outcome).toMatchObject({ status: 'completed', raw: 'completed', summary: 'made-up summary' });
+  });
+
+  it.each([
+    ['its holder ends', (s: Awaited<ReturnType<typeof session>>) => s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'none' } })],
+    ['its bridge goes', (s: Awaited<ReturnType<typeof session>>) => void s.b.close()],
+  ])('says every agent the rows hold no end for ended with the session when %s, before the watch ends', async (_how, end) => {
+    const s = await session({ main: launched(A1, 1) + launched(A2, 2) + queued(A2, 'failed', 3), entries: (dir) => [entry(dir, A1), entry(dir, A2)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['running/bridge', 'failed/rows']);
+    end(s);
+    await expect.poll(() => s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined), { timeout: 3000 }).toBe(true);
+    const mine = s.h.planes.filter((p) => p.watch === s.watch);
+    expect(mine.at(-1)?.ended).toBeDefined();
+    expect(agentsOf(s.h.planes, s.watch).map((a) => [a.agentId, a.status, a.evidence])).toEqual([[A1, 'exited', 'session'], [A2, 'failed', 'rows']]);
+    expect(agentsOf(s.h.planes, s.watch).some((a) => a.status === 'running' || a.running !== undefined)).toBe(false);
+  });
+
+  it('derives once, after it, for a bridge event that arrives while a read is in flight', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1), entry(dir, A2)], timing: { jobsPollMs: 60_000 }, before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['running/bridge', 'unknown/none']);
+    await s.settledStream();
+    const derived = counts.derivations;
+    const located = s.located();
+    s.hold();
+    s.b.agentStopped(A1); // asks for a read, which the held transcript keeps in flight
+    await expect.poll(() => s.located()).toBe(located + 1);
+    s.b.agentSpawned({ agentId: A2, toolUseId: tool(A2) }); // arrives while that read is out
+    await s.settledStream();
+    expect(counts.derivations).toBe(derived); // nothing is derived while the read is in flight
+    expect(s.located()).toBe(located + 1); // and the second event joined it
+    s.release();
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['exited/bridge', 'running/bridge']);
+    expect(counts.derivations).toBe(derived + 1);
+    expect(s.located()).toBe(located + 1);
+  });
+
+  it('makes no entry for a spawn the bridge reports before the listing names the agent; the listing’s change makes it', async () => {
+    const s = await session({ entries: () => [] });
+    s.b.agentSpawned({ agentId: A1, toolUseId: tool(A1) });
+    await s.settledStream();
+    await readsPast(s.path, 2);
+    expect(agentsOf(s.h.planes, s.watch)).toEqual([]);
+    s.listing.change([entry(s.dir, A1)]);
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/bridge');
+    expect(agentsOf(s.h.planes, s.watch)[0]).toMatchObject({ running: true, spawn: { toolUseId: tool(A1), background: true, parentAgentId: null } });
+  });
+
+  // F1: a nested agent ended on the bridge's word alone is provisional, so its parent's file stays read
+  it.each([['failed'], ['completed']])('reads the late row after a provisional ending: the bridge stops a nested agent before its row, which then says %s in its parent’s file', async (status) => {
+    const s = await session({
+      main: launched(P, 1),
+      files: { [P]: launched(N, 2) },
+      entries: (dir) => [entry(dir, P), nested(dir, N, P)],
+      before: (b) => {
+        b.agentSpawned({ agentId: P, toolUseId: tool(P) });
+        b.agentSpawned({ agentId: N, toolUseId: tool(N), parentAgentId: P });
+      },
+    });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['running/bridge', 'running/bridge']);
+    s.b.agentStopped(N);
+    await expect.poll(() => statusOf(s.h.planes, s.watch, N)).toBe('exited/bridge');
+    // its parent is open: read on each tick, though no meta and no spawn changes
+    await readsPast(s.file(P), 3);
+    appendFileSync(s.file(P), told(N, status, 9));
+    await expect.poll(() => statusOf(s.h.planes, s.watch, N), { timeout: 5000 }).toBe(`${status}/rows`);
+    // nothing under the parent is open and the parent has not settled: it leaves the tick
+    const said = whenSaid(s.watch, s.h, N, `${status}/rows`);
+    await readsPast(s.path, 4);
+    expect(readsOf(s.file(P), said)).toBe(0);
+  });
+
+  // F1: the parent settles with nothing under it open
+  it('reads a parent once more when it settles with nothing under it open, then never; a foreground nested agent then reads ended with its parent', async () => {
+    const s = await session({
+      main: launched(P, 1),
+      files: { [P]: call(N, 2, false) }, // a call its parent waits for: no result yet
+      entries: (dir) => [entry(dir, P), nested(dir, N, P, { requestShape: 'foreground' })],
+    });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['running/rows', 'unknown/none']);
+    await readsPast(s.path, 4);
+    expect(readsOf(s.file(P))).toBe(1); // read when it became a parent; nothing under it is open
+    appendFileSync(s.path, queued(P, 'completed', 5));
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['completed/rows', 'exited/parent']);
+    await expect.poll(() => readsOf(s.file(P))).toBe(2);
+    await readsPast(s.path, 4);
+    expect(readsOf(s.file(P))).toBe(2);
+  });
+
+  // N2: a nested background agent can outlive its parent, so the parent's end does not close its file
+  it('keeps reading a settled parent while a background agent under it runs, takes that agent’s row, then reads it once more and closes it', async () => {
+    const s = await session({
+      main: launched(P, 1),
+      files: { [P]: launched(N, 2) },
+      entries: (dir) => [entry(dir, P), nested(dir, N, P)],
+      before: (b) => b.agentSpawned({ agentId: N, toolUseId: tool(N), parentAgentId: P }),
+    });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['running/rows', 'running/bridge']);
+    appendFileSync(s.path, queued(P, 'completed', 5));
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['completed/rows', 'running/bridge']);
+    await readsPast(s.file(P), 3); // still read on each tick
+    appendFileSync(s.file(P), told(N, 'completed', 8));
+    await expect.poll(() => statusOf(s.h.planes, s.watch, N), { timeout: 5000 }).toBe('completed/rows');
+    const said = whenSaid(s.watch, s.h, N, 'completed/rows');
+    await readsPast(s.path, 4);
+    expect(readsOf(s.file(P), said)).toBe(1); // one last read, then closed
+  });
+
+  // F3: an unknown nested agent never keeps its parent read, nor does an unreadable parent
+  it('reads old parents whose nested agents are unknown once each, logs an unreadable one once, and tries it again only when the listing changes its entry', async () => {
+    const P2 = 'a0b1c2d3e4f5000p2';
+    const P3 = 'a0b1c2d3e4f5000p3'; // its transcript is missing
+    const forked = { toolUseId: undefined, requestShape: undefined }; // no call: the rows say nothing of them
+    const listed = (dir: string, p3: Record<string, unknown> = {}) => [
+      entry(dir, P, forked), entry(dir, P2, forked), entry(dir, P3, { ...forked, ...p3 }),
+      nested(dir, 'a0b1c2d3e4f5000n1', P, forked), nested(dir, 'a0b1c2d3e4f5000n2', P2, forked), nested(dir, 'a0b1c2d3e4f5000n3', P3, forked),
+    ];
+    const s = await session({ main: chatter(1), files: { [P]: chatter(2), [P2]: chatter(3) }, entries: (dir) => listed(dir) });
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).map((a) => a.status)).toEqual(['unknown', 'unknown', 'unknown', 'unknown', 'unknown', 'unknown']);
+    await readsPast(s.path, 8);
+    expect([readsOf(s.file(P)), readsOf(s.file(P2)), readsOf(s.file(P3))]).toEqual([1, 1, 1]);
+    expect(s.h.logs.filter((line) => line.includes(P3))).toHaveLength(1);
+    expect(s.h.logs.filter((line) => line.includes(P) || line.includes(P2))).toEqual([]);
+
+    // a change of another entry is not a change of its own
+    s.listing.change(listed(s.dir).map((e) => (e.agentId === P2 ? { ...e, meta: { ...e.meta!, description: 'count them again' } } : e)));
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).find((a) => a.agentId === P2)?.meta.description).toBe('count them again');
+    await readsPast(s.path, 3);
+    expect(readsOf(s.file(P3))).toBe(1);
+
+    writeFileSync(s.file(P3), chatter(4));
+    s.listing.change(listed(s.dir, { description: 'count the rest' }));
+    await expect.poll(() => readsOf(s.file(P3))).toBe(2);
+    await readsPast(s.path, 4);
+    expect([readsOf(s.file(P)), readsOf(s.file(P2)), readsOf(s.file(P3))]).toEqual([1, 1, 2]);
+    expect(s.h.logs.filter((line) => line.includes(P3))).toHaveLength(1);
+  });
+
+  // F4: the first listing is owed until it is answered
+  it('owes the first listing after a failed read: the engine host streaming again brings the running agent to the watch left open', async () => {
+    const s = await session({
+      main: launched(A1, 1),
+      entries: (dir) => [entry(dir, A1)],
+      timing: { backoff: { firstMs: 60_000, maxMs: 60_000, healthyMs: 60_000 } }, // the backoff's first step is past this test
+      prepare: (listing) => listing.fail(1),
+    });
+    await expect.poll(() => s.listing.reads).toBe(1);
+    await readsPast(s.path, 3);
+    expect(agentsOf(s.h.planes, s.watch)).toEqual([]);
+    expect(s.h.logs.filter((line) => line.includes('listing'))).toHaveLength(1);
+    s.listing.streaming(); // the bridge and the files have not changed
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/rows');
+    expect(s.listing.reads).toBe(2);
+  });
+
+  it('asks a failed first listing again on the backoff’s steps and no faster, logging the run of failures once', async () => {
+    const s = await session({
+      main: launched(A1, 1),
+      entries: (dir) => [entry(dir, A1)],
+      timing: { backoff: { firstMs: 1500, maxMs: 1500, healthyMs: 60_000 } },
+      prepare: (listing) => listing.fail(2),
+    });
+    await expect.poll(() => s.listing.reads).toBe(1);
+    await readsPast(s.path, 4); // ticks shorter than the first step
+    expect(s.listing.reads).toBe(1);
+    await expect.poll(() => s.listing.reads, { timeout: 5000 }).toBe(2);
+    await readsPast(s.path, 4);
+    expect(s.listing.reads).toBe(2);
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1), { timeout: 5000 }).toBe('running/rows');
+    expect(s.listing.reads).toBe(3);
+    expect(s.h.logs.filter((line) => line.includes('listing'))).toHaveLength(1);
+  });
+
+  it.each([
+    ['fails', new Error('the engine host is restarting')],
+    ['answers', null],
+  ])('drops a first listing that %s after the follow ended: nothing is sent and nothing is asked again', async (_how, answer) => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)], timing: { backoff: { firstMs: 20, maxMs: 40, healthyMs: 60_000 } }, prepare: (listing) => listing.hold() });
+    await expect.poll(() => s.listing.reads).toBe(1);
+    s.h.driver.unwatch(APP, s.watch);
+    const planes = s.h.planes.length;
+    s.listing.release(answer ?? s.listing.entries);
+    await s.settledStream();
+    await new Promise((resolve) => setTimeout(resolve, 200)); // several of the backoff's steps
+    expect(s.listing.reads).toBe(1);
+    expect(s.h.planes.slice(planes).filter((p) => p.watch === s.watch)).toEqual([]);
+    expect(s.h.logs.filter((line) => line.includes('listing'))).toEqual([]);
+  });
+
+  it('reads a listing it holds again when the engine host streams again, since a restarted host says changes only for sessions it has read', async () => {
+    const s = await session({ main: launched(A1, 1) + launched(A2, 2), entries: (dir) => [entry(dir, A1)] });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/rows');
+    expect(s.listing.reads).toBe(1);
+    s.listing.entries = [entry(s.dir, A1), entry(s.dir, A2)];
+    s.listing.streaming();
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A2)).toBe('running/rows');
+    expect(s.listing.reads).toBe(2);
+  });
+
+  // F5
+  it('derives nothing and sends nothing over a transcript that streams rows naming no agent and no job, with many agents listed', async () => {
+    const ids = Array.from({ length: 8 }, (_, i) => `a0b1c2d3e4f5001${String(i).padStart(2, '0')}`);
+    const s = await session({ main: ids.map((id, i) => launched(id, i + 1)).join(''), entries: (dir) => ids.map((id) => entry(dir, id)) });
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).filter((a) => a.status === 'running')).toHaveLength(8);
+    await readsPast(s.path, 2);
+    const derived = counts.derivations;
+    const sent = messageCount(s.h.planes, s.watch);
+    for (let i = 0; i < 8; i++) {
+      appendFileSync(s.path, chatter(100 + i));
+      await readsPast(s.path, 1);
+    }
+    await readsPast(s.path, 2);
+    expect(counts.derivations).toBe(derived);
+    expect(messageCount(s.h.planes, s.watch)).toBe(sent);
+  });
+
+  it('costs, over idle ticks with two running agents, one main read per tick and nothing else', async () => {
+    const s = await session({
+      main: launched(A1, 1) + launched(A2, 2),
+      entries: (dir) => [entry(dir, A1), entry(dir, A2)],
+      before: (b) => {
+        b.agentSpawned({ agentId: A1, toolUseId: tool(A1) });
+        b.agentSpawned({ agentId: A2, toolUseId: tool(A2) });
+      },
+    });
+    await expect.poll(() => agentsOf(s.h.planes, s.watch).map((a) => `${a.status}/${a.evidence}`)).toEqual(['running/bridge', 'running/bridge']);
+    await readsPast(s.path, 2);
+    const from = counts.timeline.length;
+    const derived = counts.derivations;
+    const sent = messageCount(s.h.planes, s.watch);
+    await readsPast(s.path, 10);
+    const reads = counts.timeline.slice(from).filter((t) => t.startsWith('read '));
+    expect(reads.length).toBeGreaterThanOrEqual(10);
+    expect(reads.every((t) => t === `read ${s.path}`)).toBe(true); // no parent read
+    expect(s.listing.reads).toBe(1);
+    expect(counts.derivations).toBe(derived);
+    expect(messageCount(s.h.planes, s.watch)).toBe(sent);
+  });
+
+  it('reads an open parent at most once per tick, and no other file; its own result row closes it after exactly one more read', async () => {
+    const s = await session({
+      main: launched(P, 1),
+      files: { [P]: call(N, 2, false) },
+      entries: (dir) => [entry(dir, P), nested(dir, N, P, { requestShape: 'foreground' })],
+      before: (b) => {
+        b.agentSpawned({ agentId: P, toolUseId: tool(P) });
+        b.agentSpawned({ agentId: N, toolUseId: tool(N), parentAgentId: P, background: false });
+      },
+    });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['running/bridge', 'running/bridge']);
+    await readsPast(s.path, 2);
+    const from = counts.timeline.length;
+    await readsPast(s.path, 10);
+    const main = readsOf(s.path, from);
+    const parent = readsOf(s.file(P), from);
+    expect(parent).toBeGreaterThan(0);
+    expect(parent).toBeLessThanOrEqual(main + 1);
+    expect(counts.timeline.slice(from).filter((t) => t.startsWith('read ') && t !== `read ${s.path}` && t !== `read ${s.file(P)}`)).toEqual([]);
+    appendFileSync(s.path, queued(P, 'completed', 5));
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, P), statusOf(s.h.planes, s.watch, N)]).toEqual(['completed/rows', 'exited/parent']);
+    const said = whenSaid(s.watch, s.h, N, 'exited/parent');
+    await readsPast(s.path, 4);
+    expect(readsOf(s.file(P), said)).toBe(1);
+  });
+
+  it('answers a bridge agent event with exactly one more round of reads and at most one message', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)], timing: { jobsPollMs: 60_000 } });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/rows');
+    await s.settledStream();
+    const reads = readsOf(s.path);
+    const sent = messageCount(s.h.planes, s.watch);
+    s.b.agentSpawned({ agentId: A1, toolUseId: tool(A1) });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/bridge');
+    await s.settledStream();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(readsOf(s.path)).toBe(reads + 1);
+    expect(messageCount(s.h.planes, s.watch)).toBe(sent + 1);
+  });
+
+  // N10: the bridge's stream says stops for ids that are no agent of the session
+  it('makes nothing of a bridge stop for an id with no meta, no spawn and no agent type: no entry, no follower, no log line', async () => {
+    const stranger = 'a0b1c2d3e4f5000x9';
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('running/rows');
+    const from = counts.timeline.length;
+    s.b.agentStopped(stranger, { agentType: '' });
+    await s.settledStream();
+    await readsPast(s.path, 3);
+    expect(agentsOf(s.h.planes, s.watch).map((a) => a.agentId)).toEqual([A1]);
+    expect(counts.timeline.slice(from).filter((t) => t.startsWith('read ') && t !== `read ${s.path}`)).toEqual([]);
+    expect(s.h.logs.filter((line) => line.includes(stranger))).toEqual([]);
+  });
+
+  it('replaces the bridge’s agents with the fresh snapshot of a reconnected state stream', async () => {
+    const s = await session({ entries: (dir) => [entry(dir, A1), entry(dir, A2)], before: (b) => b.agentSpawned({ agentId: A1, toolUseId: tool(A1) }) });
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)]).toEqual(['running/bridge', 'unknown/none']);
+    s.b.resyncAgents([{ agentId: A2, parentAgentId: null, subagentType: 'general-purpose', description: '', name: null, background: true, model: 'claude-haiku-4-5', toolUseId: tool(A2), running: true }]);
+    await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), statusOf(s.h.planes, s.watch, A2)], { timeout: 5000 }).toEqual(['unknown/none', 'running/bridge']);
+  });
+
+  // "Where the source cannot know" 1: a bridge that reports no agents leaves a waited-for agent to the rows alone
+  it('derives from the rows alone with a bridge whose snapshot has no agents: a waited-for agent is unknown until its result row', async () => {
+    const s = await session({ main: call(A1, 1, false), entries: (dir) => [entry(dir, A1, { requestShape: 'foreground' })], bridge: { reportsAgents: false } });
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('unknown/none');
+    appendFileSync(s.path, answered(A1, 2));
+    await expect.poll(() => statusOf(s.h.planes, s.watch, A1)).toBe('completed/rows');
+  });
+
+  it('subscribes to the engine host’s listing once, and lets it go when the driver stops', async () => {
+    const listing = new Listing([]);
+    const h = harness(undefined, {}, null, listing.deps);
+    expect(listing.listeners()).toBe(2);
+    h.driver.stop();
+    expect(listing.listeners()).toBe(0);
   });
 });
 
