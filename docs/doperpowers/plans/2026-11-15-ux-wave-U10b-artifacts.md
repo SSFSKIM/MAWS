@@ -35,7 +35,7 @@ After the four pull requests of this landing:
 - [ ] M2 — A document's page is a setting of the document, and an export says how many pages it has.
 - [ ] M3 — The person's Export menu shows the page, and the scenes of U10b-1.
 - [x] (2026-11-15) M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content. Built on `ux-wave/U10b-2`, commits `298646bff..86d4342c1`, reviewed clean after one fix (the mark's durability past a prune, pinned for every breaking case). `WIRE_MINOR` 49 (`708497934`) and `RL2_PROTOCOL.minor` 15 (`8477361e4`), both provisional until the chain merge.
-- [ ] M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2.
+- [x] (2026-11-15) M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2. Built on `ux-wave/U10b-2`, commits `fdc33a815..508a54acf`, fix waves `59b94ddb1..af4db9e85` and `9db474b4d..11cab006c`; reviewed clean after two fix waves (a delete never answered; the held frames' seam; two of the replica's recovery races). The scenes are written and typechecked, not run by the executor. Acceptance, against `origin/master` `fd73c808f`: `git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/artifacts/entity.ts src/endpoint/targets.ts src/shared/maws/instructions.ts` printed nothing; `git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+ *'"` printed `1`. On the VM, at `508a54acf`: `pnpm typecheck` and `pnpm lint` exit 0; `pnpm test` 40,906 passed and 55 failed. Of the failures, 42 are in the files the build brief lists (`Sidebar.test.tsx` among them, under load). The other 13 are timeouts at a load average of about 20: six of their files pass alone, and the other five time out in the same cases on master `63c97b5c0`. After the fix waves, at `11cab006c`: the renderer's artifacts, library and transcript folders and the tokens guard pass 3,129 (1 skipped); the web and node typechecks and eslint pass. At `af4db9e85`: the e2e typecheck passes, the script tests pass 588 of 588, and desk-web's typecheck, build and 794 tests pass.
 - [ ] M6 — The float has three presentations.
 - [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3.
 - [ ] M8 — "Make something new": four cards, More, and a design-system choice that binds.
@@ -1168,6 +1168,18 @@ The architect's rulings of 2026-11-15 (UTC) on M5's review, and M5's fix wave 1,
 - The edit typed just before the notice is proved by the scene through a seam: `src/renderer/src/artifacts/held-frames.ts`, about 40 lines, renderer only. It is installed only under the existing e2e flag and inert without it, which a unit case pins. The scene holds the window's outgoing document frames, types, has the agent delete the artifact, releases the frames, reads the unsent notice, presses Undo, and finds the text in the store. The Acceptance line stands as written.
 - The replica's read of the deletion state takes a ticket. A later read, or a `created`, makes an earlier answer stale, and a stale answer decides nothing. A read that gets no answer leaves the standing unknown: the replica stays read-only with its unacknowledged edit and asks again on the reconnect backoff, at the host's next `ready`, and when the link comes up. A read the host refuses (not found, not viewable) counts as gone.
 
+- Fix wave 2 of M5 (review, 2026-11-15). A read of the deletion state that a host restart or a newer successful sync overtook decides nothing: the read ticket moves with the host's generation and with each new sync. Only two refusals of that read end the replica: `notFound` (main's answer to a member who may not view the artifact, too) and `invalid`. Every other reason in `ARTIFACT_REFUSALS`, `unavailable` and `storeTooNew` among them, means the standing is unknown, and the replica waits read-only with its edit.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
+
+**U10b-2 (M4, M5), 2026-11-15.** An agent can now delete a draft its own session made, with `artifact_delete`, only while the store's mark shows that nothing but that session's accounted writes touched the draft. The transcript reads "Deleted <title>" with Undo, and Undo works here and, for a machine's owners, over the link. A deleted artifact takes no content, whoever deleted it. An editor open on it is kept read-only under the notice and sends its unsent edit after Undo. Nothing was added to `STORE_MIGRATIONS`. The wire took minor 49 and the link minor 15, each in a commit of its own so that the chain merge can redo it.
+
+What the reviews found that the document had not said:
+- The proof that the mark outlives a pruned log had to read the committed key after the person's rows were pruned.
+- The fence alone leaves an open editor writable, so the window's replica has to wait read-only on the `deleted` announcement and reconnect at `created`. That replica's read of the deletion state then needed a ticket against restarts and newer syncs, and has to tell "not there" apart from "not answered".
+- A delete that is never answered needed the artifact family's E11 sentence.
+- The edit typed before the notice can only be proved end to end through an e2e seam that holds the document frames.
+
+Still open for this pull request: its Mac scenes, its two cross-build runs, its class 1a run and the branch's xhigh panel.
