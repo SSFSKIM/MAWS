@@ -12,7 +12,7 @@
 // UX wave U1a (M4, §I): a file change's preview is its diff against the file as read (`proposed`, which the card reads
 // and hands here, since its first line says "Create" or "Edit" by it), or the input alone until and unless one is drawn.
 import { DropdownMenu } from 'radix-ui';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
@@ -73,7 +73,10 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const lastingKey = lasting === null ? null : keyed('request.allowLasting', policy === 'full' && lastingGate?.disabled === false, () => allow(lasting.scope));
   const whenArmed = (run: (() => void) | null) => run && (() => void ((guarded || armed.current) && run()));
 
-  useEffect(() => {
+  // Said in the commit that draws the buttons (the branch review's ruling of 2026-11-15 UTC): no painted frame shows them
+  // with the keys the card binds from this unsaid, so a press at the first paint is the prompt's to take, never the
+  // composer's.
+  useLayoutEffect(() => {
     bindKeys({ accept: null, decline: whenArmed(declineKey), allowOnce: whenArmed(onceKey), allowLasting: whenArmed(lastingKey), digit: null });
   });
 

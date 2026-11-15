@@ -9,7 +9,7 @@
 // name, each sending its mode. Where none can be chosen on this Mac the button reads "Implement", today's card; on a
 // session another machine runs it names the mode that machine's status gives, with no menu.
 import { DropdownMenu } from 'radix-ui';
-import { useEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useRef, useState } from 'react';
 import type { PermissionMode } from '@shared/graph/enums';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
@@ -73,7 +73,7 @@ export function PlanBody({ item, request, busy, submit, bindKeys, capability = c
   const sendFeedback = () => !feedbackGate.disabled && submit(toAnswer({ kind: 'plan', outcome: 'keep_planning', feedback: feedback ?? '' }), 'Keep planning');
   const clearAndImplement = () => !clearGate.disabled && submit(toAnswer({ kind: 'plan', outcome: 'clear_and_implement' }), 'Clear context and implement');
 
-  useEffect(() => bindKeys({ accept: implementGate.disabled ? null : implement, decline: feedbackGate.disabled ? null : keepPlanning }));
+  useLayoutEffect(() => bindKeys({ accept: implementGate.disabled ? null : implement, decline: feedbackGate.disabled ? null : keepPlanning })); // in the commit that draws the buttons
 
   return (
     <div className="flex flex-col gap-3">

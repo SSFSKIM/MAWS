@@ -25,7 +25,7 @@
 import { Checkbox, RadioGroup } from 'radix-ui';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AttentionItem } from '@shared/graph/attention';
-import { useEffect, useLayoutEffect, useRef, type KeyboardEvent } from 'react';
+import { useLayoutEffect, useRef, type KeyboardEvent } from 'react';
 import type { Question } from '@shared/graph/events';
 import { useAttention } from '../../stores/attention';
 import { normalizeQuestionSelections, questionAnswers, questionValue, toAnswer } from '../answers';
@@ -229,7 +229,7 @@ export function QuestionBody({ item, request, placement, busy, submit, bindKeys,
   const onOther = (text: string | null) => save(setOther(draft, question, text));
   const show = (to: number) => saveStep(goTo(draft, to, count));
 
-  useEffect(() => {
+  useLayoutEffect(() => { // in the commit that draws the buttons
     bindKeys({
       accept: forward,
       decline: item.kind === 'async_input' || declineGate.disabled ? null : decline, // O-22: Esc never ends an async question
