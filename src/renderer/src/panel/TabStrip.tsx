@@ -34,6 +34,7 @@ import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
 import { EDITOR_COPY } from '../tools/code/copy'; // UX wave U6b-1
 import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab } from '../tools/code/files/tabs'; // UX wave U6b-1
 import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
+import { personsSideTabClick } from '../tools/code/open-file'; // UX wave U6e (decision 19): a person's click on a file's tab is the person's open
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import { groupOf, sideGroups, type SideGroupName } from './surface-model';
 
@@ -83,7 +84,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
           const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
-          return <Tab key={tab.id} tab={tab} appSessionId={appSessionId} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
+          return <Tab key={tab.id} tab={tab} appSessionId={appSessionId} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => { panelHost.selectTab(tab.id); personsSideTabClick(tab.id); }} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
         })}
       </div>
       <AddMenu appSessionId={appSessionId} group={group} />

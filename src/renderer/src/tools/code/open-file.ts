@@ -23,7 +23,7 @@ import { quietly, useLayout } from '../../stores/layout';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore, type TranscriptActions, type TurnId } from '../../transcript';
 import { dropSideViews, holdSideViews } from '../../shell/transfer'; // M4: ⌘-click on a file beside the chat is a move to main
-import { fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, type FilesTabParams } from './files/tabs';
+import { fileKey, fileOfTab, FILES_TOOL_ID, placeOpen, sideFileOf, type FilesTabParams } from './files/tabs';
 import { useViewer } from './viewer/viewer-store';
 
 // `normalizeLexically` lives in the rule of a file the transcript names (UX wave U6c, `src/shared/files/named.ts`), so the
@@ -158,6 +158,16 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   }
   useViewer.getState().revisit(key, appSessionId, mark);
   return { surface: 'side', tabId };
+}
+
+// U6e (decision 19): a person's click on a file's tab beside the chat is the person's open of the file: the agent's mark
+// goes from the tab and from its entry, and the file is read again as the person's (`revisit`).
+export function personsSideTabClick(tabId: string): void {
+  const side = sideFileOf(tabId);
+  if (side === null) return;
+  const { appSessionId, held, key } = side;
+  if (held.agent) useLayout.getState().setPanelParams(tabId, { file: held.file, line: held.line, ...(held.preview ? { preview: true as const } : {}) });
+  useViewer.getState().revisit(key, appSessionId);
 }
 
 // A tab already in the session's list brought into view, the session brought to the front first when it is not the one
