@@ -237,6 +237,8 @@ describe('a prompt’s keys reach it', () => {
   });
 
   it('Esc with the composer’s popup open closes the popup and answers nothing', async () => {
+    const original = console.error;
+    vi.spyOn(console, 'error').mockImplementation((...args: unknown[]) => { original(String(args[0]), new Error('trace').stack); });
     const off = registerSlashWidget('usage', { title: 'Usage', component: () => null }); // a row for the `/` list
     onTestFinished(off);
     const { prompt } = scene();
