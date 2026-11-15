@@ -130,6 +130,7 @@ describe('a command’s output, drawn', () => {
   });
 
   // The architect's rulings on the drawn example (the document's Decision Log, R2 and R4)
+  // It passed at once: the transcript's markdown already draws each source line break as a break (remark-breaks); kept as R4's guard.
   it('keeps the output’s line ends: the recorded /cost output draws each of its source lines on a line of its own, closed and open (R4)', () => {
     renderedOutputs(longOutput);
     const row = starting(live('u3-commands-r1'), 'Total cost:');

@@ -106,7 +106,7 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
     previousAt = rows.at(-1)!.at;
   };
   const emitLoose = (after: TurnId | null) => {
-    for (const row of looseRows(state, looseAfter.get(after) ?? [])) {
+    for (const row of looseRows(state, looseAfter.get(after) ?? [], after)) {
       emit([row], 'loose', rowId.timeOfRow(row.id));
       if (row.kind === 'boundary' && row.boundaryKind === 'rewind' && row.revealed) {
         for (const id of state.hidden?.branches.get(row.id)?.turns ?? []) {
@@ -541,8 +541,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
           const row = localCommandRow(event, turn.id);
-          // UX wave U3b (Interfaces B): it stands alone unless the turn's prompt, known once every event is seen, is a command's
-          if (row) items.push({ kind: 'later', row: () => (user !== null && commandLineOf(user.text) !== null ? row : { ...row, lone: true }) });
+          // UX wave U3b (Interfaces B): it stands alone unless its turn draws the bubble of a command, known once every event is seen
+          if (row) items.push({ kind: 'later', row: () => (user !== null && turnCommandLine(turn) !== null ? row : { ...row, lone: true }) });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (originOf(event.origin) === 'engine') {
@@ -1692,6 +1692,22 @@ function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'a
   return { id: rowId.cut(event.id), turnId, at: event.at, kind: 'assistant_text', messageUuid: null, blockIndex: 0, markdown: cut.text, live: false, phase: 'commentary', model: null, cut: true, ...(cut.partway && { partway: true as const }) };
 }
 
+/**
+ * UX wave U3b (Interfaces B, §N): the command line a turn opens with: its opening message read through `commandLineOf`,
+ * the one reader of "this drawn text is a slash command line"; null for a turn a prompt, an arrival or nothing opened.
+ * What says a command's output has its command's bubble directly above it (`lone`), and names the command for the mod's
+ * site where the output's event names no run (`commandInput`).
+ */
+export function turnCommandLine(turn: TurnState): { command: string; args: string } | null {
+  const opener = turn.events.find((event): event is Event<'user.message'> => event.kind === 'user.message' && !event.isSynthetic && event.origin !== 'local-command' && event.bash === null);
+  return opener === undefined ? null : commandLineOf(userTextOf(opener.content).text);
+}
+
+// The last row a turn draws (time separators aside) is its bubble: nothing of the turn stands between it and what follows.
+function lastDrawnIsBubble(state: TranscriptState, turn: TurnState): boolean {
+  return rowsOfTurn(state, turn).findLast((row) => row.kind !== 'time')?.kind === 'user';
+}
+
 // UX wave U3b (decision 3, Interfaces B): the row says all of the output was an error where only the error tag held
 // text (an output that mixes the two is drawn muted), and carries the run and the plain mark of its event's entry.
 function localCommandRow(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'local_command'> | null {
@@ -1747,8 +1763,13 @@ function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowO
 }
 
 // Rows for the events outside any turn, placed after the turn they followed.
-function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
+// `after` is the turn the events are placed after (state.placement): what is drawn directly above the first of them.
+function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId | null): Row[] {
   const rows: Row[] = [];
+  // UX wave U3b (Interfaces B): the file's routes place a command's output as a loose event after its command's turn; it
+  // stands under the bubble when it is the first row drawn there and that turn's last drawn row is a command's bubble
+  const placedAfter = after === null ? undefined : state.turns.get(after);
+  const underCommand = placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
   let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
@@ -1768,7 +1789,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
           const row = localCommandRow(event, null);
-          if (row) rows.push({ ...row, lone: true }); // UX wave U3b: no turn, so no bubble of its command
+          if (row) rows.push(rows.length === 0 && underCommand ? row : { ...row, lone: true }); // UX wave U3b: on the drawn order
         }
         break;
       }

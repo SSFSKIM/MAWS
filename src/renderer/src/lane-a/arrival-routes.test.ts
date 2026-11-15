@@ -434,7 +434,7 @@ describe('a slash command’s output names its command, its error and its kind o
   it('an output standing alone (no bubble of its command above it) is lone on the file, another machine’s rows and the live route', async () => {
     // written by hand, invented: a prompt answered, then a command's output its turn did not ask for (a plugin's run)
     const output = { type: 'system', subtype: 'local_command', content: '<local-command-stdout>Current session: 24% used</local-command-stdout>', commandRun: { command: 'usage', args: '' }, level: 'info', isMeta: false };
-    const text = transcript(typed('Summarise the notes.'), said('The notes are summarised.'), ended(), output);
+    const text = `${transcript(typed('Summarise the notes.'), said('The notes are summarised.'), ended(), output)}\n`; // a whole last line
     const [fileEvents, remoteEvents] = [await fromFile(text), await fromRows(text)];
     const live = journalToEvents(LONE_JOURNAL);
     const expected = ['/usage lone: Current session: 24% used'];
