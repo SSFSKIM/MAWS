@@ -483,7 +483,7 @@ export interface StoredSide {
   panelParams: Record<string, unknown>;
 }
 
-const without = (params: unknown, keys: readonly string[]): Record<string, unknown> =>
+const omitKeys = (params: unknown, keys: readonly string[]): Record<string, unknown> =>
   Object.fromEntries(Object.entries(params as Record<string, unknown>).filter(([key]) => !keys.includes(key)));
 
 // The files beside the chat as this build holds them, from a layout whatever build wrote it (Decision 17, sequence 8):
@@ -499,7 +499,7 @@ export function repairFileTabs<T extends StoredSide>(read: T): T {
     if (next === null || Object.keys(next).length === 0) delete params[id];
     else params[id] = next;
   };
-  for (const ref of read.panelPinned) if (paramsHoldFile(params[ref.id])) edit(ref.id, without(params[ref.id], ['file', 'line', 'preview']));
+  for (const ref of read.panelPinned) if (paramsHoldFile(params[ref.id])) edit(ref.id, omitKeys(params[ref.id], ['file', 'line', 'preview']));
   const shown = new Set(allTabs(read.main).map((tab) => tab.id));
   let panelBySession = read.panelBySession;
   for (const [appSessionId, own] of read.panelBySession) {
@@ -514,7 +514,7 @@ export function repairFileTabs<T extends StoredSide>(read: T): T {
     let preview = false;
     for (const ref of kept) {
       if (fileOf(ref) === null || (params[ref.id] as { preview?: unknown }).preview !== true) continue;
-      if (preview) edit(ref.id, without(params[ref.id], ['preview']));
+      if (preview) edit(ref.id, omitKeys(params[ref.id], ['preview']));
       preview = true;
     }
     const tabs = treeFirst(kept, (ref) => fileOf(ref) !== null);
