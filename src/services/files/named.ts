@@ -1,7 +1,10 @@
 // The search for a file the transcript names, its memory and its queue (UX wave U6c,
 // docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §B; decisions 6 to 8 and 17). `names` answers
 // whether some record among the newest `NAMED_SCAN_BYTES` of the session's transcript names the path by the rule
-// (`@shared/files/named`), calls resolved. The transcript is read from its end backwards through a read-only handle, as
+// (`@shared/files/named`), calls resolved, and by which kind of form (UX wave U6e,
+// docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B and decision 22): it stops at the first
+// counted form, and passes a result form, noting the newest whose call resolves, to look on for a counted one to its
+// bound. The transcript is read from its end backwards through a read-only handle, as
 // `readRestoredCost` reads one; a line is parsed only when its bytes hold every needle of the path (or the id of a call
 // a result waits for), and never when it is one of the engine's request records. One job runs at a time for the whole
 // daemon, and it gives the event loop back after every read, every parsed line and every few steps of the rule on a
@@ -37,8 +40,12 @@ export interface NamedPathsOptions {
   bounds?: { scan?: number; chunk?: number; row?: number; entries?: number; waiting?: number; waitMs?: number; pending?: number }; // tests
   hooks?: { at?(point: 'opened' | 'searched', appSessionId: AppSessionId): Promise<void> }; // tests: after a job has opened the file and read its size; after a search, before its answer is proven and remembered
 }
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 22): which kind of form
+// names the path: a counted one (the person's message, the agent's own text, a tool call's input), only a result one
+// (what a tool returned, or a `user` row someone other than the person wrote), or none.
+export type Naming = 'counted' | 'result' | false;
 export interface NamedPaths {
-  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<boolean>;
+  names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming>;
 }
 
 const NEWLINE = 0x0a;
@@ -58,14 +65,18 @@ interface Identity {
 }
 interface Found {
   record: Span; // the naming record
-  call: (Span & PendingCall) | null; // the call's record, when the name rests on a result form
+  call: (Span & PendingCall) | null; // the call's record, when the name rests on a result form that waits for one
 }
-// A hit: where its records are. A miss: how far the file was searched (the end of a whole line), with the fingerprint of
-// the bytes before that offset.
-type Entry = ({ kind: 'hit' } & Found & Identity) | ({ kind: 'miss'; offset: number; fingerprint: string } & Identity);
+interface Checkpoint {
+  offset: number; // how far the file was searched (the end of a whole line)
+  fingerprint: string; // of the bytes before that offset
+}
+// A hit: where the counted form's record is. A result: where the result form's records are, and the checkpoint up to
+// which no counted form was found. A miss: the checkpoint up to which nothing was found.
+type Entry = ({ kind: 'hit' } & Found & Identity) | ({ kind: 'result'; found: Found } & Checkpoint & Identity) | ({ kind: 'miss' } & Checkpoint & Identity);
 
 interface Waiter {
-  answer(value: boolean): void;
+  answer(value: Naming): void;
 }
 interface Job {
   key: string; // the session, the transcript it was bound to when asked, and the path: who may join
@@ -148,20 +159,27 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     return line.includes(NEWLINE) ? undefined : parse(line);
   }
 
-  // A remembered or just-found name, read again from its record (and its call's): does it still name the path?
-  async function proves(read: Read, found: Found, path: string): Promise<boolean> {
+  // A remembered or just-found name, read again from its record (and its call's): does it still name the path, by the
+  // same kind of form?
+  async function proves(read: Read, found: Found, path: string, kind: 'counted' | 'result'): Promise<boolean> {
     const claim = await claimOf(await lineAt(read, found.record), path);
-    if (claim.names) return true;
+    if (claim.names) return kind === 'counted';
+    if (kind === 'counted') return false;
     const { call } = found;
-    if (call === null || !claim.pending.some((pending) => pending.toolUseId === call.toolUseId && pending.when === call.when)) return false;
+    if (call === null) return claim.other === true;
+    if (!claim.pending.some((pending) => pending.toolUseId === call.toolUseId && pending.when === call.when)) return false;
     return callClass(await lineAt(read, call), call.toolUseId) === call.when;
   }
 
-  // The newest record of a region that names the path, the calls the results it met wait for, newest first.
+  // The newest record of a region that names the path by a counted form (`found`), the newest result form whose call
+  // resolves (`result`), and the calls the results it met wait for, newest first.
   function scanner(read: Read, path: string) {
     const needles = needlesOf(path).map((needle) => Buffer.from(needle));
     const pending = new Map<string, { when: PendingCall['when']; record: Span }[]>(); // per call id, the newest results waiting for it
-    const state = { found: null as Found | null, pending };
+    const state = { found: null as Found | null, result: null as Found | null, pending };
+    const note = (result: Found) => {
+      if (state.result === null || result.record.offset > state.result.record.offset) state.result = result;
+    };
 
     // The waited-for call ids a line holds, in one pass over it however many wait: each `"id":"…"` read and looked up.
     function waitedIdsIn(line: Buffer): string[] {
@@ -192,6 +210,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
           state.found = { record: span, call: null };
           return;
         }
+        if (claim.other) note({ record: span, call: null }); // a `user` row someone other than the person wrote (Decision Log 8)
         for (const { toolUseId, when } of claim.pending) {
           const waits = pending.get(toolUseId);
           if (waits === undefined) {
@@ -205,23 +224,22 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         if (found === null) continue; // not the call's record (the result itself, say)
         const match = pending.get(id)!.find((wait) => wait.when === found);
         pending.delete(id); // the nearest older call decides
-        if (match) {
-          state.found = { record: match.record, call: { ...span, toolUseId: id, when: match.when } };
-          return;
-        }
+        if (match) note({ record: match.record, call: { ...span, toolUseId: id, when: match.when } });
       }
     }
 
-    // The whole lines of [low, high), newest first, until a name is found. `top`: `high` is the file's size, and the
-    // bytes after its last newline are a line with no end, passed over; `onTop` learns where the whole lines end. Else
-    // `high` is a line's start. `lowIsLine`: `low` is a line's start (else the bytes before its first newline there are
-    // the end of a line that began earlier, and are passed over). `names`: look for names, not only for calls.
+    // The whole lines of [low, high), newest first, until a counted form is found. `top`: `high` is the file's size, and
+    // the bytes after its last newline are a line with no end, passed over; `onTop` learns where the whole lines end.
+    // Else `high` is a line's start. `lowIsLine`: `low` is a line's start (else the bytes before its first newline there
+    // are the end of a line that began earlier, and are passed over). `names`: look for names, not only for calls; a
+    // region that looks only for calls ends once none is waited for.
     async function region(low: number, lowIsLine: boolean, high: number, top: boolean, names: boolean, onTop?: (end: number) => Promise<void>): Promise<void> {
+      const done = () => state.found !== null || (!names && pending.size === 0);
       let end = high;
       let head = EMPTY; // the end of a line that began before `end`, with its newline, carried to the next read
       let overlong = false; // the line that ends at `end` is longer than the row bound: its bytes are not kept
       let seeking = top; // still in the line with no end
-      while (end > low && state.found === null) {
+      while (end > low && !done()) {
         const start = Math.max(low, end - chunkBytes);
         const chunk = await read(start, end - start);
         if (chunk.length !== end - start) throw new Error('the transcript shrank while it was read');
@@ -238,7 +256,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
         }
         const first = start === low && lowIsLine ? 0 : buffer.indexOf(NEWLINE) + 1;
         let lineEnd = limit - 1; // the newline that ends the line in hand
-        while (lineEnd >= first && state.found === null) {
+        while (lineEnd >= first && !done()) {
           const newline = lineEnd === 0 ? -1 : buffer.lastIndexOf(NEWLINE, lineEnd - 1);
           await consider(buffer, newline + 1, lineEnd, start, names);
           lineEnd = newline;
@@ -255,7 +273,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     return { state, region };
   }
 
-  async function decide(job: Job, handle: FileHandle): Promise<boolean> {
+  async function decide(job: Job, handle: FileHandle): Promise<Naming> {
     const stat = await handle.stat({ bigint: true });
     if (!stat.isFile()) return false; // judged on the descriptor, before any read
     await hooks?.at?.('opened', job.appSessionId);
@@ -271,11 +289,17 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
 
     const entry = entries.get(job.entry);
     if (entry?.kind === 'hit') {
-      if (sameFile(entry, identity) && (await proves(read, entry, job.path))) {
+      if (sameFile(entry, identity) && (await proves(read, entry, job.path, 'counted'))) {
         remember(job, entry);
-        return true;
+        return 'counted';
       }
       entries.delete(job.entry);
+    }
+    // a remembered result form stands while its records prove it and its checkpoint holds
+    let known: Found | null = null;
+    if (entry?.kind === 'result') {
+      if (sameFile(entry, identity) && (await proves(read, entry.found, job.path, 'result'))) known = entry.found;
+      else entries.delete(job.entry);
     }
 
     // The window: the newest `scanBytes`, read from one byte before so that a line starting exactly there is whole.
@@ -284,12 +308,16 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     let from = bottom;
     let fromIsLine = floor === 0;
     let verified: string | null = null;
-    if (entry?.kind === 'miss') {
-      if (sameFile(entry, identity) && entry.offset >= floor && entry.offset <= size && (await fingerprint(read, entry.offset, NAMED_FINGERPRINT_BYTES)) === entry.fingerprint) {
-        from = entry.offset;
+    const checkpoint = entry?.kind === 'miss' || (entry?.kind === 'result' && known !== null) ? entry : null;
+    if (checkpoint !== null) {
+      if (sameFile(checkpoint, identity) && checkpoint.offset >= floor && checkpoint.offset <= size && (await fingerprint(read, checkpoint.offset, NAMED_FINGERPRINT_BYTES)) === checkpoint.fingerprint) {
+        from = checkpoint.offset;
         fromIsLine = true;
-        verified = entry.fingerprint;
-      } else entries.delete(job.entry);
+        verified = checkpoint.fingerprint;
+      } else {
+        entries.delete(job.entry);
+        known = null;
+      }
     }
 
     let searchedTo: number | null = fromIsLine ? from : null;
@@ -299,21 +327,30 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
       searchedTo = end;
       began = await fingerprint(read, end, NAMED_FINGERPRINT_BYTES);
     });
-    // a result added since a miss may wait for a call older than its checkpoint
-    if (state.found === null && state.pending.size > 0 && from > bottom) await region(bottom, floor === 0, from, false, false);
+    // a result added since a checkpoint may wait for a call older than it; not looked for once a result form is in hand
+    if (state.found === null && state.result === null && known === null && state.pending.size > 0 && from > bottom) await region(bottom, floor === 0, from, false, false);
     await hooks?.at?.('searched', job.appSessionId);
 
     if (state.found !== null) {
-      if (!(await proves(read, state.found, job.path))) return false;
+      if (!(await proves(read, state.found, job.path, 'counted'))) return false;
       remember(job, { kind: 'hit', ...state.found, ...identity });
-      return true;
+      return 'counted';
     }
+    const result = state.result ?? known;
+    if (state.result !== null && !(await proves(read, state.result, job.path, 'result'))) return false;
+    // the checkpoint up to which no counted form stands, if the file is still the one searched
+    let reached: Checkpoint | null = null;
     if (searchedTo !== null && began !== null) {
       const offset: number = searchedTo;
       const now = await handle.stat({ bigint: true });
       const ended = offset === from && verified !== null ? verified : await fingerprint(read, offset, NAMED_FINGERPRINT_BYTES);
-      if (Number(now.size) >= size && ended === began) remember(job, { kind: 'miss', offset, fingerprint: began, ...identity });
+      if (Number(now.size) >= size && ended === began) reached = { offset, fingerprint: began };
     }
+    if (result !== null) {
+      if (reached !== null) remember(job, { kind: 'result', found: result, ...reached, ...identity });
+      return 'result';
+    }
+    if (reached !== null) remember(job, { kind: 'miss', ...reached, ...identity });
     return false;
   }
 
@@ -321,7 +358,7 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
   // nothing of it is remembered. A file system call that never returns (a mount that stopped answering) keeps the one
   // job slot until the daemon restarts: ruled, since freeing it would let each later search hold one more of the
   // daemon's few file system threads.
-  async function run(job: Job): Promise<boolean> {
+  async function run(job: Job): Promise<Naming> {
     let handle: FileHandle | null = null;
     try {
       handle = await open(job.transcript, TRANSCRIPT_FLAGS);
@@ -366,12 +403,12 @@ export function createNamedPaths({ transcript, open = openFile, bounds = {}, hoo
     // a job that reads another transcript than the one its session is bound to when it is made), and then waits in the
     // queue only for what is left of its patience. A request that ended while the locator was asked queues nothing. No
     // transcript, a locator that throws, a full queue, a waiter that leaves: not named.
-    names(appSessionId, path, signal) {
+    names(appSessionId: AppSessionId, path: string, signal?: AbortSignal): Promise<Naming> {
       if (signal?.aborted) return Promise.resolve(false);
       // `files.read` asks for a missing file's path too, which no `realpath` has bounded: past the bound, not named at
       // once, and no transcript looked for (the work meter's fix pass, item 2; the needles' pattern runs on the path)
       if (Buffer.byteLength(path) > NAMED_PATH_MAX) return Promise.resolve(false);
-      return new Promise<boolean>((resolve) => {
+      return new Promise<Naming>((resolve) => {
         let joined: Job | null = null;
         let answered = false;
         const waiter: Waiter = {

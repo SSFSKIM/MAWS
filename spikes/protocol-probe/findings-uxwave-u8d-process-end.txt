@@ -1,0 +1,80 @@
+UX wave, landing U8d, probe P3: what engine 2.1.322 writes when a terminal session's process ends while a background
+agent runs (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, "Probes to arrange" P3; it serves
+"Engine facts" 9, acceptance 6 and M4's scene of the gone terminal; 2026-11-15, VM dc-uxwave5-26dc, branch
+ux-wave/U8d-probes)
+
+Question. The terminal is closed (and, separately, the process is sent a termination signal) while an agent launched in
+the background runs. Does any row that names the agent reach the main transcript or the agent's file, and is its meta
+rewritten?
+
+Verdict. The document's default holds where DX4 reads: nothing that names the agent reaches the main transcript, and
+the meta is not rewritten (6 of 6 runs: 2 terminal closed, 2 SIGTERM, 2 with a nested agent). So the agent reads
+"ended with the session" (DX4 `exited`, evidence `session`), not "stopped". "Engine facts" 9's wording "no transcript
+row is written" is not exact: the agent's OWN file gains rows at the exit. Its in-flight tool call gets a result,
+`is_error: true`, `toolUseResult: "Error: Exit code 137"` (the engine kills the command's process), and then a
+`prompt_snapshot` and an `agent_listing_delta` attachment. No `<task-notification>`, no queue record, no result for
+the `Agent` call, no `killed` word appears anywhere. The main transcript gains only `last-prompt` and `cost-state`
+rows. Closing the terminal (SIGHUP) and SIGTERM write the same thing.
+  Beside the question (the shells, recorded in P1's runs, findings-uxwave-u8d-resume-orphans.txt): for a BACKGROUND
+  SHELL the same exit DOES write a row in the main transcript. It is a queue record, one per shell, `<status>killed
+  </status>`, "Background command "…" was stopped", with no dequeue and no user row. A reader of queue records (the
+  ledger's jobs half) therefore reads a shell that was running at a process exit as killed/stopped, not exited.
+
+Method.
+  Engine 2.1.322 (/opt/maws-probe/engines/2.1.322; every row's `version` is "2.1.322"), model haiku (claude-haiku-5-5;
+  the agents general-purpose on the same model), route: the gateway through vm-run.sh's loopback forward
+  (spikes/protocol-probe/VM.md), the owner's feature-gate cache seeded (so an agent hands back through
+  SubagentHandback, as in the owner's sessions). scenarios/pass3/uxwave-u8d-terminal.mjs, run under vm-run.sh: the
+  interactive engine in tmux (`--model haiku --session-id <id>`, auto mode by the scratch home's defaults), prompts
+  typed with send-keys. A recorder reads the session's folder every 100 ms and logs, with the time it saw it, each new
+  line of the main transcript, of each agent's file and each change of a meta, beside the time of each event the
+  scenario caused (the record's `timeline`; `ms` since the run's start). Timings below are relative to the signal and
+  are accurate to the 100 ms poll.
+  Cases (UXW_CASE): p3-hup: the main loop launches one background general-purpose agent whose prompt runs `python3
+  uxw8d_wait.py 100` (a sleep) in the foreground; once the agent's file holds that Bash call and the main turn is
+  idle, the terminal is closed with `tmux kill-server` (SIGHUP to the pane's engine). p3-term: the same, then SIGTERM
+  to the engine's pid. p3-nested: a background agent P told to call the Agent tool in the FOREGROUND for a nested agent
+  N that runs the sleep, then the terminal closed. Each case run twice.
+  Fixtures (fixtures/uxwave/): u8d-p3-{hup,term,nested}-r{1,2}.terminal.json (the record: timeline, every meta version,
+  snapshots of line counts, panes), .transcript.jsonl (the main transcript), -subagents/ (each agent's file and meta at
+  the end).
+
+Observed (line numbers are those of the fixtures named).
+  p3-hup-r1: agent a551f51075903e049; its Bash call at its file's line 16. The signal; +112 ms main lines 37
+    `last-prompt`, 38 `cost-state`; +213 ms agent file line 17, a `user` row whose tool_result for that Bash call has
+    is_error true and toolUseResult "Error: Exit code 137"; lines 18 prompt_snapshot, 19 agent_listing_delta; the
+    engine gone at +520 ms. 10 s later nothing more anywhere. Meta: one version only, written at the launch (keys
+    agentType, isBuiltIn, launchedWithDefaults, description, toolUseId, spawnDepth 1, requestShape "background",
+    requestNonInteractive, pickedEffortModel).
+  p3-hup-r2: the same rows (main 37-38 at +112 ms; agent file 17-19 at +213 ms; gone +518 ms); meta unchanged.
+  p3-term-r1: main 36 cost-state, 37 last-prompt, 38 cost-state at +104 ms; agent file 17-19 at +217 ms (the same
+    error row); gone +676 ms; meta unchanged.
+  p3-term-r2: main 37-39 at +105 ms; agent file 16-18 at +307 ms; gone +718 ms; meta unchanged.
+  p3-nested-r1 and -r2: the case asked for could not be provoked. In both runs the nested call (input
+    run_in_background "false") was launched in the BACKGROUND: its result in P's file says "Async agent launched
+    successfully" (r1 P's file line 17), and N's meta carries `requestShape: "background"`, `parentAgentId` (P's id) and
+    `spawnDepth: 2`. In r1, P handed back at once ("the tool did not run it in the foreground"). Its meta was rewritten
+    with `finished: true` (version 2, 7 s before the signal), while N was still running its command. At the signal, N's
+    own file got the same Exit-137 error row (r1 N's line 16, +219 ms) and nothing reached P's file or the main
+    transcript about N (main 46-47: last-prompt, cost-state). In r2, P was still running at the signal: P's file
+    received the rest of its streaming turn (lines 29, 30: assistant rows, at +120 and +524 ms), N's file the error
+    row (line 16, +321 ms). Neither meta was rewritten at the exit.
+  The agent's command was killed: `pgrep` of the sleep under the scratch work folder found 2 processes before the
+    signal and 0 after, in every run.
+
+Inference.
+  - DX4's rule (the process gone and the rows hold no end: `exited`) matches what the main transcript and the meta
+    hold. The design's word for this case, "ended with the session", is right; nothing would make it "stopped".
+  - The agent's own file's last row is now an errored tool result. That does not affect DX4's reading of that agent:
+    its status is read from the main transcript or its parent's file. It would matter only to a reader that infers an
+    agent's state from its own file (for example "the last row is a tool result, so it is still working").
+  - A nested agent can outlive its parent. In p3-nested-r1, P had ended (hand-back, meta `finished: true`) while N still
+    ran, and N then ended only with the process. DX4's parent rule (the parent has ended: `exited`, evidence `parent`)
+    would have shown N as ended for those 7 s while it ran. The document's table row "an agent ended, something under
+    it still runs: Does not arise … Its nested agents read ended with it" rests on the parent rule, not on the engine:
+    the engine does not end a nested background agent with its parent. Seen once (r1). r2's parent was still running.
+  - Not shown: a nested agent the parent truly waits for (a foreground call inside an agent); the engine launched it in
+    the background both times. Whether that is forced for any agent of a background agent or was the model's string
+    "false" was not established.
+  - Meta: besides the start write, an agent's meta gains `finished: true` when it completes (P1's runs show the same
+    for an agent that completed: findings-uxwave-u8d-resume-orphans.txt). Engine facts 1 and 11 do not name this key.

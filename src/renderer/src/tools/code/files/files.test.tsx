@@ -8,13 +8,15 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesEntry } from '@shared/ipc/schema/files';
 import { FilesTreeSchema } from '@shared/ipc/schema/layout';
 import type { SessionRecord } from '@shared/graph/session';
-import { bareOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
+import type { MachineState } from '@shared/ipc/schema/machines';
 import { record } from '../../../../../../test/support/builders';
-import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
+import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
 import { installDisk } from '../../../test-support/code-disk';
 import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
@@ -164,6 +166,7 @@ const QUIET: Partial<Record<string, ReturnType<typeof answer>>> = {
   'git.watch': fail('not a git repository'),
   'git.unwatch': answer(),
   'fs.workflows': answer({ runs: [] }),
+  'layout.openFile': answer({ status: 'cancelled' }), // UX wave U6e: the chooser, cancelled
 };
 
 function mainWith(tree: Record<string, FilesEntry[] | string>) {
@@ -726,6 +729,147 @@ describe('files tool', () => {
 // relaunch. A row's click opens the file in the preview tab, a double-click keeps it, ⌘-click opens a main tab. The row of
 // the file in view is marked. In a tab too narrow for both, the tree folds, and its button shows it in the file's place
 // (the owner's answer on card R8). happy-dom has no layout: a tab's width is reported by a fake ResizeObserver.
+// UX wave U6e (M3; §D, "Reported" 1, K6, K7, K9): the Files list's menu, opened by a right-click in the tree or ⇧F10 with
+// the keyboard in it, holds the one row "Open File…", with no chord; for a session on another machine the row is
+// disabled and names the machine, the menu at most max-w-96 wide and a long name cut, the whole row its title.
+describe('the Files list’s menu (U6e)', () => {
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof mainWith>;
+  const R = addressOf(OTHER_MACHINE, 'app-remote') as AppSessionId;
+  const STUDIO = 'the-rehearsal-room-mac-mini-upstairs';
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    main = mainWith(REPO);
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })).set(R, record(R, { directory: '/r' })) }));
+    useMachines.setState({ machines: new Map([[OTHER_MACHINE, { name: STUDIO } as MachineState]]) });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    useMachines.setState({ machines: new Map() });
+  });
+  // Review finding 4 (K6, K12): at most the menus' width and never wider than the column less 1rem, the column measured
+  // as the menu opens (and its edges the menu's collision boundary); M4's scene measures the boxes.
+  const COLUMN_BOUND = 'max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))]';
+  const COLUMN_FLOOR = 'min-w-[min(12rem,calc(var(--files-menu-column,25rem)_-_1rem))]';
+  const openTree = async (appSessionId: AppSessionId) => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId }));
+    return screen.findByRole('tree');
+  };
+
+  it('a right-click in the tree opens the one row “Open File…”, with no chord, which asks Open File… for the tab’s session', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    fireEvent.contextMenu(item('src'));
+    const menu = await screen.findByRole('menu');
+    expect(menu.hasAttribute('data-files-menu')).toBe(true);
+    expect(menu.className.split(/\s+/)).toEqual(expect.arrayContaining([COLUMN_BOUND, 'shadow-float']));
+    const rows = within(menu).getAllByRole('menuitem');
+    expect(rows.map((row) => row.textContent)).toEqual(['Open File…']);
+    expect(rows[0].hasAttribute('data-open-file')).toBe(true);
+    fireEvent.click(rows[0]);
+    await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
+  });
+
+  // Panel fix wave, part 2 (M4's scene, "its row opens a second chosen file"): a menu that closes hands the keyboard back
+  // to where it was a task later (Radix's focus scope, in a timer). A menu opened again before that task runs must not take
+  // the late hand-back as the keyboard leaving it: the row stays the same element, frame after frame, and its click asks.
+  it('opened again at once after Escape, the menu stays open: its row the same element across frames, and its click asks Open File…', async () => {
+    const tree = await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus()); // a right-click on a row puts the keyboard on it, as the scene's third does
+    fireEvent.contextMenu(item('src'));
+    fireEvent.keyDown(await screen.findByRole('menu'), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.contextMenu(tree); // before the closed menu's hand-back has run
+    const row = within(await screen.findByRole('menu')).getByRole('menuitem');
+    for (let frame = 0; frame < 4; frame++) {
+      await act(() => new Promise<void>((resolve) => setTimeout(() => requestAnimationFrame(() => resolve()), 0)));
+      expect(row.isConnected, `frame ${frame}: the row is still in the page`).toBe(true);
+      expect(within(screen.getByRole('menu')).getByRole('menuitem'), `frame ${frame}: the same element`).toBe(row);
+    }
+    fireEvent.click(row);
+    await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
+  });
+
+  // The architect's ruling 2: a second right-click while the menu is open closes it and opens it again in one gesture (its
+  // press lands outside the open menu); Escape then hands the keyboard back to the row that held it when the menu first
+  // opened, not to the page.
+  it('right-clicked again while open, so it opens again, then closed by Escape, the menu hands the keyboard back to the row it first opened from', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus()); // a right-click on a row puts the keyboard on it
+    fireEvent.contextMenu(item('src'));
+    const first = await screen.findByRole('menu');
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0))); // the open menu listens for a press outside it
+    fireEvent.pointerDown(item('src')); // the second right-click: its press outside the open menu closes it …
+    fireEvent.contextMenu(item('src')); // … and its contextmenu opens it again
+    const second = await screen.findByRole('menu');
+    expect(first.isConnected).toBe(false);
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0))); // the first menu's deferred hand-back runs
+    fireEvent.keyDown(second, { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(item('src')));
+  });
+
+  it('closed by Escape and not opened again, the menu hands the keyboard back to the row it was on', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus());
+    fireEvent.contextMenu(item('src'));
+    fireEvent.keyDown(await screen.findByRole('menu'), { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(item('src')));
+  });
+
+  // Re-review residual 2: at the tree's least width (160 px) the menu's least width yields to the column too.
+  it('at a 160 px tree both the menu’s least and its most width stay under the column less 1rem', async () => {
+    const tree = await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    const column = document.querySelector('[data-tool="files"]')!;
+    vi.spyOn(column, 'getBoundingClientRect').mockReturnValue({ width: 160, height: 400, top: 0, left: 0, right: 160, bottom: 400, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.contextMenu(tree);
+    const menu = await screen.findByRole('menu');
+    const classes = menu.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining([COLUMN_BOUND, COLUMN_FLOOR]));
+    expect(classes).not.toContain('min-w-48');
+    expect(menu.style.getPropertyValue('--files-menu-column')).toBe('160px');
+  });
+
+  it('⇧F10 with the keyboard in the tree opens it', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus());
+    fireEvent.keyDown(item('src'), { key: 'F10', shiftKey: true });
+    expect((await screen.findByRole('menu')).hasAttribute('data-files-menu')).toBe(true);
+  });
+
+  it('for a session on another machine the row is disabled, names the machine in the muted colour, cut, with its whole text as its title', async () => {
+    const tree = await openTree(R);
+    const column = document.querySelector('[data-tool="files"]')!;
+    vi.spyOn(column, 'getBoundingClientRect').mockReturnValue({ width: 320, height: 600, top: 0, left: 0, right: 320, bottom: 600, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.contextMenu(tree);
+    const menu = await screen.findByRole('menu');
+    expect(menu.className.split(/\s+/)).toContain(COLUMN_BOUND);
+    expect(menu.className.split(/\s+/)).not.toContain('max-w-96');
+    expect(menu.style.getPropertyValue('--files-menu-column')).toBe('320px');
+    const row = within(menu).getByRole('menuitem');
+    const whole = `Open File… (this session runs on ${STUDIO})`;
+    expect(row.textContent).toBe(whole);
+    expect(row.getAttribute('title')).toBe(whole);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.className.split(/\s+/)).toContain('truncate');
+    expect(row.querySelector('.text-fg-muted')?.textContent).toBe(` (this session runs on ${STUDIO})`);
+    fireEvent.click(row);
+    await act(flush);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+});
+
 describe('the tree at the file’s left', () => {
   const APP = '/r/src/app.ts';
   const STAGED = '/r/src/staged.ts';
@@ -921,6 +1065,33 @@ describe('the tree at the file’s left', () => {
   });
 
   // M3's review: the first click of a double-click ends the tree in the file's place, so the second lands on the file
+  // UX wave U6e (decision 19): a row's click is the person's open, through `openFile` with no `asked`: on the file the
+  // agent's tab holds, the tab's mark and the entry's go, so the entry's next reads are the person's (a file the tree lists
+  // is inside the session's folders, admitted either way, so a shown one is not read again for it); the narrow tree's
+  // double-click then keeps the tab, still unmarked.
+  it('a row’s click on the file the agent’s tab holds takes the agent’s mark back from the tab and the entry; the narrow tree’s double-click keeps it unmarked', async () => {
+    render(<TestHost />);
+    act(() => void openFile(A, APP, null, { asked: 'agent' }));
+    const [tab] = sideTabs();
+    expect(paramsOf(tab.id)).toEqual({ file: APP, line: null, preview: true, agent: true });
+    await waitFor(() => expect(useViewer.getState().entries.get(`file:${TEST_MACHINE}:${APP}`)).toMatchObject({ status: 'ready', agent: true }));
+    const reads = () => main.callsOf('files.read').filter((input) => input.path === APP);
+    expect(reads().every((input) => input.agent === true)).toBe(true);
+    widen(NARROW);
+    fireEvent.click(toggle()!);
+    await shown('/r/src');
+    fireEvent.click(row('/r/src')!, { detail: 1 });
+    await shown(APP);
+    fireEvent.click(row(APP)!, { detail: 1 }); // the person's open of the file the tab holds
+    expect(paramsOf(tab.id)).toEqual({ file: APP, line: null, preview: true });
+    expect(useViewer.getState().entries.get(`file:${TEST_MACHINE}:${APP}`)).toMatchObject({ status: 'ready', agent: false });
+    await waitFor(() => expect(fileShown()).toBe(true));
+    const there = document.querySelector<HTMLElement>('[data-file-viewer]')!;
+    fireEvent.click(there, { detail: 2 });
+    fireEvent.dblClick(there, { detail: 2 });
+    expect(paramsOf(tab.id)).toEqual({ file: APP, line: null }); // kept, unmarked
+  });
+
   it('a double-click on a row of the tree in the file’s place keeps the tab, its first click showing the file at once', async () => {
     render(<TestHost />);
     await openBeside(APP);

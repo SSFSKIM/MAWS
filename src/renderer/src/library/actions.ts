@@ -17,6 +17,7 @@ import { useLayout } from '../stores/layout';
 import { isOpen } from '../stores/layout-model';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
 import { refreshSpaceInstructions } from './store'; // UX wave U10b (M9)
+import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's words, shared with the editor's notice
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
 
@@ -40,6 +41,20 @@ export const setArtifactPinned = (artifactId: string, pinned: boolean, client: M
 export const moveArtifactToSpace = (artifactId: string, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf);
 export const duplicateArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf);
 export const deleteArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing);
+// UX wave U10b (M5, §C.4): undo an agent's delete on the artifact's machine. Resolves null once the artifact is live
+// again, else the sentence an act that ended without its effect leaves: this Mac's store's sentence after "Not restored:";
+// another machine's as main words it (`refusalWords`, `failureWords`: "Not restored: <machine> is offline", …).
+export async function undeleteArtifact(artifactId: string, machine: MachineRef, client: MawsBridge = ipc): Promise<string | null> {
+  const result = await client.invoke('artifacts.undelete', { artifactId }, { machine });
+  if (result.ok) return null;
+  return machine === client.localMachine ? ARTIFACT.notRestored(result.error.message) : result.error.message;
+}
+// The transcript's row: on the session's machine, the artifact's machine recorded as `openArtifactInPanel` records it.
+export function undeleteSessionArtifact(appSessionId: AppSessionId, artifactId: string, client: MawsBridge = ipc): Promise<string | null> {
+  const machine = sessionArtifactMachine(appSessionId, artifactId, client.localMachine);
+  recordArtifactMachine(artifactId, machine, client.localMachine);
+  return undeleteArtifact(artifactId, machine, client);
+}
 // Decision Log 15: once per open, by the surface that showed the artifact's content to the owner, never by the list.
 export const markArtifactViewed = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing);
 

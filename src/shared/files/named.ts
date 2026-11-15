@@ -7,6 +7,7 @@
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
 import { readAnchoredMessage } from '../anchor/message';
+import { readArrivals } from '../engine/arrival';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1006,10 +1007,24 @@ export interface PendingCall {
   toolUseId: string;
   when: 'mcp' | 'edit';
 }
-export type RowClaim = { names: true } | { names: false; pending: PendingCall[] };
+// `other`: a `user` row whose text links the path but that someone other than the person wrote (UX wave U6e, Decision
+// Log 8): a result form already resolved, which names the path for a read and admits no save.
+export type RowClaim = { names: true } | { names: false; pending: PendingCall[]; other?: true };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
+const OTHER: RowClaim = { names: false, pending: [], other: true };
+// UX wave U6e (Decision Log 8, amended by 22: the person's own text fails closed): a carrier of a person's message (a
+// `user` row, a queued prompt) holds the person's own text only when it is positively the person's: its origin is the
+// person's (`human`, what the engine writes on a typed prompt) and U3a's reader of arrivals reads no other arrival off
+// its marks. A row of any other origin (a plugin's, with `asUser` or without, a peer's, a notification's, every kind that
+// is no person) or of none is never the person's text, whatever the reader returns; nor is MAWS's answer or consent text
+// in a person's row. Such text is the class of a tool's result. The one test, both carriers'.
+const originKindOf = (row: unknown): unknown => {
+  const fields = record(row);
+  return record(fields.type === 'attachment' ? record(fields.attachment).origin : fields.origin).kind;
+};
+const personsOwn = (row: unknown): boolean => originKindOf(row) === 'human' && readArrivals(row).every((arrival) => arrival.class === 'own');
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
@@ -1117,7 +1132,9 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      if (yield* personNames(content, path)) return NAMES;
+      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8): the person's
+      // own text names the path; someone else's names it for a read only (`personsOwn`)
+      if (yield* personNames(content, path)) return personsOwn(row) ? NAMES : OTHER;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const value of listOf(content)) {
@@ -1134,7 +1151,8 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
       const attachment = record(fields.attachment);
       const human = attachment.type === 'queued_command' && record(attachment.origin).kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
       if (!human || typeof attachment.source_uuid !== 'string' || attachment.source_uuid === '') return NOTHING;
-      return (yield* personNames(attachment.prompt, path)) ? NAMES : NOTHING;
+      // U6e (the panel's finding 2): as the `user` row's text, a queued answer or consent text of MAWS's names it for a read only
+      return (yield* personNames(attachment.prompt, path)) ? (personsOwn(row) ? NAMES : OTHER) : NOTHING;
     }
     default:
       return NOTHING;

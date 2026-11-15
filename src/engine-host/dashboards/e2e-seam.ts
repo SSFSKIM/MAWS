@@ -41,7 +41,8 @@ import { mawsTools } from '../tool-server/tools';
 
 /** The tools the seam serves: the agent's dashboard path, nothing that shows a pane, asks or captures. */
 // E-acc: publish uses the same fixture session authority as read, for the design's stale-publication acceptance.
-export const DASHBOARD_SEAM_TOOLS = ['artifact_create', 'artifact_read', 'artifact_publish', 'artifact_edit', 'artifact_dataset', 'artifact_list_assets', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
+// UX wave U10b (fix wave 3): `artifact_delete` too, the agent's delete of its own draft (e2e/cross-build.spec.ts).
+export const DASHBOARD_SEAM_TOOLS = ['artifact_create', 'artifact_read', 'artifact_publish', 'artifact_edit', 'artifact_dataset', 'artifact_list_assets', 'artifact_comments', 'artifact_reply', 'artifact_resolve', 'artifact_delete'] as const;
 export type DashboardSeamTool = (typeof DASHBOARD_SEAM_TOOLS)[number];
 
 export type DashboardSeamCommand =

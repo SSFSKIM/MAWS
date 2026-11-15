@@ -257,3 +257,19 @@ describe('a session tab of another machine by its link’s phase', () => {
     act(() => useSessions.setState({ records: new Map() }));
   });
 });
+
+// UX wave U6e (decision 11; Decision Log 14 (b)): a main file tab has the file's full path as its tooltip; its accessible
+// name stays its title; any other tab's tooltip is its name.
+describe('a file tab’s tooltip (U6e)', () => {
+  it('is the full path, the name staying the base name', () => {
+    const file: TabRef = { id: tabId({ kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE }), kind: 'file', path: '/elsewhere/notes/plans/todo.txt', line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false };
+    render(<Tab tab={file} pane={0} domId="t-file" active stop onKeyDown={() => {}} />);
+    const element = document.getElementById('t-file')!;
+    expect(element.getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(element.getAttribute('aria-label')).toBe('todo.txt');
+    cleanup();
+    render(<Tab tab={sessionTab(A)} pane={0} domId="t-session" active stop onKeyDown={() => {}} />);
+    const session = document.getElementById('t-session')!;
+    expect(session.getAttribute('title')).toBe(session.getAttribute('aria-label'));
+  });
+});

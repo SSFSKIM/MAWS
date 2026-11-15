@@ -147,9 +147,10 @@ export type Row = RowBase &
     // is in (a result that does not parse leaves the version null on an answered row)
     // P2-E1: `ownerAppSessionId`, from the result or the event, when the version is a side thread's ancestor's record's
     | {
-        kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update'; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
+        kind: 'artifact'; toolUseId: ToolUseId; action: 'create' | 'update' | 'delete' /* UX wave U10b */; artifactId: string; title: string | null; htmlPath: string; deliverableId: string | null; version: number | null; error: string | null; answered: boolean;
         neverAnswered?: true /* E11: as the delivery row's */; ownerAppSessionId?: AppSessionId /* P2-E1 */;
         revision?: number /* P3-L (M6b fix wave 2): the revision the call wrote, when its answer or event named it */;
+        why?: string /* UX wave U10b (M5, §C.4): a refused delete's reason key, read from the refusal's JSON */;
       }
     // E2 end
     // E4c start: a browser tool call's row (E4c execution document, Design §10): from the call (`action`, `tabId`,

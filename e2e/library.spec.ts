@@ -9,6 +9,8 @@
 // tool, its versions, P2's comment card and its Side thread, Move to tab and Export to PDF; a PDF, a video and an audio
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
+// UX wave U10b (M5, A4): an agent deletes its own draft while a tab shows it: the transcript's row, the Library without it,
+// the tab's notice over an editor that takes no keystroke, and the row's Undo bringing it back.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
 import { activeMainTab, backToTabs, mainTab, openAppDestination, openArtifactInPanel, pageRegion } from './support/shell';
 import { randomUUID } from 'node:crypto';
@@ -21,7 +23,8 @@ import { artifactUrl } from '../src/shared/artifacts/scheme';
 import { ADDED_COLUMNS, ADDED_TABLES, MIGRATIONS } from '../src/services/index/migrations';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { ownTitles } from './support/library';
-import { FIRST_REPLY, invoke, PARENT, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b
+import { DRAFTER, FIRST_REPLY, invoke, openDraftCase, PARENT, pageParentJournal, sideThreadOf, startSessionCase, threadJournal, value } from './support/library-session'; // M5b; UX wave U10b: DRAFTER, openDraftCase
+import { AgentSeam } from './support/dashboards'; // UX wave U10b: the agent's draft, made by its session's own tools
 import { SideJournal } from './support/side-replay'; // UX wave U7b
 import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // M5b
 import { closeScene, launchScene, scratchProject, seedArtifact, seedRecord, show, viewerOf, type Scratch } from './support/maws-tools'; // M6b
@@ -192,7 +195,8 @@ test('the library lists, finds, pins, files into a Space, renames and deletes, a
   await page.getByRole('menuitem', { name: 'Delete…' }).click();
   await page.getByRole('dialog', { name: 'Delete “budget.csv”?' }).getByRole('button', { name: 'Delete' }).click();
   await expect(row('budget.csv')).toHaveCount(0);
-  expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null });
+  // UX wave U10b (§C.5): a deleted artifact's answer says so, `undoable` only for an agent's delete (a person's here)
+  expect(await ok(page, 'artifacts.get', { artifactId: budget.id })).toEqual({ artifact: null, deleted: { title: 'budget.csv', kind: 'file', undoable: false } });
   await expect.poll(titles).toEqual(['Launch plan', 'Pricing, 2027']);
 
   // a write main misses: its library holds change-driven refreshes (the seam), the stand-in writes, and the change event
@@ -820,7 +824,9 @@ test('“Make something new”: four cards and More in one row that wraps in a n
   expect(made!.designSystemId, 'bound to the chosen system').toBe(classroom.id);
   await expect(pageRegion(page), 'Blank left the page for the artifact’s tab').toHaveCount(0);
   await expect(page.locator(`[data-region="main"] [data-artifact-tab="${made!.id}"]`)).toBeVisible({ timeout: 15_000 });
-  await expect(page.locator('[data-region="main"]').getByText('Design: Classroom', { exact: true }).first(), 'the document’s breadcrumb names its system').toBeVisible({ timeout: 15_000 });
+  // the breadcrumb is one element whose segments are text between its separators, so it is read whole, not by a segment's exact text
+  const crumb = page.locator('[data-region="main"] [data-header-breadcrumb]').filter({ hasText: 'Design: Classroom' }).first();
+  await expect(crumb, 'the document’s breadcrumb names its system').toBeVisible({ timeout: 15_000 });
 
   // the same for a deck, whose Theme panel names it
   library = await libraryPage(page);
@@ -902,4 +908,98 @@ test('a Space’s instructions: written in its sheet, marked on its heading line
   await ok(page, 'spaces.setInstructions', { spaceId: space.id, text: 'Keep each answer under a page.' });
   await expect(shown, 'set again: the mark is back').toBeVisible();
   expect(launch.consoleErrors()).toEqual([]);
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4, §C.4, §C.5): the session's own tools
+// make its draft (the host's agent seam, as the session), a main tab shows it, and the session's turn deletes it
+// (`artifact_delete`, served by the host's real tool server; the journal answers the engine's side as the host does).
+// An edit is typed while the window's document port holds its outgoing frames (the e2e window's hold,
+// src/renderer/src/artifacts/held-frames.ts), so the host has not seen it when the agent deletes the draft; released, the
+// fence refuses it. The transcript's row reads "Deleted Draft plan" with Undo; the Library no longer lists the draft; the
+// tab keeps the editor's text under the notice that the last edit is not saved, read-only, and a keystroke changes
+// nothing. The row's Undo brings the draft back: the row reads "Restored Draft plan" with Open, the Library lists it,
+// the notice goes, the edit typed before the notice is the store's, and the editor takes edits again.
+test('an agent deletes its own draft while a tab shows it: the row reads Deleted with Undo, the Library leaves it out, the tab’s notice says an edit typed before it is not saved and holds an editor that takes no keystroke; Undo brings it back, Restored with Open, that edit saved, the editor writable again', async () => {
+  const PROMPT = 'Delete the draft plan you made.';
+  const REPLY = 'The draft plan is deleted.';
+  const drafted = await openDraftCase();
+  try {
+    const { page, parent, maws } = drafted;
+    const agent = new AgentSeam(join(maws.userData, 'dashboard-e2e'));
+    const draft = await agent.ok<{ artifactId: string; title: string }>(parent, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this first.' });
+    expect(draft.title).toBe('Draft plan');
+
+    // the draft in a main tab, from the Library
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    const library = page.locator('[data-library]');
+    await library.getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 15_000 });
+    const tab = page.locator(`[data-region="main"] [data-artifact-tab="${draft.artifactId}"]`);
+    const editor = tab.locator('.ProseMirror[data-editor="live"]');
+    await expect(editor).toContainText('An agent wrote this first.', { timeout: 20_000 });
+    await expect(editor).toHaveAttribute('contenteditable', 'true');
+
+    // an edit the host has not seen: typed while the window's document port holds what it sends
+    type Frames = { hold(): void; release(): void; held(): number };
+    const frames = (act: 'hold' | 'release' | 'held') => page.evaluate((name) => (window as unknown as { __maws_docFrames: Frames }).__maws_docFrames[name](), act);
+    await frames('hold');
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Typed before the notice.');
+    await expect.poll(() => frames('held'), { message: 'the edit’s frames are held' }).toBeGreaterThan(0);
+
+    // the session's turn: its delete, which the host's tool server runs against the store
+    const journal = new SideJournal(DRAFTER, drafted.repo.root);
+    const prompt = journal.prompt();
+    journal.mawsToolCall('artifact_delete', { artifact: draft.artifactId }, { status: 'deleted', artifactId: draft.artifactId, kind: 'document', title: 'Draft plan' }, { asked: false });
+    journal.reply(prompt, REPLY);
+    journal.completed(prompt);
+    await drafted.start(journal, PROMPT);
+    await expect.poll(async () => value(await invoke(page, 'artifacts.get', { artifactId: draft.artifactId })).deleted ?? null, { timeout: 30_000, message: 'the host deleted the draft, as an agent’s delete Undo can take back' }).toEqual({ title: 'Draft plan', kind: 'document', undoable: true });
+
+    // released: the fence refuses the edit; the tab: the editor's text under the notice, read-only; a keystroke changes nothing
+    await frames('release');
+    const notice = tab.locator('[data-artifact-deleted]');
+    await expect(notice).toContainText('An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.', { timeout: 20_000 });
+    await expect(editor).toContainText('Typed before the notice.');
+    await expect(editor).toContainText('An agent wrote this first.');
+    await expect(editor).toHaveAttribute('contenteditable', 'false', { timeout: 10_000 });
+    await editor.click();
+    await page.keyboard.type('Ignored. ');
+    await expect(editor).not.toContainText('Ignored.');
+    await expect(notice.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled();
+
+    // the Library leaves it out
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    await expect(library.getByRole('article', { name: 'Draft plan', exact: true })).toHaveCount(0, { timeout: 15_000 });
+
+    // the session's row: Deleted with Undo; Undo brings the draft back
+    await (await sidebarRow(page, { appSessionId: parent })).click();
+    const main = page.locator('[data-region="main"]');
+    await expect(main.getByText(REPLY)).toBeVisible({ timeout: 20_000 });
+    const row = main.locator(`section.transcript-artifact[data-artifact="${draft.artifactId}"]`);
+    await expect(row.locator('[data-artifact-heading]')).toHaveText('Deleted Draft plan');
+    const undo = row.getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo).toBeEnabled({ timeout: 15_000 }); // once the library has answered
+    await undo.click();
+    await expect(row.locator('[data-artifact-heading]')).toHaveText('Restored Draft plan', { timeout: 20_000 });
+    await expect(row.getByRole('button', { name: 'Open', exact: true })).toBeVisible();
+    await expect(row.locator('[data-artifact-line]')).toHaveCount(0);
+    expect(value(await invoke(page, 'artifacts.get', { artifactId: draft.artifactId })).artifact?.title).toBe('Draft plan');
+
+    // the Library lists it again; the tab's editor is writable, and what is typed there is the store's
+    await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
+    await library.getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 15_000 });
+    await expect(tab.locator('[data-artifact-deleted]')).toHaveCount(0, { timeout: 20_000 });
+    await expect(editor).toHaveAttribute('contenteditable', 'true', { timeout: 20_000 });
+    await expect(editor).toContainText('An agent wrote this first.');
+    const read = async () => JSON.stringify(await agent.ok(parent, 'artifact_read', { artifact: draft.artifactId }));
+    await expect.poll(read, { timeout: 20_000, message: 'the edit typed before the notice is the store’s once restored' }).toContain('Typed before the notice.');
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' The person kept it.');
+    await expect.poll(read, { timeout: 20_000, message: 'the edit made after the restore is the store’s' }).toContain('The person kept it.');
+    expect(maws.consoleErrors()).toEqual([]);
+  } finally {
+    await drafted.cleanup();
+  }
 });

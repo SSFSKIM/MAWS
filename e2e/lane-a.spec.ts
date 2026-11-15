@@ -5,6 +5,9 @@
 // gaps greyed with their reasons; no bridge as before; the reply streaming, then its row; a pane opened mid-reply, and
 // that turn aborted with no `step end`, its text kept settled. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
+// UX wave U8d (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, acceptance 2, 3, 4 and 8): the
+// session's subagents with the statuses main derives from its transcript, its sidecars and the bridge's agents, on the
+// Subagents card and in the panel, the rows the engine writes at an agent's end as probes P1 and P2 recorded them.
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -14,7 +17,7 @@ import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOpt
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
+import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
 import { sidebarOf, sidebarRow } from './support/sidebar';
@@ -408,9 +411,12 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   test('each control reaches the bridge with its body: the model chip, a slash command, interrupt, compact with instructions, MCP reconnect and enable, a side question answered from its op’s end, and the agent and shell stops', async () => {
     test.setTimeout(150_000);
     const agent = { agentId: 'a1e2e000000000001', description: 'Count the words', prompt: 'Count the words in notes.md.', at: '2026-10-28T10:00:03.000Z' };
+    let last = '';
     const c = await begin((sid, cwd, after) => {
       const ask = randomUUID();
-      return [userRecord(sid, cwd, ask, after, 'Count the words in the background.', '2026-10-28T10:00:03.000Z'), ...backgroundAgentRecords(sid, cwd, ask, agent)];
+      const turn = backgroundAgentRecords(sid, cwd, ask, agent);
+      last = turn.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Count the words in the background.', '2026-10-28T10:00:03.000Z'), ...turn];
     });
     await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
     const { page } = c;
@@ -492,14 +498,15 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(page.getByText('Because you asked for a short one.')).toBeVisible({ timeout: 10_000 });
 
     // the agents tool: the subagent the transcript started (its sidecars on disk), told through the drill-in's box, then
-    // stopped through its Stop (the jobs list's stop has its own scene). UX wave U8b (M5 decision 5): nothing tells this
-    // Mac's graph which of a terminal session's agents run, so the panel lists it under On disk, folded at first.
+    // stopped through its Stop (the jobs list's stop has its own scene). UX wave U8d (M4 decision 1): main derives its
+    // status from the transcript's launch, so the panel lists it under Running, its status known.
     await openSurface(page, 'Subagents');
     const agents = surface(page, 'subagents');
-    const onDisk = agents.locator('section[data-section="disk"]');
-    const unfold = onDisk.getByRole('heading').getByRole('button');
-    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click();
-    await agents.locator(`[data-agent-row="${agent.agentId}"]`).click();
+    const running = agents.locator('section[data-section="running"]');
+    await expect(running, 'the agent the transcript launched runs').toHaveAttribute('aria-label', 'Running 1', { timeout: 15_000 });
+    await expect(agents.locator('section[data-section="disk"]'), 'nothing is left On disk').toHaveCount(0);
+    await expect(agents.getByText('Status is known only while the session runs here'), 'its status is reported: the sentence is not drawn').toHaveCount(0);
+    await running.locator(`[data-agent-row="${agent.agentId}"]`).click();
     const relay = page.locator('[data-region="panel"] [data-key-sink="composer"]'); // the drill-in's box, not the pane's composer
     await relay.getByRole('textbox', { name: /^Message / }).fill('wrap up');
     await relay.getByRole('button', { name: 'Send', exact: true }).click();
@@ -507,6 +514,22 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await page.getByRole('button', { name: 'Stop agent' }).click();
     await page.getByRole('button', { name: 'Stop', exact: true }).last().click(); // the confirm
     await expect.poll(() => bodies(bridge, 'stop-agent')).toEqual([{ op: 'stop-agent', agentId: agent.agentId }]);
+    // what the stop writes (P2, u8d-p2-bg-r1): the bridge's stop event, the plugin's note, then the engine's `killed`
+    // notification; the row's last word is "stopped", whichever of the bridge's event and the row is read first (N9)
+    bridge.agentStopped(agent.agentId, { status: 'killed' });
+    const note = pluginStopNoteRecord(c.sid, c.repo.root, last, { agentId: agent.agentId, at: '2026-10-28T10:02:00.000Z' });
+    const killed = queuedNotificationRecords(c.sid, c.repo.root, note.uuid as string, {
+      taskIds: [agent.agentId], toolUseId: `toolu_${agent.agentId}`, outputFile: `/tmp/claude/tasks/${agent.agentId}.output`, status: 'killed', summary: `Agent "${agent.description}" was stopped by Claude`, at: '2026-10-28T10:02:00.200Z',
+    });
+    await c.store.appendLines(c.transcript, [note, ...killed].map((row) => JSON.stringify(row)));
+    await expect(agents.getByRole('button', { name: /^(Stop agent|stopping…)$/ }), 'the agent ended: no stop is offered').toHaveCount(0, { timeout: 15_000 });
+    await agents.getByRole('button', { name: '‹ Subagents', exact: true }).click();
+    const done = agents.locator('section[data-section="done"]');
+    await expect(done, 'the rows say how it ended').toHaveAttribute('aria-label', 'Done 1 · 1 stopped', { timeout: 15_000 });
+    await expect(running, 'nothing runs').toHaveCount(0);
+    const unfold = done.getByRole('heading').getByRole('button');
+    if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click(); // Done is folded at first
+    await expect(done.locator(`[data-agent-row="${agent.agentId}"]`)).toContainText('stopped');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
@@ -577,32 +600,41 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  // UX wave U8b (A2; M5 decision 5, M8): the card column of a terminal session this Mac drives. Its shells are known from
-  // its transcript (main derives its jobs, its watch carries them), so a running one gives the Background tasks card; its
-  // agents' states have no source here yet, so there is no Subagents card while the transcript's own row says one works.
-  // The card for running work is the column's last, so its going moves no card above it.
-  test('the card column of a terminal session this Mac drives: the Background tasks card while its shell runs and no Subagents card while its transcript says an agent works; the shell ending takes the card away and moves no card above it', async () => {
+  // UX wave U8b (A2; M5 decision 5, M8) and U8d (M4 decision 1; acceptance 2, 3 and 4): the card column of a terminal
+  // session this Mac drives. Main derives its shells and its agents from its transcript, its sidecars and its bridge, and
+  // its watch carries them, so a running shell gives the Background tasks card and a running agent the Subagents card,
+  // with the nested agent under its parent's "(+1)". The cards for running work are the column's last, so their going
+  // moves no card above them.
+  test('the card column of a terminal session this Mac drives: the Subagents and Background tasks cards while its agent and its shell run, a nested agent under its parent’s (+1); each card leaves with the last of its kind and moves no card above it', async () => {
+    test.setTimeout(120_000);
     const agent = { agentId: 'a1e2e000000000003', description: 'Index the notes', prompt: 'Index notes.md.', at: '2026-10-28T10:00:04.000Z' };
+    const nested = { agentId: 'a1e2e000000000006', description: 'Index the headings', prompt: 'Index the headings of notes.md.', at: '2026-10-28T10:00:06.000Z' };
     const job = { taskId: 'bwatch03', command: 'sleep 600', description: 'Watch the build', at: '2026-10-28T10:00:03.000Z' };
     let last = '';
     const c = await begin((sid, cwd, after) => {
       const ask = randomUUID();
       const shell = backgroundBashRecords(sid, cwd, ask, job);
       const turn = backgroundAgentRecords(sid, cwd, shell.at(-1)!.uuid as string, agent);
-      last = turn.at(-1)!.uuid as string;
-      return [userRecord(sid, cwd, ask, after, 'Watch the build and index the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...turnEndRecords(sid, cwd, last, '2026-10-28T10:00:05.000Z')];
+      const end = turnEndRecords(sid, cwd, turn.at(-1)!.uuid as string, '2026-10-28T10:00:05.000Z');
+      last = end.at(-1)!.uuid as string;
+      return [userRecord(sid, cwd, ask, after, 'Watch the build and index the notes.', '2026-10-28T10:00:03.000Z'), ...shell, ...turn, ...end];
     });
-    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
+    const parentFile = await backgroundAgentSidecars(c.store, c.sid, c.repo.root, agent);
     const { page } = c;
-    await drive(c);
+    const { bridge } = await drive(c);
     const row = main(page).locator('.transcript-subagent', { hasText: agent.description });
     await expect(row, 'the transcript: the agent works under the ended turn').toBeVisible({ timeout: 15_000 });
 
     await showSessionCards(page);
+    const subagents = sessionCard(page, 'Subagents');
     const background = sessionCard(page, 'Background tasks');
+    const parentRow = subagents.locator(`[data-agent-row="${agent.agentId}"]`);
+    await expect(parentRow, 'the agent, as the session’s watch carries its status').toContainText(agent.description, { timeout: 15_000 });
+    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
     await expect(background.locator(`[data-task-id="${job.taskId}"]`), 'the shell, as the session’s watch carries it').toContainText(job.description, { timeout: 15_000 });
     await expect(background.getByRole('button', { name: 'Background tasks 1 running', exact: true })).toBeVisible();
-    await expect(sessionCard(page, 'Subagents'), 'no Subagents card on this route').toHaveCount(0);
+    const [agentsBox, tasksBox] = [await subagents.boundingBox(), await background.boundingBox()];
+    expect(agentsBox !== null && tasksBox !== null && agentsBox.y < tasksBox.y, 'Subagents above Background tasks').toBe(true);
     const above = sessionCard(page, 'Connectors');
     // Read once the Environment card's own reads have answered, since each that lands grows it, which is no move the
     // card's leaving made: git's (its branch and push rows), then the pull request's, whose row is drawn only once
@@ -616,20 +648,48 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const before = await above.boundingBox();
     expect(before, 'the card above it is drawn').not.toBeNull();
 
-    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, last, { taskId: job.taskId, status: 'completed', summary: 'Background command "Watch the build" completed (exit code 0)', at: '2026-10-28T10:00:09.000Z' }))]);
+    // the agent dispatches its own in the background: its sidecars, its call in the agent's own file, the bridge's spawn
+    await backgroundAgentSidecars(c.store, c.sid, c.repo.root, nested, agent.agentId);
+    const nestedCall = nestedAgentRecords(c.sid, c.repo.root, agent.agentId, parentFile.last, nested);
+    await c.store.appendLines(parentFile.transcript, nestedCall.map((r) => JSON.stringify(r)));
+    bridge.agentSpawned({ agentId: nested.agentId, toolUseId: `toolu_${nested.agentId}`, parentAgentId: agent.agentId, description: nested.description });
+    await expect(subagents.getByRole('button', { name: 'Subagents 2 running', exact: true }), 'every running agent, the nested one too').toBeVisible({ timeout: 15_000 });
+    await expect(subagents.locator('[data-agent-row]'), 'first-level agents only').toHaveCount(1);
+    const under = parentRow.locator('[data-part="under"]');
+    await expect(under).toHaveText('(+1)');
+    await under.click();
+    await expect(subagents.locator(`[data-agent-row="${nested.agentId}"]`), 'the nested agent beneath its parent').toHaveAttribute('data-depth', '1');
+
+    // the nested agent ends (its notification in its parent's file), then the agent (in the main transcript). The bridge
+    // still holds the nested agent running, so only the parent's file, read by its follower, can end it here; the bridge's
+    // stop comes after (P2 recorded either order).
+    await c.store.appendLines(parentFile.transcript, [JSON.stringify(agentNotificationRecord(c.sid, c.repo.root, agent.agentId, nestedCall.at(-1)!.uuid as string, {
+      taskIds: [nested.agentId], toolUseId: `toolu_${nested.agentId}`, outputFile: `/tmp/claude/tasks/${nested.agentId}.output`, status: 'completed', summary: `Agent "${nested.description}" finished`, at: '2026-10-28T10:00:08.000Z',
+    }))]);
+    await expect(subagents.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the nested agent ended, from its parent’s file alone').toBeVisible({ timeout: 15_000 });
+    await expect(subagents.locator(`[data-agent-row="${nested.agentId}"]`)).toHaveCount(0);
+    await expect(under, 'no agent runs under it: neither count nor arrow').toHaveCount(0);
+    bridge.agentStopped(nested.agentId);
+    const agentEnd = taskNotificationRecord(c.sid, c.repo.root, last, { taskId: agent.agentId, toolUseId: `toolu_${agent.agentId}`, status: 'completed', summary: 'Indexed.', at: '2026-10-28T10:00:09.000Z' });
+    await c.store.appendLines(c.transcript, [JSON.stringify(agentEnd)]);
+    await expect(subagents, 'its last running agent ended: the card leaves').toHaveCount(0, { timeout: 15_000 });
+    expect(await above.boundingBox(), 'and the card above it has not moved').toEqual(before);
+    await expect(background, 'the shell still runs').toBeVisible();
+
+    await c.store.appendLines(c.transcript, [JSON.stringify(taskNotificationRecord(c.sid, c.repo.root, agentEnd.uuid as string, { taskId: job.taskId, status: 'completed', summary: 'Background command "Watch the build" completed (exit code 0)', at: '2026-10-28T10:00:10.000Z' }))]);
     await expect(background, 'its last running task ended: the card leaves').toHaveCount(0, { timeout: 10_000 });
     expect(await above.boundingBox(), 'and the card above it has not moved').toEqual(before);
-    await expect(sessionCard(page, 'Subagents')).toHaveCount(0);
-    await expect(row, 'the agent still works in the transcript').toBeVisible();
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
-  // UX wave U8b (A7, M6; X-168): a terminal session's engine runs an agent in the background, so its turn ends while the
-  // agent works, and the transcript never says the agent ended when the terminal closes. The terminal going (its registry
-  // record and its bridge gone) ends the agents it left running, so their row folds with the turn. A resume in a terminal
-  // (its registry record again: what tells this Mac a process holds the session; no bridge is needed for that) that
-  // starts another agent and then goes too ends that one as well.
-  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn; resumed in a terminal, the next agent’s row stays in view, then folds once that terminal goes too', async () => {
+  // UX wave U8b (A7, M6; X-168) and U8d (M4 decision 1; acceptance 8): a terminal session's engine runs an agent in the
+  // background, so its turn ends while the agent works, and the transcript never says the agent ended when the terminal
+  // closes (P3: nothing that names it reaches the main transcript). The terminal going (its registry record and its bridge
+  // gone) ends the agents it left running: their row folds with the turn, the Subagents card leaves, and the panel's Done
+  // reads "ended with the session". A resume in a terminal ends the orphan with the engine's `stopped` block before any
+  // prompt (P1, u8d-p1-one-r1), so the agent it then starts is alone on the card; that terminal going ends it as well.
+  test('X-168: an agent started in the background whose terminal goes: its row folds with the ended turn, the Subagents card leaves and Done reads ended with the session; resumed in a terminal, the orphan reads stopped and the next agent is alone on the card, then ends the same way once that terminal goes too', async () => {
+    test.setTimeout(120_000);
     const first: BackgroundAgent = { agentId: 'a1e2e000000000004', description: 'Sort the notes', prompt: 'Sort notes.md.', at: '2026-10-28T10:00:03.000Z' };
     const second: BackgroundAgent = { agentId: 'a1e2e000000000005', description: 'Tidy the notes', prompt: 'Tidy notes.md.', at: '2026-10-28T10:01:03.000Z' };
     let last = '';
@@ -644,27 +704,58 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { page } = c;
     const holder = async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind;
     const rowOf = (agent: BackgroundAgent) => main(page).locator('.transcript-subagent', { hasText: agent.description });
+    const card = sessionCard(page, 'Subagents');
+    const onCard = (agent: BackgroundAgent) => card.locator(`[data-agent-row="${agent.agentId}"]`);
+    // the panel's Done, unfolded, once its heading reads `heading`
+    const doneReads = async (heading: string): Promise<Locator> => {
+      await openSurface(page, 'Subagents');
+      const tool = surface(page, 'subagents');
+      const done = tool.locator('section[data-section="done"]');
+      await expect(done).toHaveAttribute('aria-label', heading, { timeout: 15_000 });
+      await expect(tool.locator('section[data-section="running"]'), 'nothing under Running').toHaveCount(0);
+      const unfold = done.getByRole('heading').getByRole('button');
+      if ((await unfold.getAttribute('aria-expanded')) !== 'true') await unfold.click(); // Done is folded at first
+      return done;
+    };
     const terminal = await drive(c);
     await expect(rowOf(first), 'the turn ended while its agent works: the call stays in view').toContainText(`${first.description} started working`, { timeout: 15_000 });
+    await showSessionCards(page);
+    await expect(onCard(first), 'the agent on the Subagents card').toContainText(first.description, { timeout: 15_000 });
+    await expect(card.getByRole('button', { name: 'Subagents 1 running', exact: true })).toBeVisible();
 
     await terminal.close();
     c.terminal = null;
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
     await expect(rowOf(first), 'its terminal went: the agent ended with it, and its row folds with the turn').toHaveCount(0, { timeout: 15_000 });
+    await expect(card, 'nothing of the session runs: the Subagents card leaves').toHaveCount(0, { timeout: 15_000 });
+    await expect((await doneReads('Done 1')).locator(`[data-agent-row="${first.agentId}"]`)).toContainText('ended with the session');
 
-    // resumed in a terminal, which starts another agent in the background and ends its turn
-    await drive(c, { bridged: false, open: false });
+    // resumed in a terminal: the engine ends the orphan first (one block, its output file, `stopped`: a queue record, a
+    // dequeue and a user row), then the session starts another agent in the background and ends its turn
+    await drive(c, { open: false });
+    const orphan = queuedNotificationRecords(c.sid, c.repo.root, last, {
+      taskIds: [first.agentId], outputFile: `/tmp/claude/tasks/${first.agentId}.output`, status: 'stopped', summary: `Background agent "${first.description}" didn't finish before the previous session ended`, at: '2026-10-28T10:01:01.000Z',
+    }, { resume: true });
+    await c.store.appendLines(c.transcript, orphan.map((r) => JSON.stringify(r)));
     const ask = randomUUID();
     const turn = backgroundAgentRecords(c.sid, c.repo.root, ask, second);
     await backgroundAgentSidecars(c.store, c.sid, c.repo.root, second);
-    await c.store.appendLines(c.transcript, [userRecord(c.sid, c.repo.root, ask, last, 'Now tidy them in the background.', '2026-10-28T10:01:03.000Z'), ...turn, ...turnEndRecords(c.sid, c.repo.root, turn.at(-1)!.uuid as string, '2026-10-28T10:01:04.000Z')].map((r) => JSON.stringify(r)));
+    await c.store.appendLines(c.transcript, [userRecord(c.sid, c.repo.root, ask, orphan.at(-1)!.uuid as string, 'Now tidy them in the background.', '2026-10-28T10:01:03.000Z'), ...turn, ...turnEndRecords(c.sid, c.repo.root, turn.at(-1)!.uuid as string, '2026-10-28T10:01:04.000Z')].map((r) => JSON.stringify(r)));
     await expect(rowOf(second), 'the resumed session’s agent works: its call stays in view').toContainText(`${second.description} started working`, { timeout: 15_000 });
     await expect(rowOf(first), 'the first stays ended').toHaveCount(0);
+    await showSessionCards(page);
+    await expect(onCard(second), 'the second agent on the card').toContainText(second.description, { timeout: 15_000 });
+    await expect(card.getByRole('button', { name: 'Subagents 1 running', exact: true }), 'the orphan ended at the resume: the second agent alone').toBeVisible();
+    await expect(onCard(first)).toHaveCount(0);
 
     await c.terminal!.close();
     c.terminal = null;
     await expect.poll(holder, { timeout: 10_000 }).toBe('none');
     await expect(rowOf(second), 'that terminal went too: the second agent ended with it').toHaveCount(0, { timeout: 15_000 });
+    await expect(card, 'the Subagents card leaves again').toHaveCount(0, { timeout: 15_000 });
+    const done = await doneReads('Done 2 · 1 stopped');
+    await expect(done.locator(`[data-agent-row="${second.agentId}"]`)).toContainText('ended with the session');
+    await expect(done.locator(`[data-agent-row="${first.agentId}"]`), 'the orphan keeps the word its resume gave it').toContainText('stopped');
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
