@@ -586,6 +586,10 @@ export function startSpine(deps: SpineDeps): SpineRoot {
     },
     hostStreaming: () => hosts.streaming('engine-host'),
     onHostStreaming: (listener) => hosts.onStreaming('engine-host', listener),
+    // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M2): what tells a press from a
+    // plugin's row that plugins moved between its checks (each session's plugin list comes with its status above)
+    onPluginsOperation: (listener) => hosts.onEvent('plugins.operation', (event) => listener(event)),
+    onPluginsChanged: (listener) => hosts.onEvent('plugins.changed', () => listener()),
     port: deps.clientPort,
     listen,
     relayed, // P5 O7 M5c
