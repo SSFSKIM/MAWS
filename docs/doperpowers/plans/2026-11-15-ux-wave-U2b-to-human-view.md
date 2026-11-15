@@ -24,7 +24,7 @@ How to see it working: the unit suites named in each milestone draw recorded ses
 
 - [x] (2026-11-15) This document written at master `3f2c4fca1`, reviewed adversarially, and revised at the rulings.
 - [x] (2026-11-15) The owner's look at the drawn example and the answers to the cards ("Questions for the owner", the answer column; the architect's rulings of 2026-11-15 in the Decision Log).
-- [ ] M1 — The mirror: the fold by stretch on every route MAWS draws.
+- [x] (2026-11-15T08:22Z) M1 — The mirror: the fold by stretch on every route MAWS draws. Commits `e970b7df8`..`24bb61b67`; reviewed at its frontier (three Important and two Minor findings fixed at `9ff483b8f`..`24bb61b67`, re-review clean).
 - [ ] M2 — What a message looks like, the switch above the composer, and what goes.
 - [ ] M3 — The first pull request's scenes, the record's first line, and its acceptance run.
 - [ ] Its proof an executor does not run ("Proof", the first list).
