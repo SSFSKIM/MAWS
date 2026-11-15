@@ -47,6 +47,11 @@
 // `ready` (or the link's `up`), the backoff, which stays armed while parked, `artifacts.resync` from the artifact's
 // machine and the `created` announcement. Neither a sync (a step 2 held from before the deletion included) nor a cached
 // row counts.
+// Fix wave 6 (the architect's ruling on the delta review): while parked, exactly one of a read in flight and the backoff's
+// timer holds. A trigger during that read (the poll, `created`, `ready` or the link's `up`, `artifacts.resync`, and every
+// change that supersedes the read: the host leaving, a first sync) marks it to ask again once. Settled, the read unparks
+// on a current live answer; else, marked, it asks once more at once, whatever it said (a gone answer may predate the
+// trigger); else it ends the replica on a current gone answer, or arms the capped backoff.
 // ./deleted-replicas.ts tells the notice whether a waiting replica holds such an edit.
 import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
@@ -172,6 +177,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private deletedByAgent = false; // UX wave U10b: an agent deleted the artifact; waits for its restore, read-only
     private standingUnknown = false; // fix wave 1: refused or deleted, and the host's word on why not read; read-only meanwhile
     private standingTicket = 0; // fix wave 1: the latest read of the standing, or the latest `created`; an older answer is stale
+    private reading = false; // fix wave 6: a parked replica's read of the standing is out
+    private askAgain = false; // fix wave 6: a trigger came while it was out: ask once more when it settles
     private synced = false; // UX wave U10b: the last state's sync, so a wait ends at a new sync and not at the one it began in
     private readonly listeners = new Set<(state: DocumentState) => void>();
     private settleFirst: { resolve: () => void; reject: (error: unknown) => void } | null = null;
@@ -224,8 +231,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     close(): void {
       if (this.closed) return;
       this.closed = true;
-      if (this.timer !== null) clearTimeout(this.timer);
-      this.timer = null;
+      this.stopTimer();
+      this.askAgain = false;
       this.stopFirstFrame();
       replicas.delete(this);
       noteDeletedReplica(this, this.artifactId, null); // UX wave U10b
@@ -300,7 +307,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // Fix wave 1: also each step of the backoff while that is unknown and its port stands.
     async deleted(): Promise<void> {
       if (this.closed || this.settleFirst !== null) return;
-      if (this.parked()) return this.recheck();
+      if (this.parked()) return this.ask();
       const { now, current } = await this.standing();
       if (!current || this.parked()) return;
       if (now === 'deletedByAgent') this.waitForRestore();
@@ -308,16 +315,37 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       // live again, or deleted for good: the port's own course decides
     }
 
-    // Fix wave 4: parked, the host is asked again; only a current read that answers live ends the wait. Deleted for good
-    // ends the replica as the person's delete does; no answer keeps it parked, the backoff armed.
-    private async recheck(): Promise<void> {
+    // Fix wave 6: a parked replica's trigger: the host is asked now, or once more when the read that is out settles.
+    private ask(): void {
       if (this.closed || !this.parked()) return;
+      if (this.reading) {
+        this.askAgain = true;
+        return;
+      }
+      this.stopTimer();
+      void this.recheck();
+    }
+
+    // Fix wave 4: parked, the host is asked again; only a current read that answers live ends the wait. Deleted for good
+    // ends the replica as the person's delete does; no answer keeps it parked, the backoff armed. Fix wave 6: a trigger
+    // that came meanwhile asks once more first, and a gone answer is not acted on then.
+    private async recheck(): Promise<void> {
+      this.reading = true;
+      this.askAgain = false;
       const { now, current } = await this.standing();
+      this.reading = false;
       if (this.closed || !this.parked()) return;
       if (current && now === 'live') return this.unpark();
+      if (this.askAgain) return this.ask();
       if (current && now === 'gone') return this.fail(new Error(`${this.artifactId} was deleted`));
       if (current && now === 'deletedByAgent' && !this.deletedByAgent) return this.waitForRestore();
       this.retry();
+    }
+
+    // Fix wave 6: a read of the standing out now decides nothing; a parked replica's asks once more when it settles.
+    private supersede(): void {
+      this.standingTicket += 1;
+      if (this.reading) this.askAgain = true;
     }
 
     private parked(): boolean {
@@ -330,6 +358,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.standingUnknown = false;
       noteDeletedReplica(this, this.artifactId, null);
       this.stopTimer();
+      this.askAgain = false;
       this.attempt = 0;
       this.waitingForHost = false;
       const full = this.state(); // writable again in the editor's eyes; the open below sends what was kept
@@ -339,7 +368,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
     /** Fix wave 4: its machine's artifacts feed opened again (`artifacts.resync`): a parked replica asks again. */
     resynced(): void {
-      if (this.parked()) void this.recheck();
+      this.ask();
     }
 
     private waitForRestore(): void {
@@ -348,7 +377,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.deletedByAgent = true;
       this.standingUnknown = false;
       this.stopTimer();
-      this.standingTicket += 1; // fix wave 4: a read issued before the deletion was observed decides nothing
+      this.supersede(); // fix wave 4: a read issued before the deletion was observed decides nothing
       this.changed(this.provider.state);
       this.retry(); // fix wave 4: armed while parked
     }
@@ -357,7 +386,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private awaitStanding(): void {
       if (!this.standingUnknown) {
         this.standingUnknown = true;
-        this.standingTicket += 1; // fix wave 4: as at the agent's delete
+        this.supersede(); // fix wave 4: as at the agent's delete
         this.changed(this.provider.state);
       }
       this.retry();
@@ -371,18 +400,16 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     // Its artifact was restored (`created`). Fix wave 1: a read in flight is stale. Fix wave 4: a parked replica asks the
     // host, and leaves only when that read answers live.
     restored(): void {
-      this.standingTicket += 1;
-      if (this.closed || !this.parked()) return;
-      void this.recheck();
+      this.supersede();
+      this.ask();
     }
 
     hostReady(): void {
       if (this.closed || this.connecting) return;
       if (this.parked()) {
-        this.stopTimer(); // fix wave 4: ask the host that is back, its backoff afresh; never open on local state
-        this.attempt = 0;
+        this.attempt = 0; // fix wave 4: ask the host that is back, its backoff afresh; never open on local state
         this.waitingForHost = false;
-        void this.recheck();
+        this.ask();
         return;
       }
       if (this.provider.state.phase !== 'off') return;
@@ -394,7 +421,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
 
     hostGone(): void {
       this.generation += 1;
-      this.standingTicket += 1; // fix wave 2: what the host that went said of the artifact decides nothing
+      this.supersede(); // fix wave 2: what the host that went said of the artifact decides nothing
       if (this.provider.state.phase !== 'off') this.provider.disconnect(); // the change listener schedules the reopen
     }
 
@@ -429,7 +456,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       noteDeletedReplica(this, this.artifactId, this.deletedByAgent || this.standingUnknown ? state.unsaved : null);
       if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {
-        if (!wasSynced) this.standingTicket += 1; // fix wave 2: a read asked before this sync is older than it
+        if (!wasSynced) this.supersede(); // fix wave 2: a read asked before this sync is older than it
         this.attempt = 0;
         this.settleFirst?.resolve();
         this.settleFirst = null;
@@ -444,6 +471,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       // the host's or the link's state (a read that cannot reach it answers unknown, and is asked again)
       const parked = this.parked();
       if (this.closed || this.timer !== null || (this.waitingForHost && !parked)) return;
+      if (parked && this.reading) return; // fix wave 6: the read that is out arms it, or asks again, when it settles
       // P5 O7 M5b: another machine's document waits for its link's `up` while the link is down, and while it isn't known
       // down keeps the backoff's last step (no host state will say when)
       const remote = this.machine() !== null;
@@ -460,7 +488,8 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       this.timer = setTimeout(() => {
         this.timer = null;
         // fix wave 4: a parked replica asks the host again (a read, never an open on local state); else the port reopens
-        void (this.parked() ? this.recheck() : this.connect());
+        if (this.parked()) this.ask();
+        else void this.connect();
       }, wait);
     }
 
