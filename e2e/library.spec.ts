@@ -10,7 +10,7 @@
 // file played from the library. M6b: a profile with X12 records and an index at version 9 upgrades into the library.
 // P3-H (P3 Decision Log 92): a row menu's Export on its first opening.
 // `pnpm e2e:library` silences node:sqlite's ExperimentalWarning (the upgrade case opens the index file).
-import { activeMainTab, backToTabs, mainTab, openAppDestination, openArtifactInPanel } from './support/shell';
+import { activeMainTab, backToTabs, mainTab, openAppDestination, openArtifactInPanel, pageRegion } from './support/shell';
 import { randomUUID } from 'node:crypto';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -665,4 +665,203 @@ test('a replayed session’s transcript keeps its scroll offset across a page an
   await expect(scroller).toBeVisible();
   expect(await scroller.evaluate((el) => el.scrollTop), 'the transcript kept its scroll offset').toBe(offset);
   expect(c.maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// ---- UX wave U10b-4: "Make something new" and a Space's instructions ----------------------------------------------------
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M8, M9 and M11; A7 and A8, §D.2, §E.2,
+// §E.3, L5, H25). A7: the four cards and More in one row, none narrower than 200 px, wrapping in a narrow window with no
+// description cut; Blank at least 24 px tall; More's menu under it and Design system's two entries on the menu's left;
+// a system chosen in the heading; Blank makes the artifact bound to that system and opens it, which names it (a
+// document's breadcrumb, a deck's Theme panel); a card leaves the page for a new chat whose box holds the opening words.
+// A8: a Space's instructions written from its menu's sheet, the mark on its heading line, a card started from the Space
+// whose draft holds the instructions as one chip by its name, and the mark following `spaces.changed` from a write the
+// window did not make. Both run against the live engine host on the seeded design systems; no engine runs (a new chat
+// is unstarted until its first send).
+
+const MAKE_KINDS = ['Document', 'Presentation', 'Dashboard', 'Design'];
+const makeSection = (library: Locator) => library.locator('section[aria-labelledby="library-make"]');
+const composerBox = (page: Page) => page.locator('[data-region="main"] [data-composer] [contenteditable="true"]');
+
+async function libraryPage(page: Page): Promise<Locator> {
+  await openAppDestination(page, 'Artifacts');
+  const library = page.locator('[data-library]');
+  await expect(makeSection(library)).toBeVisible({ timeout: 15_000 });
+  return library;
+}
+
+// The heading's design-system choice set to `name` (the choice lives as long as the page is open, so each visit sets it)
+async function chooseSystem(page: Page, library: Locator, name: string): Promise<void> {
+  const choice = makeSection(library).getByRole('button', { name: /^Design system: / });
+  await expect(choice, 'the choice is read: the design systems and the defaults answered').toBeEnabled({ timeout: 15_000 });
+  await choice.click();
+  await page.getByRole('menuitemradio', { name, exact: true }).click();
+  await expect(choice).toHaveAccessibleName(`Design system: ${name}`);
+}
+
+// The page narrowed to the Space `name` (the view outlives the page, so a page opened again may already be)
+async function narrowTo(page: Page, library: Locator, name: string): Promise<void> {
+  const allSpaces = page.getByRole('button', { name: 'All Spaces' });
+  if ((await allSpaces.count()) > 0 && (await library.getByRole('heading', { level: 2, name, exact: true }).count()) > 0) return;
+  await library.getByRole('radio', { name: 'By Space' }).click();
+  await library.getByRole('heading', { name }).getByRole('button').first().click();
+  await expect(allSpaces).toBeVisible();
+}
+
+const boxOf = async (locator: Locator) => {
+  const box = await locator.boundingBox();
+  if (box === null) throw new Error('not laid out');
+  return box;
+};
+
+test('“Make something new”: four cards and More in one row that wraps in a narrow window; a chosen design system binds what Blank makes, which opens naming it; a card leaves the page for a chat holding the opening words', async () => {
+  test.setTimeout(180_000);
+  launch = await launchMaws();
+  const { app, page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+  const systems = async () => (await ok<{ artifacts: { id: string; title: string }[] }>(page, 'artifacts.list', { filter: { kind: 'design_system' } })).artifacts;
+  await expect.poll(async () => (await systems()).map((s) => s.title).sort(), { timeout: 15_000, message: 'the built-in systems are seeded' }).toEqual(['Classroom', 'MAWS', 'Official']);
+  const classroom = (await systems()).find((s) => s.title === 'Classroom')!;
+
+  // the row: four cards, each a button with Blank beside it (never inside it), More its last cell
+  let library = await libraryPage(page);
+  let make = makeSection(library);
+  const cards = make.locator('[data-make-kind]');
+  await expect(cards).toHaveCount(4);
+  expect(await cards.evaluateAll((groups) => groups.map((g) => g.getAttribute('aria-label')))).toEqual(MAKE_KINDS);
+  for (const kind of MAKE_KINDS) {
+    const card = make.getByRole('group', { name: kind, exact: true });
+    await expect(card.getByRole('button', { name: kind, exact: true })).toBeEnabled();
+    expect(await card.getByRole('button', { name: kind, exact: true }).locator('button').count(), `${kind}: no button inside the card's button`).toBe(0);
+  }
+  const blank = make.getByRole('button', { name: 'Blank document', exact: true });
+  expect((await boxOf(blank)).height, 'Blank is at least 24 px tall').toBeGreaterThanOrEqual(24);
+  const more = make.getByRole('button', { name: 'More', exact: true });
+  const rowAt = async () => {
+    const boxes = await Promise.all((await cards.all()).map(boxOf));
+    return { boxes, tops: [...new Set(boxes.map((b) => Math.round(b.y)))], more: await boxOf(more) };
+  };
+  const wide = await rowAt();
+  expect(wide.tops, 'at 1440 px the four cards share one line').toHaveLength(1);
+  for (const box of wide.boxes) expect(box.width, 'no card narrower than 200 px').toBeGreaterThanOrEqual(199.5);
+  expect(wide.more.x, 'More is the row’s last cell').toBeGreaterThanOrEqual(Math.max(...wide.boxes.map((b) => b.x + b.width)));
+
+  // More: under it, aligned to its right edge; Design system's entries open as a submenu on the menu's left
+  await more.click();
+  const menu = page.getByRole('menu').first();
+  await expect(menu.getByRole('menuitem')).toHaveText(['Design system', 'HTML page', 'Add a file…']);
+  const menuBox = await boxOf(menu);
+  expect(Math.abs(menuBox.x + menuBox.width - (wide.more.x + wide.more.width)), 'the menu is aligned to More’s right edge').toBeLessThanOrEqual(2);
+  expect(menuBox.y, 'the menu opens under More').toBeGreaterThanOrEqual(wide.more.y + wide.more.height);
+  await menu.getByRole('menuitem', { name: 'Design system', exact: true }).hover();
+  const submenu = page.getByRole('menu').filter({ has: page.getByRole('menuitem', { name: 'Ask Claude', exact: true }) });
+  await expect(submenu.getByRole('menuitem')).toHaveText(['Ask Claude', 'Blank']);
+  expect((await boxOf(submenu)).x + (await boxOf(submenu)).width, 'the submenu opens on the menu’s left').toBeLessThanOrEqual(menuBox.x + 1);
+  await expect(async () => {
+    await page.keyboard.press('Escape');
+    await expect(page.getByRole('menu')).toHaveCount(0, { timeout: 1_000 });
+  }, 'the menus close').toPass({ timeout: 10_000 });
+
+  // a narrow window: the row wraps to a second line, no card under 200 px and no description cut
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(800, 900));
+  await expect.poll(async () => (await rowAt()).tops.length, { message: 'the cards wrap to a second line' }).toBeGreaterThan(1);
+  for (const box of (await rowAt()).boxes) expect(box.width, 'no card narrower than 200 px when wrapped').toBeGreaterThanOrEqual(199.5);
+  const cut = await cards.evaluateAll((groups) =>
+    groups.filter((g) => Array.from(g.querySelectorAll('button span')).some((span) => span.scrollWidth > span.clientWidth + 1 || span.scrollHeight > span.clientHeight + 1)).map((g) => g.getAttribute('aria-label')),
+  );
+  expect(cut, 'no card’s name or description is cut').toEqual([]);
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1440, 900));
+
+  // a system chosen; Blank makes a document bound to it and opens it, whose breadcrumb names it
+  await chooseSystem(page, library, 'Classroom');
+  await make.getByRole('button', { name: 'Blank document', exact: true }).click();
+  let made: { id: string; designSystemId?: string | null } | undefined;
+  await expect
+    .poll(async () => (made = (await ok<{ artifacts: { id: string; title: string; kind: string; designSystemId?: string | null }[] }>(page, 'artifacts.list', { filter: { kind: 'document' } })).artifacts.find((a) => a.title === 'Untitled document')), { message: 'Blank made the document' })
+    .toBeDefined();
+  expect(made!.designSystemId, 'bound to the chosen system').toBe(classroom.id);
+  await expect(pageRegion(page), 'Blank left the page for the artifact’s tab').toHaveCount(0);
+  await expect(page.locator(`[data-region="main"] [data-artifact-tab="${made!.id}"]`)).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('[data-region="main"]').getByText('Design: Classroom', { exact: true }).first(), 'the document’s breadcrumb names its system').toBeVisible({ timeout: 15_000 });
+
+  // the same for a deck, whose Theme panel names it
+  library = await libraryPage(page);
+  make = makeSection(library);
+  await expect(make.getByRole('button', { name: /^Design system: / }), 'the choice is gone with the page that held it').toHaveAccessibleName('Design system: MAWS · default');
+  await chooseSystem(page, library, 'Classroom');
+  await make.getByRole('button', { name: 'Blank presentation', exact: true }).click();
+  let deck: { id: string; designSystemId?: string | null } | undefined;
+  await expect
+    .poll(async () => (deck = (await ok<{ artifacts: { id: string; title: string; designSystemId?: string | null }[] }>(page, 'artifacts.list', { filter: { kind: 'presentation' } })).artifacts.find((a) => a.title === 'Untitled presentation')), { message: 'Blank made the deck' })
+    .toBeDefined();
+  expect(deck!.designSystemId).toBe(classroom.id);
+  const deckTab = page.locator(`[data-region="main"] [data-artifact-tab="${deck!.id}"]`);
+  await expect(deckTab.locator('[data-deck-editor]')).toBeVisible({ timeout: 15_000 });
+  const toolbar = page.locator('[data-region="main"] .deck-toolbar [data-editor-toolbar]');
+  await toolbar.getByRole('button', { name: 'Deck actions', exact: true }).click();
+  await page.getByRole('menuitemcheckbox', { name: 'Theme', exact: true }).click();
+  await expect(deckTab.locator(`[data-deck-rail="theme"] [data-system="${classroom.id}"]`), 'the deck’s Theme panel names its system').toHaveAttribute('aria-checked', 'true');
+
+  // a card: the page left for a new chat whose box holds the opening words, the chosen system named
+  library = await libraryPage(page);
+  make = makeSection(library);
+  await chooseSystem(page, library, 'Classroom');
+  await make.getByRole('group', { name: 'Document', exact: true }).getByRole('button', { name: 'Document', exact: true }).click();
+  await expect(pageRegion(page), 'the card left the page').toHaveCount(0);
+  await expect(composerBox(page), 'the new chat’s box holds the opening words').toHaveText('Make a document, in the design system “Classroom”:', { timeout: 15_000, useInnerText: true });
+  expect(launch.consoleErrors()).toEqual([]);
+});
+
+test('a Space’s instructions: written in its sheet, marked on its heading line, carried by a card’s chat as one chip by its name in the draft, and the mark follows spaces.changed', async () => {
+  test.setTimeout(150_000);
+  launch = await launchMaws();
+  const { page } = launch;
+  await expect.poll(async () => (await hostState(page)).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  const SPACE = 'Field notes';
+  const TEXT = 'Write for ninth graders in plain English.\nName each source by its title.';
+  const CHIP = `Instructions for “${SPACE}”`;
+  const { space } = await ok<{ space: { id: string } }>(page, 'spaces.create', { name: SPACE });
+
+  // the Space shown alone; its menu's Instructions…, directly after Rename…, opens the sheet
+  const library = await libraryPage(page);
+  await narrowTo(page, library, SPACE);
+  const mark = library.getByRole('button', { name: 'Instructions', exact: true });
+  await expect(mark, 'no mark before there are instructions').toHaveCount(0);
+  await library.getByRole('button', { name: `Actions for the Space ${SPACE}`, exact: true }).first().click();
+  const items = await page.getByRole('menu').getByRole('menuitem').allTextContents();
+  expect(items.indexOf('Instructions…'), 'Instructions… stands directly after Rename…').toBe(items.indexOf('Rename…') + 1);
+  await page.getByRole('menuitem', { name: 'Instructions…', exact: true }).click();
+  const sheet = page.getByRole('dialog', { name: CHIP });
+  await expect(sheet.getByText('Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.')).toBeVisible();
+  const field = sheet.getByRole('textbox', { name: CHIP });
+  const save = sheet.getByRole('button', { name: 'Save', exact: true });
+  await expect(save, 'nothing to save yet').toBeDisabled();
+  await field.fill(TEXT);
+  await save.click();
+  await expect(sheet).toBeHidden();
+  await expect(mark, 'the mark on the Space’s heading line').toBeVisible();
+  expect((await boxOf(mark)).height, 'the mark is at least 24 px tall').toBeGreaterThanOrEqual(24);
+  expect((await ok<{ instructions: { spaceId: string; text: string }[] }>(page, 'spaces.instructions', {})).instructions.map((i) => [i.spaceId, i.text])).toEqual([[space.id, TEXT]]);
+
+  // a card from the Space: the chat's box holds the opening words and one chip by its name, kept in its draft
+  await makeSection(library).getByRole('group', { name: 'Document', exact: true }).getByRole('button', { name: 'Document', exact: true }).click();
+  await expect(pageRegion(page), 'the card left the page').toHaveCount(0);
+  await expect(composerBox(page)).toContainText(`Make a document in the Space “${SPACE}”:`, { timeout: 15_000 });
+  const chip = composerBox(page).locator('[data-pasted="text"]');
+  await expect(chip).toHaveCount(1);
+  await expect(chip).toHaveText(`${CHIP} +3 lines`, { useInnerText: true }); // the section's line, then the two lines
+  await expect
+    .poll(async () => (await ok<{ intents: { draft: unknown }[] }>(page, 'session.intent.list')).intents.some((intent) => JSON.stringify(intent.draft ?? null).includes(JSON.stringify(CHIP).slice(1, -1))), { timeout: 10_000, message: 'the new chat’s stored draft names the chip' })
+    .toBe(true);
+
+  // the mark follows spaces.changed: instructions removed and set again by writes this window's sheet did not make
+  const back = await libraryPage(page);
+  await narrowTo(page, back, SPACE);
+  const shown = back.getByRole('button', { name: 'Instructions', exact: true });
+  await expect(shown, 'the page still shows the Space, marked').toBeVisible();
+  await ok(page, 'spaces.setInstructions', { spaceId: space.id, text: '' });
+  await expect(shown, 'removed: the mark goes').toHaveCount(0);
+  await ok(page, 'spaces.setInstructions', { spaceId: space.id, text: 'Keep each answer under a page.' });
+  await expect(shown, 'set again: the mark is back').toBeVisible();
+  expect(launch.consoleErrors()).toEqual([]);
 });
