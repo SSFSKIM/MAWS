@@ -323,6 +323,11 @@ export const COMMAND_LINE = { mark: '⎿', showMore: 'Show more', showLess: 'Sho
 export const commandLead = (run: { command: string }) => `/${run.command} · `;
 // UX wave U3b (Interfaces §L): an answer's action row; a disabled Fork says U9's sentence (useForkUnavailable), never one of these
 export const ANSWER_ACTIONS = { copy: 'Copy', fork: 'Fork from here', forkTitle: 'Starts a new session from this point. This one stays as it is.' } as const;
+
+// UX wave U3b (decision 16, Interfaces §L): while a session compacts, the row at the transcript's end, with the time so
+// far in the turn line's format once it reaches a second ('' before), and the sidebar's hover card
+export const COMPACTING_SESSION = 'Compacting session…';
+export const compactingLine = (elapsed: string) => (elapsed === '' ? COMPACTING_SESSION : `${COMPACTING_SESSION} ${elapsed}`);
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 // W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
 // and a steer the engine took, inside the turn at the step where it arrived.

@@ -65,6 +65,7 @@ function partOf(row: Row): string | null {
     case 'browser_activity': return `- ${browserActivityLine(row.activity)}`; // E13
     case 'owner_record': return null; // P2-C (2026-10-09): the report view's own row; the copy is the transcript's
     case 'to_human': return `<message>${row.text}</message>`; // P4-R7: as the span it stands in for copies, verbatim
+    case 'activity': return null; // UX wave U3b (decision 17): what the session does now, no part of what it said
   }
 }
 

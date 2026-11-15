@@ -54,8 +54,9 @@ function Pane({ source, id }: { source: TranscriptSource; id: AppSessionId }) {
 }
 
 /** Mounts the session with the recording's rows before `from` already played, then hands back a step that plays the
- *  rows up to a seq, the clock, and what is drawn. */
-async function play(name: string, from: number) {
+ *  rows up to a seq, the clock, and what is drawn. `drawnFrom`: the first row the transcript is given of those played
+ *  before (the automatic compaction's recording opens with a million tokens of filler the window need not draw). */
+async function play(name: string, from: number, drawnFrom = 0) {
   const id = at(`app-compacting-recorded-${++plays}`) as AppSessionId;
   const journal = loadUxwaveJournal(name);
   const normalizer = new Normalizer({ appSessionId: id, launchId: 'journal', sessionId: null });
@@ -70,7 +71,9 @@ async function play(name: string, from: number) {
     setStatus();
     return events;
   };
-  const history = host(journal.filter((row) => row.seq < from));
+  const before = journal.filter((row) => row.seq < from);
+  host(before.filter((row) => row.seq < drawnFrom));
+  const history = host(before.filter((row) => row.seq >= drawnFrom));
   let push: (batch: SessionEvent[]) => void = () => {};
   const source: TranscriptSource = { key: id, subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve(history) };
   render(<Pane source={source} id={id} />);
@@ -153,7 +156,7 @@ describe('a compaction in a session MAWS runs, from the recordings', () => {
   });
 
   it('an automatic one shows it inside the running turn, whose own line still reads “Working”, from 97 to 98 (u3b-autocompact-r2)', async () => {
-    const s = await play('u3b-autocompact-r2', 91);
+    const s = await play('u3b-autocompact-r2', 91, 91);
     s.to(96); // the prompt's `requesting`
     expect(s.compaction()).toBeNull();
     s.to(97);

@@ -284,6 +284,11 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* R1: a plugin's most recent status line under a working divider, aligned with its label (the chevron and the gap) */
 .transcript-divider:has(+ .transcript-plugin-status) { padding-bottom: 0; }
 .transcript-plugin-status { margin: 0; padding: 0 0 14px 19px; overflow: hidden; color: var(--fg-faint); font-size: var(--text-ui-sm); white-space: nowrap; text-overflow: ellipsis; }
+/* UX wave U3b (decisions 16 and 17, Interfaces §E; ruled R18): "Compacting session…" at the drawn list's end, in the
+   turn line's type and as tall as it (ESTIMATES.activity, 40 px): the divider's 2 px and its button's 3 px over the
+   words, its 14 px and 3 px under them. It starts at the rows' left edge, where a run's and a text's words start, not
+   indented to the turn line's words. */
+.transcript-activity { margin: 0; padding: 5px 0 17px; color: var(--fg-muted); font-size: var(--text-ui-sm); line-height: 1.5; }
 .transcript-popover {
   max-width: 420px;
   padding: 10px 12px;

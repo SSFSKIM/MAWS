@@ -21,6 +21,7 @@ import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
 import { AnswerActions } from './AnswerActions'; // UX wave U3b
+import { ActivityRow } from './Activity'; // UX wave U3b (M4)
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
 import { GapRow } from './GapRow'; // P5 O7 M2
@@ -66,6 +67,7 @@ function body(row: Row) {
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
     case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
     case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
+    case 'activity': return <ActivityRow row={row} />; // UX wave U3b (M4): placed by the view at the drawn list's end
   }
 }
 

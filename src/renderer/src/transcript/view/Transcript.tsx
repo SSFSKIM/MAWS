@@ -18,6 +18,7 @@ import { HYDRATION, OLDER, REACH } from '../model/copy';
 import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
+import { compactingRow } from './compacting'; // UX wave U3b (M4)
 import type { Row, RowKind } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
@@ -62,6 +63,7 @@ const ESTIMATES: Record<RowKind, number> = {
   to_human: 96, // P4-R7: a message card, its label and a few lines
   gap: 36, // P5 O7 M2: one bar
   notice: 32, // UX wave U3: one line, as a message's
+  activity: 40, // UX wave U3b (Interfaces §E): the divider's, whose type and height it has
 };
 // UX wave U3b (ruled R15): an answer's action row is 20 px with 8 px under it, 12 of them in the answer's own bottom
 // padding, so an answer that carries one is 16 px taller.
@@ -492,6 +494,9 @@ export interface TranscriptProps {
   // UX wave U4a (decision 12), additive: the mount has a stack that draws a waiting message while it is unread, so the
   // transcript draws no row marked unread (`withQueueTail`); absent, every row as before
   waiting?: 'stacked';
+  // UX wave U3b (decision 16, Interfaces §E), additive: since when the session compacts, by this window's clock (ms),
+  // which the drawn list's last row then says; null or absent: no such row (the desk gives none)
+  compacting?: number | null;
 }
 
 const NO_ROWS: Row[] = [];
@@ -522,7 +527,7 @@ const focusIsHereOrNowhere = (root: HTMLElement | null) => {
 const NO_TAIL: readonly Row[] = [];
 const NOTHING_WITHDRAWN: ReadonlySet<string> = new Set();
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -555,11 +560,13 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // P2-C end
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
-  const rows = useMemo(() => {
+  const shown = useMemo(() => {
     if (startAt === undefined) return merged;
     const start = startAt(merged, loaded);
     return start === null ? NO_ROWS : start === 0 ? merged : merged.slice(start);
   }, [merged, startAt, loaded]);
+  // UX wave U3b (M4; decisions 16 and 17): while the session compacts, its row at the end, the last projection
+  const rows = useMemo(() => compactingRow(shown, compacting) as Row[], [shown, compacting]);
   // UX wave U3b (decision 12, Interfaces §C): which drawn answers carry Copy, Fork from here and the time, placed once per
   // change of the list and published to the rows through this mount's store
   const placement = useMemo(() => answerActionsOf(rows), [rows]);

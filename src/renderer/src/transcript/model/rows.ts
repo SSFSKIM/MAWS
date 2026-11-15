@@ -190,6 +190,10 @@ export type Row = RowBase &
     // in view when its turn's work folds whatever the owner lane says: a message is always addressed to the human, as
     // a `<message>` span is, which the presenter draws with the lane off and so keeps (derive.ts, `isPersistentRow`).
     | { kind: 'to_human'; toolUseId: ToolUseId; text: string; pending: boolean }
+    // UX wave U3b (decision 17, Interfaces §E): what the session is doing now that no turn line says, at the drawn list's
+    // end: placed by the view (`view/compacting.ts`), never derived and never in the store's rows; `since` when this
+    // window first saw the session compacting
+    | { kind: 'activity'; activity: 'compacting'; since: string }
   );
 
 // E1: an ask as its capsule holds it, without the row base: what the Question sheet shows when the capsule reopens it
