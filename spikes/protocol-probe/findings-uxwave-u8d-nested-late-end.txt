@@ -1,0 +1,96 @@
+UX wave, landing U8d, probe P5 (the coordinator's, after P3's nested finding): where engine 2.1.322 writes the end of a
+nested background agent N that outlives its parent P, with the session's process still running; and what happens to N
+when P is stopped (docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, the DX4 parent rule and the
+table's row "an agent ended, something under it still runs"; 2026-11-15, VM dc-uxwave5-26dc, branch ux-wave/U8d-probes)
+
+Questions. (a) P launches N in the background and hands back at once; N then ends (a 20 s sleep, a one-word reply).
+Where is N's end written: P's file (a task notification, a queue record, a result), the main transcript, N's own
+file, N's meta (`finished: true`?), and when relative to N's last row? Does a failure differ? (b) P is stopped with
+TaskStop while N runs: does N keep running, or end with P, and what is written for N?
+
+Verdict.
+  (a) N ends on its own and its end is written in THREE places (3 of 3 runs, 2 completing, 1 "failing"):
+    - the MAIN transcript: a queue record `enqueue` <task-id>N</task-id> <status>completed</status> "Agent "uxw
+      nested N" finished", with N's tool-use-id and output file. About 2 s later the same block is recorded as
+      `operation: "remove"`. There is no dequeue and no user row in the main transcript for N.
+    - P's file: N's hand-back as a peer `user` row ("Another Claude session sent a message while you were working"),
+      then the task notification as an isMeta `user` row of origin task-notification, <status>completed</status>,
+      about 2 s after N's end. N's end WAKES P: P's file gains assistant rows (P runs a new turn). P then ends again,
+      and the main transcript gets a SECOND notification for P (enqueue, dequeue, user row, <status>completed</status>
+      "Agent "uxw parent P" finished"). So P has two completion notifications under one task id.
+    - the metas: N's meta gains `finished: true`, written in the same 100 ms as N's last rows (its SubagentHandback
+      call and result) and the main transcript's enqueue. P's meta LOSES `finished` when N wakes P (rewritten without
+      the key), and regains it when P ends again: P's meta history reads finished true, absent, true (r2 and the
+      fail run), or true, absent, true, absent, true (r1).
+    - Failure: N's command exited 3 and N reported FAILED. Nothing distinguishes that run: the notification says
+      <status>completed</status> "Agent "uxw nested N" finished", and the meta has `finished: true` with the same keys.
+      An agent's own judgement that its task failed is not an engine failure. An engine-side failure (an API error)
+      gives <status>failed</status> (findings-uxwave-u8d-waited-agent.txt, p4-fail), and its meta is again only
+      `finished: true`.
+  (b) N KEEPS RUNNING when P is stopped (2 of 2). P's stop writes, in the main transcript, P's own `killed`
+    notification (queue enqueue <status>killed</status> "Agent "uxw parent P" was stopped by Claude", dequeue, user
+    row), and in P's file its in-flight Bash result "User rejected tool use" and the "[Request interrupted by user for
+    tool use]" row. NOTHING is written for N at the stop: no row in P's file, none in the main transcript, no meta
+    change. N's sleep process stayed alive (polled every 5 s: alive at each of 8 polls after the stop). N finished
+    about 45 s later as in (a). Because its parent was stopped, N's hand-back and notification went to the MAIN
+    transcript: a peer hand-back row, then the user row of origin task-notification <status>completed</status> "Agent
+    "uxw nested N" finished", after an enqueue and a dequeue. N's meta got `finished: true`. P's meta was never
+    rewritten (no `finished`, no `stoppedByUser`).
+  So the shared vector's premise that N ends with a stopped parent is false on this engine. The design's new premise
+  (it does not) holds.
+
+Method.
+  Engine 2.1.322, model haiku (claude-haiku-5-5), gateway route, the owner's feature-gate cache seeded, the
+  interactive engine in tmux; scenarios/pass3/uxwave-u8d-terminal.mjs (recorder as in
+  findings-uxwave-u8d-process-end.txt; times are ms since the run's start).
+  p5-late: the main loop launches a background P whose prompt says to launch N in the background (prompt: run
+    `python3 uxw8d_wait.py 20` in the foreground, then reply DONE) and to hand back LAUNCHED at once; recorded until N
+    ended (its meta `finished: true`) and 15 s more. Twice. p5-fail: the same, with N running `python3 uxw8d_fail.py
+    20` (sleeps 20 s, prints FAILING, exits 3) and told to reply FAILED. Once.
+  p5-stopped: P told to make two tool calls in one message, the Agent call for N (a 51 s sleep) and its own Bash
+    `python3 uxw8d_wait.py 301`, and not to hand back before its Bash returned. Once both sleeps ran (both in the
+    files, both processes alive), the person typed "Stop the background agent with id <P> using the TaskStop tool …".
+    Then every 5 s the sleeps were counted (`pgrep -af uxw8d_wait.py`), until N's meta said `finished: true` (bounded
+    at 120 s), and 15 s more. Twice. Two earlier designs of this case did not reach the state asked for and are not
+    kept. In the first, P handed back before running its sleep and was woken by N's end, so N had already ended
+    when P was stopped. In the second, the sleep counter's pattern was wrong, so the watch stopped early. Even so it
+    showed N's Bash call still running 17 s after P's stop: the terminal's close gave it the Exit-137 row.
+  Fixtures (fixtures/uxwave/): u8d-p5-late-r{1,2}, u8d-p5-fail-r1, u8d-p5-stopped-r{1,2}: .terminal.json,
+  .transcript.jsonl, -subagents/ (P's and N's files and metas).
+
+Observed (line numbers of the main transcript, or of P's file "P:", N's file "N:"; ms since start).
+  p5-late-r1 (P a260db136aa82b2c9, N a1b855f569cac4b86): P handed back at 11280 (P:23-24), meta v2 finished true.
+    N's Bash result at 31505 (N:16). At 33415, main 45 enqueue N <status>completed</status>; at 33417, N:24-25 its
+    SubagentHandback and N's meta v2 finished true. At 33517, P's meta v3 without finished; at 33548, P:26 the
+    hand-back row. P:29-30 (35431) P runs; main 46 at 35529 `remove` of N's block; at 35531, P:31 the notification
+    row (isMeta, origin task-notification, completed). Main 47-50 at 36841-36842: P's second notification
+    (completed); P's meta v6 finished true.
+  p5-late-r2: N's Bash result 31557 (N:16); main 45 enqueue 33569; N's meta finished 33570; P's meta v3 (no
+    finished) 33573; P:25 hand-back 33672; main 46 remove 35588; P:30 notification 35589; main 47-50 P's second
+    notification 36997; P's meta v4 finished true.
+  p5-fail-r1: N:16 the Bash result, is_error true, "Error: Exit code 3\nFAILING" (32008); main 45 enqueue N
+    <status>completed</status> (33821); N's meta finished true (33824); P:26 hand-back; main 46 remove; P:31
+    notification <status>completed</status>; main 47-50 P's second notification. Nothing says failed.
+  p5-stopped-r1 (P a9db85a9fbf0c177d, N ad26fb1a58bb95a16): both sleeps alive at 12533; the person's prompt at 18139
+    (main 39); main 54-55 TaskStop(P) and its result; main 56 enqueue P <status>killed</status> (20256); P:19 "User
+    rejected tool use", P:21 the interrupted marker; main 58 dequeue, 62 the user row (killed). N's sleep alive at
+    22975, 27998, …, 58129; N:16 its Bash result at 63137 (is_error false), 43 s after the stop. Main 70 enqueue N
+    <status>completed</status> (65552), 71 dequeue, 72 N's hand-back as a peer row in MAIN, 79 the notification user
+    row in MAIN (66760). N's meta v2 finished true (65554). P's meta: one version (the launch's), never rewritten.
+  p5-stopped-r2 (P a3673f2e2cdf79b8d, N a3766513a5a0cc66d): TaskStop at main 54-55; P's killed enqueue 56 (23005);
+    the user row 62. N alive at each poll from 25483 to 60712; N:16 at 65691; main 70 enqueue completed, 72 hand-back,
+    79 notification (69312). N's meta finished true; P's meta one version.
+
+Inference.
+  - DX4's parent rule ("the parent has ended: `exited`, evidence `parent`") reads N as ended in both cases while N runs,
+    for up to the rest of N's life. In both cases N's real end is in the rows: a completed notification in P's file
+    and a queue record in the main transcript (a), or a notification in the main transcript (b). A rule that let the
+    rows' later word (or the bridge's running) outrank the parent rule would read N correctly. In (a) the end is in
+    P's file, which the design follows only "while the parent has a nested agent that has not ended". If the parent
+    rule ends N, that follower stops and N's notification in P's file is not read. The main transcript's `enqueue`
+    record (and its `remove` twin) for N would still be read by the main follower, if the ledger accepts a nested
+    agent's id there.
+  - P's waking gives P a second notification and moves its meta's `finished` off and on. A reader that takes a
+    terminal word as final (DX4's "accepted residual", R7) keeps P ended while it runs that second turn.
+  - Where N's notification lands depends on P's state: P's file when P had ended normally (P is woken), the main
+    transcript when P was stopped.
