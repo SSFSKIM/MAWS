@@ -45,6 +45,7 @@ interface Parent {
   children: Set<string>; // the agents listed under it now
   open: boolean; // read on each tick
   reading: boolean;
+  again: boolean; // its agents changed while its read was out: read once more when it lands
   final: boolean; // its last read began once it was settled with nothing under it open
   closed: boolean;
   logged: Set<string>; // the causes of an unreadable file already logged
@@ -273,17 +274,28 @@ export class SessionFollow {
       else nested.push(e);
     }
     for (const p of this.parents.values()) {
-      if (under.has(p.id) || p.reading) continue;
+      if (under.has(p.id)) continue;
+      if (p.reading) {
+        if (p.children.size > 0) p.again = true; // its agents went while its read was out
+        continue;
+      }
       // no entry names it now (its nested agents' entries went or moved): it rests, its ledger kept, and an entry that
       // names it again is a new agent under it
       p.open = false;
+      p.again = false;
       p.children.clear();
     }
     for (const [id, nested] of under) {
       const p = this.parents.get(id) ?? this.parent(id);
-      if (p.reading) continue; // decided again when its read lands
-      const named = nested.filter((n) => !p.children.has(n.agentId));
-      p.children = new Set(nested.map((n) => n.agentId)); // one that left and comes back is named again
+      const ids = nested.map((n) => n.agentId);
+      if (p.reading) {
+        // decided again when its read lands; an agent that came or went meanwhile is owed a read after it
+        if (ids.length !== p.children.size || ids.some((n) => !p.children.has(n))) p.again = true;
+        continue;
+      }
+      const named = p.again ? ids : ids.filter((n) => !p.children.has(n));
+      p.again = false;
+      p.children = new Set(ids); // one that left and comes back is named again
       const open = nested.some((n) => n.status === 'running' || (ENDED.includes(n.status) && !settled(n, this.entries)));
       const own = this.entries.get(id);
       const done = !open && own !== undefined && settled(own, this.entries);
@@ -306,7 +318,7 @@ export class SessionFollow {
     const p: Parent = {
       id,
       jobs: new TranscriptJobs(() => Promise.resolve(this.listed.get(id)?.transcriptPath ?? null)),
-      held: false, readable: null, key: null, children: new Set(), open: false, reading: false, final: false, closed: false, logged: new Set(),
+      held: false, readable: null, key: null, children: new Set(), open: false, reading: false, again: false, final: false, closed: false, logged: new Set(),
     };
     this.parents.set(id, p);
     return p;
