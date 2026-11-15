@@ -172,6 +172,8 @@ describe('the row of an agent’s delete', () => {
   const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
   const DELETED: ArtifactRow = { ...BASE, action: 'delete', artifactId: DRAFT, title: 'Draft plan', htmlPath: '', deliverableId: null, version: null };
   const MINI: MachineState = { ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-15T09:00:00.000Z', generation: 1, carrier: 'relay' };
+  const AT = Date.UTC(2026, 10, 15, 9, 0);
+  const LISTED = { id: DRAFT, kind: 'document', title: 'Draft plan', createdBy: { kind: 'session', appSessionId: APP }, createdAt: AT, updatedAt: AT, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 3, lastEditor: { kind: 'session', appSessionId: APP }, lastEditedAt: AT, sessions: [] };
   let listed: boolean;
   let reads: (MachineRef | undefined)[];
   let main: ReturnType<typeof installFakeMain>;
@@ -185,7 +187,7 @@ describe('the row of an agent’s delete', () => {
     main = installFakeMain((name, _input, machine) => {
       if (name !== 'library.get') return new Promise(() => {});
       reads.push(machine);
-      return ok({ row: listed ? ({ id: DRAFT, kind: 'document', title: 'Draft plan' } as never) : null });
+      return ok({ row: listed ? LISTED : null });
     });
     offLibrary = connectLibrary();
   });
