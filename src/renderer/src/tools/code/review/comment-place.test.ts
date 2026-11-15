@@ -2,7 +2,7 @@
 // it (card 4 at its default), the place an unsent comment is drawn at after a refresh, and where the card stands (D3).
 import { describe, expect, it } from 'vitest';
 import { REVIEW_COPY } from '../copy';
-import { absolutePathOf, cardOffset, diffLines, lineText, placementOf, placeOf, reviewLineAnchor, UNPLACED_WORDS, type ScopeLines } from './comment-place';
+import { absolutePathOf, cardOffset, diffLines, lineText, PLACEMENT_TABLE, placementOf, placeOf, reviewLineAnchor, SECTION_STATES, sectionStateOf, UNPLACED_ORDER, UNPLACED_WORDS, type ScopeLines, type SectionState } from './comment-place';
 
 // Line 12 was `return value;` and is `return quoted(value);`.
 const HUNK = ['@@ -10,5 +10,5 @@', ' function cell(value) {', " if (value === '') return value;", '-return value;', '+return quoted(value);', ' }', ' const end = 1;'].join('\n');
@@ -75,34 +75,79 @@ describe('an unsent comment placed again at a refresh', () => {
 
 describe('whether a comment can be placed (Decision Log 21): the table, row by row', () => {
   const added = { anchor: reviewLineAnchor('/repo/src/report.ts', 12, 'new'), quote: 'return quoted(value);' };
-  const file = (blocks: string[][], read = true, binary = false) => ({ path: 'src/report.ts', absolute: '/repo/src/report.ts', blocks, read, binary });
+  const file = (state: SectionState, blocks: string[][] = []) => ({ path: 'src/report.ts', absolute: '/repo/src/report.ts', blocks, state });
   const ready = (...files: ScopeLines['files']): ScopeLines => ({ state: 'ready', files });
+  const HUGE = ['@@ -1,0 +1,2001 @@', ...Array.from({ length: 2001 }, (_, i) => (i === 11 ? '+return quoted(value);' : `+line ${i}`))].join('\n');
 
-  it('placeable: the scope holds the file, read, with a line whose text is the quote', () => {
-    expect(placementOf(added, ready(file([[MOVED]])))).toEqual({ kind: 'placed', path: 'src/report.ts', place: { block: 0, side: 'new', line: 14 } });
+  it('the scope still being read: pending, nothing listed', () => {
+    expect(PLACEMENT_TABLE['scope-reading']).toBe('pending');
+    expect(placementOf(added, { state: 'reading', files: [] })).toEqual({ kind: 'pending', path: null });
   });
-  it('its line left the diff: the file is in the scope and read, and no line has the quote', () => {
-    expect(placementOf(added, ready(file([[HUNK.replace('+return quoted(value);', '+return escaped(value);')]])))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
-  });
-  it('its file is binary now: a completed read with no line, so its line left the diff', () => {
-    expect(placementOf(added, ready(file([], false, true)))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
-    expect(placementOf(added, ready(file([], true, true)))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
-  });
-  it('its file is not in the scope', () => {
-    expect(placementOf(added, ready({ path: 'src/other.ts', absolute: '/repo/src/other.ts', blocks: [[HUNK]], read: true, binary: false }))).toEqual({ kind: 'not-in-scope' });
-  });
-  it('the scope is empty or cannot be read', () => {
+  it('the scope empty or unreadable: listed under “The file this comment is on is not in this diff.”', () => {
+    expect(PLACEMENT_TABLE['scope-empty']).toBe('no-files');
     expect(placementOf(added, { state: 'none', files: [] })).toEqual({ kind: 'no-files' });
     expect(placementOf(added, ready())).toEqual({ kind: 'no-files' });
   });
-  it('not read yet, which is not unplaceable: the scope is still being read, or the file’s own read has not answered', () => {
-    expect(placementOf(added, { state: 'reading', files: [] })).toEqual({ kind: 'pending', path: null });
-    expect(placementOf(added, ready(file([], false)))).toEqual({ kind: 'pending', path: 'src/report.ts' });
+  it('its file not in the scope: listed under the same sentence', () => {
+    expect(PLACEMENT_TABLE['not-in-scope']).toBe('not-in-scope');
+    expect(placementOf(added, ready({ path: 'src/other.ts', absolute: '/repo/src/other.ts', blocks: [[HUNK]], state: 'lines' }))).toEqual({ kind: 'not-in-scope' });
   });
-  it('names the sentence over each unplaceable kind, and none for the others', () => {
-    expect(UNPLACED_WORDS).toEqual({ 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope });
+  it('its file’s own read still running: pending, nothing listed', () => {
+    expect(PLACEMENT_TABLE.reading).toBe('pending');
+    expect(placementOf(added, ready(file('reading')))).toEqual({ kind: 'pending', path: 'src/report.ts' });
+  });
+  it('its file folded in a scope past the cap, its read waiting for it to unfold: pending (the open card’s reveal unfolds it)', () => {
+    expect(PLACEMENT_TABLE['folded-unread']).toBe('pending');
+    expect(placementOf(added, ready(file('folded-unread')))).toEqual({ kind: 'pending', path: 'src/report.ts' });
+  });
+  it('drawn, with a line whose text is the quote: placed under it', () => {
+    expect(PLACEMENT_TABLE['line-found']).toBe('placed');
+    expect(placementOf(added, ready(file('lines', [[MOVED]])))).toEqual({ kind: 'placed', path: 'src/report.ts', place: { block: 0, side: 'new', line: 14 } });
+  });
+  it('drawn, with no line whose text is the quote: listed under “The line this comment was on is no longer in this diff.”', () => {
+    expect(PLACEMENT_TABLE['line-not-found']).toBe('line-left');
+    expect(placementOf(added, ready(file('lines', [[HUNK.replace('+return quoted(value);', '+return escaped(value);')]])))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
+  });
+  it('binary now: a completed read with no line, listed under the line’s sentence', () => {
+    expect(PLACEMENT_TABLE.binary).toBe('line-left');
+    expect(placementOf(added, ready(file('binary')))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
+  });
+  it('its own read failed: a completed state, listed under “This file\'s diff is not shown here.”', () => {
+    expect(PLACEMENT_TABLE.failed).toBe('diff-not-shown');
+    expect(placementOf(added, ready(file('failed')))).toEqual({ kind: 'diff-not-shown', path: 'src/report.ts' });
+  });
+  it('too large to draw: listed under the same sentence, though its hunks hold the quote', () => {
+    expect(PLACEMENT_TABLE['too-large']).toBe('diff-not-shown');
+    expect(placementOf(added, ready(file('too-large', [[HUGE]])))).toEqual({ kind: 'diff-not-shown', path: 'src/report.ts' });
+  });
+
+  it('has a row for every state a section can be in: each combination of what a section holds names a state, and each state a row', () => {
+    const seen = new Set<SectionState>();
+    for (const hunks of [null, [HUNK], [HUGE], []])
+      for (const binary of [false, true])
+        for (const failed of [null, 'the disk is busy'])
+          for (const folded of [false, true])
+            for (const fetch of [false, true]) {
+              const state = sectionStateOf({ hunks, binary, failed, folded, fetch });
+              expect(SECTION_STATES).toContain(state);
+              seen.add(state);
+            }
+    expect([...seen].sort()).toEqual([...SECTION_STATES].sort()); // and no state is a dead row
+    const rows = Object.keys(PLACEMENT_TABLE).sort();
+    const cases = ['scope-reading', 'scope-empty', 'not-in-scope', ...SECTION_STATES.filter((state) => state !== 'lines'), 'line-found', 'line-not-found'].sort();
+    expect(rows).toEqual(cases);
+    expect(sectionStateOf({ hunks: null, binary: false, failed: null, folded: true, fetch: false })).toBe('folded-unread');
+    expect(sectionStateOf({ hunks: null, binary: false, failed: null, folded: true, fetch: true })).toBe('reading');
+    expect(sectionStateOf({ hunks: null, binary: true, failed: 'the disk is busy', folded: false, fetch: true })).toBe('failed'); // as its body says first
+    expect(sectionStateOf({ hunks: [HUGE], binary: false, failed: null, folded: false, fetch: false })).toBe('too-large');
+  });
+
+  it('names the sentence over each unplaceable kind, and stands the kinds in one order', () => {
+    expect(UNPLACED_WORDS).toEqual({ 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope, 'diff-not-shown': REVIEW_COPY.diffNotShown });
     expect(REVIEW_COPY.lineLeftDiff).toBe('The line this comment was on is no longer in this diff.');
     expect(REVIEW_COPY.fileNotInScope).toBe('The file this comment is on is not in this diff.');
+    expect(REVIEW_COPY.diffNotShown).toBe("This file's diff is not shown here.");
+    expect(UNPLACED_ORDER.map((sentence) => sentence.name)).toEqual(['line-left', 'not-in-diff', 'diff-not-shown']);
   });
 });
 

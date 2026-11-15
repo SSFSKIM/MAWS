@@ -87,7 +87,9 @@ const SENT = { messageUuid: null, disposition: 'sent', queueId: 'q0' };
 
 function commentsMain() {
   const state = {
-    patch: REPORT() + OTHER(),
+    patch: REPORT() + OTHER() as string | null, // null: the scope is past its cap, each file read on its own
+    perFile: { 'src/report.ts': REPORT(), 'src/other.ts': OTHER() } as Record<string, string>, // a file's own read
+    failing: new Set<string>(), // files whose own read fails
     files: FILES(),
     content: null as null | (() => Promise<ReturnType<typeof ok>>), // a test's own answer to the comments' content
     status: STATUS,
@@ -98,6 +100,7 @@ function commentsMain() {
       case 'git.watch':
         return ok(state.status);
       case 'git.diff':
+        if (typeof input.path === 'string') return state.failing.has(input.path) ? fail('the disk is busy') : ok({ patch: state.perFile[input.path] ?? '', files: state.files.filter((file) => file.path === input.path) });
         return ok(input.scope === 'staged' && state.staged ? state.staged : { patch: state.patch, files: state.files });
       case 'git.worktree.branch':
         return ok({ repoRoot: '/repo', branch: 'main', head: STATUS.head, checkedOutAt: '/repo', base: 'main', ahead: 0, merged: true });
@@ -167,7 +170,7 @@ async function painted(check: () => boolean): Promise<void> {
 }
 const drawn = (path: string) => painted(() => (bodyOf(path)?.querySelector('table') ?? null) !== null);
 // The scope read again after git.changed (250 ms on).
-async function reread(patch: string, files: GitDiffFile[]) {
+async function reread(patch: string | null, files: GitDiffFile[]) {
   const before = main.callsOf('git.diff').length;
   main.state.patch = patch;
   main.state.files = files;
@@ -616,6 +619,68 @@ describe('comments on lines in Review', () => {
     leave();
     await painted(() => card() === null && unplacedRows().length === 1);
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote where a comma is, and say why.']);
+  });
+
+  it('opens from the chip a comment in a folded file of a scope past the cap under its line: the file unfolded and read, its words edited there', async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await painted(() => card() === null && chip() !== null);
+    await reread(null, FILES()); // past the cap: every file folded, read on its own
+    await painted(() => sectionOf('src/other.ts')?.hasAttribute('data-folded') ?? false);
+    expect(lineLeft()).toBeNull(); // not read yet is not unplaceable
+    fireEvent.click(chip()!);
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:2' && card() !== null);
+    expect(bodyOf('src/other.ts')!.contains(card())).toBe(true);
+    expect(sectionOf('src/other.ts')!.hasAttribute('data-folded')).toBe(false);
+    expect(main.callsOf('git.diff')).toContainEqual(expect.objectContaining({ path: 'src/other.ts' }));
+    expect(field().value).toBe('Name it for what it counts.');
+    type('Name it for the total.');
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for the total.']);
+  });
+
+  it("lists a comment whose file’s own read failed under “This file's diff is not shown here.”, edits it there, and puts it back under its line when Retry succeeds", async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await painted(() => card() === null && chip() !== null);
+    main.state.failing.add('src/other.ts');
+    await reread(null, FILES());
+    await painted(() => sectionOf('src/other.ts')?.hasAttribute('data-folded') ?? false);
+    fireEvent.click(sectionOf('src/other.ts')!.querySelector('[data-review-fold]')!);
+    await painted(() => unplacedRows().length === 1);
+    expect(unplacedWords().map((words) => words.textContent)).toEqual(["This file's diff is not shown here."]);
+    fireEvent.click(unplacedEdit(0));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Name it for what it counts.');
+    type('Name it for the total.');
+    leave();
+    await painted(() => card() === null && unplacedRows().length === 1);
+
+    main.state.failing.clear();
+    fireEvent.click(within(sectionOf('src/other.ts')!).getByRole('button', { name: 'Retry' }));
+    await painted(() => lineLeft() === null && unsentRows('src/other.ts').length === 1);
+    expect(lineRow('src/other.ts', 'new', 2)!.nextElementSibling?.contains(unsentRows('src/other.ts')[0])).toBe(true);
+    expect(unsentRows('src/other.ts')[0].textContent).toBe('Name it for the total.');
+  });
+
+  it("lists a comment on a file grown too large to draw under “This file's diff is not shown here.”, and opens its card there", async () => {
+    await mountReview();
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await painted(() => card() === null && chip() !== null);
+    const huge = ['diff --git a/src/other.ts b/src/other.ts', 'index 3..4 100644', '--- a/src/other.ts', '+++ b/src/other.ts', '@@ -1,2 +1,2003 @@', ' export const a = 1;', '+export const b = 2;', ...Array.from({ length: 2000 }, (_, i) => `+export const n${i} = ${i};`), ' export const c = 3;', ''].join('\n');
+    await reread(REPORT() + huge, [FILES()[0], { path: 'src/other.ts', oldPath: null, insertions: 2001, deletions: 0, binary: false }]);
+    await painted(() => sectionOf('src/other.ts')?.querySelector('[data-review-too-large]') != null && unplacedRows().length === 1);
+    expect(unplacedWords().map((words) => words.textContent)).toEqual(["This file's diff is not shown here."]);
+    expect(unplacedRows()[0].textContent).toBe('export const b = 2;Name it for what it counts.');
+    fireEvent.click(unplacedEdit(0));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Name it for what it counts.');
   });
 
   it('keeps a comment whose line left the diff in the pass and the chip, drawn under no line', async () => {
