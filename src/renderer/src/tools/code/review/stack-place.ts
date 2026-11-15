@@ -203,7 +203,9 @@ export class StackPlacer {
         this.live = placeAt(layout, el.scrollTop + sticky, rows);
         if (this.live) this.host.saved(this.live);
       }
-      if (this.recount && !this.pending) this.count(m);
+      // Counted again only once the file read at the edge draws its rows: until then a drawn body weighs what the page
+      // shows, which can put the edge past hunks it has not reached.
+      if (this.recount && !this.pending && this.live !== null && this.drawsRows(layout, this.live.path, rows)) this.count(m);
     }
     this.setBand(this.bandFor(m, el.scrollTop));
   }
@@ -316,8 +318,6 @@ export class StackPlacer {
       else if (layout.bodyTops[index] <= edge) unsure = true;
     });
     this.recount = unsure;
-    // eslint-disable-next-line no-console
-    console.log('PROBE count', JSON.stringify({ at, unsure, current, top: el.scrollTop, edge, stops: order.slice(8, 14).map((hunk) => topOfPlace(layout, hunkPlace(hunk), rows)), bodyTop5: layout.bodyTops[5], body5: layout.bodies[5] }));
     if (at < current && atEnd(el)) return;
     if (at !== current) this.host.counted(at);
   }

@@ -374,8 +374,8 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
     page.scrollTo(page.topOf(sixth) + HEADER + 2 * ROW); // by hand, into the sixth file's first hunk
     await page.settle();
     expect(sixth.querySelector('[data-review-body] table')).not.toBeNull();
-    const probe = { label0: hunkLabel(), row: page.rowAtTop(), top: scroller().scrollTop, sixth: page.topOf(sixth), trs: [...sixth.querySelectorAll('tr')].slice(0, 30).map((tr) => `${tr.dataset.state ?? ''}:${tr.querySelector<HTMLElement>('[data-line-new-num]')?.dataset.lineNewNum ?? ''}`).join(' ') };
-    expect(probe).toEqual(null);
+    expect(page.rowAtTop()).toEqual({ path: files[5].path, side: 'new', line: files[5].starts[0] + 2 }); // the place kept
+    expect(hunkLabel()).toBe('Showing hunk 11 of 40');
   });
 
   it('lands a reveal into a file still being read on its row once the read answers, and keeps that place', async () => {
