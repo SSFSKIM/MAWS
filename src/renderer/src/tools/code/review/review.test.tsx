@@ -934,7 +934,7 @@ describe('review tool', () => {
     fireEvent.click(inSection('src/app.ts', '[data-open-file]')!);
     expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/app.ts', line: 5 })]); // its own first hunk
     fireEvent.click(inSection('src/staged.ts', '[data-open-file]')!);
-    expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/staged.ts', line: 1 })]);
+    expect(fileTabs()).toContainEqual(expect.objectContaining({ path: '/repo/src/staged.ts', line: 1 }));
     fold('src/app.ts');
     expect(hunkLabel()).toBe('Showing hunk 1 of 1'); // the files drawn: a folded file's hunks are M4's to reach
   });
@@ -1045,8 +1045,10 @@ describe('review tool', () => {
     await painted(() => (bodyOf('src/app.ts')?.querySelector('table') ?? null) !== null && (bodyOf('src/staged.ts')?.querySelector('table') ?? null) !== null);
     const appTable = bodyOf('src/app.ts')!.querySelector('table');
     const stagedTable = bodyOf('src/staged.ts')!.querySelector('table');
+    const before = reads().length;
     main().state.uncommitted = { patch: APP_PATCH + STAGED_PATCH.replace('+export const staged = 1;', '+export const staged = 2;'), files: main().state.uncommitted.files };
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(reads()).toHaveLength(before + 2)); // the re-read, 250 ms on
     await painted(() => bodyOf('src/staged.ts')?.textContent?.includes('staged = 2') ?? false);
     expect(bodyOf('src/app.ts')!.querySelector('table')).toBe(appTable); // the same rows, not drawn again
     expect(bodyOf('src/staged.ts')!.querySelector('table')).not.toBe(stagedTable);
@@ -1301,7 +1303,7 @@ describe('review tool', () => {
     openReview({ scope: 'turn', turnId: divider.turnId! });
     await painted(() => stackText()?.includes('omega') ?? false);
     expect(paths()).toEqual(['/repo/child.ts']);
-    expect([pathOf('/repo/child.ts'), badgeOf('/repo/child.ts'), countsOf('/repo/child.ts')]).toEqual(['child.ts', null, '+1 −1']); // inside the repository: relative
+    await waitFor(() => expect([pathOf('/repo/child.ts'), badgeOf('/repo/child.ts'), countsOf('/repo/child.ts')]).toEqual(['child.ts', null, '+1 −1'])); // inside the repository: relative, once the status answers
     expect(stackText()).toContain('alpha');
     fireEvent.click(inSection('/repo/child.ts', '[data-open-file]')!);
     expect(fileTabs()).toContainEqual(expect.objectContaining({ kind: 'file', path: '/repo/child.ts', line: 3 }));

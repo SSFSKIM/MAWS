@@ -145,7 +145,8 @@ function FoldMark({ folded }: { folded: boolean }) {
 }
 
 // The path, its folder part shortening first; a rename reads "old → new" only while both paths fit whole (D2), else the
-// new path, its badge naming the old one. The fit is measured against the room the header leaves the path.
+// new path, its badge naming the old one. The fit is measured against the room the header leaves the path, by a probe
+// beside the path (not in it, so the path reads only what is drawn).
 function PathLabel({ file }: { file: ReviewFile }) {
   const slot = useRef<HTMLSpanElement>(null);
   const probe = useRef<HTMLSpanElement>(null);
@@ -168,21 +169,23 @@ function PathLabel({ file }: { file: ReviewFile }) {
 
   const cut = file.displayPath.lastIndexOf('/') + 1;
   return (
-    <span ref={slot} data-review-path title={renamed ?? file.displayPath} className="relative flex min-w-0 flex-1 items-baseline overflow-hidden whitespace-nowrap">
-      {renamed !== null && fits ? (
-        <span className="min-w-0 truncate text-fg">{renamed}</span>
-      ) : (
-        <>
-          {cut > 0 && (
-            <span data-review-path-folder className="min-w-0 shrink-[1000] truncate text-fg-muted">
-              {file.displayPath.slice(0, cut)}
+    <span className="relative flex min-w-0 flex-1">
+      <span ref={slot} data-review-path title={renamed ?? file.displayPath} className="flex min-w-0 flex-1 items-baseline overflow-hidden whitespace-nowrap">
+        {renamed !== null && fits ? (
+          <span className="min-w-0 truncate text-fg">{renamed}</span>
+        ) : (
+          <>
+            {cut > 0 && (
+              <span data-review-path-folder className="min-w-0 shrink-[1000] truncate text-fg-muted">
+                {file.displayPath.slice(0, cut)}
+              </span>
+            )}
+            <span data-review-path-name className="min-w-0 truncate text-fg">
+              {file.displayPath.slice(cut)}
             </span>
-          )}
-          <span data-review-path-name className="min-w-0 truncate text-fg">
-            {file.displayPath.slice(cut)}
-          </span>
-        </>
-      )}
+          </>
+        )}
+      </span>
       {renamed !== null && (
         <span ref={probe} aria-hidden data-review-rename-measure className="invisible absolute top-0 left-0 whitespace-nowrap">
           {renamed}
