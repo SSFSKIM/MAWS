@@ -134,6 +134,23 @@ const suites = {
     ownerRule.on = true;
   },
 
+  // Row a's control, which does not decide: Chromium's PDF loader with its partial loading turned on
+  // (--enable-features=PdfPartialLoading, which the app does not set) and slow pages, to show whether the viewer then
+  // asks ranges of its own and whether each passes the listener.
+  async 'a-partial'() {
+    const bytes = largePdf();
+    const win = await openWindow({ width: 1000, height: 900 });
+    serve.pauseMs = 400;
+    const t = tokens.issue({ owner: win.webContents.id, name: 'large.pdf', mime: 'application/pdf', bytes, kind: 'pdf' });
+    const seq = lastSeq();
+    await mount(win, { id: 'partial', kind: 'pdf', url: t.url, width: 800, height: 700 });
+    const d = await waitDrawn(t.url, 40000, 5);
+    await sleep(3000);
+    const w = walk(since(seq), t.url, win.webContents.id);
+    result('a', 'partial-loading-control', 'record', `with PdfPartialLoading and 400 ms between pages: ${d.ok ? 'drawn' : 'NOT drawn'}; requests ${w.entries}: ${w.ranges.join(', ')}; decisions pass ${w.passes}, cancel ${w.cancels} (ids ${w.ids.join(',')}); entries without a passed decision before them ${w.entryWithoutPass}`, { walk: w });
+    serve.pauseMs = 20;
+  },
+
   // Rows b and c, in one launch: c asks again, from elsewhere, the URLs b loaded.
   async bc() {
     const w1 = await openWindow({ width: 1400, height: 900 });

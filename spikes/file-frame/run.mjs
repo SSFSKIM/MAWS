@@ -55,7 +55,7 @@ for (const name of ['xdg-open', 'gio', 'gvfs-open', 'kde-open', 'kde-open5', 'kf
   chmodSync(join(fakebin, name), 0o755);
 }
 
-const ALL = [['gen'], ['a'], ['bc'], ['d'], ['e'], ['f'], ['f', ['--lang=ko'], { LANGUAGE: 'ko', LANG: 'ko_KR.UTF-8' }, 'f-ko'], ['g'], ['hi'], ['hi-reversed']];
+const ALL = [['gen'], ['a'], ['a-partial', ['--enable-features=PdfPartialLoading']], ['bc'], ['d'], ['e'], ['f'], ['f', ['--lang=ko'], { LANGUAGE: 'ko', LANG: 'ko_KR.UTF-8' }, 'f-ko'], ['g'], ['hi'], ['hi-reversed']];
 const only = argv.only ? new Set(String(argv.only).split(',')) : null;
 const parts = [];
 const record = {};
@@ -81,14 +81,14 @@ function judge(row, key, plainParts, fragParts) {
   const seen = (ps) => ps.map((p) => [p.first, p.second].map((x) => (x ? shows(x[key]) : null)));
   const plain = seen(plainParts).flat();
   const frag = seen(fragParts).flat();
-  if (!plain.length || !frag.length || plain.includes(null) || frag.includes(null)) return { status: 'fail', why: 'a read is missing' };
+  if (!plain.length || !frag.length || plain.includes(null) || frag.includes(null)) return { status: plainParts.length + fragParts.length ? 'fail' : 'record', why: plainParts.length + fragParts.length ? 'a read is missing' : 'not run' };
   if (plain.every((v) => !v)) return { status: 'record', why: `the ${key} does not show without the fragment, so the fragment's effect cannot be seen` };
   if (!plain.every((v) => v)) return { status: 'record', why: `the ${key} shows in some reads without the fragment and not in others` };
   return frag.every((v) => !v) ? { status: 'pass', why: `the ${key} shows without the fragment and not with it, at every read` } : { status: 'fail', why: `the ${key} shows with the fragment too` };
 }
 const pick = (row, test) => parts.filter((p) => p.row === row && test(p.part));
 const hJ = judge('h', 'toolbar', pick('h', (p) => p.startsWith('plain')), pick('h', (p) => p.startsWith('toolbar=0')));
-const iJ = judge('i', 'sidenav', pick('i', (p) => p === 'plain' || p.startsWith('plain (')), pick('i', (p) => p.startsWith('navpanes=0')));
+const iJ = judge('i', 'sidenavContainer', pick('i', (p) => p === 'plain' || p.startsWith('plain (')), pick('i', (p) => p.startsWith('navpanes=0')));
 parts.push({ suite: 'run', row: 'h', part: 'verdict', status: hJ.status, observed: hJ.why });
 parts.push({ suite: 'run', row: 'i', part: 'verdict', status: iJ.status, observed: iJ.why });
 

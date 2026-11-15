@@ -143,7 +143,7 @@ const VIEWER_PROBE = `(() => {
   const pick = (k) => rect(found[k]);
   return { href: location.href, title: document.title, inner: [innerWidth, innerHeight], viewerAttrs: viewer ? [...viewer.attributes].map((a) => a.name + '=' + a.value) : null,
     toolbar: pick('viewer-toolbar'), toolbarById: pick('#toolbar'), sidenav: pick('viewer-pdf-sidenav'), sidenavContainer: pick('#sidenav-container'), thumbnails: pick('viewer-thumbnail-bar'),
-    embed: pick('embed'), plugin: pick('#plugin'), main: pick('#main'), content: pick('#content'), sizer: pick('#sizer'),
+    embed: pick('embed'), plugin: pick('#plugin'), main: pick('#main'), centerControls: pick('#center'), progress: pick('#progress'),
     pageInput: input ? input.value : null, docLength: sel && 'docLength' in sel ? sel.docLength : null, dump };
 })()`;
 export async function probeViewer(url) {
