@@ -269,6 +269,14 @@ export function stretchesOf(rows: readonly Row[], liveMarked?: string, open?: Re
   return layoutOf(rows, liveMarked, open).spans.map((span) => span.stretch);
 }
 
+/** Whether an update took away a row an open key named: a key the rows before it answered to and the rows after do not. */
+export function lostKey(before: readonly Row[], after: readonly Row[], open: ReadonlySet<string>): boolean {
+  if (open.size === 0 || before === after) return false;
+  const answered = new Set(after.flatMap(namesOf));
+  const missing = [...open].filter((key) => !answered.has(key));
+  return missing.length > 0 && before.some((row) => namesOf(row).some((name) => missing.includes(name)));
+}
+
 /**
  * The keys an update carries an opening to (the whole-branch review's second look): an open key no row answers to any
  * more, whose row the update took away, passes to a surviving identity. First, the keys of the stretch it stood in
@@ -278,7 +286,8 @@ export function stretchesOf(rows: readonly Row[], liveMarked?: string, open?: Re
  * finished, a textless thought with no recorded time travels in no cell of its call's run), stays with the commentary
  * it folded with, or passes to the run its call starts in its place, and from a run to its call when the run unwraps.
  * A key whose row leaves with no successor stays as it is, and opens its stretch again if a row comes to answer to it.
- * `ui.openStretches` holds keys as before; the carry only adds keys.
+ * `ui.openStretches` holds keys as before; the carry only adds keys. The rows are the ones a view draws, composed
+ * (the store reads each mounted view's composition): what a view places among the key's rows can split a stretch.
  */
 export function carriedKeys(before: readonly Row[], after: readonly Row[], open: ReadonlySet<string> | undefined, liveMarked?: string): string[] {
   if (open === undefined || open.size === 0 || before === after) return [];

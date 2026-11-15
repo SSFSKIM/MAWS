@@ -9,7 +9,7 @@ import type { AgentId, MessageUuid } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
 import { marksOfText } from '../transcript/model/owner-marks';
-import { carriedKeys, holdsMessage, keysOfStretch, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
+import { carriedKeys, holdsMessage, keysOfStretch, lostKey, liveMarkedRowIds, mirrorsView, openKeysOf, stretchHolding } from '../owner/view/mirror'; // UX wave U2b
 import { applyEvents, createState, RECEIPT_APPLIED, withAgents, withReaderState, withUi, type AgentLookup, type ReceiptUndo, type SpillLoad, type TranscriptState, type TranscriptUi } from '../transcript/model/reduce';
 import type { CellId, Row, RowId, TurnId } from '../transcript/model/rows';
 import { attachSource, type Attachment } from '../transcript/source/hydrate';
@@ -369,8 +369,16 @@ export function createTranscriptStore() {
         next.state = withViewFlag(patch.state); // UX wave U2b: in the same update as the events, the lane, the outside rows
         next.rows = rowsOf(next.state);
         next.working = next.state.current !== null;
-        // UX wave U2b: an opening whose row the update took away passes to what that row also answered to (`carriedKeys`)
-        const carried = carriedKeys(current.rows, next.rows, next.state.ui.openStretches, liveMarkedRowIds(current.state));
+        // UX wave U2b: an opening whose row the update took away passes to a surviving identity (`carriedKeys`), read over
+        // the rows each mounted view composes before and after the update, as the list draws them (a standalone browser
+        // activity splits a stretch there); over the key's own rows when none is mounted. Composed only when the key's
+        // own rows lost a row an open key named, since a view's rows are the key's rows with its own placed among them.
+        const open = next.state.ui.openStretches;
+        let carried: string[] = [];
+        if (open !== undefined && lostKey(current.rows, next.rows, open)) {
+          const after = composedViews(key, next);
+          carried = [...new Set(composedViews(key, current).flatMap((view, i) => carriedKeys(view.rows, after[i].rows, open, view.liveMarked)))];
+        }
         if (carried.length > 0) {
           const ui = copyUi(next.state.ui, []);
           for (const name of carried) ui.openStretches!.add(name);
