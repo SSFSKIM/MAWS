@@ -353,7 +353,7 @@ describe('what a person started outlives the view', () => {
     mountCustomize({ view: 'mine', show: 'connectors' });
     fireEvent.click(await screen.findByRole('button', { name: 'Remove tides' }));
     await screen.findByRole('dialog', { name: 'Remove tides?' });
-    fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } });
+    act(() => useCustomizeProject.setState({ projectId: B }, true)); // the place changes under the sheet, as an opener's write changes it
     await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
     fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
     expect(screen.queryByRole('dialog')).toBeNull(); // not again on return
