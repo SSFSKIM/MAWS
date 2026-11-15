@@ -213,7 +213,8 @@ describe('the report view', () => {
     b.end(['u1']);
     await mounted(b.events);
     await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call'));
-    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent?.replace(/\s+/g, ' ').trim()).toBe('The README plan. The branch is master. Unverified. Which tone? Concise Friendly');
+    // the answer's own drawing, its row's first child: the UX wave's U3b draws the answer's action row after it
+    expect(document.querySelector('[data-kind="assistant_text"]')?.firstElementChild?.textContent?.replace(/\s+/g, ' ').trim()).toBe('The README plan. The branch is master. Unverified. Which tone? Concise Friendly');
     expect(document.querySelector('[data-owner-card], .owner-card-label')).toBeNull();
   });
 
