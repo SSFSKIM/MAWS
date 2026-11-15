@@ -349,7 +349,7 @@ describe('what a person started outlives the view', () => {
     await waitFor(() => expect(invoked('connectors.signInCancel')).toEqual([{ opId: 'op-1' }]));
   });
 
-  it('a change of project closes an open sheet and resets an open detail', async () => {
+  it('a change of project closes an open sheet and resets an open detail, and a sheet asked for then opens on the new place', async () => {
     mountCustomize({ view: 'mine', show: 'connectors' });
     fireEvent.click(await screen.findByRole('button', { name: 'Remove tides' }));
     await screen.findByRole('dialog', { name: 'Remove tides?' });
@@ -362,7 +362,10 @@ describe('what a person started outlives the view', () => {
     await found('[data-plugin-detail]');
     fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } });
     await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
-    expect(await pluginRow('buoy-log@harbour-market')).toBeTruthy();
+    // a sheet asked for on the place now shown opens there
+    fireEvent.keyDown(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: /^More actions for / }), { key: 'Enter' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Uninstall…' }));
+    await waitFor(() => expect(sheet()).toBeTruthy());
   });
 });
 
