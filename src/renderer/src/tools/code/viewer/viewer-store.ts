@@ -13,7 +13,7 @@
 //
 // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §E): a session on this Mac reads
 // with `named`, so the files service also answers for a file outside the session's folders that its transcript links;
-// the answer says so (`named`), and such an entry is never editable, its reason the editor's title. Every load sets
+// the answer says so (`named`), and such an entry was never editable, its reason the editor's title (U6e below). Every load sets
 // `named` from its answer, also one that lands nothing else. No watch follows a file outside the folders, and nothing
 // follows a refusal, so `revisit` reads a failed or named entry again when its tab is shown again or its file opened
 // again (decision 15).
