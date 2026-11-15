@@ -130,8 +130,9 @@ describe('X9: the maws server and its twelve tools', () => {
 
   // U6d (O-44): the agent opens no artifact by itself, and nothing it is served invites the call that did
   it('invites no call of show_pane for an artifact: artifact_create ends on the link, and no other tool names show_pane', () => {
-    expect(MAWS_TOOLS.artifact_create.description.endsWith('To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.')).toBe(true);
-    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458); // UX wave U10b: designSystem's sentence
+    // UX wave U10b (M10, §E.4): only the sentence on a Space's instructions follows the link's, and it names no pane
+    expect(MAWS_TOOLS.artifact_create.description.endsWith("To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.")).toBe(true);
+    expect(MAWS_TOOLS.artifact_create.description).toHaveLength(1458 + 184); // UX wave U10b: designSystem's sentence; M10: the instructions' sentence
     for (const name of MAWS_TOOL_NAMES) if (name !== 'show_pane') expect(MAWS_TOOLS[name].description, name).not.toContain('show_pane');
   });
 });
