@@ -37,11 +37,14 @@ function Counter({ tabId, kind, label, previous, next, count }: { tabId: string;
 
 export function EditorControls({ entry }: { entry: ViewerEntry }) {
   const saveChord = useChordHint('file.save');
-  const { tabId, theirs, saving, saveError, dirty, diskUnusable } = entry;
+  const { tabId, theirs, saving, saveError, dirty, diskUnusable, locked } = entry;
   const counts = useEditorNavigation((s) => s.counts.get(tabId));
   const changes = theirs?.view === 'merge' ? (counts?.changes ?? null) : null;
   const conflicts = changes === null ? (counts?.conflicts ?? 0) : 0;
-  if (!dirty && theirs === null && saveError === null && diskUnusable === null && conflicts === 0) return null;
+  // UX wave U6e (the panel's finding 3): an entry whose latest admission locks it offers no Save; the ways out that write
+  // nothing (Reload, Keep mine) stay
+  const savable = locked === null && (dirty || theirs !== null);
+  if (!savable && theirs === null && saveError === null && diskUnusable === null && conflicts === 0) return null;
   const viewer = useViewer.getState;
   return (
     <span data-editor-controls className="flex min-w-0 shrink items-center gap-1">
@@ -74,7 +77,7 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
       {conflicts > 0 ? (
         <Counter tabId={tabId} kind="conflict" count={conflicts} label={EDITOR_COPY.conflicts(conflicts)} previous={EDITOR_COPY.previousConflict} next={EDITOR_COPY.nextConflict} />
       ) : null}
-      {dirty || theirs !== null ? (
+      {savable ? (
         <button
           type="button"
           className={primary}

@@ -165,7 +165,7 @@ export function FileViewer({ tab, start, end, agent = false }: { tab: FileTab; s
       line={tab.line}
       agent={agent}
       lead={lead}
-      controls={(entry) => (entry.locked === null ? <EditorControls entry={entry} /> : null)}
+      controls={(entry) => <EditorControls entry={entry} />}
       below={(entry) => <SaveFailure entry={entry} />}
       end={end}
     />
