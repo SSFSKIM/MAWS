@@ -694,9 +694,11 @@ export function createViewerStore(client: MawsBridge) {
           watchThenRead('open');
         } else {
           const moved = line !== entry.line;
-          const marked = asAgent !== entry.agent;
+          // the agent's show of an entry that is there reads nothing new and leaves its mark as it is; the tab's own mark
+          // changing (a person's open, a keep) reads again under it
+          const marked = !byAgent && agent !== entry.agent;
           if (moved) patch(tabId, { line, pendingJump: line, ...(line !== null && entry.kind === 'markdown' ? { sourceView: true } : {}) });
-          if (marked) patch(tabId, { agent: asAgent });
+          if (marked) patch(tabId, { agent });
           // a re-read an event left for the next showing, or (U6c) a failed or named entry shown again. U6e (decision 19):
           // not for a line moved under a view that stays mounted (a person's open reads through `revisit`), nor for a view
           // the agent's show drew again (it reads nothing new); and again when the agent's mark changes, a read in flight

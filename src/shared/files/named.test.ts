@@ -524,7 +524,9 @@ describe('isMcpTool and anchorPaths', () => {
 const text = (value: string) => ({ type: 'text', text: value });
 const assistant = (...content: object[]) => ({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content } });
 const call = (id: string, name: string, input: object) => ({ type: 'tool_use', id, name, input });
-const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: 'u1', message: { role: 'user', content }, ...extra });
+// A `user` row carries the person's origin as the engine writes it on a typed prompt (Decision Log 22: only such a row
+// counts as the person's); `extra` overrides it.
+const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content }, ...extra });
 const result = (id: string, content: string | object[]) => ({ type: 'tool_result', tool_use_id: id, content });
 const queued = (prompt: string | object[], extra: object = {}) => ({
   type: 'attachment',
@@ -723,7 +725,7 @@ describe('rowClaim: only a row positively the person’s counts (Decision Log 22
   });
 
   it.each(origins)('a user row of %s names it for a read only; queued, it names nothing', (_, origin) => {
-    const row = user(words, origin === undefined ? {} : { origin });
+    const row = user(words, { origin }); // `origin: undefined` drops the builder's: a row with none
     expect(rowClaim(row, P)).toEqual(OTHER);
     expect(rowClaim(queuedOf(origin), P)).toEqual(NOTHING);
   });

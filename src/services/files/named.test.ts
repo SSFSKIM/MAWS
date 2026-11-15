@@ -22,7 +22,8 @@ let serial = 0;
 const text = (value: string) => ({ type: 'text', text: value });
 const assistant = (...content: object[]) => ({ type: 'assistant', uuid: `a-${++serial}`, message: { role: 'assistant', content } });
 const call = (id: string, name: string, input: object) => assistant({ type: 'tool_use', id, name, input });
-const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: `u-${++serial}`, message: { role: 'user', content }, ...extra });
+// The person's origin, as the engine writes it on a typed prompt (Decision Log 22: only such a row counts as the person's)
+const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: `u-${++serial}`, origin: { kind: 'human' }, message: { role: 'user', content }, ...extra });
 const result = (id: string, content: string | object[], extra: object = {}) => user([{ type: 'tool_result', tool_use_id: id, content }], extra);
 const filler = (n: number, size = 200) => Array.from({ length: n }, (_, i) => (i % 2 === 0 ? user(`note ${i} ${'x'.repeat(size)}`) : assistant(text(`reply ${i} ${'y'.repeat(size)}`))));
 const linkTo = (path: string) => assistant(text(`Wrote [the report](${path}).`));
