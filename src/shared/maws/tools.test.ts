@@ -334,6 +334,13 @@ describe('X9 artifact tools (E2)', () => {
     expect(MAWS_TOOLS.artifact_publish.description).toContain('baseRevision is the revision your last artifact_read');
   });
 
+  // UX wave U10b (l6-artifacts-18, §A.2 and §A.3): the publish's path and the html page's own export, word for word
+  it('tells the agent of a publish from a file and an html page exported as itself', () => {
+    expect(MAWS_TOOLS.artifact_publish.description).toContain('(an html page is its one file, index.html) For an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file\'s bytes in place of files.; baseRevision is');
+    expect(MAWS_TOOLS.artifact_export.description).toContain('Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them.');
+    expect(MAWS_TOOLS.artifact_export.description).not.toContain('Formats: pdf or png for an html page;');
+  });
+
   it("publishes each input's JSON schema: strict, with the bounds of the contract", () => {
     const schemaOf = (name: 'artifact_create' | 'artifact_list' | 'artifact_screenshot' | 'artifact_publish') => mawsToolList().find((t) => t.name === name)!.inputSchema;
     const id = { type: 'string', pattern: ARTIFACT_ID.source };
@@ -346,7 +353,22 @@ describe('X9 artifact tools (E2)', () => {
       type: 'object', additionalProperties: false, required: ['id'],
       properties: { id, version: { type: 'integer', minimum: 1 }, width: { type: 'integer', minimum: 320, maximum: 2560 }, height: { type: 'integer', minimum: 240, maximum: 2560 } },
     });
-    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision', 'files'] });
+    // UX wave U10b (§A.2): an html page publishes from path or files, one of them, so neither is required
+    expect(schemaOf('artifact_publish')).toMatchObject({ type: 'object', additionalProperties: false, required: ['artifact', 'baseRevision'], properties: { path: { type: 'string', minLength: 1 } } });
+  });
+
+  // UX wave U10b (l6-artifacts-18, §A.2): path or files, exactly one, refused by the schema with the one sentence
+  it('takes path or files on a publish, not both and not neither', () => {
+    const base = { artifact: 'dash', baseRevision: 3 };
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, path: 'page.html' }).success).toBe(true);
+    expect(ArtifactPublishInputSchema.safeParse({ ...base, files: { 'index.html': '<p/>' } }).success).toBe(true);
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base, { ...base, path: '' }]) {
+      expect(ArtifactPublishInputSchema.safeParse(bad).success, JSON.stringify(bad)).toBe(false);
+    }
+    for (const bad of [{ ...base, path: 'page.html', files: { 'index.html': '<p/>' } }, base]) {
+      const refused = parseToolArguments('artifact_publish', bad);
+      expect(refused.ok === false && refused.error, JSON.stringify(bad)).toBe(TOOL_ERRORS.publishPathOrFiles);
+    }
   });
 
   it('parses the inputs strictly and never defaults', () => {
@@ -458,6 +480,8 @@ describe('X9 artifact tools (E2)', () => {
     expect(TOOL_ERRORS.notHtml('artifact_create', '/r/x.txt')).toBe('artifact_create: not an HTML file: /r/x.txt');
     expect(TOOL_ERRORS.tooLarge('artifact_create', '/r/x.html', 16777217)).toBe('artifact_create: too large: /r/x.html (16777217 bytes; the limit is 16 MiB)');
     expect(TOOL_ERRORS.artifactExists('dash')).toBe('artifact_create: an artifact "dash" already exists in this session; use artifact_publish');
+    expect(TOOL_ERRORS.publishPathOrFiles).toBe('artifact_publish: give path or files, not both and not neither'); // U10b (§A.2)
+    expect(TOOL_ERRORS.publishPathHtmlOnly('document')).toBe('artifact_publish: path publishes an html page; send files for a document');
     expect(TOOL_ERRORS.noArtifact('artifact_publish', 'nope')).toBe('artifact_publish: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noArtifact('artifact_screenshot', 'nope')).toBe('artifact_screenshot: no artifact "nope" in this session');
     expect(TOOL_ERRORS.noVersion('dash', 3, 2)).toBe('artifact_screenshot: version 3 does not exist; "dash" has 2 version(s)');

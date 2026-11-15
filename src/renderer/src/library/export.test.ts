@@ -33,6 +33,15 @@ describe('the export formats', () => {
     expect(file.result.current).toEqual([]);
   });
 
+  // UX wave U10b (H9, §A.3): an html page is not offered as html, which "Save a copy…" is; another kind keeps it
+  it('leave html out for an html page, and keep it for another kind', async () => {
+    installFakeMain((name, input) => (name === 'library.exportFormats' ? ok({ formats: input.kind === 'html' ? ['pdf', 'png', 'html'] : ['pdf', 'html'] }) : fail('no')));
+    const page = renderHook(() => useExportFormats('html'));
+    await waitFor(() => expect(page.result.current).toEqual(['pdf', 'png']));
+    const deck = renderHook(() => useExportFormats('presentation'));
+    await waitFor(() => expect(deck.result.current).toEqual(['pdf', 'html']));
+  });
+
   it('are none while main cannot say, and asked again next time', async () => {
     let answer = fail('main is busy');
     const main = installFakeMain(() => answer);

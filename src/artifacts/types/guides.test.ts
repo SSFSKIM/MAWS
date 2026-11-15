@@ -36,6 +36,14 @@ describe('the kinds’ guides and format references', () => {
     expect(KIND_GUIDES.file.guide).toMatch(/send_file/);
   });
 
+  // UX wave U10b (l6-artifacts-18, §A.4): when a reader filters, an html page; a rebuilt page publishes from its file
+  it('tells the agent when a dashboard is the wrong kind, and how to publish a rebuilt page by path', () => {
+    const when = KIND_GUIDES.dashboard.guide.split('\n## ').find((section) => section.startsWith('When to use this kind'))!;
+    expect(when.trimEnd().endsWith("A dashboard's views have no controls for the reader: a filter is fixed in each view's spec. When the user should filter or explore the data themselves, make an `html` page.")).toBe(true);
+    const editing = KIND_GUIDES.html.guide.split('\n## ').find((section) => section.startsWith('Reading and editing'))!;
+    expect(editing).toContain('and `files: {"index.html": "<the whole new page>"}`. When you rebuilt the page as a file, pass `path` (that .html file) in place of `files`: its bytes become the new version.');
+  });
+
   // P3-B (M7): the document kind's guide and format reference (their examples are checked against the dialect in
   // document/format.test.ts)
   it('writes the document kind in full: the guide names its tools, the format reference its dialect', () => {

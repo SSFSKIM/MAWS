@@ -21,6 +21,7 @@ import { DocumentService } from '../documents/service';
 import { SqliteDocumentStorage } from '../documents/storage';
 import { ArtifactStore } from '../documents/store';
 import { artifactListAssetsTool, artifactUploadAssetTool } from './artifact-assets';
+import { readHtmlSource } from './artifact-context';
 import { artifactExportTool, type ArtifactExportAnswer, type ArtifactExportRequest } from './artifact-export';
 import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
@@ -610,5 +611,25 @@ describe('artifact_export', () => {
     const closed = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: () => {}, answerMs: 60_000, hasClient: () => false });
     expect(textOf(await artifactExportTool({ ...w.deps(), exporter: closed }).call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).toBe(TOOL_ERRORS.appNotOpen('artifact_export'));
     expect(existsSync(join(w.cwd, 'out'))).toBe(false);
+  });
+});
+
+// UX wave U10b (§A.1): the one reader of an html source, artifact_create's steps taken out unchanged, which
+// artifact_publish's path uses too: relative to the working folder or absolute, .html or .htm, a regular file
+describe('readHtmlSource', () => {
+  it('reads the file as it is, named by its own name, at the path it resolved', async () => {
+    const raw = Buffer.from([0x3c, 0x70, 0x3e, 0xff, 0xfe, 0x3c, 0x2f, 0x70, 0x3e]);
+    writeFileSync(join(w.cwd, 'Raw.HTM'), raw);
+    const read = await readHtmlSource('artifact_publish', w.cwd, 'Raw.HTM');
+    expect(read).toEqual({ bytes: raw, name: 'Raw.HTM', source: join(w.cwd, 'Raw.HTM') });
+    expect(await readHtmlSource('artifact_create', '/elsewhere', join(w.cwd, 'dashboard.html'))).toMatchObject({ name: 'dashboard.html', source: join(w.cwd, 'dashboard.html') });
+  });
+
+  it('refuses what is not a regular .html or .htm file in the calling tool’s name', async () => {
+    writeFileSync(join(w.cwd, 'notes.txt'), 'x');
+    mkdirSync(join(w.cwd, 'folder.html'));
+    await expect(readHtmlSource('artifact_publish', w.cwd, 'notes.txt')).rejects.toMatchObject({ text: TOOL_ERRORS.notHtml('artifact_publish', join(w.cwd, 'notes.txt')) });
+    await expect(readHtmlSource('artifact_publish', w.cwd, 'gone.html')).rejects.toMatchObject({ text: TOOL_ERRORS.artifactNotAFile('artifact_publish', join(w.cwd, 'gone.html')) });
+    await expect(readHtmlSource('artifact_create', w.cwd, 'folder.html')).rejects.toMatchObject({ text: TOOL_ERRORS.artifactNotAFile('artifact_create', join(w.cwd, 'folder.html')) });
   });
 });
