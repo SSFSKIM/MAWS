@@ -136,7 +136,10 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
     }
   }
 
-  deps.register('layout.frameFile', ({ appSessionId, path }, { client, target }) => (target === deps.local ? onThisMac(client, appSessionId, path) : fromMachine(client, target, appSessionId, path)));
+  deps.register('layout.frameFile', ({ appSessionId, path }, { client, target }) => {
+    const session = appSessionId as AppSessionId; // the router validated it against AppSessionIdSchema
+    return target === deps.local ? onThisMac(client, session, path) : fromMachine(client, target, session, path);
+  });
   deps.register('layout.releaseFrame', ({ token }, { client }) => {
     if (!tokens.release(token, client)) fail('invalid_input', 'layout.releaseFrame: no frame of this window');
   });
