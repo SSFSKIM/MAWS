@@ -31,6 +31,7 @@ async function drawn(rows: JsonObject[]) {
   // the notice is work of its turn, folded with it once the turn has closed (UX wave U3, M2): read it unfolded
   return { rows: entry.rows, expanded: rowsOf(withAllExpanded(entry.state)), report: reportRows(entry.rows, entry.state, {}) };
 }
+const dividers = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'divider' ? [r.origin] : []));
 const bubbles = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'user' ? [r.text] : []));
 const lines = (rows: Row[]) => rows.flatMap((r) => (r.kind === 'notice' && r.class === 'answer' ? [r.text] : []));
 const HARNESS = /AskUserQuestion|plugin sent a message|surfaces a prompt/;
@@ -82,16 +83,17 @@ describe("the ask mod's answer", () => {
     const { rows, expanded, report } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
     expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
-    // UX wave U1b (decision 9): the question's own row carries the answer, and the answer's line heads the turn it
-    // opened (UX wave U3, the U3a document's head rule), folded with that turn's work: the turn has its line, which
-    // reads as the person's (U2a's verb for an answer's turn)
-    expect(rows.flatMap((r) => (r.kind === 'divider' ? [r.opener?.class] : []))).toEqual(['answer']);
-    expect(lines(rows)).toEqual([]);
+    // UX wave U2 (O-15; the U2a document's C5): the turn the answer opened only answers, so it has no line; the answer's
+    // line heads it, in view (UX wave U3, the U3a document's head rule; UX wave U1b, the architect's ruling on M1's D-7:
+    // the answer's line as a turn's only work stays in view). UX wave U1b: the question's own row carries the answer too
+    expect(dividers(rows)).toEqual([]);
+    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
     const answered = expanded.find((r) => r.kind === 'notice')!;
-    expect(expanded.find((r) => r.kind !== 'time' && r.kind !== 'divider' && r.turnId === answered.turnId)).toMatchObject({ id: answered.id });
+    expect(rows.find((r) => r.kind !== 'time' && r.turnId === answered.turnId)).toMatchObject({ id: answered.id });
     expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: { 'Which color do you prefer?': 'Blue', 'Which season do you prefer?': 'Summer' } });
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
-    // The report folds the answered turn's work, the line with it, and keeps the question's row, which says the answer.
+    // The report (its own fold, U2b's once it lands) folds a marked turn's unmarked rows, the line with them, and keeps
+    // the question's row, which says the answer.
     expect(lines(report)).toEqual([]);
     expect(report.filter((r) => r.kind === 'question')).toMatchObject([{ answers: { 'Which color do you prefer?': 'Blue', 'Which season do you prefer?': 'Summer' } }]);
     expect(bubbles(report)).toEqual(['Pick my colors, then write the palette.']);
@@ -152,7 +154,8 @@ describe("the ask mod's answer under either plugin's name", () => {
     const { rows, expanded } = await drawn(c.rows);
     expect(bubbles(rows)).toEqual(['Pick my colors, then write the palette.']);
     expect(lines(expanded)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]);
-    expect(rows.flatMap((r) => (r.kind === 'divider' ? [r.opener?.class] : []))).toEqual(['answer']); // UX wave U1b (decision 9): its line folds the answer's line
+    expect(dividers(rows)).toEqual([]); // UX wave U2 (O-15): the turn the answer opened only answers: no line
+    expect(lines(rows)).toEqual([NOTICE.answered('Color → Blue · Season → Summer')]); // UX wave U1b (D-7's ruling): in view
     expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: { 'Which color do you prefer?': 'Blue', 'Which season do you prefer?': 'Summer' } });
     expect([...bubbles(rows), ...lines(expanded)].some((text) => HARNESS.test(text))).toBe(false);
   });

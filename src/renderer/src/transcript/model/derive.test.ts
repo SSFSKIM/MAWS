@@ -1425,9 +1425,9 @@ describe('`background` over a recorded MCP call moved to the background (uxwave/
   });
 });
 
-// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for`. UX wave U1b (decision 9, U3a's
-// hand-over): the notice no longer stays in view through a fold, its question's row saying the answer; it is the turn's
-// work, so a turn that only answers has a line too, which folds the notice (reported to the architect with M1)
+// UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
+// where it only answers. UX wave U1b (decision 9 and the architect's ruling of 2026-11-15 on M1's D-7): with other work
+// the notice folds with it, its question's row saying the answer; as the turn's only work it stays in view
 describe('the line of a turn an answer opened', () => {
   const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
   const opened = (work: boolean) => {
@@ -1443,12 +1443,8 @@ describe('the line of a turn an answer opened', () => {
     return rowsOf(reduce(b.events)).filter((row) => row.kind !== 'time'); // at rest: folded
   };
 
-  it('that only answers has a line, `Worked for …`, which folds its notice; the answer stays', () => {
-    const list = opened(false);
-    expect(kinds(list)).toEqual(['divider', 'assistant_text']);
-    const line = find(list, 'divider');
-    expect(line.opener).toMatchObject({ class: 'answer' });
-    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s');
+  it('that only answers has no line, and its notice and answer stay', () => {
+    expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
   });
 
   it('with one call reads `Worked for …` and folds its notice with the call', () => {
