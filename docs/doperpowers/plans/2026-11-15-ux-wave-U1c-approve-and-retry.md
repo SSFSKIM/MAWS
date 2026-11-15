@@ -26,7 +26,7 @@ How to see it working: launch the app on the recorded session `spikes/protocol-p
 - [x] (2026-11-15) Adversarial review (seven findings) and the architect's rulings; revision 2.
 - [x] (2026-11-15) Probes T, B, C, D and E answered on `ux-wave/U1c-probes`, merged into this branch at its final head `54dd334a4`; the architect's rulings at the build edge (A to K) recorded (Decision Log 7 to 19) and written into the places they name. The values B and T move are moved in M3 and M4, each in a commit that names its recording.
 - [x] (2026-11-15) M1 — the grant as the reader knows it: the engine's encoding, both forms, several in one message, and the join. Commits `3fde30f1b`..`f1ad201ef` (one fix wave: rows beside a message withdrawn with it, an attachment beside grants kept), reviewed clean.
-- [ ] M2 — the row's words, what an approval names, and what the transcript's rows say of it. Built `aa6fe8a0c`..`f8e14627c`; under review.
+- [x] (2026-11-15) M2 — the row's words, what an approval names, and what the transcript's rows say of it. Commits `aa6fe8a0c`..`f8e14627c`, one fix wave `ca0456b35`..`2aa7b5f91` (the opened detail of a blocked call draws none of the engine's refusal text), reviewed clean.
 - [ ] M3 — the button, its subject, the press and the waiting row.
 - [ ] M4 — the terminal route, state by state (starts only when probe T has answered).
 - [ ] M5 — the scenes, the whole suite and the acceptance run.
@@ -762,6 +762,9 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   Date/Author: 2026-11-15, M2's executor; folded by the controller.
 - Decision 27 (the architect): `src/engine-host/journal.test.ts` "numbersReadBack > passes every line of the probe's recordings" gets the same 60 s bound on master; it is not edited on this branch. Merge nothing until the architect names a head (master is `3678e3c00` at this entry).
   Date/Author: 2026-11-15, the architect; recorded by the controller.
+- Decision 28 (the architect, on M2's review): the opened detail of a call of kind `automode-blocked` shows the command and none of the engine's refusal text; a real reason stays on the label only (Claude Desktop cuts it at 1,000 characters too, so the detail adds nothing). Built in `blocked.ts` (a display-only cell without the refusal's output, truncation and spill references) and `CellLine.tsx` (that cell goes to the native detail and to `renderDetail`, so the surface's fallback draws it too); the stored cell, the row's copy (`serialize.ts`) and what a mod's ToolResult component receives are unchanged. Acceptance 5's test opens every one of the fifteen recorded blocks and probe E's block from its journal and its file. The review found no tooltip, `title`, aria label or find text that still carries the stand-in for a blocked call; the accepted exceptions are the live subagent route (Decision Log 25) and a mod's own drawing (law 2).
+  Rationale: the document's In and Acceptance 5 ("the stand-in sentences dropped"; the stand-in "shown nowhere"); M2's first test read labels and notices only.
+  Date/Author: 2026-11-15, the architect; built by M2's executor; recorded by the controller.
 
 ## Outcomes & Retrospective
 
