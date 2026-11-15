@@ -265,10 +265,12 @@ export const BEFORE_THE_CHANGE = 'Before the change:';
 const QUOTE_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g; // every control character but the tab
 const BLANK_LINE = /^[ \t]*$/;
 
-// The line as one line of at most QUOTE_MAX units: the CR of a CRLF line's ending is no part of its text; any other
-// line break or control character is U+FFFD; a cut never halves a surrogate pair.
-function quoteLine(line: string): string {
-  const one = line.replace(/\r$/, '').replace(QUOTE_CONTROL, '�');
+// The line as one line of at most QUOTE_MAX units, or null when it is blank, which is read before the cut (a cut line
+// of spaces would hold "…"): the CR of a CRLF line's ending is no part of its text; any other line break or control
+// character is U+FFFD; a cut never halves a surrogate pair.
+function quoteLine(line: string): string | null {
+  const one = line.replace(/\r$/, '').replace(QUOTE_CONTROL, '\uFFFD');
+  if (BLANK_LINE.test(one)) return null;
   if (one.length <= QUOTE_MAX) return one;
   let end = QUOTE_MAX - 1;
   const last = one.charCodeAt(end - 1);
@@ -286,8 +288,8 @@ function codeSpan(line: string): string {
 /** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line); unchanged when `quote` is null and the line is not a removed one. */
 export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
   if (text.trim() === '') return text; // a comment with no words is not sent
-  const line = quote === null ? '' : quoteLine(quote);
-  const parts = [...(anchor.kind === 'file-line' && anchor.side === 'old' ? [BEFORE_THE_CHANGE] : []), ...(BLANK_LINE.test(line) ? [] : [codeSpan(line)]), text];
+  const line = quote === null ? null : quoteLine(quote);
+  const parts = [...(anchor.kind === 'file-line' && anchor.side === 'old' ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
   return parts.join('\n');
 }
 // UX wave U5b end

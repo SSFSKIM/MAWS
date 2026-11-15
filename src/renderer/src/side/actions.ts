@@ -13,6 +13,7 @@ import { commentsMessage, promotionMessage, quotedComment /* UX wave U5b */ } fr
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
+import { SIDE_QUESTION_CAP } from '@shared/ipc/schema/side'; // UX wave U5b: a comment's text cap
 import type { FirstMessage } from '@shared/sessions/intent';
 import { ipc } from '../ipc/client';
 import { isRemoteLaneA } from '../lane-a/remote-session';
@@ -22,7 +23,7 @@ import { adoptFork, titleOf } from '../sessions/record-ops';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { toast } from '../stores/notices';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { editComment, enterThread, flightRefused, flightSettlements, flightState, flightWent, launchFlight, notePlace, passHost, toastPending, type Flight } from './card/store';
+import { editComment, enterThread, flightRefused, flightSettlements, flightState, flightWent, launchFlight, notePlace, passHost, toastPending, type Flight, type PassComment } from './card/store';
 import { SIDE_COPY } from './copy';
 import { promotable, setSideView, sidePaneOf, useSidePane, type SideView } from './store';
 
@@ -211,10 +212,21 @@ export async function sendPass(pass: string, client: MawsBridge = ipc): Promise<
   const flight = launchFlight(pass);
   if (flight === null) return;
   const settlements = flightSettlements(flight);
-  const comments = flight.comments.map(({ anchor, quote, text, screenshot }) => ({ anchor, text: quotedComment(anchor, quote ?? null, text.trim()), screenshot }));
+  const comments = flight.comments.map((comment) => ({ anchor: comment.anchor, text: wordsAsSent(comment), screenshot: comment.screenshot }));
   const outcome = await sendComments(flight.appSessionId, comments, flight.toMain, { reveal: () => revealsThread(flight) }, client);
   for (const settle of settlements) settle(outcome.ok);
   land(flight, outcome);
+}
+
+// UX wave U5b (fix 1): a comment's words with its line quoted, as far as the commands' cap on a comment's text allows
+// (SIDE_QUESTION_CAP), so a comment whose words alone fit is never refused for its quote. What does not fit is left
+// out, the span first, then the caption; the words go as typed.
+function wordsAsSent({ anchor, quote, text }: PassComment): string {
+  const words = text.trim();
+  const quoted = quotedComment(anchor, quote ?? null, words);
+  if (quoted.length <= SIDE_QUESTION_CAP) return quoted;
+  const captioned = quotedComment(anchor, null, words);
+  return captioned.length <= SIDE_QUESTION_CAP ? captioned : words;
 }
 
 // A side thread the flight opened is revealed in the parent's pane unless a card on one of its comments becomes it; a
