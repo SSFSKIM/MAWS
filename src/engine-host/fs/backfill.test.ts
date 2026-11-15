@@ -1168,11 +1168,17 @@ describe('a grant a sminos bridge carried to a terminal session, from the file (
     expect(only(events, 'turn.started').map((event) => event.userMessageUuid)).toContain(uuid);
   });
 
-  it.each(runs.busy)('during a turn, %s: the words the mirror line names are the person’s steer into the running turn, with the mark; the appended row is a synthetic message with none; the line is no notice', (name, line, n) => {
+  // Decision Log 38: the approval waits for the running turn, its start held to the events of the running call's result
+  // (the line after the mirror line in each run), which the engine's next request carries
+  it.each(runs.busy)('during a turn, %s: the words the mirror line names are the person’s steer, with the mark, waiting for the running turn: its start comes after the running call’s result, not at the mirror line; the appended row is a synthetic message with none; the line is no notice', (name, line, n) => {
     const { events, uuid, marked } = mapped(name, line);
     expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: 'human', isSynthetic: false, arrival: [GRANT(n)] })]);
-    const at = events.indexOf(marked[0]!);
-    expect(events[at + 1]).toMatchObject({ kind: 'command.lifecycle', commandUuid: uuid, state: 'started' });
+    const result = loadUxwaveTranscript(name)[line + 1]!.uuid as string;
+    const started = events.filter((event) => event.kind === 'command.lifecycle' && event.commandUuid === uuid);
+    expect(started, 'one start').toHaveLength(1);
+    const at = events.indexOf(started[0]!);
+    expect(events[at - 1], 'right after the running call’s result').toMatchObject({ kind: 'tool.result', messageUuid: result });
+    expect(started[0]!.id.startsWith(result), 'made at the result’s record').toBe(true);
     expect(only(events, 'user.message').filter((event) => event.messageUuid === uuid).map((event) => [event.isSynthetic, event.arrival ?? null])).toEqual([[true, null], [false, [GRANT(n)]]]);
     expect(delivered(events)).toEqual([]);
   });
@@ -1191,6 +1197,19 @@ describe('a grant a sminos bridge carried to a terminal session, from the file (
   const row = (uuid: string, text: string) => rec({ type: 'user', uuid, parentUuid: 'p1', isMeta: true, timestamp: at(1), origin: sminos, promptId: 'x', message: { role: 'user', content: [{ type: 'text', text }] } });
   const line = (uuid: string, parentUuid: string, text: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, isMeta: false, timestamp: at(2), content: `sminos: delivered: ${text.replaceAll('\n', ' ')}`, level: 'notice' });
   const SENTENCE = 'Permission granted for this exact command only, as one whole string: "make build". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.';
+
+  // Decision Log 38, scope (A): only an approval waits; any other words the bridge appends into a running turn keep
+  // today's events, the steer taken at once, whether the mirror line names them or MAWS draws them (`mawsDrawn`)
+  it('an ordinary steer the bridge appended into a running turn keeps today’s events: its message and its start together, at the mirror line and at MAWS’s drawn row', () => {
+    const call = rec({ type: 'assistant', uuid: 'a1', parentUuid: 'p1', timestamp: at(1), message: { id: 'msg_1', model: 'x', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'sleep 30' } }] } });
+    const drawn = rec({ type: 'attachment', uuid: 'd2', parentUuid: 'n1', timestamp: at(3), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'And the docs.' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'd2', mawsDrawn: true } });
+    const events = mapAll([prompt, call, row('d1', 'Also run the linter.'), line('n1', 'd1', 'Also run the linter.'), drawn]);
+    const steers = events.filter((event) => (event.kind === 'user.message' && !event.isSynthetic && event.messageUuid !== 'p1') || event.kind === 'command.lifecycle');
+    expect(steers.map((event) => [event.kind, event.kind === 'user.message' ? event.messageUuid : (event as Extract<SessionEvent, { kind: 'command.lifecycle' }>).commandUuid])).toEqual([
+      ['user.message', 'd1'], ['command.lifecycle', 'd1'],
+      ['user.message', 'd2'], ['command.lifecycle', 'd2'],
+    ]);
+  });
 
   it('appended words that hold the sentence among other words, or behind the person’s sminos frame line, are the person’s words with no mark', () => {
     const among = `Also run the linter.\n${SENTENCE}`;

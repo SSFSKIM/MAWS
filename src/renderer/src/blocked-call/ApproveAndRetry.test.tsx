@@ -27,6 +27,8 @@ import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
 import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
 import { QueueList } from '../composer/queue/QueueList';
+import { rowText, STACK_WORDS, stackRows } from '../composer/queue/stack';
+import { readOf } from '../composer/queue/stack-acts';
 import { ALL_OPEN, remoteSessionState } from '../lane-b/test-support/remote-session';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useMachines } from '../stores/machines';
@@ -563,6 +565,33 @@ describe('where there is no button, where it is disabled, and a terminal session
     expect(row.button()).toBeNull();
     expect(store.rows().flatMap((r) => (r.kind === 'user' && r.consent !== undefined ? [r.consent.subject] : []))).toEqual([MARKER]);
     expect(useGrantsOut.getState().out.size, 'ended on the record').toBe(0);
+  });
+
+  // Decision Log 38 (§C 8; Design 5): u1c-t-busy-1's approval waits from the mirror line (53) for the running call's
+  // result (54), which the engine's next request carries; until then the button stays closed, the row does not read
+  // approved, and the stack draws the approval as every message waiting at the next step
+  it('a terminal session, running (u1c-t-busy-1): while the approval waits for the running call’s result, the button stays closed, the line does not read approved, and the stack draws Design 5’s waiting row; from the result on the row reads approved', async () => {
+    const run = bridged('u1c-t-busy-1', 52);
+    const records = loadUxwaveTranscript('u1c-t-busy-1');
+    const result = records[53]!.uuid as string;
+    const at54 = run.after.findIndex((event) => event.id === result || event.id.startsWith(`${result}#`));
+    const store = await storeAt(at('terminal-waiting'), run.before);
+    onTerminal(store.key, { running: true, unknown: false });
+    const [id] = blockedIds(store);
+    const row = drawn(store, id!);
+    vi.useFakeTimers();
+    fireEvent.click(row.button()!);
+    await flush();
+    await answer('laneA.send', { key: { writer: 'maws/test', seq: 1 }, state: 'entered', uuid: run.uuid });
+    await store.push(run.after.slice(0, at54));
+    expect(row.line(), 'waiting: not approved').toBe(`Auto mode blocked: ${MARKER}`);
+    expect(row.button()!.disabled, 'waiting: closed').toBe(true);
+    const stack = stackRows({ entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true }, new Set(), readOf(store.key));
+    expect(stack.map((each) => [each.kind, rowText(each), (STACK_WORDS.marks as Record<string, string>)[each.kind]])).toEqual([['handed', `You approved ${MARKER}`, 'Next step']]);
+    await store.push(run.after.slice(at54));
+    expect(row.line()).toBe(`Auto mode blocked: ${MARKER} · approved`);
+    expect(row.button()).toBeNull();
+    expect(stackRows({ entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true }, new Set(), readOf(store.key))).toEqual([]);
   });
 
   it('a terminal session before its bridge is live: the button disabled, its title the holder’s words', async () => {
