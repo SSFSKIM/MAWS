@@ -2,7 +2,7 @@ import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, 
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { writeSystem } from '@artifacts/design-system/model';
 import { defaultSystem } from '@artifacts/types/design_system/defaults';
 import { KIND_GUIDES } from '@artifacts/types/guides';
@@ -27,6 +27,16 @@ import { artifactPublishTool } from './artifact-publish';
 import { artifactCreateTool, artifactDescribeTypeTool, artifactListTool, artifactReadTool } from './artifact-tools';
 import { HUMAN, jsonOf, openWorld, SELF, textOf, type World } from './artifact-world.fixture';
 import { HostBridge } from './bridge';
+
+// UX wave U10b (§B.4): a test may hold one file's read (the exported pdf's) in its own hands; every other read is the
+// real one
+const reads = vi.hoisted(() => ({ hold: undefined as ((path: string) => Promise<Buffer> | undefined) | undefined }));
+vi.mock('node:fs/promises', async (original) => {
+  const actual = await original<typeof import('node:fs/promises')>();
+  const readFile = ((path: string, ...rest: unknown[]) => reads.hold?.(String(path)) ?? (actual.readFile as (...args: unknown[]) => unknown)(path, ...rest)) as typeof actual.readFile;
+  return { ...actual, default: { ...actual, readFile }, readFile };
+});
+afterEach(() => void (reads.hold = undefined));
 
 const PAGE = '<!doctype html><h1>Dashboard</h1><img src="https://example.com/a.png">';
 let w: World;
@@ -551,6 +561,23 @@ describe('artifact_export', () => {
     expect(jsonOf(await tool.call({ artifact: 'dash', format: 'png' }, w.ctx()))).not.toHaveProperty('pages');
     bytes = '%PDF-1.7\n%%EOF';
     expect(jsonOf(await tool.call({ artifact: 'dash', format: 'pdf' }, w.ctx()))).not.toHaveProperty('pages');
+  });
+
+  it('answers a pdf without pages when the read of its file fails, after waiting on that read', async () => {
+    jsonOf(await create({ handle: 'dash', content: '<p/>', title: 'D' }));
+    const exporter = new HostBridge<ArtifactExportRequest, ArtifactExportAnswer>({ send: (request) => (writeFileSync(request.path, TWO_PAGES), queueMicrotask(() => exporter.answer(request.requestId, { ok: true, revision: request.revision, path: request.path }))), answerMs: 60_000 });
+    const held: { path: string; fail: (error: Error) => void }[] = [];
+    reads.hold = (path) => (path.endsWith('-pdf.pdf') ? new Promise<Buffer>((_, fail) => void held.push({ path, fail })) : undefined);
+    let answered = false;
+    const pending = artifactExportTool({ ...w.deps(), exporter }).call({ artifact: 'dash', format: 'pdf' }, w.ctx()).then((answer) => ((answered = true), answer));
+    for (let i = 0; i < 200 && held.length === 0; i++) await new Promise((r) => setTimeout(r, 1));
+    expect(held).toHaveLength(1);
+    await new Promise((r) => setTimeout(r, 1));
+    expect(answered).toBe(false); // the tool waits on the file's read
+    held[0]!.fail(Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }));
+    const answer = jsonOf(await pending);
+    expect(answer).toMatchObject({ status: 'exported', format: 'pdf', path: held[0]!.path });
+    expect(answer).not.toHaveProperty('pages');
   });
 
   it('counts the page objects of a pdf as Chromium writes them, never its page tree or labels', () => {
