@@ -1,5 +1,5 @@
-// Customize › Skills › Discover (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "Discover, per
-// tab"): the plugins whose skills are known, one card per plugin with its skills named; + installs the plugin that
+// Customize › Discover, Show: Skills (docs/doperpowers/specs/2026-10-24-plugin-aggregator-design.md, Design "Discover,
+// per tab"): the plugins whose skills are known, one card per plugin with its skills named; + installs the plugin that
 // carries them through the same install sheet and operations as Plugins (the CLI in the page's directory, or the
 // engine's configuration directory for the user configuration).
 // UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): the management state and the sheet are

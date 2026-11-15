@@ -1,6 +1,6 @@
-// Discover's view choices per tab (search, the filter chips, the category, a shelf's See all filter, Not installed, the
-// sort and its direction), kept for the app run like the libraries' own (`widgets/plugins/library-store.ts`): switching
-// tabs or leaving Customize keeps them, a restart does not. No setting is kept, so no settings version. All (UX wave
+// Discover's view choices per kind (search, the filter chips, the category, a shelf's See all filter, Not installed, the
+// sort and its direction), kept for the app run like the libraries' own (`widgets/plugins/library-store.ts`): changing
+// Show or the view, or leaving Customize, keeps them, a restart does not. No setting is kept, so no settings version. All (UX wave
 // U11c M4) is a fourth entry: its search is its own, and its sort is never asked (main answers All in one order).
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { CatalogChip, CatalogQueryInput, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
