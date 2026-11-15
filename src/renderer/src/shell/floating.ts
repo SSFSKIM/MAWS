@@ -237,18 +237,27 @@ useLayout.subscribe((state, before) => {
 // pending list held before. A pill closed while that request is still pending stays closed for it; the next new one
 // raises it again. It hands over the keyboard only when the departing compact surface owned it. UX wave U10b (§F.1, the
 // root's UC-1): a hidden chat is not raised, and a request it saw arrive is no new one for the bar Show chat brings back.
+// A raise is held for the rest of its tick (until a microtask queued with it runs), so that a Hide chat later in the
+// same tick can take it back (§I: Hide chat wins in either order); the card's own open lets it go.
 const RAISING: ReadonlySet<AttentionKind> = new Set<AttentionKind>(['permission', 'question', 'plan', 'elicitation', 'dialog']);
 let raised: { session: AppSessionId | null; ids: ReadonlySet<string> } = { session: null, ids: new Set() };
+let raisedThisTick: { session: AppSessionId; marked: boolean } | null = null;
 function raiseOnRequest(): void {
   const session = cardSession(useLayout.getState());
   const items = session === null ? [] : selectPendingOf(useAttention.getState(), session);
   const ids = new Set(items.filter((item) => RAISING.has(item.kind)).map((item) => item.id as string));
   const fresh = session !== null && session === raised.session && [...ids].some((id) => !raised.ids.has(id));
   raised = { session, ids };
-  if (fresh && chatPresentation(useFloatingCard.getState()) === 'bar') {
+  if (session !== null && fresh && chatPresentation(useFloatingCard.getState()) === 'bar') {
     const compact = document.activeElement?.closest<HTMLElement>('[data-compact-session]');
-    if (session !== null && compact?.dataset.compactSession === session) markFocusOnMount(session);
+    const marked = compact?.dataset.compactSession === session && !useComposerStore.getState().focusOnMount.has(session);
+    if (marked) markFocusOnMount(session);
     useFloatingCard.getState().setClosed(false);
+    const held = { session, marked };
+    raisedThisTick = held;
+    queueMicrotask(() => {
+      if (raisedThisTick === held) raisedThisTick = null;
+    });
   }
 }
 useAttention.subscribe(raiseOnRequest);
@@ -414,6 +423,7 @@ export function closeCard(): void {
 // The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again. From the bar or
 // from hidden (U1b's line "Waiting for you · N" calls it too).
 export function openCard(): void {
+  raisedThisTick = null; // the person's open: no Hide chat in this tick takes it back
   const session = cardSession(layout());
   if (session !== null) markFocusOnMount(session);
   useFloatingCard.getState().setClosed(false);
@@ -484,12 +494,26 @@ export function useShowChatHeader(): boolean {
 
 // The bar's Hide chat: bar → hidden, Show chat in the header taking the keyboard. Only from the bar, and only where a
 // header holds Show chat (hidden exists only then). The split's float no longer stands for S: the focused pane goes to
-// A, as the card's Close leaves it, so the sidebar, S's tab and ⇧⌘\ bring the card back from there.
+// A, as the card's Close leaves it, so the sidebar, S's tab and ⇧⌘\ bring the card back from there. A request's raise
+// earlier in the same tick is taken back first (with the composer's mark it set), so the tick ends hidden in either
+// order (§I); the request's id stays recorded, and Show chat brings the bar.
 export function hideChat(): void {
   const state = layout();
   const tab = splitHeaderTab(state);
-  if (chatPresentation(useFloatingCard.getState()) !== 'bar' || !holdsShowChat(cardHost(state), tab !== null && editorHostOf({ surface: 'main', tabId: tab }) !== null)) return;
-  useFloatingCard.setState({ hidden: true, pillTakesFocus: false, showChatTakesFocus: true });
+  if (!holdsShowChat(cardHost(state), tab !== null && editorHostOf({ surface: 'main', tabId: tab }) !== null)) return;
+  const raise = raisedThisTick;
+  const presentation = chatPresentation(useFloatingCard.getState());
+  const takesBackRaise = presentation === 'card' && raise !== null && raise.session === cardSession(state);
+  if (presentation !== 'bar' && !takesBackRaise) return;
+  raisedThisTick = null;
+  if (takesBackRaise && raise.marked) {
+    useComposerStore.setState((s) => {
+      const focusOnMount = new Set(s.focusOnMount);
+      focusOnMount.delete(raise.session);
+      return { focusOnMount };
+    });
+  }
+  useFloatingCard.setState({ closed: true, hidden: true, pillTakesFocus: false, showChatTakesFocus: true });
   const split = cardHost(state) === 'split' ? splitFloat(state.main) : null;
   if (split !== null) state.showPane(otherPane(split.pane));
 }
