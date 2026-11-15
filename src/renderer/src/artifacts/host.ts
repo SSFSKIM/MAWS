@@ -29,12 +29,14 @@
 // read-only store. A refusal for good (not found or not viewable, not a document, a malformed open) ends the attempts:
 // the first open rejects with it, and a replica that had synced says it as `refused`, which the editor shows.
 //
-// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): the host's fence closes a replica's
-// port when its artifact is deleted, and main then refuses its reopen `notFound`. A replica that had synced, of an
-// artifact the host says an agent deleted and Undo can bring back (`artifacts.get`'s `deleted.undoable`), waits instead
-// of ending: it keeps what the host never acknowledged, reads as read-only (the state an editor has for a reader who may
-// only view, so it takes no edit under the deletion's notice), and opens again at its artifact's `created` (the
-// undelete's announcement, from whichever machine), sending what it kept in the reconnect's first exchange.
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): a replica that had synced, of an
+// artifact the host says an agent deleted and Undo can bring back (`artifacts.get`'s `deleted.undoable`), waits for the
+// restore instead of ending. It learns it at the artifact's `deleted` announcement, and again when its reopen is refused
+// `notFound` (the host's fence closes a connection at its next content frame, and main refuses a deleted artifact's
+// open). While it waits it keeps what the host never acknowledged and reads as read-only (the state an editor has for a
+// reader who may only view, so it takes no edit under the deletion's notice); at its artifact's `created` (the
+// undelete's announcement, from whichever machine) it is writable again and opens again if its port went, sending what
+// it kept in the reconnect's first exchange.
 // ./deleted-replicas.ts tells the notice whether a waiting replica holds such an edit.
 import type { ArtifactDocOption, ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import { PortProvider, type PortLike, type Restored, type SaveState } from '@artifacts/provider/port';
@@ -128,10 +130,15 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
   });
 
-  // UX wave U10b (M5): an undelete announces `created`; a replica waiting on its artifact's restore opens again.
+  // UX wave U10b (M5): a delete announces `deleted`, which a replica of the artifact asks the host about; an undelete
+  // announces `created`, which ends a replica's wait.
   ipc.on('artifacts.changed', (change) => {
-    if (change.change !== 'created') return;
-    for (const replica of replicas) if (replica.artifactId === change.artifactId) replica.restored();
+    if (change.change !== 'created' && change.change !== 'deleted') return;
+    for (const replica of replicas) {
+      if (replica.artifactId !== change.artifactId) continue;
+      if (change.change === 'created') replica.restored();
+      else void replica.deleted();
+    }
   });
 
   class Replica implements DocumentHandle {
@@ -148,6 +155,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     private firstFrame: ReturnType<typeof setTimeout> | null = null; // review fix 1: the connection's first frame awaited
     private waitingForHost = false; // the backoff ran out: the next `ready` re-opens
     private deletedByAgent = false; // UX wave U10b: an agent deleted the artifact; waits for its restore, read-only
+    private synced = false; // UX wave U10b: the last state's sync, so a wait ends at a new sync and not at the one it began in
     private readonly listeners = new Set<(state: DocumentState) => void>();
     private settleFirst: { resolve: () => void; reject: (error: unknown) => void } | null = null;
     readonly first: Promise<void>;
@@ -252,6 +260,12 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
       }
     }
 
+    // Its artifact was deleted: a replica that had synced asks the host whether an agent's delete Undo can take back.
+    async deleted(): Promise<void> {
+      if (this.closed || this.deletedByAgent || this.settleFirst !== null) return;
+      if ((await this.standing()) === 'deletedByAgent' && !this.closed) this.waitForRestore();
+    }
+
     private waitForRestore(): void {
       if (this.deletedByAgent) return;
       log(`${this.artifactId} was deleted by an agent; waiting for it to be restored`);
@@ -308,8 +322,9 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
 
     private changed(state: SaveState): void {
-      // UX wave U10b: a waiting replica says what it keeps; one the host synced again (a restore it did not hear) is done waiting
-      if (this.deletedByAgent && state.synced) this.deletedByAgent = false;
+      // UX wave U10b: a waiting replica says what it keeps; one the host synced anew (a restore it did not hear) is done waiting
+      if (this.deletedByAgent && state.synced && !this.synced) this.deletedByAgent = false;
+      this.synced = state.synced;
       noteDeletedReplica(this, this.artifactId, this.deletedByAgent ? state.unsaved : null);
       if (state.phase !== 'handshake') this.stopFirstFrame();
       if (state.synced) {

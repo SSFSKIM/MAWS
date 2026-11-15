@@ -597,6 +597,25 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     handle.close();
   });
 
+  it('turns read-only at the artifact’s `deleted` once the host says Undo can take it back, before any edit is refused, and writable at `created`', async () => {
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    h.answers.set('artifacts.get', deleted(false));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(h.calls.filter((c) => c.name === 'artifacts.get')).toHaveLength(1));
+    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false }); // the person's own delete: nothing to wait for
+    h.answers.set('artifacts.get', deleted(true));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', readOnly: true }));
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(false); // nothing typed: nothing kept
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false });
+    handle.doc.get('root').insert(0, 'After the restore. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the restore. ');
+    handle.close();
+  });
+
   it('is done waiting when an open the host’s ready brings syncs, though it never heard the restore', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
     const h = harness();
