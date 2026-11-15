@@ -459,8 +459,10 @@ describe("composer DOM under C5's dispatcher", () => {
     busy(A);
     useLayout.setState((s) => ({ main: { ...s.main, panes: [{ tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5 } }) as never);
     mount([{ index: 0, id: A }], <ComposerAppKeys />);
-    const item = pageItem(itemFor(permission({ requestId: 'req-a' as never }), A_ID));
-    act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map(), version: 1 }));
+    // one request read already (the dock took the oldest read one), one not read yet (the dock read it first)
+    const read = permission({ requestId: 'req-a' as never, at: '2026-09-29T09:00:00.000Z' });
+    const [first, unread] = [pageItem(itemFor(read, A_ID)), pageItem(itemFor(permission({ requestId: 'req-b' as never, at: '2026-09-29T09:01:00.000Z' }), A_ID))];
+    act(() => useAttention.setState({ bySession: new Map([[A, [first, unread]]]), requests: new Map([[first.id, read]]), version: 1 }));
     await waitFor(() => expect(primary().textContent).toBe('Stop'));
     expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false);
     expect(composerOf(0).querySelector('[data-request-card], [data-docked-frame]')).toBeNull();
