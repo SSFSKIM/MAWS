@@ -8,6 +8,7 @@ import { randomBytes } from 'node:crypto';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { DatabaseSync } from 'node:sqlite';
 import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import { decodeFrame, encodeFrame } from '@artifacts/provider/frames';
 import { applyV2, diffV1, newDoc, stateVector } from '@artifacts/yjs';
@@ -73,7 +74,7 @@ async function machine() {
   await documents.service.writeAs(id, { kind: 'session', appSessionId: AGENT }, (doc) => doc.get('root').insert(0, 'An agent wrote this.'));
   f.host.artifact(id); // the endpoint's read of it before the open
   const a = await openRemote(f, org.a1, org.A, { capabilities: ['rl2.read-open'] });
-  return { f, documents, id, a };
+  return { f, documents, id, a, dir };
 }
 
 /** Frames as the stream carries them, each prefixed by its u32be length. */
@@ -115,7 +116,15 @@ async function open(m: Awaited<ReturnType<typeof machine>>) {
   };
   return { id, type: () => send(encodeFrame({ type: 'update', update: diffV1(doc, sv) })) };
 }
-const rows = (m: Awaited<ReturnType<typeof machine>>) => (m.documents.storage.db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq').all(m.id) as { actor: string }[]).map((row) => row.actor);
+// The rows the store's file holds, read through a separate read-only connection, as the local tests read them.
+const rows = (m: Awaited<ReturnType<typeof machine>>) => {
+  const db = new DatabaseSync(join(m.dir, 'artifacts', 'store.sqlite'), { readOnly: true });
+  try {
+    return (db.prepare('SELECT actor FROM artifact_updates WHERE artifactId = ? ORDER BY seq').all(m.id) as { actor: string }[]).map((row) => row.actor);
+  } finally {
+    db.close();
+  }
+};
 const agentDelete = (m: Awaited<ReturnType<typeof machine>>) =>
   m.documents.store.writeCommitted(() => m.documents.store.deleteOwnDraft(m.id, [AGENT])).then(
     () => 'deleted',

@@ -128,6 +128,18 @@ async function editor(artifactId: string): Promise<ProvidedReplica> {
   return replica;
 }
 const type = (replica: ProvidedReplica, words: string) => replica.doc.get('t').insert(0, words);
+// What the mark is for: once its key is committed broken, an agent's write after the person's (to each document of the
+// pair that has rows) and a checkpoint and a prune leave none of the person's rows in the store's file, and the key read
+// from the file still says broken. Everything is read through a separate read-only connection (`committed`).
+async function outlivesTheLog(id: string, broken: 'person' | 'unaccounted'): Promise<void> {
+  expect(mark(id)).toMatchObject({ broken });
+  const suggestion = `${id}:suggest`; // its key, without opening it
+  await write(id, agent, (doc) => doc.get('t').insert(0, 'The agent again. '));
+  if (rows(suggestion).length > 0) await write(suggestion, agent, (doc) => doc.get('t').insert(0, 'And proposes. '));
+  await checkpointAndPrune();
+  expect([...rows(id), ...rows(suggestion)].map((row) => row.actor)).not.toContain('human');
+  expect(mark(id)).toMatchObject({ broken });
+}
 
 describe('the mark', () => {
   it('is written by a session’s create and advanced by each of its writes, in the batch the row joins', async () => {
@@ -145,11 +157,8 @@ describe('the mark', () => {
   it('is broken by a person’s insert, and the delete is refused after a checkpoint and a prune', async () => {
     const id = await draft();
     await write(id, human, (doc) => doc.get('t').insert(0, 'The person typed. '));
-    expect(mark(id)).toMatchObject({ broken: 'person' });
-    await write(id, agent, (doc) => doc.get('t').insert(0, 'The agent again. '));
-    await checkpointAndPrune();
+    await outlivesTheLog(id, 'person');
     expect(rows(id).map((row) => row.actor)).toEqual(['session:app-1']); // only the newest row is left
-    expect(mark(id)).toMatchObject({ broken: 'person' });
     expect(await agentDelete(id)).toBe('edited');
     expect(deletedAt(id)).toBeNull();
   });
@@ -157,8 +166,7 @@ describe('the mark', () => {
   it('is broken by a person’s deletion alone', async () => {
     const id = await draft();
     await write(id, human, (doc) => doc.get('t').delete(0, 3));
-    await write(id, agent, (doc) => doc.get('t').insert(0, 'More. '));
-    await checkpointAndPrune();
+    await outlivesTheLog(id, 'person');
     expect(await agentDelete(id)).toBe('edited');
   });
 
@@ -172,9 +180,7 @@ describe('the mark', () => {
       const range = [{ start: idAt(live, 0)!, end: idAt(live, 9)! }];
       if (settled === 'accept') await service.acceptSuggestion(id, range, human);
       else await service.rejectSuggestion(id, range, human);
-      await write(id, agent, (doc) => doc.get('t').insert(0, 'After. '));
-      await checkpointAndPrune();
-      expect([settled, mark(id)?.broken]).toEqual([settled, 'person']);
+      await outlivesTheLog(id, 'person');
       expect([settled, await agentDelete(id)]).toEqual([settled, 'edited']);
     }
   });
@@ -184,7 +190,7 @@ describe('the mark', () => {
     const version = (await store.createVersion(id, { kind: 'named', actor: agent, label: 'First' }))!;
     await write(id, agent, (doc) => doc.get('t').insert(0, 'Second. '));
     await store.restore(id, version, human);
-    await checkpointAndPrune();
+    await outlivesTheLog(id, 'person');
     expect(await agentDelete(id)).toBe('edited');
   });
 
@@ -192,7 +198,7 @@ describe('the mark', () => {
     const id = await draft('design');
     await store.ensureMigrated(id, human);
     expect(rows(id).at(-1)!.actor).toBe('human');
-    await checkpointAndPrune();
+    await outlivesTheLog(id, 'person');
     expect(await agentDelete(id)).toBe('edited');
   });
 
@@ -225,10 +231,13 @@ describe('the mark', () => {
     db.close();
     make();
     expect(text(id)).toBe('Typed under the older build. An agent wrote this.');
-    await checkpointAndPrune();
+    // the stay left the key as it was, behind the newest row: not broken yet, and not standing
+    expect(mark(id)).not.toHaveProperty('broken');
+    expect(mark(id)!.seq).toBeLessThan(rows(id).at(-1)!.seq);
     expect(await agentDelete(id)).toBe('unknown');
+    // this build's next row breaks it, and the break outlives the older build's row
     await write(id, agent, (doc) => doc.get('t').insert(0, 'Back here. '));
-    expect(mark(id)).toMatchObject({ broken: 'unaccounted' });
+    await outlivesTheLog(id, 'unaccounted');
     expect(await agentDelete(id)).toBe('unknown');
   });
 });
