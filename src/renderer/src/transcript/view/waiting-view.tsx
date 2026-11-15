@@ -42,6 +42,16 @@ export function WaitingViewProvider({ view, settling, children }: { view: Waitin
   );
 }
 
+/** A settling receipt as one status line, with no control and bound to no key: at the end (`EndRegion`), or in the row of
+ * the plan it settled (§G, "that row's receipt says it"). */
+export function SettlingLine({ entry, className = '' }: { entry: Settling; className?: string }) {
+  return (
+    <p role="status" data-settling={entry.id} className={`m-0 text-ui-sm text-fg-muted ${className}`}>
+      {entry.summary} · {entry.words}
+    </p>
+  );
+}
+
 const mounted = new Map<string, Set<Pick<WaitingView, 'show'>>>();
 /** The mounted transcripts of a store key, for a caller outside the tree (`showWaiting`, §E). */
 export function waitingViewsOf(key: string): readonly Pick<WaitingView, 'show'>[] {

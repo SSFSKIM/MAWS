@@ -10,7 +10,7 @@ import { ATTENTION_HEADINGS } from '@shared/attention/headings';
 import type { AgentId, AppSessionId, AttentionId } from '@shared/graph/ids';
 import { useAttention } from '../stores/attention';
 import { useTranscriptStore } from '../transcript';
-import { useEndSettling, useWaitingView } from '../transcript/view/waiting-view';
+import { SettlingLine, useEndSettling, useWaitingView } from '../transcript/view/waiting-view';
 import { Muted, TONE_CLASS } from './controls';
 import { requesterName } from './requester';
 import { RequestCard } from './RequestCard';
@@ -64,9 +64,7 @@ export function EndRegion({ appSessionId, agentId }: { appSessionId: AppSessionI
         </div>
       )}
       {settling.map((entry) => (
-        <p key={entry.id} role="status" data-settling={entry.id} className={`m-0 text-ui-sm text-fg-muted ${open !== null || others.length > 0 ? 'mt-3' : ''}`}>
-          {entry.summary} · {entry.words}
-        </p>
+        <SettlingLine key={entry.id} entry={entry} className={open !== null || others.length > 0 ? 'mt-3' : ''} />
       ))}
     </div>
   );

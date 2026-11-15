@@ -2,13 +2,17 @@
 // shared markdown pipeline, its collapsed body bounded at 144 px (transcript.css), and its outcome badge. Show more
 // appears when the rendered content overflows that box, measured after layout and again whenever the content's size
 // changes (highlighting, diagrams and math render asynchronously), and Show less whenever the plan is open. No
-// controls: a pending plan is C7's request card in the slot, never this row. W8: opening and closing run the shared
-// disclosure motion between the 144 px preview and the whole plan.
+// controls: a waiting plan is C7's request card in this row's place (UX wave U1b), never this body. W8: opening and
+// closing run the shared disclosure motion between the 144 px preview and the whole plan. UX wave U1b (§G): while its
+// terminal's settlement is held settling and the transcript has no outcome for it yet, the row says it in the end's
+// status line (`SettlingLine`); the transcript's own outcome wins once it has one.
 import { useLayoutEffect, useState } from 'react';
 import { useDisclosureMotion } from '../../../ui/disclosure';
 import { PLAN, planBadge } from '../../model/copy';
 import type { Row } from '../../model/rows';
-import { useDisclosure } from '../context';
+import { useAttention } from '../../../stores/attention';
+import { useDisclosure, useRowSession } from '../context';
+import { SettlingLine } from '../waiting-view';
 import { Markdown } from '../markdown/Markdown';
 
 const PREVIEW_PX = 144; // the closed body's bound (transcript.css, `.transcript-plan-body`)
@@ -17,6 +21,8 @@ export function PlanRow({ row }: { row: Extract<Row, { kind: 'plan' }> }) {
   const [open, toggle] = useDisclosure(`plan:${row.id}`);
   const { ref: body } = useDisclosureMotion<HTMLDivElement>(open, { closedHeight: PREVIEW_PX });
   const [overflows, setOverflows] = useState(false);
+  const session = useRowSession();
+  const settling = useAttention((s) => (session === null || row.outcome !== null ? undefined : s.settling.get(session)?.find((entry) => entry.call === row.toolUseId)));
 
   // Measured while collapsed only: an open body has no bound. Open stays in the transcript-wide disclosures while the
   // measurement is this mount's, so an open plan always offers Show less (a virtualiser remount resets the
@@ -40,6 +46,7 @@ export function PlanRow({ row }: { row: Extract<Row, { kind: 'plan' }> }) {
           {planBadge(row.outcome, row.feedback)}
         </span>
       </div>
+      {settling !== undefined && <SettlingLine entry={settling} />}
       <div ref={body} className="transcript-plan-body" data-plan-body="" data-overflows={overflows ? '' : undefined} data-open={open ? '' : undefined}>
         <div>
           <Markdown markdown={row.plan} live={false} />
