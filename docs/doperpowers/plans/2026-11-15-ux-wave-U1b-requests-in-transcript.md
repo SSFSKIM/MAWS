@@ -856,6 +856,10 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   Rationale: the task review found both 9b scenes threw at staging (the recordings mark the prompt human) and the dismissal's "nothing reaches the session" observed nothing the app sends.
   Date/Author: 2026-11-15 (UTC), the M7 addition's executor; folded by the controller.
 
+- Decision: an early part of the chain merge, named by the architect before M7b: `origin/ux-wave/U6b` at `b730f60f5` (the file-beside-the-chat landing on the document-page landing on master `ef1d659ad`) is merged as a commit of its own (`e8ddff845`, from `a4b315abac`; clean; 237 files, +16023 / −1940). Files both sides changed: `e2e/c12-prerun.spec.ts`, `e2e/cross-build.spec.ts`, `e2e/panel.spec.ts`, `e2e/remote.spec.ts`, `e2e/side.spec.ts`, `panel/summary/Summary.test.tsx`, `panel/SurfaceRow.tsx`, `request-card/RequestCard.test.tsx`, `transcript/view/TranscriptSlot.test.tsx`, each in separate hunks or tests. Read in the merged tree: wire 3.48 (`src/shared/ipc/wire-manifest.json`), link 1.14 (`apps/org-protocol/src/channel.ts` `RL2_PROTOCOL`); this landing changes neither. Read against the merged tree: on it a Files tree click opens the file as a tab in the side column, so acceptance 3's scene ("an ask beside an open file", `e2e/maws-tools.spec.ts`) stands on its premise; one commit after the merge (`d50ca424b`) makes it prove the premise (the viewer in the side column, the file's tab and the session's main tab selected before the ask and after, the snapshot strip holding the file's tab, the tree's root expanded before the row's click). No other U1b scene, no layout guess (the end card's buttons, the far row, the floating card's minimum) and no scene on a surface the other side changed differs; `sessionsInFront()` still counts a session exactly when its transcript is visible, but for the narrow window's side sheet (tracker).
+  Rationale: the M7 record's scenes are written on the tree that ships, and the final chain merge stays small.
+  Date/Author: 2026-11-15, the controller (the architect's ruling of 2026-11-15).
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
