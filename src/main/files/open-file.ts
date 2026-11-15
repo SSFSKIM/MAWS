@@ -14,10 +14,9 @@
 // session's id is bare here and its machine is the router's target: `layout.*` is graded `client`, so a session of
 // another machine is refused by the router before this runs.
 import type { ClientPort, PickAnswer } from '@shared/client/port';
-import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
-import type { CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandResult } from '@shared/ipc/schema';
 import type { OpenFileOutput } from '@shared/ipc/schema/layout';
 import { pageOf } from '../ipc/clients';
 import type { CommandGuard, MainContext } from '../ipc/router';
@@ -35,7 +34,7 @@ export const appPageOnly: CommandGuard = (name, _input, ctx) =>
 export interface OpenFileDeps {
   port: Pick<ClientPort, 'pick'>;
   isAppPage(client: ClientRef): boolean;
-  grant(input: { appSessionId: AppSessionId; path: string }): Promise<CommandResult<'files.grant'>>; // main's own send, the id bare as it came
+  grant(input: CommandInput<'files.grant'>): Promise<CommandResult<'files.grant'>>; // main's own send, the id bare as it came
 }
 
 const CANCELLED: OpenFileOutput = { status: 'cancelled' };
@@ -44,7 +43,7 @@ const UNAVAILABLE: OpenFileOutput = { status: 'refused', reason: 'unavailable' }
 // The askers whose Open File… is being answered: one chooser per page, and one grant from it.
 const asking = new WeakSet<ClientRef>();
 
-export async function openChosenFile(input: { appSessionId: AppSessionId }, ctx: Pick<MainContext, 'client' | 'target'>, deps: OpenFileDeps): Promise<OpenFileOutput> {
+export async function openChosenFile(input: CommandInput<'layout.openFile'>, ctx: Pick<MainContext, 'client' | 'target'>, deps: OpenFileDeps): Promise<OpenFileOutput> {
   const { client } = ctx;
   if (asking.has(client)) return CANCELLED; // C2: its chooser is open
   asking.add(client);

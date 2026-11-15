@@ -811,12 +811,12 @@ describe('main ipc router', () => {
       const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
       const list = vi.fn(() => ({ sessions: [], revision: 3 }));
       router.registerMachineHandler('session.list', list);
-      const guard = vi.fn(() => REFUSED);
+      const guard = vi.fn((_name: unknown, _input: unknown, _context: MainContext) => REFUSED);
       router.guardCommand(['session.list'], guard);
       await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
       await expect(router.invokeOwn('session.list', {}, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
       await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: OTHER })).resolves.toEqual({ ok: false, error: REFUSED });
-      expect(guard.mock.calls.map(([, , context]) => [(context as MainContext).client.id, (context as MainContext).target])).toEqual([
+      expect(guard.mock.calls.map(([, , context]) => [context.client.id, context.target])).toEqual([
         ['remote:1/page:3.1', LOCAL], ['main', LOCAL], ['remote:1/page:3.1', OTHER],
       ]);
       expect(list).not.toHaveBeenCalled();
