@@ -52,8 +52,9 @@ const BEFORE = 'Listed the notes first.';
 const AFTER = 'Checked the rest of them.';
 const records = () => screen.queryAllByRole('button', { name: '› working record' });
 // the record lines as drawn, by their frames (a live turn's lines are counted the same way as a finished one's)
-const closedLines = () => [...document.querySelectorAll<HTMLButtonElement>('.owner-record-fold:not([data-open]) > button')];
-const openLines = () => [...document.querySelectorAll<HTMLButtonElement>('.owner-record-fold[data-open] > button')];
+const recordLines = (open: boolean) => [...document.querySelectorAll<HTMLButtonElement>('.owner-record-fold > button')].filter((button) => button.parentElement!.hasAttribute('data-open') === open);
+const closedLines = () => recordLines(false);
+const openLines = () => recordLines(true);
 
 it('a jump to work after a standalone browser activity opens the stretch the list draws it in, and only that one', async () => {
   const b = builder('2026-10-08T10:00:00.000Z');
