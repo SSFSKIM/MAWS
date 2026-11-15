@@ -531,6 +531,18 @@ describe('a terminal session this Mac drives', () => {
     expect(statusesOf(D)).toEqual({ a1: 'running', a3: 'unknown' });
   });
 
+  // §C: the same object after a change that alters no node. What a status rests on is in the body but on no node.
+  it('publishes the same object after a body whose change alters no node: a running agent’s evidence moving from the rows to the bridge', async () => {
+    await watchDisk(D, [sidecar('a1'), sidecar('a2')]);
+    plane(D, 'snapshot', [running('a1'), completed('a2')]);
+    const laid = entryOf(D);
+    plane(D, 'subagents', [running('a1', { evidence: 'bridge', running: true, outcome: undefined }), completed('a2')]);
+    expect(useLaneA.getState().agents.get(D)?.agents[0]).toMatchObject({ evidence: 'bridge' }); // a new list was noted
+    expect(entryOf(D)).toBe(laid);
+    plane(D, 'subagents', [running('a1', { evidence: 'bridge', running: true, outcome: undefined }), gone('a2')]);
+    expect(statusesOf(D)).toEqual({ a1: 'running', a2: 'exited' }); // a change that alters a node is published
+  });
+
   it('keeps the statuses when the watch ends after a body with none running, and reads from disk again when it ends with one running', async () => {
     await watchDisk(D, [sidecar('a1'), sidecar('a2')]);
     plane(D, 'snapshot', [completed('a1'), gone('a2')]);
