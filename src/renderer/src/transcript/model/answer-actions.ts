@@ -60,8 +60,9 @@ export function aboveLastCompaction(rows: readonly Row[], index: number): boolea
  *
  * For each turn-opening prompt, and for the list's end, the last answer drawn before it and after the prompt before,
  * unless a running turn (its turn line working, or a row of it live) has a row from that answer on. Fork is off where the
- * next prompt has no message id, and where it lies above the list's last compaction boundary; the answer directly above
- * that boundary keeps Fork, against the first turn-opening row on the boundary's far side.
+ * next prompt has no message id, and where it lies above the list's last compaction boundary: so the answer directly above
+ * that boundary keeps Fork only against a typed `/compact` bubble (`aboveLastCompaction`'s one exception); the prompt that
+ * set off an automatic compaction is written before it, and the answer before that prompt draws none (ruled, M3-4).
  */
 export function answerActionsOf(rows: readonly Row[]): Map<RowId, AnswerAction> {
   const running = new Set<TurnId>();
@@ -79,22 +80,12 @@ export function answerActionsOf(rows: readonly Row[]): Map<RowId, AnswerAction> 
   });
   if (answer >= 0) placed.push({ at: answer, next: rows.length });
 
-  const boundary = lastCompaction(rows);
-  const directlyAbove = placed.findLast((entry) => entry.at < boundary);
   const out = new Map<RowId, AnswerAction>();
-  for (const entry of placed) {
-    let next = entry.next;
-    let fork = true;
-    if (next < rows.length && aboveLastCompaction(rows, next)) {
-      if (entry === directlyAbove) {
-        const after = rows.findIndex((row, i) => i > next && opensOwnersTurn(row) && !aboveLastCompaction(rows, i));
-        next = after < 0 ? rows.length : after;
-      } else fork = false;
-    }
-    if (runsFrom(entry.at, next)) continue;
-    const answerRow = rows[entry.at] as Extract<Row, { kind: 'assistant_text' }> & { turnId: TurnId };
+  for (const { at, next } of placed) {
+    if (runsFrom(at, next)) continue;
+    const answerRow = rows[at] as Extract<Row, { kind: 'assistant_text' }> & { turnId: TurnId };
     const prompt = next < rows.length ? (rows[next] as UserRow) : null;
-    out.set(answerRow.id, { turnId: answerRow.turnId, rewindTo: prompt?.messageUuid ?? null, fork: fork && (prompt === null || prompt.messageUuid !== null) });
+    out.set(answerRow.id, { turnId: answerRow.turnId, rewindTo: prompt?.messageUuid ?? null, fork: prompt === null || (prompt.messageUuid !== null && !aboveLastCompaction(rows, next)) });
   }
   return out;
 }
