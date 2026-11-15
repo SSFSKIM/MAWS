@@ -4,8 +4,14 @@
 // `window.__maws_harness.panel.child`: it steps the parent's player (the child's events arrive through childSource's
 // filter) and reads what R7 asserts about the container at each width.
 import { useEffect, useSyncExternalStore, type RefObject } from 'react';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { SessionEvent } from '@shared/graph/events';
+import type { AppSessionId, AttentionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
 import { Icon } from '../../app/IconButton';
+import { ipc } from '../../ipc/client';
 import type { PanelTool } from '../../panel/tool';
+import { useAttention } from '../../stores/attention';
 import { useTranscriptStore } from '../../stores/transcript';
 import { Transcript, type SubagentRef, type TranscriptSource } from '../../transcript';
 import { OVERSCAN, type TranscriptListHandle } from '../../transcript/view/Transcript';
@@ -57,15 +63,53 @@ export class ChildTabState {
     return this.view;
   }
 
-  // The child's entry leaves the store, so the next binding starts the child over.
+  // The child's entry leaves the store, so the next binding starts the child over; the requests it raised leave the
+  // session's attention list with it.
   private release(): void {
     if (this.view.source?.key) useTranscriptStore.getState().drop(this.view.source.key);
+    if (this.raised && this.appSessionId) useAttention.getState().applyChanged({ appSessionId: this.appSessionId as AppSessionId, items: [] }, ipc.localMachine);
+    this.raised = false;
+  }
+
+  // UX wave U1b: nothing answers `attention.list` on this page, so the requests the child's transcript holds pending (the
+  // fixture's own `permission.requested` events) reach the tab's session's list as main's attention service lists them
+  // (the broker's item: its ids and agent from the event, its summary), applied as an `attention.changed` of that session
+  // is. The child's transcript, keyed under that session, then places each at its end and its call's row says it waits.
+  private raised = false;
+  raisePending(): number {
+    const key = this.view.source?.key;
+    const appSessionId = this.appSessionId as AppSessionId | null;
+    if (!key || !appSessionId) throw new Error('child: no child tab open over a loaded transcript');
+    const pending = [...(useTranscriptStore.getState().entries[key]?.state.pending.values() ?? [])];
+    const items = pending.flatMap((event): AttentionItem[] => (event.kind === 'permission.requested' ? [brokerItem(appSessionId, event)] : []));
+    useAttention.getState().applyChanged({ appSessionId, items }, ipc.localMachine);
+    this.raised = true;
+    return items.length;
   }
 
   dispose(): void {
     this.offLoads();
     this.release();
   }
+}
+
+// A permission request's attention item as the engine host's broker lists it (`src/engine-host/broker.ts`, `shapeOf`).
+function brokerItem(appSessionId: AppSessionId, event: Extract<SessionEvent, { kind: 'permission.requested' }>): AttentionItem {
+  const input = (event.input ?? {}) as { command?: unknown; description?: unknown };
+  const name = event.displayName ?? event.toolName;
+  const detail = typeof input.command === 'string' ? input.command : (event.description ?? (typeof input.description === 'string' ? input.description : ''));
+  return {
+    id: addressOf(ipc.localMachine, `harness-attention-${event.requestId}` as AttentionId),
+    appSessionId,
+    sessionId: event.sessionId,
+    kind: 'permission',
+    request: { requestId: event.requestId, toolUseId: event.toolUseId, taskId: null, agentId: event.agentId },
+    summary: detail.length > 0 ? `${name}: ${detail.slice(0, 80)}` : name,
+    createdAt: event.at,
+    state: 'pending',
+    stateChangedAt: event.at,
+    expiresAt: null,
+  };
 }
 
 // The newest instance: what the probes act on (the tool is single-instance).
@@ -139,6 +183,15 @@ export const childProbes: PanelHarnessApi['child'] = {
     await frame();
     await frame();
     return rowsOfChild().length;
+  },
+
+  async raisePending() {
+    if (!current) throw new Error('child: no child tab open');
+    bound();
+    const raised = current.raisePending();
+    await frame();
+    await frame();
+    return raised;
   },
 
   async expandAll() {

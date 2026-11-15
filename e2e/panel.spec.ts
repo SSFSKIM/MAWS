@@ -14,6 +14,7 @@ import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyWait } from './support/latency';
+import { END_ROW } from './support/request-keys'; // UX wave U1b
 import { sidebarRow } from './support/sidebar';
 import { CHARTER, otherThemeColours, panelScenario, scratchRepository, SIDEBAR_DRAG } from './support/panel-support';
 import type { AppSessionId } from '@shared/graph/ids'; // P4-B3
@@ -848,8 +849,14 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
           expect(last.scrollWidth, 'no horizontal overflow in the slot').toBe(last.clientWidth);
           expect(last.overflowX, 'nor in the tab panel or the list').toBe(0);
         }
-        expect(last!.pendingRequests).toBe(1);
-        await expect(panel.region.locator('.transcript-slot-placeholder[role="status"]'), 'C6’s placeholder, since C7 is not on master').toBeVisible();
+        // UX wave U1b: a request makes no row of its own. The child's Bash call waits on the fixture's own permission
+        // request, which the page lists in A's attention list as main would (nothing answers `attention.list` here):
+        // the child's transcript, keyed under A, then places it at its end and its call's row says it waits.
+        expect(last!.pendingRequests, 'no request listed yet: no end row').toBe(0);
+        expect(await panel.child('raisePending'), 'the fixture’s one pending request, listed').toBe(1);
+        await expect.poll(async () => (await panel.metrics()).pendingRequests, 'the child’s end row, for its agent’s request').toBe(1);
+        await expect(panel.region.getByText('Waiting for approval: pnpm test').first(), 'the call’s row, or its run’s line, says it waits').toBeVisible();
+        await expect.poll(async () => (await panel.metrics()).lastRowInView, 'the end stays in view with the end row').toBe(true);
 
         await panel.child('expandAll');
         await expect.poll(async () => (await panel.metrics()).lastRowInView, 'expandAll leaves the end in view').toBe(true);
@@ -1315,10 +1322,12 @@ test.describe('the floating session card (P3-G)', () => {
     }, { filesFor: USAGE });
   });
 
-  // The whole-branch review: at its minimum size a docked request and the composer are taller than the card. The card's
-  // body scrolls (a person's wheel, not a programmatic scroll, which would also move the clipping frame), so every
-  // control of the request and the composer can be brought into the card's visible rect; the header stays in place.
-  test('at its minimum size the card’s body scrolls to a docked request’s controls and the composer', async () => {
+  // The whole-branch review: at its minimum size the card's body scrolls (a person's wheel, not a programmatic scroll,
+  // which would also move the clipping frame), so every control of the request and the composer can be brought into the
+  // card's visible rect; the header stays in place. UX wave U1b: the request no longer takes the composer's place; it is
+  // the card at the end of the card's transcript, which follows its end, so its buttons stand at the transcript's foot
+  // above the composer.
+  test('at its minimum size the card’s body scrolls to its request’s controls at the transcript’s end and the composer', async () => {
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const card = panel.getByRole('region', { name: 'Session card' });
@@ -1350,12 +1359,53 @@ test.describe('the floating session card (P3-G)', () => {
               return `${element.getAttribute('aria-label') ?? element.textContent?.trim()}: ${inside && element.contains(document.elementFromPoint(x, y))}`;
             });
         }, selector);
-      await expect.poll(() => reachable('[data-docked-frame] button')).not.toContainEqual(expect.stringMatching(/: false$/));
-      expect(await reachable('[data-docked-frame] button'), 'the request has buttons').not.toEqual([]);
+      await expect(card.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }), 'at the transcript’s end').toHaveCount(1);
+      await expect.poll(() => reachable('[data-request-card] button')).not.toContainEqual(expect.stringMatching(/: false$/));
+      expect(await reachable('[data-request-card] button'), 'the request has buttons').not.toEqual([]);
       const composer = await card.locator('section[data-composer]').boundingBox();
       expect(composer!.y + composer!.height, 'the composer’s bottom inside the card').toBeLessThanOrEqual(box.y + box.height + 1);
       expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
       await expect(card.getByRole('heading', { name: SIDEBAR_DRAG })).toBeInViewport();
+      expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    });
+  });
+
+  // UX wave U1b (acceptance 10): a closed card's compact composer shows no transcript, so it says how many requests of its
+  // session wait, in one line above itself; a click opens the card and puts the keyboard on the oldest of them, here the
+  // prompt at its transcript's end. Answered, the request waits nowhere and the line goes. The session's permission is
+  // pending in nine-sessions.json from the start, so floating the panel shows the card open and closing it keeps it
+  // closed (the raise opens a closed card for a request no list held before, never for one it already held).
+  test('a closed card’s compact composer reads Waiting for you · N while N requests wait, and its click opens the card on the request', async () => {
+    await withScenario(async (maws, panel) => {
+      const { page, app } = maws;
+      const card = panel.getByRole('region', { name: 'Session card' });
+      const compact = panel.getByRole('region', { name: 'Compact session composer' });
+      const waitingLine = compact.getByRole('button', { name: /^Waiting for you · \d+$/ });
+
+      await (await sidebarRow(page, SIDEBAR_DRAG)).click();
+      await openSurface(page, 'Files'); // UX2: floating must have a real surface behind the card
+      await menu(app, 'panel.float');
+      await expect(card.getByRole('group', { name: 'Approval needed' }), 'the card open, its request at its transcript’s end').toBeVisible();
+      await expect(card.getByRole('button', { name: /^Waiting for you/ }), 'an open card shows its transcript, and no count').toHaveCount(0);
+
+      await card.getByRole('button', { name: 'Close session card' }).click();
+      await expect(card).toHaveCount(0);
+      await expect(waitingLine).toHaveText('Waiting for you · 1');
+      await expect(waitingLine).toHaveAttribute('data-waiting-count', '1');
+      await expect(compact.locator('[data-request-card]'), 'the compact composer draws no request').toHaveCount(0);
+
+      await waitingLine.click();
+      await expect(card).toBeVisible();
+      await expect(compact).toHaveCount(0);
+      const request = card.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+      await expect(request).toBeVisible();
+      await expect(card.locator(END_ROW), 'the keyboard on the request’s row').toBeFocused();
+
+      await request.getByRole('button', { name: 'Allow once', exact: true }).click(); // the stub scenario delivers it
+      await expect(card.locator('[data-request-card]')).toHaveCount(0);
+      await card.getByRole('button', { name: 'Close session card' }).click();
+      await expect(compact.getByRole('textbox', { name: 'Message' })).toBeVisible();
+      await expect(compact.getByRole('button', { name: /^Waiting for you/ }), 'nothing waits: no line').toHaveCount(0);
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });

@@ -54,6 +54,11 @@ export class HarnessSession {
 
   rows = () => useTranscriptStore.getState().rows(this.key);
 
+  // UX wave U1b: the session a child agent's key names. A transcript reads its session's waiting requests from its store
+  // key's session part (`<session>:<agent>`, as `ipcSource` keys a child in the product), so a page that plays this
+  // fixture as one of its sessions (the `#panel` page's fake A and B) names that session here; else the player's own key.
+  owner: string = this.key;
+
   // A child agent's own transcript (the drill-in C8 builds over `ipcSource(appSessionId, agentId)`), here over the
   // fixture: the child's events released so far (the parent's state indexes them under the parent tool use), then
   // the child's later events as the player releases them. Its events are top-level in its own state. Like ipcSource's
@@ -72,7 +77,7 @@ export class HarnessSession {
       return finish ? [...own, finish] : own;
     };
     return {
-      key: `${this.key}:${agentId}`,
+      key: `${this.owner}:${agentId}`,
       agentId,
       snapshot: () => Promise.resolve(released()),
       subscribe: (listener) =>
@@ -93,6 +98,6 @@ export class HarnessSession {
   dispose(): void {
     this.player.pause();
     const store = useTranscriptStore.getState();
-    for (const key of Object.keys(store.entries)) if (key === this.key || key.startsWith(`${this.key}:`)) store.drop(key); // its children's too
+    for (const key of Object.keys(store.entries)) if (key === this.key || key.startsWith(`${this.key}:`) || (this.owner !== this.key && key.startsWith(`${this.owner}:`))) store.drop(key); // its children's too
   }
 }

@@ -2986,6 +2986,14 @@ const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names D
 // what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
 const STAGE_ROW_MS = 6_000;
 const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+// UX wave U1b: whether a build's request takes its composer's place (its `swapOf`, the docked swap). Both peers, build F
+// and the master build, dock a session's oldest request over the box; from U1b a request is drawn in the transcript and
+// the box is shown beside it, so on such a build a request ahead holds no box and the premise above stands.
+const docksRequests = (build: Build) => {
+  const swap = join(build.root ?? REPO_ROOT, 'src/renderer/src/composer/docked/swap.ts');
+  return existsSync(swap) && readFileSync(swap, 'utf8').includes('export function swapOf');
+};
+const boxHeld = async (build: Build, page: Page, id: AppSessionId) => docksRequests(build) && (await hasRequest(page, id));
 const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
 const STAGE_TAKEN = 'Rename the second fixture once the review is done';
 const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
@@ -3074,7 +3082,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
 
     // the peer: the stage in its box as an ordinary draft, the message still listed
     const old = await launchServed(s, id, peer.root);
-    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(peer, old.page, id), STAGE_PREMISE);
     expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
     const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
     said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
@@ -3085,7 +3093,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
     expect(found, 'this build finds what the peer left').toEqual(left);
     const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
     expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
-    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(here, back.page, id), STAGE_PREMISE);
     await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
     if (stageOf(found) !== null) {
       await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
@@ -3129,7 +3137,8 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
     // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
     // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
-    // the next prompt and no request's card holds either build's box
+    // the next prompt and no request's card holds the box of a build that docks one (`docksRequests`: both peers; this
+    // build, from UX wave U1b, never covers it)
     type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
     let next: Requested | undefined;
     await expect

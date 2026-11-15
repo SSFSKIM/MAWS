@@ -776,7 +776,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await shootCard(maws, viewerBox, 'card-composing');
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
-    await expect(card.locator('[data-request-card]')).toContainText('echo themed', { timeout: 20_000 });
+    await expect(card.locator('[data-request-end] [data-request-card]'), 'at the thread transcript’s end (UX wave U1b)').toContainText('echo themed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // the strip's words on one line at the card's width, its two buttons wrapping under them rather than squeezing them
     const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
@@ -869,8 +869,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const allowed = () => journal(maws, child).filter((r) => r.direction === 'out' && r.frame.type === 'control_response').length;
 
     // the first request: C7's inline card (the transcript's, named by its heading) inside the card's box, the strip above
-    // Reply naming it
-    const request = card.locator('[data-request-card]');
+    // Reply naming it. UX wave U1b: a permission is the card at the end of the thread's transcript
+    const request = card.locator('[data-request-end] [data-request-card]');
     await expect(request).toBeVisible({ timeout: 20_000 });
     await expect(request.getByRole('heading', { name: 'Run a command' }), 'the loaded card says what is asked (U1a §D)').toBeVisible({ timeout: 20_000 });
     await expect(request).toContainText('echo first-step');
@@ -893,9 +893,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await strip.getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo second-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo second-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(allowed).toBe(2);
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     expect(writtenUsers(maws, parent)).toHaveLength(1);
@@ -927,9 +927,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo the-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo the-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
 
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
@@ -985,7 +985,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
     // strip, then Allow there
-    const request = card.locator('[data-request-card]');
+    const request = card.locator('[data-request-end] [data-request-card]'); // UX wave U1b: at the thread transcript's end
     await expect(request.getByRole('button', { name: 'Allow once', exact: true }), 'the loaded permission card').toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
