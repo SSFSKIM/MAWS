@@ -1,0 +1,115 @@
+UX wave, landing U3b, probe 6: "Fork from here" when a typed local command follows the answer, engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, "Fork from here" passes the id of what follows
+the answer; asked by the architect 2026-11-15 after probe 5; VM dc-uxwave5-26dc, branch ux-wave/U3b-probes)
+
+Verdict. Five points.
+  - The rewind takes the id of any `user` row: the caveat (isMeta), the <command-name> row, the next prompt, and
+    after a /compact also the summary and the "Compacted" row. It REFUSES the id of a command's output with
+    {rewound: false, prefillText: null, precedingAssistantUuid: null, error: "target not found", reason:
+    "target_not_found"} (2 of 2: /rename's and /cost's `system` local_command rows, which are the wire's assistant
+    <synthetic> frames). It also refuses any message from before a compaction, the first prompt included.
+  - Rewinding to what directly follows the first answer works and is clean. That is the command's caveat row, which
+    is in the file only; the wire has no frame for it. The fork keeps ONE and its answer and nothing of the command,
+    and the answer is the last thing kept. Rewinding to the command's <command-name> row (the uuid the person's
+    command was sent with, and the one its wire replay carries) keeps the caveat above it. The fork's context then
+    has a caveat that introduces a command which is gone.
+  - Control: a rewind to the second prompt (TWO) keeps everything above it, both commands' caveat, command and
+    output rows included, between ONE's answer and the fork's new prompt.
+  - After a /compact (a short session, no fill): a rewind to the prompt after the compaction keeps the boundary,
+    the summary, the caveat, the /compact command and its "Compacted" row, and nothing from before the boundary. A
+    rewind to the /compact command's row keeps the boundary, the summary and the caveat. A rewind to the summary
+    keeps the boundary alone, so the fork starts with no conversation at all. ONE (before the boundary) is refused,
+    target_not_found.
+  - `precedingAssistantUuid` is the last REAL assistant message above the target, never a command's output. It was
+    ONE's answer for every target in the commands session (TWO included, though the two outputs stand between), and
+    null for every target after the compaction.
+  So "the id of what follows the answer" is accepted, and it gives the fork the document intends, when that id is
+  the next `user` row in the file (here the caveat). If MAWS passes the id of the command frame it saw on the wire
+  (the replay of <command-name>), the fork is accepted too but keeps an orphan caveat row. If it passes the output's
+  id (the assistant <synthetic> frame), the engine refuses it in the words above.
+
+Fixtures (fixtures/uxwave/). Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (VM.md). Scenario
+scenarios/pass3/uxwave-u3b-fork-command.mjs; the launch, the fork and the rewind as in probe 5
+(findings-uxwave-u3b-fork-delivered.txt): MAWS's launch (uxwave-common-arrivals.mjs); a fork `--resume <source>
+--fork-session --session-id <new>`; `rewind_conversation` {target_message_uuid, last_seen_user_message_uuid: the
+source's last prompt (TWO), interrupt_if_running: false}; then one prompt "… FORKED." so the fork writes its file. The
+`uxw_fork_chain` note holds that prompt's parent chain back to the root or to the boundary (non-attachment rows).
+  u3b-forkcmd-source-commands (.jsonl, .transcript.jsonl): ONE typed; "/rename uxw renamed"; "/cost"; TWO typed. Each
+    is sent as a prompt, as MAWS's composer sends it.
+  u3b-forkcmd-source-compact: ONE typed; "/compact"; TWO typed.
+  u3b-forkcmd-<target> (.jsonl, plus .transcript.jsonl for each accepted fork): rename-caveat, rename-command,
+    rename-output, cost-caveat, cost-command, cost-output, two; compact-two, compact-command, compact-stdout,
+    compact-caveat, compact-summary, compact-one. Each target is one fork, each run once: a rewind reads the file as
+    written, and nothing in it depends on timing.
+  Spend: about US$0.05 in all (two sources at US$0.003, eleven accepted forks at about US$0.0035 each; a refused fork
+  costs nothing).
+
+(a) What a typed local command leaves. Source "commands": wire seq, file line.
+  ONE           wire 28 user replay (sent uuid 813e88ed…); file 3 user, 25 assistant "ONE" (09c23acd…).
+  /rename       wire 46 assistant <synthetic> fb8d7dc8…, local_command_run {command: "rename", args: "uxw renamed"},
+                "Session renamed to: uxw renamed"; 47 user replay of <command-name>/rename with the SENT uuid
+                52d4b168…. File 34 user isMeta <local-command-caveat> abd88da4… (no wire frame); 35 user
+                <command-name> 52d4b168…; 36 system local_command fb8d7dc8…, commandRun, the stdout. No meta reminder
+                row in a headless session (a terminal session writes one: findings-uxwave-u3b-bridge-command.txt).
+  /cost         runs as /usage: wire 57 assistant <synthetic> aa8f8067…, local_command_run {command: "usage", args:
+                ""}, "Total cost: …"; 58 user replay <command-name>/usage with the sent uuid fcd6c264…. File 39 caveat
+                61dcf3f2…, 40 <command-name> fcd6c264…, 41 system local_command aa8f8067….
+  TWO           wire 69 replay 527b1ea6…; file 44 user (parentUuid: /cost's output row), 50 assistant "TWO".
+  On the wire, then, the command leaves two frames with ids: the output (assistant <synthetic>, its id the file's
+  system row) and the command's replay (its id the sent uuid, which is also the file's <command-name> row). The
+  caveat's id exists only in the file. The chain runs: answer, caveat, command, output, caveat, command, output,
+  prompt.
+  Source "compact": ONE file 3, answer 22; /compact: wire 47 compact_boundary 1fc9019c…, 48 the summary e4212ca8…
+  (isSynthetic), 49 user replay "<local-command-stdout>Compacted </local-command-stdout>" f48108e3…, 50 user replay
+  <command-name>/compact with the sent uuid f36c78b5…. File 32 system compact_boundary (parentUuid null,
+  logicalParentUuid: the last row before it), 33 the summary (isCompactSummary), 34 caveat f75a09e3…, 35
+  <command-name> f36c78b5…, 36 "Compacted" f48108e3…; TWO wire 61, file 44.
+
+(b) and (c) The rewinds and what each fork holds (chain from FORKED upward; "gone" = absent from the fork's file).
+  rename-caveat   abd88da4…  rewound true, targetMessageUuid the same, prefillText the caveat's text,
+                  precedingAssistantUuid 09c23acd… (ONE's answer). Chain: FORKED, "ONE", ONE. The command and its
+                  output are gone; ONE's answer is the last thing kept.
+  rename-command  52d4b168…  rewound true, prefillText "<command-name>/rename</command-name>… <command-args>uxw
+                  renamed</command-args>", preceding 09c23acd…. Chain: FORKED, the /rename caveat, "ONE", ONE. The
+                  command and output are gone, but the caveat stays.
+  rename-output   fb8d7dc8…  REFUSED: {rewound: false, prefillText: null, precedingAssistantUuid: null, error:
+                  "target not found", reason: "target_not_found"}.
+  cost-caveat     61dcf3f2…  rewound true, prefillText the caveat, preceding 09c23acd…. Chain: FORKED, /rename's
+                  output, /rename's command, /rename's caveat, "ONE", ONE.
+  cost-command    fcd6c264…  rewound true, prefillText "<command-name>/usage</command-name>…", preceding
+                  09c23acd…. Chain: FORKED, /cost's caveat, the /rename rows, "ONE", ONE.
+  cost-output     aa8f8067…  REFUSED, the same words as rename-output.
+(d) The control.
+  two             527b1ea6…  rewound true, prefillText "Without using any tool, reply with only the word TWO.",
+                  preceding 09c23acd…. Chain: FORKED, /cost output, /cost command, /cost caveat, /rename output,
+                  /rename command, /rename caveat, "ONE", ONE. Both commands and their outputs are kept between the
+                  answer and the fork's prompt.
+(e) Around a /compact (every answer's precedingAssistantUuid null).
+  compact-two     859f2529…  rewound true, prefillText TWO's text. The fork's file: compact_boundary, the summary,
+                  the caveat, <command-name>/compact, "Compacted", FORKED. No row from before the boundary: ONE and
+                  its answer are absent from the file, not only from the chain.
+  compact-command f36c78b5…  rewound true, prefillText "<command-name>/compact…". The fork: boundary, summary,
+                  caveat, FORKED.
+  compact-stdout  f48108e3…  rewound true, prefillText "<local-command-stdout>Compacted </local-command-stdout>".
+                  The fork: boundary, summary, caveat, <command-name>/compact, FORKED.
+  compact-caveat  f75a09e3…  rewound true, prefillText the caveat. The fork: boundary, summary, FORKED.
+  compact-summary e4212ca8…  rewound true, prefillText the summary's whole text. The fork: boundary, FORKED. Neither
+                  the summary nor the pre-compaction messages remain.
+  compact-one     06440419…  (ONE, before the boundary) REFUSED, target_not_found.
+  So a fork after a compaction holds the summary and never the pre-compaction messages, unless the target is the
+  summary itself, in which case it holds neither.
+
+Inference, in the document's terms.
+  - For "Fork from here" under an answer followed by a typed command, the clean fork comes from the next `user` row
+    in the file (the caveat). On the live wire that row has no frame. The frames MAWS sees after the answer are the
+    output (refused) and then the command's replay (accepted, but it keeps an orphan caveat). A view built from the
+    wire that wants the clean cut has to rewind to the command's replay. Taking prefillText then puts the
+    <command-name> block in the composer, and the fork has a caveat line in its context. Alternatively it can read
+    the caveat's uuid from the file.
+  - A rewind onto a command's output always fails ("target not found"). If the document's "what follows the answer"
+    can be an output frame (in a session MAWS runs, an output arrives BEFORE the replay of its command: u3-commands
+    findings), the code must skip outputs when it picks the id. If it does not, the fork's own tab shows the refusal.
+  - precedingAssistantUuid ignores command outputs and is null after a compaction, so it does not identify "the
+    answer the fork was asked from".
+  - Rewinding to anything at or before a compaction's summary empties or refuses: a fork from an answer above a
+    boundary cannot be made by rewind.
