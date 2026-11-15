@@ -1057,6 +1057,10 @@ Class 1a on GitHub Actions is the gate of record for each.
   Evidence: the measured page 6 of "The look". Hence the per-component canvas of §J.
 - Observation: the three menu chords of the composer ask a predicate the composer registers, not the context that hides the toolbar's popovers.
   Evidence: `draftShown: () => !promptState.current.docked` in `composer/Composer.tsx`, read by `toggleFocusedMenu` in `ComposerAppKeys.tsx`. Found by the adversarial review; hence §F.3's predicate.
+- Observation (M8): the drawn page 4's frame 6 shows "Blank" and More enabled and no choice while the Space loads; the document (L5, §D.2) disables them and shows the muted choice. The document was built.
+  Evidence: `~/.local/share/maws-ux-wave/examples/u10b-make-new/`, frame 6, against §D.2; reported to the architect.
+- Observation (M8): §D.1's `designSystemNotForKind(kind)`, filled with the kind's code name, reads "a html takes no design system" and "a design_system takes no design system"; `noDesignSystem` with no live system ends in an empty list. Built as written and reported to the architect (Constraint 4).
+  Evidence: the M8 report; `TOOL_ERRORS` in `src/shared/maws/tools.ts`.
 
 ## Decision Log
 
@@ -1110,6 +1114,13 @@ The architect's rulings of 2026-11-15 (UTC) on the six points revision 2 could n
 - What an older build's accept of a suggestion does with the page setting is accepted as written: the scenes of U10b-1 on both exact peers are the proof. §G; M3 decision 6.
 - Whether the history rail shows a page-only revision as an empty change is accepted as written: M2's executor reads it and reports.
 - The architect read the three statements the mark of §C.1 rests on in the code, and they hold: the update log has two inserts and no third; the prune keeps each artifact's newest row; both older builds read `meta` by key only.
+
+Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's executor reports.
+
+- M8 (2026-11-15): the three refusals of §D.1 are in `TOOL_ERRORS` as plain strings, word for word; `designSystemNamed` takes the calling tool's refusal maker, as `spaceNamed` does, because the document create has its own refusal class. "Ignoring case and spaces" removes all whitespace and lowercases; the exact title still wins. Ids and titles in a refusal are sorted, so the text is deterministic. The kind is refused before anything is read or written; an unknown Space is still reported first.
+- M8 (2026-11-15): "Blank" shows only when the kind's editor has registered (today's rule for "New"). While the narrowed Space loads, More's two ask entries and its Blank are disabled too (the same acts as a card's); Add a file… stays enabled (H23).
+- M8 (2026-11-15): the section's line is kept mounted by the Library's list virtualiser (`library/Rows.tsx`, three lines in the existing kept-lines mechanism, pinned by a test), so the choice holds while the page is open (decision 3); without it a scroll of about seven lines reset the choice. `Rows.tsx` is this child's file and M9 edits it too. A chosen system holds across Spaces while the page is open, and falls back to the default when it becomes the default or leaves the library.
+- M8 (2026-11-15): accessible names only, no new words on screen: a card is named by its visible name, "Blank" by `Blank <noun>`, the choice by `Design system: <shown>`. When nothing else governs, the bundled floor is shown as "MAWS", as a document's breadcrumb names it. More's submenu is placed on the menu's left by a right-side collision padding on Radix's `SubContent` (not seen laid out; M11's scene and the owner's look). A card's line wraps rather than truncates.
 
 ## Outcomes & Retrospective
 
