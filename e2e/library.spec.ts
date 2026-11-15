@@ -673,13 +673,13 @@ test('a replayed session’s transcript keeps its scroll offset across a page an
 // UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4, §C.4, §C.5): the session's own tools
 // make its draft (the host's agent seam, as the session), a main tab shows it, and the session's turn deletes it
 // (`artifact_delete`, served by the host's real tool server; the journal answers the engine's side as the host does).
-// The transcript's row reads "Deleted Draft plan" with Undo; the Library no longer lists the draft; the tab keeps the
-// editor's text under the notice, read-only, and a keystroke changes nothing. The row's Undo brings the draft back: the
-// row reads "Restored Draft plan" with Open, the Library lists it, the notice goes and the editor takes edits again,
-// which the store holds. (An edit typed before the editor knew of the delete, which the fence refused, is sent after
-// the restore: held by the unit cases of artifacts/host.test.ts and agent-draft.test.ts, since a scene cannot place a
-// keystroke between the delete's commit and the window's word of it.)
-test('an agent deletes its own draft while a tab shows it: the row reads Deleted with Undo, the Library leaves it out, the tab’s notice holds an editor that takes no keystroke; Undo brings it back, Restored with Open, the editor writable again', async () => {
+// An edit is typed while the window's document port holds its outgoing frames (the e2e window's hold,
+// src/renderer/src/artifacts/held-frames.ts), so the host has not seen it when the agent deletes the draft; released, the
+// fence refuses it. The transcript's row reads "Deleted Draft plan" with Undo; the Library no longer lists the draft; the
+// tab keeps the editor's text under the notice that the last edit is not saved, read-only, and a keystroke changes
+// nothing. The row's Undo brings the draft back: the row reads "Restored Draft plan" with Open, the Library lists it,
+// the notice goes, the edit typed before the notice is the store's, and the editor takes edits again.
+test('an agent deletes its own draft while a tab shows it: the row reads Deleted with Undo, the Library leaves it out, the tab’s notice says an edit typed before it is not saved and holds an editor that takes no keystroke; Undo brings it back, Restored with Open, that edit saved, the editor writable again', async () => {
   const PROMPT = 'Delete the draft plan you made.';
   const REPLY = 'The draft plan is deleted.';
   const drafted = await openDraftCase();
@@ -698,6 +698,15 @@ test('an agent deletes its own draft while a tab shows it: the row reads Deleted
     await expect(editor).toContainText('An agent wrote this first.', { timeout: 20_000 });
     await expect(editor).toHaveAttribute('contenteditable', 'true');
 
+    // an edit the host has not seen: typed while the window's document port holds what it sends
+    type Frames = { hold(): void; release(): void; held(): number };
+    const frames = (act: 'hold' | 'release' | 'held') => page.evaluate((name) => (window as unknown as { __maws_docFrames: Frames }).__maws_docFrames[name](), act);
+    await frames('hold');
+    await editor.click();
+    await page.keyboard.press('End');
+    await page.keyboard.type(' Typed before the notice.');
+    await expect.poll(() => frames('held'), { message: 'the edit’s frames are held' }).toBeGreaterThan(0);
+
     // the session's turn: its delete, which the host's tool server runs against the store
     const journal = new SideJournal(DRAFTER, drafted.repo.root);
     const prompt = journal.prompt();
@@ -707,9 +716,11 @@ test('an agent deletes its own draft while a tab shows it: the row reads Deleted
     await drafted.start(journal, PROMPT);
     await expect.poll(async () => value(await invoke(page, 'artifacts.get', { artifactId: draft.artifactId })).deleted ?? null, { timeout: 30_000, message: 'the host deleted the draft, as an agent’s delete Undo can take back' }).toEqual({ title: 'Draft plan', kind: 'document', undoable: true });
 
-    // the tab: the editor's text under the notice, read-only; a keystroke changes nothing
+    // released: the fence refuses the edit; the tab: the editor's text under the notice, read-only; a keystroke changes nothing
+    await frames('release');
     const notice = tab.locator('[data-artifact-deleted]');
-    await expect(notice).toContainText('An agent deleted this artifact. It takes no edits until it is restored.', { timeout: 20_000 });
+    await expect(notice).toContainText('An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.', { timeout: 20_000 });
+    await expect(editor).toContainText('Typed before the notice.');
     await expect(editor).toContainText('An agent wrote this first.');
     await expect(editor).toHaveAttribute('contenteditable', 'false', { timeout: 10_000 });
     await editor.click();
@@ -741,10 +752,11 @@ test('an agent deletes its own draft while a tab shows it: the row reads Deleted
     await expect(tab.locator('[data-artifact-deleted]')).toHaveCount(0, { timeout: 20_000 });
     await expect(editor).toHaveAttribute('contenteditable', 'true', { timeout: 20_000 });
     await expect(editor).toContainText('An agent wrote this first.');
+    const read = async () => JSON.stringify(await agent.ok(parent, 'artifact_read', { artifact: draft.artifactId }));
+    await expect.poll(read, { timeout: 20_000, message: 'the edit typed before the notice is the store’s once restored' }).toContain('Typed before the notice.');
     await editor.click();
     await page.keyboard.press('End');
     await page.keyboard.type(' The person kept it.');
-    const read = async () => JSON.stringify(await agent.ok(parent, 'artifact_read', { artifact: draft.artifactId }));
     await expect.poll(read, { timeout: 20_000, message: 'the edit made after the restore is the store’s' }).toContain('The person kept it.');
     expect(maws.consoleErrors()).toEqual([]);
   } finally {

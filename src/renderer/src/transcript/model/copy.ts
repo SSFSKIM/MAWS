@@ -533,6 +533,7 @@ export const ARTIFACT = {
   open: 'Open',
   // UX wave U10b (M5, §C.4): an agent's delete
   deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
+  neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`, // E11 (fix wave 1): the family's form, its turn closed first
   couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`,
 } as const;
 
@@ -558,11 +559,12 @@ const refusalForHuman = (error: string) =>
 // The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
 // E11), else the version it registered (without a version when the result named none).
 // UX wave U10b (M5, §C.4): a delete's heading is "Deleting <title>…" until its answer, then "Deleted <title>", or its refusal
-// in the person's words. Whether the artifact is live again ("Restored <title>") is read by the row's view, not here.
+// in the person's words (never answered, E11, when its turn closed first). Whether the artifact is live again ("Restored <title>") is read by the row's view, not here.
 export function artifactHeading(row: { action: 'create' | 'update' | 'delete'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true; why?: string }): string {
   const name = row.title ?? row.artifactId;
   if (row.action === 'delete') {
     if (row.error !== null) return ARTIFACT.couldNotDelete(name, (row.why !== undefined ? DELETE_REASONS[row.why] : undefined) ?? refusalForHuman(row.error));
+    if (row.neverAnswered) return ARTIFACT.neverAnsweredDelete(name);
     return row.answered ? ARTIFACT.deleted(name) : ARTIFACT.deleting(name);
   }
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
