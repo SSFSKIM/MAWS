@@ -243,10 +243,17 @@ describe('a prompt’s keys reach it', () => {
     await mount([prompt]);
     arm();
     focusOn(editor()!);
+    const list = () => document.querySelector('[data-key-sink="composer"] [role="listbox"]');
+    // the popup is the editor's own React root (Tiptap's renderer): waited for inside act, a bounded number of times
+    const until = async (shown: boolean) => {
+      for (let i = 0; i < 50 && (list() !== null) !== shown; i++) await act(() => new Promise((resolve) => setTimeout(resolve, 10)));
+    };
     await type('/');
-    await waitFor(() => expect(document.querySelector('[data-key-sink="composer"] [role="listbox"]')).not.toBeNull());
+    await until(true);
+    expect(list()).not.toBeNull();
     await press(editor()!, ESCAPE);
-    await waitFor(() => expect(document.querySelector('[data-key-sink="composer"] [role="listbox"]')).toBeNull());
+    await until(false);
+    expect(list()).toBeNull();
     expect(answered()).toEqual([]);
   });
 
