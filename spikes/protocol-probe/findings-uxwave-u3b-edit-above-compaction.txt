@@ -1,0 +1,68 @@
+UX wave, landing U3b, probe 7: an IN-PLACE rewind (no fork) onto a message from before a compaction, engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md; master's Edit under the owner's message
+rewinds the session itself, src/engine-host/rewind.ts; landing 2 needs the fact; asked by the architect 2026-11-15
+after probe 6; VM dc-uxwave5-26dc, branch ux-wave/U3b-probes)
+
+Verdict.
+  - In the LIVE session that compacted, the engine ACCEPTS a rewind onto a message from before the boundary.
+    Onto ONE, the first prompt: {rewound: true, targetMessageUuid: ONE, prefillText: ONE's text,
+    precedingAssistantUuid: null}. The next prompt is then written with parentUuid null: the session starts over
+    empty, with no summary, no boundary in its chain, and nothing of ONE, /compact or TWO. It answers normally.
+    Probe 6's forks behaved differently: they refused the same target (target_not_found).
+  - After a RESTART (the same session ended and launched again with `--resume`), the same rewind onto ONE is
+    REFUSED: {rewound: false, prefillText: null, precedingAssistantUuid: null, error: "target not found", reason:
+    "target_not_found"}. Nothing is written, nothing changes, and the session takes the next prompt and answers it,
+    continuing after TWO's answer. So whether an Edit above a compaction works depends on whether the engine process
+    that compacted is still the one running.
+  - Onto the /compact command's own row (live): accepted. The next prompt hangs under the /compact caveat, so the
+    boundary and the summary stay, and the command, its "Compacted" row and TWO are gone. Onto TWO (the control):
+    accepted, and the next prompt hangs under "Compacted". In both cases precedingAssistantUuid is ONE's answer,
+    which is FROM BEFORE THE BOUNDARY, while the forks of probe 6 answered null for the same targets.
+  - A rewind sends nothing on the wire beyond its control_response (3 s watched). In the file it writes only a
+    `last-prompt` row; the cut shows in the next prompt's parentUuid.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md). Scenario
+scenarios/pass3/uxwave-u3b-edit-above-compaction.mjs, beside probe 6's uxwave-u3b-fork-command.mjs. The launch is
+MAWS's (uxwave-common-arrivals.mjs). A short session with no context fill: ONE typed and answered; "/compact" (sent as
+MAWS's composer sends it); TWO typed and answered. Then, in the same live process, `rewind_conversation`
+{target_message_uuid, last_seen_user_message_uuid: TWO, interrupt_if_running: false}, as rewind.ts asks. The targets
+are the uuids the three prompts were sent with: ONE's is its file row; /compact's is its <command-name> row (probe 6,
+(a)); TWO's is its row. The wire and the file are noted for 3 s after the answer, then "Without using any tool, reply
+with only the word AFTER." is sent, and its answer and its file chain (parentUuid upward, logicalParentUuid across a
+boundary) are noted. Each target ran in a session of its own, once: the outcome follows from what the process holds,
+not from timing. The resumed case: the same source session (u3b-editcmp-one-resumed-first) is ended after TWO and
+launched again with `--resume <id>` (MAWS's launch, as after a restart), and the rewind onto ONE is issued in that
+process.
+Fixtures (fixtures/uxwave/, each .jsonl and .transcript.jsonl): u3b-editcmp-one, u3b-editcmp-compact,
+u3b-editcmp-two, u3b-editcmp-one-resumed-first (the source process), u3b-editcmp-one-resumed (the resumed process).
+Spend: US$0.019 in all.
+
+Observed. In each live run the source's file holds ONE (line 3) and its answer (25), the compact_boundary (35,
+parentUuid null, logicalParentUuid before it), the summary (36), the caveat (37), <command-name>/compact (38),
+"Compacted" (39), then TWO and its answer. The rewind's answer is the `uxw_rewind` note.
+  one (live)      target ONE 7a3326c0…: rewound true, targetMessageUuid 7a3326c0…, prefillText "Without using any
+                  tool, reply with only the word ONE.", precedingAssistantUuid null. Then: the file gains one
+                  `last-prompt` row (line 69); the wire carries nothing for 3 s. AFTER: wire 80 status requesting,
+                  81 its replay, 90 result success "AFTER". The file's AFTER row (72) has parentUuid null and is the
+                  whole chain.
+  compact (live)  target the /compact row a8255c7c…: rewound true, prefillText "<command-name>/compact</command-name>
+                  … <command-args></command-args>", precedingAssistantUuid d982f1fa… (ONE's answer, line 25, before
+                  the boundary). Then a `last-prompt` row, nothing on the wire. AFTER answered (result success); its
+                  row (72) hangs under the caveat (37), then the summary (36) and the boundary (35).
+  two (live)      target TWO 10341488…: rewound true, prefillText TWO's text, precedingAssistantUuid 34754853…
+                  (ONE's answer, line 25). AFTER answered; its row (69) hangs under "Compacted" (39), then the
+                  command (38), the caveat (37), the summary (36) and the boundary (35).
+  one (resumed)   target ONE 2ec925b0…: rewound false, prefillText null, precedingAssistantUuid null, error "target
+                  not found", reason "target_not_found". No row written, nothing on the wire. AFTER answered (result
+                  success "AFTER"); its row (72) hangs under TWO's answer (64): the conversation is unchanged.
+
+Inference, for landing 2.
+  - An Edit under a message from before a compaction succeeds only in the engine process that compacted. It then
+    empties the conversation down to that message, summary included: rewinding to ONE leaves nothing above it, since
+    ONE was first. In any process launched later (a restart, a resume) the engine refuses it, and the session goes
+    on as before. MAWS must treat "target not found" for such a message as the normal outcome after a restart, and
+    should not offer the Edit or should say why. The engine's own words are "target not found".
+  - In the live case precedingAssistantUuid can name an answer from before the boundary, one that is no longer in
+    the model's context after a compaction. Do not use it to find the row the cut lands on; the next prompt's
+    parentUuid is the truth.
+  - A refusal leaves the session usable (1 of 1): the next prompt is taken and answered.
