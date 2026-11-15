@@ -234,7 +234,11 @@ describe('channel.history, view-filtered lane by lane', () => {
     const hidden = (await call(a, 'channel.history', { project: PROJECT })).output as { entries: HostEntry[] };
     const theirs = hidden.entries.find((e) => e.text === 'hidden')!.id;
     const placements = () => f.host.calls.filter((c) => c.name === 'session.get').length;
-    for (const before of [theirs, '1', '3', `${mine.id.slice(0, -2)}xx`]) {
+    // A cursor of this member's with one character changed. The FIRST one: every bit of it is read, where the last
+    // character of an unpadded base64url string of this length carries two bits the decoder drops, so a changed tail
+    // could decode to the very bytes of `mine.id` (about one run in a thousand) and page as the real cursor does.
+    const forged = `${mine.id.startsWith('A') ? 'B' : 'A'}${mine.id.slice(1)}`;
+    for (const before of [theirs, '1', '3', forged]) {
       const from = placements();
       expect(await call(b, 'channel.history', { project: PROJECT, before }), before).toMatchObject({ ok: true, output: { entries: [], more: false } });
       expect(placements() - from, before).toBe(1);
