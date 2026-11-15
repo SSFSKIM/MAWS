@@ -5,7 +5,7 @@
 // Every question, id and word is invented.
 import { cleanup, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
@@ -18,9 +18,10 @@ import { useAttention } from '../stores/attention';
 import { applyLaneAList, applyLaneAState, resetLaneAStore } from '../stores/lane-a';
 import { useSessions } from '../stores/sessions';
 import { resetShellStores } from '../test-support/shell-stores';
-import { followSessionsLeaving, followSettlements } from './receipts';
+import { SETTLED_MS } from '../lane-a/race';
+import { followSessionsLeaving, followSettlements, followSettling } from './receipts';
 import { RequestCard } from './RequestCard';
-import { fixtureRequest, itemFor } from './test-requests';
+import { fixtureRequest, itemFor, permission } from './test-requests';
 
 const HERE = at('eng-here' as AppSessionId);
 const THERE = addressOf(OTHER_MACHINE, 'eng-here' as AppSessionId); // one engine session on two machines
@@ -176,5 +177,36 @@ describe('a receipt’s lifetime', () => {
     stop();
     useSessions.setState({ listed: listing() });
     expect(receiptOf(THERE)).toEqual({ settled: 'Answered in the terminal' });
+  });
+});
+
+// UX wave U1b M3 (Interfaces §G "The settling receipt"; decision 20): a request this window listed as waiting that leaves
+// its session's list settled elsewhere stands SETTLED_MS where it stood, held in the store by the follower's own timer.
+describe('the follower of settling receipts', () => {
+  const prompt = permission({ requestId: 'toolu_prompt' as never, toolUseId: 'toolu_prompt' as never, input: { command: 'make' } });
+  const asked = itemFor(prompt, HERE, { summary: 'Bash: make' });
+  const held = () => useAttention.getState().settling.get(HERE) ?? [];
+  afterEach(() => vi.useRealTimers());
+
+  it('holds one the terminal answered for SETTLED_MS, with its words; one this window answered, or with no settlement, writes none', () => {
+    vi.useFakeTimers();
+    stop = followSettling();
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [asked] }, TEST_MACHINE);
+    applyLaneAState(HERE, stateWith(HERE, [settled({ request: 'toolu_prompt', outcome: 'allow' })]));
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [] }, TEST_MACHINE);
+    expect(held().map((e) => [e.id, e.summary, e.words, e.call])).toEqual([[asked.id, 'Bash: make', 'Answered in the terminal: Allowed', 'toolu_prompt']]);
+    vi.advanceTimersByTime(SETTLED_MS - 1);
+    expect(held()).toHaveLength(1);
+    vi.advanceTimersByTime(1);
+    expect(held()).toEqual([]);
+
+    applyLaneAState(HERE, stateWith(HERE, [settled({ request: 'toolu_prompt', outcome: 'allow', winner: 'web', by: 'maws' })]));
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [asked] }, TEST_MACHINE);
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [] }, TEST_MACHINE);
+    expect(held()).toEqual([]);
+    applyLaneAState(HERE, stateWith(HERE, []));
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [asked] }, TEST_MACHINE);
+    useAttention.getState().applyChanged({ appSessionId: HERE, items: [] }, TEST_MACHINE);
+    expect(held()).toEqual([]);
   });
 });

@@ -3,7 +3,8 @@ import type { AgentId, EventId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { cellId, rowId, turnId } from '../transcript/model/keys';
 import type { Row } from '../transcript/model/rows';
-import { api, BASH_RESULT, builder, tool, uuid } from '../transcript/model/test-events';
+import { api, BASH_RESULT, builder, request, tool, uuid } from '../transcript/model/test-events';
+import { foldedInReport } from '../owner/report/project';
 import type { TranscriptSource } from '../transcript/source/types';
 import { synthesise } from '../../../../test/support/synth-transcript';
 import { turnDerivations } from '../transcript/model/derive';
@@ -694,5 +695,47 @@ describe('transcript store: the calls that hold a waiting form', () => {
     expect(plans()).toEqual([]);
     store.getState().setWaitingForms(KEY, calls('plan-1'));
     expect(plans().map((row) => row.toolUseId)).toEqual(['plan-1']);
+  });
+  // UX wave U1b M3 (§B, rules 1 and 3; proof a): a session MAWS runs streams each request while it waits; its call's row
+  // is derived all the same, and no row is made for the request itself
+  function pendingTurns() {
+    const b = waitingTurns();
+    b.emit('question.requested', { requestId: request('r-q'), toolUseId: tool('q-raised'), questions: [{ question: 'Which file?', header: 'File', multiSelect: false, options: [{ label: 'a.ts', description: null, preview: null }] }] });
+    b.emit('plan.requested', { requestId: request('r-p'), toolUseId: tool('plan-1'), plan: '1. Read the notes.', input: {} });
+    b.toolUse('t2', 'Bash', { command: 'make' }, 'm4', 0);
+    b.emit('permission.requested', { requestId: request('r-b'), toolUseId: tool('t2'), toolName: 'Bash', displayName: null, input: { command: 'make' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null });
+    return b;
+  }
+
+  it('with each request pending, the question and plan rows are derived and carry the mark while the list names their calls; no request makes a row', async () => {
+    const store = createTranscriptStore();
+    await store.getState().attach(KEY, pushSource(pendingTurns().events).source);
+    store.getState().expandAll(KEY);
+    const rows = () => store.getState().rows(KEY);
+    expect(rows().filter((row) => row.kind === 'request_slot')).toEqual([]);
+    expect(rows().filter((row) => row.kind === 'question' || row.kind === 'plan').map((row) => row.toolUseId)).toEqual(['q-async', 'q-raised', 'plan-1']);
+    expect(marked(rows())).toEqual([]);
+    store.getState().setWaitingForms(KEY, calls('q-raised', 'plan-1'));
+    expect(marked(rows())).toEqual(['question:q-raised', 'plan:plan-1']);
+    store.getState().setWaitingForms(KEY, calls('q-raised'));
+    expect(marked(rows())).toEqual(['question:q-raised']);
+  });
+
+  it('a waiting plan of a pending request stays in view in a turn the reader collapsed and in the to-human view’s fold; one that waits for nothing folds', async () => {
+    const store = createTranscriptStore();
+    const b = pendingTurns();
+    b.end(['u3']);
+    await store.getState().attach(KEY, pushSource(b.events).source);
+    const plan = () => store.getState().rows(KEY).find((row) => row.kind === 'plan');
+    expect(plan()).toBeUndefined(); // its turn folded: a plan that waits for nothing goes with the turn's work
+    store.getState().setWaitingForms(KEY, calls('plan-1'));
+    expect(plan()?.toolUseId).toBe('plan-1');
+    expect(foldedInReport(plan()!)).toBe(false);
+    store.getState().expandAll(KEY);
+    const open = store.getState().rows(KEY).find((row) => row.kind === 'plan' && row.toolUseId === tool('plan-1'))!;
+    store.getState().setWaitingForms(KEY, new Set());
+    const unmarked = store.getState().rows(KEY).find((row) => row.kind === 'plan' && row.toolUseId === tool('plan-1'))!;
+    expect(foldedInReport(unmarked)).toBe(true);
+    expect(foldedInReport(open)).toBe(false);
   });
 });

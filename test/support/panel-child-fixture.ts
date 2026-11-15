@@ -4,7 +4,7 @@
 // event (its finish and the parent's later events withheld, so the child's turn stays open), then a tail appended to
 // that child: sixty units, each a Read call with its result followed by a completed text block (C6 merges adjacent
 // Reads into one row, and a text block between two calls flushes the open group, so each unit is two top-level rows),
-// then a Bash call with a permission request nobody answers, so the child's request slot is pending.
+// then a Bash call with a permission request nobody answers, so the child's request is pending.
 //
 // `PANEL_CHILD_TAIL` is what the e2e reads (never a guessed count): `first`, the seq of the tail's first event (C6's
 // `seek` releases the events strictly below it); `batches`, three release counts covering the tail in order, the third

@@ -42,7 +42,7 @@ describe('panel harness child transcript', () => {
       expect(rows(), `after batch ${i + 1}`).toHaveLength(PANEL_CHILD_TAIL.rows[i]);
     });
     expect(session.player.done).toBe(true);
-    expect(rows().filter((row) => row.kind === 'request_slot')).toHaveLength(1);
+    expect(rows().filter((row) => row.kind === 'request_slot')).toHaveLength(0); // UX wave U1b: a request makes no row
 
     childTranscriptTool.dispose(state);
     expect(useTranscriptStore.getState().entries[key], 'dispose forgets the child’s entry').toBeUndefined();
