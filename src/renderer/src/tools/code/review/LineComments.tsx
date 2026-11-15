@@ -71,7 +71,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     let holdPath: string | null = null;
     if (pass === null || (state === 'ready' && repoRoot === null)) return { rows, unplaced, card, holdPath };
     const lines: ScopeLines =
-      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot!), blocks: section.blocks, read: section.hunks !== null })) } : { state, files: [] };
+      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot!), blocks: section.blocks, read: section.hunks !== null, binary: section.binary })) } : { state, files: [] };
     // M9: a commit's scope draws its commit's comments, every other scope those with none
     const comments = pass.comments.filter(isFileLine).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
