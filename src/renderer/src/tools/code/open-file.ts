@@ -104,7 +104,8 @@ function makeKept(): void {
       open.settle?.('unknown-session');
       continue;
     }
-    open.settle?.(decide(open));
+    const made = decide(open); // made before the answer: an optional call evaluates no argument when there is no `settle`
+    open.settle?.(made);
   }
 }
 
