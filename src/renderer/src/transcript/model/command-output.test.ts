@@ -110,6 +110,27 @@ describe('a command output’s row', () => {
     output(b, 'o1', '<local-command-stdout>Total cost: $0.04</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
     expect(outputs(b.events).map((row) => [row.text, row.turnId, row.lone])).toEqual([['Before any turn', null, true], ['Total cost: $0.04', null, true]]);
   });
+  // The re-review's finding on M1's fix wave: whether a loose output stands under its command is asked only for a loose
+  // output, never per turn on every re-flatten. Counted in reads of the turns' events, not in time.
+  it('a re-flatten with no loose output after a turn reads none of that turn’s events', () => {
+    const b = builder();
+    b.turn('u1', 'Summarise the notes.');
+    b.text('m1', 0, 'Done.');
+    b.end(['u1']);
+    b.turn('u2', '/usage');
+    output(b, 'o2', '<local-command-stdout>Total cost: $0.03</local-command-stdout>', commandEntry({ run: USAGE, plain: false }));
+    b.end(['u2']);
+    const state = withAllExpanded(applyEvents(createState(null, null), b.events));
+    rowsOf(state); // every turn derived and kept
+    let reads = 0;
+    for (const turn of state.turns.values()) {
+      turn.events = new Proxy(turn.events, { get: (target, key, receiver) => { reads += 1; return Reflect.get(target, key, receiver); } });
+    }
+    const again = rowsOf({ ...state, loose: [...state.loose] }); // the list flattened again, no turn changed
+    expect(again.some((row) => row.kind === 'local_command')).toBe(true);
+    expect(reads).toBe(0);
+  });
+
   // A loose row of another kind between a command's turn and its output: no recording holds one (the probes' files place
   // each output directly after its command's turn), so no order is written here for it. By the rule, its output would
   // then have no bubble directly above it and stand alone.
