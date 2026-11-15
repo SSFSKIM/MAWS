@@ -1,0 +1,14 @@
+html, body { margin: 0; height: 100%; font: 13px sans-serif; background: #faf9f6; }
+body { display: flex; }
+#side { width: var(--side, 260px); flex: none; background: #00c000; padding: 8px; box-sizing: border-box; }
+#edge { width: 4px; flex: none; background: #000000; cursor: col-resize; }
+#main { position: relative; flex: 1; min-width: 0; }
+#slot { position: absolute; inset: 0; background: #00ffff; display: none; }
+body.view #slot { display: block; }
+#frames { position: absolute; inset: 0; display: flex; flex-wrap: wrap; }
+#frames iframe { width: 460px; height: 380px; border: 1px solid #888; background: #fff; }
+#right { width: 120px; flex: none; background: #ff8000; display: none; }
+body.view #right { display: block; }
+#menu { position: absolute; left: 160px; top: 60px; width: 520px; height: 160px; background: #ffd000; display: none; z-index: 10; }
+body.menu #menu { display: block; }
+#field { width: 100%; }

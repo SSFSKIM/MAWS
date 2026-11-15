@@ -1,0 +1,187 @@
+UX wave, U11, second pass: the checks 1, 2, 3, 4, 5, 9 and 11 of the draft section "Probes and checks" (U11-connector-
+scopes.md, written against the first pass, findings-uxwave-u11-connector-scopes.txt), on engine 2.1.322 (2026-11-14,
+build VM under vm-run.sh, branch ux-wave/probe-connector-scopes-2). Checks 6, 7, 8 and 10 are not in this pass.
+
+  check  verdict, in one line                                        what it changes in the draft, by its own words
+  1      No name can admit a plugin's connector: `plugin:<p>:<s>` is   Card 1's allow-list option "stays as costly as the
+         dropped ("Invalid entry was ignored"), the bare name does     card says", and costlier: a list left with no valid
+         not match, and a list left empty by the drop blocks every     entry blocks everything, silently; by address the
+         connector. By address all six load: serverCommand equal to    entry must equal the command line the engine
+         the expanded command line, serverUrl the address; one         reports, and one such entry takes every other
+         serverCommand entry ends name matching for every stdio        server of that transport off name matching. Its
+         server, one serverUrl entry for every HTTP one.               "plugin's folder, which holds the plugin's version"
+                                                                       was not what this plugin's entry needed (below).
+  2      mcp_toggle works both ways for all six kinds: off, then on    No kind "refuses", so no kind becomes "never
+         in one session, and on from `disabled` at start; the place's  switched by the rule" and no row is drawn disabled.
+         list follows, the tools reach the next turn. An HTTP          The dialog's "read back, never inferred" is needed:
+         server's off is answered before the list is written.          the file can lag the answer.
+  3      Before the first toggle can land, every server has been       The cost is not nil, so the #476 sentence stays;
+         started, initialized and listed (HTTP on the stored token);   the wait is enough (nothing reaches the first
+         the first turn has none of their tools and no deferred        turn), so the launch need not deny names. "Before
+         names. A server started late is started even after its off   the toggle reached it" is not always so (below).
+         was answered, then stopped.
+  4      The second session, sent its own off for a name the list      The fan-out can take success as success; the
+         holds, answers success and drops the connector; the name      error branch is not reached in this case. Writes of
+         stays once. Two sessions' writes merged.                      two engines did not lose each other's entries.
+  5      Live sessions in the worktree and the subfolder keep the      `seen` keyed by the place holds for new sessions.
+         connector after the root's off (they are not told); new       A ready session in any folder of the repository is
+         ones there list it `disabled`.                                stale until it is sent the toggle itself.
+  9      add-json takes http, sse and stdio at user, local and         No type is refused, so no type needs `mcp add`.
+         project scope, writes each entry exactly as given, and a      The engine's refusal of a name is "Invalid name
+         later session loads all nine. It does not check a URL, and   <name>. Names can only contain letters, numbers,
+         takes a name already used at another scope.                   hyphens, and underscores."; the form has to check
+                                                                       a URL and a name used at another scope itself.
+  11     In a real terminal session (the interactive engine in tmux),  The item's sentences about `/mcp` stay, now run:
+         `/mcp disable` and `/mcp enable` write and clear the same     a terminal's switch is the person's choice, as the
+         list under the main root's key, from the root and from a      rule's table says.
+         linked worktree, plugin names included.
+
+Contradictions with the first pass or the draft.
+  - The draft (first section, third bullet): an address entry needs "the engine's own expansion of variables and of the
+    plugin's folder, which holds the plugin's version". For this plugin, installed with `claude plugin install` from a
+    local directory marketplace, the engine ran the server from the marketplace's own folder (record line 2,
+    `configs["plugin:cs-plug:cs-pserver"].args[0]` = `<scratch>/cs-market/cs-plug/srv.mjs`), not from the installed
+    copy that installed_plugins.json names (`<home>/.claude/plugins/cache/cs-market/cs-plug/<version>`, line 1
+    `pluginInstallShape`); an entry with the installed folder admitted nothing (line 7, allow-cmd-install). So the
+    folder an entry must name depends on the plugin's source; for a source fetched into the cache (git, a URL) it was
+    not run.
+  - The draft (#476, "When the rule runs"): a connector switched off at launch "was started by the engine once, in
+    that one launch, before the toggle reached it". cs-local (the local-scope server, which the engine starts about
+    100 ms after the others) was started after its own off had been answered, in both runs (line 16, early-initialize:
+    toggles answered by 616 ms, `stdioTimeline` cs-local `start` at 624 ms, `SIGINT` at 676 ms; run 2: 697 ms, 706 ms,
+    748 ms). "Started once in that launch" holds; "before the toggle reached it" does not always.
+  - Nothing contradicts the first pass. Its allow-user (an allowlist blocks what it does not name) and its reading of
+    `/mcp disable` (writes `disabledMcpServers` under the project entry) are confirmed by runs here.
+
+Method.
+  Engine 2.1.322 under spikes/protocol-probe/vm-run.sh (VM.md) on the build VM the first pass used; the gateway through
+  the loopback forward. Scenario scenarios/pass3/uxwave-u11-connector-scopes-2.mjs, run twice as
+    ./vm-run.sh --prefix conn2a --out /tmp/conn2-r1 run run-pass3.mjs uxwave-u11-connector-scopes-2
+  (conn2b, /tmp/conn2-r2 for the second). Scratch HOME and repository per run; nothing of a person's: no account, no
+  sign-in, all servers invented stubs on loopback. The six servers are the first pass's (cs-proj in the repository's
+  .mcp.json; cs-user and cs-oauth by `claude mcp add --scope user`, stdio and HTTP; cs-local by `--scope local`; the
+  plugin cs-plug's plugin:cs-plug:cs-pserver and plugin:cs-plug:cs-poauth, installed at user scope), with one change:
+  the plugin's stdio server is `node ${CLAUDE_PLUGIN_ROOT}/srv.mjs cs-pserver`, so a command entry can be tried with
+  the variable and with each folder it could stand for. The HTTP stub admits only the token seeded in the scratch
+  credential store and records each request with its time; three more paths serve add-json's servers with no
+  sign-in (`/open/<name>` streamable HTTP, `/sse/<name>` the legacy SSE transport). The stdio stub logs its start,
+  every JSON-RPC method, a signal and a closed stdin, with the time. Folders: the repository (<root>), a linked
+  worktree beside it (<worktree>), <root>/sub. Every session is MAWS's launch (uxwave-common-arrivals.mjs mawsLaunch);
+  the allow cases add `--debug-file` and the record keeps the engine's lines about settings and MCP from it. The
+  terminal cases start the interactive engine (`--model haiku`) in tmux inside the scenario, type the commands, and
+  read .claude.json after each. A turn ("Reply with only the word ok", haiku) is sent only in the cases that read
+  init's tools and the deferred names. Spend: under $0.01 a run.
+  The two runs agree field by field (times, seqs and ids aside) except one race: at early-status's first mcp_status,
+  three stdio servers read `pending` in run 1 and `connected` in run 2. Run 1 is committed.
+  Fixtures: the record fixtures/uxwave/u11-connector-scope2.ndjson, one case a line (line N below), and one journal
+  per session, fixtures/uxwave/u11-connector-scope2-<case>[-<step>].jsonl, where seq N is the row with "seq": N.
+  The journals are trimmed by the scenario: stream events dropped, control payloads over 4 kB that name no probe
+  server (initialize's answer, the maws server's tool list) reduced to their size and keys, arrays over 24 items
+  reduced to their count and the probe's own items. No engine transcript is committed; deferred names are in the
+  record's `deferred` (the transcript's deferred_tools_delta at its line 6, as the scenario read it).
+
+Cases and what each shows.
+  Check 1, the allow list (lines 2 to 13; journal fixtures/uxwave/u11-connector-scope2-<case>.jsonl, the settled
+  mcp_status at seq 22, 25 or 35):
+    allow-none (2)          no list: all six connected; `configs` is each server's config as mcp_status reports it.
+    allow-pname-only (3)    user list [plugin:cs-plug:cs-pserver, plugin:cs-plug:cs-poauth]: no cs-* server at all
+                            (`status.servers` {}, `stdio` {}, `hits` {}). `debug.settings`: twice "[ERROR] Invalid
+                            setting skipped without dialog (automated session): <home>/.claude/settings.json:
+                            allowedMcpServers[i]: Invalid entry was ignored: Server name can only contain letters,
+                            numbers, hyphens, and underscores". Nothing on the wire or stderr (`wireWarnings`,
+                            `stderr` empty): the list that remains is empty, and an empty list admits nothing.
+    allow-pname (4)         the same two plus cs-user: cs-user alone; the same two warnings. Only the two entries are
+                            dropped: the third entry of the same list still applies.
+    allow-bare (5)          [cs-pserver, cs-poauth, cs-user]: cs-user alone; no warning (a valid name that matches
+                            nothing).
+    allow-cmd (6)           [serverCommand = allow-none's reported command for cs-pserver, serverName cs-user,
+                            serverName cs-oauth]: plugin:cs-plug:cs-pserver and cs-oauth. cs-user, named, is out: a
+                            serverCommand entry makes every stdio server match by command only. cs-oauth (HTTP) still
+                            matches by name.
+    allow-cmd-install (7)   serverCommand with installed_plugins.json's installPath in place of the variable, and
+                            cs-user: nothing.
+    allow-cmd-var (8)       serverCommand spelled `${CLAUDE_PLUGIN_ROOT}/srv.mjs`, and cs-user: nothing; debug "MCP
+                            policy predicate references environment variable(s) not present in the policy expansion
+                            env: CLAUDE_PLUGIN_ROOT".
+    allow-url (9)           [serverUrl <base>/mcp/cs-poauth, serverName cs-oauth, serverName cs-user]:
+                            plugin:cs-plug:cs-poauth and cs-user; cs-oauth, named, is out (the same rule for HTTP).
+    allow-address-all (10)  a serverCommand per stdio server (as reported) and a serverUrl per HTTP server: all six
+                            connected.
+    allow-flag (11)         allowedMcpServers [cs-user] in --settings alone: cs-user alone.
+    allow-worktree (12)     session in <worktree>; user [cs-user], <worktree>/.claude/settings.local.json [cs-oauth]:
+                            cs-user and cs-oauth (the worktree's own local file counts).
+    allow-worktree-rootlocal (13)  session in <worktree>; user [cs-user], <root>/.claude/settings.local.json
+                            [cs-proj], the worktree having none: cs-user and cs-proj. The main root's local file counts
+                            for a session in a linked worktree too.
+    A server the list blocks is not named in the debug log either: the log shows only the connections it makes.
+  Check 2, mcp_toggle (lines 14, 15):
+    toggle-off-on (14; journal -toggle-off-on, toggles answered at seq 27/31 cs-proj, 35/39 cs-user, 43/47 cs-oauth,
+      51/55 cs-local, 59/63 plugin:cs-plug:cs-pserver, 67/71 plugin:cs-plug:cs-poauth (off/on); mcp_status two seqs
+      after each): every toggle `success`. Off: the status reads `disabled <scope>`; a stdio server gets SIGINT
+      (`steps[i].off.stdio` ["SIGINT"]); the name is in the place's list. On: `connected` with its tool; a stdio
+      server is started again (start, initialize, tools/list), an HTTP server dialled again with the stored token
+      (`steps[i].on.hits`); the name leaves the list. For the two HTTP servers the off is answered in 4 to 8 ms
+      (`off.ms`) and the list does not hold the name yet at the answer (`off.listAtAnswer` []), only 1.5 s later
+      (`listAfter1500ms`); for the stdio servers the answer comes after the process is stopped (about 55 ms) and the
+      list already holds it. The on is in the list at its answer for every kind. Both runs alike.
+    toggle-on-from-disabled (15; journal -toggle-on-from-disabled): started with the six names in the list (written by
+      14's toggles): all six `disabled` at seq 22, nothing started or dialled (`hitsAtStart`, `stdioAtStart` {});
+      `mcp_toggle` on for each, `success`, `connected` with tools, the list shrinking by one each time to []; the turn
+      that follows has all six pings in init's `tools` (seq 52) and in the deferred names.
+  Check 3, a toggle right after initialize (lines 16, 17; times in ms from the scenario's launch call):
+    early-initialize (16): initialize sent at 6 ms (seq 3), answered at 515 (seq 6). The stdio servers start at 510 to
+      512 and the HTTP ones are first dialled at 521, that is around the initialize answer. The six offs go out at
+      587, the first request after initialize, and are answered by 616 (seq 27 to 32). By then cs-proj, cs-user and
+      plugin:cs-plug:cs-pserver had each run initialize and tools/list (591 to 595), and both HTTP servers had run
+      initialize and tools/list on the stored token (574) (`stdioBeforeToggleAnswered`, `hitsBeforeToggleAnswered`).
+      cs-local started at 624, after its off was answered, ran to tools/list, and got SIGINT at 676. The status after
+      reads all six `disabled`; the turn's init (seq 40) lists them `disabled`, no cs-* tool, and no cs-* deferred
+      name (`deferred[0].addedNames` []).
+    early-status (17): the same with the offs sent at the first mcp_status answer (the draft's rule): that answer had
+      four servers `pending` (run 1; `connected` in run 2), the offs went out at 615 and were answered one after
+      another by 850; the same outcome: every server started and listed once, then stopped; nothing in the turn.
+    Not run: a first message sent without waiting for the toggles' answers.
+  Check 4, two live sessions (line 18; journals -two-live-a, -two-live-b):
+    A switches cs-user off (A seq 27): B still reads it `connected` (it is not told). B is sent its own off for
+    cs-user (B seq 29): `success`; B reads it `disabled` (B seq 31); the list holds `cs-user` once. A switches cs-oauth
+    off (A seq 29), then B switches cs-local off (B seq 33): the list holds all three (B's write kept A's entry). B
+    switches cs-user on (B seq 35): the list is [cs-oauth, cs-local]; A still reads cs-user `disabled` and B `connected`
+    (A seq 31, B seq 39): each session holds what it was told. The list stays so after both end. Writes a few hundred
+    ms apart only; two writes at the same instant were not tried.
+  Check 5, the worktree and the subfolder (line 19; journals -place-root, -place-wt, -place-sub, -place-wt-new,
+    -place-sub-new):
+    W (in <worktree>) and S (in <root>/sub) are live with all six connected when R (in <root>) switches cs-user and
+    plugin:cs-plug:cs-pserver off: the list under <root> holds both; W and S still read both `connected` (their seq
+    27). New sessions in <worktree> and <root>/sub read both `disabled`, the other four connected (seq 25). Beside the
+    question: cs-local, defined under projects[<root>].mcpServers, loads in the worktree and the subfolder too.
+  Check 9, claude mcp add-json (line 20; journal -add-json):
+    `adds`: nine calls `claude mcp add-json aj-<type>-<scope> '<json>' --scope <scope>`, http and sse with a header and
+    stdio with args and env: each answered "Added <type> MCP server <name> to <scope> config", each entry in the file
+    equal to the JSON given (`equal` true): user in the top-level mcpServers of .claude.json, local under
+    projects[<root>].mcpServers, project in <root>/.mcp.json. The session after (seq 25) reads all nine `connected`
+    with their tool (sse over the legacy transport). `refusals`, each with its exit code and words:
+      plugin:cs-plug:aj-x, "claude.ai Probe", "has space", dot.name: exit 1, "Invalid name <name>. Names can only
+        contain letters, numbers, hyphens, and underscores.", nothing written;
+      aj-http-user again at user scope: exit 1, "MCP server aj-http-user already exists in user config";
+      aj-http-user at local scope: accepted ("Added http MCP server aj-http-user to local config"): one name now has
+        two definitions;
+      {"url": ...} with no type: exit 1, "Invalid configuration: : Invalid input";
+      type ws: accepted; type http with url "not a url": accepted.
+    `mcpGetCliHelp`: add-json's own help, default scope "local".
+  Check 11, the terminal's /mcp (lines 21 to 23; the panes are in the record, no journal):
+    term-root (21): typed `/mcp disable cs-user`, `/mcp disable plugin:cs-plug:cs-pserver`, `/mcp enable cs-user`; the
+      pane answers `MCP server "cs-user" disabled`, `MCP server "plugin:cs-plug:cs-pserver" disabled`, `MCP server
+      "cs-user" enabled`; after each, projects[<root>].disabledMcpServers is [cs-user], then [cs-user,
+      plugin:cs-plug:cs-pserver], then [plugin:cs-plug:cs-pserver], and so after the session ends.
+    term-worktree (22): in <worktree>, `/mcp disable cs-oauth` writes [cs-oauth] under <root>, no worktree key.
+    term-from-disabled (23): the list preset to [cs-user, plugin:cs-plug:cs-poauth]; `/mcp enable` of each empties it.
+    What remains unshown: what the terminal's own /mcp dialog lists for a server that is off, and whether `enable`
+    reconnects it inside that terminal session (only the file was read).
+
+What could not be run here, and why.
+  - Checks 6, 7, 8 and 10 were not in this pass's brief (6 needs an account with a connector; 7 the Mac mini's OAuth
+    gate job).
+  - A plugin from a marketplace that is fetched (git or URL) into the plugin cache: the folder its servers run from,
+    and so whether a plugin update changes the command line an address entry must match, is not shown; only a
+    local directory marketplace was run.
+  - Two engines writing .claude.json at the same instant.

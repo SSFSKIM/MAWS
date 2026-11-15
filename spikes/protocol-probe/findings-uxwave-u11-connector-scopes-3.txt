@@ -1,0 +1,110 @@
+UX wave, U11, third pass: is "Write a secret as ${NAME} and set NAME in your environment." true for a connector entry
+on engine 2.1.322? (2026-11-14, build VM under vm-run.sh, branch ux-wave/probe-connector-scopes-3)
+
+Verdict.
+  - True, at all three scopes alike (<root>/.mcp.json, user, local), for every field tested of a local command entry
+    (stdio): `command`, `args` and `env` receive the value, whatever the name, with one exception: a name beginning
+    OTEL_ is read as empty there too, and is not inherited by the command either.
+  - True for a remote entry (HTTP and SSE: a header's value, the URL's path and query) when the name is one of the
+    person's own, whether it looks like a credential or not (QUAY_REGION, QUAY_TICKETS_TOKEN, QUAY_API_KEY,
+    QUAY_PASSWORD, QUAY_SECRET), and for GITHUB_TOKEN and GH_TOKEN.
+  - False for a remote entry with a well-known name the engine keeps to itself: NPM_TOKEN, AWS_SECRET_ACCESS_KEY,
+    ANTHROPIC_API_KEY, HTTPS_PROXY and OTEL_EXPORTER_OTLP_HEADERS are sent as empty strings, in headers and in the URL
+    alike. The server still connects. The person is told nowhere they would look: not on the wire, not in mcp_status
+    (no field for it), not on stderr; only the debug file, in "[WARN] MCP server config references credential
+    variable(s) that are never expanded toward a remote server: <names> (read as empty)" lines, which do not name
+    the server.
+  - "Set NAME in your environment" is true of the engine's process environment and of the user settings file's `env`
+    (a name set only there was received by both kinds). A name that is set nowhere is not reported as missing: it is
+    sent as written, the literal `${NAME}`, in headers, URL, args and env, and the server connects; only a header gets
+    a debug-file line ("Header values reference unset environment variables: <name>").
+  - `${NAME:-fallback}` with NAME unset gives the fallback in every field.
+  Wording I would trust instead: "Write a secret as ${NAME}, with a name of your own such as MYSERVICE_TOKEN, and set
+  NAME in the environment Claude Code starts with or under env in ~/.claude/settings.json. A remote connector gets
+  well-known variables such as NPM_TOKEN, AWS_SECRET_ACCESS_KEY or ANTHROPIC_API_KEY as empty, and an unset NAME as
+  the text ${NAME}." For a form that writes the entry, check the names before saving rather than relying on the
+  engine to say anything.
+
+Method.
+  Engine 2.1.322 under spikes/protocol-probe/vm-run.sh (VM.md), on the build VM of the first two passes; the gateway
+  through the loopback forward, but no model is called. Scenario scenarios/pass3/uxwave-u11-connector-scopes-3.mjs,
+  run twice as
+    ./vm-run.sh --prefix conn3a --out /tmp/conn3-r1 run run-pass3.mjs uxwave-u11-connector-scopes-3
+  (conn3b, /tmp/conn3-r2). The two records agree field by field; run 1 is committed. Scratch HOME and repository;
+  every value invented (`inv-<name>`, HTTPS_PROXY `http://127.0.0.1:9`, with NO_PROXY covering loopback so the
+  engine still reaches the stubs); nothing of a person's.
+  Every entry is written with `claude mcp add-json` (this is check C too): per scope an HTTP, an SSE and a stdio
+  entry carrying `${…}` in every field (x3-http-<scope>, x3-sse-<scope>, x3-stdio-<scope>), and one of each kind
+  whose only variable is QUAY_UNSET with no fallback (x3-unset-*-<scope>), so that an unset name cannot spoil the
+  other readings. Remote entries: URL `<base>/x3[s]/<server>/${QUAY_SEG}?region=${QUAY_REGION}&tickets=
+  ${QUAY_TICKETS_TOKEN}&npm=${NPM_TOKEN}&otel=${OTEL_EXPORTER_OTLP_HEADERS}&fb=${QUAY_UNSET:-fallback}` and one
+  header `x-v-<name>: ${<name>}` per name of the spread, plus `x-fallback`. Stdio entries: command
+  `${QUAY_NODE_DIR}/node`, args with QUAY_REGION, QUAY_TICKETS_TOKEN, GITHUB_TOKEN, NPM_TOKEN,
+  OTEL_EXPORTER_OTLP_HEADERS and the fallback, env `V_<name>: ${<name>}` per name plus V_FALLBACK. Two more user
+  entries, x3-settings-http and x3-settings-stdio, use QUAY_FROM_SETTINGS, which is set only in the user settings
+  file's `env`. The engine's environment (MAWS's launch, uxwave-common-arrivals.mjs mawsLaunch, cwd <root>, plus
+  `--debug-file`) holds every other name. One session reads mcp_status until the x3 servers settle (seq 25).
+  The HTTP stub records the path, query and x- headers of every request; the stdio stub records its argv, the env
+  values it got and the names it inherited. The scenario keeps only a class per value: set (the invented value),
+  empty, absent, literal (`${…}` as written), fallback. Values do not reach the fixtures: the journal and record have
+  each value replaced by `<value of NAME>`.
+  Fixtures: the record fixtures/uxwave/u11-connector-scope3.ndjson (line 1 setup and the add-json calls, line 2 the
+  session) and the session's journal fixtures/uxwave/u11-connector-scope3-session.jsonl (seq N is the row with
+  "seq": N), trimmed as in the second pass. 60 KB. No engine transcript.
+
+Cases.
+  A, per field (line 2, `remote` and `stdio`; the same at every scope, compared across the three):
+    remote URL: the path segment ${QUAY_SEG} and the query's region and tickets `set`; npm and otel `empty`; fb
+      `fallback` (`remote["x3-http-project"].pathSegment`, `.query`; SSE the same).
+    remote header: per name as under B; `x-fallback` `fallback`; the same on every request of the connection
+      (`sameOnEveryRequest` true).
+    stdio command: `${QUAY_NODE_DIR}/node` ran (`stdio[…].command`); args region, tickets, gh, npm `set`, otel
+      `empty`, fb `fallback`; env as under B.
+    unset with no fallback (`remote["x3-unset-*"]`, `stdio["x3-unset-stdio-*"]`): the URL query `unset=${QUAY_UNSET}`
+      and the header `x-unset` arrive literal; the stdio arg and env value arrive literal; every one of these
+      servers reads `connected` (`status`, seq 25). The debug file has "MCP server "x3-unset-http-<scope>": Header
+      values reference unset environment variables: QUAY_UNSET" for each remote one (http and sse, six lines) and
+      nothing for the URL, the args or the env (`debug.matched`).
+    settings env: x3-settings-http's query and header and x3-settings-stdio's arg and env `set`, and the stdio command
+      inherited QUAY_FROM_SETTINGS (`stdio["x3-settings-stdio"].inheritedFromSettings` `set`).
+  B, per name (line 2, `remote[…].headers` and `stdio[…].envField`, `stdio[…].inherited`):
+    name                         remote header   stdio env field   inherited by the stdio command
+    QUAY_REGION                  set             set               set
+    QUAY_TICKETS_TOKEN           set             set               set
+    QUAY_API_KEY                 set             set               set
+    QUAY_PASSWORD                set             set               set
+    QUAY_SECRET                  set             set               set
+    GITHUB_TOKEN                 set             set               set
+    GH_TOKEN                     set             set               set
+    NPM_TOKEN                    empty           set               set
+    AWS_SECRET_ACCESS_KEY        empty           set               set
+    ANTHROPIC_API_KEY            empty           set               set
+    HTTPS_PROXY                  empty           set               set
+    OTEL_EXPORTER_OTLP_HEADERS   empty           empty             absent
+    Where a person is told: `wire` [] (every frame from the engine searched, the servers' own config as written left
+    out), `stderr` [], mcp_status has no field for it (each server's fields: config, name, scope, serverInfo,
+    source, status, tools, transport, urlHost for remote ones), and the debug file has [WARN] lines, one for each
+    field value that held such names (the record keeps the six distinct ones: the URL's "NPM_TOKEN,
+    OTEL_EXPORTER_OTLP_HEADERS" and one per header), e.g. "MCP server config references credential variable(s) that
+    are never expanded toward a remote server: NPM_TOKEN, OTEL_EXPORTER_OTLP_HEADERS (read as empty)", with no server
+    named (`debug.matched`). Beside the question: every name of the engine's environment but OTEL_* reaches a stdio
+    command's own environment, ANTHROPIC_API_KEY included, whether or not the entry names it (x3-noenv).
+  C, add-json (line 1, `adds`): all 22 calls answered "Added <type> MCP server <name> to <scope> config", and each
+    file entry equals the JSON given (`writtenEqualsGiven` true): every `${…}` written unexpanded, at project
+    (<root>/.mcp.json), user and local scope. x3-noenv (stdio, no env key) and x3-noargs (stdio, `args: []`, no env;
+    its command an executable script) are written as given and read `connected` with their tool (line 2, seq 25).
+
+Not run, and why.
+  - Names beyond the spread. The engine's own lists say which names a remote entry reads as empty; read, not run:
+    cli.pretty.js `U1o` and `B1o` (~388367: among them HTTP_PROXY, ALL_PROXY and lower-case forms, CARGO_REGISTRY_TOKEN,
+    PYPI_TOKEN, TWINE_PASSWORD, PIP_INDEX_URL, UV_INDEX_URL, GOPROXY, GOAUTH, CODEARTIFACT_AUTH_TOKEN, GOOGLE_OAUTH_
+    ACCESS_TOKEN, AZURE_PASSWORD, MCP_CLIENT_SECRET, each also with an INPUT_ prefix), the patterns of `RVe` (~388368:
+    GIT_CONFIG_PARAMETERS and GIT_CONFIG_KEY_n/VALUE_n, CARGO_REGISTRIES_<x>_TOKEN, BUNDLE_<x>__ names), and the names of
+    `Pcn` (~1012249, the engine's own and every OTEL_*). The function is `KY` (~388401); its warning ~388428.
+  - Blanking by a value's shape: `$Ve` (~388384) also blanks a name whose value looks like a credential, but only
+    when `_Oo()` holds (~1012116: CLAUDE_CODE_ENTRYPOINT `local-agent`, or the subprocess env scrub). MAWS's launch
+    (entrypoint sdk-ts) does not meet it, so it was not set up; read, not run.
+  - A plugin's connector with an unset name: the source has a warning "Missing environment variables in plugin MCP
+    config: …" (~474804) for that case; no plugin was used here.
+  - Where MAWS's own engine launch gets its environment from on a Mac (a shell's profile or not) is MAWS's question,
+    not the engine's, and was not part of this probe.
