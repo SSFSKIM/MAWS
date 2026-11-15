@@ -129,12 +129,16 @@ function place({ appSessionId, path, line, options }: Request): Opened {
   const session = appSessionId!;
   if (options.asked !== 'agent') layout.closeDestination();
   const params = (preview: boolean): FilesTabParams => ({ file: path, line, ...(preview ? { preview: true as const } : {}) });
+  // The branch review's fourth finding: a file whose one entry has unsaved edits or a save under way (made beside another
+  // chat) opens kept, as its first edit keeps a preview: a preview of it could be replaced with no close question.
+  const entry = useViewer.getState().entries.get(key);
+  const kept = (options.keep ?? false) || entry?.dirty === true || entry?.saving === true;
   let tabId: string;
   if (placement.tabId === null) {
-    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!options.keep), asked: options.asked });
+    tabId = panelHost.addTool(FILES_TOOL_ID, { appSessionId: session, params: params(!kept), asked: options.asked });
   } else {
     // a reused tab is the preview unless kept; a selected one stays what it was, unless the opener keeps it
-    const preview = placement.how === 'reuse' ? !options.keep : fileOfTab(layout.panelParams[placement.tabId])?.preview === true && !options.keep;
+    const preview = placement.how === 'reuse' ? !kept : fileOfTab(layout.panelParams[placement.tabId])?.preview === true && !kept;
     layout.setPanelParams(placement.tabId, params(preview));
     tabId = placement.tabId;
     showTab(session, tabId, options.asked);
