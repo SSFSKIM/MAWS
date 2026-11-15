@@ -208,7 +208,7 @@ async function placed(store: ArtifactStore, recorded: ArtifactPublishResult, ctx
   return { ...recorded, id: artifact.handle ?? artifact.id, deliverableId: artifact.id, version: place, externalReferences: externalReferenceCount(text), ...(owner !== null && owner !== ctx.appSessionId && { ownerAppSessionId: owner }) };
 }
 
-async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, files: Record<string, string | null>, ctx: McpToolContext): Promise<ArtifactPublishResult> {
+async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Artifact, input: ArtifactPublishInput, sent: Record<string, string | null>, ctx: McpToolContext): Promise<ArtifactPublishResult> {
   const actor = actorOf(ctx);
   const replica = store.service.replica(ctx.appSessionId, artifact.id);
   let suggest = false;
@@ -240,7 +240,7 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
           actor,
           (doc) => {
             try {
-              const published = publish(doc, baseFiles, files, input.force ?? false);
+              const published = publish(doc, baseFiles, sent, input.force ?? false);
               if (published.conflicts.length > 0) outcome.conflicts = published.conflicts;
               else outcome.result = { status, artifactId: artifact.id, kind: artifact.kind, title: artifact.title, revision: 0, changed: published.changed, kept: [], removed: [], ...loaderFields(published) /* P3-C */ };
             } catch (error) {
@@ -290,7 +290,7 @@ async function publishDoc(deps: PublishDeps, store: ArtifactStore, artifact: Art
   if (outcome.result) {
     try {
       replica.base = withDoc(base!.state, (doc) => {
-        const { changed } = publish(doc, baseFiles, files, true);
+        const { changed } = publish(doc, baseFiles, sent, true);
         const after = filesOf(store, artifact.kind, doc);
         const files = { ...baseFiles }; // P3-C: kept for the next publish
         for (const path of changed) {
