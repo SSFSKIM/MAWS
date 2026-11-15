@@ -366,7 +366,9 @@ test('the to-human view folds by stretch, opens, folds again, and a jump opens t
     return { follows: after(open), closedBetween: between.length };
   }, target!);
   expect(order, 'the target’s record is the open one').toEqual({ follows: true, closedBetween: 0 });
-  await expect(page.locator('[data-view-switch]').getByRole('button')).toHaveText('full transcript ›');
+  // Still the report: the other stretches stay folded (the full transcript draws no record line). The harness mounts a
+  // transcript and no composer, so no view switch stands here; the app's report scene reads the switch.
+  await expect.poll(() => closedLines.count(), { message: 'the other stretches stay folded' }).toBeGreaterThan(0);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
