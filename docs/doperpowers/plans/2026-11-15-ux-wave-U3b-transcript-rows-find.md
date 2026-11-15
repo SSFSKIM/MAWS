@@ -472,7 +472,7 @@ One rule for all of them. The suites that map whole recorded sessions (`model/fi
 | the same again (the engine's repeat) | on | on, `since` unchanged |
 | a status with any other `activity`; a status whose process is `exiting` or `exited`; the session's status removed | on | off |
 | a bridge message `compact` with phase `start` and operation id R | off | on, `since` = now, held by R |
-| `compact` with phase `end` and id R; the session's watch resets or ends; its bridge is no longer `live`; a row of kind `boundary` and `boundaryKind: 'compaction'` later than `since` reaches the store | on, held by R | off |
+| `compact` with phase `end` and id R; the session's watch resets (from the link, or replaced in this window for an overflow) or ends; its bridge state goes away or is neither `live` nor `starting`; a row of kind `boundary` and `boundaryKind: 'compaction'` that was not among the session's rows when the row went on reaches the store (told by the row's id, never by comparing its time with this window's clock) | on, held by R | off |
 | `compact` `end` with another id | on, held by R | on |
 
 A session has one state; the two sources never both feed one session (one is a session MAWS runs, the other a terminal session). The elapsed time ticks once a second through the ticker the turn line already uses. An automatic compaction needs no case of its own: its status frames are a typed one's (Engine facts, 9).
@@ -1168,6 +1168,7 @@ Each milestone's own review, at its boundary, reads that milestone's diff agains
 
 ## Decision Log
 
+- Decision (2026-11-15 (UTC), the controller, on M4's review): M4's table is corrected in three cells. (1) The boundary that ends a bridge-held compaction is one that was not among the session's rows when the row went on, told by its row id; the first text said "later than `since`", which compares the transcript machine's time (kept through the backfill) with this window's clock, so a skewed machine could leave the row standing or clear a new compaction with an old boundary. (2) A watch reset includes the one this window makes when it replaces an overflowed watch for a late consumer. (3) The bridge's loss is its state going away or becoming anything but `live` or `starting`, not only a fall from `live`. Told to the architect; the fix wave builds it, red first, with both skew directions.
 - Decision (2026-11-15 (UTC), the architect, on M3-4): the answer directly before the prompt that set off an automatic compaction draws no Fork (Copy and the time only). That prompt is drawn, and written in the file, above the boundary, so decision 14's sentence decides it; a fork against the prompt after the compacted turn would hold a whole turn the person did not ask for. §C names only the typed `/compact` command's row as the exception; `answerActionsOf`'s one branch and its test change, red first; one tracker row (M6): whether the engine accepts a rewind to that prompt is not recorded.
 - Decision (2026-11-15 (UTC), the architect, on M3-11): the one assertion changed in `owner/report/report-view.test.tsx` (U2's) is accepted as it stands; it joins §M.
 - Decision (2026-11-15 (UTC), the architect): `src/services/owner/service.ts:453` (owner marks left standing after a rewind past a compaction, through the `precedingAssistantUuid` fallback) is not this landing's: one tracker row (M6), no code.
