@@ -6,7 +6,7 @@
 // as the page in force; a dashboard's is today's six rows; the history card's is the four formats.
 import { describe, expect, it, vi } from 'vitest';
 import type { DocumentState } from '@artifacts/host';
-import { documentExports, documentHeader, EXPORT_COPY, savedOf, type DocumentHeaderCommands, type DocumentHeaderState } from './header';
+import { documentExports, documentHeader, EXPORT_COPY, FORMAT_NAMES, savedOf, type DocumentHeaderCommands, type DocumentHeaderState } from './header';
 
 const live = (fields: Partial<DocumentState> = {}): DocumentState => ({ phase: 'live', synced: true, unsaved: 0, revision: 4, integrated: 0, readOnly: false, ...fields });
 
@@ -153,7 +153,16 @@ describe('documentHeader', () => {
 
   // §B.5: the one sentence an export says when the document's last write is not acknowledged (M3 decision 3)
   it('words an export that waited for an unsaved change in one fixed sentence', () => {
-    expect(EXPORT_COPY.exportNotSaved).toBe('Your last change to this document is not saved yet, so nothing was exported. Try again in a moment.');
+    expect(EXPORT_COPY.exportNotSaved).toBe('The last change is not saved yet. Try again in a moment.');
+  });
+
+  // the architect's ruling of 2026-11-15 on M3's report: the sentence is drawn whole in the failed action, whatever the format
+  it('draws that sentence whole in the failed export’s action for every format', () => {
+    const c = commands();
+    for (const format of Object.keys(FORMAT_NAMES) as (keyof typeof FORMAT_NAMES)[]) {
+      const { label } = documentHeader(state({ exporting: { phase: 'failed', format, message: EXPORT_COPY.exportNotSaved } }), c).actions![0]!;
+      expect([label.endsWith('Try again in a moment.'), label.includes('…')], label).toEqual([true, false]);
+    }
   });
 
   it('says an export’s progress and its failure first in the header’s actions, and holds the menu while one runs', () => {
