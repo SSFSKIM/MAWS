@@ -777,10 +777,12 @@ test('an answered question reads as one compact receipt that stays in view when 
 });
 
 // ---- UX wave U1b: a question's form in the row of its call (Proof 3, acceptance 6 and 13; the architect's ruling A2) ----
-// `synthetic/questions` is the seeded transcript with three AskUserQuestion turns put in it (harness/questions.ts): two
-// asked and never answered, a hundred turns apart, and one dismissed whole as its last turn. `raise` makes a call's
-// request a waiting one of the transcript's session (an attention item and its request event, as main's feed and the
-// card's read would hold them), and from then on the page draws requests through the real card's renderer.
+// `synthetic/questions` is the seeded transcript with three question calls put in it (harness/questions.ts): two of a
+// terminal session's asynchronous questions (the sminos ask mod's call and its immediate result, the agent going on for a
+// hundred turns and more with them open), a hundred turns apart, and, as its last turn, the engine's own AskUserQuestion
+// dismissed whole. `raise` makes an asynchronous call a waiting request of the transcript's session as its bridge raises
+// one (an `async_input` item and its request view, read by the shared `laneAEntryOf`, in the attention store), and from
+// then on the page draws requests through the real card's renderer.
 const QUESTIONS = 'synthetic/questions';
 const questionsOf = (page: Page): Promise<HarnessQuestion[]> => page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.questions());
 const raise = (page: Page, call: string): Promise<string> => page.evaluate((c) => (window as unknown as HarnessWindow).__maws_harness.raise(c), call);
@@ -814,12 +816,12 @@ const placeOf = (page: Page, rowId: string) =>
   }, rowId);
 
 // The child's check, "a row that mounts a card far from the end" (Proof 3, acceptance 13): with the reader in the middle
-// of a transcript of several hundred rows, a question raised for a call whose row stands just above the viewport (mounted
+// of a transcript of several hundred rows, an asynchronous question raised for a call whose row stands just above the viewport (mounted
 // by the list's overscan, so its form mounts there and the row grows) and one for a call far below leave the reader's
 // first visible row where it was, to the pixel. The form scrolled out (the list unmounts its row) and back holds what was
 // picked in it: the draft is held by the request, not by the row. With requests waiting out of view the jump button is
 // the pill, and it goes to the oldest of them.
-test('a question raised above and below a reader mid-transcript moves nothing they see, and its form scrolled away and back keeps its draft', async ({ harness }) => {
+test('an asynchronous question raised above and below a reader mid-transcript moves nothing they see, and its form scrolled away and back keeps its draft', async ({ harness }) => {
   test.setTimeout(90_000);
   const { page } = harness;
   await harnessReady(page);
@@ -852,7 +854,7 @@ test('a question raised above and below a reader mid-transcript moves nothing th
   await raise(page, below.call);
   const form = page.locator(`[data-waiting-form="${first}"]`);
   await expect(form, 'the form mounts in the row above the reader').toBeAttached();
-  await expect(form.getByRole('group', { name: 'Question' })).toBeAttached();
+  await expect(form.getByRole('group', { name: 'Question waiting' }), 'a terminal session’s asynchronous question').toBeAttached();
   await settle(page, 500);
   const after = await firstShown(page);
   expect(after?.id, 'the same row is the first the reader sees').toBe(before!.id);
@@ -882,11 +884,11 @@ test('a question raised above and below a reader mid-transcript moves nothing th
   expect(harness.consoleErrors()).toEqual([]);
 });
 
-// Acceptance 6 (the jump button's request state, §D): with the reader at the end, following, a question that waits in a
-// row far above makes the jump button the pill, though the reader is at the end; the pill scrolls to the question and puts
+// Acceptance 6 (the jump button's request state, §D): with the reader at the end, following, an asynchronous question
+// that waits in a row far above (the agent having gone on past it) makes the jump button the pill, though the reader is at the end; the pill scrolls to the question and puts
 // the keyboard on its row; once no request waits the pill is gone, and the reader, away from the end, has the round
 // button back.
-test('a question waiting far above a reader at the end: the pill reads Needs your input, goes to it, and goes once it no longer waits', async ({ harness }) => {
+test('an asynchronous question waiting far above a reader at the end: the pill reads Needs your input, goes to it, and goes once it no longer waits', async ({ harness }) => {
   test.setTimeout(90_000);
   const { page } = harness;
   await harnessReady(page);
@@ -908,7 +910,7 @@ test('a question waiting far above a reader at the end: the pill reads Needs you
   await pill.click();
   const form = page.locator(`[data-waiting-form="${id}"]`);
   await expect(form, 'the pill scrolls to the question').toBeInViewport();
-  await expect(form.getByRole('group', { name: 'Question' })).toBeVisible();
+  await expect(form.getByRole('group', { name: 'Question waiting' })).toBeVisible();
   await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
   await expect(pill, 'in view, the request needs no pill').toHaveCount(0);
 

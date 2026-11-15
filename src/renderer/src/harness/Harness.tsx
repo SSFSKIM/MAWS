@@ -4,11 +4,11 @@
 // examples of what C7 and C8 do with the public surface: "Request cards" docks an example card in every pending
 // request's slot through `renderRequest`, and after a subagent row is opened, "Show child" mounts a second Transcript
 // with `variant: 'child'` over that agent's own events (C8's drill-in). UX wave U1b: once the page is asked to raise one
-// of a fixture's questions (`raise`), the transcript draws its requests through the real card's renderer, so a waiting
-// question's form stands in the row of its call (Proof 3, `synthetic/questions`).
+// of a fixture's asynchronous questions (`raise`, as a terminal session's bridge raises one), the transcript draws its
+// requests through the real card's renderer, so the waiting question's form stands in the row of its call (Proof 3,
+// `synthetic/questions`).
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
-import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, MessageUuid } from '@shared/graph/ids';
 import { renderSessionRequest } from '../request-card'; // UX wave U1b
 import { useTranscriptStore } from '../stores/transcript';
@@ -23,7 +23,7 @@ import { FIXTURES, loadFixture } from './fixtures';
 import { FrameMetrics, percentile } from './metrics';
 import { HarnessSession } from './player';
 import { textOfTurn } from './paged';
-import { lowerQuestion, raiseQuestion } from './questions'; // UX wave U1b
+import { lowerQuestion, questionCalls, raiseQuestion } from './questions'; // UX wave U1b
 
 // `window.__maws_harness` is declared once for every harness page, this one's members included (`./env.d.ts`).
 
@@ -147,23 +147,17 @@ export function Harness() {
       questions: () => {
         const session = current();
         const state = useTranscriptStore.getState().entries[session.key]?.state;
-        return session.events.flatMap((event) => {
-          if (event.kind !== 'question.requested') return [];
-          const turn = state?.index.toolUses.get(event.toolUseId);
-          return [{
-            call: event.toolUseId,
-            row: rowId.question(event.toolUseId),
-            turn: state === undefined || turn === undefined ? 0 : state.order.indexOf(turn) + 1,
-            dismissed: session.events.some((answered) => answered.kind === 'question.answered' && answered.toolUseId === event.toolUseId && Object.keys(answered.answers).length === 0),
-          }];
+        return questionCalls(session.events).map(({ call, how }) => {
+          const turn = state?.index.toolUses.get(call);
+          return { call, row: rowId.question(call), turn: state === undefined || turn === undefined ? 0 : state.order.indexOf(turn) + 1, dismissed: how === 'dismissed' };
         });
       },
       raise: (call) => {
         const session = current();
-        const request = session.events.find((event): event is Extract<SessionEvent, { kind: 'question.requested' }> => event.kind === 'question.requested' && event.toolUseId === call);
-        if (!request) throw new Error(`no question asks by ${call}`);
+        const asked = questionCalls(session.events).find((entry) => entry.call === call && entry.how === 'async');
+        if (!asked) throw new Error(`no asynchronous question asks by ${call}`);
         flushSync(() => setRealCards(true));
-        return raiseQuestion(sessionOfKey(session.key), request);
+        return raiseQuestion(sessionOfKey(session.key), asked.call, asked.questions);
       },
       lower: (id) => lowerQuestion(sessionOfKey(current().key), id as AttentionId),
     };
