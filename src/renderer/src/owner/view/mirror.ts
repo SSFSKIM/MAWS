@@ -213,7 +213,7 @@ interface Layout {
 // `runStart` and `runEnd` (430 to 470): a maximal run of consecutive folding rows, the rows of no stretch between
 // them included, headed by the mixed text directly before it (rows of no stretch aside); a mixed text with nothing
 // folding after it is a stretch of its own.
-function layoutOf(rows: readonly Row[], liveMarked: string | undefined, open?: ReadonlySet<string>): Layout {
+function layoutOf(rows: readonly Row[], liveMarked: string | undefined, openKeys?: ReadonlySet<string>): Layout {
   const context = contextOf(rows, liveMarked);
   const classes = rows.map((row) => classOf(row, context));
   const spans: Span[] = [];
@@ -227,7 +227,7 @@ function layoutOf(rows: readonly Row[], liveMarked: string | undefined, open?: R
     const members = open.members.map((i) => rows[i]);
     const turns = new Set<TurnId>();
     for (const row of head === null ? members : [head, ...members]) if (row.turnId !== null && row.kind !== 'divider' && row.kind !== 'time') turns.add(row.turnId);
-    const stretch: Stretch = { key: keyOf(head, members, open), head, rows: members, turns };
+    const stretch: Stretch = { key: keyOf(head, members, openKeys), head, rows: members, turns };
     const index = spans.length;
     spans.push({ stretch, head: open.head, first: open.first, last: open.last, members: open.members });
     if (open.head !== null) spanAt[open.head] = index;
