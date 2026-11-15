@@ -13,6 +13,7 @@ import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HostOn } from '@shared/host/runtime';
 import type { CustomizationEndpoint, CustomizationInventory, CustomizationPluginEndpoint, CustomizationPluginServer, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
+import { usedEntry } from '@shared/plugins/connector-precedence';
 import { addressFormOf } from '@shared/plugins/plugin-connector';
 import { isUnifiedSettings, migrateMachineSettings, migrateSettings } from '@shared/settings/defaults';
 import { captureLocalKey } from '../connectors/local-key';
@@ -63,6 +64,8 @@ const absent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as Node
 const LIMIT = 'Customization inventory reached its read limit; some configured items are not inventoried.';
 class Stop extends Error {}
 const FILE_RANK: Record<CustomizationServer['scope'], number> = { app: 0, project: 1, user: 2, local: 3 };
+const URL_BOUND = 4096; // an endpoint's `url`
+type FileEntry = CustomizationServer & { url: string | null };
 const transportOf = (entry: Record<string, unknown>): CustomizationServer['transport'] => {
   const type = entry.type === 'streamable-http' ? 'http' : entry.type === undefined && typeof entry.command === 'string' ? 'stdio' : entry.type;
   return (['stdio', 'http', 'sse', 'ws'].includes(type as string) ? type : 'unknown') as CustomizationServer['transport'];
@@ -77,6 +80,9 @@ class Reading {
   readonly pluginServers: CustomizationPluginServer[] = [];
   readonly plugins: NonNullable<CustomizationInventory['plugins']> = [];
   readonly pluginEndpoints: CustomizationPluginEndpoint[] = [];
+  // the file-configured servers (`user`, `project`, `local`) with their addresses whole, for `sameAddressAs`
+  private readonly fileEntries: FileEntry[] = [];
+  private usedFileEntries: FileEntry[] | null = null; // of them, the one the engine uses for each name; made at the first plugin server
   readonly warnings = new Set<string>();
   stopped = false;
   serversRead = false; // P4-AGG M4: every MCP configuration that applies was read without a warning
@@ -98,7 +104,8 @@ class Reading {
   }
   addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
-    const address = url === null ? null : url.slice(0, 4096);
+    if (row.scope !== 'app') this.fileEntries.push({ ...row, url });
+    const address = url === null ? null : url.slice(0, URL_BOUND);
     this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: address, revision: revisionOf({ name: row.name, transport: row.transport, url: address }) });
   }
   addPlugin(row: NonNullable<CustomizationInventory['plugins']>[number]): void {
@@ -108,18 +115,22 @@ class Reading {
     this.check(); if (this.pluginServers.length >= INVENTORY_BOUNDS.rows) throw new Stop();
     const { plugin, installScope, version, name, transport, url } = configuration;
     this.pluginServers.push({ plugin, pluginName: row.pluginName, server: row.server, name, installScope, version, path: row.path, transport, address: url === null ? null : addressFormOf(url), sameAddressAs: this.sameAddressAs(transport, url) });
-    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url, revision: pluginRevisionOf(configuration) });
+    // the address is classified, compared and revised whole; only the endpoint's `url` is cut at its bound, so a cut
+    // text never equals another address and matches no live one
+    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url: url === null ? null : url.slice(0, URL_BOUND), revision: pluginRevisionOf(configuration) });
   }
   // The engine drops a plugin's server whose address a file-configured server names
-  // (spikes/protocol-probe/findings-uxwave-u11-plugin-server-dedup.txt): the `user`, `project` or `local` entry of the same
-  // address as written, the one the engine would use of several (local, then user, then the nearest project file, as
-  // `usedEntry` ranks them). Only a remote address with no template is compared; MAWS's own list is not (the engine does
-  // not compare servers given at launch). Read after every configured server, which `collect` reads first.
+  // (spikes/protocol-probe/findings-uxwave-u11-plugin-server-dedup.txt), after it has merged the files' servers by name
+  // (2.1.322 cli.pretty.js about 477063, then 476051): so only the `user`, `project` or `local` entry the engine uses for
+  // its name (`usedEntry`) is compared, by its address as written, and of several such the highest (local, then user,
+  // then the nearest project file). Only a remote address with no template is compared; MAWS's own list is not (the
+  // engine does not compare servers given at launch). Read after every configured server, which `collect` reads first.
   private sameAddressAs(transport: CustomizationPluginServer['transport'], url: string | null): string | null {
     if (url === null || url.includes('${') || !['http', 'sse', 'ws'].includes(transport)) return null;
-    let found: CustomizationEndpoint | null = null;
-    for (const entry of this.endpoints) {
-      if (entry.scope === 'app' || entry.url !== url) continue;
+    this.usedFileEntries ??= this.fileEntries.filter((entry) => usedEntry(entry.name, this.fileEntries) === entry);
+    let found: FileEntry | null = null;
+    for (const entry of this.usedFileEntries) {
+      if (entry.url !== url) continue;
       if (found === null || FILE_RANK[entry.scope] >= FILE_RANK[found.scope]) found = entry;
     }
     return found?.name ?? null;
@@ -275,7 +286,7 @@ async function pluginServers(r: Reading, installation: Omit<PluginConfiguration,
       // the engine's name (spikes/protocol-probe/findings-uxwave-u11-plugin-connectors.txt, 1): the manifest's name, never the
       // key's; a built-in plugin's carries an alias the inventory cannot know (2.1.322 cli.pretty.js:954009-954011)
       const name = pluginName === null || plugin.endsWith('@builtin') ? null : `plugin:${pluginName}:${server}`;
-      const url = typeof entry.url === 'string' ? entry.url.slice(0, 4096) : null;
+      const url = typeof entry.url === 'string' ? entry.url : null;
       r.addPluginServer({ ...installation, name, transport: transportOf(entry), url }, { pluginName, server, path });
     }
   };
