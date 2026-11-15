@@ -356,13 +356,13 @@ describe('the grant that is out (Design 4)', () => {
     }
     vi.useFakeTimers();
     void approve(id, BUILD, PRESSED);
-    expect(offs).toHaveLength(5);
+    expect(offs, 'the five the store follows, and the transcript store once more for the session’s hold (hold.ts)').toHaveLength(6);
     await flush();
     await answer('session.send', { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' });
     expect(offs.every((off) => off.mock.calls.length === 0), 'while it is out').toBe(true);
     await vi.advanceTimersByTimeAsync(SETTLE_MS);
     expect(useGrantsOut.getState().out.size).toBe(0);
-    expect(offs.map((off) => off.mock.calls.length)).toEqual([1, 1, 1, 1, 1]);
+    expect(offs.map((off) => off.mock.calls.length)).toEqual([1, 1, 1, 1, 1, 1]);
   });
 });
 
