@@ -1016,7 +1016,7 @@ describe('denial disposition', () => {
     expect(find(list, 'divider')).toMatchObject({ toolCalls: 4, denied: 1, autoDenied: 2, firstDeniedCell: 'cell:t2' });
     expect(kinds(list)).toEqual(['time', 'user', 'divider', 'cell', 'cell', 'cell', 'cell']);
     const labels = list.filter((row) => row.kind === 'cell').map((row) => (row as Extract<Row, { kind: 'cell' }>).label);
-    expect(labels).toEqual(['Ran `a` in 0s', 'Denied: `b` · Nope', 'Auto mode blocked: `c` · blocked', 'Auto mode blocked: `d` · review unreadable']);
+    expect(labels).toEqual(['Ran `a` in 0s', 'Denied: `b` · Nope', 'Auto mode blocked: `c`' /* UX wave U1c: a text that is not the engine's gives no reason */, 'Auto mode blocked: `d` · review unreadable']);
   });
 });
 

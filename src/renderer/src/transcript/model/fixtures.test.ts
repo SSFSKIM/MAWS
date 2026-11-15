@@ -39,7 +39,7 @@ describe('synthetic journals', () => {
     expect(dividers[0].firstDeniedCell).toBe(firstCells[0].id);
     expect(firstCells.map((c) => c.label)).toEqual([
       'Denied: `git push --force origin main` · Never force-push main.',
-      'Auto mode blocked: `rm -rf build` · Auto mode blocked this command: destructive deletion outside the workspace allowlist.',
+      'Auto mode blocked: `rm -rf build`', // UX wave U1c (Design 1): its invented text does not open as the engine's, so it gives no reason
       'Auto mode blocked: `curl -X POST https://deploy.example.com/hook` · review unreadable',
     ]);
     // UX wave U2 (decision 23, R2): in the aborted turn the rejected call is a stopped member of its run, here a run of

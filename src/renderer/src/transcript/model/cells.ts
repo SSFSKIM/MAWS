@@ -494,3 +494,6 @@ export function thinkingCell(id: string, text: string, live: boolean, at: string
     label: thinkingLabel(live, durationMs), paths: [], startedAt: at, endedAt: live ? null : at, detail: { kind: 'thinking', text, durationMs, recordedMs }, expanded, agent: null, background: false,
   };
 }
+
+// UX wave U1c, M2: a stub for the red run (today's label); the next commit replaces it.
+export const blockedLabel = (cell: Cell, _state: unknown): string => cell.label;

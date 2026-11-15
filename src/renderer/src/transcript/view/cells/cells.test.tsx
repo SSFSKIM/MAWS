@@ -521,3 +521,38 @@ it('labels plan-outcomes seq 120 as skipped, not reviewed', async () => {
   const view = renderRow(rowHolding(store.rows(), id), { storeKey: store.key });
   expect(view.container.querySelector('[data-verdict="skipped"]')?.textContent).toBe('Auto mode · review skipped');
 });
+
+// UX wave U1c, M2 (the U1c document, Design 1 and 3, Interfaces §D's label half; Acceptance 2 and 16's label): a
+// blocked row's line reads what the rule says of it, from the store's rows, and the copied label stays the row's base
+// words. Over probe U1's recording of a rule that always denies: the first block approved, the retry's blocked again.
+describe('a call auto mode blocked', () => {
+  const CURL = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"';
+  it('u1-hard-seeded-1: the first row reads “· approved”, the retry’s “Auto mode blocked again”, each from the store’s rows', async () => {
+    const store = await storeWith(journalToEvents(loadUxwaveJournal('u1-hard-seeded-1')));
+    useTranscriptStore.getState().expandAll(store.key);
+    const blocked = store.rows().filter((row): row is Extract<Row, { kind: 'cell' }> => row.kind === 'cell' && row.classification.denial?.kind === 'automode-blocked');
+    expect(blocked.map((cell) => cell.label), 'the base words, which a copy carries').toEqual([`Auto mode blocked: \`${CURL}\``, `Auto mode blocked: \`${CURL}\``]);
+    const lines = blocked.map((cell) => {
+      const view = renderRow(cell, { storeKey: store.key });
+      const line = view.container.querySelector<HTMLElement>(`[data-cell-id="${cell.id}"] > .transcript-cell-line`)!;
+      const read = { text: line.textContent, code: line.querySelector('code')?.textContent };
+      view.unmount();
+      return read;
+    });
+    expect(lines).toEqual([{ text: `Auto mode blocked: ${CURL} · approved`, code: CURL }, { text: `Auto mode blocked again: ${CURL}`, code: CURL }]);
+  });
+
+  it('a call auto mode blocked that has no name reads its row as the model writes it', async () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'make build', run_in_background: true });
+    b.result('t1', 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: Builds. If you have other tasks', { isError: true, denial: 'automode-blocked' });
+    b.end(['u1']);
+    const store = await storeWith(b.events);
+    useTranscriptStore.getState().expandAll(store.key);
+    const cell = store.rows().find((row): row is Extract<Row, { kind: 'cell' }> => row.kind === 'cell')!;
+    expect(cell.blocked).toBeUndefined();
+    const view = renderRow(cell, { storeKey: store.key });
+    expect(view.container.querySelector(`[data-cell-id="${cell.id}"] > .transcript-cell-line`)!.textContent).toBe('Auto mode blocked: make build · Builds');
+  });
+});
