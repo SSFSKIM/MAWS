@@ -579,6 +579,17 @@ describe('a card’s delivery', () => {
   });
 
   // UX wave U1b M3 (decision 8a): a question answered elsewhere says so on its row past the card's two seconds
+  // Decision 8b: a plan's row keeps the known answer too
+  it('a plan answered elsewhere leaves the receipt Already answered elsewhere under its call', async () => {
+    connect();
+    const plan = item('s1', 'plan', '2026-09-28T09:02:00Z', { id: 'att-plan' as never, request: { requestId: 'req-plan' as never, toolUseId: 'toolu_plan' as never, taskId: null, agentId: null } });
+    const store = listed(plan);
+    const late = store.getState().deliver(plan, { kind: 'plan', outcome: 'implement', feedback: null } as RequestAnswer);
+    outcome('not_pending');
+    await late;
+    expect(store.getState().receipts.get(S)?.get('toolu_plan' as never)).toEqual({ settled: ANSWERED_ELSEWHERE });
+  });
+
   it('a question answered elsewhere leaves the receipt Already answered elsewhere, which an answer or a settlement held already outranks, and a prompt none', async () => {
     vi.useFakeTimers();
     connect();

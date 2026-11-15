@@ -13,7 +13,7 @@ import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { bareOf } from '@shared/machine/address';
-import { status } from '../../../../test/support/builders';
+import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { loadJournal } from '../../../../test/support/fixtures';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
@@ -241,30 +241,86 @@ describe('the end row', () => {
   });
 });
 
-// §G, "that row's receipt says it" (the review of M3): a plan's row reads its own settling receipt, which the end leaves out
+// Decision 8b: a plan's row keeps the known answer. While it has no outcome of its own it reads its call's lasting
+// receipt in the place of Pending; its own outcome wins; the receipt goes with its session. The three-second settling
+// line is the end's only, and the end leaves this one out, since the row says it.
 describe('a waiting plan its terminal settled before its result arrived', () => {
-  it('reads the settlement’s words in its own row with no control while the receipt is held, then its own badge again', async () => {
+  const CALL = 'toolu_p1'; // a bridge's request id is its call's id (C17)
+  function planScene() {
     const b = builder();
     b.turn('u1', 'Plan it');
-    b.toolUse('p1', 'ExitPlanMode', { plan: '1. Read the notes.' });
-    const plan = b.emit('plan.requested', { requestId: request('rplan'), toolUseId: tool('p1'), plan: '1. Read the notes.', input: {} });
+    b.toolUse(CALL, 'ExitPlanMode', { plan: '1. Read the notes.' });
+    const plan = b.emit('plan.requested', { requestId: request(CALL), toolUseId: tool(CALL), plan: '1. Read the notes.', input: {} });
     events = b.events;
-    requests.set('rplan', plan);
-    act(() => useAttention.getState().applySnapshot([itemFor(plan as RequestEvent, APP, { summary: 'Plan' })], TEST_MACHINE));
-    render(<section data-pane={0}><TranscriptSlot appSessionId={APP} /></section>);
-    const planRow = () => document.querySelector<HTMLElement>('.transcript-row[data-kind="plan"]');
+    requests.set(CALL, plan);
+    return { b, item: itemFor(plan as RequestEvent, APP, { summary: 'Plan' }) };
+  }
+  const planRow = () => document.querySelector<HTMLElement>('.transcript-row[data-kind="plan"]');
+  const badge = () => planRow()?.querySelector('.transcript-badge')?.textContent;
+  const mountPlan = () => render(<section data-pane={0}><TranscriptSlot appSessionId={APP} /></section>);
+  const remount = async (view: ReturnType<typeof mountPlan>) => {
+    view.unmount();
+    useTranscriptStore.getState().drop(APP);
+    const next = mountPlan();
+    await waitFor(() => expect(planRow()).not.toBeNull());
+    return next;
+  };
+  async function settledByTerminal() {
+    const scene = planScene();
+    act(() => useAttention.getState().applySnapshot([scene.item], TEST_MACHINE));
+    const view = mountPlan();
     await waitFor(() => expect(planRow()?.querySelector('[data-request-card]')).not.toBeNull());
-    vi.useFakeTimers();
-    const settled: LaneAState['settled'][number] = { request: 'rplan', session: 'eng', winner: 'terminal', outcome: 'answered', by: 'terminal' };
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    const settled: LaneAState['settled'][number] = { request: CALL, session: 'eng', winner: 'terminal', outcome: 'answered', by: 'terminal' };
     act(() => applyLaneAState(APP, laneAState(APP, { engineSessionId: 'eng', settled: [settled] })));
     list([]);
+    return { ...scene, view };
+  }
+
+  it('reads the settlement’s words in place of Pending, with no control, past SETTLED_MS and through a remount; no settling line in the row or at the end', async () => {
+    const { view } = await settledByTerminal();
     expect(planRow()!.querySelector('[data-request-card]')).toBeNull();
-    expect(planRow()!.querySelector('[role="status"]')?.textContent).toBe('Plan · Answered in the terminal');
+    expect(badge()).toBe('Answered in the terminal');
+    expect(planRow()!.textContent).not.toContain('Pending');
+    expect(planRow()!.querySelector('[role="status"]')).toBeNull(); // the three-second line is the end's alone
     expect(planRow()!.querySelectorAll('button')).toHaveLength(0);
     expect(endRow()).toBeNull(); // the row says it, not the end
     act(() => void vi.advanceTimersByTime(SETTLED_MS));
-    expect(planRow()!.querySelector('[role="status"]')).toBeNull();
-    expect(planRow()!.querySelector('.transcript-badge')?.textContent).toBe('Pending'); // no result yet: the row's own
+    expect(badge()).toBe('Answered in the terminal');
+    vi.useRealTimers();
+    await remount(view);
+    expect(badge()).toBe('Answered in the terminal');
+  });
+
+  it('reads its own outcome once it arrives', async () => {
+    const { b, view } = await settledByTerminal();
+    vi.useRealTimers();
+    b.emit('plan.resolved', { requestId: request(CALL), toolUseId: tool(CALL), outcome: 'implement', feedback: null });
+    events = b.events;
+    await remount(view);
+    await waitFor(() => expect(badge()).toBe('Implemented'));
+  });
+
+  it('reads Pending with no receipt and no outcome, and after its session left and came back', async () => {
+    const { item } = planScene();
+    act(() => useAttention.getState().applySnapshot([item], TEST_MACHINE));
+    const view = mountPlan();
+    await waitFor(() => expect(planRow()?.querySelector('[data-request-card]')).not.toBeNull());
+    list([]);
+    await waitFor(() => expect(badge()).toBe('Pending'));
+    view.unmount();
+    cleanup();
+
+    const { view: settled } = await settledByTerminal();
+    vi.useRealTimers();
+    expect(badge()).toBe('Answered in the terminal');
+    const known = new Map(useSessions.getState().records).set(APP, record(APP));
+    const without = new Map([...known].filter(([id]) => id !== APP));
+    act(() => useSessions.setState({ records: known }));
+    act(() => useSessions.setState({ records: without })); // it leaves
+    act(() => useSessions.setState({ records: known })); // and comes back
+    await remount(settled);
+    expect(badge()).toBe('Pending'); // never a receipt forgotten when it left
   });
 });
 
