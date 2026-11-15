@@ -14,7 +14,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions, type FakeRaised } from '../test/support/fake-bridge';
+import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
@@ -23,6 +23,7 @@ import { addressed } from './support/address';
 import { menu } from './support/menu';
 import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
 import { END_ROW, rowOf } from './support/request-keys';
+import { stopRecord } from './support/stop-record';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -103,45 +104,8 @@ function fileRows(sessionId: string, cwd: string, after: string, at: string) {
 }
 const RECORDED_FIELDS = new Set(['type', 'message', 'isMeta', 'origin', 'subtype', 'content', 'level', 'toolUseResult']);
 
-// UX wave U1b, probe 9b (spikes/protocol-probe/findings-uxwave-u1b-message-and-stop-while-asked.txt; sminos 1.47.0, engine
-// 2.1.322): a terminal session's Stop while its sminos asynchronous question waits, then the question answered or
-// dismissed (`fixtures/uxwave/u1b-askwait-stop-{answer,dismiss}-r2`, the runs whose record holds the bridge's lists). From
-// the record: the bridge's events (the turn's start, the question raised, the turn's end `aborted`, the settlement), its
-// answer to the interrupt, and the rows the session's file holds before the Stop, after it, and after the answer.
-type FileRow = Record<string, unknown> & { type?: string; isMeta?: boolean; subtype?: string; origin?: { kind?: string }; message?: { content?: unknown } };
-function stopRecord(then: 'answer' | 'dismiss') {
-  const base = join(REPO_ROOT, 'spikes/protocol-probe/fixtures/uxwave', `u1b-askwait-stop-${then}-r2`);
-  const record = JSON.parse(readFileSync(`${base}.terminal.json`, 'utf8')) as { bridge: { events: Record<string, unknown>[]; answers: { op: string; body: Record<string, unknown> }[] } };
-  const file = readFileSync(`${base}.transcript.jsonl`, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as FileRow);
-  const event = (match: (e: Record<string, unknown>) => boolean) => {
-    const found = record.bridge.events.find(match);
-    if (!found) throw new Error(`${base}: no such bridge event`);
-    return Object.fromEntries(Object.entries(found).filter(([key]) => !['ms', 'n', 't'].includes(key))); // the record's clock and count
-  };
-  const raised = event((e) => e.type === 'raised');
-  const call = String(raised.request);
-  const blocks = (row: FileRow) => (Array.isArray(row.message?.content) ? (row.message!.content as { type?: string; id?: string; name?: string; tool_use_id?: string }[]) : []);
-  const at = (match: (row: FileRow) => boolean) => file.findIndex(match);
-  const ask = at((row) => row.type === 'assistant' && blocks(row).some((b) => b.type === 'tool_use' && b.id === call));
-  const bash = at((row) => row.type === 'assistant' && blocks(row).some((b) => b.type === 'tool_use' && b.name === 'Bash'));
-  const bashId = blocks(file[bash]!).find((b) => b.type === 'tool_use')!.id;
-  const bashResult = at((row) => row.type === 'user' && blocks(row).some((b) => b.type === 'tool_result' && b.tool_use_id === bashId));
-  const conversation = (row: FileRow) => (row.type === 'user' || row.type === 'assistant' || (row.type === 'system' && row.subtype !== undefined)) && !(row.type === 'assistant' && blocks(row).every((b) => b.type === 'thinking'));
-  const prompt = file.find((row) => row.type === 'user' && typeof row.message?.content === 'string' && row.origin === undefined)!;
-  const { ok, result } = record.bridge.answers.find((a) => a.op === 'interrupt')!.body;
-  return {
-    call,
-    raised: Object.fromEntries(Object.entries(raised).filter(([key]) => key !== 'type')) as unknown as FakeRaised,
-    question: ((raised.input as { questions: { question: string; header: string }[] }).questions)[0]!,
-    turn: event((e) => e.type === 'turn' && e.phase === 'start'),
-    aborted: event((e) => e.type === 'turn' && e.phase === 'complete' && e.reason === 'aborted'),
-    settled: event((e) => e.type === 'settled') as { request: string; winner: 'web'; outcome: string; by: string },
-    interrupted: { ok, result },
-    before: [prompt, ...file.slice(ask, bash + 1).filter(conversation)],
-    afterStop: file.slice(bash + 1, bashResult + 1).filter(conversation),
-    afterAnswer: file.slice(bashResult + 1).filter(conversation),
-  };
-}
+// UX wave U1b, probe 9b: what the two Stop scenes stage is read from the records by `stopRecord` (e2e/support/stop-record.ts,
+// checked on both records by test/support/stop-record.test.ts).
 
 // The ask mod's asynchronous call (sminos 1.47.0): its tool, what it returns at once, and its delivery's sentences.
 const ASK_TOOL = 'mcp__sminos__AskUserQuestion';
@@ -1261,7 +1225,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   // from the record (`stopRecord`): the file's rows to the running Bash call, the bridge's turn and its raise, its answer to
   // the interrupt, and the interrupt's rows and the turn's end as the engine and the bridge wrote them.
   async function stoppedWhileAsked(then: 'answer' | 'dismiss') {
-    const record = stopRecord(then);
+    const record = stopRecord(then, REPO_ROOT);
     let rows!: ReturnType<typeof fileRows>;
     const c = await begin((sid, cwd, after) => {
       rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
@@ -1299,10 +1263,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     test.setTimeout(150_000);
     const { c, bridge, rows, record, row, form, listed } = await stoppedWhileAsked('answer');
     const { page } = c;
-    // the record's answer, as its delivery quotes it ("<question>"="<answer>")
-    const delivered = record.afterAnswer.find((r) => r.type === 'user' && r.origin?.kind === 'plugin');
-    const answer = /="([^"]+)"/.exec(String(delivered?.message?.content ?? ''))?.[1] ?? '';
-    expect(answer, 'the record’s delivery names the answer').not.toBe('');
+    const answer = record.answer!; // the record's answer, as its delivery quotes it (the staging test pins it)
     await form.getByRole('radiogroup', { name: record.question.question }).getByRole('radio', { name: answer }).click();
     await form.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'allow', updatedInput: { answers: { [record.question.question]: answer } }, ...AS_MAWS }]);
@@ -1326,7 +1287,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { page } = c;
     expect(record.settled, 'the record: withdrawn, by MAWS').toMatchObject({ winner: 'web', outcome: 'withdrawn', by: 'maws' });
     expect(record.afterAnswer, 'the record: no row reached the session').toEqual([]);
+    // a premise of the staging: the stand-in bridge writes no row on a decision, so the file's length only says the scene
+    // wrote none; what MAWS sends is read at the bridge (below)
     const linesBefore = readFileSync(c.transcript, 'utf8').trim().split('\n').length;
+    const commandsAtDismiss = bridge.commands.length;
     await form.getByRole('button', { name: 'Dismiss', exact: true }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
     await expect(form).toHaveCount(0, { timeout: 2_000 });
@@ -1339,7 +1303,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
     await open(c);
     await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'from the settlement alone' }).toEqual([`${record.question.header}→Dismissed`]);
-    expect(readFileSync(c.transcript, 'utf8').trim().split('\n').length, 'no row reached the session').toBe(linesBefore);
+    expect(readFileSync(c.transcript, 'utf8').trim().split('\n').length, 'the staging wrote no row').toBe(linesBefore);
+    // the delivery boundary: MAWS's whole say after the Stop is the one dismissal; it posted no message, steer or
+    // other control that could reach the session
+    expect(decided(bridge), 'one decision, the dismissal').toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
+    expect(bridge.commands.slice(commandsAtDismiss).map((cmd) => cmd.op).filter((op) => op !== 'read' && op !== 'ping'), 'no command after the dismissal').toEqual([]);
     await expect(end(page)).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
   });
