@@ -353,15 +353,17 @@ describe('comments on lines in Review', () => {
     expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
   });
 
-  it('stands the card at the code’s left edge where the gutter and its width fit, at the row’s left edge where they do not, and in Split under the side that holds the line', async () => {
+  it('stands the card, and the unsent rows with it, at the code’s left edge where the gutter and its width fit, at the row’s left edge where they do not, and in Split under the side that holds the line', async () => {
     let row = 720;
-    vi.spyOn(reviewLayout, 'width').mockImplementation((element) => (element.matches('[data-review-card-row]') ? row : element.matches('td.diff-line-num, td.diff-line-old-num, td.diff-line-new-num') ? 80 : 0));
+    vi.spyOn(reviewLayout, 'width').mockImplementation((element) => (element.matches('[data-review-card-row], [data-review-unsent]') ? row : element.matches('td.diff-line-num, td.diff-line-old-num, td.diff-line-new-num') ? 80 : 0));
     await mountReview();
     addOn('src/report.ts', 'new', 12);
     await painted(() => cardRow() !== null);
     type('Quote only where a comma is.');
     expect(cardRow()!.style.paddingLeft).toBe('80px'); // the gutter and the card's 300 px fit in 720
     leave();
+    await painted(() => unsentRows().length === 1);
+    expect(unsentRows()[0].closest<HTMLElement>('[data-review-unsent]')!.style.paddingLeft).toBe('80px'); // its row stands where its card stood
     row = 360; // a narrow column: 80 + 300 do not fit
     await painted(() => chip() !== null);
     fireEvent.click(chip()!);
