@@ -627,7 +627,7 @@ describe('Open beside', () => {
       await fake.reply('maws.asks.list', { asks: [ASK] });
       const row = screen.getByTestId('row');
       fireEvent.click(within(row.querySelector<HTMLElement>('[data-question-id="q1"]')!).getByRole('radio', { name: 'Blue' }));
-      const data: AskRowData = { askId: ASK.askId, toolUseId: ASK.toolUseId, title: ASK.title, context: ASK.context, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null };
+      const data: AskRowData = { askId: ASK.askId, toolUseId: 'toolu_a' as ToolUseId, title: ASK.title, context: ASK.context, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null };
       act(() => mawsTranscriptActionsOver(fake.client).openAsk(SHOWN, data)); // Open beside
       expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([[SHOWN, { askId: ASK.askId, historical: data }]]);
       expect(surfaceTabs(useLayout.getState(), SHOWN).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
