@@ -400,23 +400,23 @@ In a scene a menu row is fired by its item's id (`e2e/support/menu.ts`), because
 
 ## Plan of Work
 
-Ten milestones, one executor each, in order; M1 to M6 are landing 1 on `ux-wave/U3b`, M7 to M11 are landing 2 on `ux-wave/U3b-2`. Every executor reads this whole document and the child's file first; a milestone points at them and restates nothing. Paths are written as "Words used here" says.
+Eleven milestones, one executor each, in order; M1 to M6 are landing 1 on `ux-wave/U3b`, M7 to M11 are landing 2 on `ux-wave/U3b-2`. Every executor reads this whole document and the child's file first; a milestone points at them and restates nothing. Paths are written as "Words used here" says.
 
-One rule for all of them. The suites that map whole recorded sessions (`model/fixtures.test.ts`, `snapshots.test.ts`, `journals.test.ts`, `disk.test.ts`, `src/renderer/src/lane-a/arrival-routes.test.ts`, the engine host's conformance suites) and the 217 row snapshots under `test/snapshots/transcript/` move only where a row gains a field of this document. Each moved expectation is read and tied to a decision in the commit that changes it; one that ties to none is a defect, not a snapshot to refresh.
+One rule for all of them. The suites that map whole recorded sessions (`model/fixtures.test.ts`, `snapshots.test.ts`, `journals.test.ts`, `disk.test.ts`, `lane-a/arrival-routes.test.ts`, the engine host's conformance suites) and the 217 row snapshots under `test/snapshots/transcript/` move only where a row gains a field of this document. Each moved expectation is read and tied to a decision in the commit that changes it; one that ties to none is a defect, not a snapshot to refresh.
 
 ### M1 — A command's output is a light line
 
-**What exists at its end.** On every route a slash command's output is the dim line of decision 4 under its command, and the "Command output" card is gone. The event of an output names the command the engine ran, where the engine said, and the row and the mod's site read it from there.
+**What exists at its end.** On every route a slash command's output is the dim line of decision 4 under its command: one drawing, clipped at two lines until opened. The "Command output" card is gone. The event of an output names the command the engine ran, where the engine said, and says when its text was a terminal's; the row and the mod's site read both from there.
 
-**What it touches.** `src/shared/engine/arrival.ts` (the file row's `commandRun`), `src/shared/engine/arrival-schema.ts` (`commandEntry`, `commandRunOf`), the two producers `src/engine-host/normalizer.ts` (`commandOutput`) and `src/engine-host/fs/backfill.ts` (both places that make a `user.message` of origin `local-command`); `model/rows.ts` and `schema.ts` (the row's three fields), `model/derive.ts` (`localCommandRow`, in a turn and loose), `model/copy.ts`, `model/serialize.ts`; `view/rows/LocalCommand.tsx`, `view/transcript.css`; `surface/adapters.ts` (`commandInput`). Tests beside each, `src/shared/graph/arrival-builds.test.ts`, and the row snapshots that hold a command's output.
+**What it touches.** `src/shared/engine/arrival.ts` (the file row's `commandRun`; whether the carrier's text held escape sequences), `src/shared/engine/arrival-schema.ts` (`commandEntry`, `commandOf`), the two producers `src/engine-host/normalizer.ts` (`commandOutput`) and `src/engine-host/fs/backfill.ts` (both places that make a `user.message` of origin `local-command`); `model/rows.ts` and `schema.ts` (the row's four fields), `model/derive.ts` (`localCommandRow`, in a turn and loose), `model/copy.ts`, `model/serialize.ts`; `view/rows/LocalCommand.tsx`, `view/transcript.css`; `surface/adapters.ts` (`commandInput`). Tests beside each, `src/shared/graph/arrival-builds.test.ts`, and the row snapshots that hold a command's output.
 
 **Interfaces.** Exposes §A and §B. Consumes U3a's reader and its `command` class.
 
-**Decisions.** 2 to 6. The other machine's rows ride the backfill (`recordToEvents`), so `lane-a/plane-transcript.ts` needs no edit; a test says so. `LOCAL_COMMAND_HEADER` is deleted with its last reader. The `.transcript-replayed*` rules stay: the `!` shell row still uses them. A setting change's confirmation still draws nothing (`confirmsSettingChange`), and an empty output still draws nothing.
+**Decisions.** 2 to 6. The other machine's rows ride the backfill (`recordToEvents`), so `lane-a/plane-transcript.ts` needs no edit; a test says so. `LOCAL_COMMAND_HEADER` is deleted with its last reader. The `.transcript-replayed*` rules stay: the `!` shell row still uses them. A setting change's confirmation still draws nothing (`confirmsSettingChange`), and an empty output still draws nothing. The closed line's bound is a height in lines of the row's own type, not a line clamp on text: the drawing under it is the open drawing, whatever it holds (a table's first rows, a heading). The view's unit tests hold that both states have the same text; that the bound is two lines is M6's scene.
 
 **What it does not touch.** The reducer's routing of a command's output and of its repeat; `CarriedArrivalSchema` and `CARRIED_CLASSES`; `WIRE_MINOR`; the command's bubble; `rows/Bash.tsx`.
 
-**What it proves.** Acceptance 1 (its unit half), 2, 3 and 14. Beyond them its tests pin: an entry whose `run` is malformed is ignored and the event still reads; the entry is on no synthetic message; `carriedOf` never returns it.
+**What it proves.** Acceptance 1 (its unit half), 2, 3 and the unit half of 14. Beyond them its tests pin: an entry that does not fit is ignored and the event still reads; the entry is on no synthetic message; `carriedOf` never returns it; an output from the live wire is never `plain`.
 
 ### M2 — Code blocks and tables keep the column; the owner's message actions sit under the bubble
 
@@ -434,27 +434,29 @@ One rule for all of them. The suites that map whole recorded sessions (`model/fi
 
 ### M3 — An answer's Copy, Fork from here and time
 
-**What exists at its end.** Hovering the last answer before the owner's next prompt shows Copy, "Fork from here" and the time. Fork opens a fork that ends with that answer, on this Mac and, through U9's offer, on another machine, and says why when it cannot.
+**What exists at its end.** Hovering the last answer before the owner's next prompt shows Copy, "Fork from here" and the time. Copy takes the whole answer whatever is folded. Fork opens a fork that ends with that answer, on this Mac and, through U9's offer, on another machine, and says why when it cannot.
 
-**What it touches.** New `model/answer-actions.ts` and `view/rows/AnswerActions.tsx` with their tests; `view/rows/Row.tsx` (`RowView` renders the action row after the row's body; no case of `body()` changes); `view/Transcript.tsx` (the projection and its store); `view/context.tsx` (`forkFrom`, the store's place in the context); `model/copy.ts` (the words); `view/transcript.css`; `transcript/shell.tsx` (the adapter's registration); `lane-a/view/RemoteTranscriptSlot.tsx` (it gives no `forkFrom`); `sessions/record-ops.ts` (`forkInPlace`'s optional `rewindTo`).
+**What it touches.** New `model/answer-actions.ts` and `view/rows/AnswerActions.tsx` with their tests; `view/rows/Row.tsx` (`RowView` renders the action row after the row's body; no case of `body()` changes); `view/Transcript.tsx` (the projection and its store); `view/context.tsx` (`forkFrom`, the store's place in the context); `model/copy.ts` (the words); `model/derive.ts` (the rewind boundary's `detail`); `src/shared/engine/arrival.ts` (`ownWordsOf`); `view/transcript.css`; `transcript/shell.tsx` (the adapter's registration); `lane-a/view/RemoteTranscriptSlot.tsx` (it gives no `forkFrom`); `sessions/record-ops.ts` (`forkInPlace`'s optional `rewindTo`).
 
 **Interfaces.** Exposes §C and §D. Consumes U9's `forkSession`, `forkInPlace` and `useForkUnavailable`.
 
-**Decisions.** 12 to 15. The async sequence, fixed here: *press* → the button disabled and `aria-busy` → the act settles → enabled. A press while disabled does nothing. The act opens the fork's tab itself; the button does nothing on success. On a refusal the act has already shown its toast. If the row leaves the list while the act is out, the act still completes and its tab still opens. If the act never settles the button stays disabled for that mount of the row only; the act's own budget (`command-budgets.ts` for the link) ends it.
+**Decisions.** 12 to 15; Probes, 5 for the frame line. The async sequence, fixed here: *press* → the button disabled and `aria-busy` → the act settles → enabled. A press while disabled does nothing. The act opens the fork's tab itself; the button does nothing on success. On a refusal the act has already shown its toast. If the row leaves the list while the act is out, the act still completes and its tab still opens. If the act never settles the button stays disabled for that mount of the row only; the act's own budget (`command-budgets.ts` for the link) ends it. Copy reads the store at the press and never at render: the placement map holds no row ids to copy.
 
-**What it does not touch.** `src/endpoint/offers.ts`, `src/shared/ipc/remote-unavailable.ts`, `src/renderer/src/lane-b/remote-unavailable.ts`; the composer's Edit and its Fork; the turn line's menu; `serializeRows` itself.
+**What it does not touch.** `src/endpoint/offers.ts`, `src/shared/ipc/remote-unavailable.ts`, `lane-b/remote-unavailable.ts`; the composer's Edit and its Fork; the `/rewind` widget (its prefill is reported, not edited); the turn line's menu; `serializeRows` itself.
 
 **What it proves.** Acceptance 7 (unit), 8 and 9.
 
 ### M4 — A compaction says so
 
-**What exists at its end.** While a session compacts, its open turn's line reads "Compacting session…" with the time so far, a row at the list's end says the same when no turn is open, and the sidebar's hover card says it too; nothing remains when it ends, however it ends.
+**Before it starts:** the probes' branch is merged as a commit of its own (Concrete Steps, 1), so the automatic compaction's fixture and M5's fetch fixtures are in the tree.
 
-**What it touches.** New `stores/compacting.ts` and `view/compacting.ts` with tests; `transcript/shell.tsx` (the store's subscription to the sessions store); `lane-a/watches.ts` (one call where `compact` messages are kept); `model/copy.ts` (`dividerHead`, the words), `model/rows.ts`, `schema.ts`, `serialize.ts` (the `activity` kind); `view/Transcript.tsx` (the prop, the row, `ESTIMATES`), `view/context.tsx`, `view/rows/Divider.tsx` (`useDividerSummary`), `view/rows/Row.tsx` (the kind's case), new `view/rows/Activity.tsx`; `view/TranscriptSlot.tsx` and `lane-a/view/RemoteTranscriptSlot.tsx` (they pass the prop); `sidebar/HoverCard.tsx` (one line).
+**What exists at its end.** While a session compacts, a row at the end of the transcript reads "Compacting session…" with the time so far, and the sidebar's hover card says the same; nothing remains when it ends, however it ends.
+
+**What it touches.** New `stores/compacting.ts` and `view/compacting.ts` with tests; `transcript/shell.tsx` (the store's subscription to the sessions store); `lane-a/watches.ts` (one call where `compact` messages are kept); `model/copy.ts` (the words), `model/rows.ts`, `schema.ts`, `serialize.ts` (the `activity` kind); `view/Transcript.tsx` (the prop, the row, `ESTIMATES`), `view/rows/Row.tsx` (the kind's case), new `view/rows/Activity.tsx`; `view/TranscriptSlot.tsx` and `lane-a/view/RemoteTranscriptSlot.tsx` (they pass the prop); `sidebar/HoverCard.tsx` (one line).
 
 **Interfaces.** Exposes §E.
 
-**Decisions.** 16 and 17, and "Reported, 2" for the place. The transitions, fixed here; `since` is the window's clock in milliseconds:
+**Decisions.** 16 and 17. The transitions, fixed here; `since` is the window's clock in milliseconds:
 
 | event | from | to |
 |---|---|---|
@@ -465,11 +467,11 @@ One rule for all of them. The suites that map whole recorded sessions (`model/fi
 | `compact` with phase `end` and id R; the session's watch resets or ends; its bridge is no longer `live`; a row of kind `boundary` and `boundaryKind: 'compaction'` later than `since` reaches the store | on, held by R | off |
 | `compact` `end` with another id | on, held by R | on |
 
-A session has one state; the two sources never both feed one session (one is a session MAWS runs, the other a terminal session). The elapsed time ticks once a second through the ticker the turn line already uses.
+A session has one state; the two sources never both feed one session (one is a session MAWS runs, the other a terminal session). The elapsed time ticks once a second through the ticker the turn line already uses. An automatic compaction needs no case of its own: its status frames are a typed one's (Engine facts, 9).
 
-**What it does not touch.** `src/engine-host/session-status.ts` and the status schema; the digest and the sidebar row's glyph; `PluginStatusLine`; the turn line's caption, counts and menu.
+**What it does not touch.** `src/engine-host/session-status.ts` and the status schema; the digest and the sidebar row's glyph; `dividerHead`, `view/rows/Divider.tsx` and every turn line's words; `PluginStatusLine`.
 
-**What it proves.** Acceptance 10 and 11. Beyond them: with a plugin's Spinner text set, the line keeps the plugin's text; the `activity` row is never in the store's rows, never copied (`partOf` gives null) and is the last row before U1b's end row when that exists.
+**What it proves.** Acceptance 10 and 11. Beyond them: the `activity` row is never in the store's rows, never copied (`partOf` gives null), takes no action row and no mark, and is the last row before U1b's end row when that exists; a reader who follows the end stays at the end when the row appears and when it goes.
 
 ### M5 — The web plugin's fetch, and the word for an agent that ended with its session
 
@@ -479,7 +481,7 @@ A session has one state; the two sources never both feed one session (one is a s
 
 **Interfaces.** Exposes §F.
 
-**Decisions.** 18 and 19. Each of the nine places asks the helper; none compares a tool's name itself afterwards (a test greps the renderer and the two services for the literal `'WebFetch'` outside the helper, its tests and `READ_ONLY_TOOLS`' own list). The hand-written call shapes in the tests are replaced by the probe's fixture when it exists (Probes, 4).
+**Decisions.** 18 and 19. Each of the nine places asks the helper; none compares a tool's name itself afterwards (a test greps the renderer and the two services for the literal `'WebFetch'` outside the helper, its tests and `READ_ONLY_TOOLS`' own list). The tests read the recorded calls (Engine facts, 11), not hand-written shapes: a fetch with a prompt and one without, each with its string result. A web call's detail takes the result's text whether the engine gave a string or text blocks, as `WebFetch`'s does today.
 
 **What it does not touch.** `WebSearch`; any other MCP tool; `view/cells/WebDetail.tsx` (it draws the same detail); U8's panel and its words.
 
@@ -489,17 +491,19 @@ A session has one state; the two sources never both feed one session (one is a s
 
 **What exists at its end.** Landing 1's scenes are written, the two reversed rulings and X1's line are amended where they stand, and the branch is handed back green on the VM.
 
-**What it touches.** `e2e/transcript.spec.ts` (the breakout scene becomes acceptance 5's; new scenes for 1, 4, 6 and 7), `e2e/composer.spec.ts` (the W2 scene's assertion on where the actions sit; the Edit scenes still find the button), `e2e/side.spec.ts` (scene 9's selector), and the harness fixtures those scenes replay; `docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md` and `docs/charter.md` (the amendments below); `docs/tech-debt-tracker.md`.
+**What it touches.** `e2e/transcript.spec.ts` (the breakout scene becomes acceptance 5's; new scenes for 1, 4, 6 and 7), `e2e/composer.spec.ts` (the W2 scene's assertion on where the actions sit; the Edit scenes still find the button), `e2e/side.spec.ts` (scene 9's selector), `e2e/cross-build.spec.ts` (one scene, below), and the harness fixtures those scenes replay; `docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md` and `docs/charter.md` (the amendments below); `docs/tech-debt-tracker.md`.
 
 **Decisions.** No new spec file: a guard pins the number of spec files and which group runs each. A bound a scene asserts on a time takes one of the forms the gate's guard lists (`.github/scripts/gate-plan.test.mjs`, above `LIVENESS_BOUNDS`); these scenes assert pixels and text, not times. The amendments, each dated and appended where the ruling stands:
 
 - O-08, in `docs/doperpowers/plans/2026-10-01-ux-fundamentals-waves.md`, Decision Log, 2026-10-01 (W2 residue), "Wide blocks break out to `--measure` + 128px", and at the charter's Decision Log entry of 2026-10-01 (W2 executor) that names `--measure-wide`: "Reversed 2026-11-12 (UX wave, U3, O-08): an answer's table or code block keeps the text column's width; a code block wraps and a table scrolls sideways in its frame. `--measure-wide` stays for the Projects and Library pages. The owner: 'longer boxes escape transcript ratio. I'd fix the size.'"
 - O-02, in the same plan, item B2's direction: "Amended 2026-11-12 (UX wave, U3, O-02): the time, Copy and Edit sit under the bubble, not beside it, in the space the message already has there; no height is added. The owner: 'move copy, edit, time to be below message component, not next to it.'"
-- X1, appended to its entry in `docs/charter.md` §13: "Amended 2026-11-15 (UX wave, U3b; UC-2), additive: on a `user.message` of origin `local-command`, `arrival` may hold one entry `{ class: 'command', run: { command, args } }`, the command as the engine ran it. It is not one of the classes the event's schema holds strictly: it passes as an entry of a class the schema does not name and is read by `commandRunOf` (`src/shared/engine/arrival-schema.ts`), which ignores an entry that does not fit. A build that does not know it draws the output as before."
+- X1, appended to its entry in `docs/charter.md` §13: "Amended 2026-11-15 (UX wave, U3b; UC-2), additive: on a `user.message` of origin `local-command`, `arrival` may hold one entry `{ class: 'command', run?: { command, args }, plain?: true }`: the command as the engine ran it, and that the output's text was a terminal's (it held escape sequences, now removed) and is not markdown. It is not one of the classes the event's schema holds strictly: it passes as an entry of a class the schema does not name and is read by `commandOf` (`src/shared/engine/arrival-schema.ts`), which ignores an entry that does not fit. A build that does not know it draws the output as before."
 
-Tracker rows opened: a command the sminos bridge ran is drawn as the person's (Probes, 2); an output that mixes stdout and stderr is drawn muted; a terminal's `/context` grid is drawn through markdown with its colours removed; a mode change in the middle of a compaction restarts the words' clock (Surprises, 10); the desk draws Edit where nothing answers it (Surprises, 6).
+**The cross-build scene** (ruled, F6), in `e2e/cross-build.spec.ts`, with its line in that file's list of scenes: *(a command's output, both ways)*. The keeper's app starts a session on a replay that holds a slash command with its output frame and `local_command_run` (in the shape of Engine facts, 6, with invented content), and quits with keep; the other build's app attaches to the kept engine host and shows the session. Asserted in each direction: the output's text is drawn; no gap row is drawn; neither end's log holds a refusal of what the other sent. Where the host is this build's and the window the peer's, the window draws the output as its own build draws one (read from the peer's source, as the spec's other scenes read what a peer knows: a peer at or past U3a draws its "Command output" row; build F, which has no reader of arrivals, is given the event by this build's host and draws its row for origin `local-command`). Where the host is the peer's and the window this build's, the window draws what that host sends: from build G's host an output event with no entry, drawn as the light line with the command's name from its turn; from build F's host, which sends a command's output as an assistant block, an answer paragraph, as F's sessions draw today. It uses the spec's own crossing helpers and adds no skip but for a peer that cannot play the replay, said as a skip that names why; a skipped scene is not evidence. The coverage table in that file is for stored keys and gains no row. The two runs are the architect's (Proof, 13).
 
-**What it does not touch.** The register and the board (the architect's, at landing); `e2e/cross-build.spec.ts` unless "Reported, 4" is ruled the other way.
+Tracker rows opened: a command the sminos bridge ran is drawn as the person's, with the mark a follow-on can key on (Engine facts, 15); an output that mixes stdout and stderr is drawn muted; a terminal's grid from a machine on an older build is drawn through markdown; a mode change in the middle of a compaction restarts the row's clock (Surprises, 10); the `/rewind` widget fills the composer with sminos's frame line for a delivered prompt (Probes, 5). The desk's Edit button that does nothing is the architect's ticket (ruled, point 3).
+
+**What it does not touch.** The register and the board (the architect's, at landing); the cross-build spec's other scenes and its coverage table.
 
 **What it proves.** Every acceptance item of landing 1, as written, in "Concrete Steps", 4; the scenes are handed over unrun.
 
@@ -515,47 +519,61 @@ Tracker rows opened: a command the sminos bridge ran is drawn as the person's (P
 
 **What it does not touch.** `src/main/menu.ts`, `src/shared/keymap/build-f.ts`, the key dispatcher and `useKeyChord`; `src/main/browser/keys.ts`; the composer; the follow and anchoring code of `TranscriptList`.
 
-**What it proves.** Acceptance 23, 24 and 25 (their unit halves; the scenes are M11's), and by the spike's check that the five chords can be menu rows.
+**What it proves.** Acceptance 23, 24 and 25 (their unit halves; the scenes are M11's), and by the spike's check that the five chords can be menu rows. The executor does not go past the spike until the architect reports the check's answer (ruled, point 11).
 
-### M8 — Find: what is searched, counted and opened
+### M8 — Find: one reading of what a row draws
 
-**What exists at its end.** A find controller per mounted transcript that, given a query, knows every match in the loaded session, which one is current, what to open for it and what to close after it, keeps that true while the session streams, and can walk older pages. No bar yet: it is driven by its tests.
+**What exists at its end.** For every row kind find searches, one function gives the words that row draws, and the row's component draws from the same source. Each searched part has a scope in the DOM, chrome inside a scope is named, and a contract test per kind holds that what is counted is what can be marked. Nothing a person sees changes.
 
-**What it touches.** New `model/find.ts` (the minimum, the fold, the text of a part, the parts of a row, the matches of a part) and `view/find/controller.ts`, with tests; `model/derive.ts` (the rows with every turn open, on a memo the caller keeps; the store's own `allExpandedRows` calls it); `view/context.tsx` (`Disclosures` gains `open` and `close`).
+**What it touches.** `view/cells/CellLine.tsx` (`cellLineWords`; `CellLabel` draws from it; the scope on a call's line; the `label:<cell id>` disclosure), `model/rows.ts` (`messageWhole`) and `view/rows/AgentMessage.tsx`, `Notice.tsx`, `User.tsx`, `AssistantText.tsx`, `LocalCommand.tsx`, `owner/to-human/MessageRow.tsx` (each sets its scopes and marks its chrome; `owner/` is U2's, one attribute); `view/rows/Row.tsx` (`body` exported for the detached drawing); new `model/find.ts` (the minimum, the fold, the parts of a row, the matches of a text), `view/find/scope.ts` (the walker over a scope, the ranges of a query in a scope, the skip list) and `view/find/words.ts` (`drawnWordsOf`), each with tests; new `view/find/contract.test.tsx`.
 
-**Interfaces.** Exposes §J and the controller's half of §K. Consumes §B's key, §G's jump option, and the pager's shape (`OlderPagesController`, `lane-a/view/older-pages.ts`).
+**Interfaces.** Exposes §J. Consumes §B's drawing.
 
-**Decisions.** 27 to 30 and 33. The states of a search, fixed here: *idle* (no bar, or a query under the minimum) → *indexing* (the first pass, in slices) → *ready* (matches, a current one or none) ⇄ *walking* (older pages being asked). A new query from any state cancels the pass or the walk in flight by a generation number; a result that carries an older generation is dropped. The linearization points are the store's own: find reads the store's state when its throttled recount runs and never holds a row across a store change.
+**Decisions.** 27. Pitfalls seen in the code: Streamdown's code block keeps its language name in the DOM in a header that M2 only hides, and its copy control announces "Copied" in a screen-reader-only `output`; both are in the walker's fixed list, or they would be counted and have no rectangle. A run's line draws a running call's label through `CellLabel` too; the scope is set by `CellLine`, never by `CellLabel`, so a label is one scope. The detached drawing renders the row's own `body(row)` under a context with no store key and `presentation: 'local'`, so it asks no mod's site and attaches nothing; it is rendered synchronously, read and unmounted in one task, and never enters the document. A code block's highlighted body arrives later than its plain one and holds the same text.
 
-**What it does not touch.** Any view; the store's `jumpTo` (it is called, not changed); `rowsOf` and the store's memo; thinking and tool output, which stay unread.
+**What it does not touch.** What any row draws (the suites that snapshot rows and the scenes that read a call's line pass unchanged); `model/groups.ts`; the run's caption; the turn line; the store.
 
-**What it proves.** The unit halves of acceptance 16 to 21, and the bounds of acceptance 19 by the derivation counter and a lexing counter of its own.
+**What it proves.** Acceptance 27, and the unit halves of 16 that are about what counts. Beyond them: `cellLineWords` equals what `CellLabel` drew before this milestone for every cell of the row snapshots (a test walks them); the detached drawing of a row and its mounted drawing give the same words for every searched kind.
+
+### M9 — Find: what is counted, opened and kept current
+
+**What exists at its end.** A find controller per mounted transcript that, given a query, knows every match in the loaded session, which one is current, what to open for it and what to close after it, keeps that true while the session streams, and can walk older pages. Its first pass is resumable. No bar yet: it is driven by its tests.
+
+**What it touches.** New `view/find/controller.ts` and `view/find/pass.ts` (the resumable pass and its clock) with tests; `view/context.tsx` (`Disclosures` gains `open` and `close`).
+
+**Interfaces.** Exposes the controller's half of §K. Consumes §J, §G's jump option, `expandedTurnRows`, and the pager's shape (`OlderPagesController`, `lane-a/view/older-pages.ts`).
+
+**Decisions.** 28 (what is held and released), 29, 30 and 33. The states of a search, fixed here: *idle* (no bar, or a query under the minimum) → *indexing* (the first pass) → *ready* (matches, a current one or none) ⇄ *walking* (older pages being asked). The events: open, a query, a step, a store change, a yield's return, a page's arrival or failure, close. A new query from any state cancels the scan or the walk in flight by a generation number, and a result that carries an older generation is dropped; the kept words are not dropped by a new query, only by their row's content changing. The linearization points are the store's own: find reads the store's state at the start of each unit and after each yield, and never holds a row across a yield. The pass takes its clock and its yield as arguments, so its tests step it unit by unit.
+
+**What it does not touch.** Any view; the store's `jumpTo` (it is called, not changed); `rowsOf`, `derive.ts` and the store's memo; thinking and tool output, which stay unread.
+
+**What it proves.** The unit halves of acceptance 17 to 21. Beyond them: no unit of the pass but a single turn's derivation or a single part's drawing runs past a yield point without the clock being read (a test gives a clock that is always late and counts one unit per task).
 
 ### M10 — Find: the bar, the marks and where the view lands
 
-**What exists at its end.** ⌘F opens the bar; the count, the marks and the view follow the controller; Esc gives the focus back.
+**What exists at its end.** ⌘F opens the bar; the count, the marks and the view follow the controller; a match is brought into view through whatever clips it; Esc gives the focus back.
 
-**What it touches.** New `view/find/FindBar.tsx`, `view/find/marks.ts` and `view/find/index.ts` (the chunk's entry), with tests; `view/Transcript.tsx` (the lazy host, the handle's `reveal`, the padding under an open bar, the pager given to find), `view/rows/Row.tsx` (`RowFrame` registers its marks when find is loaded), `view/transcript.css` (the bar; the two `::highlight` rules), `model/copy.ts` (`FIND`), `transcript/keys.ts` (the three handlers call the controller), `lane-a/view/RemoteTranscriptSlot.tsx` (it hands the plane's pager to the transcript).
+**What it touches.** New `view/find/FindBar.tsx`, `view/find/marks.ts`, `view/find/reveal.ts` and `view/find/index.ts` (the chunk's entry), with tests; `view/Transcript.tsx` (the lazy host, the handle's `reveal`, the padding under an open bar, the pager given to find), `view/rows/Row.tsx` (`RowFrame` registers its marks when find is loaded), `view/rows/User.tsx`, `LocalCommand.tsx` and `view/cells/CellLine.tsx` (each fold that cuts names its disclosure, `data-find-clip`), `view/transcript.css` (the bar; the two `::highlight` rules; a call's label drawn whole while its disclosure is open), `model/copy.ts` (`FIND`), `transcript/keys.ts` (the three handlers call the controller), `lane-a/view/RemoteTranscriptSlot.tsx` (it hands the plane's pager to the transcript).
 
 **Interfaces.** Exposes the view's half of §K.
 
-**Decisions.** 31, 32 and 34, and card 1 for the bar's place. `CSS.highlights` does not exist in the unit environment: `marks.ts` takes its registry as an argument, the unit tests give it a fake and assert the ranges, and that the two highlights paint is M11's scene. The field ignores Enter while an input method composes, as the in-app browser's bar does.
+**Decisions.** 28 (the clipping chain), 31, 32 and 34, and card 1 for the bar's place. `CSS.highlights` does not exist in the unit environment and jsdom has no layout: `marks.ts` and `reveal.ts` take their registry and their geometry as arguments, the unit tests give them fakes and assert the ranges and the order of opening and scrolling, and that the highlights paint and the rectangles are where acceptance 18 says is M11's scene. A range inside a block the browser has not rendered yet has no rectangle (Streamdown's code block sets `content-visibility: auto`): the reveal then brings the range's nearest ancestor that has a rectangle into the band, and reads the range again in the next frame, at most three times. The field ignores Enter while an input method composes, as the in-app browser's bar does.
 
-**What it does not touch.** The in-app browser's bar and its words; the dispatcher; `apps/desk-web`.
+**What it does not touch.** The in-app browser's bar and its words; the dispatcher; `apps/desk-web`; the follow and anchoring code of `TranscriptList`.
 
 **What it proves.** The remaining unit halves of acceptance 16 to 18; with M11's scenes, 16 to 18 and 22.
 
-### M11 — The scenes, the record, the last run of landing 2
+### M11 — The scenes, the measurements, the record, the last run of landing 2
 
-**What exists at its end.** Landing 2's scenes are written and the branch is handed back green on the VM.
+**What exists at its end.** Landing 2's scenes, its clipping scenes and its measured scenes are written, and the branch is handed back green on the VM.
 
-**What it touches.** `e2e/transcript.spec.ts` (scenes for acceptance 16, 17, 18, 23 and 24, on the harness's long synthetic session and a session with folded turns), acceptance 22's scene in the spec that already opens a session, a file and Settings in one app, and its browser case beside the browser's own find scene (`e2e/browser.spec.ts`); the harness fixtures they replay; `docs/tech-debt-tracker.md`.
+**What it touches.** `e2e/transcript.spec.ts` (scenes for acceptance 16, 17, 18, 23 and 24, on the harness's long synthetic session and a session with folded turns; the measured scenes of acceptance 26 behind the file's `MEASURED` switch); acceptance 22's scene in the spec that already opens a session, a file and Settings in one app, and its browser case beside the browser's own find scene (`e2e/browser.spec.ts`); the harness fixtures they replay, among them the three sessions acceptance 26 names (synthesised by `test/support/synth-transcript.ts`, extended for one very large turn and one very large answer) and one with a wide and tall table, a tall code block and long lines for acceptance 18; `docs/tech-debt-tracker.md`.
 
-**Decisions.** No new spec file. No ruling is reversed and no contract amended by landing 2. Tracker rows opened: a tab stop of the transcript's own for messages ("Reported, 9"); ⌘G in a page of the in-app browser ("Reported, 5"); diacritics are not folded, where Desktop folds them; find in a subagent's transcript.
+**Decisions.** No new spec file. No ruling is reversed and no contract amended by landing 2. A measured scene's bound is asserted only behind the measurement switch, the form the gate's guard allows (`.github/scripts/gate-plan.test.mjs`, above `LIVENESS_BOUNDS`); with the switch off the same scenes run and assert only that the count is right. Each measured scene also reports, without asserting it, the whole first pass's duration. Tracker rows opened: a tab stop of the transcript's own for messages (ruled, point 9); ⌘G in a page of the in-app browser does nothing, the browser bar's owner being U12 (ruled, point 5); diacritics are not folded, where Desktop folds them; find in a subagent's transcript; a mermaid diagram's and a formula's source are not searched; the lead words of a message's line are not searched.
 
 **What it does not touch.** The register and the board.
 
-**What it proves.** Every acceptance item of landing 2, as written, in "Concrete Steps", 4.
+**What it proves.** Every acceptance item of landing 2, as written, in "Concrete Steps", 4; the scenes and the measurements are handed over unrun.
 
 ## Concrete Steps
 
@@ -577,7 +595,13 @@ From the landing's worktree. `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/
        ls src/renderer/src/owner/view/mirror.ts src/renderer/src/transcript/view/waiting-view.tsx 2>/dev/null
        ls spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.jsonl spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.transcript.jsonl spikes/protocol-probe/fixtures/uxwave/u3-terminal-commands-r1.transcript.jsonl
 
-   Before M1 the first prints the header's three uses and after M1 nothing; the second prints the loose member; the keymap line prints only `actions.test.ts` until M7. The first `ls` says which of U2b and U1b is on master (neither file: neither). Then go through "The statements to read again" for every file the merge changed (`git diff --name-only <the head before the merge> HEAD`); where one fails, do what its table row says, and where that is not enough, stop and report. Landing 2's branch is cut from a master that holds landing 1: `git grep -n "commandRunOf" -- src/shared/engine/arrival-schema.ts` prints a line, or stop.
+   Before M1 the first prints the header's three uses and after M1 nothing; the second prints the loose member; the keymap line prints only `actions.test.ts` until M7. The first `ls` says which of U2b and U1b is on master (neither file: neither). Before M4, once, the probes' recordings come in as a commit of their own, unless master already holds them:
+
+       git fetch origin ux-wave/U3b-probes && git merge origin/ux-wave/U3b-probes
+       ls spikes/protocol-probe/findings-uxwave-u3b-{autocompact,webfetch,bridge-command,fork-delivered}.txt
+       vmcheck.sh <branch> -- 'timeout 600 node --test .github/scripts/maws-app-scan.test.mjs'      # after the push: the static job's secret scan over the new fixtures
+
+   Then go through "The statements to read again" for every file the merge changed (`git diff --name-only <the head before the merge> HEAD`); where one fails, do what its table row says, and where that is not enough, stop and report. Landing 2's branch is cut from a master that holds landing 1: `git grep -n "export function commandOf" -- src/shared/engine/arrival-schema.ts` prints a line, or stop.
 
 2. **The checks**, on the VM. Push before every check: the VM sees only what is on origin.
 
@@ -592,11 +616,12 @@ From the landing's worktree. `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/
    The paths, per milestone:
    - M1: `src/shared/engine src/shared/graph src/engine-host/normalizer.test.ts src/engine-host/normalizer-arrivals.test.ts src/engine-host/fs src/renderer/src/lane-a src/renderer/src/transcript test/support/tokens-guard.test.ts`
    - M2: `src/renderer/src/transcript/view src/renderer/src/side src/renderer/src/composer test/support/tokens-guard.test.ts`
-   - M3: `src/renderer/src/transcript src/renderer/src/lane-a/view src/renderer/src/sessions src/renderer/src/lane-b test/lane-b test/support/tokens-guard.test.ts`
+   - M3: `src/shared/engine src/renderer/src/transcript src/renderer/src/lane-a/view src/renderer/src/sessions src/renderer/src/lane-b src/renderer/src/widgets test/lane-b test/support/tokens-guard.test.ts`
    - M4: `src/renderer/src/stores src/renderer/src/transcript src/renderer/src/lane-a src/renderer/src/sidebar src/renderer/src/owner test/support/tokens-guard.test.ts`
    - M5: `src/shared/engine src/shared/attention src/services/sessions src/renderer/src/request-card src/renderer/src/transcript src/renderer/src/panel/summary test/support/synth-transcript.test.ts`
    - M7: `src/shared/keymap src/main/menu.test.ts src/renderer/src/keymap src/renderer/src/settings-tab src/renderer/src/palette src/renderer/src/transcript src/renderer/src/stores test/support/tokens-guard.test.ts`
-   - M8: `src/renderer/src/transcript src/renderer/src/stores src/renderer/src/lane-a/view`
+   - M8: `src/renderer/src/transcript src/renderer/src/owner src/renderer/src/lane-a src/renderer/src/harness test/support/tokens-guard.test.ts`
+   - M9: `src/renderer/src/transcript src/renderer/src/stores src/renderer/src/lane-a/view`
    - M10: `src/renderer/src/transcript src/renderer/src/lane-a/view test/support/tokens-guard.test.ts`
 
    A row snapshot that a decision moves is rewritten on the VM and comes back as that run's diff, applied in the worktree and committed:
@@ -611,7 +636,7 @@ From the landing's worktree. `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/
        vmcheck.sh <branch> -- 'timeout 900 pnpm --filter desk-web build'
        vmcheck.sh <branch> -- 'timeout 900 pnpm exec vitest run --project desk-web'
 
-   Each ends with no error and with no file of `apps/desk-web` edited. A test of the desk's that fails is read first as a difference the desk draws: if it is one of the six of "Reported, 3", report it for the coordinator; if it is another, it is this milestone's defect.
+   Each ends with no error and with no file of `apps/desk-web` edited. A test of the desk's that fails is read first as a difference the desk draws: if it is one of the six the ruling on point 3 names, report it for the coordinator; if it is another, it is this milestone's defect.
 
 3. **The wire does not change.** After M1, and again in each landing's last run:
 
@@ -630,9 +655,9 @@ From the landing's worktree. `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/
 
    On the VM these fail on master too and are not this work's: the desk-hub `test/deploy/{hub-reads,production-scripts,staging-scripts}.test.ts`, `src/services/machine/setup.test.ts`, `src/shared/machine/git-reads.test.ts`, `test/artifacts/portability.test.ts`; `src/renderer/src/sidebar/Sidebar.test.tsx` can fail under the whole suite's load and pass alone. Any other failure is this landing's. A run whose log has stopped growing while a process sits at full CPU is a loop: stop it, check that no worker is left (`pgrep -fa vitest`), find the case one file at a time, and report the loop itself. The whole suite runs once per landing, here; an earlier milestone does not run it. A suite whose behaviour could depend on the Node version (none is expected) is run once under Node 22 as the build brief says.
 
-5. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e. The hand-back says: what exists, with the command and the result that showed it; what is not verified (every scene, by file and name, written and typechecked but not run, with its group); the decisions made; anything that contradicts this document or the child's file; what deserves a ticket.
+5. **Stop and hand back.** The executor runs no `scripts/ci-gate.sh`, opens no pull request and starts no Electron e2e. The hand-back says: what exists, with the command and the result that showed it; what is not verified (every scene, by file and name, written and typechecked but not run, with its group; for landing 1 the cross-build scene and its two runs; for landing 2 the measured scenes); the decisions made; anything that contradicts this document or the child's file; what deserves a ticket.
 
-6. **M7's spike** stops once before that: after its first commit and a push, the executor hands back the head and waits for the hands-on check (Proof, 7).
+6. **M7's spike** stops once before that: after its first commit and a push, the executor hands back the head and waits. The architect arranges the hands-on check and reports its answer; the executor does not go past the spike before that (Proof, 7).
 
 7. **The architect's, after a hand-back.** "Proof that an executor does not run", in its order.
 
@@ -640,27 +665,29 @@ From the landing's worktree. `vmcheck.sh` is `~/.local/share/maws-ux-wave/tools/
 
 | # | the proof | when | what it needs | what comes back |
 |---|---|---|---|---|
-| 1 | **The owner's look at the drawn example** | before M2 (frames 1 to 6) and before M10 (frames 7 to 9) | the frames listed under the cards, drawn at real sizes with invented content; the two cards | each frame called a clear improvement or reworked; the answers to card 1 and card 2 |
+| 1 | **The owner's look at the drawn example** | before M2 (frames 1 to 6) and before M10 (frames 7 to 9, with card 1) | the frames listed under the card, drawn at real sizes with invented content; the architect dispatches the drawing after this revision, landing 1's frames first | each frame called a clear improvement or reworked; the answer to card 1 |
 | 2 | **Class 1a**, landing 1 | on the head M6 hands back, and again on the final head if the review changed the branch | `scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u3b`, in the background | each job's conclusion and the run's URL |
 | 3 | **The branch's review**, landing 1 | once class 1a is green | the xhigh panel of `doperpowers:review-code`, with the lenses of "Size and review", the base and head shas and the worktree | its verdict and findings; findings are settled by a fix wave, never inline |
-| 4 | **Landing 1's scenes alone, then their groups** | after the review's findings are settled | a Mac under the load rule. Alone: the changed and new scenes of `e2e/transcript.spec.ts`, the W2 scene and the two Edit scenes of `e2e/composer.spec.ts`, scene 9 of `e2e/side.spec.ts`. Then the groups `e2e:transcript`, `e2e:c7`, `e2e:side`, `e2e:panel`, `e2e:agents`, `e2e:to-human`, `e2e:lane-a`, `e2e:remote`, `e2e:desk-web` and the default group | each scene and group named as run and green; a skipped scene is not evidence. What only this run shows: every width, height and overlap of acceptance 4, 5 and 6; that hovering moves nothing; that the clipboard holds what the acceptance says |
+| 4 | **Landing 1's scenes alone, then their groups** | after the review's findings are settled | a Mac under the load rule. Alone: the changed and new scenes of `e2e/transcript.spec.ts`, the W2 scene and the two Edit scenes of `e2e/composer.spec.ts`, scene 9 of `e2e/side.spec.ts`. Then the groups `e2e:transcript`, `e2e:c7`, `e2e:side`, `e2e:panel`, `e2e:agents`, `e2e:to-human`, `e2e:lane-a`, `e2e:remote`, `e2e:desk-web` and the default group | each scene and group named as run and green; a skipped scene is not evidence. What only this run shows: every width, height and overlap of acceptance 1, 4, 5 and 6; that hovering moves nothing; that the clipboard holds what the acceptance says |
 | 5 | **The measured anchoring scene** | with 4, on a quiet Mac | `MAWS_TRANSCRIPT_PERF=1 pnpm e2e:transcript -g "anchoring: 500 turns"`, twice on master's tree and twice on the landing's, read base against landing as the gate-offload plan's Decision Log 162 says (every p95 within 0.5 ms of every other) | the four readings. It is owed because the answer-row projection runs once per change of the list during that scene's stream, and because fenced blocks and tables measure differently |
 | 6 | **#330's other symptoms** (the child's check 5) | on the built window of landing 1, with a live engine and a terminal session | in a terminal session `/rename x` then `/effort low`, then the reverse order, then a command that prints nothing; in a session MAWS runs, an interrupted `/compact` and then one that succeeds | no output under another command, no "(no content)" row; or the symptom, which is fixed before landing |
-| 7 | **The keys' routing** (Probes, 1) | after M7's first commit, before the rest of M7 | a Mac that runs the spike's head; real key presses, by a person or through the computer-use tool: ⌘F, ⌘G and ⇧⌘G with the caret in a file's editor, in the Settings view, in a document and in a browser's page; ⌥⌘↑ in an editable file; each of the five from a session pane | per press, which side answered (the region's own search, or the handler's console line); the verdict of M7's promote or discard |
+| 7 | **The keys' routing** (Probes, 1) | after M7's first commit, before the rest of M7; arranged by the architect, who reports the answer | a Mac that runs the spike's head; real key presses, by a person or through the computer-use tool: ⌘F, ⌘G and ⇧⌘G with the caret in a file's editor, in the Settings view, in a document and in a browser's page; ⌥⌘↑ in an editable file; each of the five from a session pane | per press, which side answered (the region's own search, or the handler's console line); the verdict of M7's promote or discard |
 | 8 | **Class 1a**, landing 2 | on the head M11 hands back, and on the final head | `scripts/ci-gate.sh "$PWD" --gates static,unit,probes --label u3b-2` | as 2 |
 | 9 | **The branch's review**, landing 2 | once class 1a is green | as 3 | as 3 |
-| 10 | **Landing 2's scenes alone, then their groups** | after the review | a Mac under the load rule. Alone: the new scenes of `e2e/transcript.spec.ts`, acceptance 22's scene, its browser case. Then `e2e:transcript`, `e2e:c7`, `e2e:panel`, `e2e:code`, `e2e:browser`, `e2e:settings`, `e2e:document`, `e2e:side`, `e2e:lane-a`, `e2e:remote`, `e2e:desk-web` and the default group | as 4. What only this run shows: that the highlights paint, that a match is in view under the bar, where focus is after each key, and all of acceptance 22 |
-| 11 | **The measured anchoring scene** | with 10 | as 5 | the four readings. It is owed because `RowFrame` and the list's handle changed; with the bar closed the scene must read as master does |
-| 12 | **The owner's look at the built window** | at the wave's next sitting after each landing | landing 1: a command's line, a wrapped fence, a wide table, the two action rows, a compaction in a long turn, a fetch by the web plugin, a command the sminos bridge ran (the child's residue for O-18). Landing 2: find over a long session with folded turns, the prompt chords from the composer and from the transcript, and the real keys of acceptance 22 in each region once more | each called a clear improvement, or reworked |
+| 10 | **Landing 2's scenes alone, then their groups** | after the review | a Mac under the load rule. Alone: the new scenes of `e2e/transcript.spec.ts` (acceptance 18's clipping scenes among them), acceptance 22's scene, its browser case. Then `e2e:transcript`, `e2e:c7`, `e2e:panel`, `e2e:code`, `e2e:browser`, `e2e:settings`, `e2e:document`, `e2e:side`, `e2e:agents`, `e2e:lane-a`, `e2e:remote`, `e2e:desk-web` and the default group | as 4. What only this run shows: that the highlights paint; that the current match's rectangle is inside every clipping ancestor and the list's band; where focus is after each key; and all of acceptance 22 |
+| 11 | **The measured anchoring scene** | with 10 | as 5 | the four readings. It is owed because `RowFrame`, the rows' scopes and the list's handle changed; with the bar closed the scene must read as master does |
+| 12 | **The owner's look at the built window** | at the wave's next sitting after each landing | landing 1: a command's line (closed, open, a terminal's grid), a wrapped fence, a wide table, the two action rows, a compaction in a long turn seen from the transcript's end, a fetch by the web plugin, a command the sminos bridge ran (the child's residue for O-18). Landing 2: find over a long session with folded turns, the prompt chords from the composer and from the transcript, and the real keys of acceptance 22 in each region once more | each called a clear improvement, or reworked |
+| 13 | **The cross-build runs**, landing 1 (ruled, F6) | on landing 1's final head, or the last head that changed what a host sends | twice, each older build as the exact peer, in the ordinary mode (the wires differ: this tree is at 48, build G at 46, build F at 33): `scripts/ci-gate.sh "$PWD" --gates e2e:cross-build --peer-exact 2c7044231 --label u3b-xb-g` and `scripts/ci-gate.sh "$PWD" --gates e2e:cross-build --peer-exact f1852de3a --label u3b-xb-f` | each run's URL, with the scene *(a command's output, both ways)* named as run and not skipped in both; the pull request's body names the two runs |
+| 14 | **Find's measured budgets**, landing 2 (ruled, F5) | with 10, on a quiet Mac | `MAWS_TRANSCRIPT_PERF=1 pnpm e2e:transcript -g "find, measured"`, the five scenes of acceptance 26, twice each | each longest task against its budget, and the whole first pass's duration as reported. A budget not met stops the landing: the index moves off the main thread (decision 29's fallback), which is a revision of this document before it is built |
 
-No paid live group is owed: neither landing changes a scene of `e2e:p1-live` or what it proves. Until row 4 is green no build that holds landing 1 is offered to a machine a person uses, and likewise row 10 for landing 2.
+No paid live group is owed: neither landing changes a scene of `e2e:p1-live` or what it proves. Until rows 4 and 13 are green no build that holds landing 1 is offered to a machine a person uses, and likewise rows 10 and 14 for landing 2.
 
 ## The pull requests
 
 Two, each opened by the architect after its hand-back, each opening with the root's path, "U3, second landing, part 1 of 2" or "part 2 of 2", and the parent pin.
 
-- **Landing 1's body** names: its class 1a run on the final head; the review's verdict and what was dismissed or deferred; the Mac runs of rows 4 to 6 by scene and group; the rulings it reverses, O-08 and O-02, amended where they stand, and X1's dated line; that no wire minor is taken and nothing is stored, with "Reported, 4"; the insertions of Interfaces §M (U1's two files, U2's two, U7's one, U9's one) for their owners; the six differences the desk draws; that `mcp__web__fetch` is now read-only for one-click allows, for U1; the tracker rows of M6; the probes still open (2, 3, 4). The board at landing: #330, #331 and #146 close; #44 closes with its first item pointed at O-02.
-- **Landing 2's body** names: its class 1a run, review and Mac runs (rows 8 to 11); the spike's verdict (row 7); the five rows added to U6's table and the two test expectations of U6's that moved; that it reverses no ruling, stores nothing and sends nothing; the departures from Claude Desktop of "The reference"; the tracker rows of M11. The board at landing: #588 closes.
+- **Landing 1's body** names: its class 1a run on the final head; the review's verdict and what was dismissed or deferred; the Mac runs of rows 4 to 6 by scene and group; the two cross-build runs of row 13; the rulings it reverses, O-08 and O-02, amended where they stand, and X1's dated line; that no wire minor is taken and nothing is stored, and what is newly sent (Interfaces §H); the named insertions of Interfaces §M (U1's two files, U2's two, U7's one, U9's one) for their owners, with the smaller decisions the architect accepted (the row kind `activity`, `forkInPlace`'s optional `rewindTo`, the helper in `caption.ts` and `classify.ts`); the six differences the desk draws; that `mcp__web__fetch` is now read-only for one-click allows, for U1; that the compaction's line is at the transcript's end, by the architect's ruling on the section's premise; the tracker rows of M6; the probes' branch merged in it. The board at landing: #330, #331 and #146 close; #44 closes with its first item pointed at O-02; #588 closes.
+- **Landing 2's body** names: its class 1a run, review and Mac runs (rows 8 to 11) and the measurements of row 14; the spike's verdict (row 7); the five rows added to U6's table, the two test expectations of U6's that moved and `modalOwnsFocus` exported; the insertions in `view/cells/CellLine.tsx` and `owner/to-human/MessageRow.tsx` (U2's); that it reverses no ruling, stores nothing and sends nothing; the departures from Claude Desktop of "The reference"; the tracker rows of M11. The board at landing: landing 2's own ticket closes.
 
 Each ends with the session line the build brief gives.
 
