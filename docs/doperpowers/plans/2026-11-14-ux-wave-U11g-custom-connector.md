@@ -21,7 +21,7 @@ How to see it working: Acceptance, G1 to G7.
 - [x] (2026-11-14) The owner's look: the sheet was drawn from this document and the architect ruled on what the drawing showed (R7). M2 is released at these defaults (R8); one question is with the owner, whether the value fields are masked ("The owner's look").
 - [x] (2026-11-14) M1 — The rules, the command, the check before the run, and what may leave the runner. Commits `739e3edc1`..`1ab670d7f`, the fix `d8e13b1c3`..`13a50d579` (the trim finding, R10); reviewed clean at its frontier.
 - [x] (2026-11-14) M2 — The sheet and the action in Customize. Commits `258a93940`..`ac381f757`, the fix `455d83e7a`..`beaac66e6` (the opening's read, R11); reviewed clean at its frontier. Its e2e scene is written and typechecked, not run.
-- [ ] M3 — The dialog's sentence, the record, the whole checks, the hand-back.
+- [x] (2026-11-14) M3 — The dialog's sentence, the record, the whole checks, the hand-back. Commits `f5930a6d8`, `6d65a2ce7` (M1 review's deferred Minor, test-only), master `0e92f6e7c` merged at `1c38cb10f`; reviewed at its frontier, two findings carried to the branch review (Outcomes).
 - [ ] The architect's: the e2e scenes on a Mac, the branch review, class 1a, the pull request (Proof, P2 to P4).
 
 ## The landing's edge
@@ -670,7 +670,25 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 - Decision: the opening's read must be a request started after the opening. M2's frontier review showed that while the page's first inventory read is still out, the opening's `refetch()` joins it (one request; the reviewer reproduced it on the VM with two observers of the key), so its answer, begun before the opening, enabled Add. The sheet now counts only a read begun after it opened, also when the first read is still pending.
   Rationale: "What it writes" and M2's decision on the opening's read: an older answer vouches for nothing.
   Date/Author: 2026-11-14, the plan's controller, on the review.
+- Decision: M3's choices. A test comment in `McpWidget.test.tsx` that paraphrased the old claim ("the switch reaches every session in the place") now says what the switch reaches; no expectation changed with it. U11a's record line is a paragraph directly under §C's first table, whose row keeps the old words as history. The leading-value cases (M1 review's deferred Minor) sit beside the existing ones; a RED was shown by putting the old bug back in its leading-only form on the VM's checkout. The probe findings file and the U11 child spec, which quote the old sentence, are left: a probe's record, and the architect's file.
+  Rationale: M3's Touches and "nothing else of that document changes".
+  Date/Author: 2026-11-14, the plan's executor, folded by its controller.
+- Decision: M3's frontier review asked for two things, both carried to the branch review rather than fixed here. The new held-open runner case copies its neighbour's scenario instead of parameterising it (test-only duplication, no behaviour). The whole suite's failures outside the build brief's known list (`normalizer-fidelity`, `subagents`, `Sidebar`, `detached-transport`, `document-perf`, `viewer`: five-second timeouts and a timing assertion at VM load 10 to 16, each passing alone) are read as load provisionally; the architect read the run's load timeouts as load and takes class 1a on the final head as the reading of record.
+  Rationale: the first is maintainability the panel can weigh with the whole branch; the second is the architect's explicit disposition, and the files are none the landing changed.
+  Date/Author: 2026-11-14, the plan's controller.
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-14, at the executor's hand-back (head of this commit; master `0e92f6e7c` merged at `1c38cb10f`; wire minor 47 on master's 46).**
+
+What exists. Customize › Connectors › My items has "Add custom connector…", which opens one sheet for a remote HTTP or SSE server with request headers or a local command with arguments and environment, at the scope the page offers, and adds it through one run of `claude mcp add-json` in the runner's queue, after the engine host has checked the name again against the configuration. Nothing new is stored; the wire gained `connectors.addJson`, additive. The Connectors dialog's head reads "A switch here is for this chat, and every session started in <place> afterwards." Fifty files outside `docs/` and `spikes/`, about 3,000 lines added and 84 removed; the estimate was about 2,000 over 46.
+
+How it was shown. At `1c38cb10f` on the build VM: `pnpm typecheck` and eslint over step 5's paths silent; the acceptance call (step 5, twelve paths) 33 files, 721 tests passed; M3's set 65 files, 833 tests; the scan 8 of 8; the script tests 587 of 587; `pnpm test` once: 13 files failed, 2,644 passed, every failure either on the build brief's known list or a timing case that passed alone (read as load, provisionally; class 1a decides). The architect's Mac run on `1c38cb10f`: `e2e:discover` 11 passed, 1 skipped, the new scene passing on its first real run; `e2e:default` 253 passed, 322 skipped. Not run: `widgets` and `c11-live` for the sentence, class 1a, the branch review.
+
+What the reviews found. Each milestone's frontier review found one thing the document's own tests had not: M1 tested a CLI line for a value after trimming it, so a value with a space at an end leaked whole minus that space (fixed, with a decision); M2's opening read could join a request started before the sheet opened while the page's first read was out (fixed, with a decision); M3's two are carried. The executor's discovery that the read-back error can quote any fragment of the file became R10, a third trigger of the one drop.
+
+Carried to the branch review (Unresolved findings): M3's duplicated held-open runner scenario; the provisional load reading of the whole suite's timing failures; inherited test noise (`machineSettings.get failed` in the model-selector tests, `get_context_usage failed` warnings in `ipc-e8`); the import cycle between `ConnectorSheet.tsx` and `CustomConnectorSheet.tsx`, kept by "Does not touch".
+
+Residue: Concrete Steps 6's list, as revised by R10.
+
+Lesson. The rule about values was right in the document and still slipped twice in code at the seams the document did not draw: a normalisation before the test, a cache's request-sharing before the gate. Both were caught by a reviewer who tried one concrete value against the running code rather than reading it; a rule like this one is worth one such probe per boundary at its frontier review.
