@@ -148,7 +148,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     const placed = placer.current;
     if (!placed) return;
     placed.update({ sections: sections.map((section) => ({ path: section.file.path, folded: section.folded, lines: section.lines })), order, current });
-    placed.drawn();
+    placed.drawn(band);
     const seen = handled.current;
     if (reveal !== null && (seen.reveal?.path !== reveal.path || seen.reveal.n !== reveal.n)) {
       seen.reveal = reveal;

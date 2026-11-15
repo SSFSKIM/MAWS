@@ -90,9 +90,9 @@ export class StackPlacer {
     this.input = input;
   }
 
-  // The host drew the band it was handed.
-  drawn(): void {
-    this.pending = false;
+  // A commit: the page lags the model until the band last handed to the host is the one drawn.
+  drawn(band: Band): void {
+    if (band === this.band) this.pending = false;
   }
 
   // A request that named a file: that section's top at the scroller's top.
