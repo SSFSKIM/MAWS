@@ -17,6 +17,7 @@ import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { continuedAfter, presentationOf } from './classify'; // P5 O9; UX wave U2: continuedAfter
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
+import { splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { headRole } from './head'; // UX wave U3
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -701,26 +702,15 @@ function apply(batch: Batch, event: SessionEvent): void {
         pushRouted(null, false); // retained on the turn, no row of its own
         return;
       }
-      recordAskSteer(batch, event); // E1
-      if (event.joined !== undefined && event.joined.length > 0 && event.messageUuid !== null && batch.join(event, event.joined)) return; // UX wave U4a
-      // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
-      if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
-      const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
-      if (own) {
-        const turn = batch.touch(own.id);
-        if (event.messageUuid !== null) index.messages.set(event.messageUuid, turn.id);
-        batch.push(turn, event);
-        return;
-      }
-      // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
-      // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
-      // disk turn that never carries a `turn.started` still gathers its answer.
-      const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
-      const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
-      const turn = batch.open(id, 'human', event.at, false);
-      if (waited) turn.waited = true; // UX wave U4a
-      if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
-      batch.push(turn, event);
+      // UX wave, ticket 704 (the architect's ruling B): a person's message is read apart once, here, before anything else
+      // reads it. A host of an older build sends a message the engine joined from the person's words and MAWS's answer
+      // envelopes whole; it is reduced as this build's producers will send it, the person's message and then each
+      // envelope as a message of its own under the same uuid (which records its answers and places nothing). No part is
+      // asked about again: the split returns none it would split.
+      const parts = splitPersonsMessage(event);
+      if (parts.length === 1 && parts[0] === event) return placePrompt(batch, event);
+      const { id, sessionId, at, seq, agentId, parentToolUseId } = event;
+      parts.forEach((part, n) => placePrompt(batch, { ...part, id: n === 0 ? id : (`${id}${SPLIT_PART}${n}` as EventId), sessionId, at, seq, agentId, parentToolUseId }));
       return;
     }
     case 'assistant.block.delta': {
@@ -968,6 +958,36 @@ function apply(batch: Batch, event: SessionEvent): void {
       return; // session lifecycle, accounting, snapshots and unknown frames: nothing the transcript shows
   }
 }
+
+// A person's message, or a part of one (ticket 704): its envelope's answers recorded, then placed as a prompt.
+function placePrompt(batch: Batch, event: Event<'user.message'>): void {
+  const { state } = batch;
+  const { index } = state;
+  recordAskSteer(batch, event); // E1
+  if (event.joined !== undefined && event.joined.length > 0 && event.messageUuid !== null && batch.join(event, event.joined)) return; // UX wave U4a
+  // A prompt already placed (an inbound replay of it, or of one folded into another turn) adds nothing.
+  if (event.messageUuid !== null && index.messages.has(event.messageUuid)) return;
+  const own = event.messageUuid === null ? undefined : state.turns.get(turnIdOf.ofMessage(event.messageUuid));
+  if (own) {
+    const turn = batch.touch(own.id);
+    if (event.messageUuid !== null) index.messages.set(event.messageUuid, turn.id);
+    batch.push(turn, event);
+    return;
+  }
+  // *Turn boundaries on this engine*: a prompt with no turn yet is a pending turn of its own, after the running one
+  // (a `now` prompt never folds; a `next` prompt folds at its `started`); with no turn running it is current, so a
+  // disk turn that never carries a `turn.started` still gathers its answer.
+  const id = event.messageUuid === null ? turnIdOf.ofEvent(event.id) : turnIdOf.ofMessage(event.messageUuid);
+  const waited = runningTurn(state) !== null || state.order.some((other) => state.turns.get(other)!.state === 'open' && !state.turns.get(other)!.accepted); // UX wave U4a
+  const turn = batch.open(id, 'human', event.at, false);
+  if (waited) turn.waited = true; // UX wave U4a
+  if (event.messageUuid !== null) index.messages.set(event.messageUuid, id);
+  batch.push(turn, event);
+}
+
+// The id of a part beyond the first of a message the window split (ticket 704): the message's id and this suffix, which
+// no producer writes
+const SPLIT_PART = '~part';
 
 // E1 start (residue 13): a user message that is an async ask's steer (`[MAWS ask <askId>]` and the answered result's
 // fenced block) carries that ask's answers. They go on the turn holding the ask's call (copy-on-write: that turn is
