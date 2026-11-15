@@ -206,8 +206,9 @@ export function spaceInstructionsOf(s: LibraryState): ReadonlyMap<string, string
 }
 
 // The same read as a writer needs it (the branch review of U10b-4): not read yet, failed (no answer yet and a refusal,
-// whose message it keeps while it is read again), or read (the last good answer, which a later refused read keeps). A field that would overwrite the stored
-// text is held until it is read. One value per read, so a selector over it is stable.
+// whose message it keeps while it is read again), or read (the last good answer, which a later refused read keeps). A
+// field that would overwrite the stored text is held until it is read. One value per read, so a selector over it is
+// stable.
 export type SpaceInstructionsRead = { status: 'unread' } | { status: 'failed'; error: string } | { status: 'read'; instructions: ReadonlyMap<string, string> };
 const UNREAD: SpaceInstructionsRead = { status: 'unread' };
 const readsOfInstructions = new WeakMap<LibraryRead<unknown>, SpaceInstructionsRead>();
