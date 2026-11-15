@@ -67,6 +67,9 @@ export interface BackfillContext {
   // UX wave U1c (M4, §C 8; Decision Log 38): the approvals the bridge appended into the running turn whose message is
   // drawn and whose `started` waits for the engine's read (withHeldApprovals, below)
   readonly heldApprovals: MessageUuid[];
+  // UX wave U1c (Decision Log 43): the main loop's latest model response, by its API message id, and those of its calls
+  // that have no result yet: the round whose last result is the held approvals' read boundary (roundCompleted, below)
+  readonly round: { message: string | null; readonly open: Set<string> };
   // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
   // (localCommandTurn, below)
   localCaveat: MessageUuid | null;
@@ -112,6 +115,7 @@ export function createBackfillContext(init: {
     unanswered: false,
     waitingWords: [],
     heldApprovals: [],
+    round: { message: null, open: new Set() },
     localCaveat: null,
     arrivals: init.arrivals ?? nothingOpen,
     appendedLast: false,
@@ -607,20 +611,41 @@ const isWaiting = (ctx: BackfillContext, messageUuid: MessageUuid) => ctx.waitin
 // read boundary.
 const REJECTED_BY_PERSON = 'User rejected tool use';
 
-// The read boundary of the approvals held (Decision Log 38): the running turn's next main-loop tool result, the
-// engine's next request carrying the rows appended before it, so their `started` follow the result's events; a turn
-// that ends, is interrupted or gives way to another first leaves them waiting as words already drawn, which the next
-// turn's start or the bridge's wake takes (withWaitingWords). Nothing else clears them: late by one call, never early.
+// The read boundary of the approvals held (Decision Log 38, its boundary as Decision Log 43 replaced it): the result
+// that completes the running turn's round, the engine's next request carrying the rows appended before it, so their
+// `started` follow that result's events; a turn that ends, is interrupted or gives way to another first leaves them
+// waiting as words already drawn, which the next turn's start or the bridge's wake takes (withWaitingWords). Nothing
+// else clears them: late by one call, never early.
 function withHeldApprovals(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
+  const completes = roundCompleted(record, events, ctx);
   if (ctx.heldApprovals.length === 0) return events;
   const ends = events.some((event) => event.kind === 'turn.ended' || event.kind === 'turn.started' || (event.kind === 'user.message' && event.origin === 'interrupt-marker'));
   if (ends) {
     for (const uuid of ctx.heldApprovals.splice(0)) ctx.waitingWords.push({ kind: 'own', uuid, words: null });
     return events;
   }
-  const read = ctx.agentId === null && record.toolUseResult !== REJECTED_BY_PERSON && events.some((event) => event.kind === 'tool.result');
-  if (!read) return events;
+  if (!completes) return events;
   return [...events, ...ctx.heldApprovals.splice(0).map((uuid): SessionEvent => ({ ...base(), kind: 'command.lifecycle', commandUuid: uuid, state: 'started' }))];
+}
+
+// The round (Decision Log 43): the calls the main loop's latest model response made, known by its API message id. The
+// engine sends its next request only once every call of the round has its result (`u3-tasks-r2` lines 156 to 161: an
+// Agent call answered at once, a parallel Bash call thirty seconds later, then the request), so a result that leaves a
+// call of the round open is no read boundary, nor is a result for a call outside the round, a subagent's (its own
+// context, or a sidechain record here), or the refusal an Esc writes for the running call.
+function roundCompleted(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext): boolean {
+  if (ctx.agentId !== null || record.isSidechain === true) return false;
+  const round = ctx.round;
+  let answered = false;
+  for (const event of events) {
+    if ((event.kind === 'assistant.block.complete' || event.kind === 'tool.use') && event.apiMessageId !== round.message) {
+      round.message = event.apiMessageId;
+      round.open.clear();
+    }
+    if (event.kind === 'tool.use') round.open.add(event.toolUseId);
+    else if (event.kind === 'tool.result' && round.open.delete(event.toolUseId)) answered = true;
+  }
+  return answered && round.open.size === 0 && record.toolUseResult !== REJECTED_BY_PERSON;
 }
 
 // A slash command's output (class `command`): the engine's own tag around it, its terminal escapes removed, in the turn

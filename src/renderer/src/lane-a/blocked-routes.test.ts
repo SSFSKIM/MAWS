@@ -289,3 +289,92 @@ describe('an approval the bridge appended waits for the engine to read it, by bo
     expect(queued.filter((attachment) => 'mawsDrawn' in attachment)).toEqual([]);
   });
 });
+
+// UX wave U1c (Decision Log 43): the read boundary of an approval held during a turn is the result that completes the
+// round, when every call the assistant made since its last request has its result; the engine sends no request before
+// it. The recorded parallel round is `u3-tasks-r2`'s (lines 156 to 161: an Agent call and a Bash call of one response,
+// the Agent's result at once, the Bash call's thirty seconds later), with u1c-t-busy-1's appended grant and its mirror
+// line (lines 52 and 53) put after the round's last call, each row chained as the engine chains them.
+describe('an approval held during a round is read at the result that completes the round (Decision Log 43)', () => {
+  const linesOf = (name: string) => textOf(`${name}.transcript.jsonl`).split('\n').filter((line) => line.trim() !== '').map((line) => JSON.parse(line) as JsonObject);
+  const tasks = linesOf('u3-tasks-r2');
+  const busy = linesOf('u1c-t-busy-1');
+  const esc = linesOf('u1c-t-esc-1');
+  const at = (line: number) => tasks[line - 1]!;
+  /** u1c-t-busy-1's appended grant and its mirror line, the row chained under `parent`. */
+  const grantAfter = (parent: JsonObject): JsonObject[] => [{ ...busy[51]!, parentUuid: parent.uuid as string }, busy[52]!];
+  const AGENT_RESULT = at(158);
+  const BASH_RESULT = at(161);
+  const BASH_CALL = at(157);
+
+  /** What the approval's row reads: none, read, or waiting with its marks. */
+  function approvalOf(events: SessionEvent[]): string {
+    const rows = rowsOf(withAllExpanded(applyEvents(createState(null, null), events)));
+    const approval = rows.find((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user' && row.consent?.subject === MARKER);
+    if (approval === undefined) return 'none';
+    if (approval.pending === undefined && approval.unread !== true) return 'read';
+    return `waiting (${approval.pending ?? 'no pending'}, ${approval.unread === true ? 'unread' : 'no unread'})`;
+  }
+  const WAITING = 'waiting (next, unread)';
+  const UNREAD = 'waiting (no pending, unread)';
+  /** The reading by both routes at each prefix of `lines` from line `from` on, the file still being written. */
+  async function prefixes(lines: JsonObject[], from: number) {
+    const read: { file: string[]; link: string[] } = { file: [], link: [] };
+    for (let p = from; p <= lines.length; p += 1) {
+      const head = lines.slice(0, p).map((line) => JSON.stringify(line)).join('\n');
+      read.file.push(`${p}: ${approvalOf(await fromFileFollowed(`${head}\n`))}`);
+      read.link.push(`${p}: ${approvalOf(await fromRows(head))}`);
+    }
+    return read;
+  }
+  /** The reading after each record from `from` on, mapped in order under one context, as the file route maps them. */
+  const readings = (lines: JsonObject[], from: number) => {
+    const ctx = createBackfillContext({ sessionId: SESSION as SessionId, agent: null });
+    const events: SessionEvent[] = [];
+    return lines.map((line) => (events.push(...recordToEvents(parseTranscriptRecord(line), ctx)), approvalOf(events))).slice(from - 1);
+  };
+  const labelled = (from: number, readings: string[]) => readings.map((reading, i) => `${from + i}: ${reading}`);
+
+  it('u3-tasks-r2, the grant held from its parallel round: it waits through the Agent call’s result and is read at the Bash call’s, thirty seconds later, by both routes', async () => {
+    // 158 the grant, 159 its mirror line, 160 the Agent call's result, 163 the Bash call's result
+    const lines = [...tasks.slice(0, 157), ...grantAfter(BASH_CALL), ...tasks.slice(157, 161)];
+    expect(lines[159]!.uuid).toBe(AGENT_RESULT.uuid);
+    expect(lines[162]!.uuid).toBe(BASH_RESULT.uuid);
+    const read = await prefixes(lines, 157);
+    expect.soft(read.file, 'from the file').toEqual(labelled(157, ['none', 'none', WAITING, WAITING, WAITING, WAITING, 'read']));
+    expect.soft(read.link, 'through its rows').toEqual(labelled(157, ['none', WAITING, WAITING, WAITING, WAITING, WAITING, 'read']));
+  });
+
+  it('u3-tasks-r2, the same round answered in the other order (the Bash call’s result, then the Agent call’s): read at the second result, by both routes', async () => {
+    // 158 the grant, 159 its mirror line, 160 the Bash call's result, 161 the Agent call's result
+    const lines = [...tasks.slice(0, 157), ...grantAfter(BASH_CALL), BASH_RESULT, AGENT_RESULT];
+    const read = await prefixes(lines, 159);
+    expect.soft(read.file, 'from the file').toEqual(labelled(159, [WAITING, WAITING, 'read']));
+    expect.soft(read.link, 'through its rows').toEqual(labelled(159, [WAITING, WAITING, 'read']));
+  });
+
+  it('u3-tasks-r2, one call in its round (the Bash call of line 138, answered at line 139): read at its result', () => {
+    // 139 the grant, 140 its mirror line, 141 the call's result
+    const lines = [...tasks.slice(0, 138), ...grantAfter(at(138)), at(139)];
+    expect(readings(lines, 138)).toEqual(['none', 'none', WAITING, 'read']);
+  });
+
+  it('u3-tasks-r2, the parallel round interrupted after its first result (the Agent call’s; then u1c-t-esc-1’s rejected result for the Bash call, its marker and the bridge’s wake): it never reads at a result; it waits through the interrupt; the wake takes it', () => {
+    const bashId = ((BASH_CALL.message as JsonObject).content as JsonObject[])[0]!.id as string;
+    const rejected: JsonObject = { ...esc[53]!, uuid: 'rejected-43', parentUuid: BASH_CALL.uuid as string, sourceToolAssistantUUID: BASH_CALL.uuid as string, message: { role: 'user', content: [{ ...((esc[53]!.message as JsonObject).content as JsonObject[])[0]!, tool_use_id: bashId }] } };
+    const marker: JsonObject = { ...esc[54]!, uuid: 'marker-43', parentUuid: 'rejected-43' };
+    const wake: JsonObject = { ...esc[60]!, uuid: 'wake-43', parentUuid: 'marker-43' };
+    // 158 the grant, 159 its mirror line, 160 the Agent call's result, 161 the rejected result, 162 the marker, 163 the wake
+    const lines = [...tasks.slice(0, 157), ...grantAfter(BASH_CALL), AGENT_RESULT, rejected, marker, wake];
+    expect(readings(lines, 159)).toEqual([WAITING, WAITING, WAITING, UNREAD, 'read']);
+  });
+
+  it('u3-tasks-r2, a subagent’s call and result (sidechain records) inside the parallel round: no read boundary; the round’s own last result is', () => {
+    const sub = { isSidechain: true, agentId: 'a0sub43', sessionId: at(157).sessionId as string, timestamp: at(157).timestamp as string };
+    const call: JsonObject = { ...sub, type: 'assistant', uuid: 'sub-call-43', parentUuid: null, message: { id: 'msg_sub_43', type: 'message', role: 'assistant', model: 'x', content: [{ type: 'tool_use', id: 'toolu_sub_43', name: 'Bash', input: { command: 'true' } }] } };
+    const result: JsonObject = { ...sub, type: 'user', uuid: 'sub-result-43', parentUuid: 'sub-call-43', message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: 'toolu_sub_43', content: '' }] } };
+    // 158 the grant, 159 its mirror line, 160 the subagent's call, 161 its result, 162 the Agent call's result, 163 the Bash call's
+    const lines = [...tasks.slice(0, 157), ...grantAfter(BASH_CALL), call, result, AGENT_RESULT, BASH_RESULT];
+    expect(readings(lines, 159)).toEqual([WAITING, WAITING, WAITING, WAITING, 'read']);
+  });
+});
