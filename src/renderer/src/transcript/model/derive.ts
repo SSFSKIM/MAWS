@@ -475,7 +475,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     if (words === null) return [{ ...userRow(event, id, editable, steer), consent: marks[0]! }, ...beside(1)];
     return [userRow(event, id, editable, steer, words), ...beside(0)];
   };
-  const opener = ([first, ...beside]: RowOf<'user'>[]): [RowOf<'user'>, RowOf<'user'>[]] => [first!, beside];
+  const openingRows = ([first, ...beside]: RowOf<'user'>[]): [RowOf<'user'>, RowOf<'user'>[]] => [first!, beside];
   // UX wave U3 (UC-2, "Where a row sits"; the U3a document, decision 5): the items an arrival made, by its class, and
   // those that came before any of the turn's work (head.ts, the reducer's reading too), so the resolution pass can place
   // them
@@ -571,9 +571,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         } else if (answersHeldAsk(event)) {
           // an async ask's answer: its capsule draws it (above)
         } else if (event.messageUuid !== null && opensTurn(event, turn.id) && user === null && !dropped(event.messageUuid)) {
-          [user, userBeside] = opener(messageRows(event, rowId.user(event.messageUuid), true));
+          [user, userBeside] = openingRows(messageRows(event, rowId.user(event.messageUuid), true));
         } else if (turn.id === turnIdOf.ofEvent(event.id) && user === null && !event.isSynthetic) {
-          [user, userBeside] = opener(messageRows(event, rowId.userOfEvent(event.id), false));
+          [user, userBeside] = openingRows(messageRows(event, rowId.userOfEvent(event.id), false));
         } else if (!event.isSynthetic && !isInterruptionMarker(event.origin, event.content) && !dropped(event.messageUuid)) {
           for (const row of messageRows(event, event.messageUuid === null ? rowId.userOfEvent(event.id) : rowId.user(event.messageUuid), true, true)) items.push({ kind: 'steer', row });
         }
