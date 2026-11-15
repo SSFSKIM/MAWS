@@ -37,7 +37,7 @@ afterEach(() => {
 });
 
 const newClient = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
-const draw = (client: QueryClient, iconUrl: string | null, size: 'row' | 'card' | 'detail' = 'row') =>
+const draw = (client: QueryClient, iconUrl: string | null, size: 'row' | 'card' | 'head' | 'detail' = 'row') =>
   render(
     <QueryClientProvider client={client}>
       <ul>
@@ -141,13 +141,13 @@ describe('the item’s image', () => {
     await waitFor(() => expect(asked).toEqual([ICON, MISS, MISS]));
   });
 
-  it('keeps one box per size: a row’s, a card’s, a detail’s', () => {
-    const sizes = (['row', 'card', 'detail'] as const).map((size) => {
+  it('keeps one box per size: a row’s, a card’s, a detail head’s, Discover’s detail’s', () => {
+    const sizes = (['row', 'card', 'head', 'detail'] as const).map((size) => {
       draw(newClient(), null, size);
       const classes = image().className;
       cleanup();
       return classes.split(' ').find((c) => c.startsWith('size-'));
     });
-    expect(sizes).toEqual(['size-9', 'size-10', 'size-14']);
+    expect(sizes).toEqual(['size-9', 'size-10', 'size-11', 'size-14']);
   });
 });

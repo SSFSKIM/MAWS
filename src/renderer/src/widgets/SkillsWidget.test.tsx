@@ -166,6 +166,7 @@ describe('skills widget: the library', () => {
     expect(detail.getAttribute('data-skill-detail')).toBe('frontend-design:frontend-design');
     const onRow = document.querySelector('[data-skill-row="frontend-design:frontend-design"] [data-item-image]')!;
     expect([detail.querySelector('[data-item-image]')!.textContent, detail.querySelector('[data-item-image]')!.getAttribute('data-tile-colour')]).toEqual([onRow.textContent, onRow.getAttribute('data-tile-colour')]); // one tile, row and detail
+    expect(detail.querySelector('[data-item-image]')!.className).toContain('size-11'); // the detail head keeps its 44px box
     expect(detail.textContent).toContain('Long enough to be cut on the row and whole in the detail.');
     expect(detail.textContent).toContain('/frontend-design:frontend-design');
     expect(detail.textContent).toContain('Frontend design');

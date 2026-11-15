@@ -117,7 +117,7 @@ export function PluginDetail({ appSessionId, availability, identity, loaded, loa
           </p>
         )}
         <div className="flex min-w-0 items-start gap-3">
-          <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={icons.get(identity.id) ?? null} size="detail" />
+          <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={icons.get(identity.id) ?? null} size="head" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <h3 className="m-0 truncate text-prose font-semibold text-fg" title={identity.id}>
               {name}

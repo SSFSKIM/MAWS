@@ -10,8 +10,9 @@ import { tileOf, type ItemKind, type TileColour } from './tile';
 // context in which a script runs nothing and an external reference loads nothing; any other answer keeps the tile.
 const IMAGE_DATA = /^data:image\/(?:png|svg\+xml);base64,[A-Za-z0-9+/]+={0,2}$/;
 
-// Each place keeps the box it had: a row's 36px, a card's 40px; a detail and Discover's Featured, 56px.
-const BOX = { row: 'size-9 rounded-md text-ui', card: 'size-10 rounded-md text-ui', detail: 'size-14 rounded-lg text-prose' } as const;
+// Each place keeps the box it had: a row's 36px, a card's 40px, a plugin's or a skill's detail head 44px (My items and the
+// session's dialogs), Discover's detail and Featured 56px.
+const BOX = { row: 'size-9 rounded-md text-ui', card: 'size-10 rounded-md text-ui', head: 'size-11 rounded-lg text-prose', detail: 'size-14 rounded-lg text-prose' } as const;
 
 // The eight pairs written out whole, so the stylesheet holds each class (Tailwind sees only a class whose name is written).
 const TILE: Record<TileColour, string> = {

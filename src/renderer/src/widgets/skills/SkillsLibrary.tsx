@@ -101,7 +101,7 @@ function SkillDetail({ row, onBack, onUse }: { row: SkillRow; onBack(): void; on
     <div ref={root} tabIndex={-1} data-skill-detail={row.name} onKeyDown={backOnChord(onBack)} className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto px-2 pb-3 outline-none">
       <BackButton to={S.list} onBack={onBack} />
       <div className="flex items-center gap-3">
-        <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="detail" />
+        <ItemImage kind="skill" seed={labelOf(row)} iconUrl={null} size="head" />
         <div className="flex min-w-0 flex-1 flex-col gap-0.5">
           <h3 className="m-0 truncate text-prose font-semibold text-fg">{labelOf(row)}</h3>
         </div>

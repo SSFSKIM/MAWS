@@ -1560,7 +1560,7 @@ describe('plugins widget: the images', () => {
     fireEvent.click(within(row(BERTH)).getByRole('button', { name: /^View / }));
     const detailImage = () => document.querySelector<HTMLElement>(`[data-plugin-detail="${BERTH}"] [data-item-image]`)!;
     await waitFor(() => expect(detailImage().getAttribute('data-item-image')).toBe('icon'));
-    expect(detailImage().className).toContain('size-14');
+    expect(detailImage().className).toContain('size-11'); // the detail head keeps its 44px box
   });
 
   it('held open: while the icons’ read is out every row has its tile; its answer fills one box and no row is added, removed or moved', async () => {
