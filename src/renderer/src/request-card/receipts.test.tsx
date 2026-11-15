@@ -125,13 +125,23 @@ describe('the card’s own receipt', () => {
     await waitFor(() => expect(receiptOf(HERE, item.request.toolUseId!)).toEqual({ dismissed: true }));
   });
 
-  it.each(['write_failed', 'not_pending'] as const)('an answer that was not delivered (%s) writes nothing', async (failed) => {
-    outcome = failed;
+  it('an answer that was not delivered (write_failed) writes nothing', async () => {
+    outcome = 'write_failed';
     const item = mount(declinable);
     await userEvent.setup().click(screen.getByRole('button', { name: 'Dismiss' }));
-    await screen.findByText(failed === 'write_failed' ? "Couldn't deliver the answer" : 'Already answered elsewhere');
+    await screen.findByText("Couldn't deliver the answer");
     expect(fake.invoked('session.answer')).toHaveLength(1);
     expect(receiptOf(HERE, item.request.toolUseId!)).toBeUndefined();
+  });
+
+  // UX wave U1b M3 (decision 8a): an answer too late says where the question was answered, in its row too
+  it('an answer that came too late (not_pending) writes Already answered elsewhere, not the answer sent', async () => {
+    outcome = 'not_pending';
+    const item = mount(declinable);
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Dismiss' }));
+    await screen.findByText('Already answered elsewhere');
+    expect(fake.invoked('session.answer')).toHaveLength(1);
+    expect(receiptOf(HERE, item.request.toolUseId!)).toEqual({ settled: 'Already answered elsewhere' });
   });
 });
 

@@ -315,6 +315,7 @@ describe('the call that waits, on its own row', () => {
     await mount([question, prompt, { ...second, request: { ...second.request, toolUseId: null } }]);
     act(() => useTranscriptStore.getState().expandAll(APP));
     await waitFor(() => expect(cell('b1')).not.toBeNull());
+    expect(document.body.textContent).not.toMatch(/answer below|Composer paused/); // (k): no pointer row, nothing paused
     expect(cell('b1')!.hasAttribute('data-waiting')).toBe(true);
     expect(cell('b1')!.querySelector('.transcript-cell-label')?.textContent).toBe('Waiting for approval: make check');
     expect(cell('b2')!.hasAttribute('data-waiting')).toBe(false);
@@ -327,18 +328,19 @@ describe('the call that waits, on its own row', () => {
 // Decision 8a: a delivery that ends as answered elsewhere while its item is still listed
 describe('a request answered elsewhere while its row still waits', () => {
   it('reads Already answered elsewhere on each line with no form and no control, across a remount and after the item leaves; its prompt’s row reads as its tool row; a closed card is not the end’s open one', async () => {
-    vi.useFakeTimers({ shouldAdvanceTime: true });
     const { question, prompt, second } = scene();
     const first = await mount([question, prompt, second]);
     await waitFor(() => expect(within(questionRow()).queryByRole('radio', { name: 'Red' })).not.toBeNull());
     await pick('Red', 'Next');
     await pick('Small', 'Submit');
     await waitFor(() => expect(answered()).toHaveLength(1));
-    await act(() => fake.reply('session.answer', { outcome: 'not_pending' }));
     await waitFor(() => expect(within(end()!).queryByRole('button', { name: 'Allow once' })).not.toBeNull());
     fireEvent.click(within(end()!).getByRole('button', { name: 'Allow once' }));
     await waitFor(() => expect(answered()).toHaveLength(2));
-    await act(() => fake.reply('session.answer', { outcome: 'not_pending' }));
+    // both answers arrive too late, each as answered elsewhere; the clock is the test's from here, for the two seconds
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    await act(() => fake.reply('session.answer', { outcome: 'not_pending' })); // the question's
+    await act(() => fake.reply('session.answer', { outcome: 'not_pending' })); // the prompt's
     act(() => void vi.advanceTimersByTime(NOT_PENDING_MS));
     await waitFor(() => expect(questionRow().querySelector('[data-request-card]')).toBeNull());
     const quiet = () => {

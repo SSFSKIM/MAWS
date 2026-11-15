@@ -17,7 +17,6 @@ import type { AgentId, ApiMessageId, EventId, MessageUuid, ParentToolUseId, Requ
 import { journalToEvents } from '../../src/renderer/src/transcript/dev/journal';
 import { rowsOf } from '../../src/renderer/src/transcript/model/derive';
 import { applyEvents, createState } from '../../src/renderer/src/transcript/model/reduce';
-import type { Row } from '../../src/renderer/src/transcript/model/rows';
 import { loadJournal, TEST_FIXTURE_DIR } from './fixtures';
 
 export const PANEL_CHILD_FILE = join(TEST_FIXTURE_DIR, 'transcript/events/panel-child.events.jsonl');
@@ -134,12 +133,11 @@ export function measurePanelChild(events: SessionEvent[]): { first: number; batc
   const before = rowsOf(state).length;
   const rows: number[] = [];
   let at = firstIndex;
-  let last: Row[] = [];
   for (const count of batches) {
     state = applyEvents(state, events.slice(at, at + count).filter(own));
     at += count;
-    last = rowsOf(state);
-    rows.push(last.length);
+    rows.push(rowsOf(state).length);
   }
-  return { first, batches, rows, before, pendingRequests: last.filter((row) => row.kind === 'request_slot').length };
+  // UX wave U1b: a request makes no row (§B, rule 3); the child's state still holds it pending
+  return { first, batches, rows, before, pendingRequests: state.pending.size };
 }

@@ -172,7 +172,7 @@ export interface TranscriptState {
   order: TurnId[];
   loose: SessionEvent[]; // events outside any turn (boundaries between turns, process exit, reconnects)
   hidden: (HiddenBranch & { branches: Map<RowId, HiddenBranch> }) | null; // all hidden turns (for row muting), with each rewind boundary’s own branch; fromTurn is the latest target
-  pending: Map<RequestId, SessionEvent>; // unresolved requests → request_slot rows
+  pending: Map<RequestId, SessionEvent>; // unresolved requests (U2's groupInput reads them; UX wave U1b: no row is made from them)
   seen: Set<EventId>; // every applied event id
   echoUuids: Set<MessageUuid>; // uuids of bash_echo messages, so a turn.started naming one is dropped
   ui: TranscriptUi;

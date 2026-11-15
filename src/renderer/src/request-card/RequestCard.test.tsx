@@ -70,7 +70,25 @@ function Pane({ index = 0, children }: { index?: 0 | 1; children: ReactNode }) {
   );
 }
 
-function Card({ event, placement, item }: { event: SessionEvent; placement: Placement; item: AttentionItem }) {
+// UX wave U1b (M3): the end row's open card, in a row that takes focus as a transcript's row does (the row owns its keys)
+function EndRow({ children }: { children: ReactNode }) {
+  return (
+    <div tabIndex={-1} data-end-row="">
+      {children}
+    </div>
+  );
+}
+
+// Where a test draws the card: a placement, or `end`, the transcript's end row as `EndRegion` draws its open card
+type Where = Placement | 'end';
+
+function Card({ event, placement, item }: { event: SessionEvent; placement: Where; item: AttentionItem }) {
+  if (placement === 'end')
+    return (
+      <EndRow>
+        <RequestCard item={item} request={event} placement="inline" region="end" askInPlace paneIndex={0} />
+      </EndRow>
+    );
   const card = <RequestCard item={item} request={event} placement={placement} paneIndex={0} />;
   return placement === 'card' ? (
     <article tabIndex={0} aria-label={`article ${item.appSessionId}`}>
@@ -81,7 +99,7 @@ function Card({ event, placement, item }: { event: SessionEvent; placement: Plac
   );
 }
 
-function mount(event: RequestEvent, placement: Placement, over: Partial<AttentionItem> = {}) {
+function mount(event: RequestEvent, placement: Where, over: Partial<AttentionItem> = {}) {
   const item = itemFor(event, APP, over);
   const view = render(
     <Pane>
@@ -98,7 +116,7 @@ const sentAsItWas = async (button: string) => {
   expect(screen.queryByText(/Answered/)).toBeNull();
 };
 const focusOn = (element: HTMLElement) => act(() => element.focus());
-const frame = () => document.querySelector<HTMLElement>('[data-docked-frame]')!; // a multi-select question is a named group too
+const frame = () => document.querySelector<HTMLElement>('[data-end-row]')!; // UX wave U1b: the end card's own transcript row, which owns its keys
 const article = () => screen.getByRole('article');
 // UX wave U1a (§D): a permission prompt's keys, as the dispatcher reads them, and the 400 ms they wait after it appears
 const CMD_ENTER = { key: 'Enter', code: 'Enter', metaKey: true };
@@ -156,21 +174,21 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
     }
   });
 
-  it('docked, Enter retries and Esc cancels from the frame', async () => {
-    const first = mount(refusal, 'docked');
+  it('at the end, Enter retries and Esc cancels from its row', async () => {
+    const first = mount(refusal, 'end');
     focusOn(frame());
     await press('{Enter}');
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'retry_fallback' }]));
     first.view.unmount();
     answeredLeaves();
-    mount(refusal, 'docked');
+    mount(refusal, 'end');
     focusOn(frame());
     await press('{Escape}');
     await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'dialog', behavior: 'completed', result: 'cancelled' }));
   });
 
   it('the auto-mode server fallback renders its title and paragraphs and answers continue (Enter) or interrupt (Esc), never cancelled', async () => {
-    const first = mount(autoFallback, 'docked');
+    const first = mount(autoFallback, 'end');
     expect(screen.getByRole('heading', { name: /changing auto mode/ })).toBeTruthy();
     expect(screen.getByText(/Nothing breaks: auto mode keeps working/)).toBeTruthy();
     expect(screen.getByText('127.0.0.1:8641')).toBeTruthy();
@@ -179,7 +197,7 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
     await waitFor(() => expect(answers()).toEqual([{ kind: 'dialog', behavior: 'completed', result: 'continue' }]));
     first.view.unmount();
     answeredLeaves();
-    mount(autoFallback, 'docked');
+    mount(autoFallback, 'end');
     focusOn(frame());
     await press('{Escape}');
     await waitFor(() => expect(answers().at(-1)).toEqual({ kind: 'dialog', behavior: 'completed', result: 'interrupt' }));
@@ -187,10 +205,10 @@ describe('dialog variants answer the two declared kinds and leave an undeclared 
   });
 
   it('an undeclared kind shows its payload and the pending notice, with no answer control and no key', async () => {
-    mount(undeclared, 'docked');
+    mount(undeclared, 'end');
     expect(screen.getByRole('heading', { name: 'cost_threshold' })).toBeTruthy();
     expect(screen.getByText(/MAWS did not declare this dialog kind and cannot answer it/)).toBeTruthy();
-    expect(screen.queryByRole('group')).toBeNull(); // no docked frame: it never takes the editor's place
+    expect(screen.getByRole('group', { name: HEADINGS.dialog.text })).toBeTruthy(); // UX wave U1b: drawn at the end, as any request
     expect(screen.queryAllByRole('button').map((b) => b.textContent)).toEqual(['tab 0']);
     expect(bindingsOf('request.accept')).toEqual([]);
     expect(bindingsOf('request.decline')).toEqual([]);
@@ -348,7 +366,7 @@ describe('edit prompt restores the initiating prompt', () => {
 
 describe('request card placements and delivery states', () => {
   it('opens links and files from a standalone plan in the requesting session', async () => {
-    mount({ ...plan, plan: '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' } as RequestEvent, 'docked');
+    mount({ ...plan, plan: '[Website](https://example.com)\n\n[Source](/r/app.ts#L7)' } as RequestEvent, 'end');
     fireEvent.click(await screen.findByRole('link', { name: 'Website' }));
     expect(fake.invoked('layout.openExternal')).toEqual([{ url: 'https://example.com/' }]);
     fireEvent.click(screen.getByTitle('/r/app.ts'));
@@ -390,7 +408,7 @@ describe('request card placements and delivery states', () => {
     await sentAsItWas('Submit'); // UC-1: the card stands, sent, until its item leaves the list
   });
 
-  it.each(['inline', 'docked', 'card'] as const)('a single-select pick in %s waits for Next and can be changed, with the pager retaining the answer', async (placement) => {
+  it.each(['inline', 'end', 'card'] as const)('a single-select pick in %s waits for Next and can be changed, with the pager retaining the answer', async (placement) => {
     mount(withoutPreviews, placement);
     const user = userEvent.setup();
     expect((screen.getByRole('button', { name: 'Show next question' }) as HTMLButtonElement).disabled).toBe(true);
@@ -443,15 +461,15 @@ describe('request card placements and delivery states', () => {
     await user.click(screen.getByRole('button', { name: 'Next' }));
     await user.click(screen.getByRole('checkbox', { name: 'Pear' }));
     first.view.unmount();
-    mount(question, 'docked');
+    mount(question, 'end');
     expect(screen.getByText('2 of 2')).toBeTruthy();
     expect(screen.getByRole('checkbox', { name: 'Pear' }).getAttribute('aria-checked')).toBe('true');
     await user.click(screen.getByRole('button', { name: 'Show previous question' }));
     expect(screen.getByRole('radio', { name: 'Red' }).getAttribute('aria-checked')).toBe('true');
   });
 
-  it('docked, digits pick, Enter is Next then Submit, and focus stays with the frame across the steps', async () => {
-    mount(question, 'docked');
+  it('at the end, digits pick, Enter is Next then Submit, and focus stays with its row across the steps', async () => {
+    mount(question, 'end');
     focusOn(frame());
     await press('{Enter}');
     expect(screen.getByText('1 of 2')).toBeTruthy(); // nothing chosen: Enter does nothing
@@ -466,8 +484,8 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Blue', 'Which fruits do you like?': 'Apple, Pear' } }]));
   });
 
-  it('Next keeps focus in the docked frame and the frame can continue with digits and Enter', async () => {
-    mount(withoutPreviews, 'docked');
+  it('Next keeps focus in the end card\'s row and the row can continue with digits and Enter', async () => {
+    mount(withoutPreviews, 'end');
     const user = userEvent.setup();
     await user.click(screen.getByRole('radio', { name: 'Red' }));
     await user.click(screen.getByRole('button', { name: 'Next' }));
@@ -479,7 +497,7 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'question', answers: { 'Which color do you prefer?': 'Red', 'Which fruits do you like?': 'Apple' } }]));
   });
 
-  it('a shared question advancing in the docked pane restores focus there, not to the Overview article', async () => {
+  it('a shared question advancing at the end of a pane\'s transcript restores focus there, not to the Overview article', async () => {
     const item = itemFor(withoutPreviews, APP);
     render(
       <>
@@ -487,7 +505,7 @@ describe('request card placements and delivery states', () => {
           <Card event={withoutPreviews} placement="card" item={item} />
         </Pane>
         <Pane index={1}>
-          <Card event={withoutPreviews} placement="docked" item={item} />
+          <Card event={withoutPreviews} placement="end" item={item} />
         </Pane>
       </>,
     );
@@ -499,8 +517,8 @@ describe('request card placements and delivery states', () => {
     expect(document.activeElement).not.toBe(article());
   });
 
-  it('Esc declines the whole question with the plain permission deny pass3/question-deny seq 110 recorded, docked and on the Overview card', async () => {
-    const first = mount(skippedQuestion, 'docked');
+  it('Esc declines the whole question with the plain permission deny pass3/question-deny seq 110 recorded, at the end and on the Overview card', async () => {
+    const first = mount(skippedQuestion, 'end');
     focusOn(frame());
     await press('{Escape}');
     // the answer C3's broker writes as the recorded deny (broker.test.ts pins the wire over the same fixture)
@@ -540,7 +558,7 @@ describe('request card placements and delivery states', () => {
 
   it('an elicitation whose schema the form cannot map leaves Decline as the only action; Esc cancels nothing', async () => {
     const nested = { ...elicitation, payload: { ...((elicitation as Extract<RequestEvent, { kind: 'elicitation.requested' }>).payload as object), requested_schema: { type: 'object', properties: { address: { type: 'object' } } } } } as RequestEvent;
-    mount(nested, 'docked');
+    mount(nested, 'end');
     expect(screen.getByText(/MAWS cannot show this form: address/)).toBeTruthy();
     expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
     expect((screen.getByRole('button', { name: 'Cancel' }) as HTMLButtonElement).disabled).toBe(true);
@@ -563,7 +581,7 @@ describe('request card placements and delivery states', () => {
   });
 
   it("the plan's Esc opens the feedback box and its Enter sends keep_planning with the feedback", async () => {
-    mount(plan, 'docked');
+    mount(plan, 'end');
     focusOn(frame());
     await press('{Escape}');
     const box = screen.getByRole('textbox', { name: 'What should change in the plan' });
@@ -572,15 +590,16 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'keep_planning', feedback: 'split step 2' }]));
   });
 
-  it('docked with the request still loading, the keys reach the frame that mounts once it arrives', async () => {
+  it('at the end with the request still loading, the keys reach its row once it arrives', async () => {
     vi.useFakeTimers();
     const item = itemFor(reapply, APP);
     render(
       <Pane>
-        <RequestCard item={item} request={null} placement="docked" paneIndex={0} />
+        <EndRow>
+          <RequestCard item={item} request={null} placement="inline" region="end" askInPlace paneIndex={0} />
+        </EndRow>
       </Pane>,
     );
-    expect(screen.queryByRole('group')).toBeNull(); // the skeleton is not framed
     await act(async () => {
       const replied = fake.reply('attention.request', { event: reapply });
       vi.advanceTimersByTime(0); // the fake client settles its reply on a timer
@@ -594,7 +613,7 @@ describe('request card placements and delivery states', () => {
   });
 
   it("Enter in the Deny… with a reason textarea is a newline; ⌘Enter sends the deny with the reason", async () => {
-    mount(reapply, 'docked');
+    mount(reapply, 'end');
     const user = userEvent.setup();
     await user.click(screen.getByRole('button', { name: 'Deny… with a reason' }));
     const box = screen.getByRole('textbox', { name: 'Reason for denying' });
@@ -613,7 +632,7 @@ describe('request card placements and delivery states', () => {
     await waitFor(() => expect(answers()).toEqual([{ kind: 'permission', decision: 'deny_and_stop' }]));
   });
 
-  it.each(['docked', 'card', 'inline'] as const)('a requires_user_interaction Read has no allow button and no allow key, only Deny and the sentence (%s)', async (placement) => {
+  it.each(['end', 'card', 'inline'] as const)('a requires_user_interaction Read has no allow button and no allow key, only Deny and the sentence (%s)', async (placement) => {
     vi.useFakeTimers();
     mount(flaggedRead, placement);
     expect(screen.queryAllByRole('button').filter((b) => /^Allow|^Always allow/.test(nameOf(b) ?? ''))).toEqual([]);
@@ -623,7 +642,7 @@ describe('request card placements and delivery states', () => {
     expect(bindingsOf('request.accept')).toEqual([]);
     expect(bindingsOf('request.allowOnce')).toEqual([]);
     expect(bindingsOf('request.allowLasting')).toEqual([]);
-    const owner = placement === 'docked' ? frame() : placement === 'card' ? article() : screen.getByRole('button', { name: 'Deny' });
+    const owner = placement === 'end' ? frame() : placement === 'card' ? article() : screen.getByRole('button', { name: 'Deny' });
     focusOn(owner);
     graceOver();
     for (const init of [CMD_ENTER, SHIFT_CMD_ENTER, { key: 'Enter', code: 'Enter' }, { key: '1', code: 'Digit1' }]) keyAt(owner, init);
@@ -692,10 +711,13 @@ describe('request card placements and delivery states', () => {
   it('a request the store could not read shows its notice with the failure instead of loading', () => {
     const item = itemFor(reapply, APP);
     useAttention.setState({ requests: new Map([[item.id, null]]), unreadable: new Map([[item.id, 'no host']]) });
-    render(<RequestCard item={item} request={null} placement="docked" paneIndex={null} />);
+    render(
+      <EndRow>
+        <RequestCard item={item} request={null} placement="inline" region="end" askInPlace paneIndex={null} />
+      </EndRow>,
+    ); // UX wave U1b (decision 14): drawn at the end
     expect(screen.queryByText('Loading the request…')).toBeNull();
     expect(screen.getByRole('alert').textContent).toBe('The request could not be readRetry');
-    expect(useComposerStore.getState().docked.get(APP)).toBeUndefined(); // nothing docked: the transcript keeps its card
     expect(screen.getByText(item.summary)).toBeTruthy();
   });
 
@@ -774,7 +796,7 @@ describe('request card placements and delivery states', () => {
 
 // UX wave U1a (M3, §D; l4-approvals-02 and A3 as this landing cuts them): the permission card is one line saying what is
 // asked, the preview, three buttons with their keys on them, and the rule's file line only with a project rule. ⌘↩, ⇧⌘↩ and
-// Esc answer from the docked frame or a focused Overview article, on a fresh press, once the prompt has been drawn for
+// Esc answer from the end card's row (UX wave U1b) or a focused Overview article, on a fresh press, once the prompt has been drawn for
 // 400 ms; Enter and the digits answer no permission prompt.
 describe('the permission card', () => {
   const askRule = fixtureRequest('pass2', 'grant-askrule-start', 27);
@@ -788,10 +810,10 @@ describe('the permission card', () => {
         projectsVersion: s.projectsVersion + 1,
       })),
     );
-  const ownerOf = (placement: 'docked' | 'card') => (placement === 'docked' ? frame() : article());
+  const ownerOf = (placement: 'end' | 'card') => (placement === 'end' ? frame() : article());
 
   describe('what it reads', () => {
-    it.each(['docked', 'card', 'inline'] as const)('reads what is asked, then the preview, with no tool heading, no "wants to" line and no folder line (%s)', (placement) => {
+    it.each(['end', 'card', 'inline'] as const)('reads what is asked, then the preview, with no tool heading, no "wants to" line and no folder line (%s)', (placement) => {
       inProject(null);
       mount(reapply, placement);
       expect(screen.getByRole('heading', { name: 'Run a command' })).toBeTruthy();
@@ -808,7 +830,7 @@ describe('the permission card', () => {
 
     // §D's order, for a tool whose preview does not carry the description itself (the review of M3): the preview, the
     // call's "Why", the engine's reason, then the buttons; a command's "Why" stays its preview's own, drawn once
-    it.each(['docked', 'card', 'inline'] as const)('reads the preview, the call’s Why, the engine’s reason, then the buttons, for a tool that is not a command (%s)', (placement) => {
+    it.each(['end', 'card', 'inline'] as const)('reads the preview, the call’s Why, the engine’s reason, then the buttons, for a tool that is not a command (%s)', (placement) => {
       mount(permission({ toolName: 'Read', displayName: 'Read', input: { file_path: '/w/notes.txt' }, description: 'Check the release notes', decisionReason: 'An ask rule in the project matched' }), placement);
       const order = [screen.getByTestId('request-input'), screen.getByText('Why: Check the release notes'), screen.getByText('An ask rule in the project matched'), screen.getByRole('button', { name: 'Deny' })];
       for (const [before, after] of order.slice(0, -1).map((node, i) => [node, order[i + 1]!] as const)) {
@@ -830,9 +852,9 @@ describe('the permission card', () => {
       expect(screen.queryByText(/from/)).toBeNull();
     });
 
-    it('keeps the docked frame’s title and the glyph of the kind on the first line', () => {
-      mount(reapply, 'docked');
-      expect(frame().getAttribute('aria-label')).toBe('Approval needed');
+    it('is a group named by its kind’s heading, with the glyph of the kind on the first line', () => {
+      mount(reapply, 'end');
+      expect(frame().contains(screen.getByRole('group', { name: 'Approval needed' }))).toBe(true);
       expect(screen.getByRole('heading', { name: 'Run a command' }).textContent).toBe('◐Run a command');
     });
 
@@ -857,7 +879,7 @@ describe('the permission card', () => {
 
   describe('its buttons, from the scopes the request offers', () => {
     it('an ask-rule prompt: Deny and Allow once, no lasting key, no menu on Allow once, no file line', () => {
-      mount(askRule, 'docked');
+      mount(askRule, 'end');
       expect(answerButtons()).toEqual(['Deny', 'Allow once']);
       expect(screen.queryByRole('button', { name: 'More allow options' })).toBeNull();
       expect(bindingsOf('request.allowLasting')).toEqual([]);
@@ -866,7 +888,7 @@ describe('the permission card', () => {
     });
 
     it('a session scope only: the third button reads "Allow for this session", with no menu and no file line', () => {
-      mount(sessionOnly, 'docked');
+      mount(sessionOnly, 'end');
       expect(answerButtons()).toEqual(['Deny', 'Allow for this session', 'Allow once']);
       expect(screen.queryByRole('button', { name: 'More allow options' })).toBeNull();
       expect(screen.queryByText(/settings\.local\.json/)).toBeNull();
@@ -874,7 +896,7 @@ describe('the permission card', () => {
 
     it('a project rule: "Always allow in <project>", the rule’s file line, and "Allow for this session" as the one entry of the menu on Allow once', async () => {
       inProject('probe');
-      mount(reapply, 'docked');
+      mount(reapply, 'end');
       expect(answerButtons()).toEqual(['Deny', 'Always allow in probe', 'Allow once']);
       expect(screen.getByText(/^Always allow adds/).textContent).toBe('Always allow adds touch granted.txt to .claude/settings.local.json in the project.');
       const user = userEvent.setup();
@@ -905,7 +927,7 @@ describe('the permission card', () => {
     });
 
     it('finds each button by its name without its hint, and carries the key in aria-keyshortcuts', () => {
-      mount(reapply, 'docked');
+      mount(reapply, 'end');
       const keys = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-keyshortcuts');
       expect(keys('Allow once')).toBe('Meta+Enter');
       expect(keys('Always allow in this project')).toBe('Meta+Shift+Enter');
@@ -920,7 +942,7 @@ describe('the permission card', () => {
       // a stored rebinding of another action holds ⌘↩ (U6a's decision 10), so Allow once has no effective chord
       act(() => useSettings.setState({ state: { settings: { ...SETTINGS_DEFAULTS_V21, keymap: { 'composer.send': 'Cmd+Enter' } }, resolvedTheme: 'light' } }));
       try {
-        mount(reapply, 'docked');
+        mount(reapply, 'end');
         expect(screen.getByRole('button', { name: 'Allow once' }).textContent).toBe('Allow once');
         expect(screen.getByRole('button', { name: 'Allow once' }).hasAttribute('aria-keyshortcuts')).toBe(false);
         expect(bindingsOf('request.allowOnce')).toEqual([]);
@@ -932,7 +954,7 @@ describe('the permission card', () => {
 
     it('a request flagged "default to no" binds no allow key and prints no hint on its allow buttons; the buttons still answer', async () => {
       vi.useFakeTimers();
-      mount(permission({ defaultToNo: true, suggestions: [] }), 'docked');
+      mount(permission({ defaultToNo: true, suggestions: [] }), 'end');
       expect(answerButtons()).toEqual(['Deny', 'Allow for this session', 'Allow once']);
       for (const name of ['Allow once', 'Allow for this session']) {
         expect(screen.getByRole('button', { name }).textContent).toBe(name);
@@ -955,7 +977,7 @@ describe('the permission card', () => {
   describe('its keys', () => {
     beforeEach(() => void vi.useFakeTimers());
 
-    it.each(['docked', 'card'] as const)('⌘↩ allows once, ⇧⌘↩ gives the third button’s scope, Esc denies, from the focused owner (%s)', async (placement) => {
+    it.each(['end', 'card'] as const)('⌘↩ allows once, ⇧⌘↩ gives the third button’s scope, Esc denies, from the focused owner (%s)', async (placement) => {
       for (const [init, answer] of [
         [CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
         [SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
@@ -973,7 +995,7 @@ describe('the permission card', () => {
       expect(answers()).toHaveLength(3);
     });
 
-    it.each(['docked', 'card'] as const)('answers nothing at 399 ms and answers at 400 ms (%s)', async (placement) => {
+    it.each(['end', 'card'] as const)('answers nothing at 399 ms and answers at 400 ms (%s)', async (placement) => {
       mount(reapply, placement);
       focusOn(ownerOf(placement));
       act(() => void vi.advanceTimersByTime(KEY_GRACE_MS - 1));
@@ -986,7 +1008,7 @@ describe('the permission card', () => {
       expect(answers()).toEqual([{ kind: 'permission', decision: 'allow', scope: 'once' }]);
     });
 
-    it.each(['docked', 'card'] as const)('Enter and the digits answer nothing (%s)', async (placement) => {
+    it.each(['end', 'card'] as const)('Enter and the digits answer nothing (%s)', async (placement) => {
       mount(reapply, placement);
       focusOn(ownerOf(placement));
       graceOver();
@@ -996,7 +1018,7 @@ describe('the permission card', () => {
     });
 
     it('no key answers from a button or from the reason box, whose own ⌘↩ sends the deny with its reason', async () => {
-      mount(reapply, 'docked');
+      mount(reapply, 'end');
       graceOver();
       for (const name of ['Allow once', 'Deny', 'Always allow in this project']) {
         const button = screen.getByRole('button', { name });
@@ -1016,7 +1038,7 @@ describe('the permission card', () => {
       expect(answers()).toEqual([{ kind: 'permission', decision: 'deny', message: 'not now' }]);
     });
 
-    it.each(['docked', 'card'] as const)('a chord pressed while an input method composes answers nothing (%s)', async (placement) => {
+    it.each(['end', 'card'] as const)('a chord pressed while an input method composes answers nothing (%s)', async (placement) => {
       mount(reapply, placement);
       focusOn(ownerOf(placement));
       graceOver();
@@ -1026,7 +1048,7 @@ describe('the permission card', () => {
     });
 
     it('a prompt that offers no allow still waits its 400 ms before Esc denies', async () => {
-      mount(flaggedRead, 'docked');
+      mount(flaggedRead, 'end');
       focusOn(frame());
       keyAt(frame(), ESCAPE);
       await flush();
@@ -1043,7 +1065,7 @@ describe('the permission card', () => {
   describe('a held chord across two prompts', () => {
     const second = { ...reapply, requestId: 'req-second', toolUseId: 'toolu_second' } as RequestEvent;
     const events = new Map<string | null, SessionEvent>([[reapply.requestId, reapply], [second.requestId, second]]);
-    function Queue({ placement }: { placement: 'docked' | 'card' }) {
+    function Queue({ placement }: { placement: 'end' | 'card' }) {
       const item = useAttention((s) => selectPendingOf(s, APP)[0] ?? null);
       return item === null ? null : <Card event={events.get(item.request.requestId)!} placement={placement} item={item} />;
     }
@@ -1053,9 +1075,9 @@ describe('the permission card', () => {
     beforeEach(() => void vi.useFakeTimers());
 
     it.each([
-      ['⌘↩', 'docked', CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
-      ['⇧⌘↩', 'docked', SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
-      ['Esc', 'docked', ESCAPE, { kind: 'permission', decision: 'deny' }],
+      ['⌘↩', 'end', CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
+      ['⇧⌘↩', 'end', SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
+      ['Esc', 'end', ESCAPE, { kind: 'permission', decision: 'deny' }],
       ['⌘↩', 'card', CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'once' }],
       ['⇧⌘↩', 'card', SHIFT_CMD_ENTER, { kind: 'permission', decision: 'allow', scope: 'local_settings' }],
       ['Esc', 'card', ESCAPE, { kind: 'permission', decision: 'deny' }],
@@ -1070,7 +1092,7 @@ describe('the permission card', () => {
       expect(sent()).toEqual([{ appSessionId: MAIN_APP, requestId: reapply.requestId, answer }]);
       list([b]); // the publisher lets the answered item go; the second prompt takes its place
       const owner = ownerOf(placement);
-      expect(document.activeElement).toBe(owner); // docked: the second prompt's frame took focus from the first
+      expect(document.activeElement).toBe(owner); // at the end: the keyboard stays on the row the second prompt opens in
       expect(document.querySelector(`[data-request-card="${b.id}"]`)).not.toBeNull();
       const seen: boolean[] = [];
       const after = (event: KeyboardEvent) => void seen.push(event.defaultPrevented);
@@ -1128,19 +1150,19 @@ describe('card focus owner is the Overview article', () => {
     expect(binding.within?.current).toBe(document.querySelector('[data-request-card]'));
   });
 
-  it('two docked cards in two panes: ⌘↩ with focus in one answers that one only', async () => {
+  it('two end cards in two panes: ⌘↩ with focus on one’s row answers that one only', async () => {
     vi.useFakeTimers();
     render(
       <>
         <Pane index={0}>
-          <RequestCard item={itemFor(reapply, at('app-a'))} request={reapply} placement="docked" paneIndex={0} />
+          <Card event={reapply} placement="end" item={itemFor(reapply, at('app-a'))} />
         </Pane>
         <Pane index={1}>
-          <RequestCard item={itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, at('app-b'))} request={{ ...reapply, requestId: 'req-b' } as SessionEvent} placement="docked" paneIndex={1} />
+          <Card event={{ ...reapply, requestId: 'req-b' } as SessionEvent} placement="end" item={itemFor({ ...reapply, requestId: 'req-b' } as RequestEvent, at('app-b'))} />
         </Pane>
       </>,
     );
-    const frames = screen.getAllByRole('group', { name: 'Approval needed' });
+    const frames = [...document.querySelectorAll<HTMLElement>('[data-end-row]')];
     graceOver();
     focusOn(frames[1]);
     keyAt(frames[1], CMD_ENTER);
@@ -1367,7 +1389,7 @@ describe('the dev-mods consent (R2, pass3/mods-consent)', () => {
   it('renders as a question card headed "Mods" with the engine’s three choices', () => {
     const consent = fixtureRequest('pass3', 'mods-consent', 7);
     expect(consent.kind).toBe('question.requested');
-    mount(consent, 'docked');
+    mount(consent, 'end');
     expect(screen.getByText('Mods')).toBeTruthy();
     expect(screen.getByText(/Enable hot reloading for this session\?/)).toBeTruthy();
     for (const choice of ['How does this work?', 'Enable for this session', 'Not now']) expect(screen.getByRole('radio', { name: choice })).toBeTruthy();
@@ -1393,7 +1415,7 @@ describe("a plan's next mode", () => {
 
   it('names the mode before Plan, and its press sends today’s answer', async () => {
     inPlan(APP, 'default');
-    mount(plan, 'docked');
+    mount(plan, 'end');
     expect(screen.queryByRole('button', { name: 'Implement' })).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Implement · Manual' }));
     await waitFor(() => expect(answers()).toEqual([{ kind: 'plan', outcome: 'implement', feedback: null }]));
@@ -1401,7 +1423,7 @@ describe("a plan's next mode", () => {
 
   it('a menu entry sends the mode it names; the menu never lists Plan or the button’s mode', async () => {
     inPlan(APP, 'default');
-    mount(plan, 'docked');
+    mount(plan, 'end');
     const user = userEvent.setup();
     await user.click(caret()!);
     expect(await entries()).toEqual(['Implement · Accept edits']);
@@ -1411,7 +1433,7 @@ describe("a plan's next mode", () => {
 
   it('lists the modes in the mode menu’s order without the one on the button, and Enter sends the button’s answer', async () => {
     inPlan(APP, 'auto');
-    mount(plan, 'docked');
+    mount(plan, 'end');
     const user = userEvent.setup();
     expect(screen.getByRole('button', { name: 'Implement · Auto' })).toBeTruthy();
     await user.click(caret()!);
@@ -1440,7 +1462,7 @@ describe("a plan's next mode", () => {
   ])('under %s is today’s card: "Implement", no menu, today’s answer', async (_name, supervisor) => {
     useHosts.setState({ supervisor });
     inPlan(APP, 'acceptEdits');
-    mount(plan, 'docked');
+    mount(plan, 'end');
     expect(caret()).toBeNull();
     expect(screen.queryByRole('button', { name: /^Implement · / })).toBeNull();
     await userEvent.setup().click(screen.getByRole('button', { name: 'Implement' }));
@@ -1449,7 +1471,7 @@ describe("a plan's next mode", () => {
 
   it('an entry pressed after the host stopped applying a mode sends nothing, and the card is drawn again without the menu', async () => {
     inPlan(APP, 'default');
-    mount(plan, 'docked');
+    mount(plan, 'end');
     const user = userEvent.setup();
     await user.click(caret()!);
     const entry = await screen.findByRole('menuitem', { name: 'Implement · Accept edits' });

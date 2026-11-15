@@ -48,7 +48,7 @@ export interface PanelHarnessTab {
 // the last row's rect inside the scroll element; `scrollWidth` and `clientWidth` are the region's slot element's, and
 // `overflowX` the widest horizontal overflow of the slot, the host's tab panel and the list's scroll element (a
 // transcript that overflows sideways scrolls inside its own list, which the slot alone would not show);
-// `regionWidth` the rendered width of the panel region; `pendingRequests` the child's request_slot rows.
+// `regionWidth` the rendered width of the panel region; `pendingRequests` the child's waiting rows and its end row (UX wave U1b).
 export interface PanelChildMetrics {
   rows: number;
   domRows: number;

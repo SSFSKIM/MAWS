@@ -449,8 +449,9 @@ describe('Reply through the human send seam', () => {
 });
 
 describe('needs you', () => {
-  it('a pending permission: the request card in the thread, and the strip above Reply with Open in Side pane and Open as tab', async () => {
-    offs.push(registerRequestRenderer((slot) => <div data-request-card="">{`Approval needed · ${slot.requestId}`}</div>));
+  // UX wave U1b: the prompt is drawn at the thread's end, through the end row (`request-end`) the host's renderer draws
+  it('a pending permission: the request card at the thread’s end, and the strip above Reply with Open in Side pane and Open as tab', async () => {
+    offs.push(registerRequestRenderer((slot) => <div data-request-card="">{`Approval needed · ${slot.id}`}</div>));
     const b = threadTurn();
     b.turn('t2', 'Edit the page');
     b.toolUse('e1', 'Edit', { file_path: '/r/dashboard.html' });
@@ -459,7 +460,7 @@ describe('needs you', () => {
     await intoThread();
     withRecord();
     act(() => useAttention.setState({ bySession: new Map([[child, [item(child, 'permission', new Date().toISOString())]]]) }));
-    await waitFor(() => expect(card()!.querySelector('[data-request-card]')?.textContent).toBe('Approval needed · r1'));
+    await waitFor(() => expect(card()!.querySelector('[data-request-card]')?.textContent).toBe('Approval needed · request-end'));
     const strip = card()!.querySelector<HTMLElement>('[data-needs-you]')!;
     expect(strip.dataset.needsYou).toBe('attention');
     expect(strip.textContent).toContain('Waiting for your permission');
