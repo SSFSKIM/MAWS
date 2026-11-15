@@ -45,6 +45,23 @@ describe('ownFolders', () => {
     expect(own()).toEqual([at('profile')]);
   });
 
+  // The panel's finding 1: a bundle's suffix in another case is a bundle, the daemon's and a told one alike
+  it('takes a bundle whose suffix is written in another case, the daemon’s and a told one', () => {
+    folder('profile');
+    const exec = join(folder('Apps', 'MAWS.APP', 'Contents', 'MacOS'), 'MAWS');
+    writeFileSync(exec, '');
+    const told = folder('Other', 'Maws.App');
+    expect(ownFolders(at('profile'), exec, () => [told])()).toEqual([at('profile'), at('Apps', 'MAWS.APP'), told]);
+  });
+
+  // The containment test after the native realpath: a folder given in another case than the disk's is answered in the
+  // disk's, the case the boundary's realpath gives a file under it, so `under` compares one spelling with the same
+  it.skipIf(process.platform !== 'darwin')('answers each folder in the disk’s case when it is given in another', () => {
+    folder('profile');
+    const app = folder('Other', 'MAWS Dev.app');
+    expect(ownFolders(at('PROFILE'), '/usr/local/bin/node', () => [at('other', 'maws dev.APP')])()).toEqual([at('profile'), app]);
+  });
+
   it('leaves out a folder that does not resolve', () => {
     expect(ownFolders(at('no-profile'), join(at('Gone.app'), 'Contents', 'MacOS', 'x'), () => [])()).toEqual([]);
   });

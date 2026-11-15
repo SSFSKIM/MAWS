@@ -9,6 +9,7 @@ import { anchoredMessage, anchorLead, anchorTag, commentsMessage, MESSAGE_COMMEN
 import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import { askSteerText } from '@shared/maws/ask';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
+import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
@@ -671,6 +672,40 @@ describe('rowClaim: a user row the person did not write', () => {
     const peer = JSON.parse(JSON.stringify(peerByBridge()).replace(`Open ${LINK}`, 'Nothing linked here.')) as unknown;
     expect(classes(peer)).toEqual(['peer']);
     expect(rowClaim(peer, P)).toEqual({ names: false, pending: [] });
+  });
+});
+
+// The panel's finding 2: a prompt queued in a running turn is the person's text only as a `user` row is: the queued
+// branch answers what the idle one answers for the same text (NAMES for the person's own, OTHER for a text someone else
+// wrote that links the path). Queued rows of another origin name nothing, as on master.
+describe('rowClaim: a queued prompt the person did not write', () => {
+  const OTHER = { names: false, pending: [], other: true };
+  const NOTHING = { names: false, pending: [] };
+  const classes = (row: unknown) => readArrivals(row).map((arrival) => arrival.class);
+  const answer = askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]);
+
+  it('names the path for the person’s queued message, as for the same text typed at rest', () => {
+    const queued = queuedPrompt(`Open ${LINK}`);
+    expect(classes(queued)).toEqual([]);
+    expect(rowClaim(queued, P)).toEqual({ names: true });
+    expect(rowClaim(user(`Open ${LINK}`, { origin: { kind: 'human' } }), P)).toEqual({ names: true });
+  });
+
+  it.each([
+    ['MAWS’s answer envelope', answer, 'answer'],
+    ['MAWS’s consent message', consentMessage('command', `open ${LINK}`), 'consent'],
+  ])('names it for a read only, as the idle row does: %s queued', (_, text, kind) => {
+    const queued = queuedPrompt(text);
+    expect(classes(queued)).toEqual([kind]);
+    expect(rowClaim(queued, P)).toEqual(OTHER);
+    expect(rowClaim(user(text, { origin: { kind: 'human' } }), P)).toEqual(OTHER);
+  });
+
+  it('names nothing by a queued peer message or a queued notification, as on master', () => {
+    const peer = queuedPeerMessage(`Open ${LINK}`);
+    const notice = queuedNotification(`Wrote ${LINK}`);
+    expect([classes(peer), classes(notice)]).toEqual([['peer'], ['task']]);
+    for (const row of [peer, notice]) expect(rowClaim(row, P), JSON.stringify(row).slice(0, 200)).toEqual(NOTHING);
   });
 });
 

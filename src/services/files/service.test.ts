@@ -15,6 +15,8 @@ import { FILES_LIST_MAX_ENTRIES, FILES_MOVED, FILES_READ_MAX_LENGTH, FILES_WRITE
 import type { LibraryEntry } from '@shared/ipc/schema/library';
 import { summary } from '../../../test/support/index-fixture';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
+import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
+import { askSteerText } from '@shared/maws/ask';
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
@@ -1676,6 +1678,30 @@ describe('files saves outside the folders', () => {
     });
   });
 
+  // The panel's finding 2: a prompt queued in a running turn counts for a save only when the person wrote it
+  describe('which queued prompts count for a save', () => {
+    const answerNaming = (path: string) => askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: link(path) }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [link(path)] }]);
+
+    it('reads a path only MAWS’s queued answer names, read-only, never saves it by that, and saves it once the person’s queued message links it', async () => {
+      await transcriptOf(A, [queuedPrompt(answerNaming(out('result.txt')))]);
+      const files = outsideService();
+      expect(await shown(files, A, out('result.txt'))).toMatchObject({ named: true, outside: { real: out('result.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('result.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('result.txt'), 'utf8')).toBe('result.txt as it was\n');
+      await transcriptOf(A, [queuedPrompt(answerNaming(out('result.txt'))), queuedPrompt(`Please edit ${link(out('result.txt'))}`)]);
+      expect(await saveShown(files, A, out('result.txt'), 'the person’s edit\n')).toEqual({ status: 'ok', hash: sha('the person’s edit\n') });
+    });
+
+    it('admits no save by a queued peer message or a queued notification', async () => {
+      await transcriptOf(A, [queuedPeerMessage(`Please edit ${link(out('peer.txt'))}`), queuedNotification(`Wrote ${link(out('notice.txt'))}`)]);
+      const files = outsideService();
+      for (const name of ['peer.txt', 'notice.txt']) {
+        await expect(files.writeOutside({ appSessionId: A, path: out(name), content: 'pwned\n', expectedHash: sha(`${name} as it was\n`), real: out(name) }), name).rejects.toThrow(new Error(OUT));
+        expect(readFileSync(out(name), 'utf8'), name).toBe(`${name} as it was\n`);
+      }
+    });
+  });
+
   // Write rule, line 5; decision 8; A8: no write reaches MAWS's own folders, whatever admits the file
   describe('MAWS’s own folders', () => {
     const ownFiles = () => [join(profile, 'settings.json'), at('Apps', 'MAWS.app', 'Contents', 'Resources', 'app.txt'), at('Dev', 'MAWS Dev.app', 'Contents', 'Resources', 'dev.txt')];
@@ -1764,6 +1790,24 @@ describe('files saves outside the folders', () => {
       expect(await files.grant(A, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
       for (const path of [grantsFile, join(profile, 'settings.json'), at('Dev', 'MAWS Dev.app', 'Contents', 'Resources', 'dev.txt')]) await refusesBoth(files, H, path);
       holdsOnlyTheGrantMade();
+    });
+
+    // The panel's finding 1: a bundle whose suffix is written in another case (the default Mac volume ignores case)
+    it('refuses both writes into a bundle named MAWS.APP or Maws.App under a session’s root, the daemon’s and a told one', async () => {
+      // two parents: on a volume that ignores case the two bundles' names are one name
+      const exec = at('Upper', 'MAWS.APP', 'Contents', 'MacOS', 'MAWS');
+      write(exec, 'the daemon’s executable\n');
+      write(at('Mixed', 'Maws.App', 'Contents', 'MacOS', 'Maws'), 'an attached app’s executable\n');
+      records.set(H, record(base));
+      const files = outsideService({ own: ownFolders(profile, exec, () => [at('Mixed', 'Maws.App')]) });
+      for (const path of [exec, at('Mixed', 'Maws.App', 'Contents', 'MacOS', 'Maws')]) {
+        const before = original(path);
+        const read = await files.read({ appSessionId: H, path, hash: true });
+        expect(read, path).toMatchObject({ own: true });
+        await expect(files.write({ appSessionId: H, path, content: 'pwned\n', expectedHash: read.hash! }), path).rejects.toThrow(new Error(`not writable: ${path}`));
+        await expect(files.writeOutside({ appSessionId: H, path, content: 'pwned\n', expectedHash: read.hash!, real: path }), path).rejects.toThrow(new Error(`not writable: ${path}`));
+        expect(original(path), path).toBe(before);
+      }
     });
 
     it('protects an attached app’s bundle once the app tells it, and not before (S13)', async () => {

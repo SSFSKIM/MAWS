@@ -3,6 +3,8 @@
 // never writes (one of MAWS's own folders). Main tells the daemon its own (`machine.client`'s `bundle`); the daemon reads
 // its own. Pure: a path read as written, no disk.
 
+export const isBundleName = (name: string): boolean => name.length > '.app'.length && name.endsWith('.app'); // red stub
+
 // The outermost ancestor of `execPath` whose name ends in `.app`; null when none does (a development run's Node).
 export function bundleOf(execPath: string): string | null {
   if (!execPath.startsWith('/')) return null;
