@@ -560,7 +560,7 @@ describe('ways in', () => {
     await act(async () => release());
     listAnswer = null;
     installed = [buoyLog, installedLedger];
-    act(() => openCustomize('plugins')); // the composer's "Manage plugins…"
+    act(() => openCustomize('plugins', A)); // the composer's "Manage plugins…", for its project
     await pluginRow('quay-ledger@harbour-market');
     await act(async () => {});
     expect(document.querySelector('[data-plugin-detail]')).toBeNull();
@@ -581,7 +581,10 @@ describe('the keyboard when the detailed plugin leaves the list', () => {
       await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
       await pluginRow('buoy-log@harbour-market');
       const page = document.querySelector<HTMLElement>('[data-customize-page]')!;
-      expect(page.contains(document.activeElement), `the keyboard is on ${document.activeElement?.tagName}`).toBe(true);
+      const active = document.activeElement as HTMLElement;
+      expect(page.contains(active), `the keyboard is on ${active.tagName}`).toBe(true);
+      // jsdom focuses any element; a browser focuses only a focusable one, and leaves the keyboard on the body otherwise
+      expect(active.matches('a[href], button, input, select, textarea, [tabindex]'), `${active.tagName} can take the keyboard in a browser`).toBe(true);
       fireEvent.keyDown(document.activeElement!, { key: '/' });
       expect(document.activeElement).toBe(within(tools()!).getByRole('searchbox', { name: search }));
     });
