@@ -288,7 +288,8 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
   const after = await metrics(page);
   console.log(`mirrored anchoring: ${JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches })}`);
   test.info().annotations.push({ type: 'mirrored anchoring', description: JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches }) });
-  expect(after.batches - before.batches, 'the stream ran throughout the window').toBeGreaterThan(0);
+  expect(after.batches - before.batches, 'the stream ran during the window').toBeGreaterThan(0);
+  await expect.poll(async () => (await metrics(page)).batches, { message: 'the stream still runs at the window’s end' }).toBeGreaterThan(after.batches);
   expect(streamWindow.domRows, 'DOM rows').toBeLessThanOrEqual(40);
   expect(harness.consoleErrors()).toEqual([]);
 });
@@ -352,6 +353,19 @@ test('the to-human view folds by stretch, opens, folds again, and a jump opens t
   const text = list.locator(rowSelector(target!)).locator('[data-kind="assistant_text"]').first();
   await expect(text).toBeFocused();
   await expect(text.locator('.owner-message-ink')).toHaveCount(0); // commentary, drawn as the plain transcript draws it
+  // Its record is the one open: its line follows the target with no closed line between, and the view is still the report.
+  await expect(openLines).toHaveCount(1);
+  await expect(openLines.getByRole('button')).toHaveText('‹ fold to report');
+  await expect(openLines.getByRole('button')).toHaveAttribute('aria-expanded', 'true');
+  const order = await list.evaluate((scroller, id) => {
+    const row = scroller.querySelector(`[data-row-id="${CSS.escape(id)}"]`);
+    const open = scroller.querySelector('[data-row-id^="record-fold:open:"]');
+    const after = (el: Element | null) => !!row && !!el && (row.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    const between = Array.from(scroller.querySelectorAll('[data-row-id^="record-fold:closed:"]')).filter((line) => after(line) && open && (line.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+    return { follows: after(open), closedBetween: between.length };
+  }, target!);
+  expect(order, 'the target’s record is the open one').toEqual({ follows: true, closedBetween: 0 });
+  await expect(page.locator('[data-view-switch]').getByRole('button')).toHaveText('full transcript ›');
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -1719,6 +1733,9 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(viewSwitch).toHaveText('to-human view · full transcript ›');
     const frame = pane.locator('[data-composer-frame]');
     expect(await viewSwitch.evaluate((el, f) => !!f && (el.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, await frame.elementHandle())).toBe(true); // above the frame
+    const switchBox = (await viewSwitch.boundingBox())!;
+    const frameBox = (await frame.boundingBox())!;
+    expect(switchBox.y + switchBox.height, 'the switch’s bottom at or above the frame’s top (a pixel for rounding)').toBeLessThanOrEqual(frameBox.y + 1);
 
     // A closed stretch's head is its messages alone, each under its label: the outer mark's words, the insight, the
     // must-read and the question, each a message as the mod reads them; its own words are the record's.
