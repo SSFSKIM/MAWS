@@ -1,9 +1,11 @@
 // The request card's public surface (X4; C7 execution document, Repository map): the component every placement
 // renders, the pure rules it applies, the transcript renderers, and `connectRequestCard`, which App.tsx's C7 block
-// calls once to register the card in C5's `requestCard` slot and C6's request renderer.
+// calls once to register the card in C5's `requestCard` slot and C6's request renderer. UX wave U1b: it also starts the
+// follower of a terminal session's settlements, which writes a question's receipt (receipts.ts).
 import { registerSlot } from '../app/slots';
 import { registerRequestRenderer } from '../transcript';
 import { renderSessionRequest } from './inline';
+import { followSettlements } from './receipts';
 import { RequestCard } from './RequestCard';
 
 export { RequestCard, type Placement, type RequestCardProps } from './RequestCard';
@@ -13,8 +15,13 @@ export { toAnswer, type VariantState } from './answers';
 export { renderInlineRequest, renderSessionRequest, type RequestRenderer } from './inline';
 
 // C5's slot (docked, card, hover) and C6's transcript slot (inline). The slot registration has no disposer in C5's
-// registry; the returned function removes the transcript renderer.
+// registry; the returned function removes the transcript renderer and stops the follower.
 export function connectRequestCard(): () => void {
   registerSlot('requestCard', RequestCard);
-  return registerRequestRenderer(renderSessionRequest);
+  const offRenderer = registerRequestRenderer(renderSessionRequest);
+  const offSettlements = followSettlements();
+  return () => {
+    offRenderer();
+    offSettlements();
+  };
 }

@@ -112,6 +112,10 @@ export interface TranscriptUi {
   // `jumpToMessage`), each replacing the last; absent before the first. Where a mod draws a fold MAWS cannot open, the
   // row or cell it names asks no mod's site and MAWS draws it; U2 reads it for its own asks and may clear it by its rule.
   revealed?: RowId | CellId;
+  // UX wave U1b (the U1b document, Interfaces §B; decision 2): the calls whose row holds a waiting form, as the session's
+  // list says them (`setWaitingForms`); absent: none. A `question`, `ask` or `plan` row carries `waiting` exactly while its
+  // call is here, so every fold decides from the row alone.
+  waitingForms?: ReadonlySet<ToolUseId>;
 }
 
 // A receipt's undo state, driven by the view through the RewindInterface: the dry run's answer (asked once per
@@ -187,8 +191,10 @@ export interface TranscriptState {
   // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
   // line is drawn) and the turn holding it, or null when it is kept loose (no turn was open for it), so a later one under
   // the same uuid takes that one out (one arrival per uuid). `endArrivals` (the whole-branch review's finding 3, its
-  // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived)
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>> };
+  // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived). `answers` (UX wave U1b,
+  // Interfaces §B): the delivered answer of each asynchronous question the sminos ask asked, by its call, the latest
+  // delivery standing, whatever turn it reached the agent in and whether or not the call is loaded yet
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>>; answers: Map<ToolUseId, { summary: string; dismissed: boolean }> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -213,7 +219,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map(), answers: new Map() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -1011,6 +1017,7 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const turn = batch.current();
   if (turn) batch.push(turn, event);
   else batch.loose(event);
+  joinAnswers(batch, event); // UX wave U1b
   if (event.messageUuid === null) return;
   batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
   for (const taskId of endedTasks(event)) {
@@ -1018,6 +1025,20 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
     batch.state.index.endArrivals.set(taskId, uuids.add(event.messageUuid));
   }
   batch.endsChanged(event);
+}
+
+// UX wave U1b (Interfaces §B, "The answer's join"): each answer the arrival delivers for a question the sminos ask asked
+// without waiting is kept under the call it names, a later delivery replacing an earlier one, and the turn that holds the
+// call derives again, which is rarely the turn the delivery landed in. MAWS's own envelope is not read here: its ask is
+// filled from `maws.ask.answered`. A call not loaded yet finds the entry when its page comes.
+function joinAnswers(batch: Batch, event: Event<'user.message'>): void {
+  for (const entry of carriedOf(event.arrival)) {
+    if (entry.class !== 'answer' || entry.tool !== 'sminos') continue;
+    const call = entry.call as ToolUseId;
+    batch.state.index.answers.set(call, { summary: entry.summary, dismissed: entry.dismissed });
+    const owner = batch.state.index.toolUses.get(call);
+    if (owner !== undefined && batch.state.turns.has(owner)) batch.touch(owner).version += 1;
+  }
 }
 
 // The tasks whose end an arrival tells: its task entries that name a task and state an outcome. A monitor's event,

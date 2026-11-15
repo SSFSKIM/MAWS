@@ -51,6 +51,7 @@ import { AskBody } from './variants/Ask'; // E1 M4b
 import { CardButton, Controls, Muted } from './controls';
 import { HoverPreview } from './preview/HoverPreview';
 import { proposedChange, proposedFilePath } from './preview/proposed';
+import { receiptOfAnswer } from './receipts'; // UX wave U1b
 import { useProposedFile } from './preview/use-proposed-file';
 import { requesterName } from './requester';
 import { askedLine, mcpParts, toolVerb } from './tools';
@@ -102,8 +103,9 @@ type Phase = 'pending' | 'answering' | 'sent' | 'not_pending' | 'closed';
 type Outcome = 'delivered' | 'not_pending' | 'write_failed';
 
 // The one delivery path: the session's controls port (lane B: `session.answer`), its outcome, and a Retry that sends
-// the same answer again.
-function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswered']) {
+// the same answer again. UX wave U1b (Interfaces §G): a delivered answer to a question is its call's receipt, which the
+// question's row reads until the transcript's own row carries the answer.
+function useDelivery(item: AttentionItem, request: SessionEvent | null, onAnswered: RequestCardProps['onAnswered']) {
   const [phase, setPhase] = useState<Phase>('pending');
   const [failed, setFailed] = useState<{ retry: () => void; detail: string | null } | null>(null);
   const inFlight = useRef(false);
@@ -122,6 +124,9 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
         const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
         onAnswered?.(outcome);
         if (outcome === 'delivered') {
+          const call = item.request.toolUseId;
+          const receipt = receiptOfAnswer(request, answer);
+          if (call !== null && receipt !== null) useAttention.getState().recordReceipt(item.appSessionId, call, receipt);
           setPhase('sent');
           delivered?.();
         } else if (outcome === 'not_pending') {
@@ -133,7 +138,7 @@ function useDelivery(item: AttentionItem, onAnswered: RequestCardProps['onAnswer
       };
       void send();
     },
-    [item, onAnswered],
+    [item, request, onAnswered],
   );
 
   useEffect(() => {
@@ -245,7 +250,7 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const project = useSessions((s) => (record?.projectId ? (s.projects.get(record.projectId)?.name ?? null) : null));
   const rows = useTranscriptStore((s) => s.entries[item.appSessionId]?.rows);
   const now = useNow();
-  const { phase, failed, submit } = useDelivery(item, onAnswered);
+  const { phase, failed, submit } = useDelivery(item, request, onAnswered);
   const pointer = usePointerOnly();
   // P5 O9 M6: what the session's port carries, and how the race with its terminal stands
   const controls = useSessionControls(item.appSessionId);

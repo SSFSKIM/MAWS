@@ -5,7 +5,7 @@
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf } from '../transcript/model/derive';
 import { foldedInReport, reportViewOf } from '../owner/report/project'; // P2-C (2026-10-09)
@@ -107,6 +107,10 @@ export interface TranscriptStore {
   setOwnerLane(key: string, on: boolean): void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleReportRecord(key: string, turn: TurnId): void;
+  // UX wave U1b (the U1b document, Interfaces §B): the calls whose row holds a waiting form, as the session's list says
+  // them. An equal set changes nothing; else the turns holding a call that entered or left it derive again, every other
+  // turn keeping its rows. A key whose state starts over is told again by its transcript.
+  setWaitingForms(key: string, calls: ReadonlySet<ToolUseId>): void;
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
   // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
   jumpToMessage(key: string, anchor: MessageAnchor): boolean;
@@ -122,6 +126,7 @@ export interface TranscriptStore {
 }
 
 const NO_ROWS: Row[] = [];
+const NO_CALLS: ReadonlySet<ToolUseId> = new Set(); // UX wave U1b
 const NO_ACTIVITY: TurnActivity[] = [];
 
 // The buffer of a live text or thinking row: its block identity is the row id after the kind prefix (keys.ts).
@@ -165,6 +170,7 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
     global: turns === 'all' ? ui.global + 1 : ui.global, stamps, version: ui.version + 1,
     ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), reportOpenTurns: new Set(ui.reportOpenTurns), // P2-C
     ...(ui.revealed !== undefined && { revealed: ui.revealed }), // UX wave U3
+    ...(ui.waitingForms !== undefined && { waitingForms: ui.waitingForms }), // UX wave U1b
   };
 }
 
@@ -540,6 +546,16 @@ export function createTranscriptStore() {
           // The record is the turn's disclosure in Report; opening it reveals the work directly.
           expandTurn(ui, turn);
         });
+      },
+      // UX wave U1b
+      setWaitingForms(key, calls) {
+        const current = entry(key);
+        if (!current) return;
+        const held = current.state.ui.waitingForms ?? NO_CALLS;
+        const changed = [...calls].filter((call) => !held.has(call)).concat([...held].filter((call) => !calls.has(call)));
+        if (changed.length === 0) return;
+        const turns = new Set(changed.flatMap((call) => current.state.index.toolUses.get(call) ?? []));
+        changeUi(key, () => turns, (ui) => void (ui.waitingForms = new Set(calls)));
       },
       attached: (key) => attachments.has(key),
 

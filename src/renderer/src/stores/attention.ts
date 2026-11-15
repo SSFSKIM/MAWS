@@ -15,6 +15,7 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { waitingAgents, waitingByCall, waits } from '@shared/attention/kinds';
+import { waitingForms, waitingRequests } from '@shared/attention/waiting'; // UX wave U1b
 import { needsYou, type NeedsYouRow } from '../attention/derive';
 import type { QuestionDraft } from '../request-card/question-steps';
 import type { ListedSession } from './sessions';
@@ -36,6 +37,11 @@ export interface AttentionState {
   drafts: Map<AttentionId, QuestionDraft>;
   // P5 O7 M6: the sessions of every machine whose attention main holds greyed.
   greyed: ReadonlySet<AppSessionId>;
+  // UX wave U1b (Interfaces §G, decisions 8 and 21): what is known of a question's answer before the transcript's own row
+  // carries it, by the addressed session and the call: the answers this window sent, a dismissal, or a settlement's
+  // words. Memory, per window; a session's go when its list is dropped from the store.
+  receipts: ReadonlyMap<AppSessionId, ReadonlyMap<ToolUseId, Receipt>>;
+  recordReceipt(appSessionId: AppSessionId, call: ToolUseId, receipt: Receipt): void; // a `settled` receipt never replaces an `answers` or a `dismissed` one
   // P5 O6 M4: per machine. A machine's snapshot replaces its sessions' lists only, and buffers only its changes; begun
   // again (a new generation of its link) it drops what it had buffered.
   beginSnapshot(machine: MachineRef): void;
@@ -54,6 +60,9 @@ export interface AttentionState {
   retryRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // an unreadable item's read, asked again (the card's Retry)
   setDraft(id: AttentionId, draft: QuestionDraft): void;
 }
+
+/** UX wave U1b (Interfaces §G): what is known of a question's answer before the transcript's own row carries it. */
+export type Receipt = { answers: Record<string, string> } | { dismissed: true } | { settled: string };
 
 export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
 
@@ -79,6 +88,19 @@ function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: 
   const kept = new Map([...drafts].filter(([id]) => open.has(id)));
   return kept.size === drafts.size ? {} : { drafts: kept };
 }
+
+// UX wave U1b (Interfaces §G): the receipts of a session whose list this write dropped (a snapshot that no longer lists
+// it) go, and only that session's; a list emptied (its last request answered) keeps them, for that is when they speak.
+function forgetDroppedReceipts(receipts: AttentionState['receipts'], before: Map<AppSessionId, AttentionItem[]>, after: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (receipts.size === 0) return {};
+  const dropped = [...receipts.keys()].filter((id) => before.has(id) && !after.has(id));
+  if (dropped.length === 0) return {};
+  const kept = new Map(receipts);
+  for (const id of dropped) kept.delete(id);
+  return { receipts: kept };
+}
+
+const sameReceipt = (a: Receipt | undefined, b: Receipt): boolean => a !== undefined && JSON.stringify(a) === JSON.stringify(b);
 
 // P5 O6 M4: a machine's part of the store, the sessions whose lists the calls naming it wrote (never parsed from ids), and
 // its changes buffered while its snapshot is outstanding.
@@ -136,7 +158,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
       }
       p.buffer = null;
-      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetDroppedReceipts(get().receipts, get().bySession, bySession) });
     };
     return {
       loaded: false,
@@ -148,6 +170,7 @@ export function createAttentionStore() {
       unreadable: new Map(),
       drafts: new Map(),
       greyed: new Set(),
+      receipts: new Map(),
       beginSnapshot(machine) {
         const p = partition(machine);
         if (p.fed) return; // fix wave 1: the feed's changes apply as they come
@@ -188,7 +211,7 @@ export function createAttentionStore() {
         p.buffer = null;
         p.fed = true;
         p.greyed = grey;
-        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession), ...forgetDroppedReceipts(get().receipts, get().bySession, bySession) });
       },
       applyNotified({ delivery }) {
         if (delivery !== 'in-app') set({ notificationDelivery: delivery });
@@ -233,6 +256,11 @@ export function createAttentionStore() {
       setDraft(id, draft) {
         set({ drafts: new Map(get().drafts).set(id, draft) });
       },
+      recordReceipt(appSessionId, call, receipt) {
+        const held = get().receipts.get(appSessionId)?.get(call);
+        if (sameReceipt(held, receipt) || ('settled' in receipt && held !== undefined && !('settled' in held))) return;
+        set({ receipts: new Map(get().receipts).set(appSessionId, new Map(get().receipts.get(appSessionId)).set(call, receipt)) });
+      },
     };
   });
 }
@@ -262,6 +290,26 @@ export function selectWaitingByCall(state: Pick<AttentionState, 'bySession'>, ap
   let calls = callsCache.get(items);
   if (!calls) callsCache.set(items, (calls = waitingByCall(items)));
   return calls;
+}
+
+// UX wave U1b (Interfaces §A): the session's waiting requests oldest first, and the calls its transcript marks as
+// waiting rows, by the shared rule, memoised per list as the readings above.
+const requestsCache = new WeakMap<AttentionItem[], AttentionItem[]>();
+export function selectWaitingRequests(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): AttentionItem[] {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return EMPTY;
+  let requests = requestsCache.get(items);
+  if (!requests) requestsCache.set(items, (requests = waitingRequests(items)));
+  return requests;
+}
+const NO_FORMS: ReadonlySet<ToolUseId> = new Set();
+const formsCache = new WeakMap<AttentionItem[], ReadonlySet<ToolUseId>>();
+export function selectWaitingForms(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): ReadonlySet<ToolUseId> {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return NO_FORMS;
+  let forms = formsCache.get(items);
+  if (!forms) formsCache.set(items, (forms = waitingForms(items)));
+  return forms;
 }
 
 const NO_AGENTS: ReadonlySet<string> = new Set();

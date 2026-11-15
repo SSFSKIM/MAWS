@@ -413,9 +413,14 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 /* W4: the answered question as one compact widget, a line per question (Claude Desktop's 480 px receipt) */
 .transcript-question { width: fit-content; min-width: 200px; max-width: min(480px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
 .transcript-question-lines { display: grid; gap: 2px; margin: 0; padding: 6px 12px; list-style: none; }
-.transcript-question-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 1.5; }
-.transcript-question-label { flex: none; max-width: 45%; overflow: hidden; color: var(--fg); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
-.transcript-question-arrow { flex: none; color: var(--fg-faint); }
+/* UX wave U1b (the architect's ruling A2): a header is cut only when header and answer together exceed the widget's
+   widest allowed width. The widget is as wide as its lines up to that width; past it the header and the answer share
+   the line half and half, and whichever needs less keeps its whole width, the other taking the rest (the answer
+   wraps, the header ends in an ellipsis). A percentage cap on the header read against the widget's own fitted width,
+   and so cut a short header beside a short answer such as Dismissed. */
+.transcript-question-line { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(0, max-content); align-items: baseline; column-gap: 6px; min-width: 0; line-height: 1.5; }
+.transcript-question-label { min-width: 0; overflow: hidden; color: var(--fg); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-question-arrow { color: var(--fg-faint); }
 .transcript-question-answer { min-width: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
 .transcript-question-answer[data-answer="none"] { color: var(--fg-faint); }
 

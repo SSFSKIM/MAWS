@@ -134,14 +134,16 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
 // E2: what the agent asked, delivered and registered stays in view, as an answered question does), and a message tool's
 // message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
-// presenter draws and so keeps with the lane off), and a task's end that reports an outcome, a scheduled fire and an
-// answer's notice (UX wave U3: one short fact each, which a failed task would otherwise show nowhere, and the answer
-// until U1b puts it on its question's row; every message between agents and sessions folds, O-12). The divider folds everything else, so a turn of a local command
+// presenter draws and so keeps with the lane off), a task's end that reports an outcome and a scheduled fire (UX wave
+// U3: one short fact each, which a failed task would otherwise show nowhere; every message between agents and sessions
+// folds, O-12; UX wave U1b: an answer's notice folds too, its question's row saying the answer), and a plan whose request
+// waits (UX wave U1b: its form is in the row). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
-  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome, a scheduled fire and, until U1b, an answer stay
+  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome and a scheduled fire stay
+  || (row.kind === 'plan' && row.waiting === true) // UX wave U1b (Interfaces §B, rule 4): a form folded away could not be answered
   || row.kind === 'owner_record' // P2-C (2026-10-09): placed by the report projection, never a work row
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
@@ -891,7 +893,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       // E1 start
       case 'ask':
-        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
+        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers, ui?.waitingForms) });
         break;
       case 'delivery':
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id, context) });
@@ -1241,14 +1243,19 @@ function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: Transcr
   const { use } = pending;
   const input = record(use.input);
   if (pending.requestId && state?.pending.has(pending.requestId)) return null; // its slot row was emitted at the request's position
+  const waiting = state?.ui.waitingForms?.has(use.toolUseId) === true ? { waiting: true as const } : {}; // UX wave U1b (§B, rule 2)
   if (pending.kind === 'question') {
     const questions = Array.isArray(input.questions) ? input.questions.map(record).map((q) => ({
       question: str(q.question), header: str(q.header), multiSelect: q.multiSelect === true,
       options: Array.isArray(q.options) ? q.options.map(record).map((o) => ({ label: str(o.label), description: typeof o.description === 'string' ? o.description : null, preview: typeof o.preview === 'string' ? o.preview : null })) : [],
     })) : [];
-    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers: pending.answers, error: pending.error };
+    // UX wave U1b (§B, the answer's join): an asynchronous question's own result answers nothing; its delivery, joined
+    // by the call wherever it landed, reads as the blocking call's result would (a refusal: a decline, an empty map)
+    const delivered = pending.answers === null ? state?.index.answers.get(use.toolUseId) : undefined;
+    const answers = delivered === undefined || delivered.dismissed ? pending.answers : askModAnswers(questions, { content: delivered.summary, isError: false });
+    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers, error: pending.error, ...waiting, ...(delivered?.dismissed === true && { dismissed: true as const }) };
   }
-  return { id: rowId.plan(use.toolUseId), turnId, at: use.at, kind: 'plan', toolUseId: use.toolUseId, plan: str(input.plan), outcome: pending.outcome, feedback: pending.feedback };
+  return { id: rowId.plan(use.toolUseId), turnId, at: use.at, kind: 'plan', toolUseId: use.toolUseId, plan: str(input.plan), outcome: pending.outcome, feedback: pending.feedback, ...waiting };
 }
 
 // E1 start: the capsule and the delivery row from their records.
@@ -1284,7 +1291,7 @@ function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>
 // with no result and no cancellation (a session that ended mid-ask, read from disk, where no meta row says so) can no
 // longer be answered, so it reads cancelled rather than waiting forever; no event says why, so it carries no reason
 // (`cancelReason` is the event's, for a cancelled row only).
-function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined): RowOf<'ask'> {
+function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined, waitingForms: ReadonlySet<ToolUseId> | undefined): RowOf<'ask'> {
   const { use, input, opened } = ask;
   const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
   const blocking = opened?.blocking ?? input?.blocking ?? true;
@@ -1296,6 +1303,7 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
     questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
     cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
+    ...(waitingForms?.has(use.toolUseId) === true && { waiting: true as const }), // UX wave U1b (§B, rule 2)
   };
 }
 
@@ -1415,11 +1423,12 @@ export function artifactTitlesIn(state: TranscriptState | null, turn: TurnState)
 }
 
 
-// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome, a
-// scheduled fire and, until U1b fills the question's row with it, an answer stay in view when their turn folds (the
-// architect's ruling of 2026-11-13; U1b removes the answer's term); a notice with no outcome and the wake's fold with it.
+// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
+// scheduled fire stay in view when their turn folds; a notice with no outcome and the wake's fold with it. UX wave U1b
+// (decision 9, U3a's hand-over): an answer's notice folds with the turn it reached the agent in, now that its question's
+// row carries the answer; it is still derived there, the head row a turn's `opener` is read from.
 function isPersistentNotice(row: Row): boolean {
-  return row.kind === 'notice' && (row.class === 'schedule' || row.class === 'answer' || (row.class === 'task' && row.outcome !== null));
+  return row.kind === 'notice' && (row.class === 'schedule' || (row.class === 'task' && row.outcome !== null));
 }
 
 // Whether a peer user.message is drawn by its companion event (E7): an envelope (peer.message, subagent.message), or, UX
