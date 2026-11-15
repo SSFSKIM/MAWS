@@ -439,7 +439,7 @@ describe('the stack’s refused controls', () => {
     window.maws = { localMachine: TEST_MACHINE } as never;
     resetRemoteSurfaces();
     resetRemoteLaneBStore();
-    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: new Date().toISOString(), generation: 0, carrier: null }]);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'down', since: '2026-11-15T09:00:00.000Z', generation: 0 }]);
     useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-r'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
     const { client } = bridge();
     render(<QueueList appSessionId={R} busy queue={queue([], { steers: [steer(U1, 'remote steer')] })} client={client} />);
