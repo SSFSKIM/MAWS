@@ -1503,8 +1503,13 @@ function noticeOf(event: Event<'user.message'>, arrival: Exclude<CarriedArrival,
       const first = arrival.prompt === null ? null : firstLineOf(arrival.prompt);
       return { ...base, text: NOTICE.schedule(first), detail: arrival.prompt !== null && first !== null && previewHidesBody(arrival.prompt, first) ? arrival.prompt : null };
     }
-    case 'answer':
-      return { ...base, text: NOTICE.answered(arrival.dismissed ? NOTICE.dismissed : answeredWords(arrival.summary, questionsOf(arrival.call))) };
+    case 'answer': {
+      // UX wave U2b (R13): the notice names the call that asked, when the session holds it (the sminos bridge names the
+      // question's tool-use id; MAWS's ask its askId, which is its call's tool-use id), so the mirror folds it where that
+      // call's row carries the receipt
+      const questions = questionsOf(arrival.call);
+      return { ...base, toolUseId: questions === null ? null : (arrival.call as ToolUseId), text: NOTICE.answered(arrival.dismissed ? NOTICE.dismissed : answeredWords(arrival.summary, questions)) };
+    }
     case 'wake':
       return { ...base, text: NOTICE.wake };
   }
