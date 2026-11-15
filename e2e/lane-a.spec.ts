@@ -918,6 +918,18 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: appId }))?.turn, { timeout: 10_000 }).toEqual({ running: state === 'running', unknown: false });
     if (state !== 'running') await expect(main(page).locator('.transcript-divider .transcript-disclosure').last(), `the newest turn's line reads ${state === 'stopped' ? 'stopped' : 'not stopped'}`).toHaveText(state === 'stopped' ? /^You stopped after/ : /^Worked for/);
   }
+  // The newest line the session's follower has read, as the window hears it: each `fs.followState` names its chain's
+  // leaf, reported whenever the chain grows. A positive sign of a read where the lines read draw nothing.
+  async function followerLeaves(page: Page, appId: string): Promise<() => Promise<(string | null)[]>> {
+    await page.evaluate((id) => {
+      const w = window as unknown as { __u1cLeaves: (string | null)[] };
+      w.__u1cLeaves = [];
+      window.maws.on('fs.followState', (e) => {
+        if (e.appSessionId === id && e.agentId === null) w.__u1cLeaves.push(e.leafUuid);
+      });
+    }, appId);
+    return () => page.evaluate(() => (window as unknown as { __u1cLeaves: (string | null)[] }).__u1cLeaves);
+  }
   // At its read boundary: the row reads approved and offers nothing, the grant is the approval's line.
   async function approvedAt(page: Page, row: Locator): Promise<void> {
     await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER} · approved`, { timeout: 15_000 });
@@ -1029,8 +1041,13 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await button.click();
     await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
     await expect(button, 'the grant is out').toBeDisabled();
+    const leaves = await followerLeaves(page, c.appId);
     await c.store.appendLines(c.transcript, recordLines(records, 56, 60)); // the appended row (56), the mirror line (57), the queue's rows (58, 59), 60
-    // before the wake nothing reads approved: no approval row comes, so the grant out ends by its clock (SETTLE_MS after the
+    // Lines 56 to 60 draw nothing after a Stop (the grant waits for the wake, the mirror is its second carrier, the rest
+    // carry nothing), so the checkpoint is the follower's: its chain has grown to the mirror line, the last line with a uuid
+    // before the wake, and 58 to 60 came in the same write.
+    await expect.poll(async () => (await leaves()).at(-1), { timeout: 10_000, message: 'the follower has read to the mirror line (57)' }).toBe(String(records[56]!.uuid));
+    // Read, and nothing reads approved: no approval row comes, so the grant out ends by its clock (SETTLE_MS after the
     // delivery's outcome) and the button is back, the row unapproved and no "You approved" line drawn
     await expect(button, 'no approval before the wake').toBeEnabled({ timeout: 15_000 });
     await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
