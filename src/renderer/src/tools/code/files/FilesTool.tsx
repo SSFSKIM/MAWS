@@ -374,9 +374,17 @@ const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui lead
 function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; children: ReactNode }) {
   const list = useRef<HTMLElement>(null);
   const [column, setColumn] = useState<{ box: Element; width: number } | null>(null);
-  const opened = (open: boolean) => {
+  // A menu that closes hands the keyboard back to where it was a task later (Radix's focus scope, in a timer). Opened
+  // again before that task runs, the menu holds the keyboard, and the late hand-back would land outside it and close it
+  // (a menu that is not modal closes when the keyboard leaves it): so while the menu is open again, nothing is handed back.
+  const open = useRef(false);
+  const opened = (now: boolean) => {
+    open.current = now;
     const box = list.current;
-    if (open && box) setColumn({ box, width: box.getBoundingClientRect().width });
+    if (now && box) setColumn({ box, width: box.getBoundingClientRect().width });
+  };
+  const handBack = (event: Event) => {
+    if (open.current) event.preventDefault();
   };
   const machine = machineFor(appSessionId);
   const elsewhere = useMachines((s) => (machine === ipc.localMachine ? null : machineName(s.machines, machine, ipc.localMachine)));
@@ -400,6 +408,7 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
           className={MENU}
           collisionBoundary={column?.box}
           collisionPadding={8}
+          onCloseAutoFocus={handBack}
           style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
         >
           {whole === null ? (

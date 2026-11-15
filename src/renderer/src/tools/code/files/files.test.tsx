@@ -797,6 +797,15 @@ describe('the Files list’s menu (U6e)', () => {
     await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
   });
 
+  it('closed by Escape and not opened again, the menu hands the keyboard back to the row it was on', async () => {
+    await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus());
+    fireEvent.contextMenu(item('src'));
+    fireEvent.keyDown(await screen.findByRole('menu'), { key: 'Escape' });
+    await waitFor(() => expect(document.activeElement).toBe(item('src')));
+  });
+
   // Re-review residual 2: at the tree's least width (160 px) the menu's least width yields to the column too.
   it('at a 160 px tree both the menu’s least and its most width stay under the column less 1rem', async () => {
     const tree = await openTree(A);
