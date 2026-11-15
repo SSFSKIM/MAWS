@@ -18,6 +18,7 @@ import { MainArea } from '../main/MainArea';
 import { panelHost, registerPanelTool, usePanelHost } from '../panel/host';
 import { PanelHost } from '../panel/PanelHost';
 import { PanelRegion } from '../panel/PanelRegion';
+import { groupOf, sideGroups } from '../panel/surface-model';
 import { persistLayout, useLayout } from '../stores/layout';
 import { activeTab, allTabs } from '../stores/layout-model';
 import { useNotices } from '../stores/notices';
@@ -422,6 +423,33 @@ describe('the editor’s state across a move, at the viewer’s cap', () => {
     twentyUnsaved();
     act(() => void (toMain ? moveFileToMain(sideTabOf(APP)!) : moveFileToSide(KEY(APP))));
     const moved = await editorShowing(toMain ? 'main' : 'panel', `// mine\n${ORIGINAL}`);
+    expect(existingViewState(KEY(APP))?.codeScroll).toBe(120);
+    act(() => void undo(moved));
+    expect(moved.state.doc.toString()).toBe(ORIGINAL);
+  });
+
+  // The branch review's third finding: a move between the side groups remounts the file's view as a move to the main
+  // area does, so it holds the key the same way.
+  it.each([['its menu'], ['a drag onto the column’s lower part']])('a clean file with an undo history moved to the other group by %s keeps its history and its scroll', async (way) => {
+    renderBoth();
+    const view = await openBeside(APP, { keep: true });
+    type(view, '// mine\n');
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY(APP))?.dirty).toBe(true));
+    expect(await act(() => useViewer.getState().save(KEY(APP)))).toBe('ok');
+    view.scrollDOM.scrollTop = 120;
+    twentyUnsaved();
+    const tabId = sideTabOf(APP)!;
+    if (way === 'its menu') fireEvent.click(await menuItem(panelTabElement(tabId), 'Move below'));
+    else {
+      const dt = transfer();
+      drag('dragStart', panelTabElement(tabId), dt);
+      const target = document.querySelector<HTMLElement>('[data-side-lower-drop] [data-drop-overlay]')!;
+      drag('dragEnter', target, dt);
+      expect(drag('dragOver', target, dt)).toBe(true);
+      drag('drop', target, dt);
+    }
+    expect(groupOf(sideGroups(useLayout.getState(), A), tabId)).toBe('lower');
+    const moved = await editorShowing('panel', `// mine\n${ORIGINAL}`);
     expect(existingViewState(KEY(APP))?.codeScroll).toBe(120);
     act(() => void undo(moved));
     expect(moved.state.doc.toString()).toBe(ORIGINAL);
