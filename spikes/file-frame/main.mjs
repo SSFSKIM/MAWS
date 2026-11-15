@@ -287,6 +287,15 @@ const suites = {
       const d = await waitDrawn(t.url, 15000);
       await page(win, 'spike.frames(120)');
       await sleep(1500);
+      if (name === 'control-click-link') {
+        const st = await stateOf(win, name);
+        const x = st.rect.x + Math.round(st.rect.width / 2) + 150; // right of the viewer's sidebar, on the page
+        const y = st.rect.y + 300;
+        win.webContents.sendInputEvent({ type: 'mouseMove', x, y });
+        win.webContents.sendInputEvent({ type: 'mouseDown', x, y, button: 'left', clickCount: 1 });
+        win.webContents.sendInputEvent({ type: 'mouseUp', x, y, button: 'left', clickCount: 1 });
+        await sleep(1500);
+      }
       const probes = await probeViewer(t.url);
       const pic = await picture(win, join(out, `e-${name}.png`));
       const screen = screenShot(join(out, `e-${name}-screen.png`));
@@ -333,6 +342,19 @@ const suites = {
       await sleep(700);
       const left = xWindows().filter((w) => w.mapped && !before.x.has(w.id));
       if (left.length) result('e', `${name}-left-open`, 'record', `windows still mapped after the case's window closed: ${left.map((w) => `"${w.name}" ${w.width}x${w.height}`).join(', ')}`);
+    }
+    // Positive controls for the native-window reading: an alert of the window's own page, and the window's print.
+    for (const [name, act] of [['detector-alert', (w) => void w.webContents.executeJavaScript('alert("Invented alert of the window")', true)], ['detector-print', (w) => w.webContents.print({}, () => {})]]) {
+      const win = await openWindow({ width: 600, height: 400 });
+      await sleep(500);
+      const beforeX = new Set(xWindows().filter((w) => w.mapped).map((w) => w.id));
+      act(win);
+      await sleep(2500);
+      const newX = xWindows().filter((w) => w.mapped && !beforeX.has(w.id));
+      const screen = screenShot(join(out, `e-${name}-screen.png`));
+      result('e', name, 'record', `native windows that appeared: ${newX.map((w) => `"${w.name}" ${w.width}x${w.height}`).join(', ') || 'none'}${screen ? `; picture e-${name}-screen.png` : ''}`, { newX });
+      win.destroy();
+      await sleep(700);
     }
   },
 

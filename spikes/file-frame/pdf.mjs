@@ -75,7 +75,8 @@ export function buildPdf({ pages, catalog = () => '' }) {
     }
     const contents = w.stream('', content);
     const annots = page.annots ? page.annots(w, pageRefs[i]) : [];
-    w.set(pageRefs[i], `<< /Type /Page /Parent ${pagesRef} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> ${xobjects} >> /Contents ${contents} 0 R${annots.length ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(' ')}]` : ''} >>`);
+    const extra = page.extra ? ` ${page.extra(pageRefs)}` : '';
+    w.set(pageRefs[i], `<< /Type /Page /Parent ${pagesRef} 0 R /MediaBox [0 0 612 792] /Resources << /Font << /F1 ${font} 0 R >> ${xobjects} >> /Contents ${contents} 0 R${annots.length ? ` /Annots [${annots.map((a) => `${a} 0 R`).join(' ')}]` : ''}${extra} >>`);
   });
   w.set(pagesRef, `<< /Type /Pages /Kids [${pageRefs.map((r) => `${r} 0 R`).join(' ')}] /Count ${pages.length} >>`);
   const root = w.add(`<< /Type /Catalog /Pages ${pagesRef} 0 R ${catalog(w, pageRefs)} >>`);
@@ -117,6 +118,10 @@ export function hostilePdfs() {
     'baseline': one('Baseline', () => ''),
     'control-script': one('Control: script', openAction(js('this.pageNum = 2;')), textPages(3, 'Control: script')),
     'control-action': buildPdf({ pages: textPages(3, 'Control: action'), catalog: (w, refs) => `/OpenAction [${refs[2]} 0 R /Fit]` }),
+    'control-document-script': buildPdf({ pages: textPages(3, 'Control: document script'), catalog: () => `/Names << /JavaScript << /Names [(init) ${js('this.pageNum = 2;')}] >> >>` }),
+    'control-page-open': buildPdf({ pages: textPages(3, 'Control: page open action').map((p, i) => (i === 0 ? { ...p, extra: (refs) => `/AA << /O << /S /GoTo /D [${refs[2]} 0 R /Fit] >> >>` } : p)), catalog: () => '' }),
+    // A positive control for main's record, with a click (not part of R4's test): a link over the whole page.
+    'control-click-link': buildPdf({ pages: textPages(1, 'Control: a clicked link').map((p) => ({ ...p, annots: (w) => [w.add('<< /Type /Annot /Subtype /Link /Rect [0 0 612 792] /Border [0 0 0] /A << /S /URI /URI (https://example.com/clicked) >> >>')] })), catalog: () => '' }),
     'alert': one('Alert', openAction(js('app.alert("Invented alert from the spike");'))),
     'print': one('Print', openAction(js('this.print();'))),
     'submit': buildPdf({ pages: formPages, catalog: form.catalog }),
