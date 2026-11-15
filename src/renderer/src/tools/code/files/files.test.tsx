@@ -776,6 +776,27 @@ describe('the Files list’s menu (U6e)', () => {
     await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
   });
 
+  // Panel fix wave, part 2 (M4's scene, "its row opens a second chosen file"): a menu that closes hands the keyboard back
+  // to where it was a task later (Radix's focus scope, in a timer). A menu opened again before that task runs must not take
+  // the late hand-back as the keyboard leaving it: the row stays the same element, frame after frame, and its click asks.
+  it('opened again at once after Escape, the menu stays open: its row the same element across frames, and its click asks Open File…', async () => {
+    const tree = await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    act(() => item('src').focus()); // a right-click on a row puts the keyboard on it, as the scene's third does
+    fireEvent.contextMenu(item('src'));
+    fireEvent.keyDown(await screen.findByRole('menu'), { key: 'Escape' });
+    expect(screen.queryByRole('menu')).toBeNull();
+    fireEvent.contextMenu(tree); // before the closed menu's hand-back has run
+    const row = within(await screen.findByRole('menu')).getByRole('menuitem');
+    for (let frame = 0; frame < 4; frame++) {
+      await act(() => new Promise<void>((resolve) => setTimeout(() => requestAnimationFrame(() => resolve()), 0)));
+      expect(row.isConnected, `frame ${frame}: the row is still in the page`).toBe(true);
+      expect(within(screen.getByRole('menu')).getByRole('menuitem'), `frame ${frame}: the same element`).toBe(row);
+    }
+    fireEvent.click(row);
+    await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
+  });
+
   // Re-review residual 2: at the tree's least width (160 px) the menu's least width yields to the column too.
   it('at a 160 px tree both the menu’s least and its most width stay under the column less 1rem', async () => {
     const tree = await openTree(A);
