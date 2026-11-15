@@ -25,7 +25,7 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { hostStatus, supervisorStatus } from '../../test-support/host-status';
 import { HOST_UPDATING } from './host-wire';
 import { PAUSED_COPY, QueueList, UNCERTAIN_TEXT } from './QueueList';
-import { STACK_WORDS } from './stack';
+import { newestToTake, STACK_WORDS, stackRows } from './stack';
 import { resetTakeBack, TAKE_BACK_WORDS, takeBack } from './take-back';
 
 const APP = 'app-1' as AppSessionId;
@@ -215,6 +215,24 @@ describe('a waiting grant’s row', () => {
     const [row] = rows();
     expect(row.querySelector('[data-row-text]')!.textContent).toBe(`Go ahead.\n${GRANT}`);
     expect(labels(row)).toEqual(['Send now', 'Delete', 'More']);
+  });
+
+  // Decision Log 44: the grant sentence is a grant row only when it is everything the message holds
+  it.each([
+    ['an image', { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, '[Image #1]'],
+    ['a PDF', { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBE' } }, '[PDF #1]'],
+  ] as const)('the exact sentence beside %s is an ordinary message: its own text, More with Edit, and the newest to take', async (_, block, named) => {
+    const { client } = bridge();
+    const onTakeBack = vi.fn();
+    const content = [block, { type: 'text', text: GRANT }];
+    render(<QueueList appSessionId={APP} busy queue={queue([entry('q-1', { content })])} client={client} onTakeBack={onTakeBack} />);
+    const [row] = rows();
+    expect(row.querySelector('[data-row-text]')!.textContent).toBe(`${named} ${GRANT}`);
+    expect(labels(row)).toEqual(['Send now', 'Delete', 'More']);
+    const user = userEvent.setup();
+    await user.click(within(row).getByRole('button', { name: 'More' }));
+    expect(await screen.findByRole('menuitem', { name: 'Edit' })).toBeTruthy();
+    expect(newestToTake(stackRows(queue([entry('q-1', { content })]), new Set(), { unread: [], started: () => false }))?.key).toBe('q-1');
   });
 });
 

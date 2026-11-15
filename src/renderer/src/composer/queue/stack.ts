@@ -51,7 +51,10 @@ const grantOfText = (text: string): BlockedCall | null => {
   const grants = readConsents(text);
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
-const grantOf = (content: SendContent): BlockedCall | null => grantOfText(messageText(content as string | ContentBlock[]));
+// Decision Log 44: a row is a grant's only when the sentence is everything the message holds; a message with any block
+// that is not text (an image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview
+const grantOf = (content: SendContent): BlockedCall | null =>
+  typeof content === 'string' || (content as readonly ContentBlock[]).every((block) => block.type === 'text') ? grantOfText(messageText(content as string | ContentBlock[])) : null;
 
 export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, read: Read): StackRow[] {
   const steers = new Set<string>(queue.steers.map((steer) => steer.messageUuid));
