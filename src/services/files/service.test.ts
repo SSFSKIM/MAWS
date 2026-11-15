@@ -1699,7 +1699,7 @@ describe('files saves outside the folders', () => {
 
     it('refuses it admitted by a name and by a grant, and reads it with own', async () => {
       told = [at('Dev', 'MAWS Dev.app')];
-      await transcriptOf(A, ownFiles().map((path) => said(link(path))));
+      await transcriptOf(A, ownFiles().map((path) => said(`See [the file](<${path}>).`))); // a destination with a space is written in angle brackets
       records.set(B, record(root));
       const files = outsideService();
       for (const path of ownFiles()) expect(await files.grant(B, path), path).toEqual({ status: 'granted', path });

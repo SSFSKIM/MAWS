@@ -466,7 +466,9 @@ describe('the services front', () => {
   // each attached app told in its machine.client, kept per connection, which the files service never writes
   it('keeps the bundle each connection’s machine.client told, and answers those of the connections that live', async () => {
     const { served, client } = front({ isApp: () => true });
-    const app = client([MACHINE_SPINE_CAPABILITY]);
+    const app = connection();
+    const appRuntime = served.runtimeFor({ appPid: 1, capabilities: [MACHINE_SPINE_CAPABILITY] });
+    appRuntime.serve(app.port);
     const dev = client();
     const older = client();
     expect(served.appBundles()).toEqual([]);
@@ -477,7 +479,8 @@ describe('the services front', () => {
     expect(await dev.request('machine.client', { browserSocket: null, bundle: null })).toMatchObject({ ok: true });
     expect(served.appBundles()).toEqual(['/Applications/MAWS.app']);
     app.close();
-    await vi.waitFor(() => expect(served.appBundles()).toEqual([]));
+    appRuntime.detach(); // the socket server's end of the connection
+    expect(served.appBundles()).toEqual([]);
     served.close();
   });
 });
