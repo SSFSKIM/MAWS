@@ -659,4 +659,120 @@ describe('an artifact an agent deleted (UX wave U10b)', () => {
     expect(handle.state().readOnly).toBe(false);
     expect(unsentWhileDeleted(ARTIFACT)).toBe(false);
   });
+
+  // Fix wave 1 (review items 2 and 3): the host's word on the deletion is read once per change, and a read that a later
+  // change overtook, or that failed, decides nothing for good.
+  const held = () => {
+    let answer!: (result: unknown) => void;
+    const result = new Promise((resolve) => (answer = resolve));
+    return { result, answer };
+  };
+  const gets = (h: ReturnType<typeof harness>) => h.calls.filter((c) => c.name === 'artifacts.get').length;
+  const FAILED = { ok: false, error: { code: 'host_unavailable', message: 'restarting' } } as const;
+
+  it('a `deleted` read the restore overtook parks nothing: `created` while the host’s answer is held leaves the editor writable', async () => {
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'deleted' });
+    await vi.waitFor(() => expect(gets(h)).toBe(1));
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    read.answer(deleted(true)); // what the host said before the undelete
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(handle.state()).toMatchObject({ phase: 'live', readOnly: false });
+    handle.doc.get('root').insert(0, 'After the restore. ');
+    await vi.waitFor(() => expect(handle.state().unsaved).toBe(0));
+    expect(text(h.host.doc)).toBe('After the restore. ');
+    handle.close();
+  });
+
+  it('a refused reopen whose standing read the restore overtook opens again and sends the kept edit, read-only at no point after', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', () => {
+      h.answers.delete('artifacts.open');
+      return NOT_FOUND;
+    });
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    read.answer(deleted(true));
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    expect(handle.state().refused).toBeUndefined();
+    handle.close();
+  });
+
+  it('a standing read that fails keeps the replica read-only with its edit and asks again on the backoff; the host’s answer, then Undo, sends the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', FAILED);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(handle.state().refused).toBeUndefined();
+    h.answers.set('artifacts.get', deleted(true)); // the host answers again
+    await settle(RECONNECT_BACKOFF_MS[1]);
+    expect(gets(h)).toBe(2);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    expect(unsentWhileDeleted(ARTIFACT)).toBe(true);
+    h.answers.delete('artifacts.open');
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
+  });
+
+  it('Undo while the standing is unknown opens it again and sends the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    h.answers.set('artifacts.get', FAILED);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(handle.state()).toMatchObject({ phase: 'off', unsaved: 1, readOnly: true });
+    h.answers.delete('artifacts.open');
+    h.emit('artifacts.changed', { artifactId: ARTIFACT, kind: 'document', revision: 4, change: 'created' });
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
+  });
+
+  it('a refusal whose standing read went stale (the host left ready meanwhile) ends nothing: the next ready opens it again with the edit', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    const h = harness();
+    const handle = await h.artifacts.open(ARTIFACT);
+    handle.doc.get('root').insert(0, 'Typed just before. ');
+    h.answers.set('artifacts.open', NOT_FOUND);
+    const read = held();
+    h.answers.set('artifacts.get', (() => read.result) as never);
+    h.host.dropAll();
+    await settle(RECONNECT_BACKOFF_MS[0]);
+    expect(gets(h)).toBe(1);
+    h.hostState('restarting', 8);
+    read.answer(deleted(false)); // said by the host that went
+    await settle();
+    expect(handle.state().refused).toBeUndefined();
+    h.answers.delete('artifacts.open');
+    h.hostState('ready', 9);
+    await settle();
+    await vi.waitFor(() => expect(handle.state()).toMatchObject({ phase: 'live', unsaved: 0, readOnly: false }));
+    expect(text(h.host.doc)).toBe('Typed just before. ');
+    handle.close();
+  });
 });

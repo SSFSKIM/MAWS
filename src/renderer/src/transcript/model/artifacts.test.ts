@@ -314,6 +314,30 @@ describe('the artifact row of an agent’s delete', () => {
     expect(artifactHeading(plain)).toBe('Could not delete draft-plan: invalid arguments: artifact: Required');
   });
 
+  // Fix wave 1 (review item 1): the artifact family's E11 form, a delete whose turn closed before its answer
+  it('a delete whose turn closed with no answer reads "Deleting <title> was never answered"', () => {
+    const [closed] = deleteRows((b) => b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null }));
+    expect(closed).toMatchObject({ action: 'delete', error: null, answered: false, neverAnswered: true });
+    expect(artifactHeading(closed)).toBe('Deleting draft-plan was never answered');
+  });
+
+  const REJECTED = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).";
+  it('a delete stopped or denied comes back with an error result and reads "Could not delete <title>: …", never answered or not', () => {
+    const [stopped] = deleteRows((b) => {
+      b.result('toolu_d', REJECTED, { isError: true });
+      b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    });
+    expect(stopped).toMatchObject({ action: 'delete', error: REJECTED, answered: true });
+    expect(stopped).not.toHaveProperty('neverAnswered');
+    expect(artifactHeading(stopped)).toMatch(/^Could not delete draft-plan: /);
+  });
+
+  it('a denied delete with no `why` reads the engine’s sentence as the refusal reader leaves it', () => {
+    const [denied] = deleteRows((b) => b.result('toolu_d', REJECTED, { isError: true }));
+    expect(denied).not.toHaveProperty('why');
+    expect(artifactHeading(denied)).toBe(`Could not delete draft-plan: ${REJECTED}`);
+  });
+
   it('stays in view when its turn folds, and its copied text is the heading alone', () => {
     const rows = deleteRows((b) => {
       b.result('toolu_d', json({ status: 'deleted', artifactId: DRAFT, kind: 'document', title: 'Draft plan' }));

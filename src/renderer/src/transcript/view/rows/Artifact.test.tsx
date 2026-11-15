@@ -287,6 +287,21 @@ describe('the row of an agent’s delete', () => {
     expect(container.querySelectorAll('button')).toHaveLength(0);
   });
 
+  // Fix wave 1 (review item 1): Undo is offered for an answered delete alone, so a delete never answered offers nothing,
+  // whether the Library shows the artifact gone or still there (the Library's own restore reaches a gone one)
+  it('a delete never answered reads so and offers no control, the artifact gone or still listed, and reads no library', async () => {
+    for (const shown of [false, true]) {
+      listed = shown;
+      const { container, unmount } = renderRow({ ...DELETED, answered: false, neverAnswered: true }, { storeKey: APP, actions: withUndo(async () => null) });
+      await act(async () => {});
+      expect(heading(container)).toBe('Deleting Draft plan was never answered');
+      expect(container.querySelectorAll('button')).toHaveLength(0);
+      expect(container.querySelector('[data-artifact-line]')).toBeNull();
+      unmount();
+    }
+    expect(reads).toEqual([]);
+  });
+
   it('where the host offers no Undo (the desk) it draws the heading alone and reads nothing', async () => {
     const { container } = renderRow(DELETED, { storeKey: APP });
     await act(async () => {});
