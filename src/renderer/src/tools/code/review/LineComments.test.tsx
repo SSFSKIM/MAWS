@@ -28,6 +28,7 @@ import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
 import { UNPLACED_ROWS_SHOWN } from './UnplacedComments';
 import { reviewLayout } from './measure';
+import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
 import { useReview } from './review-store';
 import { reviewTool } from './ReviewTool';
 
@@ -82,12 +83,14 @@ const STATUS: GitStatus = {
   checkedAt: '2026-09-29T10:00:00.000Z',
 };
 
+const PAST_THE_CAP = ' '.repeat(REVIEW_SCOPE_BYTES_CAP); // what makes a scope's patch too large to keep
 const BUILT = [{ type: 'text', text: 'the built message' }];
 const SENT = { messageUuid: null, disposition: 'sent', queueId: 'q0' };
 
 function commentsMain() {
   const state = {
-    patch: REPORT() + OTHER() as string | null, // null: the scope is past its cap, each file read on its own
+    patch: REPORT() + OTHER(),
+    pastCap: false, // the scope's patch past REVIEW_SCOPE_BYTES_CAP: its files folded, each read on its own
     perFile: { 'src/report.ts': REPORT(), 'src/other.ts': OTHER() } as Record<string, string>, // a file's own read
     failing: new Set<string>(), // files whose own read fails
     files: FILES(),
@@ -101,6 +104,7 @@ function commentsMain() {
         return ok(state.status);
       case 'git.diff':
         if (typeof input.path === 'string') return state.failing.has(input.path) ? fail('the disk is busy') : ok({ patch: state.perFile[input.path] ?? '', files: state.files.filter((file) => file.path === input.path) });
+        if (state.pastCap) return ok({ patch: state.patch + PAST_THE_CAP, files: state.files });
         return ok(input.scope === 'staged' && state.staged ? state.staged : { patch: state.patch, files: state.files });
       case 'git.worktree.branch':
         return ok({ repoRoot: '/repo', branch: 'main', head: STATUS.head, checkedOutAt: '/repo', base: 'main', ahead: 0, merged: true });
@@ -170,7 +174,7 @@ async function painted(check: () => boolean): Promise<void> {
 }
 const drawn = (path: string) => painted(() => (bodyOf(path)?.querySelector('table') ?? null) !== null);
 // The scope read again after git.changed (250 ms on).
-async function reread(patch: string | null, files: GitDiffFile[]) {
+async function reread(patch: string, files: GitDiffFile[]) {
   const before = main.callsOf('git.diff').length;
   main.state.patch = patch;
   main.state.files = files;
@@ -628,7 +632,8 @@ describe('comments on lines in Review', () => {
     type('Name it for what it counts.');
     leave();
     await painted(() => card() === null && chip() !== null);
-    await reread(null, FILES()); // past the cap: every file folded, read on its own
+    main.state.pastCap = true;
+    await reread(REPORT() + OTHER(), FILES()); // past the cap: every file folded, read on its own
     await painted(() => sectionOf('src/other.ts')?.hasAttribute('data-folded') ?? false);
     expect(lineLeft()).toBeNull(); // not read yet is not unplaceable
     fireEvent.click(chip()!);
@@ -649,7 +654,8 @@ describe('comments on lines in Review', () => {
     leave();
     await painted(() => card() === null && chip() !== null);
     main.state.failing.add('src/other.ts');
-    await reread(null, FILES());
+    main.state.pastCap = true;
+    await reread(REPORT() + OTHER(), FILES());
     await painted(() => sectionOf('src/other.ts')?.hasAttribute('data-folded') ?? false);
     fireEvent.click(sectionOf('src/other.ts')!.querySelector('[data-review-fold]')!);
     await painted(() => unplacedRows().length === 1);
