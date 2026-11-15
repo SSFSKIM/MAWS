@@ -544,6 +544,25 @@ describe('comments on lines in Review', () => {
     expect(changedLine('src/report.ts')).toBeNull();
   });
 
+  it('stands an open card whose file is not in the chosen scope under the toolbar, with the keyboard, and back under its line in the scope that has it', async () => {
+    main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
+    main.state.staged = { patch: REPORT(), files: [FILES()[0]] }; // Staged has report.ts alone
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    await mountReview();
+    await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    field().focus();
+    fireEvent.click(scopeChip('staged')!);
+    await painted(() => bodyOf('src/other.ts') === null && (lineLeft()?.contains(card()) ?? false));
+    expect(field().value).toBe('Name it for what it counts.');
+    expect(document.activeElement).toBe(field());
+    fireEvent.click(scopeChip('uncommitted')!);
+    await painted(() => cardRow()?.dataset.reviewCardRow === 'new:2' && card() !== null && lineLeft() === null);
+    expect(bodyOf('src/other.ts')!.contains(card())).toBe(true);
+  });
+
   it('keeps the pass when the session’s working folder changes', async () => {
     await mountReview();
     addOn('src/other.ts', 'new', 2);
