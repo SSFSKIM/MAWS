@@ -225,9 +225,10 @@ describe('the stack laid out', () => {
     await page.settle();
     const read = ownReads(main).map((input) => input.path);
     expect(read.length).toBeGreaterThan(0);
-    expect(read.length).toBeLessThan(40);
+    // A section unread is estimated by its counts (one line here): about 45 fit in the band's five viewports.
+    expect(read.length).toBeLessThan(50);
     expect(read).toContain(files[0].path);
-    expect(read).not.toContain(files[199].path);
+    expect(read).not.toContain(files[100].path);
   }, LARGE);
 
   it('keeps the file and row the person reads at the top through a change of width and a zoom', async () => {

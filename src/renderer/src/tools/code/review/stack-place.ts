@@ -10,7 +10,7 @@
 // The reading edge is the scroller's top under the sticky header: what the person reads is the row just below the
 // header that stays at the top, so a place names that row, and a hunk jumped to stands there.
 import { reviewLayout } from './measure';
-import { drawnSections, rowsOf, settled, type DrawnSection } from './stack-dom';
+import { drawnSections, rowsOf, settled } from './stack-dom';
 import { bandOf, hunkPlace, placeAt, stackLayout, topOfPlace, type RowsOf, type StackHunk, type StackLayout, type StackRow } from './stack-model';
 import type { StackPlace } from './view-state';
 
@@ -177,12 +177,22 @@ export class StackPlacer {
     const viewport = el.clientHeight;
     const laidOut = viewport > 0;
     const dom = drawnSections(el);
-    if (laidOut) for (const [path, drawn] of dom) this.measureSection(path, drawn);
+    // A drawn body weighs what the page shows, settled or not, so the model is the page; only a settled body's height
+    // is kept for the spacer that stands for it later.
+    const shown = new Map<string, number>();
+    if (laidOut)
+      for (const [path, { header, body }] of dom) {
+        if (header) this.headers.set(path, reviewLayout.height(header));
+        if (!body) continue;
+        const height = reviewLayout.height(body);
+        shown.set(path, height);
+        if (settled(body)) this.bodies.set(path, height);
+      }
     const layout = stackLayout(
       this.input.sections.map((section) => ({
         path: section.path,
         header: this.headers.get(section.path) ?? HEADER_PX,
-        body: section.lines === 0 ? 0 : (this.bodies.get(section.path) ?? null),
+        body: section.lines === 0 ? 0 : (shown.get(section.path) ?? this.bodies.get(section.path) ?? null),
         lines: section.lines,
         folded: section.folded,
       })),
@@ -203,11 +213,6 @@ export class StackPlacer {
   private drawsRows(layout: StackLayout, path: string, rows: RowsOf): boolean {
     const index = layout.paths.indexOf(path);
     return index >= 0 && (rows(index)?.length ?? 0) > 0;
-  }
-
-  private measureSection(path: string, { header, body }: DrawnSection): void {
-    if (header) this.headers.set(path, reviewLayout.height(header));
-    if (body && settled(body)) this.bodies.set(path, reviewLayout.height(body));
   }
 
   // The band around a scroll position. A scroller not laid out yet is taken as tall as the window, so the work stays

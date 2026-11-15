@@ -46,18 +46,12 @@ function linesOf(row: HTMLElement): { side: 'old' | 'new'; line: number }[] {
 // with it, so a place inside it keeps its offset: a hunk's header row to the line under it, a widget or extend row (a
 // comment under a line, M5) to the line above it. A body with no diff (a note, "Binary file") has no rows.
 export function rowsOf(body: HTMLElement): StackRow[] | null {
-  if (body.querySelector('[data-review-loading]')) return null;
+  if (!settled(body)) return null;
   const rows: StackRow[] = [];
   const blocks = body.querySelectorAll<HTMLElement>('[data-review-block]');
   for (let block = 0; block < blocks.length; block++) {
-    const tables = blocks[block].querySelectorAll('table');
-    if (tables.length === 0) {
-      if (blocks[block].querySelector('[role="status"]')) continue; // the block could not be drawn and says so
-      return null;
-    }
-    for (const table of tables) {
+    for (const table of blocks[block].querySelectorAll('table')) {
       const trs = table.querySelectorAll<HTMLElement>('tr');
-      if (trs.length === 0) return null;
       let above: StackRow[] = []; // the line rows last drawn, which a widget or extend row lengthens
       let header: { top: number } | null = null; // a hunk's header waiting for its first line
       for (const tr of trs) {
@@ -79,10 +73,12 @@ export function rowsOf(body: HTMLElement): StackRow[] | null {
   return rows.sort((a, b) => a.top - b.top);
 }
 
+const LINE_CELL = '[data-line-old-num], [data-line-new-num], [data-line-num]';
+
 // A body whose height is worth keeping (`rowsOf` would answer it): drawn whole, not a Loading line standing in for it, and
-// every block drawing its rows or saying why it cannot.
+// every block drawing its line rows (the library builds them after its first paint) or saying why it cannot.
 export function settled(body: HTMLElement): boolean {
   if (body.querySelector('[data-review-loading]')) return false;
-  for (const block of body.querySelectorAll('[data-review-block]')) if (!block.querySelector('tr') && !block.querySelector('[role="status"]')) return false;
+  for (const block of body.querySelectorAll('[data-review-block]')) if (!block.querySelector(LINE_CELL) && !block.querySelector('[role="status"]')) return false;
   return true;
 }
