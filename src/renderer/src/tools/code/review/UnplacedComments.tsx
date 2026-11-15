@@ -1,24 +1,18 @@
 // The row under Review's toolbar (UX wave U5b, M5 fix 3; §B, Decision Log 20 and 21; D11): the place of every comment
 // the surface cannot place (`placementOf`'s table). Drawn while there is one, whether or not a card is open: for each kind
-// present its sentence (`UNPLACED_WORDS`), then its comments in card 6's look, oldest first, each with Remove. A row's
+// present its sentence (`UNPLACED_ORDER`, the kinds' one order), then its comments in card 6's look, oldest first, each with Remove. A row's
 // press (a click, Enter or Space) opens that comment's card in the row's place, one at a time; read, edit, send, remove,
 // a refusal and its retry are the card's own. Past `UNPLACED_ROWS_SHOWN` rows the list scrolls inside the row, so the
 // diff stays in sight; an open card is never cut by that bound.
 import { Fragment, useLayoutEffect, useRef, useState } from 'react';
 import { CARD_WIDTH } from '../../../side/card/placement';
 import { editComment } from '../../../side/card/store';
-import { UNPLACED_WORDS } from './comment-place';
+import { UNPLACED_ORDER } from './comment-place';
 import { RemoveComment, type UnplacedComment } from './LineComments';
 import { reviewLayout } from './measure';
 
 /** How many rows the list shows before it scrolls inside the row under the toolbar. */
 export const UNPLACED_ROWS_SHOWN = 3;
-
-// The sentences in the order they stand, by the kind's attribute value (the tests' and the scenes' name for it).
-const SENTENCES = [
-  { name: 'line-left', words: UNPLACED_WORDS['line-left'], kinds: ['line-left'] },
-  { name: 'not-in-diff', words: UNPLACED_WORDS['not-in-scope'], kinds: ['not-in-scope', 'no-files'] },
-] as const;
 
 export interface UnplacedCommentsProps {
   passKey: string;
@@ -58,8 +52,8 @@ export function UnplacedComments({ passKey, hostId, unplaced, opened, onRow, cla
   return (
     <div data-review-unplaced="" className="shrink-0 border-b border-border px-3 py-2">
       <div ref={list} data-review-unplaced-list="" style={maxHeight === null ? undefined : { maxHeight }} className="flex flex-col gap-0.5 overflow-y-auto">
-        {SENTENCES.map((sentence) => {
-          const own = unplaced.filter((each) => (sentence.kinds as readonly string[]).includes(each.kind));
+        {UNPLACED_ORDER.map((sentence) => {
+          const own = unplaced.filter((each) => sentence.kinds.includes(each.kind));
           if (own.length === 0) return null;
           return (
             <Fragment key={sentence.name}>

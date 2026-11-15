@@ -131,6 +131,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
   const navigate = useStore(ui, (s) => s.navigate);
   const current = Math.min(hunk, Math.max(0, order.length - 1));
   const card = useLineCommentsContext()?.card ?? null; // M5: this surface's open card, under its line
+  const waiting = useLineCommentsContext()?.waiting ?? null; // M5 fix 5: the open card's file, its place waiting on its read
 
   // Mounted: the placer, the observers of every box that can move the page, and the saved place as the first reveal;
   // unmounted, the place in force is saved.
@@ -165,7 +166,7 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
 
   // Every commit is a layout change: the placer takes the sections as drawn, the requests made since (a file, a hunk
   // jump), and applies the place again.
-  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null }>({ reveal: null, navigate, card: null });
+  const handled = useRef<{ reveal: { path: string; n: number } | null; navigate: number; card: number | null; waiting: number | null }>({ reveal: null, navigate, card: null, waiting: null });
   useLayoutEffect(() => {
     const placed = placer.current;
     if (!placed) return;
@@ -189,6 +190,12 @@ export function Stack({ appSessionId, ui, sections, order, placeKey: key, target
     }
     // M5: a card opened on a line this stack does not draw (the chip's newest comment, in a folded file or far from the
     // scroll position) is brought into view, its file unfolded; one opened where the person points stays where it is.
+    // M5 fix 5: one whose file is folded in a scope past the cap waits on a read the fold holds back: the file unfolds, as
+    // a request's reveal unfolds its file (§F), is read, and the card is revealed at its line above once it is placed.
+    if (waiting !== null && seen.waiting !== waiting.serial) {
+      seen.waiting = waiting.serial;
+      if (sections.find((each) => each.file.path === waiting.path)?.folded) ui.setState((s) => setFold(s, key, waiting.path, 'open'));
+    }
     if (card !== null && seen.card !== card.serial) {
       seen.card = card.serial;
       const section = sections.find((each) => each.file.path === card.path);

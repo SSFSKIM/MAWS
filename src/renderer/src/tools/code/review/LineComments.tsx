@@ -16,7 +16,7 @@ import { CARD_WIDTH } from '../../../side/card/placement';
 import { discardComment, editComment, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
 import { SIDE_COPY } from '../../../side/copy';
 import { openCommentComposer } from '../anchor/anchor';
-import { absolutePathOf, cardOffset, isUnplaced, lineText, placementOf, reviewLineAnchor, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
+import { absolutePathOf, cardOffset, isUnplaced, lineText, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
 import { reviewLayout } from './measure';
 import type { StackSection } from './Stack';
 
@@ -29,6 +29,7 @@ export interface LineCommentsValue {
   key: string; // the pass's key
   hostId: string;
   card: (LinePlace & { path: string; serial: number }) | null; // where this surface's open card stands (its widget row), and which card it is
+  waiting: { path: string; serial: number } | null; // the open card's file while its place waits on the file's own read (the stack unfolds it)
   rowsOf(path: string): readonly PlacedComment[]; // every other comment of the file, under its line
   add(path: string, block: number, side: LineSide, line: number): void; // the add button on a line
   setRow(element: HTMLElement | null): void; // the row the card is drawn in, handed to the host
@@ -69,20 +70,22 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     const unplaced: UnplacedComment[] = [];
     let card: (LinePlace & { path: string; serial: number }) | null = null;
     let holdPath: string | null = null;
-    if (pass === null || (state === 'ready' && repoRoot === null)) return { rows, unplaced, card, holdPath };
+    let waiting: { path: string; serial: number } | null = null;
+    if (pass === null || (state === 'ready' && repoRoot === null)) return { rows, unplaced, card, holdPath, waiting };
     const lines: ScopeLines =
-      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot!), blocks: section.blocks, read: section.hunks !== null, binary: section.binary })) } : { state, files: [] };
+      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot!), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
     // M9: a commit's scope draws its commit's comments, every other scope those with none
     const comments = pass.comments.filter(isFileLine).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
       const at = placementOf(comment, lines, madeIn.get(comment.id));
       if (comment.id === ours && 'path' in at && at.path !== null) holdPath = at.path;
+      if (comment.id === ours && at.kind === 'pending' && at.path !== null) waiting = { path: at.path, serial: serial! };
       if (at.kind === 'placed') {
         if (comment.id === ours) card = { ...at.place, path: at.path, serial: serial! };
         else rows.set(at.path, [...(rows.get(at.path) ?? []), { ...at.place, comment }]);
       } else if (isUnplaced(at)) unplaced.push({ comment, kind: at.kind });
     }
-    return { rows, unplaced, card, holdPath };
+    return { rows, unplaced, card, holdPath, waiting };
   }, [repoRoot, state, pass, sections, ours, serial]);
 
   const add = useCallback(
@@ -97,7 +100,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     [sections, repoRoot, appSessionId, hostId],
   );
 
-  return { key, card: placed.card, unplaced: placed.unplaced, opened: ours, holdPath: placed.holdPath, rows: placed.rows, add };
+  return { key, card: placed.card, waiting: placed.waiting, unplaced: placed.unplaced, opened: ours, holdPath: placed.holdPath, rows: placed.rows, add };
 }
 
 /**

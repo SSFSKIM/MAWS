@@ -7,7 +7,7 @@
 import type { FileLineAnchor } from '@shared/anchor/anchor';
 import { fileLineAnchor } from '../anchor/anchor';
 import { REVIEW_COPY } from '../copy';
-import type { ReviewFile } from './review-model';
+import { tooLarge, type ReviewFile } from './review-model';
 
 export type LineSide = 'old' | 'new';
 
@@ -86,36 +86,81 @@ export function placeOf(comment: { anchor: FileLineAnchor; quote?: string | null
 
 /**
  * Whether a surface can place a comment, and where (Decision Log 21: a comment is always drawn at its place; one the
- * surface cannot place has the row under the toolbar for its place). The one predicate, by this table:
+ * surface cannot place has the row under the toolbar for its place). The one predicate, by this table, closed over every
+ * state a scope and a file's section can be in (`SECTION_STATES`, from `sectionStateOf`):
  *
- *   the scope            its file            its file's diff        the answer      drawn                         the sentence over it
- *   read, with files     held, read          a line has the quote   `placed`        under that line               none
- *   read, with files     held, read          no line has it         `line-left`     the row under the toolbar     `REVIEW_COPY.lineLeftDiff`
- *   read, with files     held, binary        - (it has no lines)    `line-left`     the row under the toolbar     `REVIEW_COPY.lineLeftDiff`
- *   read, with files     not held            -                      `not-in-scope`  the row under the toolbar     `REVIEW_COPY.fileNotInScope`
- *   empty or unreadable  -                   -                      `no-files`      the row under the toolbar     `REVIEW_COPY.fileNotInScope`
- *   still being read     -                   -                      `pending`       nowhere yet (not unplaceable) none
- *   read, with files     held, not read yet  -                      `pending`       nowhere yet (not unplaceable) none
+ *   the case          when                                                    the answer        the sentence over it
+ *   scope-reading     the scope's list not read yet                           `pending`         none: nothing listed
+ *   scope-empty       the scope read with no files, or not readable           `no-files`        `REVIEW_COPY.fileNotInScope`
+ *   not-in-scope      the scope holds no section for the comment's file       `not-in-scope`    `REVIEW_COPY.fileNotInScope`
+ *   reading           its section's own read running (asked, not answered)    `pending`         none: nothing listed
+ *   folded-unread     folded in a scope past the cap, its read not asked      `pending`         none (the open card's reveal unfolds it)
+ *   line-found        drawn, a line's text is the quote                       `placed`          none: under that line
+ *   line-not-found    drawn, no line's text is the quote                      `line-left`       `REVIEW_COPY.lineLeftDiff`
+ *   binary            binary: a completed read with no lines                  `line-left`       `REVIEW_COPY.lineLeftDiff`
+ *   failed            its own read ended in failure                           `diff-not-shown`  `REVIEW_COPY.diffNotShown`
+ *   too-large         too large to draw (its hunks known, no lines drawn)     `diff-not-shown`  `REVIEW_COPY.diffNotShown`
  *
- * A held file's diff is the hunks the surface draws (a file under an open card holds still, decision 10). "Read" is
- * the file's hunks known; a binary file's read is complete with no hunks, so it is never "not read yet".
+ * A section's diff is the hunks the surface draws (a file under an open card holds still, decision 10). Each completed
+ * state is told apart from pending: only a read still running, or one not asked yet, lists nothing.
  */
 export type Placement =
   | { kind: 'placed'; path: string; place: LinePlace }
   | { kind: 'line-left'; path: string }
+  | { kind: 'diff-not-shown'; path: string }
   | { kind: 'not-in-scope' }
   | { kind: 'no-files' }
   | { kind: 'pending'; path: string | null };
-export type Unplaced = Extract<Placement, { kind: 'line-left' | 'not-in-scope' | 'no-files' }>['kind'];
+export type Unplaced = Extract<Placement, { kind: 'line-left' | 'diff-not-shown' | 'not-in-scope' | 'no-files' }>['kind'];
+
+// The states a file's section can be in, as the predicate reads them.
+export const SECTION_STATES = ['reading', 'folded-unread', 'lines', 'binary', 'failed', 'too-large'] as const;
+export type SectionState = (typeof SECTION_STATES)[number];
+
+/** A section's state from what it holds (`StackSection`'s fields), in the order its body tells them. */
+export function sectionStateOf(section: { hunks: readonly string[] | null; binary: boolean; failed: string | null; folded: boolean; fetch: boolean }): SectionState {
+  if (section.hunks === null && section.failed !== null) return 'failed'; // its body says so first, a binary's as much as a text file's
+  if (section.binary) return 'binary';
+  if (section.hunks === null) return section.folded && !section.fetch ? 'folded-unread' : 'reading';
+  return tooLarge({ hunks: section.hunks }) ? 'too-large' : 'lines';
+}
+
+export type PlacementCase = 'scope-reading' | 'scope-empty' | 'not-in-scope' | Exclude<SectionState, 'lines'> | 'line-found' | 'line-not-found';
+
+// The table's answers, one per case (`lines` splits by the quote).
+export const PLACEMENT_TABLE: Readonly<Record<PlacementCase, Placement['kind']>> = {
+  'scope-reading': 'pending',
+  'scope-empty': 'no-files',
+  'not-in-scope': 'not-in-scope',
+  reading: 'pending',
+  'folded-unread': 'pending',
+  'line-found': 'placed',
+  'line-not-found': 'line-left',
+  binary: 'line-left',
+  failed: 'diff-not-shown',
+  'too-large': 'diff-not-shown',
+};
 
 // The surface's scope as the predicate reads it: `reading` while its list is not read yet, `none` while it cannot be read.
 export interface ScopeLines {
   state: 'reading' | 'none' | 'ready';
-  files: readonly { path: string; absolute: string; blocks: readonly (readonly string[])[]; read: boolean; binary: boolean }[]; // `path`, the stack's identity
+  files: readonly { path: string; absolute: string; blocks: readonly (readonly string[])[]; state: SectionState }[]; // `path`, the stack's identity
 }
 
 // The sentence over each kind of comment the surface cannot place (the table's last column).
-export const UNPLACED_WORDS: Readonly<Record<Unplaced, string>> = { 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope };
+export const UNPLACED_WORDS: Readonly<Record<Unplaced, string>> = {
+  'line-left': REVIEW_COPY.lineLeftDiff,
+  'not-in-scope': REVIEW_COPY.fileNotInScope,
+  'no-files': REVIEW_COPY.fileNotInScope,
+  'diff-not-shown': REVIEW_COPY.diffNotShown,
+};
+
+// The order the sentences stand in the row under the toolbar when more than one kind is present, each with its kinds.
+export const UNPLACED_ORDER: readonly { name: string; words: string; kinds: readonly Unplaced[] }[] = [
+  { name: 'line-left', words: UNPLACED_WORDS['line-left'], kinds: ['line-left'] },
+  { name: 'not-in-diff', words: UNPLACED_WORDS['not-in-scope'], kinds: ['not-in-scope', 'no-files'] },
+  { name: 'diff-not-shown', words: UNPLACED_WORDS['diff-not-shown'], kinds: ['diff-not-shown'] },
+];
 
 export const isUnplaced = (placement: Placement): placement is Extract<Placement, { kind: Unplaced }> => placement.kind in UNPLACED_WORDS;
 
@@ -125,10 +170,18 @@ export function placementOf(comment: { anchor: FileLineAnchor; quote?: string | 
   if (scope.state === 'none' || scope.files.length === 0) return { kind: 'no-files' };
   const file = scope.files.find((each) => each.absolute === comment.anchor.path);
   if (!file) return { kind: 'not-in-scope' };
-  if (file.binary) return { kind: 'line-left', path: file.path };
-  if (!file.read) return { kind: 'pending', path: file.path };
-  const place = placeOf(comment, file.blocks, block);
-  return place ? { kind: 'placed', path: file.path, place } : { kind: 'line-left', path: file.path };
+  const place = file.state === 'lines' ? placeOf(comment, file.blocks, block) : null;
+  const answer = PLACEMENT_TABLE[file.state === 'lines' ? (place ? 'line-found' : 'line-not-found') : file.state];
+  switch (answer) {
+    case 'placed':
+      return { kind: 'placed', path: file.path, place: place! };
+    case 'line-left':
+    case 'diff-not-shown':
+    case 'pending':
+      return { kind: answer, path: file.path };
+    default:
+      return { kind: answer }; // not reached: a file's case answers one of the four above
+  }
 }
 
 /**
