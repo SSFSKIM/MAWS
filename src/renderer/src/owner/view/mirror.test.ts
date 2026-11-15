@@ -317,28 +317,38 @@ describe('a stretch stays the one the reader opened', () => {
     expect(stretchesOf(windowAt(2, true)).at(-1)!.key).toBe(COMMENTARY);
   });
 
-  // Each row: the step the reader opens the stretch at, and the step from which the window is paged up (at or before
-  // the opening: it opened in the paged window; never: it never pages).
-  const timelines = STEPS.flatMap((_, opensAt) => [0, 1, 2, 3].map((pagedFrom) => [opensAt, pagedFrom] as const));
-  it.each(timelines.map(([opensAt, pagedFrom]) => [`opened at ${STEPS[opensAt]}, ${pagedFrom > 2 ? 'never paged up' : `paged up from ${STEPS[pagedFrom]} on`}`, opensAt, pagedFrom] as const))(
-    '%s: open at every step after, and one press folds it', (_name, opensAt, pagedFrom) => {
-      const pressed = lines(mirrorRows(windowAt(opensAt, pagedFrom <= opensAt), {})).at(-1)!;
-      expect(pressed.open).toBe(false);
-      const openStretches = new Set([pressed.stretch]);
-      for (let step = opensAt; step < STEPS.length; step += 1) {
-        const window = windowAt(step, pagedFrom <= step);
-        const drawn = mirrorRows(window, { openStretches });
-        const at = `at ${STEPS[step]}`;
-        expect(lines(drawn).map((line) => line.open), at).toEqual(pagedFrom <= step ? [false, true] : [true]); // the earlier turn's stays closed
-        expect(drawn.at(-1)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
-        expect(drawn.some((r) => r.kind === 'thinking' || r.kind === 'group'), at).toBe(true); // its rows in sight
-      }
-      // the press on `‹ fold to report` takes the key the line carries, and the stretch folds
-      const last = windowAt(2, pagedFrom <= 2);
-      const folding = lines(mirrorRows(last, { openStretches })).at(-1)!;
-      expect(folding.open).toBe(true);
-      const after = new Set(openStretches);
-      after.delete(folding.stretch);
-      expect(lines(mirrorRows(last, { openStretches: after })).every((line) => !line.open)).toBe(true);
-    });
+  // Each row: the step the reader opens the stretch at, and when the window is paged up: before the opening (it opened
+  // in the paged window), at a step from the opening on (right after what that step drew), or never. The reader looks
+  // at every step from the opening to the end, before and after each paging.
+  type Paging = 'before' | 0 | 1 | 2 | 'never';
+  const timelines = STEPS.flatMap((_, opensAt) => (['before', 0, 1, 2, 'never'] as const).filter((at) => typeof at !== 'number' || at >= opensAt).map((at) => [opensAt, at] as const));
+  const named = ([opensAt, paging]: readonly [number, Paging]) =>
+    `opened at ${STEPS[opensAt]}, ${paging === 'before' ? 'paged up before' : paging === 'never' ? 'never paged up' : `paged up at ${STEPS[paging]}`}`;
+  it.each(timelines.map((timeline) => [named(timeline), ...timeline] as const))('%s: open at every look after, and one press folds it', (_name, opensAt, paging) => {
+    const looks: { step: number; paged: boolean }[] = [];
+    for (let step = opensAt; step < STEPS.length; step += 1) {
+      const pagedBy = paging === 'before' || (typeof paging === 'number' && paging < step);
+      looks.push({ step, paged: pagedBy });
+      if (paging === step) looks.push({ step, paged: true });
+    }
+    const first = looks[0];
+    const pressed = lines(mirrorRows(windowAt(first.step, first.paged), {})).at(-1)!;
+    expect(pressed.open).toBe(false);
+    const openStretches = new Set([pressed.stretch]);
+    for (const { step, paged } of looks) {
+      const drawn = mirrorRows(windowAt(step, paged), { openStretches });
+      const at = `at ${STEPS[step]}${paged ? ', paged' : ''}`;
+      expect(lines(drawn).map((line) => line.open), at).toEqual(paged ? [false, true] : [true]); // the earlier turn's stays closed
+      expect(drawn.at(-1)?.kind, at).toBe('record_fold'); // `‹ fold to report` under the stretch's last row
+      expect(drawn.some((r) => r.kind === 'thinking' || r.kind === 'group'), at).toBe(true); // its rows in sight
+    }
+    // the press on `‹ fold to report` takes the key the line carries, and the stretch folds
+    const last = looks.at(-1)!;
+    const window = windowAt(last.step, last.paged);
+    const folding = lines(mirrorRows(window, { openStretches })).at(-1)!;
+    expect(folding.open).toBe(true);
+    const after = new Set(openStretches);
+    after.delete(folding.stretch);
+    expect(lines(mirrorRows(window, { openStretches: after })).every((line) => !line.open)).toBe(true);
+  });
 });
