@@ -63,7 +63,12 @@ export class SqliteDocumentStorage implements DocumentStorage {
     return this.open;
   }
 
+  // A test's count of the statements run through `sql`, by their text (agent-draft-cost.test.ts pins what the fence and
+  // the agent-draft mark cost per content row). Null in the app.
+  onStatement: ((text: string) => void) | null = null;
+
   private sql(text: string): StatementSync {
+    this.onStatement?.(text);
     let statement = this.statements.get(text);
     if (!statement) this.statements.set(text, (statement = this.db.prepare(text)));
     return statement;
