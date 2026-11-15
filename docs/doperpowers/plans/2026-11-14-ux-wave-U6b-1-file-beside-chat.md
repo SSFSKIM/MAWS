@@ -24,7 +24,7 @@ How to see it working: in a session, click a file path in the transcript: the fi
 - [x] (2026-11-14) The adversarial review of this document (findings on pinning, Reopen closed tab, a move's stored layout, the editor's state across a move, and `show_pane` before hydration), and the architect's rulings on them and on the nine reported points.
 - [x] (2026-11-14) Revision 2: the rulings folded in (Decision Log 2 to 9); master `b3253a098` merged (documents, a tracker row and probe fixtures only; no file under `src/` moved); the code each finding cites read again at that head ("What the code holds today", 10 to 14).
 - [x] (2026-11-14) Amendment after revision 2 (Decision Log 10): the host's add paths read against the opener (a file open cannot take a restored slot; a tree-only add before hydration could have made a second tree-only tab, closed by `reuse`); `paneNotReady` for a wait that ran out; master `2c7044231` merged (ticket 662's landing; its only files under `src/` are `src/main/chromium-features.ts`, `src/main/index.ts` and their tests, none of them this landing's).
-- [ ] M1 — The stored form, and where an open goes.
+- [x] (2026-11-14) M1 — The stored form, and where an open goes. Built `0fa7bea3e`..`719b5fcbe`, its frontier review's fixes `002039373` (a relative path's side tab draws the viewer and its refusal) and `12ca4f34c` (the cross-build scene's peer pins first and opens last), review clean (Decision Log 11 to 13).
 - [ ] The cross-build scene on M1's head, on a Mac (the architect's; M2 starts on its result).
 - [ ] M2 — An editable file beside the chat: close, save, comment, and a session that goes.
 - [ ] The owner's answer on the card of R8 (the tree in a tab too narrow for both), before M3.
