@@ -503,6 +503,14 @@ describe('the answer envelopes inside a joined text', () => {
     expect(readAnswerEnvelopes(joined(broken, words, A1))).toEqual({ envelopes: [read(A1)], rest: joined(broken, words) });
   });
 
+  it('a valid multi-line envelope followed directly by a second envelope: both found, the rest empty', () => {
+    const multi = askSteerText('ask-3', [LAYOUT, FOLDER], [
+      { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'], note: 'wide screens first' },
+      { id: 'q3', question: FOLDER.question, status: 'answered', value: ['/work/site/pages', '/work/site/parts'] },
+    ]);
+    expect(readAnswerEnvelopes(joined(multi, A2))).toEqual({ envelopes: [read(multi), read(A2)], rest: '' });
+  });
+
   it('a plain prompt with the tag mid-line stays text', () => {
     const text = `Please read ${A1}`;
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
