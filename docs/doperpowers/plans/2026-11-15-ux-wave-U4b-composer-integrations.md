@@ -26,7 +26,7 @@ How to see it working: the unit tests named under each milestone; in a running b
 - [x] (2026-11-15 12:40Z) The probe for M3's conditional step merged from `ux-wave/U4b-probes` at `f7e88d3c1` (a merge commit of its own); its findings pass decision 15's three conditions and the step is built in M3 (the Decision Log's lines on the probe's result).
 - [x] (2026-11-15 14:40Z) M1 — a waiting answer reads as an answer (`fe2523f77..eda29631e`, fix `bb22ac385..2b89a5a09`; reviewed clean). The desk web app's build and tests ran at `eda29631e`; at the fix's head its typecheck ran, and its build and tests run again at M3's head.
 - [x] (2026-11-15 14:05Z) M2 — the `/btw` card at the column's foot (`bbd9b53c6..b6dc4d66e`; reviewed clean).
-- [ ] M3 — Send now and taking back on another machine (and its conditional step: built, or not, with the reason).
+- [x] (2026-11-15 17:10Z) M3 — Send now and taking back on another machine, its conditional step built (the probe passed decision 15's three conditions; the Decision Log's lines on the probe's result) (`f35e8b809..39a5f5c43`, and `97d6b047b`, a test pinning a send-now that fails after the promote; reviewed clean).
 - [ ] M4 — the scenes, the record, the last run.
 - [ ] The link's minor, at the chain merge, in a commit of its own.
 - [ ] Hand-back; then the architect's proofs, in the order of "Proof that an executor does not run".
