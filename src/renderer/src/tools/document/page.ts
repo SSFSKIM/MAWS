@@ -18,7 +18,10 @@ export const PAGE_ORIGIN = 'document-page';
 export interface PageInForce {
   size: PageSize | null;
   compact: boolean;
-  /** False while the system's page, which the size in force rests on, is not known: the sizes take no choice then. */
+  /**
+   * False while the system's page is not known: the sizes take no choice then, since a choice rests on it (choosing the
+   * system's page clears the document's size). The size the document sets is still named in `size`.
+   */
   sizeKnown: boolean;
 }
 
@@ -37,13 +40,14 @@ function sizeOf(width: string, height: string): PageSize | null {
 
 export function pageInForce(page: DocPage, overrides: TokenOverrides, system: PageSize | null): PageInForce {
   const compact = page.density === 'compact';
-  if (page.size) return { size: page.size, compact, sizeKnown: true };
+  const sizeKnown = system !== null;
+  if (page.size) return { size: page.size, compact, sizeKnown };
   const width = overrides[WIDTH];
   const height = overrides[HEIGHT];
-  if (width === undefined && height === undefined) return { size: system, compact, sizeKnown: system !== null };
-  if (system === null && (width === undefined || height === undefined)) return { size: null, compact, sizeKnown: false };
+  if (width === undefined && height === undefined) return { size: system, compact, sizeKnown };
+  if (system === null && (width === undefined || height === undefined)) return { size: null, compact, sizeKnown };
   const [systemWidth, systemHeight] = system ? SIZES[system] : ['', ''];
-  return { size: sizeOf(width ?? systemWidth, height ?? systemHeight), compact, sizeKnown: true };
+  return { size: sizeOf(width ?? systemWidth, height ?? systemHeight), compact, sizeKnown };
 }
 
 /** Writes what choosing `item` asks, in one transaction of `origin`; answers whether it wrote. */
