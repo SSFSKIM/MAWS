@@ -13,10 +13,13 @@
 // - Each watch (`laneA.watch`, one per page) is a stream of its own, whose own snapshot seeds that watcher; its events go
 //   out as `laneA.plane` reshaped to DX4 (./reshape.ts). A stream that ends under a live watch is announced as a reset
 //   and resubscribed.
-// - Jobs: while a session has a watch, its transcript is followed (./transcript-jobs.ts) and its background shells and
-//   monitors, derived by sminos's rules (./jobs.ts), go to each watch in its snapshot and as a `subagents` message each
-//   time they change. When the session's holder ends or its bridge goes, its process is taken as gone: each watch hears
-//   its running jobs `exited` before it ends. A stop is refused for a job the transcript holds ended.
+// - Jobs and subagents: while a session has a watch, it is followed (./follow.ts): its transcript (./transcript-jobs.ts),
+//   the engine host's listing of its agents' sidecars, its parent agents' own transcripts and the bridge's agents (the
+//   state stream's, ./agents.ts). Its background shells and monitors and its subagents, derived by sminos's rules
+//   (./jobs.ts) only when one of those changed, go to each watch in its snapshot and as a `subagents` message each time
+//   they change (UX wave U8d M2). When the session's holder ends or its bridge goes, its process is taken as gone: each
+//   watch hears its running jobs and agents `exited` before it ends. A stop is refused for a job the transcript holds
+//   ended.
 // - Controls post `POST /command?wait=10000` carrying the launch `/status` named. A 504 or a closed socket is `unknown`:
 //   the op may have run. Nothing is retried on its own but `deliver` (./deliveries.ts). Decisions are built from typed
 //   fields (./decisions.ts) after a fresh `GET /requests/<id>`, with `by: 'maws'`. `from` is never sent. A decision the
@@ -38,16 +41,19 @@ import type { SessionRecord } from '@shared/graph/session';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import type { CommandName, EventPayload } from '@shared/ipc/schema';
+import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { ControlResult, LaneAAnswerOutput, LaneACatalog, LaneASendOutput, LaneAState } from '@shared/ipc/schema/lane-a';
 import { reportsMode } from '@shared/lane-a/mode';
 import type { ServiceHandler } from '@shared/spine/bus';
 import { createGitRunner, type GitRun } from '../git/runner';
+import { BridgeAgents } from './agents';
 import { BridgeUnreachable, call, subscribe, type BridgeAnswer, type EventStream } from './bridge-client';
 import { decisionFor } from './decisions';
 import { DeliveryLane, fileSeqStore, LANE_TIMING, type LaneTiming, type PostResult, type SeqStore } from './deliveries';
 import { bridgeSocket, watchBridgeDir, type BridgeDirWatch } from './discovery';
+import { SessionFollow } from './follow';
 import { sendMedia, uploadRecords } from './media';
-import { Reshaper } from './reshape';
+import { NO_SUBAGENTS, Reshaper } from './reshape';
 import { classify, SessionFold, type BridgeState, type MainTool } from './state';
 import { TranscriptJobs } from './transcript-jobs';
 import { Work, type Settling } from '../work'; // P5 O3-D M2
@@ -59,7 +65,7 @@ export interface LaneATiming {
   decisionMs: number; // a decision's post (an async question's answer is relayed to the mod, up to 5 s)
   backoff: { firstMs: number; maxMs: number; healthyMs: number };
   dirPollMs: number;
-  jobsPollMs: number; // how often a watched session's transcript is read for its jobs
+  jobsPollMs: number; // how often a watched session's transcripts are read for its jobs and subagents
   sweepMs: number; // how often the upload roots are swept of those a day old (M7)
   lane: LaneTiming;
 }
@@ -89,6 +95,11 @@ export interface LaneADeps {
   log?(line: string): void;
   git?: GitRun; // the uploads' exclude entry (M7); main's read runner by default
   timing?: Partial<LaneATiming>;
+  // UX wave U8d M2: the engine host's listing of a session's agents (`fs.subagents`; a rejection is a failed read), its
+  // change (`fs.subagentsChanged`), and the host streaming again. Without them a session lists no agents.
+  subagents?(appId: AppSessionId): Promise<SubagentEntry[]>;
+  onSubagentsChanged?(listener: (appId: AppSessionId, agents: SubagentEntry[]) => void): () => void;
+  onHostStreaming?(listener: () => void): () => void;
 }
 
 export interface SessionHold {
@@ -140,7 +151,7 @@ interface Watch {
   timer: NodeJS.Timeout | null;
   offGone: () => void;
   ended: boolean;
-  jobs: string | null; // the jobs it last carried, as JSON
+  body: string | null; // the subagents and jobs it last carried, as JSON
 }
 
 interface Session {
@@ -160,8 +171,8 @@ interface Session {
   lane: DeliveryLane;
   watches: Map<string, Watch>;
   modelChain: Promise<unknown>;
-  jobs: TranscriptJobs | null; // followed while it has a watch
-  jobsTimer: NodeJS.Timeout | null;
+  agents: BridgeAgents; // the bridge's, from the state stream: kept while it reconnects, none once the bridge goes
+  follow: SessionFollow | null; // while it has a watch
   gone: boolean;
 }
 
@@ -231,6 +242,12 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   setImmediate(() => {
     if (!stopped) sweep();
   });
+
+  // U8d M2: the host's word on a session's agents, for a session followed
+  const offSubagents = deps.onSubagentsChanged?.((appId, agents) => sessions.get(appId)?.follow?.listingChanged(agents)) ?? (() => {});
+  const offStreaming = deps.onHostStreaming?.(() => {
+    for (const s of sessions.values()) s.follow?.hostStreaming();
+  }) ?? (() => {});
 
   void Promise.resolve(deps.home).then(
     (resolved) => {
@@ -320,8 +337,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
 
   function unbridge(s: Session, reason: string): void {
     closeState(s);
-    jobsChanged(s, false); // no bridge: the session's process is taken as gone
+    s.follow?.processGone(); // no bridge: the session's process is taken as gone
     endWatches(s, reason);
+    s.agents.clear(); // what the gone bridge held runs no more
     s.lane.dropQueued(reason);
     if (s.bridge === null) return;
     s.bridge = null;
@@ -338,11 +356,13 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
         if (s.stream !== stream) return;
         let dirty = false;
         const toolBefore = JSON.stringify(s.fold.mainTool());
+        const agentsBefore = s.agents.version;
         for (const line of lines) {
           if (!s.snapshotted) {
             if (line.type !== 'snapshot') return stateEnded(s, stream, 'the stream did not open with a snapshot');
             s.snapshotted = true;
             s.fold.snapshot(line);
+            s.agents.snapshot(line.agents);
             s.lane.snapshotArrived();
             s.backoff.holding();
             void probe(s); // a starting bridge's first snapshot: /status again, which names it live
@@ -352,8 +372,10 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           } else if (line.type === 'delivered') {
             const key = record(line.key) ?? {};
             s.lane.fate(key, String(line.outcome), typeof line.uuid === 'string' ? line.uuid : undefined, typeof line.reason === 'string' ? line.reason : undefined);
-          } else if (s.fold.event(line)) dirty = true;
+          } else if (line.type === 'agent') s.agents.event(line);
+          else if (s.fold.event(line)) dirty = true;
         }
+        if (s.agents.version !== agentsBefore) s.follow?.bridgeChanged();
         if (dirty) changed(s);
         else if (JSON.stringify(s.fold.mainTool()) !== toolBefore) tell(s);
       },
@@ -401,9 +423,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
           if (w.reshaper === null) {
             if (line.type !== 'snapshot') return watchEnded(s, w, stream);
             w.reshaper = new Reshaper({ machine: deps.machine, session: s.engine, sub: w.id });
-            const jobs = s.jobs?.body(true) ?? [];
-            w.jobs = JSON.stringify(jobs);
-            messages.push(...w.reshaper.snapshot(line, jobs));
+            const body = s.follow?.body ?? NO_SUBAGENTS;
+            w.body = JSON.stringify(body);
+            messages.push(...w.reshaper.snapshot(line, body));
             w.backoff.holding();
             continue;
           }
@@ -428,7 +450,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     w.backoff.broke();
     if (w.ended || s.gone) return;
     if (w.reshaper !== null) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, reset: true }); // what it drew no longer follows
-    // its reshaper stays until the stream opens again, so the jobs' last word reaches it if the bridge went meanwhile
+    // its reshaper stays until the stream opens again, so the body's last word reaches it if the bridge went meanwhile
     w.timer = setTimeout(() => {
       w.timer = null;
       if (!w.ended) openWatch(s, w);
@@ -445,7 +467,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     w.backoff.broke();
     w.offGone();
     s.watches.delete(w.id);
-    if (s.watches.size === 0) unfollowJobs(s);
+    if (s.watches.size === 0) unfollow(s);
     if (reason !== null) deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, ended: reason });
   }
 
@@ -453,41 +475,41 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     for (const w of [...s.watches.values()]) endWatch(s, w, reason);
   }
 
-  // ---- jobs ---------------------------------------------------------------------------------------------------------------
-  const transcriptJobs = (s: Session) => new TranscriptJobs(() => deps.transcript?.(s.appId, s.engine) ?? Promise.resolve(null));
+  // ---- jobs and subagents -----------------------------------------------------------------------------------------------
+  const locate = (s: Session) => () => deps.transcript?.(s.appId, s.engine) ?? Promise.resolve(null);
+  const listing = deps.subagents;
 
-  function followJobs(s: Session): void {
-    if (s.jobs !== null) return;
-    const jobs = (s.jobs = transcriptJobs(s));
-    const poll = () => {
-      jobs.read().then(
-        () => jobsChanged(s, true),
-        (error: unknown) => log(`${s.engine}: its transcript could not be read for its jobs (${error instanceof Error ? error.message : String(error)})`),
-      ).finally(() => {
-        if (s.jobs !== jobs) return;
-        s.jobsTimer = setTimeout(poll, timing.jobsPollMs);
-        s.jobsTimer.unref();
-      });
-    };
-    poll();
+  function follow(s: Session): void {
+    if (s.follow !== null) return;
+    const f: SessionFollow = new SessionFollow({
+      session: s.engine,
+      locate: locate(s),
+      bridge: s.agents,
+      ...(listing !== undefined && { listing: () => listing(s.appId) }),
+      pollMs: timing.jobsPollMs,
+      backoff: () => new Backoff(timing.backoff),
+      changed: () => {
+        if (s.follow === f) bodyChanged(s, f);
+      },
+      log,
+    });
+    s.follow = f;
+    f.start();
   }
 
-  function unfollowJobs(s: Session): void {
-    if (s.jobsTimer) clearTimeout(s.jobsTimer);
-    s.jobsTimer = null;
-    s.jobs = null;
+  function unfollow(s: Session): void {
+    s.follow?.stop();
+    s.follow = null;
   }
 
-  // Each watch that carried other jobs hears these; `running` false once the session's process is gone, which a watch
-  // whose stream broke under it hears too.
-  function jobsChanged(s: Session, running: boolean): void {
-    if (s.jobs === null) return;
-    const jobs = s.jobs.body(running);
-    const key = JSON.stringify(jobs);
+  // Each watch that carried another body hears this one, once derived; a watch whose stream broke under it hears it
+  // only once the session's process is gone (its fresh snapshot carries it otherwise).
+  function bodyChanged(s: Session, f: SessionFollow): void {
+    const key = JSON.stringify(f.body);
     for (const w of s.watches.values()) {
-      if (w.reshaper === null || (running && w.stream === null) || w.jobs === key) continue;
-      w.jobs = key;
-      deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages: [w.reshaper.jobs(jobs)] });
+      if (w.reshaper === null || (f.sessionRunning && w.stream === null) || w.body === key) continue;
+      w.body = key;
+      deps.emit('laneA.plane', { appSessionId: s.appId, watch: w.id, messages: [w.reshaper.subagents(f.body)] });
     }
   }
 
@@ -497,7 +519,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     const s = liveFor(appId, 'stop');
     if (!('appId' in s)) return s;
     const launch = launchOf(s);
-    const jobs = s.jobs ?? transcriptJobs(s);
+    const jobs = s.follow?.main ?? new TranscriptJobs(locate(s));
     await jobs.read().catch(() => {}); // unreadable: the bridge judges
     if (jobs.body(true).some((j) => j.taskId === taskId && j.status !== 'running')) return refused('not-running', 'that background task is not running: it ended');
     return resultOf(await post(s, { op: 'stop', taskId }, launch));
@@ -558,8 +580,8 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
       lane: new DeliveryLane({ writer, session: hold.engineSessionId, seqs: (seqs ??= fileSeqStore(join(deps.userData, 'lane-a', 'deliveries.json'), log)), launch: () => launchOf(s), post: (body, launch) => post(s, body, launch), changed: () => changed(s), timing: timing.lane }),
       watches: new Map(),
       modelChain: Promise.resolve(),
-      jobs: null,
-      jobsTimer: null,
+      agents: new BridgeAgents(),
+      follow: null,
       gone: false,
     };
     return s;
@@ -568,7 +590,7 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
   function drop(s: Session): void {
     s.gone = true;
     closeState(s);
-    jobsChanged(s, false); // its holder ended: the session's process is gone
+    s.follow?.processGone(); // its holder ended: the session's process is gone
     for (const w of [...s.watches.values()]) endWatch(s, w, 'the session left the terminal');
     s.lane.close('the session left the terminal');
     sessions.delete(s.appId);
@@ -768,9 +790,9 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     watch(appId, client) {
       const s = sessions.get(appId);
       if (!s || (s.bridge?.bridge !== 'live' && s.bridge?.bridge !== 'starting')) throw new Error(`${appId}: ${s?.bridge?.reason ?? NO_BRIDGE}`);
-      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, jobs: null };
+      const w: Watch = { id: randomUUID(), stream: null, reshaper: null, backoff: new Backoff(timing.backoff), timer: null, offGone: () => {}, ended: false, body: null };
       s.watches.set(w.id, w);
-      followJobs(s);
+      follow(s);
       w.offGone = client.onGone(() => endWatch(s, w, null));
       if (!w.ended) openWatch(s, w);
       return { watch: w.id };
@@ -819,6 +841,8 @@ export function createLaneADriver(deps: LaneADeps): LaneADriver {
     stop() {
       stopped = true;
       clearInterval(sweeper);
+      offSubagents();
+      offStreaming();
       for (const s of [...sessions.values()]) drop(s);
       dirWatch?.close();
       dirWatch = null;

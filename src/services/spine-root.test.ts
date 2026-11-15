@@ -298,8 +298,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
   });
 
   // UX wave U8d M2 (Interfaces §A): the driver reads a watched session's agents from the engine host's listing,
-  // `fs.subagents` (owed until answered: the host is not streaming when the watch starts, and its streaming signal asks
-  // again), then each `fs.subagentsChanged`
+  // `fs.subagents`, then each `fs.subagentsChanged` (the owed listing and the host's streaming signal: driver.test.ts)
   it('hands the lane A driver the engine host’s listing of a watched session’s agents, and each change of it', async () => {
     const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a9';
     const seeded = new Index(join(profile, 'index.sqlite'));
@@ -313,13 +312,13 @@ describe('the spine and the checkouts composed under plain Node', () => {
     host.answer('fs.subagents', ({ appSessionId: asked }) => ({ agents: asked === appSessionId ? [listed('a0b1c2d3e4f500001')] as never : [] }));
     const bus = fakeBus();
     compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
     await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
     expect(await bus.invoke('laneA.watch', { appSessionId })).toMatchObject({ ok: true });
     const agentIds = () => {
       const bodies = bus.emittedOf('laneA.plane').filter((p) => p.appSessionId === appSessionId).flatMap((p) => p.messages ?? []).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents');
       return ((bodies.at(-1)?.body as { subagents?: { agentId: string; status: string }[] } | undefined)?.subagents ?? []).map((a) => `${a.agentId} ${a.status}`);
     };
-    await host.ready();
     await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown']);
     host.emit('fs.subagentsChanged', { appSessionId, agents: [listed('a0b1c2d3e4f500001'), listed('a0b1c2d3e4f500002')] as never });
     await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown', 'a0b1c2d3e4f500002 unknown']);

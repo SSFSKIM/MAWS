@@ -242,6 +242,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
         if (record?.engineSessionId !== engineSessionId) return null; // another transcript now: the driver follows the record
         return index.sessions.summaryOf(appId)?.transcriptPath || transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
       },
+      // UX wave U8d M2: and its subagents, from the engine host's listing of their sidecars and its change
+      subagents: async (appSessionId) => {
+        const listed = (await hosts.dispatch('engine-host', 'fs.subagents', { appSessionId })) as CommandResult<'fs.subagents'>;
+        if (!listed.ok) throw new Error(listed.error.message);
+        return listed.value.agents;
+      },
+      onSubagentsChanged: (listener) => hosts.onEvent('fs.subagentsChanged', ({ appSessionId, agents }) => listener(appSessionId as AppSessionId, agents)),
+      onHostStreaming: (listener) => hosts.onStreaming('engine-host', listener),
       emit: (name, payload) => void bus.emit(name, payload),
     });
     registerLaneA(laneA, bus.register);
