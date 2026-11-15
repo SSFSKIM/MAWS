@@ -1109,13 +1109,17 @@ function storedValue(key: LayoutKey, slice: unknown): unknown {
 // would clobber them) or for hydration itself.
 // l1-sessions-13: main's inactivity sweep keeps every session `main.tabs` holds open, so a session tab (or one of its
 // agents') joining the tabs is written at once rather than after the delay; a tab leaving waits as any change does.
-// UX wave U6b-1 (Decision 19): a move's keys in order. `writeInOrder` writes the destination's keys at once and holds the
-// source's (a key held writes nothing, its changes owed) until every one of those writes, or a later write of the same
-// key, has answered ok; a failed one keeps the hold, so the next change of that key, once written, writes the held keys
-// after it. Anything that cannot wait (beforeunload, the stop, a session joining a held `main.tabs`) sends the
-// destination's keys again and then the held ones, in that order.
+// UX wave U6b-1 (Decision 19; M4's fix wave): a move's keys in order. `writeInOrder` makes a gate that holds the source's
+// keys (a key held writes nothing, its changes owed) until every destination key of that gate has a write answered ok
+// (its own, or a later one of the same key). A destination key that an earlier gate holds is not written at once either:
+// its value already carries that earlier move's removal, so it waits for that gate as the earlier source keys do, and
+// this gate waits for it in turn. So gates compose, and no write sends a removal before the place the file went to is
+// stored. A failed write keeps its gate until a later write of the key answers ok; two moves whose writes wait on each
+// other after a failure wait until `beforeunload` or the stop, the only times everything is sent (the destination keys
+// first). A session joining a held `main.tabs` waits for the gate too, and is written as soon as it lets go.
 interface WriteGate {
-  waiting: Map<LayoutKey, number>; // each destination key and the write of it whose answer the gate waits for (or a later one)
+  waiting: Map<LayoutKey, number>; // each destination key written and the write whose answer (or a later one's) the gate waits for
+  deferred: Set<LayoutKey>; // destination keys an earlier gate holds, written once no gate does
   held: Set<LayoutKey>;
 }
 const orderedWriters = new Map<typeof useLayout, (first: LayoutKey[], then: LayoutKey[]) => void>();
@@ -1124,7 +1128,7 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
   let published = new Set(written ? openSessionsOf(store.getState().main) : []); // the sessions main's `main.tabs` holds open
-  let gates: WriteGate[] = [];
+  let gates: WriteGate[] = []; // oldest first
   const owed = new Set<LayoutKey>(); // held keys with a change not yet written
   let writes = 0;
 
@@ -1137,63 +1141,73 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     });
   };
   const isHeld = (key: LayoutKey) => gates.some((gate) => gate.held.has(key));
-  // A held key's owed change, written from the state as it is now (a key that left the state is not written back).
-  const writeOwed = (key: LayoutKey) => {
-    if (!owed.delete(key)) return;
-    const now = persistedKeys(store.getState());
-    if (now.has(key)) write(key, now.get(key));
+  const unschedule = (key: LayoutKey) => {
+    clearTimeout(pending.get(key)?.timer);
+    pending.delete(key);
   };
-  const release = (gate: WriteGate) => {
-    gates = gates.filter((other) => other !== gate);
-    for (const key of gate.held) if (!isHeld(key)) writeOwed(key);
+  // The key written from the state as it is now (a key that left the state is not written back); the write's number.
+  const writeNow = (key: LayoutKey, now: Map<LayoutKey, unknown>): number | null => {
+    owed.delete(key);
+    unschedule(key);
+    if (!now.has(key)) return null;
+    write(key, now.get(key));
+    return writes;
   };
-  const answered = (key: LayoutKey, sent: number) => {
-    for (const gate of [...gates]) {
-      const from = gate.waiting.get(key);
-      if (from !== undefined && sent >= from) gate.waiting.delete(key);
-      if (gate.waiting.size === 0) release(gate);
+  // Every destination key no gate holds any more is written (one write for every gate deferring it), every owed change
+  // no gate holds is written, and every gate with nothing left to wait for lets go; again, until none does.
+  const unblock = () => {
+    for (;;) {
+      const now = persistedKeys(store.getState());
+      const due = new Set<LayoutKey>();
+      for (const gate of gates) for (const key of gate.deferred) if (!isHeld(key)) due.add(key);
+      for (const key of due) {
+        const sent = writeNow(key, now);
+        for (const gate of gates) if (gate.deferred.delete(key) && sent !== null) gate.waiting.set(key, sent);
+      }
+      for (const key of [...owed]) if (!isHeld(key)) writeNow(key, now);
+      const done = gates.filter((gate) => gate.waiting.size === 0 && gate.deferred.size === 0);
+      if (done.length === 0) return;
+      gates = gates.filter((gate) => !done.includes(gate));
     }
   };
-  // Every gate let go now, its destination's keys sent again before its held keys.
+  const answered = (key: LayoutKey, sent: number) => {
+    for (const gate of gates) {
+      const from = gate.waiting.get(key);
+      if (from !== undefined && sent >= from) gate.waiting.delete(key);
+    }
+    unblock();
+  };
+  // beforeunload and the stop: every gate let go, every destination key sent before every owed change.
   const sendAll = () => {
     const now = persistedKeys(store.getState());
     const all = gates;
     gates = [];
-    for (const gate of all) {
-      for (const key of gate.waiting.keys()) {
-        if (!now.has(key)) continue;
-        clearTimeout(pending.get(key)?.timer);
-        pending.delete(key);
-        write(key, now.get(key));
-      }
-    }
-    for (const gate of all) for (const key of gate.held) writeOwed(key);
+    for (const gate of all) for (const key of [...gate.waiting.keys(), ...gate.deferred]) writeNow(key, now);
+    for (const key of [...owed]) writeNow(key, now);
   };
   const inOrder = (first: LayoutKey[], then: LayoutKey[]) => {
     if (written === null) return; // before hydration nothing is written
-    const now = persistedKeys(store.getState());
-    const gate: WriteGate = { waiting: new Map(), held: new Set() };
-    for (const key of first) {
-      for (const other of gates) other.held.delete(key); // a newer destination is written now
-      owed.delete(key);
-      clearTimeout(pending.get(key)?.timer);
-      pending.delete(key);
-      if (!now.has(key)) continue;
-      write(key, now.get(key));
-      gate.waiting.set(key, writes);
-    }
+    const gate: WriteGate = { waiting: new Map(), deferred: new Set(), held: new Set() };
     for (const key of then) {
       if (first.includes(key)) continue;
-      const due = pending.get(key);
-      if (due) {
-        clearTimeout(due.timer);
-        pending.delete(key);
+      if (pending.has(key)) {
+        unschedule(key);
         owed.add(key);
       }
       gate.held.add(key);
     }
-    if (gate.waiting.size === 0) release(gate);
-    else gates.push(gate);
+    const now = persistedKeys(store.getState());
+    for (const key of first) {
+      if (isHeld(key)) {
+        unschedule(key); // an earlier gate holds it: written when that gate lets go
+        gate.deferred.add(key);
+        continue;
+      }
+      const sent = writeNow(key, now);
+      if (sent !== null) gate.waiting.set(key, sent);
+    }
+    gates.push(gate);
+    unblock();
   };
   orderedWriters.set(store, inOrder);
   const schedule = (key: LayoutKey, value: unknown) => {
@@ -1222,14 +1236,13 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
       for (const [key, value] of now) {
         if (written.get(key) === value) continue;
         if (state.firstReadPending && (key === 'panelTools.surfaces' || key === 'panelTools.groups' || PANEL_KEY.test(key))) marks = true;
-        const joins = key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id));
         if (isHeld(key)) {
-          // UX wave U6b-1: a held key's change waits with it, unless a session joins `main.tabs`, which cannot wait
+          // UX wave U6b-1: a held key's change waits with it, a session joining `main.tabs` included (written as the gate
+          // lets go, with no delay)
           owed.add(key);
-          if (joins) sendAll();
           continue;
         }
-        if (joins) {
+        if (key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id))) {
           clearTimeout(pending.get(key)?.timer);
           pending.delete(key);
           write(key, value);

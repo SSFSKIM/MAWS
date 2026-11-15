@@ -24,7 +24,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
 import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
-import { useLayout } from '../stores/layout';
+import { useLayout, type LayoutState } from '../stores/layout';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
@@ -96,8 +96,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
 
 // The side tab under drag that may join `group`: one of the scope's tabs in the other group (a strip never takes its own
 // group's tab; reordering inside a strip is nobody's), read from the drag state, since a `dragover` cannot read the payload.
-function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName): string | null {
-  const state = useLayout.getState();
+function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName, state: LayoutState = useLayout.getState()): string | null {
   const dragging = state.dragging;
   if (dragging?.source !== 'panel') return null;
   const from = groupOf(sideGroups(state, appSessionId), dragging.tabId);
@@ -111,8 +110,12 @@ function joinGroup(appSessionId: AppSessionId | null, tabId: string, group: Side
   if (groupOf(sideGroups(useLayout.getState(), appSessionId), tabId) === group) keep(tabId);
 }
 
+// The highlight shows while a drag the strip would take is over it; it goes with that drag, by whichever path the drag
+// ends (a drop elsewhere, its source removed), and a later drag does not find it on.
 function useGroupDrop(appSessionId: AppSessionId | null, group: SideGroupName) {
   const [over, setOver] = useState(false);
+  const live = useLayout((state) => draggedInto(appSessionId, group, state) !== null);
+  if (over && !live) setOver(false);
   const accept = (event: DragEvent) => {
     if (draggedInto(appSessionId, group) === null) return false;
     event.preventDefault();
@@ -134,7 +137,7 @@ function useGroupDrop(appSessionId: AppSessionId | null, group: SideGroupName) {
       joinGroup(appSessionId, tabId, group);
     },
   };
-  return { over, handlers };
+  return { over: over && live, handlers };
 }
 
 // The lower part of a column with one group, a target while one of its tabs drags and the group has another to keep;

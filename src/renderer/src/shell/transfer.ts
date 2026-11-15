@@ -384,6 +384,22 @@ export function moveFileToSide(mainTabId: string): boolean {
 
 // The viewer holds the key of a file beside the chat across a move's step (Decision 20b): neither the prune of the view
 // that goes nor the cap takes its entry before the view that comes has mounted.
+// Reopen closed tab on a file beside the chat (Decision 18; M4's fix wave): the main tab comes back under the session of
+// the side tab it replaces, as an open takes the session of that open, so it shows the viewer's entry as it was shown
+// beside that chat (nothing of the viewer's state is handed across entries). Of several, the one the entry was last
+// shown under. Null: no side tab holds the file.
+export function sideViewOf(key: string): { appSessionId: AppSessionId; line: number | null } | null {
+  const found: { appSessionId: AppSessionId; line: number | null }[] = [];
+  for (const own of layout().panelBySession.values()) {
+    for (const ref of own.tabs) {
+      const side = sideFileOf(ref.id);
+      if (side?.key === key) found.push({ appSessionId: side.appSessionId, line: side.held.line });
+    }
+  }
+  const shown = useViewer.getState().entries.get(key)?.appSessionId;
+  return found.find((side) => side.appSessionId === shown) ?? found[0] ?? null;
+}
+
 export function holdSideViews(key: string): void {
   if (sideFileKeys(layout()).has(key)) useViewer.getState().holdKey(key);
 }
