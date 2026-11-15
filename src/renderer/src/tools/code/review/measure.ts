@@ -1,7 +1,9 @@
-// The one seam through which the stack reads the page's layout (UX wave U5b, M3; the execution document's §F and M4's
-// "Measures come through one seam the tests replace"): happy-dom lays nothing out, so a test replaces `width` and the
-// stack's decisions (the header's narrow form, Split's room, a rename's fit, the toolbar's lines) follow the widths it
-// gives. A width of 0 is a page not laid out yet, and every decision then takes its wide form.
+// The one seam through which the stack reads the page's layout (UX wave U5b, M3 and M4; the execution document's §F and
+// M4's "Measures come through one seam the tests replace"): happy-dom lays nothing out, so a test replaces these and the
+// stack's decisions follow the measures it gives: from the widths, the header's narrow form, Split's room, a rename's fit
+// and the toolbar's lines (a width of 0 is a page not laid out yet, and every decision then takes its wide form); from
+// the heights and offsets, what each section weighs, the band and the place (M4). The scroller's own `scrollTop`,
+// `scrollHeight` and `clientHeight` are read off the element.
 export const reviewLayout = {
   width(element: Element): number {
     return element.getBoundingClientRect().width;
@@ -13,6 +15,14 @@ export const reviewLayout = {
     const style = getComputedStyle(element);
     const inset = [style.paddingLeft, style.paddingRight, style.borderLeftWidth, style.borderRightWidth].reduce((sum, value) => sum + (Number.parseFloat(value) || 0), 0);
     return Math.max(0, box - inset);
+  },
+  // An element's height as drawn (a section's header, a drawn body, a diff row).
+  height(element: Element): number {
+    return element.getBoundingClientRect().height;
+  },
+  // How far below the top of `container` an element's top is drawn (a diff row inside its body).
+  offsetWithin(element: Element, container: Element): number {
+    return element.getBoundingClientRect().top - container.getBoundingClientRect().top;
   },
 };
 

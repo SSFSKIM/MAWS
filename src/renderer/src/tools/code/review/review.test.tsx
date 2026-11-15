@@ -990,7 +990,7 @@ describe('review tool', () => {
     expect([marked.checked, marked.title || marked.closest('label')?.title]).toEqual([true, 'Viewed']);
   });
 
-  it('counts hunks across the files drawn; ↑ and ↓ move through them; Open file ↗ opens the counter’s hunk in its file, else the file’s first', async () => {
+  it('counts hunks across the files, folded or not; ↑ and ↓ move through them; Open file ↗ opens the counter’s hunk in its file, else the file’s first', async () => {
     main().state.status = statusOf({ dirty: true, files: DIRTY.files.slice(0, 2) });
     render(<TestHost />);
     openReview();
@@ -1010,7 +1010,7 @@ describe('review tool', () => {
     fireEvent.click(inSection('src/staged.ts', '[data-open-file]')!);
     expect(fileTabs()).toContainEqual(expect.objectContaining({ path: '/repo/src/staged.ts', line: 1 }));
     fold('src/app.ts');
-    expect(hunkLabel()).toBe('Showing hunk 1 of 1'); // the files drawn: a folded file's hunks are M4's to reach
+    expect(hunkLabel()).toBe('Showing hunk 3 of 3'); // a folded file's hunks are counted too (M4): a jump unfolds it
   });
 
   it('keeps a hunk it jumped to when the hunk cannot reach the top of the scroller; scrolling by hand moves the count', async () => {
