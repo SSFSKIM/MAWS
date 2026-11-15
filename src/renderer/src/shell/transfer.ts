@@ -186,9 +186,11 @@ export const useTransferRefusal = (request: TransferRequest | null): string | nu
 export const usePanelRecord = (panelTabId: string): string | null => useSyncExternalStore(subscribeTransfer, () => panelRecordOf(panelTabId));
 
 // The panel tabs that move to main: the Artifacts tool's (Decision Log 17) and, UX wave U6b-1, a Files tab that holds a
-// file; no other tool has a main tab kind.
-export const panelTabMoves = (tab: PanelTabRef): boolean =>
-  tab.toolId === ARTIFACTS_TOOL_ID || (tab.toolId === FILES_TOOL_ID && paramsHoldFile(layout().panelParams[tab.id]));
+// file; no other tool has a main tab kind. A render passes the tab's params as it subscribed to them (the Mac run's first
+// failure: under the React Compiler a read of the store here is memoized on the tab, which a file given to a tree-only
+// tab leaves as it was).
+export const panelTabMoves = (tab: PanelTabRef, params: unknown = layout().panelParams[tab.id]): boolean =>
+  tab.toolId === ARTIFACTS_TOOL_ID || (tab.toolId === FILES_TOOL_ID && paramsHoldFile(params));
 
 // ---- the moves -----------------------------------------------------------------------------------------------------------
 
@@ -331,7 +333,7 @@ export function moveFocusedArtifactToPanel(): void {
 export function moveShownRecordToTab(): void {
   const shown = surfaceSession(layout());
   const selected = shown === null ? layout().panelActiveNoSession : (layout().panelBySession.get(shown)?.activeTabId ?? null);
-  const tabs = layout().effectivePanelTabs(shown).filter(panelTabMoves);
+  const tabs = layout().effectivePanelTabs(shown).filter((tab) => panelTabMoves(tab));
   const tab = tabs.find((t) => t.id === selected) ?? tabs[0];
   const refusal = tab ? transferRefusal({ to: 'tab', panelTabId: tab.id }) : TRANSFER_COPY.noRecord;
   if (refusal !== null || !tab) return refused(refusal ?? TRANSFER_COPY.noRecord);
