@@ -144,7 +144,7 @@ export const PLACEMENT_TABLE: Readonly<Record<PlacementCase, Placement['kind']>>
 // The surface's scope as the predicate reads it: `reading` while its list is not read yet, `none` while it cannot be read.
 export interface ScopeLines {
   state: 'reading' | 'none' | 'ready';
-  files: readonly { path: string; absolute: string; blocks: readonly (readonly string[])[]; state: SectionState }[]; // `path`, the stack's identity
+  files: readonly { path: string; absolute: string | null; blocks: readonly (readonly string[])[]; state: SectionState }[]; // `path`, the stack's identity
 }
 
 // The sentence over each kind of comment the surface cannot place (the table's last column).
@@ -195,9 +195,13 @@ export function reviewLineAnchor(path: string, line: number, side: LineSide): Fi
   return side === 'old' ? { ...anchor, side: 'old' } : anchor;
 }
 
-/** The absolute path a comment on a file of the stack names: a git scope's file joined to the repository's root. */
-export function absolutePathOf(file: Pick<ReviewFile, 'path'>, repoRoot: string): string {
-  return file.path.startsWith('/') ? file.path : `${repoRoot.replace(/\/+$/, '')}/${file.path}`;
+/**
+ * The absolute path a comment on a file of the stack names: an absolute identity as it is (Last turn's, which needs no
+ * repository), a git scope's file joined to the repository's root; null for a relative one while the root is not known.
+ */
+export function absolutePathOf(file: Pick<ReviewFile, 'path'>, repoRoot: string | null): string | null {
+  if (file.path.startsWith('/')) return file.path;
+  return repoRoot === null ? null : `${repoRoot.replace(/\/+$/, '')}/${file.path}`;
 }
 
 /**

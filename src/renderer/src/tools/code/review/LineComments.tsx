@@ -31,6 +31,7 @@ export interface LineCommentsValue {
   card: (LinePlace & { path: string; serial: number }) | null; // where this surface's open card stands (its widget row), and which card it is
   waiting: { path: string; serial: number } | null; // the open card's file while its place waits on the file's own read (the stack unfolds it)
   rowsOf(path: string): readonly PlacedComment[]; // every other comment of the file, under its line
+  addable(path: string): boolean; // whether a comment on the file can be made: its add button is drawn only then
   add(path: string, block: number, side: LineSide, line: number): void; // the add button on a line
   setRow(element: HTMLElement | null): void; // the row the card is drawn in, handed to the host
 }
@@ -55,7 +56,8 @@ export interface UnplacedComment {
  * line when the card is this surface's and its comment is placed (`card`), every other placed comment under its line
  * (`rows`), the comments it cannot place, oldest first, the open card's among them (`unplaced`; their place is the row
  * under the toolbar), the file the open card holds still (`holdPath`), and the opener the add button calls. `sections`
- * are the stack's while `state` is `ready`; `repoRoot` null there (the status not read yet) places nothing.
+ * are the stack's while `state` is `ready`. A file's absolute identity needs no `repoRoot` (Last turn is listed before Git
+ * answers, and outside Git); a relative one is placed and commented on only once the root is known.
  */
 export function useLineComments(input: { appSessionId: AppSessionId; hostId: string; repoRoot: string | null; state: ScopeLines['state']; sections: readonly StackSection[] }) {
   const { appSessionId, hostId, repoRoot, state, sections } = input;
@@ -71,9 +73,9 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     let card: (LinePlace & { path: string; serial: number }) | null = null;
     let holdPath: string | null = null;
     let waiting: { path: string; serial: number } | null = null;
-    if (pass === null || (state === 'ready' && repoRoot === null)) return { rows, unplaced, card, holdPath, waiting };
+    if (pass === null) return { rows, unplaced, card, holdPath, waiting };
     const lines: ScopeLines =
-      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot!), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
+      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
     // M9: a commit's scope draws its commit's comments, every other scope those with none
     const comments = pass.comments.filter(isFileLine).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
@@ -88,19 +90,24 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     return { rows, unplaced, card, holdPath, waiting };
   }, [repoRoot, state, pass, sections, ours, serial]);
 
+  const addable = useCallback((path: string) => absolutePathOf({ path }, repoRoot) !== null, [repoRoot]);
   const add = useCallback(
     (path: string, block: number, side: LineSide, line: number) => {
       const section = sections.find((each) => each.file.path === path);
-      if (!section || repoRoot === null) return;
+      const absolute = section ? absolutePathOf(section.file, repoRoot) : null;
+      if (!section || absolute === null) return;
       const quote = lineText(section.blocks[block] ?? [], side, line);
-      openCommentComposer(reviewLineAnchor(absolutePathOf(section.file, repoRoot), line, side), { appSessionId, placement: { kind: 'card', host: 'review', hostId }, destination: 'main', ...(quote !== null && { quote }) });
+      // A full pass adds nothing and opens the card on its newest comment, which keeps the block it was made in: only a
+      // comment this add made takes the clicked block.
+      const before = new Set(useCommentCard.getState().passes.get(key)?.comments.map((comment) => comment.id));
+      openCommentComposer(reviewLineAnchor(absolute, line, side), { appSessionId, placement: { kind: 'card', host: 'review', hostId }, destination: 'main', ...(quote !== null && { quote }) });
       const opened = useCommentCard.getState().open;
-      if (opened?.phase.kind === 'composing') madeIn.set(opened.phase.comment, block);
+      if (opened?.phase.kind === 'composing' && !before.has(opened.phase.comment)) madeIn.set(opened.phase.comment, block);
     },
-    [sections, repoRoot, appSessionId, hostId],
+    [sections, repoRoot, appSessionId, hostId, key],
   );
 
-  return { key, card: placed.card, waiting: placed.waiting, unplaced: placed.unplaced, opened: ours, holdPath: placed.holdPath, rows: placed.rows, add };
+  return { key, card: placed.card, waiting: placed.waiting, unplaced: placed.unplaced, opened: ours, holdPath: placed.holdPath, rows: placed.rows, addable, add };
 }
 
 /**

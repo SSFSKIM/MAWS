@@ -251,8 +251,8 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, cla
     },
     [keyboardToCard],
   );
-  const { rows, card, waiting, add } = comments;
-  const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, waiting, rowsOf: (path) => rowsIn(rows, path), add, setRow }), [comments.key, hostId, card, waiting, rows, add, setRow]);
+  const { rows, card, waiting, addable, add } = comments;
+  const value = useMemo<LineCommentsValue>(() => ({ key: comments.key, hostId, card, waiting, rowsOf: (path) => rowsIn(rows, path), addable, add, setRow }), [comments.key, hostId, card, waiting, rows, addable, add, setRow]);
 
   return (
     <LineCommentsContext.Provider value={value}>

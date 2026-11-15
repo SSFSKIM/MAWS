@@ -106,7 +106,7 @@ export default function FileBody({ path, data, mode, wrap }: FileBodyProps) {
               diffViewHighlight={shiki !== null}
               registerHighlighter={shiki ?? undefined}
               {...(comments && {
-                diffViewAddWidget: true,
+                diffViewAddWidget: comments.addable(path),
                 onAddWidgetClick: blocks[index].onAdd,
                 renderWidgetLine: blocks[index].renderWidget,
                 onCreateUseWidgetHook: blocks[index].onWidgetHook,
