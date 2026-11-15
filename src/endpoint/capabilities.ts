@@ -68,4 +68,8 @@ export const ENDPOINT_CAPABILITIES = [
   // a device sends a machine none of them unless its `h2` listed it (SESSION_ACTS_CAPABILITY), since an older one has no
   // row for them and answers `not-offered`.
   'rl2.session-acts',
+  // The UX wave (U4b; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C): this endpoint
+  // offers `session.steer.sendNow`, a message waiting at the next step sent now; a device sends a machine the act only
+  // when its `h2` listed it (SEND_NOW_CAPABILITY), since an older one has no row for it and answers `not-offered`.
+  'rl2.send-now',
 ] as const;
