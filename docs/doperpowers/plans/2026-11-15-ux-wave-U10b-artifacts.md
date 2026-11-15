@@ -869,7 +869,7 @@ The last milestone of each pull request runs Concrete Steps 4 and its own lines 
     git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/ipc src/shared/artifacts/entity.ts src/endpoint apps/org-protocol src/shared/maws/instructions.ts
     # U10b-2 (M5): no migration, no entity field, no change to the endpoint's target rules or to the tab's state; exactly one offer added
     git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/artifacts/entity.ts src/endpoint/targets.ts src/shared/maws/instructions.ts
-    git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+  '"
+    git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+ *'"
     # U10b-3 (M7): the renderer alone, and not U1's pane or the transfer
     git diff origin/master...HEAD --stat -- src/shared src/main src/engine-host src/services src/endpoint src/renderer/src/session/SessionPane.tsx src/renderer/src/shell/transfer.ts
     # U10b-4 (M11): no migration, no entity field, no offer
@@ -1065,6 +1065,11 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation: an owner passes the endpoint's `artifact` target for an artifact that `library.entry` no longer lists, so `artifacts.get` and the undelete reach a deleted artifact without any change to `targets.ts`.
   Evidence: `test/endpoint/undelete-row.test.ts`, which pins both.
 
+- Observation: the fence does not end connections that are already open at the delete. It refuses the next content frame, and awareness frames pass.
+  Evidence: `content` in `src/engine-host/documents/service.ts`. Hence M5's replica, which parks read-only at the `deleted` announcement.
+- Observation: the desk's web app mounts the shared transcript, so the delete's row reaches it, and its bundle grows by the modules that Undo's logic imports. Nothing in them runs at import. The `TranscriptPane` chunk is about 7 kB larger.
+  Evidence: M5's `pnpm --filter desk-web build` against master `63c97b5c0`.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
@@ -1131,6 +1136,27 @@ M4's executor, 2026-11-15 (U10b-2, branch `ux-wave/U10b-2`), on means the docume
 - `SUGGESTION_SUFFIX`, `suggestionKey` and `mainOf` move to `src/engine-host/documents/doc-keys.ts`, which `service.ts` re-exports, so `storage.ts` reads the document pair without a circular import.
 - Two pins outside M4's touch list gained one row each for the new last tool: `src/engine-host/session-maws.test.ts` and `src/engine-host/tool-server/documents-wired.test.ts`. Neither is another child's file.
 - The minors are commits of their own: `WIRE_MINOR` 49 is `708497934` (the number, its note, and the manifest and fingerprint as `pnpm wire:manifest` wrote them on the VM). `RL2_PROTOCOL.minor` 15 is `8477361e4`. Both are provisional until the chain merge.
+
+The architect's word of 2026-11-15 (UTC) on M4 and M5, folded by the controller.
+
+- M4's five decisions are accepted as recorded: the fence also refuses the host's own writes; the fence is the `deletedAt` row, read through the batch's connection; `why: 'designSystemInUse'` stays in the agent's refusal JSON; the mark is written for a session's copy and import; `deleted.by` is the calling session.
+- Added to M5: the cost of the fence and of the mark's upkeep is pinned by counts, not by time (`agent-draft-cost.test.ts`).
+- Added to every milestone's proof (from 2026-11-15): when a changed file is imported by another workspace package (`apps/desk-web` imports the transcript's model and view), that package's typecheck, build and test project run as the static gate runs them. The desk's web app is outside the wave: it draws as it did, and an edit there comes to the coordinator first.
+- The three differences between the drawn page 3 and the document (frames 4 and 5 showed the agent's sentence; frame 6 showed no control before the library's read; the folder has no frame of the editor's notice): the document's words govern, as built.
+- The Acceptance line that counts the offers added used `grep -c "^+  '"`. That pattern matches no line, because the table's entries are indented four spaces. It is corrected to `grep -c "^+ *'"`, which counts 1 on the built branch.
+
+M5's executor, 2026-11-15 (U10b-2), on means the document leaves open. Folded by the controller.
+
+- A test-only statement seam: `Storage.onStatement`, called at the head of the private `sql()`, null in production. The counts it pins, for one appended content row and for one incoming frame on an agent's draft, are one fence read, one mark read, one newest-sequence read and one mark write. With no mark, the newest-sequence read and the mark write are not run. `EXPLAIN QUERY PLAN` shows each read as a keyed `SEARCH`, never a `SCAN`.
+- Undo's shared logic is in a new `src/renderer/src/library/undo-delete.ts`, which the transcript row and the editor's notice both use. The row mounts Undo and Open only when the host registers `undeleteArtifact`. The desk's web app does not register it, so there the row is the icon and its heading alone ("Deleting <title>…", "Deleted <title>", "Could not delete <title>: <reason>"), with no control and no library read.
+- The notice's disabled sentence is built per machine in `undo-delete.ts`, through `disabledWords`, with the standing taken from the machines store and the link's phase. `lane-b/remote-standing.ts` is keyed by session, so it is not edited.
+- A failed Undo on another machine shows the sentence main words for it. A failed Undo here is wrapped in `ARTIFACT.notRestored`.
+- `src/renderer/src/artifacts/host.ts` is edited, outside M5's touch list (no child owns it), with a new `artifacts/deleted-replicas.ts` beside it. Without the edit the editor stays writable after an agent's delete. The fence refuses only the next frame, and main refuses the reopen as `notFound`, so the replica fails for good. With the edit, at the artifact's `deleted` announcement, or at a refused reopen when the delete is an agent's undoable one, the replica parks read-only (`DocumentState.readOnly`) and counts what is unacknowledged. At `created` it reconnects. This one change is how every kind takes no edit under the notice.
+- Every kind's body already reads `DocumentState.readOnly`: document and dashboard (`setEditable(false)`), presentation, design and design system. The html and file viewers take no edits. No kind lacked a state that takes no edit, so no body was made inert. That a read-only body still scrolls was read in the code, not run.
+- `RecordView.tsx` is not edited, because it renders `ArtifactView`, so the notice reaches the side column through `ArtifactTab`. `serialize.ts` is not edited, because it already copies `artifactHeading`. `e2e/deliverables.spec.ts` is not edited, because its replay asserts headings M5 leaves as they were.
+- With no editor held, the notice and Undo stand alone under the title, and the editor mounts once the artifact is restored.
+- The library scene cannot place a keystroke between the delete's commit and the window's word of it. So "an edit typed just before the notice is saved after Undo" is held by unit cases (`artifacts/host.test.ts`, M4's fence cases), and the scene asserts that an edit after the restore is the store's.
+- "(deleted draft, both ways)" skips only when the peer's own `src/engine-host/documents/storage.ts` holds `agentDraft`. Neither older build does, so it runs against both. It asserts the peer's `artifacts.status` with `toMatchObject({ status: 'ok' })`.
 
 ## Outcomes & Retrospective
 
