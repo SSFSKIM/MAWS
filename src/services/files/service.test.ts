@@ -91,14 +91,23 @@ function identityAt(path: string): string {
   return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 }
 // Returns once the file system's clock has moved past `path`'s change time, so a write made now gives the file another
-// one: Linux stamps a change from a coarse clock, and two changes inside one of its ticks carry the same time.
+// one: Linux stamps a change from a coarse clock, and two changes inside one of its ticks carry the same time. Bounded,
+// since the loop is synchronous and the runner cannot interrupt it: a clock that does not move fails the case, with why.
+const CLOCK_TRIES = 100_000;
+const CLOCK_PATIENCE_MS = 5000;
 function pastChangeTime(path: string) {
   const before = statSync(path, { bigint: true }).ctimeNs;
   const probe = `${path}.tick`;
-  do {
-    appendFileSync(probe, 'x');
-  } while (statSync(probe, { bigint: true }).ctimeNs <= before);
-  unlinkSync(probe);
+  const deadline = Date.now() + CLOCK_PATIENCE_MS;
+  try {
+    for (let tries = 0; tries < CLOCK_TRIES && Date.now() < deadline; tries++) {
+      writeFileSync(probe, String(tries % 2)); // a write of one byte: each one stamps the probe's change time again
+      if (statSync(probe, { bigint: true }).ctimeNs > before) return;
+    }
+  } finally {
+    rmSync(probe, { force: true });
+  }
+  throw new Error(`the premise is not met: the file system's change time did not move past ${path}'s within ${CLOCK_TRIES} writes or ${CLOCK_PATIENCE_MS} ms`);
 }
 // The bytes a base64 answer carries
 const bytesOf = (answer: { encoding: string; content: string }) => Buffer.from(answer.content, answer.encoding as BufferEncoding);
@@ -1147,12 +1156,16 @@ describe('files service raw read', () => {
   });
 
   it('a raw read whose file changed while it was read is refused', async () => {
-    write(inRoot('page.bin'), Buffer.alloc(64, 0x61));
-    points['after-read'] = (path) => {
-      pastChangeTime(path);
-      writeFileSync(path, Buffer.alloc(64, 0x62)); // in place: the descriptor's file, the same size
-    };
-    await expect(service().read({ appSessionId: A, path: inRoot('page.bin'), length: 32, raw: true })).rejects.toThrow(new Error(`changed while reading: ${inRoot('page.bin')}`));
+    // and so is one that also asks the hash, whose bytes come from one read of the whole file
+    for (const hash of [false, true]) {
+      write(inRoot('page.bin'), Buffer.alloc(64, 0x61));
+      points['after-read'] = (path) => {
+        pastChangeTime(path);
+        writeFileSync(path, Buffer.alloc(64, 0x62)); // in place: the descriptor's file, the same size
+      };
+      await expect(service().read({ appSessionId: A, path: inRoot('page.bin'), length: 32, raw: true, hash }), `hash ${hash}`).rejects.toThrow(new Error(`changed while reading: ${inRoot('page.bin')}`));
+      expect(points['after-read'], `hash ${hash}`).toBeUndefined(); // the point was reached
+    }
     // the point is a raw read's alone: a plain read never reaches it
     points['after-read'] = () => {
       throw new Error('a plain read reached after-read');
