@@ -8,6 +8,7 @@ import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b: a join of envelopes alone
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -439,9 +440,12 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   // an async ask's answer steer whose capsule this state answered is no bubble (askAnsweredHere; the reducer recorded
   // it when the steer arrived, so before this turn derives)
+  // UX wave U4b (the joined answer's task review): a message the engine joined from several envelopes alone, every one
+  // for an ask answered here, is no bubble either; one with an envelope whose ask is not answered here keeps its bubble
   const answersHeldAsk = (event: Event<'user.message'>): boolean => {
-    const askId = state === null ? null : askSteerOf(event.content);
-    return askId !== null && askAnsweredHere(state!, askId);
+    if (state === null) return false;
+    const { envelopes, rest } = readAnswerEnvelopes(messageText(event.content));
+    return envelopes.length > 0 && rest === '' && envelopes.every((envelope) => askAnsweredHere(state, envelope.askId));
   };
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
