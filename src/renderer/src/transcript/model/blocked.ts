@@ -64,6 +64,14 @@ export function lineNamesWhole(drawn: Cell, call: BlockedCall): boolean {
   return call.subject.length <= LINE_SUBJECT_MAX && !/[\n\r`]/.test(call.subject);
 }
 
+/**
+ * Whether the row drawn for a call shows that auto mode blocked it: a call's cell in the denied state of that kind, whose
+ * line says the block and the classifier's reason where it gave one (Design 1). The one test by which the engine's
+ * advisory for that call is left out (Decision Log 46): a row of any other kind (an Agent call's, which keeps neither
+ * status nor reason) keeps its advisory.
+ */
+export const showsAutoModeBlock = (cell: Cell): boolean => cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';
+
 /** A call auto mode blocked that has a name, as the model drew it (a mod's draw-time status is not one). */
 export const isBlockedCell = (cell: Cell): cell is Cell & { blocked: BlockedCall } =>
   cell.blocked !== undefined && cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';

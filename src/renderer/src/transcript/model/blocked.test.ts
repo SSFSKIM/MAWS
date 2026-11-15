@@ -342,6 +342,21 @@ describe('a classifier block’s advisory row, and every other advisory (Design 
     expect(notices(b), 'once the turn ends').toEqual([]);
   });
 
+  // Decision Log 46: one predicate over the row drawn for the call decides; a row kind that does not show the block keeps it
+  it('a blocked Agent call keeps its advisory: its row shows neither the denied state nor the reason; a blocked Write’s cell, which shows both, leaves it out', () => {
+    const blockedCall = (name: string, input: Record<string, unknown>) => {
+      const b = builder();
+      b.turn('u1');
+      b.toolUse('t1', name, input);
+      advisory(b, 't1');
+      b.result('t1', engineText('Deletes files outside the working folder'), { isError: true, denial: 'automode-blocked' });
+      b.end(['u1']);
+      return notices(b);
+    };
+    expect(blockedCall('Agent', { description: 'Clean the build folder', prompt: 'Remove the build folder.', subagent_type: 'general-purpose' }), 'an Agent call').toEqual([engineText('Deletes files outside the working folder')]);
+    expect(blockedCall('Write', { file_path: '/etc/hosts', content: 'x' }), 'a Write').toEqual([]);
+  });
+
   it('a reason that is not a stand-in is shown on the row', () => {
     const b = builder();
     b.turn('u1');

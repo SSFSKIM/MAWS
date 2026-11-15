@@ -14,6 +14,7 @@ import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
 import { HISTORICAL_BROWSER_TOOL_USE, MAWS_TOOL_USE } from './classify'; // E2, E4c
 import { isAskModTool } from './classify'; // DC9
 import { askModAnswers } from './ask-mod'; // DC9
+import { showsAutoModeBlock } from './blocked'; // UX wave U1c (Decision Log 46)
 import { cellOf, editCounts, engineRefusalOf, filePathOf, movedToBackground, resultJson, resultText, toolErrorText, turnContextOf, type ToolRecord, type TurnContext } from './cells';
 import { firstJsonBlock, jsonObjectOf } from './cells'; // E2, E4c
 import { artifactTitlesOf, type ArtifactTitles } from './cells'; // UX wave U2
@@ -892,6 +893,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const resolved: (WorkItem | Extract<Item, { kind: 'steer' }> | { kind: 'notice'; row: RowOf<'error'> })[] = [];
   // UX wave U3 (decision 5): the rows of the arrivals that came before any of the turn's work, by class
   const heads = new Map<(typeof resolved)[number], Arrival['class']>();
+  const advisories = new Map<(typeof resolved)[number], ToolUseId>(); // UX wave U1c: each advisory's entry, by the call it names
   for (const item of items) {
     const from = resolved.length;
     const arrivalClass = arrivals.get(item);
@@ -929,8 +931,9 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       case 'later': // E7
         resolved.push({ kind: 'row', row: item.row() });
         break;
-      case 'advisory': // UX wave U1c (Design 1, ruling F6): a classifier block's call row carries what its advisory says
-        if (results.get(item.toolUseId)?.denial !== 'automode-blocked') resolved.push({ kind: 'row', row: item.row });
+      case 'advisory': // UX wave U1c (Design 1, ruling F6; Decision Log 46): left out below where its call's drawn row shows the block
+        resolved.push({ kind: 'row', row: item.row });
+        advisories.set(resolved[resolved.length - 1]!, item.toolUseId);
         break;
       case 'artifact': // E2
         resolved.push({ kind: 'row', row: artifactRow(artifacts.get(item.toolUseId)!, turn.id, context) });
@@ -958,6 +961,15 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         resolved.push(item);
     }
     if (arrivalClass !== undefined && atHead.has(item)) for (const entry of resolved.slice(from)) heads.set(entry, arrivalClass);
+  }
+  // UX wave U1c (Decision Log 46): an advisory is left out only where the row drawn for its call shows the block; one
+  // predicate over that row (showsAutoModeBlock) decides, so a row kind that does not carry the block keeps its advisory
+  if (advisories.size > 0) {
+    const showsBlock = new Set(resolved.flatMap((entry) => (entry.kind === 'cell' && entry.cell.toolUseId !== null && showsAutoModeBlock(entry.cell) ? [entry.cell.toolUseId] : [])));
+    for (let i = resolved.length - 1; i >= 0; i -= 1) {
+      const call = advisories.get(resolved[i]!);
+      if (call !== undefined && showsBlock.has(call)) resolved.splice(i, 1);
+    }
   }
   // A task's end with an outcome and a scheduled fire that came before the turn's work stand above its divider, where a
   // prompt stands (above the prompt, in a turn the person's prompt opened); every other arrival there is the first row
