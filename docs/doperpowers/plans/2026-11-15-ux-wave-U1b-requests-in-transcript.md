@@ -741,6 +741,14 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   Evidence: `src/engine-host/session.ts` (`holdAll` before the interrupt); `queue.ts` near 366; the M7 Stop addition's report.
 - Observation (M7, 2026-11-15): a probe recording's handshake cannot be replayed through the host as recorded: the host holds `initialize` and compares it deep-equal, so a scene over a probe's journal stands C3's prelude in for it (as `sendNowJournal` does); the engine's `mcp_message` rows do not depend on it.
   Evidence: `e2e/support/c7-replay.ts` (`stopPendingJournal`, `askWaitJournal`).
+- Observation (M7b, 2026-11-15): U2b's document has ruled since this document's row on it (R13, its
+  decision 12): the `answer` notice folds in the mirror where its question's row carries the receipt. Its rule matches
+  the two by the notice's `toolUseId` (`noticeClass` in `owner/view/mirror.ts` on `origin/ux-wave/U2b`), while the
+  derivation on both branches gives every `answer` notice `toolUseId: null` (`noticeOf`, `case 'answer'`, in
+  `transcript/model/derive.ts`), and U2b's R13 test hand-builds its notice with `toolUseId: 'toolu_q'`
+  (`owner/view/mirror.test.ts`:177-200). So the twice-stated answer remains on the merged tree until one side gives the
+  notice its call's id (`arrival.call` names it). The architect ruled it the to-human landing's own defect, sent to that landing as a fix wave; U1b does not build it (2026-11-15).
+  Evidence: the files named; the tracker row narrowed in `eebee3d03`.
 
 ## Decision Log
 
@@ -859,6 +867,22 @@ At landing the architect updates the register's rows and closes ticket 586 throu
 - Decision: an early part of the chain merge, named by the architect before M7b: `origin/ux-wave/U6b` at `b730f60f5` (the file-beside-the-chat landing on the document-page landing on master `ef1d659ad`) is merged as a commit of its own (`e8ddff845`, from `a4b315abac`; clean; 237 files, +16023 / −1940). Files both sides changed: `e2e/c12-prerun.spec.ts`, `e2e/cross-build.spec.ts`, `e2e/panel.spec.ts`, `e2e/remote.spec.ts`, `e2e/side.spec.ts`, `panel/summary/Summary.test.tsx`, `panel/SurfaceRow.tsx`, `request-card/RequestCard.test.tsx`, `transcript/view/TranscriptSlot.test.tsx`, each in separate hunks or tests. Read in the merged tree: wire 3.48 (`src/shared/ipc/wire-manifest.json`), link 1.14 (`apps/org-protocol/src/channel.ts` `RL2_PROTOCOL`); this landing changes neither. Read against the merged tree: on it a Files tree click opens the file as a tab in the side column, so acceptance 3's scene ("an ask beside an open file", `e2e/maws-tools.spec.ts`) stands on its premise; one commit after the merge (`d50ca424b`) makes it prove the premise (the viewer in the side column, the file's tab and the session's main tab selected before the ask and after, the snapshot strip holding the file's tab, the tree's root expanded before the row's click). No other U1b scene, no layout guess (the end card's buttons, the far row, the floating card's minimum) and no scene on a surface the other side changed differs; `sessionsInFront()` still counts a session exactly when its transcript is visible, but for the narrow window's side sheet (tracker).
   Rationale: the M7 record's scenes are written on the tree that ships, and the final chain merge stays small.
   Date/Author: 2026-11-15, the controller (the architect's ruling of 2026-11-15).
+
+- Decision: M7b, the record and the whole checks (`eebee3d03`). The two rulings reversed carry the child's sentences
+  verbatim, dated by the date after "Amended" ("Amended 2026-11-15 (the owner's answer of 2026-11-12): …"), each
+  appended where its ruling stands in the form those documents use: the end of charter §13's X4 bullet (the words
+  "placed docked at the composer" kept), a paragraph after C7's Placements paragraph, a paragraph after E1's M4b
+  "Decisions here". The tracker: the row on the docked frame's hand-over mark removed (decision 11; the file removes a
+  closed row); the row on the `answer` notice narrowed, its transcript-view half closed and its to-human half kept open
+  with the reason (the notice carries no `toolUseId`, which U2b's R13 rule needs to fold it); four rows added: the
+  compact composer's toolbar wrap (U10's floating chat, ruling A4), `applyAskEvents`' unread return (M6),
+  `sessionsInFront()` under the narrow window's sheet (the sheet rule is UX2-L's, kept by U8b), and
+  `TranscriptSlot.test.tsx`'s hidden TypeError. The whole checks: typecheck, lint, the script tests, desk web's three
+  and the load-sensitive files alone passed; the whole suite: 54 failed tests in 16 files, each either a listed master failure (failing on master with the same counts) or a load timeout that passes alone (four of them not yet on build-common's list: `DocumentEditor.dom`, `screencast`, `endpoint/streams`, desk-hub `o15-tools`); none in a file U1b touches. Concrete Step 7 as written lists
+  the chain merge's thirteen files (U6b's) and U1b's `broker.test.ts`; over `b730f60f5..HEAD` it lists
+  `broker.test.ts` alone; nothing under `apps/`.
+  Rationale: the M7b executor's report (`task-7b-report.md`).
+  Date/Author: 2026-11-15 (UTC), M7b's executor; folded by the controller.
 
 ## Outcomes & Retrospective
 
