@@ -58,7 +58,7 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
   });
 
   // UX wave U6d: a path link takes the mention's element and look (its text in the monospace font, by its data-chip),
-  // its title its path, and the keyboard's Enter and Space; its click is today's openFile
+  // its title its path, and the keyboard's Enter and Space; its click is today's openFile, beside the chat (no ⌘: UX wave U6b-1)
   it('a path link is link text too: a focusable span with the role of a button, opened by Enter and Space', () => {
     const { actions } = renderWith('Open [x.ts](src/renderer/x.ts#L7).', live);
     const link = screen.getByRole('button', { name: 'x.ts' });
@@ -66,7 +66,7 @@ describe.each([false, true])('markdown links and images (live: %s)', (live) => {
     fireEvent.keyDown(link, { key: 'Enter' });
     fireEvent.keyDown(link, { key: ' ' });
     fireEvent.keyDown(link, { key: ' ', repeat: true });
-    expect(vi.mocked(actions.openFile).mock.calls).toEqual([['src/renderer/x.ts', 7, null], ['src/renderer/x.ts', 7, null]]);
+    expect(vi.mocked(actions.openFile).mock.calls).toEqual([['src/renderer/x.ts', 7, null, { main: false }], ['src/renderer/x.ts', 7, null, { main: false }]]);
   });
 
   it('an image that is not inline data is a chip naming its alt text and source, and loads nothing', () => {
