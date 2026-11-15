@@ -1767,9 +1767,12 @@ function withBashOutput(row: RowOf<'bash'>, output: Event<'user.message'>): RowO
 function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId | null): Row[] {
   const rows: Row[] = [];
   // UX wave U3b (Interfaces B): the file's routes place a command's output as a loose event after its command's turn; it
-  // stands under the bubble when it is the first row drawn there and that turn's last drawn row is a command's bubble
-  const placedAfter = after === null ? undefined : state.turns.get(after);
-  const underCommand = placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
+  // stands under the bubble when it is the first row drawn there and that turn's last drawn row is a command's bubble.
+  // Asked only for such an output, so a re-flatten reads no turn's events for the turns with no loose output after them.
+  const underCommand = (): boolean => {
+    const placedAfter = after === null ? undefined : state.turns.get(after);
+    return placedAfter !== undefined && turnCommandLine(placedAfter) !== null && lastDrawnIsBubble(state, placedAfter);
+  };
   let episode: { index: number; id: RowId } | null = null; // the open reconnect episode: its row updates in place until it ends
   const sideThreads = new Map<AppSessionId, RowOf<'side_thread'>>(); // E3
   for (const event of events) {
@@ -1789,7 +1792,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[], after: TurnId
           if (at >= 0) rows[at] = withBashOutput(rows[at] as RowOf<'bash'>, event);
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) {
           const row = localCommandRow(event, null);
-          if (row) rows.push(rows.length === 0 && underCommand ? row : { ...row, lone: true }); // UX wave U3b: on the drawn order
+          if (row) rows.push(rows.length === 0 && underCommand() ? row : { ...row, lone: true }); // UX wave U3b: on the drawn order
         }
         break;
       }
