@@ -25,7 +25,7 @@ How to see it working, on the wave's build: in a session whose agent changed sev
 - [x] (2026-11-15 UTC) M1 — What a line comment says, and what the card takes (`9635be8a1`..`34912e0b8`, fix `887eb7d31`..`0cef9efc8`; reviewed clean)
 - [x] (2026-11-15 UTC) M2 — The stack's model (`e84601eef`..`e96b8a8f9`, fix `2a271d5e1`..`8af6128fd`; reviewed clean)
 - [x] (2026-11-15 UTC) M3 — The stack drawn (`176e8ee92`..`4c02123a0`, fix `f9021073d`..`bb511afe8`; reviewed clean)
-- [ ] M4 — The band, the place and the hunk counter
+- [x] (2026-11-15 UTC) M4 — The band, the place and the hunk counter (`8e9c757e6`..`dcd368046`, fix `1da221687`..`a94f369cb`; reviewed clean). Before it, M3's fix 2 for the desk's web app (`5ef3ebfb7`..`1cb670da8`; reviewed clean)
 - [ ] M5 — Comments on lines
 - [ ] M6 — U5b-1's scenes, record and acceptance
 - [ ] U5b-1: the branch review, class 1a, the Mac runs, the owner's look at the stacked Review on a real change, the pull request (the architect).
