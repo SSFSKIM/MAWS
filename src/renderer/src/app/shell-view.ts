@@ -32,7 +32,7 @@ export interface CardColumn { session: AppSessionId | null; sessionTab: boolean;
 export const cardsSpeakOf = (sessions: Pick<SessionsState, 'records' | 'listed'>, session: AppSessionId | null): boolean =>
   session !== null && (sessions.records.has(session) || sessions.listed.get(session)?.lane === 'A');
 // The session the column speaks of: the focused pane's, else the other pane's of a split, so a focus move between a
-// session's pane and another pane neither places nor removes the column (#692: the press that moved focus also moved the
+// session's pane and another pane neither places nor removes the column (ticket 692: the press that moved focus also moved the
 // pane's header, and its release landed elsewhere). The focused pane's session wins while both show one.
 export const cardColumnSession = (state: Pick<LayoutState, 'main'>): AppSessionId | null => sessionsInView(state.main)[0] ?? null;
 type CardFacts = { known: boolean; opened: boolean; pageOpen: boolean };

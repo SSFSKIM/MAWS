@@ -8,7 +8,7 @@ import { A, B, resetPanelStores, sessionTab } from '../test-support/panel';
 import { cardColumnNow } from './shell-view';
 
 // A split's two panes, each showing one tab, focus on `focused`. A column placed or not is what pads the main area, so a
-// focus move inside a split must not change it while a session is in view (#692: the press that moved focus also moved the
+// focus move inside a split must not change it while a session is in view (ticket 692: the press that moved focus also moved the
 // pane's header out from under the pointer).
 const document: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
 const split = (left: TabRef, right: TabRef, focused: 0 | 1): Strip => ({ ...EMPTY_STRIP, panes: [{ tabs: [left], activeTabId: left.id }, { tabs: [right], activeTabId: right.id }], focusedPane: focused });
