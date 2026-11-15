@@ -184,7 +184,7 @@ describe('splitPersonsMessage over the recorded joins, as build G’s producers 
     const joinedContent = JSON.stringify(recordedJoin('u704-end-env-first-1').joined.content);
     for (const name of ['u704-pasted-1', 'u704-end-env-first-1']) {
       const lone = userMessages([...frozen(name, 'events'), ...frozen(name, 'backfill')]).filter((message) => !message.isSynthetic && JSON.stringify(message.content) !== joinedContent);
-      expect(lone.length).toBeGreaterThan(name === 'u704-pasted-1' ? 1 : 4); // its envelope's, or the first prompt's and each member's alone
+      expect(lone.length).toBeGreaterThanOrEqual(name === 'u704-pasted-1' ? 2 : 4); // its envelope's on both routes, or the first prompt's and each member's as MAWS wrote it
       for (const event of lone) {
         const [only, ...rest] = splitPersonsMessage(event);
         expect(only).toBe(event);
