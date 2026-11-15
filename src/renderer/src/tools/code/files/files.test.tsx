@@ -1,5 +1,7 @@
 // The Files tool (C8c execution document, M2): the tree's pure model, the listing store over a fake X2 client, and the
-// tool over C8a's host.
+// tool over C8a's host. UX wave U6b-1 (M2): a file beside the chat as an editor.
+import { isolateHistory } from '@codemirror/commands';
+import { EditorView } from '@codemirror/view';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -7,18 +9,22 @@ import type { FilesEntry } from '@shared/ipc/schema/files';
 import type { SessionRecord } from '@shared/graph/session';
 import { bareOf } from '@shared/machine/address';
 import { record } from '../../../../../../test/support/builders';
-import { at } from '../../../../../../test/support/machine';
+import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { instanceOf, panelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
-import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
-import { useViewer } from '../viewer/viewer-store';
+import { installDisk } from '../../../test-support/code-disk';
+import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
+import { registerEditor, sideFilesViewer } from '../editor/register';
+import { openFile, resetKeptOpens } from '../open-file';
+import { existingViewState, useViewer } from '../viewer/viewer-store';
 import { filesTool, type FilesState } from './FilesTool';
 import { useFiles, WATCH_GRACE_MS } from './store';
+import { connectSideFiles } from './tabs';
 import { dirname, expandTo, hidden, joinPath, roleOf, rootsFor, rowsOf, sameFile, type Listing } from './tree';
-import { currentSet } from '../../../stores/layout-model';
+import { activeTab, allTabs, currentSet } from '../../../stores/layout-model';
 import { useSetup } from '../../../sessions/store'; // E11
 import { FILES_COPY } from '../copy'; // E11
 
@@ -707,5 +713,119 @@ describe('files tool', () => {
     act(() => useLayout.getState().openSession(A));
     expect(await screen.findByText('src')).toBeTruthy(); // A's expansion kept
     expect(within(screen.getByRole('tree')).getAllByRole('treeitem')[0].getAttribute('aria-expanded')).toBe('true');
+  });
+});
+
+// ---- a file beside the chat as an editor (UX wave U6b-1, M2) -----------------------------------------------------------
+// The first edit keeps the preview tab (L1), so nothing replaces an unsaved file beside the chat; and a session that goes
+// leaves no unsaved file behind unasked (R5, sequence 6): the side tabs' one subscriber opens a main tab, not in front,
+// for each file that left them with unsaved edits or a save under way, before the viewer's prune runs.
+describe('a file beside the chat as an editor', () => {
+  const APP = '/r/app.ts';
+  const LIB = '/r/lib.ts';
+  const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
+  const offs: (() => void)[] = [];
+  let disk: ReturnType<typeof installDisk>;
+  beforeAll(() => import('../viewer/CodeView'));
+  beforeEach(() => {
+    resetPanelStores();
+    useLayout.setState({ main: mainShowing(B, A) }); // A in front, B's tab beside it: what comes to the front when A goes
+    resetKeptOpens();
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    disk = installDisk({ [APP]: 'const a = 1;\n', [LIB]: 'export const b = 2;\n' });
+    offs.push(registerPanelTool(filesTool), registerEditor(), connectSideFiles(sideFilesViewer), connectCodeEvents());
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    resetKeptOpens();
+  });
+
+  const sideTabs = (id: AppSessionId) => (panelOf(id)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  const paramsOf = (tabId: string) => useLayout.getState().panelParams[tabId];
+  const editor = () => {
+    const element = document.querySelector<HTMLElement>('[data-files-tab] .cm-editor');
+    return element ? EditorView.findFromDOM(element) : null;
+  };
+  const type = (text: string) => act(() => editor()!.dispatch({ changes: { from: 0, insert: text }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+  const entryOf = (path: string) => useViewer.getState().entries.get(KEY(path));
+  const documentOf = (path: string) => existingViewState(KEY(path))?.docOf?.();
+  const mainTab = (path: string) => allTabs(useLayout.getState().main).find((tab) => tab.id === KEY(path));
+
+  // `path` beside A's chat in the preview tab (or kept), shown and editable.
+  async function openBeside(path: string, options: { keep?: boolean } = {}) {
+    act(() => void openFile(A, path, null, options));
+    await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
+    await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(path));
+  }
+
+  it('the first edit keeps the preview tab, so the next single click opens a second tab and the edited file stands', async () => {
+    render(<TestHost />);
+    await openBeside(APP);
+    const [preview] = sideTabs(A);
+    expect(paramsOf(preview.id)).toEqual({ file: APP, line: null, preview: true });
+    act(() => {
+      editor()!.dispatch({ changes: { from: 0, insert: '// mine\n' }, userEvent: 'input.type' });
+      expect(paramsOf(preview.id)).toEqual({ file: APP, line: null }); // in the same step as the edit, before any render
+    });
+    await openBeside(LIB);
+    expect(sideTabs(A)).toHaveLength(2);
+    expect(paramsOf(preview.id)).toEqual({ file: APP, line: null });
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(documentOf(APP)).toBe('// mine\nconst a = 1;\n');
+  });
+
+  it.each([
+    ['not in view', true],
+    ['in view', false],
+  ])('a session that goes with its unsaved file %s leaves the file as a main tab, not in front, with its edit', async (_, other) => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    if (other) {
+      await openBeside(LIB); // another file in view: app.ts's view unmounts, its entry and document stay
+      expect(document.querySelectorAll('[data-files-tab]')).toHaveLength(1);
+    }
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${A}`);
+    act(() => useLayout.getState().dropSession(A));
+    expect(panelOf(A)).toBeUndefined();
+    expect(mainTab(APP)).toMatchObject({ kind: 'file', path: APP, appSessionId: A });
+    expect(activeTab(useLayout.getState().main)?.id).toBe(`session:${B}`);
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(documentOf(APP)).toBe('// mine\nconst a = 1;\n');
+    expect(mainTab(LIB)).toBeUndefined(); // a clean file goes with its session, as any side tab does
+    await act(() => new Promise((resolve) => setTimeout(resolve, 0))); // the unmounts' prunes
+    expect(entryOf(APP)?.dirty).toBe(true);
+    expect(entryOf(LIB)).toBeUndefined();
+  });
+
+  it('a session that goes while its file saves leaves the file as a main tab; the save lands there', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    const write = disk.hold('files.write');
+    const saving = useViewer.getState().save(KEY(APP));
+    await waitFor(() => expect(entryOf(APP)?.saving).toBe(true));
+    act(() => useLayout.getState().dropSession(A));
+    expect(mainTab(APP)).toBeDefined();
+    await act(async () => write.release());
+    expect(await saving).toBe('ok');
+    expect(disk.files[APP]).toBe('// mine\nconst a = 1;\n');
+    expect(entryOf(APP)).toMatchObject({ dirty: false, saving: false });
+  });
+
+  it('a file another session’s list still holds stays beside that chat, and no main tab is made', async () => {
+    render(<TestHost />);
+    await openBeside(APP, { keep: true });
+    type('// mine\n');
+    await waitFor(() => expect(entryOf(APP)?.dirty).toBe(true));
+    act(() => void openFile(B, APP, null, { keep: true }));
+    act(() => useLayout.getState().dropSession(A));
+    expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
+    expect(mainTab(APP)).toBeUndefined();
+    expect(entryOf(APP)?.dirty).toBe(true);
   });
 });

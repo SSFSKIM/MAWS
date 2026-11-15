@@ -12,6 +12,7 @@ import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../.
 import { tabOnScreen, useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
 import { useViewer } from '../viewer/viewer-store';
+import type { SideFilesViewer } from '../files/tabs';
 import { askClose } from './EditorDialogs';
 
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
@@ -40,6 +41,14 @@ function commentOnFocusedLine(): void {
   const tab = tabOnScreen(useLayout.getState());
   if (tab?.kind === 'file') commentOnCursorLine(tab.id);
 }
+
+// UX wave U6b-1 (M2), not yet built: the stubs the tests are written against.
+export function focusedFile(): string | null {
+  const tab = tabOnScreen(useLayout.getState());
+  return tab?.kind === 'file' ? tab.id : null;
+}
+export const closeGuardOf = (key: string): Promise<boolean> => guardFileClose({ id: key, kind: 'file', path: '', line: null, appSessionId: null, machine: '' as never, pinned: false });
+export const sideFilesViewer: SideFilesViewer = { prune: () => useViewer.getState().prune(), unsaved: () => false };
 
 // E11 F2b (plan 2.5): opening a session in this file tab's place keeps the tab while it holds unsaved changes or a save
 // is on its way, and says so; a clean file gives its place.

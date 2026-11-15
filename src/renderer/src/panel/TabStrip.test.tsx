@@ -5,7 +5,9 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
+import { useViewer, type ViewerEntry } from '../tools/code/viewer/viewer-store';
 import { A, probeTool, ref, resetPanelStores, type ProbeState } from '../test-support/panel';
 import type { PanelTool } from './tool';
 import { installResizeObserver } from '../test-support/resize';
@@ -221,5 +223,39 @@ describe('a strip too narrow for its tabs (decision 5)', () => {
     act(() => shownClose.focus()); // the tab in view never folds: its glyph keeps the keyboard
     narrowTo(150);
     expect(document.activeElement).toBe(shownClose);
+  });
+});
+
+// UX wave U6b-1 (M2): a file's side tab carries the unsaved mark a main file tab carries, read from the viewer's entry
+// under the file's key.
+describe('a file’s unsaved mark', () => {
+  afterEach(() => useViewer.getState().reset());
+
+  it('shows the dot and data-dirty on a side tab whose file has unsaved edits, and on no other tab', () => {
+    register(probeTool('files').tool, probeTool('review', { multiInstance: false }).tool);
+    const app = ref('files:aaaa0001');
+    const lib = ref('files:aaaa0002');
+    const review = ref('review:aaaa0003');
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: [app, lib, review], activeTabId: app.id }]]),
+      panelParams: { [app.id]: { file: '/r/app.ts', line: null }, [lib.id]: { file: '/r/lib.ts', line: null, preview: true } },
+      panelSurfaces: { version: 2, stacks: { [A]: [app.id] }, pinnedTools: [], contexts: {} },
+    });
+    const entries = (dirty: boolean) => new Map([
+      [`file:${TEST_MACHINE}:/r/app.ts`, { dirty } as ViewerEntry],
+      [`file:${TEST_MACHINE}:/r/lib.ts`, { dirty: false } as ViewerEntry],
+    ]);
+    useViewer.setState({ entries: entries(true) });
+    render(<Strip />);
+    const tabOf = (id: string) => document.querySelector(`[data-tab-id="${id}"]`) as HTMLElement;
+    expect(tabOf(app.id).getAttribute('data-dirty')).toBe('true');
+    expect(within(tabOf(app.id)).getByRole('img', { name: 'Unsaved changes' }).textContent).toBe('•');
+    for (const other of [lib.id, review.id]) {
+      expect(tabOf(other).hasAttribute('data-dirty')).toBe(false);
+      expect(within(tabOf(other)).queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
+    }
+    act(() => useViewer.setState({ entries: entries(false) })); // saved
+    expect(tabOf(app.id).hasAttribute('data-dirty')).toBe(false);
+    expect(within(tabOf(app.id)).queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
   });
 });

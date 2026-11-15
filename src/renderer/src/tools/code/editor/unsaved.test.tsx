@@ -10,12 +10,17 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
 import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
+import { registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { installDisk, type DiskFile } from '../../../test-support/code-disk';
+import { resetPanelStores, TestHost } from '../../../test-support/panel';
+import { filesTool } from '../files/FilesTool';
 import { useFiles } from '../files/store';
-import { openFile } from '../open-file';
+import { connectSideFiles } from '../files/tabs';
+import { openFile, resetKeptOpens } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
+import { sideFilesViewer } from './register';
 
 const A = at('app-a' as AppSessionId); // P5 O6 M2: the page's address; its file tabs name their machine
 const FILE = (path: string) => `file:${TEST_MACHINE}:${path}`;
@@ -178,5 +183,42 @@ describe('unsaved files for the quit guard', () => {
     await act(async () => write.release());
     expect(await first).toBe('ok');
     expect(disk.callsOf('files.write')).toHaveLength(1);
+  });
+});
+
+// UX wave U6b-1 (M2): the quit question reads the viewer's entries, not the tabs, so a file beside the chat is among them
+// with no change of its own; pinned here because the prune now decides what an entry outlives (Decision 20a).
+describe('a file beside the chat in the quit guard', () => {
+  const offs: (() => void)[] = [];
+  beforeAll(() => import('../viewer/CodeView'));
+  beforeEach(() => {
+    resetPanelStores();
+    resetKeptOpens();
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    resetKeptOpens();
+  });
+
+  it('is listed once while unsaved, also with its tab not in view, and Save all saves it', async () => {
+    const disk = installDisk({ [APP]: 'const a = 1;\n', [LIB]: 'export const b = 2;\n' });
+    offs.push(registerPanelTool(filesTool), connectSideFiles(sideFilesViewer), connectCodeEvents());
+    render(<TestHost />);
+    const editor = () => EditorView.findFromDOM(document.querySelector<HTMLElement>('[data-files-tab] .cm-editor')!)!;
+    act(() => void openFile(A, APP, null, { keep: true }));
+    await waitFor(() => expect(editor()?.state.facet(EditorView.editable)).toBe(true));
+    act(() => editor().dispatch({ changes: { from: 0, insert: '// app\n' }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+    const pushes = () => disk.callsOf('layout.unsavedFiles').map((input) => input.paths);
+    await waitFor(() => expect(pushes()).toEqual([[APP]]));
+    act(() => void openFile(A, LIB)); // another file in view beside the chat: app.ts's view unmounts, its entry stays
+    await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(LIB));
+    expect(pushes()).toEqual([[APP]]);
+    act(() => disk.emit('layout.saveAll', { requestId: 'r1' }));
+    await waitFor(() => expect(disk.callsOf('layout.saveAllDone')).toEqual([{ requestId: 'r1', failed: [] }]));
+    expect(disk.files[APP]).toBe('// app\nconst a = 1;\n');
+    expect(pushes()).toEqual([[APP], []]);
   });
 });

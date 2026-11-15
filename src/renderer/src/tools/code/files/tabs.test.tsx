@@ -18,6 +18,7 @@ import { allTabs, openTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds, resetPanelStores, TestHost } from '../../../test-support/panel';
+import { sideFilesViewer } from '../editor/register';
 import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
@@ -68,7 +69,7 @@ beforeEach(() => {
   useFiles.getState().reset();
   mainFor({ '/r/a.ts': 'a\n', '/r/b.ts': 'b\n', '/r/c.ts': 'c\n' });
   unregisterFiles = registerPanelTool(filesTool);
-  offs.push(connectSideFiles(() => useViewer.getState().prune()));
+  offs.push(connectSideFiles(sideFilesViewer));
   useSessions.setState((s) => ({ records: new Map(s.records).set(R, record(R, { directory: '/r' })) }));
 });
 afterEach(() => {

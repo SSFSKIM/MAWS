@@ -125,7 +125,12 @@ export function showFiles(appSessionId: AppSessionId): string {
 // layout is held to the read's rules (`repairFileTabs`: within a list the tree-only Files tab before those that hold a
 // file, Decision 17; no pin and no second preview), and then the viewer's prune runs, which counts the side files'
 // keys. Connected once with the code tools; `prune` is the viewer store's, handed in so this module imports no viewer.
-export function connectSideFiles(prune: () => void): () => void {
+export interface SideFilesViewer {
+  prune(): void;
+  unsaved(key: string): boolean;
+}
+
+export function connectSideFiles({ prune }: SideFilesViewer): () => void {
   let holding = false; // the repair's own writes notify again: the outer run has the whole repair in hand
   return useLayout.subscribe((state, prev) => {
     if (holding || !state.hydrated) return;
