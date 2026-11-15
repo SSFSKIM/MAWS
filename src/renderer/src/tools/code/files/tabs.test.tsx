@@ -33,7 +33,8 @@ const inView = (id: AppSessionId) => surfaceTabs(useLayout.getState(), id).map((
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 
 // Main as the files service answers for a session's folders: the roots, their listings and the files' bytes; a path
-// named in `refused` is refused, and `held` holds the first read of a path until released.
+// named in `refused` is refused, and `held` holds the first read of a path until released. A relative path is refused as
+// the service refuses it (its `path must be absolute`, which main's router answers with the error's message).
 const REFUSAL = "path outside the session's directories";
 function mainFor(files: Record<string, string>, opts: { refused?: string[]; held?: Map<string, Promise<void>> } = {}) {
   return installFakeMain(async (name, input) => {
@@ -48,6 +49,7 @@ function mainFor(files: Record<string, string>, opts: { refused?: string[]; held
     if (name === 'files.read') {
       const path = input.path as string;
       await opts.held?.get(path);
+      if (!path.startsWith('/')) return fail('path must be absolute');
       if (opts.refused?.includes(path)) return fail(REFUSAL);
       const text = files[path];
       if (text === undefined) return fail(`not found: ${path}`);
@@ -131,7 +133,8 @@ describe('what a tab of Files holds (fileOfTab)', () => {
     expect(fileOfTab({ file: '/r/./src/../a.ts' })).toEqual({ file: '/r/a.ts', line: null });
     expect(fileOfTab({ file: '/r/a.ts', line: 0, preview: 'yes' })).toEqual({ file: '/r/a.ts', line: null });
     expect(fileOfTab({ file: '/r/a.ts', line: 2.5 })).toEqual({ file: '/r/a.ts', line: null });
-    for (const tree of [undefined, null, {}, { path: '/r/a.ts' }, { file: '' }, { file: 'a.ts' }, { file: 7 }, 'x', []]) expect(fileOfTab(tree), JSON.stringify(tree)).toBeNull();
+    expect(fileOfTab({ file: 'src/./a.ts', line: 4 })).toEqual({ file: 'src/a.ts', line: 4 }); // a relative path chip's: the viewer answers for it
+    for (const tree of [undefined, null, {}, { path: '/r/a.ts' }, { file: '' }, { file: 7 }, 'x', []]) expect(fileOfTab(tree), JSON.stringify(tree)).toBeNull();
     expect(fileKey(OTHER_MACHINE, '/r/a.ts')).toBe(KEY('/r/a.ts', OTHER_MACHINE));
   });
 });
@@ -259,6 +262,31 @@ describe('opening a file beside the chat (openFile)', () => {
     act(() => void openFile(A, '/r/b.ts'));
     await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
     expect(main.callsOf('files.read')[1]).toMatchObject({ appSessionId: bareOf(A), path: '/r/b.ts', named: true });
+  });
+});
+
+// ---- a path the opener gives as it is ------------------------------------------------------------------------------------
+
+describe('a relative path chip opens beside the chat as it opens in a main tab', () => {
+  // The transcript leaves a relative path relative (`src/shared/files/named.ts`); a main tab of it shows the viewer's
+  // refusal of it, and so does its side tab, in the preview's place, never the tree.
+  it('the preview tab draws the viewer with the service’s refusal, keyed as the main tab would be; ⌘ opens that main tab', async () => {
+    render(<TestHost />);
+    act(() => void openFile(A, '/r/a.ts'));
+    const [preview] = filesOf(A);
+    await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe('/r/a.ts'));
+    act(() => codeTranscriptActions.openFile('src/./a.ts', 4, A));
+    expect(filesOf(A).map((tab) => tab.id)).toEqual([preview.id]);
+    expect(paramsOf(preview.id)).toEqual({ file: 'src/a.ts', line: 4, preview: true });
+    await waitFor(() => expect(document.querySelector('[data-refusal]')?.textContent).toBe('Refused: path must be absolutesrc/a.ts'));
+    expect(document.querySelector('[data-files-tab]')!.getAttribute('data-file')).toBe('src/a.ts');
+    expect(screen.queryByRole('tree')).toBeNull();
+    expect(sideFileKeys(useLayout.getState())).toEqual(new Set([KEY('src/a.ts')]));
+    act(() => codeTranscriptActions.openFile('src/a.ts', 9, A)); // rule 3: the tab of the file, selected at the line
+    expect(filesOf(A).map((tab) => [tab.id, paramsOf(tab.id)])).toEqual([[preview.id, { file: 'src/a.ts', line: 9, preview: true }]]);
+    act(() => codeTranscriptActions.openFile('src/a.ts', 9, A, { main: true }));
+    expect(mainFiles()).toEqual([KEY('src/a.ts')]);
+    expect(filesOf(A)).toEqual([]);
   });
 });
 
@@ -465,7 +493,7 @@ describe('the read of a stored layout', () => {
   it('a restored tab whose params this build cannot read is the tree; one whose file is refused shows the refusal and stays', async () => {
     const odd = { id: 'files:odd', toolId: 'files', pinned: false };
     const refused = { id: 'files:refused', toolId: 'files', pinned: false };
-    await launch({ [`panel.${A}`]: { tabs: [odd, refused], activeTabId: odd.id }, 'panelTools.params': { version: 1, params: { [odd.id]: { file: 'a.ts', other: true }, [refused.id]: { file: '/r/x.ts', line: null } } } });
+    await launch({ [`panel.${A}`]: { tabs: [odd, refused], activeTabId: odd.id }, 'panelTools.params': { version: 1, params: { [odd.id]: { path: '/r/a.ts', other: true }, [refused.id]: { file: '/r/x.ts', line: null } } } });
     mainFor({}, { refused: ['/r/x.ts'] });
     render(<TestHost />);
     await waitFor(() => expect(document.querySelector('[data-files-tab]')?.getAttribute('data-file')).toBe(''));

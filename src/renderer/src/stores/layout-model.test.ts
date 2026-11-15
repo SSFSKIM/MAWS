@@ -512,7 +512,7 @@ describe('the files beside the chat at the read', () => {
 
   it('reads params that hold a file: an object with a non-empty string file, nothing else', () => {
     expect(paramsHoldFile({ file: '/r/a.ts', line: 3 })).toBe(true);
-    expect(paramsHoldFile({ file: 'relative.ts' })).toBe(true); // the gate asks the key, not whether this build can show it
+    expect(paramsHoldFile({ file: 'relative.ts' })).toBe(true); // a relative path chip's file too: its tab is the viewer's, refused there
     for (const no of [undefined, null, 'x', 7, [], {}, { file: '' }, { file: 7 }, { path: '/r/a.ts' }, [{ file: '/r/a.ts' }]]) expect(paramsHoldFile(no), JSON.stringify(no)).toBe(false);
   });
 

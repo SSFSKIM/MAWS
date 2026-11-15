@@ -19,17 +19,17 @@ import { allTabs, paramsHoldFile, repairFileTabs } from '../../../stores/layout-
 export const FILES_TOOL_ID = 'files';
 
 export interface FilesTabParams {
-  file: string; // absolute, lexically normal
+  file: string; // as the opener gave it, lexically normal: absolute, or a relative path chip's, which the viewer's read refuses as a main tab's does
   line: number | null;
   preview?: true;
 }
 
-// What a tab of Files holds, read from its stored params: null for the tree alone (no params, or params this build cannot
-// read: a `file` that is not an absolute path, a value of another shape).
+// What a tab of Files holds, read from its stored params: a file whenever they hold one (`paramsHoldFile`: a non-empty
+// string `file`, whatever path it is, so the viewer gives its own answer for it, as in a main tab); null for the tree
+// alone (no params, or params of another shape, build F's `path` among them).
 export function fileOfTab(params: unknown): FilesTabParams | null {
   if (!paramsHoldFile(params)) return null;
   const { file, line, preview } = params as { file: string; line?: unknown; preview?: unknown };
-  if (!file.startsWith('/')) return null;
   const at = typeof line === 'number' && Number.isInteger(line) && line >= 1 ? line : null;
   return { file: normalizeLexically(file), line: at, ...(preview === true ? { preview: true as const } : {}) };
 }
@@ -59,7 +59,7 @@ const filesTabs = (state: Pick<LayoutState, 'panelBySession'>, appSessionId: App
 
 export interface OpenRequest {
   appSessionId: AppSessionId | null;
-  path: string; // absolute, lexically normal
+  path: string; // lexically normal, as the opener gave it
   main: boolean; // ⌘-click: the main area
   keep: boolean; // the opener keeps the tab (no preview)
 }
