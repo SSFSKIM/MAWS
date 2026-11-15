@@ -1023,7 +1023,7 @@ async function paneWidth(page: Page, width: number) {
 const TRANSCRIPT_WIDTHS = [768, 960, 1280] as const;
 // A window with room for the widest column (1280 px, the pane's scrollbar beside it), the pane on the harness's flex-1.
 async function roomForWidths({ app, page }: MawsLaunch) {
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 900));
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 820)); // 820: the e2e launch's own default height
   await page.waitForFunction(() => window.innerWidth === 1440);
   await page.evaluate(() => {
     document.querySelector<HTMLElement>('[data-transcript-scroller]')!.closest<HTMLElement>('.transcript')!.style.flex = '';
@@ -1329,9 +1329,9 @@ test('a code block wraps its long lines in one frame the column’s width, with 
   expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)})`).toBe(true);
   // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it.
   // The fence ends the fixture and the list has no trailing space, so in a 900 px window the scroll would stop short:
-  // for this step the window is 360 px tall, a viewport shorter than the frame, so the list can carry its top that far up.
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 360));
-  await page.waitForFunction(() => window.innerHeight === 360);
+  // for this step the viewport is capped at 300 px, shorter than the frame, so the list can carry its top that far up (the
+  // window cannot be made that short: main gives it a 600 px minimum height, src/main/window.ts).
+  await page.evaluate(() => void (document.querySelector<HTMLElement>('[data-transcript-scroller]')!.style.maxHeight = '300px'));
   await settle(page, 300);
   await mounted(page, loader);
   const stuck = await loader.evaluate(async (frame) => {
@@ -1348,8 +1348,7 @@ test('a code block wraps its long lines in one frame the column’s width, with 
   expect(stuck.above, `the frame’s top is above the viewport (a ${stuck.viewport} px viewport, a ${stuck.frameHeight} px frame)`).toBeGreaterThan(100);
   expect(stuck.fromViewTop, 'R8: the control stays at the viewport’s top, not scrolled away with the frame’s').toBeGreaterThanOrEqual(-1);
   expect(stuck.inside, 'and inside its frame').toBe(true);
-  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 900));
-  await page.waitForFunction(() => window.innerHeight === 900);
+  await page.evaluate(() => void (document.querySelector<HTMLElement>('[data-transcript-scroller]')!.style.maxHeight = ''));
   await settle(page, 300);
 
   // the clipboard: the control takes the fence's one line as it is; a selection copied by hand, a line end between the
