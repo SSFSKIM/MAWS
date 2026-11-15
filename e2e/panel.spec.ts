@@ -856,10 +856,25 @@ test.describe('the #panel harness: strip, summary, R7 and themes', () => {
         expect(await panel.child('raisePending'), 'the fixture’s one pending request, listed').toBe(1);
         await expect.poll(async () => (await panel.metrics()).pendingRequests, 'the child’s end row, for its agent’s request').toBe(1);
         await expect(panel.region.getByText('Waiting for approval: pnpm test').first(), 'the call’s row, or its run’s line, says it waits').toBeVisible();
-        await expect.poll(async () => (await panel.metrics()).lastRowInView, 'the end stays in view with the end row').toBe(true);
+        // the end row is the view's own (the model's rows, which `lastRowInView` indexes, hold none): read its box
+        // against its scroller's
+        const endRowInView = () =>
+          panel.region.locator('[data-row-id="request-end"]').evaluateAll((rows) =>
+            rows.length === 1 &&
+            rows.every((row) => {
+              const scroller = row.closest('[data-transcript-scroller]');
+              if (scroller === null) return false;
+              const view = scroller.getBoundingClientRect();
+              const box = row.getBoundingClientRect();
+              return box.top >= view.top - 1 && box.bottom <= view.bottom + 1;
+            }),
+          );
+        await expect.poll(endRowInView, 'the end row stands inside the child’s viewport').toBe(true);
+        await expect.poll(async () => (await panel.metrics()).lastRowInView, 'and the last model row above it too').toBe(true);
 
         await panel.child('expandAll');
         await expect.poll(async () => (await panel.metrics()).lastRowInView, 'expandAll leaves the end in view').toBe(true);
+        await expect.poll(endRowInView, 'and the end row').toBe(true);
         const settled = await panel.metrics();
         expect(settled.overflowX).toBe(0);
         verdict.push({ width, ...settled });

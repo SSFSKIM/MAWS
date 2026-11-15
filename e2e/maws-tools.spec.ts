@@ -23,7 +23,7 @@ import { addressed, localRef } from './support/address';
 import { openSurface, sideColumn, sideTabNames, surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
 import { parseAskSteer } from '../src/shared/maws/ask';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
@@ -65,6 +65,8 @@ const capsuleOf = (s: Scene) => s.pane.locator('section.transcript-ask');
 // UX wave U1b (Interfaces §D, "A waiting row"; M6): while its ask waits, the capsule's row holds the ask's form under its
 // title line (the request card's in-place body: the sheet's own sections, drafts and Submit), and its button reads Open
 // beside, which opens the sheet on the same form and draft. Nothing opens the sheet by itself.
+// Two animation frames: whatever a store write made before them is committed to the page by their end.
+const settledFrames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
 const formOf = (s: Scene) => capsuleOf(s).locator('.transcript-ask-form [data-hover-ask]');
 async function openBeside(s: Scene, askId: string): Promise<Locator> {
   await capsuleOf(s).getByRole('button', { name: 'Open beside', exact: true }).click();
@@ -402,7 +404,10 @@ test('an ask from a session not shown never switches the main view; when that se
     await show(s, asking);
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'pending');
     await expect(formOf(s)).toHaveAttribute('data-hover-ask', opened!.askId);
-    await s.page.waitForTimeout(500); // the deferred open M6 removed would have run at the arrival
+    // the form reads the ask from the ask store (HoverAsk draws `data-hover-ask` only for an ask it holds pending), drawn
+    // after the layout write that showed the session: the deferred open M6 removed ran in a microtask after that write,
+    // so it would have opened by now; two frames more and any layout write it made would be committed
+    await settledFrames(s.page);
     await expect(sheetOf(s)).toHaveCount(0);
     await clearToasts(s.page);
     await formOf(s).getByRole('button', { name: 'Submit', exact: true }).click();
@@ -459,7 +464,10 @@ test('an ask beside an open file: its form stands in the capsule’s row under t
       expect(body.y, 'the form stands under the title line').toBeGreaterThanOrEqual(line.y + line.height - 1);
     }).toPass({ timeout: 10_000 });
     // nothing above the composer, and the side column as it was: the file in view, no sheet tab
-    await s.page.waitForTimeout(500); // the open M6 removed would have run at the arrival
+    // the form above reads the ask from the ask store, which the live batch filled: the open M6 removed ran in that same
+    // batch's handler, right after the store was filled, so it would have opened by now; two frames more and any layout
+    // write it made would be committed
+    await settledFrames(s.page);
     await expect(s.pane.locator('[data-composer] [data-request-card]'), 'no notice above the composer').toHaveCount(0);
     await expect(viewer.locator('.cm-line').first()).toBeVisible();
     await expect(sheetOf(s)).toHaveCount(0);
