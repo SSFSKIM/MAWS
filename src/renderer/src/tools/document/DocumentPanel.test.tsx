@@ -261,8 +261,50 @@ describe('the document editor in L’s registry', () => {
     act(() => historyToggle.click());
     await until(() => screen.queryByRole('complementary', { name: 'Version history' }) === null, 'the rail closed');
     // an export's failure is said in the header's own action
-    act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf-a4')!.onSelect());
+    act(() => editorHostOf(scope)!.exports!.find((e) => e.id === 'pdf')!.onSelect());
     await until(() => editorHostOf(scope)!.actions!.some((a) => a.id === 'export' && /PDF export failed/.test(a.label)), 'the export’s failure');
+  });
+
+  // UX wave U10b (§B.5, M3 decision 1 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md; the owner's
+  // "Always show the page in force")
+  it('checks the system’s page with nothing set and writes nothing until an item is chosen; A4 chosen is one row of the person’s, then checked', async () => {
+    const stop = provideDocumentDesignSystem({ Scope: ({ children }) => children, systemFor: () => ({ builtin: 'maws' }), pageSizeOf: () => 'letter' });
+    try {
+      const rows: unknown[] = [];
+      memory.onLanded((row) => rows.push(row.actor));
+      const { state } = mount();
+      await shown();
+      await until(() => editorHostOf(scope)?.saved === 'saved', 'saved');
+      const items = () => editorHostOf(scope)!.exports!.filter((e) => e.checked !== undefined).map((e) => [e.label, e.checked, e.disabled]);
+      expect(items()).toEqual([
+        ['Letter', true, false],
+        ['A4', false, false],
+        ['Compact', false, false],
+      ]);
+      await act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+      expect(rows, 'an open and a menu built write nothing').toEqual([]);
+      act(() => editorHostOf(scope)!.exports!.find((e) => e.label === 'A4')!.onSelect());
+      await until(() => items()[1]![1] === true && state.snapshot().handle!.state().unsaved === 0, 'A4 checked and acknowledged');
+      expect(items().map(([label, checked]) => [label, checked])).toEqual([
+        ['Letter', false],
+        ['A4', true],
+        ['Compact', false],
+      ]);
+      expect(rows).toEqual([{ kind: 'human' }]);
+    } finally {
+      stop();
+    }
+  });
+
+  it('holds the sizes until the system’s page is known', async () => {
+    mount(); // no design system provided: its page is not known here
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'saved');
+    expect(editorHostOf(scope)!.exports!.filter((e) => e.checked !== undefined).map((e) => [e.label, e.disabled])).toEqual([
+      ['Letter', true],
+      ['A4', true],
+      ['Compact', false],
+    ]);
   });
 
   it('registers the page as the tab’s Mark-up surface while it is visible', async () => {

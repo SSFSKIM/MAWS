@@ -17,7 +17,10 @@ import { TEST_MACHINE } from '../../../../../test/support/machine';
 import { useNotices } from '../../stores/notices'; // P3-F (F7)
 import { useCommentCard } from '../../side/card/store'; // P4-B1; UX wave U5a: the unsent comment is the card's pass's
 import { holdArtifactEditorState, releaseArtifactEditorState } from '../../artifacts/registry'; // UX wave U5a
-import { DocumentTabState, type DocumentTabDeps } from './tab-state';
+import { docPage, dsOverrides } from '@artifacts/document/meta'; // UX wave U10b
+import { DocumentTabState, EXPORT_ACK_WAIT_MS, type DocumentTabDeps } from './tab-state';
+import { EXPORT_COPY } from './header'; // UX wave U10b
+import { pageInForce } from './page'; // UX wave U10b
 
 const A = '0f1e2d3c-4b5a-4968-8778-695a4b3c2d1e';
 const row = (fields: Record<string, unknown> = {}) => ({ id: A, kind: 'document', title: 'Launch plan', lastViewedAt: 1_000, agentEditsAsSuggestions: false, revision: 3, ...fields });
@@ -353,6 +356,121 @@ describe('a document tab’s state', () => {
     save = new Error('no export 7-pdf.pdf of a; export it again');
     await state.export('pdf', 'letter');
     expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: 'no export 7-pdf.pdf of a; export it again' });
+  });
+
+  // ── UX wave U10b (§B.5, §I and M3 decisions 2 and 3 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md) ──
+
+  it('sends no size for a document’s format row, so the export prints on the document’s own page', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: false } });
+    const state = w.open();
+    await ready(state);
+    await state.export('pdf');
+    expect(w.calls.filter(([name]) => name === 'artifacts.export')).toEqual([['artifacts.export', { artifactId: A, format: 'pdf', ownFile: true }]]);
+  });
+
+  it('writes a page item as one row of the person’s, which a second window on the document reads as the page in force', async () => {
+    const w = world();
+    const [one, two] = [w.open(), w.open()];
+    await Promise.all([ready(one), ready(two)]);
+    const rows: unknown[] = [];
+    w.memory.onLanded((row) => rows.push(row.actor));
+    one.choosePage('a4', 'letter');
+    const second = w.handles[1]!;
+    await until(() => docPage(second.doc).size === 'a4' && w.handles[0]!.state().unsaved === 0, 'the page at the second replica');
+    expect(rows).toEqual([{ kind: 'human' }]);
+    expect(pageInForce(docPage(second.doc), dsOverrides(second.doc), 'letter')).toEqual({ size: 'a4', compact: false, sizeKnown: true });
+    expect(second.state().unsaved, 'the second window writes nothing back').toBe(0);
+  });
+
+  it('takes no page item while a version is shown', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    state.setPreviewing(true, { versionId: 3 });
+    state.choosePage('a4', 'letter');
+    expect([docPage(w.handles[0]!.doc), w.handles[0]!.state().unsaved]).toEqual([{}, 0]);
+  });
+
+  // §I: the export after a page item awaits the host's acknowledgement of the write, then prints with it
+  it('exports after a page item only once the host has acknowledged the write, so the export prints with it', async () => {
+    const memory = new MemoryDocumentHost();
+    const printed: unknown[] = []; // the host's page as main's export reads it
+    const w = world({ 'artifacts.export': () => (printed.push(docPage(memory.doc)), { path: '/u/x', revision: 9 }), 'library.saveAs': { saved: false } }, memory);
+    const state = w.open();
+    await ready(state);
+    state.choosePage('a4', 'letter');
+    expect(w.handles[0]!.state().unsaved, 'the write is in flight as the export starts').toBe(1);
+    await state.export('pdf');
+    expect([printed, state.snapshot().exporting]).toEqual([[{ size: 'a4' }], null]);
+  });
+
+  it('fails with the fixed sentence and asks for no export while the document’s port is down, the export command still answering', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: true, path: '/d/x' } });
+    const state = w.open();
+    await ready(state);
+    w.memory.dropConnections();
+    await until(() => w.handles[0]!.state().phase === 'off', 'the port to go');
+    state.choosePage('a4', 'letter');
+    expect(w.handles[0]!.state().unsaved).toBe(1);
+    await state.export('pdf');
+    expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: EXPORT_COPY.exportNotSaved });
+    expect(w.calls.filter(([name]) => name === 'artifacts.export' || name === 'library.saveAs'), 'nothing exported').toEqual([]);
+  });
+
+  it('exports while the port is down when the host already acknowledged every write', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: false } });
+    const state = w.open();
+    await ready(state);
+    w.memory.dropConnections();
+    await until(() => w.handles[0]!.state().phase === 'off', 'the port to go');
+    await state.export('pdf');
+    expect([state.snapshot().exporting, w.calls.filter(([name]) => name === 'artifacts.export').length]).toEqual([null, 1]);
+  });
+
+  it('fails with the fixed sentence after the wait when a connected provider never acknowledges, and exports nothing', async () => {
+    const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: true, path: '/d/x' } });
+    const listeners = new Set<(state: DocumentState) => void>();
+    const waiting: DocumentState = { phase: 'live', synced: true, unsaved: 1, revision: 4, integrated: 4, readOnly: false };
+    const doc = newDoc();
+    createDocument(doc, { title: 'Launch plan', id: 'tab00001' });
+    const unacknowledged = { doc, awareness: null, state: () => waiting, subscribe: (listener: (state: DocumentState) => void) => (listeners.add(listener), () => void listeners.delete(listener)), onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close: () => {} };
+    (w.host as unknown as { open: () => Promise<unknown> }).open = async () => unacknowledged;
+    const state = w.open();
+    await ready(state);
+    vi.useFakeTimers();
+    const done = state.export('pdf');
+    await vi.advanceTimersByTimeAsync(EXPORT_ACK_WAIT_MS - 1);
+    expect(state.snapshot().exporting, 'still waiting').toEqual({ phase: 'running', format: 'pdf' });
+    for (const listener of listeners) listener({ ...waiting, revision: 5 }); // a state change that still leaves the write unacknowledged
+    await vi.advanceTimersByTimeAsync(1);
+    await done;
+    expect(state.snapshot().exporting).toEqual({ phase: 'failed', format: 'pdf', message: EXPORT_COPY.exportNotSaved });
+    expect(w.calls.filter(([name]) => name === 'artifacts.export' || name === 'library.saveAs')).toEqual([]);
+  });
+
+  it('fails with the fixed sentence when the write is refused or the port goes during the wait, and exports nothing once the tab is disposed', async () => {
+    for (const end of ['refused', 'off', 'disposed'] as const) {
+      const w = world({ 'artifacts.export': { path: '/u/x', revision: 9 }, 'library.saveAs': { saved: false } });
+      const listeners = new Set<(state: DocumentState) => void>();
+      const waiting: DocumentState = { phase: 'live', synced: true, unsaved: 1, revision: 4, integrated: 4, readOnly: false };
+      const doc = newDoc();
+      createDocument(doc, { title: 'Launch plan', id: 'tab00001' });
+      let now = waiting;
+      const handle = { doc, awareness: null, state: () => now, subscribe: (listener: (state: DocumentState) => void) => (listeners.add(listener), () => void listeners.delete(listener)), onRestored: () => () => {}, onProvisional: () => () => {}, holdRemote: () => {}, close: () => {} };
+      (w.host as unknown as { open: () => Promise<unknown> }).open = async () => handle;
+      const state = w.open();
+      await ready(state);
+      const done = state.export('pdf');
+      await until(() => state.snapshot().exporting?.phase === 'running', 'the export to wait');
+      if (end === 'disposed') state.dispose();
+      else {
+        now = end === 'refused' ? { ...waiting, refused: 'This document was deleted.' } : { ...waiting, phase: 'off', synced: false };
+        for (const listener of [...listeners]) listener(now);
+      }
+      await done;
+      if (end !== 'disposed') expect(state.snapshot().exporting, end).toEqual({ phase: 'failed', format: 'pdf', message: EXPORT_COPY.exportNotSaved });
+      expect(w.calls.filter(([name]) => name === 'artifacts.export'), end).toEqual([]);
+    }
   });
 
   // P4-B1 (C8; X36's draft rule): an unsent comment typed in the document's compose card is asked about before the rest.

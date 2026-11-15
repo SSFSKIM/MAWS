@@ -28,6 +28,7 @@ import { memoryEditorHost } from '@artifacts/document/editor/memory-host';
 import { ticks } from '@artifacts/document/editor/test-world';
 import { HUMAN, openDocumentWorld, sessionActor, type DocumentWorld } from '../../engine-host/documents/kinds/document-world.fixture';
 import { fromNodePort } from '../../engine-host/documents/ports';
+import { choosePage } from '../../renderer/src/tools/document/page'; // UX wave U10b M3: the Export menu's page item
 
 const TAB = 't1';
 const AGENT = sessionActor('app-agent');
@@ -262,5 +263,24 @@ describe('the editor’s repairs through the store', () => {
     await ticks(30);
     expect([await actors(id), mine.state().unsaved, second.state().unsaved], 'after the page').toEqual([['session:app-agent', 'session:app-agent'], 0, 0]);
     expect(shape(world!.service.live(id))).toEqual(['paragraph:Quarterly sales.', 'chart:']);
+  });
+
+  // UX wave U10b (M3; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.5): the person's page item, written
+  // on the editor's own replica, is one row of theirs and adds no paragraph after a final chart: the editor's binding
+  // never sees it as a change of the tab it binds, so no repair answers it
+  it('take the person’s page item on the open editor’s replica as one row of theirs that adds no paragraph after the chart', async () => {
+    const id = await made(para('p1', 'Quarterly sales.'), chart('c1'));
+    const { mine, second } = await mounted(id);
+    expect(await actors(id), 'the open').toEqual(['session:app-agent']);
+    expect(choosePage(mine.doc, 'a4', 'letter')).toBe(true);
+    await until(() => mine.state().unsaved === 0 && docPage(second.doc).size === 'a4', 'the page at the second replica');
+    await ticks(30);
+    expect([await actors(id), second.state().unsaved], 'one row of the person’s').toEqual([['session:app-agent', 'human'], 0]);
+    expect([shape(world!.service.live(id)), shape(second.doc), shape(mine.doc)]).toEqual([
+      ['paragraph:Quarterly sales.', 'chart:'],
+      ['paragraph:Quarterly sales.', 'chart:'],
+      ['paragraph:Quarterly sales.', 'chart:'],
+    ]);
+    expect(docPage(world!.service.live(id))).toEqual({ size: 'a4' });
   });
 });
