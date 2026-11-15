@@ -33,6 +33,9 @@ const recordedRow = (name: string, line: number, words: string, by: string): obj
   if (!json.includes(words)) throw new Error(`${name}:${line} does not hold ${words}`);
   return JSON.parse(json.replace(words, JSON.stringify(by).slice(1, -1))) as object;
 };
+// The bridge's recorded delivery of the person's words, as a peer's: its frame names a session (U3a's reader, arrival.ts)
+const peerByBridge = (by: string): object =>
+  JSON.parse(JSON.stringify(recordedRow('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', by)).replace('from human id=5aa95008', 'from session:7ef6ac00 id=5aa95008')) as object;
 const bytesOf = (records: object[]) => records.reduce((sum, record) => sum + Buffer.byteLength(lineOf(record)) + 1, 0);
 
 let fixture: StoreFixture;
@@ -217,7 +220,7 @@ describe('names: what the transcript names', () => {
 
   // Decision Log 8: a `user` row someone other than the person wrote is a result form already resolved
   it('a link in a peer session’s message or a notification names the path as a result; the person’s own message counts', async () => {
-    const peer = recordedRow('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Open [r](${P})`);
+    const peer = peerByBridge(`Open [r](${P})`);
     const notification = recordedRow('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote [r](${P})`);
     expect([peer, notification].map((row) => readArrivals(row).map((arrival) => arrival.class))).toEqual([['peer'], ['task']]);
     for (const row of [peer, notification]) {

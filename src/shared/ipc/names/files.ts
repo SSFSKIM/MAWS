@@ -4,9 +4,9 @@
 export const commands = [
   'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal',
   'files.write', // E5
+  'files.writeOutside', // UX wave U6e: the save of a file outside the session's directories
   'files.reveal', // E1
   'files.upload', // P5 O3-E: bridged, no caller yet (O7 M4's drag and drop)
-  'files.writeOutside', // UX wave U6e: the save of a file outside the session's directories
 ] as const;
 
 // P5 O3-E (Interfaces §D): `library.read`'s reach to a path main resolved, main's alone to send

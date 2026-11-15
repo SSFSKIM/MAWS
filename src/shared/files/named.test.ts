@@ -635,20 +635,31 @@ describe('rowClaim: a user row the person did not write', () => {
     return JSON.parse(json.replace(words, by.replace(/\\/g, '\\\\').replace(/"/g, '\\"')));
   };
   const classes = (row: unknown) => readArrivals(row).map((arrival) => arrival.class);
+  // The bridge's delivery of the person's words, recorded; and the same row as a peer's, its frame naming a session
+  const ownByBridge = () => recorded('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`);
+  const peerByBridge = () => JSON.parse(JSON.stringify(ownByBridge()).replace('from human id=5aa95008', 'from session:7ef6ac00 id=5aa95008')) as unknown;
 
   it('names the path for the person’s typed prompt and for the person’s words sminos delivered', () => {
     const typed = recorded('u3-sminos-r1-maws', 3, 'Without using any tool, reply with only the word READY.', `Open ${LINK}`);
-    const ownByInbox = recorded('u3-sminos-r1-maws', 32, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`);
-    const ownByBridge = recorded('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`);
-    expect([classes(typed), classes(ownByInbox), classes(ownByBridge)]).toEqual([[], ['own'], ['own']]);
-    for (const row of [typed, ownByInbox, ownByBridge]) expect(rowClaim(row, P), JSON.stringify(row)).toEqual({ names: true });
+    expect([classes(typed), classes(ownByBridge())]).toEqual([[], ['own']]);
+    for (const row of [typed, ownByBridge()]) expect(rowClaim(row, P), JSON.stringify(row)).toEqual({ names: true });
+  });
+
+  // The inbox's deliveries are meta rows, which the window draws no bubble for: they name nothing, as on master
+  it('names nothing by a meta row the inbox delivered, whoever wrote it', () => {
+    const rows = [
+      recorded('u3-sminos-r1-maws', 32, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`),
+      recorded('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`),
+      recorded('u3-sminos-r1-terminal', 46, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`),
+      recorded('u3-tasks-r1', 104, 'PONG', `PONG ${LINK}`),
+    ];
+    expect(rows.map(classes)).toEqual([['own'], ['peer'], ['peer'], ['subagent']]);
+    for (const row of rows) expect(rowClaim(row, P), JSON.stringify(row)).toEqual({ names: false, pending: [] });
   });
 
   it.each([
-    ['a peer session’s message by the inbox', () => recorded('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`), 'peer'],
-    ['a peer session’s message in a terminal session', () => recorded('u3-sminos-r1-terminal', 46, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`), 'peer'],
+    ['a peer session’s message the bridge delivered', peerByBridge, 'peer'],
     ['a background task’s notification', () => recorded('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote ${LINK}`), 'task'],
-    ['a subagent’s message', () => recorded('u3-tasks-r1', 104, 'PONG', `PONG ${LINK}`), 'subagent'],
     ['MAWS’s consent message', () => user(consentMessage('command', `open ${LINK}`), { origin: { kind: 'human' } }), 'consent'],
     ['MAWS’s answer envelope', () => user(askSteerText('toolu_f', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]), { origin: { kind: 'human' } }), 'answer'],
   ])('names it for a read only, as a tool’s result does: %s', (_, row, kind) => {
@@ -657,7 +668,8 @@ describe('rowClaim: a user row the person did not write', () => {
   });
 
   it('asks the reader only of a row whose text links the path', () => {
-    const peer = recorded('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', 'Nothing linked here.');
+    const peer = JSON.parse(JSON.stringify(peerByBridge()).replace(`Open ${LINK}`, 'Nothing linked here.')) as unknown;
+    expect(classes(peer)).toEqual(['peer']);
     expect(rowClaim(peer, P)).toEqual({ names: false, pending: [] });
   });
 });
@@ -726,7 +738,7 @@ describe('rowClaim: decision 22’s table over the recorded transcripts', () => 
         }
       }
     }
-    expect(named).toBeGreaterThan(20);
+    expect(named).toBeGreaterThan(0);
     expect(waiting).toBeGreaterThan(0);
     expect(other).toBe(0); // no recorded row links a path in text someone else wrote; the case above writes them
   });

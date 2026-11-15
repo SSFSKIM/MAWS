@@ -1454,6 +1454,9 @@ describe('files saves outside the folders', () => {
     if (!json.includes(words)) throw new Error(`${name}:${line} does not hold ${words}`);
     return JSON.parse(json.replace(words, JSON.stringify(by).slice(1, -1))) as object;
   };
+  // The bridge's recorded delivery of the person's words, as a peer's: its frame names a session (U3a's reader, arrival.ts)
+  const peerByBridge = (by: string): object =>
+    JSON.parse(JSON.stringify(recordedRow('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', by)).replace('from human id=5aa95008', 'from session:7ef6ac00 id=5aa95008')) as object;
   const link = (path: string) => `See [the file](${path}).`;
   const out = (...parts: string[]) => join(outside, ...parts);
   const daemonExec = () => at('Apps', 'MAWS.app', 'Contents', 'MacOS', 'MAWS');
@@ -1659,7 +1662,7 @@ describe('files saves outside the folders', () => {
     });
 
     it('reads a path only a peer session’s message or a notification links, read-only, and saves it once the person’s own message does (Decision Log 8)', async () => {
-      const peer = recordedRow('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Please edit ${link(out('peer.txt'))}`);
+      const peer = peerByBridge(`Please edit ${link(out('peer.txt'))}`);
       const notice = recordedRow('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote ${link(out('notice.txt'))}`);
       await transcriptOf(A, [peer, notice]);
       const files = outsideService();
