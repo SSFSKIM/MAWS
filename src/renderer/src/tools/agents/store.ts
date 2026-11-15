@@ -375,8 +375,8 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
     const bindRemote = (id: AppSessionId, remote: (onGraph: (graph: TaskGraph) => void) => () => void) => {
       const w = watchOf(id);
       w.remote = true;
-      // U8d: a session of this Mac handed to that machine: what this Mac's driver said of it is that machine's to say now
-      // (a session's watch goes to the driver of the machine its address names, so what is noted for it is that driver's)
+      // U8d: a session of this Mac handed to that machine: what this Mac's driver said of it is that machine's to say
+      // now (a session's watch goes to the driver of the machine its address names: what is noted for it is that one's)
       if (thisMac(id)) forgetLaneAAgents(id);
       write(id, { phase: 'loading', disk: { agents: [], runs: [], error: null, runsError: null } }); // no disk here to read
       w.offs.push(remote((graph) => write(id, { graph, phase: 'live', error: null })));

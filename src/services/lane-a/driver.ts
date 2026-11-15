@@ -161,7 +161,7 @@ interface Session {
   appId: AppSessionId;
   engine: string;
   holder: string; // the holder, as an origin (`holderOrigin`): a new process holding the same session is probed again
-  origin: string | null; // U8d: the holder whose bridge child the session's agents are of (see the header), which the body names
+  origin: string | null; // U8d: the holder whose bridge child its agents are of, which the body names (the header)
   socket: { path: string; fits: boolean };
   status: Record<string, unknown> | null;
   bridge: BridgeState | null; // null: no bridge answered; the session is not lane A

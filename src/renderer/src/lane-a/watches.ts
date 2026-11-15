@@ -15,9 +15,9 @@
 // The jobs a snapshot or a `subagents` message carries are kept in the lane A store (`useLaneAJobs`). UX wave U8d: so are
 // its subagents, when the body carries a list of them (`useLaneAAgents`; an older driver's carries none, or an empty one),
 // for every session's watch, another machine's too; a watch's end, or its last consumer letting it go, keeps them only
-// when none still runs and their body named an origin. They are noted with the origin their body names beside the list (`origin`: the holder whose
-// bridge child the facts came from, the fence review's ruling), or none when it names none (an older driver; another
-// machine's sminos today), and the lane A store fences them on it.
+// when none still runs and their body named an origin. They are noted with the origin their body names beside the list
+// (`origin`: the holder whose bridge child the facts came from, the fence review's ruling), or none when it names none
+// (an older driver; another machine's sminos today), and the lane A store fences them on it.
 //
 // The session-wide `op` and `compact` messages are kept by their op's id (the last 100 ops per session), so a caller that
 // learns an id from a control's answer after its op already ended still finds the op's messages.

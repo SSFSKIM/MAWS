@@ -740,7 +740,7 @@ describe('subagents', () => {
     const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
     await expect.poll(() => [statusOf(s.h.planes, s.watch, A1), originOf(s.h.planes, s.watch)]).toEqual(['running/rows', 'terminal:4242']);
     const before = agentsOf(s.h.planes, s.watch);
-    await bridge({ pid: 5151 }); // the next terminal's bridge child takes the socket; the last one's streams go on
+    await bridge({ pid: 5151, launch: 'launch-2' }); // the next terminal's bridge child takes the socket; the last one's streams go on
     s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'terminal', pid: 5151 } });
     await s.settledStream(); // the state stream is still the last child's
     expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
@@ -748,6 +748,23 @@ describe('subagents', () => {
     await expect.poll(() => originOf(s.h.planes, s.watch), { timeout: 3000 }).toBe('terminal:5151');
     expect(agentsOf(s.h.planes, s.watch)).toEqual(before);
     expect(s.h.planes.some((p) => p.watch === s.watch && p.ended !== undefined)).toBe(false);
+  });
+
+  // A launch is the engine process a bridge child serves. The next terminal's child can answer a reconnect while the
+  // index still names the last terminal: its body names that terminal (the probe's holder) until the holder moves to
+  // the next one, and then, with nothing else changed, the next one; it is never left naming a holder it is not.
+  it('names the next terminal once the holder moves to it, when that terminal’s bridge child answered before it did', async () => {
+    const s = await session({ main: launched(A1, 1), entries: (dir) => [entry(dir, A1)] });
+    await expect.poll(() => originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+    const next = await bridge({ pid: 5151, launch: 'launch-2' });
+    s.b.reset(); // the last child's streams end, and the next child answers the reconnect under the holder still named
+    await expect.poll(() => s.h.state()?.launch, { timeout: 3000 }).toBe('launch-2');
+    next.emit({ type: 'model', model: 'claude-haiku-mark-next', effort: null }); // once the state shows it, the next child's stream is read
+    await expect.poll(() => s.h.state()?.override?.model, { timeout: 3000 }).toBe('claude-haiku-mark-next');
+    expect(originOf(s.h.planes, s.watch)).toBe('terminal:4242');
+    s.h.driver.observe({ appId: APP, engineSessionId: ENGINE, holder: { kind: 'terminal', pid: 5151 } });
+    await expect.poll(() => originOf(s.h.planes, s.watch), { timeout: 3000 }).toBe('terminal:5151');
+    expect(statusOf(s.h.planes, s.watch, A1)).toBe('running/rows');
   });
 
   it('derives once, after it, for a bridge event that arrives while a read is in flight', async () => {

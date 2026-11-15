@@ -29,7 +29,7 @@ export interface FollowDeps {
   session: string; // the engine session id, which log lines name
   locate(): Promise<string | null>; // the main transcript's path now
   bridge: BridgeAgents; // the state stream's, held by the driver
-  origin(): string | null; // the holder whose bridge child those agents (and the process's life) are, as the driver probed it
+  origin(): string | null; // the holder whose bridge child those agents are, as the driver probed it
   listing?(): Promise<SubagentEntry[]>; // `fs.subagents`; a rejection is a failed read
   pollMs: number;
   backoff(): { next(): number }; // a fresh backoff for a run of failed listings
