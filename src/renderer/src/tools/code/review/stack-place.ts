@@ -149,9 +149,9 @@ export class StackPlacer {
     this.relayout();
   }
 
-  // A card opened on a line (M5), or none: once the card is drawn in its row under the line, the stack stands it wholly
-  // in view itself (the field's own scroll as it takes the keyboard would come outside the person's gesture, and be
-  // undone as a layout change). The person's input before then leaves it where it is drawn.
+  // A card opened on a line (M5), or none: once the card is drawn in its row under the line, the stack shows it down to
+  // its bottom itself (the field's own scroll as it takes the keyboard can come outside the person's gesture and be undone
+  // as a layout change, or its event be overtaken by one). The person's input before then leaves it where it is drawn.
   showCard(place: StackPlace | null): void {
     this.card = place;
   }
@@ -287,9 +287,10 @@ export class StackPlacer {
     this.count(m);
   }
 
-  // The card waiting to be drawn, once it is: its line's row reaches down over the card's (`rowsOf`), and stands wholly
-  // between the reading edge and the scroller's bottom; else the scroller moves by the least that shows it, never past
-  // its line at the reading edge (a card taller than the view shows its top). Read as the live place where it moved.
+  // The card waiting to be drawn, once it is: its line's row reaches down over the card's (`rowsOf`). Where the card's
+  // bottom is below the scroller's, the scroller moves down by the least that shows it, never past its line at the
+  // reading edge (a card taller than the view shows its top); a card higher up moves nothing, so the place read stands
+  // (M5). Read as the live place where it moved.
   private standCard(m: Measured): void {
     const place = this.card;
     if (!place?.row || !m.laidOut) return;
@@ -302,7 +303,7 @@ export class StackPlacer {
     if (!at?.exact || !at.edge || !row) return;
     const top = m.el.scrollTop;
     const line = scrollTopAt(m.layout, at.top); // the line at the reading edge
-    const want = at.top < edgeAt(m.layout, top) ? line : Math.min(line, Math.max(top, at.top + row.height - m.viewport));
+    const want = Math.max(top, Math.min(line, at.top + row.height - m.viewport));
     if (Math.abs(want - top) < 1) return;
     this.write(m.el, want);
     this.read(m);
