@@ -1,10 +1,17 @@
 // UX wave U3, first landing, M2 (docs/doperpowers/plans/2026-11-12-ux-wave-U3a-arrivals.md, Interfaces C and D;
 // decisions 4 to 6, 8, 10, 11 and 21): the rows the model makes of what entered a session, from hand-made event lists in
 // the shapes Interfaces C defines (today's callers do not emit them yet). Every name, address and word is invented.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import type { SessionEvent } from '@shared/graph/events';
 import type { ArrivalEntry, CarriedArrival } from '@shared/engine/arrival-schema';
+import type { SessionId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { consentMessage } from '@shared/engine/arrival';
+import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
+import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../../test/support/memory-reader';
+import { journalToEvents } from '../dev/journal';
 import { isPersistentRow, rowsOf, turnRows, withAllExpanded } from './derive';
 import { NOTICE } from './copy';
 import { rowId, turnId } from './keys';
@@ -625,5 +632,98 @@ describe('the consent line (decision 10)', () => {
     expect(user).toMatchObject({ messageUuid: 'c1', consent: { kind: 'command', subject: 'git push origin notes' } });
     expect(isPersistentRow(user!)).toBe(true);
     expect(kinds(folded)).toEqual(['user', 'divider']);
+  });
+});
+
+// UX wave U1c, M1 (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, Design 2, "What the transcript
+// draws of a person's message that carries marks", and Interfaces §C, 5; Acceptance 14's rows): a message that carries
+// grants is drawn as its words, the grant lines taken out, and one approval row per grant. The hand-made events carry
+// the marks as the host and the file reader now put them on; the recorded cases are probe B's
+// (findings-uxwave-u1c-during-turn.txt), each live from its journal and from its transcript file.
+describe('a person’s message that carries grants (U1c)', () => {
+  const OTHER = 'Also say the word EXTRA when done.';
+  const consent = (subject: string) => ({ class: 'consent' as const, kind: 'command' as const, subject });
+  const message = (content: string, marks: string[], over: Record<string, unknown> = {}) => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('j1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('j1'), content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, ...(marks.length > 0 && { arrival: marks.map(consent) }), ...over });
+    b.end(['j1']);
+    return of(rowsOf(reduce(b.events)), 'user');
+  };
+  /** A person's rows, one line each: an approval row's subject, else the bubble's words. */
+  const said = (rows: RowOf<'user'>[]) => rows.map((row) => (row.consent ? `approved: ${row.consent.subject}` : `says: ${row.text}`));
+
+  it('a grant joined with an ordinary message keeps the message’s words: the bubble without the grant line, then the approval row', () => {
+    const rows = message(`${consentMessage('command', 'make build')}\n${OTHER}`, ['make build']);
+    expect(said(rows)).toEqual([`says: ${OTHER}`, 'approved: make build']);
+    expect(rows[0]).toMatchObject({ id: rowId.user(uuid('j1')), messageUuid: 'j1', editable: true });
+    expect(rows[0]).not.toHaveProperty('consent');
+    expect(rows[1]).toMatchObject({ id: rowId.grant(uuid('j1'), 0), messageUuid: null, editable: false, turnId: rows[0]!.turnId });
+  });
+
+  it('the other message first: the bubble, then the approval row', () => {
+    expect(said(message(`${OTHER}\n${consentMessage('command', 'make build')}`, ['make build']))).toEqual([`says: ${OTHER}`, 'approved: make build']);
+  });
+
+  it('a joined second grant is not lost: two grants and no other words draw two approval rows, the first under the message’s own id', () => {
+    const rows = message(`${consentMessage('command', 'make build')}\n${consentMessage('command', 'make check')}`, ['make build', 'make check']);
+    expect(said(rows)).toEqual(['approved: make build', 'approved: make check']);
+    expect(rows.map((row) => [row.id, row.messageUuid])).toEqual([[rowId.user(uuid('j1')), 'j1'], [rowId.grant(uuid('j1'), 1), null]]);
+  });
+
+  it('when the lines cannot be matched to the marks, the bubble keeps the whole text and every mark still gets its approval row', () => {
+    const text = `${consentMessage('command', 'make build')}\n${OTHER}`;
+    const rows = message(text, ['make check']);
+    expect(said(rows)).toEqual([`says: ${text}`, 'approved: make check']);
+    expect(said(message(OTHER, ['make build', 'make check']))).toEqual([`says: ${OTHER}`, 'approved: make build', 'approved: make check']);
+  });
+
+  it('one mark on a text that is its sentence is today’s row, unchanged; a message with no mark is its bubble', () => {
+    const rows = message(consentMessage('command', 'make build'), ['make build'], { isReplay: false });
+    expect(rows).toEqual([expect.objectContaining({ id: rowId.user(uuid('j1')), messageUuid: 'j1', text: consentMessage('command', 'make build'), editable: true, consent: { kind: 'command', subject: 'make build' } })]);
+    expect(said(message(`${consentMessage('command', 'make build')}\n${OTHER}`, []))).toEqual([`says: ${consentMessage('command', 'make build')}\n${OTHER}`]);
+  });
+
+  it('a grant steered into a running turn beside other words: the steer’s bubble and its approval row, in the turn', () => {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('p1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('p1'), content: 'Run the checks.', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.toolUse('t1', 'Bash', { command: 'make check' });
+    b.emit('user.message', { messageUuid: uuid('s1'), content: `${OTHER}\n${consentMessage('command', 'make build')}`, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [consent('make build')] });
+    b.result('t1', 'ok');
+    b.end(['p1', 's1']);
+    const rows = of(expanded(b.events), 'user');
+    expect(said(rows)).toEqual(['says: Run the checks.', `says: ${OTHER}`, 'approved: make build']);
+    expect(rows.slice(1).map((row) => [row.steer, row.messageUuid])).toEqual([[true, 's1'], [true, null]]);
+  });
+
+  describe('probe B’s recordings, live from the journal and from the transcript file (Acceptance 14)', () => {
+    const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de' as SessionId;
+    const MARKER = (n: string) => `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"`;
+    const fromFile = async (name: string): Promise<SessionEvent[]> => {
+      const events: SessionEvent[] = [];
+      const follower = new ChainFollower(new MemoryFileReader(readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`))), SESSION, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+      await follower.start();
+      follower.stop();
+      return events;
+    };
+    /** The person's rows after the session's first prompt, drawn whole. */
+    const persons = (events: SessionEvent[]) => said(of(expanded(events), 'user')).slice(1);
+    const cases: [string, string[]][] = [
+      // mid-turn, not joined: each message its own row, in the order written
+      ['u1c-b-join-grant-first-1', [`approved: ${MARKER('1')}`, `says: ${OTHER}`]],
+      ['u1c-b-join-other-first-1', [`says: ${OTHER}`, `approved: ${MARKER('1')}`]],
+      ['u1c-b-two-1', [`approved: ${MARKER('1a')}`, `approved: ${MARKER('1b')}`]],
+      // at the turn's end, joined: the words' bubble without the grant line, then one approval row per grant
+      ['u1c-b-joinend-grant-first-1', [`says: ${OTHER}`, `approved: ${MARKER('1')}`]],
+      ['u1c-b-joinend-other-first-1', [`says: ${OTHER}`, `approved: ${MARKER('1')}`]],
+      ['u1c-b-twoend-1', [`approved: ${MARKER('1a')}`, `approved: ${MARKER('1b')}`]],
+    ];
+    for (const [name, rows] of cases) {
+      it(`${name}: ${rows.join('; ')}`, async () => {
+        expect(persons(journalToEvents(loadUxwaveJournal(name))), `${name}, live`).toEqual(rows);
+        expect(persons(await fromFile(name)), `${name}, from the file`).toEqual(rows);
+      });
+    }
   });
 });

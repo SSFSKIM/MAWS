@@ -114,4 +114,22 @@ describe('the consent line', () => {
     expect(screen.queryByRole('button', { name: 'Copy' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
   });
+
+  // UX wave U1c, M1 (the U1c document, Design 2): a grant the engine joined with the person's other words
+  it('beside the person’s other words: their bubble without the grant’s sentence, then the line', () => {
+    const subject = 'make build';
+    const rows = derived((b) => {
+      b.emit('turn.started', { userMessageUuid: uuid('j1'), origin: 'human' });
+      b.emit('user.message', { messageUuid: uuid('j1'), content: `Also say the word EXTRA when done.\n${consentMessage('command', subject)}`, isReplay: true, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject }] });
+    }).filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user');
+    expect(rows).toHaveLength(2);
+    const bubble = renderRow(rows[0]!, { storeKey: A }).container;
+    expect(bubble.querySelector('[data-bubble]')?.textContent).toContain('Also say the word EXTRA when done.');
+    expect(bubble.textContent).not.toContain('Permission granted');
+    expect(bubble.querySelector('.transcript-consent')).toBeNull();
+    cleanup();
+    const line = renderRow(rows[1]!, { storeKey: A }).container;
+    expect(line.querySelector('.transcript-consent')?.textContent).toBe(`You approved ${subject}`);
+    expect(line.querySelector('[data-bubble]')).toBeNull();
+  });
 });

@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
-import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, endedByExit, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
@@ -1107,5 +1107,33 @@ describe('a refused call’s kind, from the file', () => {
     expect(resultsOf([refusedRow({ toolDenialKind: 'classifier-later-kind' })]).map((r) => r.denial)).toEqual([null]);
     expect(resultsOf([refusedRow({ toolDenialKind: 7 })]).map((r) => r.denial)).toEqual([null]);
     expect(resultsOf([refusedRow({})]).map((r) => r.denial)).toEqual([null]);
+  });
+});
+
+// UX wave U1c, M1 (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, Design 2, "The join, from a
+// file"; Acceptance 14): probe B's transcript files (findings-uxwave-u1c-during-turn.txt). At the turn's end the engine
+// writes the waiting messages as one `user` row of origin `human`, the texts joined by one line break, and each grant
+// line of it is the person's grant; mid-turn each message is its own queued prompt.
+describe('a joined row keeps every grant, from the file (U1c)', () => {
+  const GRANT = (n: string) => ({ class: 'consent', kind: 'command', subject: `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"` });
+  const messageOf = (name: string, line: number) => {
+    const records = loadUxwaveTranscript(name);
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    const before = records.slice(0, line - 1).flatMap((record) => recordToEvents(record, ctx));
+    expect(before.length, name).toBeGreaterThan(0);
+    return only(mapAll([records[line - 1]!], ctx), 'user.message');
+  };
+
+  it('at the turn’s end, joined: the one row carries the mark of each grant line, in order, under the second frame’s uuid', () => {
+    expect(messageOf('u1c-b-joinend-grant-first-1', 42)).toEqual([expect.objectContaining({ messageUuid: 'f85e3839-8569-463a-b00e-fe1ae5ce3dd0', origin: 'human', isSynthetic: false, arrival: [GRANT('1')] })]);
+    expect(messageOf('u1c-b-joinend-other-first-1', 39)).toEqual([expect.objectContaining({ messageUuid: 'f1e78acb-5a61-46d3-a2c6-e147781964cd', arrival: [GRANT('1')] })]);
+    expect(messageOf('u1c-b-twoend-1', 47)).toEqual([expect.objectContaining({ messageUuid: '01cc8d05-81ae-4fc9-87c3-5d8ab4578a95', arrival: [GRANT('1a'), GRANT('1b')] })]);
+  });
+
+  it('mid-turn, not joined: each queued prompt is its own message, a grant with its mark and the other words with none', () => {
+    const marks = (name: string, lines: number[]) => lines.map((line) => messageOf(name, line).map((event) => event.arrival ?? null));
+    expect(marks('u1c-b-join-grant-first-1', [42, 45])).toEqual([[[GRANT('1')]], [null]]);
+    expect(marks('u1c-b-join-other-first-1', [42, 45])).toEqual([[null], [[GRANT('1')]]]);
+    expect(marks('u1c-b-two-1', [44, 47])).toEqual([[[GRANT('1a')]], [[GRANT('1b')]]]);
   });
 });
