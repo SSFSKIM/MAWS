@@ -1156,6 +1156,7 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
   // Every destination key no gate holds any more is written (one write for every gate deferring it), every owed change
   // no gate holds is written, and every gate with nothing left to wait for lets go; again, until none does.
   const unblock = () => {
+    if (gates.length === 0) return; // nothing held: nothing owed
     for (;;) {
       const now = persistedKeys(store.getState());
       const due = new Set<LayoutKey>();
