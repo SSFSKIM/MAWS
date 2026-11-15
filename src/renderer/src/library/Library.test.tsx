@@ -20,6 +20,8 @@ import { allTabs, currentSet } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
+import { prefillToDoc } from '../composer/editor/recall';
+import { serializeDraft } from '../composer/editor/serialize';
 import { askClaudePrefill } from './copy';
 import { useLibraryDialog } from './dialogs';
 import { resetExportFormats } from './export';
@@ -1007,5 +1009,167 @@ describe('Spaces', () => {
     await changed();
     await waitFor(() => expect(screen.queryByRole('button', { name: 'All Spaces' })).toBeNull());
     expect(screen.getByRole('radio', { name: 'By Space' }).getAttribute('aria-checked')).toBe('true');
+  });
+});
+
+// UX wave U10b (l8-settings-13; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M9 and §E.2, §E.3): a
+// Space carries instructions for agents, written from its menu in a sheet with one field, held by the engine host's
+// `spaces.instructions` and `spaces.setInstructions`; a Space that has them shows the mark "Instructions" on its heading
+// line; a chat a card starts from such a Space carries them as one chip after the opening words.
+describe('a Space’s instructions', () => {
+  type Held = { spaceId: string; text: string; at: number };
+  let held: Held[];
+  const RECEIVERS = 'Every agent on this Mac that makes or opens an artifact in this Space is given these, and whoever can read its session can read them.';
+  const prefillOf = (n: number) => useComposerStore.getState().prefills.get(at(S(n)));
+  // the engine host's answer, then its announcement, as a write there makes them
+  const store = async (next: Held[], spaceId: string) => {
+    held = next;
+    await act(async () => main.emit('spaces.changed', { spaceId, change: 'updated' }));
+  };
+  const bySpace = async (user: ReturnType<typeof userEvent.setup>) => {
+    render(<Library />);
+    await user.click(screen.getByRole('radio', { name: 'By Space' }));
+  };
+  const headingOf = async (name: string) => (await screen.findByRole('heading', { name, level: 2 })).parentElement as HTMLElement; // the Space's heading line
+  const markOf = (heading: HTMLElement) => within(heading).queryByRole('button', { name: 'Instructions' });
+  const field = (sheet: HTMLElement) => within(sheet).getByRole('textbox') as HTMLTextAreaElement;
+  const button = (sheet: HTMLElement, name: string) => within(sheet).getByRole('button', { name }) as HTMLButtonElement;
+
+  beforeEach(() => {
+    held = [];
+    answers['spaces.instructions'] = () => ok({ instructions: held });
+  });
+
+  it('are written from the Space’s menu, “Instructions…” directly after “Rename…”, in a sheet that says who receives them; Enter makes a new line; the Space then shows the mark, which opens the sheet', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    expect(markOf(await headingOf('Home'))).toBeNull();
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    const items = within(await screen.findByRole('menu')).getAllByRole('menuitem').map((item) => item.textContent);
+    expect(items).toEqual(['Show only this Space', 'Rename…', 'Instructions…', 'Link a folder…', 'Delete Space…']);
+    await user.click(screen.getByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(within(sheet).getByText(RECEIVERS)).toBeTruthy();
+    expect(field(sheet).value).toBe('');
+    expect(button(sheet, 'Save').disabled).toBe(true); // nothing differs from what is stored
+    await user.type(field(sheet), 'Use metres.{Enter}Cite the field log.');
+    expect(field(sheet).value).toBe('Use metres.\nCite the field log.');
+    expect(main.callsOf('spaces.setInstructions')).toEqual([]);
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.\nCite the field log.' }]);
+
+    await store([{ spaceId: HOME, text: 'Use metres.\nCite the field log.', at: 5 }], HOME);
+    const mark = await waitFor(async () => markOf(await headingOf('Home'))!);
+    expect(markOf(await headingOf('Work'))).toBeNull();
+    await user.click(mark);
+    const again = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(again).value).toBe('Use metres.\nCite the field log.');
+    expect(button(again, 'Save').disabled).toBe(true);
+  });
+
+  it('show the mark on the narrowed Space’s bar too, after its folder and before its menu', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const bar = (await screen.findByRole('button', { name: 'All Spaces' })).parentElement as HTMLElement;
+    const mark = await within(bar).findByRole('button', { name: 'Instructions' });
+    const order = [...bar.querySelectorAll('span, button')].map((el) => el.textContent || el.getAttribute('aria-label'));
+    expect(order.indexOf('Mirrored to /Users/me/work/artifacts')).toBeLessThan(order.indexOf('Instructions'));
+    expect(order.indexOf('Instructions')).toBeLessThan(order.indexOf('Actions for the Space Work'));
+    expect(mark.className).toContain('h-6'); // a pressed area 24 px tall
+  });
+
+  it('saving an empty text removes the instructions, and the mark with them', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.', at: 5 }];
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await waitFor(async () => markOf(await headingOf('Work'))!));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Work”' });
+    await user.clear(field(sheet));
+    expect(button(sheet, 'Save').disabled).toBe(false); // the empty text differs from what is stored
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: WORK, text: '' }]));
+    await store([], WORK);
+    await waitFor(async () => expect(markOf(await headingOf('Work'))).toBeNull());
+  });
+
+  it('take at most 8,000 characters: a paste is cut there, a line under the field counts from 7,500, and 8,001 cannot be saved', async () => {
+    answers['spaces.setInstructions'] = () => ok();
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    expect(field(sheet).maxLength).toBe(8000);
+    fireEvent.change(field(sheet), { target: { value: 'x'.repeat(7499) } });
+    expect(within(sheet).queryByText(/of 8,000 characters/)).toBeNull();
+    fireEvent.change(field(sheet), { target: { value: 'x'.repeat(7500) } });
+    expect(within(sheet).getByText('7,500 of 8,000 characters')).toBeTruthy();
+    fireEvent.change(field(sheet), { target: { value: 'y'.repeat(8001) } });
+    expect(field(sheet).value).toBe('y'.repeat(8000));
+    expect(within(sheet).getByText('8,000 of 8,000 characters')).toBeTruthy();
+    await user.click(button(sheet, 'Save'));
+    await waitFor(() => expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'y'.repeat(8000) }]));
+  });
+
+  it('a save held open disables both buttons and is not cancelled by closing the sheet; a failed save keeps the sheet open with its text and says why', async () => {
+    const answer = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => answer.promise;
+    const user = userEvent.setup();
+    await bySpace(user);
+    await user.click(await screen.findByRole('button', { name: 'Actions for the Space Home' }));
+    await user.click(await screen.findByRole('menuitem', { name: 'Instructions…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Instructions for “Home”' });
+    await user.type(field(sheet), 'Use metres.');
+    await user.click(button(sheet, 'Save'));
+    expect(button(sheet, 'Save').disabled).toBe(true);
+    expect(button(sheet, 'Cancel').disabled).toBe(true);
+    await user.click(button(sheet, 'Save'));
+    expect(main.callsOf('spaces.setInstructions')).toHaveLength(1);
+    await act(async () => answer.resolve({ ok: false, error: { code: 'internal', message: 'the store is read-only' } }));
+    expect(within(sheet).getByText('the store is read-only')).toBeTruthy();
+    expect(field(sheet).value).toBe('Use metres.');
+    expect(button(sheet, 'Save').disabled).toBe(false);
+
+    const second = deferred<ReturnType<typeof ok>>();
+    answers['spaces.setInstructions'] = () => second.promise;
+    await user.click(button(sheet, 'Save'));
+    await user.keyboard('{Escape}');
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await act(async () => second.resolve(ok()));
+    expect(main.callsOf('spaces.setInstructions')).toEqual([{ spaceId: HOME, text: 'Use metres.' }, { spaceId: HOME, text: 'Use metres.' }]);
+  });
+
+  it('ride in a chat a card starts from the Space as one chip after the opening words, its body sent with the first message; a Space without them adds no chip', async () => {
+    held = [{ spaceId: WORK, text: 'Use metres.\nCite the field log.', at: 5 }];
+    const creator = vi.fn(async () => at(S(8)));
+    offs.push(registerSessionCreator(creator));
+    answers['session.projects.addFolder'] = () => ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location: { kind: 'directory', path: '/Users/me/work' } });
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK }));
+    render(<Library />);
+    const bar = (await screen.findByRole('button', { name: 'All Spaces' })).parentElement as HTMLElement;
+    await within(bar).findByRole('button', { name: 'Instructions' }); // the instructions are read
+    const made = await screen.findByRole('region', { name: 'Make something new' });
+    const documentCard = within(within(made).getByRole('group', { name: 'Document' })).getByRole('button', { name: 'Document' });
+    await waitFor(() => expect((documentCard as HTMLButtonElement).disabled).toBe(false));
+    await user.click(documentCard);
+    const body = 'Instructions of the Space “Work”, set by the user in MAWS:\nUse metres.\nCite the field log.';
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Work”: [Pasted text #1 +3 lines]', pasted: [{ name: 'Instructions for “Work”', text: body }] }));
+    const doc = prefillToDoc(prefillOf(8)!);
+    const chips = (doc.content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === 'pasted');
+    expect(chips.map((chip) => [chip.attrs?.name, chip.attrs?.lines])).toEqual([['Instructions for “Work”', 3]]);
+    const sent = serializeDraft(doc, { sessionId: 'eng-8', cwd: '/Users/me/work' });
+    expect(sent.pastedContents['1']?.content).toBe(body);
+    expect(String(sent.content)).toContain(`Make a document in the Space “Work”: `);
+    expect(String(sent.content)).toContain(body);
+
+    act(() => setLibraryView({ spaceId: HOME })); // a Space with no instructions
+    await user.click(within(within(made).getByRole('group', { name: 'Document' })).getByRole('button', { name: 'Document' }));
+    await waitFor(() => expect(creator).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Home”: ' }));
   });
 });

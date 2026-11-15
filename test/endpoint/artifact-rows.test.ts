@@ -186,6 +186,24 @@ describe('M5a’s rows', () => {
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(codeOf(await call(c, 'library.spaces', null))).toBe('class');
   });
+
+  // UX wave U10b (M9; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, Routes, "A Space's instructions, said
+  // as it is"): no command over the link reads or changes a Space's instructions. Neither name has a row, so the endpoint
+  // refuses each from another machine, as a call and as an act, for a member and for the machine's owner alike, before
+  // anything reaches the machine's engine host
+  it('refuse a Space’s instructions, read or written, from another machine: neither name is offered, and nothing reaches the engine host', async () => {
+    for (const name of ['spaces.instructions', 'spaces.setInstructions']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    const { f, a, b } = await setup();
+    const from = f.host.calls.length;
+    const spaceId = randomUUID();
+    for (const r of [a, b]) {
+      expect(codeOf(await call(r, 'spaces.instructions', {}))).toBe('not-offered');
+      expect(codeOf(await call(r, 'spaces.setInstructions', { spaceId, text: 'Use metres.' }))).toBe('not-offered');
+      expect(await act(r, actOf(f, r, 'spaces.instructions', {}))).toBe('not-offered');
+      expect(await act(r, actOf(f, r, 'spaces.setInstructions', { spaceId, text: 'Use metres.' }))).toBe('not-offered');
+    }
+    expect(JSON.stringify(f.host.calls.slice(from))).not.toContain('spaces.');
+  });
 });
 
 describe('an artifact write, an engine-host act with no session', () => {
