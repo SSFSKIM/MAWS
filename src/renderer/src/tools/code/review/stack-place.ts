@@ -9,8 +9,8 @@
 // out never moves it, so the place saved at an unmount is the one in force (a saved place restored at a mount is the
 // live place from the start). A scroll event is the person's only during their gesture (a wheel, touch, key or pointer
 // press in the scroller, and a moment after); any other the stack did not make is a layout change (the browser's clamp
-// of a page that shrank under it). Positions are the model's (`stack-model.ts`) over the measures of the page (`stack-dom.ts`), so the band
-// and the place read the same offsets. No React here.
+// of a page that shrank under it). Positions are the model's (`stack-model.ts`) over the measures of the page
+// (`stack-dom.ts`), so the band and the place read the same offsets. No React here.
 //
 // The reading edge is the scroller's top under the sticky header: what the person reads is the row just below the
 // header that stays at the top, so a place names that row, and a hunk jumped to stands there.
@@ -67,7 +67,7 @@ const atEnd = (el: HTMLElement) => el.scrollTop >= el.scrollHeight - el.clientHe
 // How long after the person's last input a scroll event is still theirs: the browser's animation of a key's or a
 // wheel's scroll, or the scroll that follows a pointer released over the scroll bar. Momentum on a trackpad keeps sending
 // wheel events, and a pointer held down keeps the gesture until it is released.
-export const GESTURE_MS = 500;
+const GESTURE_MS = 500;
 
 export class StackPlacer {
   private scroller: HTMLElement | null = null;
