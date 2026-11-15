@@ -32,8 +32,8 @@
 
 /* Review's diff body (M3): @git-diff-view/react's colour variables (its diff-view.css names them `--diff-*--` on
    `.diff-style-root`, one set per `data-theme`) from X7 tokens, so both themes follow the app's; one selector serves
-   both, since the tokens change with the theme. Scoped under ReviewView's scroller (`.review-diff`), one step more
-   specific than the library's own rules. Syntax colours are shiki's github-light and github-dark, as the transcript's
+   both, since the tokens change with the theme. Scoped under the diff's scroller (`.review-diff`: Review's stack, UX
+   wave U5b, and the acting pane's ReviewView until it leaves), one step more specific than the library's own rules. Syntax colours are shiki's github-light and github-dark, as the transcript's
    code blocks (C6), applied inline by the library. */
 .review-diff .diff-tailwindcss-wrapper[data-theme] .diff-style-root {
   --diff-border--: var(--border);

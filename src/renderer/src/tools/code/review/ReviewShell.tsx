@@ -1,28 +1,27 @@
-// The Review surface both the panel tool and a diff tab render (C8c execution document, Interfaces *Copy* and M3's
-// decisions): the scope chips (the tool only; a diff tab's ref fixes its scope), the header, the file list with counts,
-// kinds and viewed marks, the selected file's header with Mark viewed and Open file ↗, the mode toggles and the hunk and
-// file navigation, the diff body, the footer. Static and thin: the diff body (`ReviewView`, with the library, its
+// The Review surface both the panel tool and a diff tab render (C8c execution document, Interfaces *Copy*; UX wave U5b,
+// the execution document's §F): the scope chips (the tool only; a diff tab's ref fixes its scope), the toolbar, the
+// stack of every changed file and the footer. Static and thin: a section's diff (`FileBody`, with the library, its
 // stylesheet and the highlighter) loads on first use under the `Loading` fallback (ruled 2026-09-29, O2), while the
-// list and the header draw at once. Review reads no file bytes (K4): an untracked file is a row without hunks that
-// offers the viewer.
-import { lazy, Suspense, useEffect, useMemo, useRef } from 'react';
+// chips, the toolbar and the headers draw at once. Review reads no file bytes (K4): an untracked file is read as
+// Source control reads it, its diff against /dev/null.
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitStatus } from '@shared/ipc/schema/git';
+import { useTranscriptStore } from '../../../transcript';
 import { REFUSAL, REVIEW_COPY } from '../copy';
-import { openFile } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import '../code.css';
-import { blocksOf, defaultScope, firstChangedLine, tooLarge, totals, viewedSignature, type ReviewFile, type ReviewScope } from './review-model';
-import { diffOf, fileDiffOf, useReview, useReviewData, type DiffTarget, type ReviewData, type ReviewStore } from './review-store';
-import { decide, isViewed, selectFile, selectScope, toggleViewed, viewedKey, type ReviewUi } from './view-state';
-
-const ReviewView = lazy(() => import('./ReviewView'));
+import { reviewLayout, SPLIT_MIN_WIDTH } from './measure';
+import { defaultScope, latestTurnWithFiles, totals, type ReviewFile, type ReviewScope } from './review-model';
+import { diffOf, useReview, useReviewData, type ReviewData } from './review-store';
+import { Stack, useStack } from './Stack';
+import { everyFolded } from './stack-model';
+import { Toolbar, totalsWords } from './Toolbar';
+import { decide, foldAll, placeKey, selectLastTurn, selectScope, type ReviewMode, type ReviewUi } from './view-state';
 
 const chip = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg disabled:cursor-default disabled:opacity-50 disabled:hover:bg-transparent';
-const quiet = 'rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
-const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';
 
 export interface ReviewShellProps {
   appSessionId: AppSessionId;
@@ -38,6 +37,25 @@ const Loading = () => <p className="p-3 text-ui-sm text-fg-muted">{REVIEW_COPY.l
 // A path the list does not hold that names nothing in the repository: shown as the refusal, never opened.
 const outside = (path: string, status: GitStatus | null, scope: ReviewScope | null) =>
   scope !== 'turn' && path.startsWith('/') && status !== null && path !== status.repoRoot && !path.startsWith(`${status.repoRoot.replace(/\/+$/, '')}/`);
+
+// A requested path, by its identity in the scope or by its absolute path.
+const findFile = (files: readonly ReviewFile[], path: string): ReviewFile | null => files.find((f) => f.path === path) ?? files.find((f) => f.openPath === path) ?? null;
+
+// The stack's width, which decides Split's room and a header's narrow form: 0 until the page lays it out.
+function useWidth(): [(element: HTMLDivElement | null) => void, number] {
+  const [element, setElement] = useState<HTMLDivElement | null>(null);
+  const [width, setWidth] = useState(0);
+  useLayoutEffect(() => {
+    if (!element) return;
+    const measure = () => setWidth(reviewLayout.width(element));
+    measure();
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [element]);
+  return [setElement, width];
+}
 
 export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest = 0, visible = true }: ReviewShellProps) {
   const scope = useStore(ui, (s) => s.scope);
@@ -55,17 +73,6 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
     ui.setState((s) => decide(s, defaultScope(data.status, data.branch.base !== null)));
   }, [requested, scope, redecide, data.status, data.gitFailed, data.branch, ui]);
 
-  // The selection follows the list: a requested path is matched by its identity or its absolute path; a file gone from
-  // a refreshed list gives way to the first; a path outside the repository stays, to be shown refused.
-  const selected = useStore(ui, (s) => s.selected);
-  const file = files ? findFile(files, selected) : null;
-  const refused = files !== null && file === null && selected !== null && outside(selected, data.status, scope);
-  useEffect(() => {
-    if (files === null || refused) return;
-    if (file && file.path !== selected) ui.setState({ selected: file.path });
-    else if (!file && files.length > 0) ui.setState(selectFile(files[0].path));
-  }, [files, file, selected, refused, ui]);
-
   // Shown again, or asked for focus: read the scope afresh (a stale hunk never outlives a glance away).
   const seen = useRef({ focusRequest, visible });
   const target = data.target;
@@ -75,11 +82,22 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
     if (target && ((focusRequest > before.focusRequest && visible) || (visible && !before.visible))) useReview.getState().refresh(target);
   }, [focusRequest, visible, target]);
 
-  const key = scope ? viewedKey(directory, scope, turnId) : '';
+  // A requested file: brought into view by the stack when the list holds it; a path outside the repository stays, to be
+  // shown refused; any other is dropped (the file has no change in this scope).
+  const reveal = useStore(ui, (s) => s.reveal);
+  const revealed = files !== null && reveal !== null ? findFile(files, reveal.path) : null;
+  const refused = files !== null && reveal !== null && revealed === null && outside(reveal.path, data.status, scope);
+  useEffect(() => {
+    if (files !== null && reveal !== null && revealed === null && !refused) ui.setState({ reveal: null });
+  }, [files, reveal, revealed, refused, ui]);
+  const onRevealed = useCallback(() => ui.setState({ reveal: null }), [ui]);
+
+  const [measured, width] = useWidth();
+  const mode = useStore(ui, (s) => s.mode);
+  const key = scope ? placeKey(directory, scope, turnId, null) : '';
   return (
-    <div data-review data-scope={scope ?? ''} className="flex h-full min-h-0 flex-col bg-bg">
-      {chips ? <ScopeChips ui={ui} data={data} scope={scope} turnId={turnId !== null} /> : null}
-      <Header scope={scope} files={files} />
+    <div ref={measured} data-review data-scope={scope ?? ''} data-mode={drawnMode(mode, width)} className="flex h-full min-h-0 flex-col bg-bg">
+      {chips ? <ScopeChips ui={ui} data={data} scope={scope} appSessionId={appSessionId} /> : null}
       {data.list.phase === 'unavailable' ? (
         <p role="status" data-review-unavailable className="px-3 py-2 text-ui text-fg-muted">
           {data.list.message}
@@ -91,20 +109,78 @@ export function ReviewShell({ appSessionId, directory, ui, chips, focusRequest =
           {emptyOf(scope, data)}
         </p>
       ) : files ? (
-        <>
-          <FileList files={files} selected={file?.path ?? null} ui={ui} viewedKey={key} target={data.target} />
-          {file ? <FileSection file={file} files={files} ui={ui} appSessionId={appSessionId} data={data} viewedKey={key} /> : null}
-          {refused && selected !== null ? <RefusedPath path={selected} /> : null}
-        </>
+        <StackView
+          appSessionId={appSessionId}
+          ui={ui}
+          data={data}
+          files={files}
+          placeKey={key}
+          width={width}
+          reveal={revealed && reveal ? { path: revealed.path, n: reveal.n } : null}
+          onRevealed={onRevealed}
+          refused={refused && reveal !== null ? reveal.path : null}
+        />
       ) : null}
       <Footer scope={scope} data={data} />
     </div>
   );
 }
 
-function findFile(files: readonly ReviewFile[], selected: string | null): ReviewFile | null {
-  if (selected === null) return null;
-  return files.find((f) => f.path === selected) ?? files.find((f) => f.openPath === selected) ?? null;
+// What the stack draws: the stored choice, but Unified where it is too narrow for Split (D9).
+const drawnMode = (mode: ReviewMode, width: number): ReviewMode => (mode === 'split' && (width <= 0 || width >= SPLIT_MIN_WIDTH) ? 'split' : 'unified');
+
+interface StackViewProps {
+  appSessionId: AppSessionId;
+  ui: StoreApi<ReviewUi>;
+  data: ReviewData;
+  files: readonly ReviewFile[];
+  placeKey: string;
+  width: number;
+  reveal: { path: string; n: number } | null;
+  onRevealed(): void;
+  refused: string | null;
+}
+
+// The toolbar over the stack, both from one resolution of the scope's files.
+function StackView({ appSessionId, ui, data, files, placeKey: key, width, reveal, onRevealed, refused }: StackViewProps) {
+  const { sections, order } = useStack({ files, target: data.target, placeKey: key, pastCap: data.pastCap, ui });
+  const scopeDiff = useReview((s) => (data.target ? diffOf(s, data.target) : undefined));
+  const mode = useStore(ui, (s) => s.mode);
+  const hunk = useStore(ui, (s) => s.hunk);
+  const wrap = useViewer((s) => s.wrap);
+  const allFolded = everyFolded(sections.map((section) => section.folded));
+  const current = Math.min(hunk, Math.max(0, order.length - 1));
+  return (
+    <>
+      <Toolbar
+        totals={totalsWords(totals(files))}
+        allFolded={allFolded}
+        onFoldAll={() => ui.setState((s) => foldAll(s, key, files.map((file) => file.path), allFolded ? 'open' : 'closed'))}
+        counter={order.length > 0 ? { index: current, count: order.length } : null}
+        onHunk={(next) => ui.setState((s) => ({ hunk: next, navigate: s.navigate + 1 }))}
+        mode={mode}
+        splitRoom={width <= 0 || width >= SPLIT_MIN_WIDTH}
+        onMode={(next) => ui.setState({ mode: next })}
+        wrap={wrap}
+        onWrap={() => useViewer.getState().setWrap(!wrap)}
+      />
+      {refused !== null ? <RefusedPath path={refused} /> : null}
+      <Stack
+        appSessionId={appSessionId}
+        ui={ui}
+        sections={sections}
+        order={order}
+        placeKey={key}
+        target={data.target}
+        scopeDiff={scopeDiff}
+        width={width}
+        mode={drawnMode(mode, width)}
+        wrap={wrap}
+        reveal={reveal}
+        onRevealed={onRevealed}
+      />
+    </>
+  );
 }
 
 function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
@@ -121,9 +197,14 @@ function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
   }
 }
 
-function ScopeChips({ ui, data, scope, turnId }: { ui: StoreApi<ReviewUi>; data: ReviewData; scope: ReviewScope | null; turnId: boolean }) {
-  const pick = (next: ReviewScope) => ui.setState((s) => selectScope(s, next));
+// Last turn is always listed (l5-code-12 c): chosen with no turn set, it shows the latest turn of the session's own
+// transcript whose divider lists files; with none it is disabled with its reason.
+function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>; data: ReviewData; scope: ReviewScope | null; appSessionId: AppSessionId }) {
+  const turnId = useStore(ui, (s) => s.turnId);
+  const latest = useTranscriptStore((s) => latestTurnWithFiles(s.rows(appSessionId)));
+  const pick = (next: ReviewScope) => ui.setState((s) => (next === 'turn' ? selectLastTurn(s, latest) : selectScope(s, next)));
   const branchReason = data.branch.settled && data.branch.base === null ? data.branch.reason : null;
+  const turnAvailable = turnId !== null || latest !== null;
   const stagedShown = data.staged || scope === 'staged';
   const chipOf = (id: ReviewScope, disabled: boolean, reason: string | null) => (
     <button key={id} type="button" data-chip={id} className={chip} aria-pressed={scope === id} disabled={disabled} title={reason ?? undefined} onClick={() => pick(id)}>
@@ -134,231 +215,15 @@ function ScopeChips({ ui, data, scope, turnId }: { ui: StoreApi<ReviewUi>; data:
     <div role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
       {chipOf('uncommitted', false, null)}
       {chipOf('branch', !data.branch.settled || data.branch.base === null, branchReason)}
-      {turnId ? chipOf('turn', false, null) : null}
+      {chipOf('turn', !turnAvailable, turnAvailable ? null : REVIEW_COPY.noTurnChangedFiles)}
       {stagedShown ? chipOf('staged', !data.staged, data.staged ? null : REVIEW_COPY.indexMatchesHead) : null}
     </div>
   );
 }
 
-function Header({ scope, files }: { scope: ReviewScope | null; files: readonly ReviewFile[] | null }) {
-  if (scope === null || files === null) return null;
-  const sum = totals(files);
-  return (
-    <p data-review-header className="shrink-0 px-3 pt-2 pb-1 text-ui font-medium text-fg">
-      {REVIEW_COPY.header(sum.files, sum.added, sum.removed, REVIEW_COPY.scopes[scope])}
-    </p>
-  );
-}
-
-const basename = (path: string) => path.slice(path.lastIndexOf('/') + 1);
-const dirOf = (path: string) => (path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : '');
-
-function Counts({ file }: { file: ReviewFile }) {
-  if (file.kind === 'untracked' || file.kind === 'binary') return <span className="shrink-0 text-ui-sm text-fg-faint">{REVIEW_COPY.kinds[file.kind]}</span>;
-  return (
-    <span className="shrink-0 font-mono text-ui-sm">
-      <span className="text-success">+{file.added}</span> <span className="text-danger">−{file.removed}</span>
-    </span>
-  );
-}
-
-function CheckIcon() {
-  return (
-    <svg viewBox="0 0 16 16" aria-hidden="true" className="size-3 shrink-0 text-success" fill="none" stroke="currentColor" strokeWidth={1.8} strokeLinecap="round" strokeLinejoin="round">
-      <path d="M3.5 8.5l3 3 6-7" />
-    </svg>
-  );
-}
-
-// A file's hunks: its own, or those fetched for it when its scope is past the cap.
-function hunksOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): string[] | null {
-  if (file.hunks !== null || target === null) return file.hunks;
-  const load = fileDiffOf(fetched, target, file.path);
-  return load?.status === 'ok' ? (load.file?.hunks ?? []) : null;
-}
-
-// A file's patch header: its own, or the one fetched for it when its scope is past the cap (what a binary's viewed mark
-// signs: its `index` line names both blobs, so a new blob drops the mark within the cap or past it).
-function headerOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): string | null {
-  if (file.header !== null || target === null) return file.header;
-  const load = fileDiffOf(fetched, target, file.path);
-  return load?.status === 'ok' ? (load.file?.header ?? null) : null;
-}
-
-// The kind a file's mark signs and its body draws by: its listing's, or for an untracked file the one its own read answered
-// (the listing knows only that it is untracked; a binary's patch says it is binary, and its header names the new blob)
-function shownKindOf(file: ReviewFile, target: DiffTarget | null, fetched: Pick<ReviewStore, 'files'>): ReviewFile['kind'] {
-  if (file.kind !== 'untracked' || target === null) return file.kind;
-  const load = fileDiffOf(fetched, target, file.path);
-  return load?.status === 'ok' && load.file?.kind === 'binary' ? 'binary' : file.kind;
-}
-
-function FileList({ files, selected, ui, viewedKey: key, target }: { files: readonly ReviewFile[]; selected: string | null; ui: StoreApi<ReviewUi>; viewedKey: string; target: DiffTarget | null }) {
-  const marks = useStore(ui, (s) => s.viewed);
-  const fetched = useReview((s) => s.files);
-  return (
-    <ul role="listbox" aria-label={REVIEW_COPY.title} className="max-h-[40%] shrink-0 overflow-y-auto border-b border-border py-1">
-      {files.map((file) => {
-        const signed = { kind: shownKindOf(file, target, { files: fetched }), header: headerOf(file, target, { files: fetched }) };
-        const viewed = isViewed(marks, key, file.path, viewedSignature(signed, hunksOf(file, target, { files: fetched })));
-        return (
-          <li key={file.path} role="option" aria-selected={file.path === selected}>
-            <button
-              type="button"
-              data-path={file.path}
-              data-kind={file.kind}
-              data-viewed={viewed || undefined}
-              title={file.path}
-              onClick={() => ui.setState(selectFile(file.path))}
-              className={`flex h-6 w-full items-center gap-1.5 px-3 text-left text-ui hover:bg-bg-hover ${file.path === selected ? 'bg-bg-active text-fg' : 'text-fg'}`}
-            >
-              {viewed ? <CheckIcon /> : <span className="size-3 shrink-0" />}
-              <span className="truncate">{basename(file.path)}</span>
-              <span className="min-w-0 flex-1 truncate text-ui-sm text-fg-faint">{dirOf(file.path)}</span>
-              <Counts file={file} />
-            </button>
-          </li>
-        );
-      })}
-    </ul>
-  );
-}
-
-const kindLabel = (file: ReviewFile) => (file.kind === 'renamed' ? REVIEW_COPY.renamedFrom(file.oldPath ?? '') : REVIEW_COPY.kinds[file.kind]);
-
-function FileSection({ file, files, ui, appSessionId, data, viewedKey: key }: { file: ReviewFile; files: readonly ReviewFile[]; ui: StoreApi<ReviewUi>; appSessionId: AppSessionId; data: ReviewData; viewedKey: string }) {
-  const mode = useStore(ui, (s) => s.mode);
-  const navigate = useStore(ui, (s) => s.navigate);
-  const current = useStore(ui, (s) => s.hunk);
-  const marks = useStore(ui, (s) => s.viewed);
-  const wrap = useViewer((s) => s.wrap);
-  // A scope past its cap fetches the selected file's hunks on selection, and a binary's header (what its mark signs).
-  const target = data.target;
-  const binary = file.kind === 'binary';
-  // P5 O7 M8 ("Untracked files"): an untracked file is fetched too, as Source control reads it (the `untracked` scope), so
-  // it shows as added; an untracked directory (`dir/`, its files unlisted) has no diff and keeps the note
-  const untracked = file.kind === 'untracked';
-  const untrackedDirectory = untracked && file.path.endsWith('/');
-  const fetch = target !== null && (binary ? file.header === null : file.hunks === null && !untrackedDirectory);
-  const fetched = useReview((s) => (fetch && target ? fileDiffOf(s, target, file.path) : undefined));
-  // Keyed on the scope's diff too: a re-read of the scope drops the per-file loads, and the selected file asks again.
-  const scopeDiff = useReview((s) => (fetch && target ? diffOf(s, target) : undefined));
-  useEffect(() => {
-    if (fetch && target) useReview.getState().loadFile(target, file.path, untracked);
-  }, [fetch, target, file.path, untracked, scopeDiff]);
-  // P5 O7 M8 review: an untracked file whose read answered a binary patch is drawn and signed as the binary it is
-  const shownBinary = binary || (untracked && fetched?.status === 'ok' && fetched.file?.kind === 'binary');
-  const hunks = useMemo(() => (shownBinary ? null : (file.hunks ?? (fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null))), [shownBinary, file.hunks, fetched]);
-  const header = file.header ?? (fetched?.status === 'ok' ? (fetched.file?.header ?? null) : null);
-  // Stable while the file's hunks are, so the diff body does not re-parse on every render.
-  const blocks = useMemo(() => (hunks === null ? [] : blocksOf(hunks, file.hunks === null ? [hunks.length] : file.blocks)), [hunks, file.hunks, file.blocks]);
-  const signature = viewedSignature({ kind: shownBinary ? 'binary' : file.kind, header }, hunks);
-  const large = hunks !== null && tooLarge({ hunks });
-  const count = hunks === null || large ? 0 : hunks.length;
-  const hunk = Math.min(current, Math.max(0, count - 1));
-  const index = files.indexOf(file);
-
-  const lineOf = (i: number): number | null => (file.kind === 'untracked' ? 1 : hunks && hunks.length > 0 ? firstChangedLine(hunks[Math.min(i, hunks.length - 1)]) : null);
-  const open = (line: number | null) => file.openPath !== null && openFile(appSessionId, file.openPath, line);
-  const goHunk = (next: number) => ui.setState((s) => ({ hunk: next, navigate: s.navigate + 1 }));
-  const goFile = (next: ReviewFile) => ui.setState((s) => ({ ...selectFile(next.path), navigate: s.navigate + 1 }));
-  const viewed = isViewed(marks, key, file.path, signature);
-
-  return (
-    <section data-review-file={file.path} className="flex min-h-0 flex-1 flex-col">
-      <div className="flex shrink-0 items-center gap-2 px-3 pt-2 pb-1">
-        <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
-          {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
-        </span>
-        {(shownBinary ? header !== null : !untrackedDirectory && hunks !== null) ? (
-          <button type="button" className={toggle} aria-pressed={viewed} onClick={() => ui.setState((s) => toggleViewed(s, key, file.path, signature))}>
-            {viewed ? REVIEW_COPY.viewed : REVIEW_COPY.markViewed}
-          </button>
-        ) : null}
-        {file.openPath !== null ? (
-          <button type="button" data-open-file className={quiet} onClick={() => open(lineOf(hunk))}>
-            {REVIEW_COPY.openFile}
-          </button>
-        ) : null}
-        <span className="flex shrink-0 items-center">
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.previousFile} title={REVIEW_COPY.previousFile} disabled={index <= 0} onClick={() => goFile(files[index - 1])}>
-            ‹
-          </button>
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.nextFile} title={REVIEW_COPY.nextFile} disabled={index >= files.length - 1} onClick={() => goFile(files[index + 1])}>
-            ›
-          </button>
-        </span>
-      </div>
-      {count > 0 ? (
-        <div className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 pb-1.5">
-          <button type="button" className={toggle} aria-pressed={mode === 'unified'} onClick={() => ui.setState({ mode: 'unified' })}>
-            {REVIEW_COPY.unified}
-          </button>
-          <button type="button" className={toggle} aria-pressed={mode === 'split'} onClick={() => ui.setState({ mode: 'split' })}>
-            {REVIEW_COPY.split}
-          </button>
-          <button type="button" className={toggle} aria-pressed={wrap} onClick={() => useViewer.getState().setWrap(!wrap)}>
-            {REVIEW_COPY.wrap}
-          </button>
-          <span className="flex-1" />
-          <span data-review-hunk className="text-ui-sm text-fg-muted">
-            {REVIEW_COPY.hunkOf(hunk + 1, count)}
-          </span>
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.previousHunk} title={REVIEW_COPY.previousHunk} disabled={hunk === 0} onClick={() => goHunk(hunk - 1)}>
-            ↑
-          </button>
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.nextHunk} title={REVIEW_COPY.nextHunk} disabled={hunk >= count - 1} onClick={() => goHunk(hunk + 1)}>
-            ↓
-          </button>
-        </div>
-      ) : (
-        <div className="shrink-0 border-b border-border" />
-      )}
-      {untrackedDirectory ? (
-        <p data-review-note className="px-3 py-2 text-ui-sm text-fg-muted">
-          {REVIEW_COPY.untrackedNote}
-        </p>
-      ) : hunks === null ? (
-        shownBinary ? null : fetched?.status === 'error' ? (
-          <p role="status" className="px-3 py-2 text-ui-sm text-fg-muted">
-            {REVIEW_COPY.unavailable(fetched.message)}
-          </p>
-        ) : (
-          <Loading />
-        )
-      ) : large ? (
-        <p data-review-too-large className="px-3 py-2 text-ui-sm text-fg-muted">
-          {REVIEW_COPY.tooLarge}{' '}
-          {file.openPath !== null ? (
-            <button type="button" className="text-accent hover:underline" onClick={() => open(lineOf(0))}>
-              {REVIEW_COPY.openTheFile}
-            </button>
-          ) : (
-            REVIEW_COPY.openTheFile
-          )}
-        </p>
-      ) : hunks.length > 0 ? (
-        <Suspense fallback={<Loading />}>
-          <ReviewView
-            key={file.path}
-            file={{ path: file.path, oldPath: file.oldPath, blocks }}
-            mode={mode}
-            wrap={wrap}
-            hunk={hunk}
-            navigate={navigate}
-            initialScrollTop={ui.getState().scrollTop}
-            onHunk={(next) => ui.setState({ hunk: next })}
-            onLeave={(scrollTop) => ui.setState({ scrollTop })}
-          />
-        </Suspense>
-      ) : null}
-    </section>
-  );
-}
-
 function RefusedPath({ path }: { path: string }) {
   return (
-    <div role="alert" data-review-refused className="flex flex-col gap-0.5 px-3 py-2">
+    <div role="alert" data-review-refused className="flex shrink-0 flex-col gap-0.5 px-3 py-2">
       <span className="text-ui-sm text-danger">{REVIEW_COPY.refused(REFUSAL)}</span>
       <span className="truncate font-mono text-ui-sm text-fg-muted">{path}</span>
     </div>

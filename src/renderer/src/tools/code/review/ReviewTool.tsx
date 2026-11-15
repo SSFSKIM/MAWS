@@ -1,9 +1,9 @@
 // The Review tool (C8c execution document, Interfaces *Tools, slots and the open-file seam*; M3's decisions): what
 // changed under the scope that fits, in the right panel. X5: `id: 'review'`, pinnable, single-instance,
 // `params { scope?, path?, turnId? }`, `open` re-targeting, and a `summary` for Environment's diff stats. Its state is a
-// store handle (C8a's React Compiler rule): the scope, the turn, the selected file, the hunk, the scroll, the mode and
-// the viewed marks. The git watch and the scope's diff are the mounted body's (the host unmounts an unselected tool),
-// so `dispose` has nothing left to release.
+// store handle (C8a's React Compiler rule): the scope, the turn, the hunk, the mode, the viewed marks and (UX wave U5b)
+// the stack's folds and places. The git watch and the scope's diff are the mounted body's (the host unmounts an
+// unselected tool), so `dispose` has nothing left to release.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';

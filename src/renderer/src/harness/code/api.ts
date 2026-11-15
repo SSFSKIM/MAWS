@@ -10,13 +10,15 @@ export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged';
 
 export type ReviewSurface = 'panel' | 'tab'; // the panel's Review tool, or a diff tab in the page's left column
 
+// UX wave U5b (M3): Review is one stack of sections. `files` are its sections in order, each with its fold; `selected`
+// is the file whose section is at the top of the stack; `mode` is what the stack draws.
 export interface CodeHarnessReview {
   scope: ReviewScope | null;
   turnId: string | null; // Last turn's turn (the panel tool's state, or a diff tab's ref)
-  files: { path: string; added: number; removed: number; viewed: boolean; kind: string }[];
+  files: { path: string; added: number; removed: number; viewed: boolean; kind: string; folded: boolean }[];
   selected: string | null;
   hunks: string[] | null; // the selected file's hunk texts as Review draws them (null: none to draw, or not loaded)
-  hunk: { index: number; count: number } | null; // `Showing hunk <index> of <count>`, 1-based as shown
+  hunk: { index: number; count: number } | null; // `Showing hunk <index> of <count>` (or `<index> of <count>`), 1-based as shown
   mode: 'unified' | 'split';
   wrap: boolean;
   footer: string;
@@ -38,13 +40,13 @@ export interface CodeHarnessApi {
   // The panel's Review when the panel shows it, else the diff tab in the left column; `surface` picks one.
   review(surface?: ReviewSurface): CodeHarnessReview | null;
   selectScope(scope: ReviewScope): void;
-  selectFile(path: string, surface?: ReviewSurface): void;
+  selectFile(path: string, surface?: ReviewSurface): void; // brings the file's section to the top of the stack
   nextHunk(surface?: ReviewSurface): void;
   prevHunk(surface?: ReviewSurface): void;
-  setMode(mode: 'unified' | 'split', surface?: ReviewSurface): void;
-  toggleWrap(surface?: ReviewSurface): void;
-  markViewed(path: string, surface?: ReviewSurface): Promise<void>; // selects the file, then marks it
-  openSelectedFile(surface?: ReviewSurface): void; // `Open file ↗` on the current hunk
+  setMode(mode: 'unified' | 'split', surface?: ReviewSurface): void; // through the View menu: read `review().mode` after
+  toggleWrap(surface?: ReviewSurface): void; // through the View menu: read `review().wrap` after
+  markViewed(path: string, surface?: ReviewSurface): Promise<void>; // brings the file's section to the top, then marks it
+  openSelectedFile(surface?: ReviewSurface): void; // `Open file ↗` of the section at the top
   files(): { roots: string[]; expanded: string[]; selected: string | null; rows: { path: string; kind: string; depth: number }[] } | null;
   expand(path: string): Promise<void>; // resolves once the directory's listing (or its notice) is drawn
   selectEntry(path: string): void;
