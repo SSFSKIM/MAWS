@@ -1154,6 +1154,7 @@ Each milestone's own review, at its boundary, reads that milestone's diff agains
 
 ## Decision Log
 
+- Decision (2026-11-15 (UTC), the architect, on the pre-flight's point (a)): a `user` row that carries `beside` (U1c's approval row beside its message, in flight) belongs to its message and is not a prompt of its own: it opens no turn for `answerActionsOf`, gets no action row, and is no prompt stop in landing 2. M3 builds the rule as one predicate with a test that holds a message followed by rows of that shape (written from the shape read at U1c's head, no import from that branch); whichever of U1c and this landing lands second confirms it at its merge.
 - Decision (2026-11-15 (UTC), the architect, after the revision): ticket 588 closes with landing 1; landing 2's ticket is 698. Where this document says "landing 2's own ticket", that is 698.
 - Decision (2026-11-15 (UTC), the architect): the `/rewind` widget's prefill of a bridge-delivered prompt (sminos's frame line landing in the draft) stays a tracker row in M6, as written: what a draft should hold for a prompt the person did not type is a product question, not decided inside this landing.
 - Decision (2026-11-15 (UTC), the architect): the measured budgets of decision 29 and "Searching…" belong to landing 2 and are accepted as its defaults; nothing of them is built in landing 1.
