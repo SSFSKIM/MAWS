@@ -62,7 +62,10 @@ export function answerWords(text: string, questions: Read['questions']): string 
   if (envelope === null) return null;
   const asked = questions(envelope.call);
   // MAWS's own envelope always carries its answers; the class's null is another tool's shape
-  const pairs = (envelope.answers ?? []).map((answer) => {
+  const answers = envelope.answers ?? [];
+  // the asked order: the ask's questions where the window holds it, then any answer none of them holds; else the array's
+  const ordered = asked === null ? answers : [...asked.flatMap((question) => answers.filter((answer) => answer.id === question.id)), ...answers.filter((answer) => !asked.some((question) => question.id === answer.id))];
+  const pairs = ordered.map((answer) => {
     const question = asked?.find((candidate) => candidate.id === answer.id);
     return { title: question === undefined ? answer.question : askQuestionTitle(question), words: askAnswerCopy(answer) };
   });
