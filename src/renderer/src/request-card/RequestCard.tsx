@@ -308,19 +308,23 @@ function NativeRequestCard({ item, request, placement, onAnswered, loading, unre
   const appSessionId = item.appSessionId;
   // claimed when the press is this prompt's (its row, its composer, or nothing with its pane active) and the card is in
   // view, and ⌘↩ only beside an empty composer; a claimed press answers only once the guard is armed, else nothing
-  const claims = (yieldsToDraft: boolean) => () => {
-    const row = ownerRef.current;
-    const card = rootRef.current;
-    return row !== null && card !== null && promptFocused(row, appSessionId) && inView(card) && (!yieldsToDraft || composerEmpty(appSessionId));
-  };
-  const guarded = (may: 'mayDeny' | 'mayAllow', run: () => void) => () => {
-    if (prompt.current?.[may](performance.now()) === true) run();
-  };
-  const pane = (yieldsToDraft: boolean) => (paneKeys ? claims(yieldsToDraft) : undefined);
+  const claimsPress = useCallback(
+    (yieldsToDraft: boolean) => {
+      const row = ownerRef.current;
+      const card = rootRef.current;
+      return row !== null && card !== null && promptFocused(row, appSessionId) && inView(card) && (!yieldsToDraft || composerEmpty(appSessionId));
+    },
+    [appSessionId],
+  );
+  const claimsAny = useCallback(() => claimsPress(false), [claimsPress]);
+  const claimsBesideEmpty = useCallback(() => claimsPress(true), [claimsPress]);
+  const armedDecline = useCallback(() => void (prompt.current?.mayDeny(performance.now()) === true && keys.current.decline?.()), [prompt]);
+  const armedAllowOnce = useCallback(() => void (prompt.current?.mayAllow(performance.now()) === true && keys.current.allowOnce?.()), [prompt]);
+  const armedAllowLasting = useCallback(() => void (prompt.current?.mayAllow(performance.now()) === true && keys.current.allowLasting?.()), [prompt]);
   useKeyChord('request.accept', accept, { within: ownerRef, enabled: owns && live && bound.accept, fresh: true });
-  useKeyChord('request.decline', paneKeys ? guarded('mayDeny', decline) : decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true, claims: pane(false) });
-  useKeyChord('request.allowOnce', paneKeys ? guarded('mayAllow', allowOnce) : allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true, claims: pane(true) });
-  useKeyChord('request.allowLasting', paneKeys ? guarded('mayAllow', allowLasting) : allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true, claims: pane(false) });
+  useKeyChord('request.decline', paneKeys ? armedDecline : decline, { within: ownerRef, enabled: cardKeys && bound.decline, fresh: true, claims: paneKeys ? claimsAny : undefined });
+  useKeyChord('request.allowOnce', paneKeys ? armedAllowOnce : allowOnce, { within: ownerRef, enabled: cardKeys && bound.allowOnce, fresh: true, claims: paneKeys ? claimsBesideEmpty : undefined });
+  useKeyChord('request.allowLasting', paneKeys ? armedAllowLasting : allowLasting, { within: ownerRef, enabled: cardKeys && bound.allowLasting, fresh: true, claims: paneKeys ? claimsAny : undefined });
 
   // Digits, from the element that owns the keys (the article, or the transcript's row).
   useEffect(() => {

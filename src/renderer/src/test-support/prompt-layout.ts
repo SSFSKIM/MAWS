@@ -12,7 +12,7 @@ export function layOutPrompts(): { shift(by: number): void; restore(): void } {
   let offset = 0;
   const cardAt = (band: number) => new DOMRect(10, offset + 20 + band * BAND, 620, BAND - 10);
   const buttonsAt = (band: number) => new DOMRect(20, offset + 90 + band * BAND, 600, 32);
-  const original = Element.prototype.getBoundingClientRect; // eslint-disable-line @typescript-eslint/unbound-method
+  const original = Element.prototype.getBoundingClientRect;
   const spy = vi.spyOn(Element.prototype, 'getBoundingClientRect').mockImplementation(function (this: Element) {
     const all = rows();
     const band = all.indexOf(this as HTMLElement);
