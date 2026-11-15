@@ -48,6 +48,7 @@ const INVENTED: readonly string[] = [
   ...MARKED_CASES.map(([, text]) => text),
   '<message>Done.</message> narration <message>Still open', // the review's first reproduction
   '<message>\n```sh\nls\n```</message>', // the second: a closing fence glued to the closer
+  '<message>\n```sh\nls\n```</message>\nNarration after the fence.', // the same, with narration after it
   'Narration </message> <message>Kept.</message>',
   '<message>a<insight>b</insight>c</message>',
   '<message>a<insight>b</message>c</insight>',

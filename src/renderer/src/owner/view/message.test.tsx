@@ -188,6 +188,21 @@ describe('the label follows `spanRows`', () => {
     expect(labels(head(text).container)).toEqual(['● message']);
   });
 
+  it('draws a glued closing fence followed by narration with neither the fence nor the closer, the narration outside the code and the message', () => {
+    const text = '<message>\n```sh\nls\n```</message>\nNarration after the fence.';
+    const whole = draw(text);
+    expect(labels(whole.container)).toEqual(['● message']);
+    expect(whole.container.textContent).not.toContain('</message>');
+    expect(whole.container.textContent).not.toContain('```');
+    expect(whole.container.querySelector('pre')?.textContent).not.toContain('Narration');
+    expect(bodies(whole.container).join('')).not.toContain('Narration');
+    expect([...whole.container.querySelectorAll('p')].map((p) => p.textContent)).toContain('Narration after the fence.');
+    cleanup();
+    const folded = head(text);
+    expect(labels(folded.container)).toEqual(['● message']);
+    expect(folded.container.textContent).not.toContain('Narration');
+  });
+
   it('the full drawing keeps a mark inside a line in its authored paragraph, under one label', () => {
     const view = draw('Checked. <message>First.</message> <message>Second.</message> Done.');
     expect(view.container.querySelectorAll('p')).toHaveLength(1);
