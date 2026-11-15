@@ -179,6 +179,10 @@ describe('editor modes', () => {
       await waitFor(() => expect(document.querySelectorAll('.cm-deletedChunk')).toHaveLength(1));
       expect(getChunks(view().state)?.chunks).toHaveLength(1);
       expect(within(bar()!).getByText('1 change from disk')).toBeTruthy();
+      // the controls drawn again act on the tab's new view (UX wave U6b-1, the Mac run's second failure)
+      fireEvent.click(chunkControl(0, 'Take theirs'));
+      await waitFor(() => expect(within(bar()!).getByText('0 changes from disk')).toBeTruthy());
+      expect(doc()).toBe(numbered(10, { 8: 'theirs 8' }));
     });
 
     it('closes the merge view on Reload and on Keep mine', async () => {
