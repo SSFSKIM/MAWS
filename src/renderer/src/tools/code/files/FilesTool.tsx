@@ -136,7 +136,8 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   const machine = machineFor(appSessionId);
   const key = held ? fileKey(machine, held.file) : null;
   const [tabWidth, measure] = useWidth();
-  const fileColumn = useCallback((element: HTMLDivElement | null) => (visible && key !== null && element ? registerSideFile(element, key) : undefined), [visible, key]);
+  const [fileColumn, setFileColumn] = useState<HTMLDivElement | null>(null); // absent while the tree is in the file's place
+  useEffect(() => (visible && key !== null && fileColumn ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn]);
   useEffect(() => void useTreeState.getState().load(), []);
   const loaded = useTreeState((s) => s.loaded);
   const tree = useTreeState((s) => treeOf(s, appSessionId));
@@ -189,7 +190,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
         </div>
       ) : null}
       {held && place !== 'instead' ? (
-        <div ref={fileColumn} className="h-full min-h-0 min-w-0 flex-1">
+        <div ref={setFileColumn} className="h-full min-h-0 min-w-0 flex-1">
           <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} />
         </div>
       ) : null}
