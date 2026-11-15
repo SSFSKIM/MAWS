@@ -170,11 +170,11 @@ describe('the drawn row says what the one reading says', () => {
     const whole = renderRow(row);
     expect(read(whole.container), 'the row drawn whole').toEqual({ messages, record });
     whole.unmount();
-    const cut = renderRow({ ...row, cut: true });
+    const cut = renderRow({ ...row, cut: true as const });
     expect(read(cut.container), 'the row as a reply an interrupt cut').toEqual({ messages, record });
     cut.unmount();
     if (messages.length === 0) return; // a text with no message never heads a stretch
-    for (const head of [{ ...row, reportOnly: true as const }, { ...row, cut: true, reportOnly: true as const }]) {
+    for (const head of [{ ...row, reportOnly: true as const }, { ...row, cut: true as const, reportOnly: true as const }]) {
       const view = renderRow(head);
       expect(read(view.container), `a closed stretch’s head${head.cut ? ', cut' : ''}`).toEqual({ messages, record: '' });
       view.unmount();
