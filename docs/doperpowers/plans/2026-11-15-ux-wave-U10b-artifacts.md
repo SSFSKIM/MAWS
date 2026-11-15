@@ -1058,6 +1058,9 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation: the three menu chords of the composer ask a predicate the composer registers, not the context that hides the toolbar's popovers.
   Evidence: `draftShown: () => !promptState.current.docked` in `composer/Composer.tsx`, read by `toggleFocusedMenu` in `ComposerAppKeys.tsx`. Found by the adversarial review; hence §F.3's predicate.
 
+- Observation: the probe snapshot's write switch rewrites the places `search-tools.test.ts` deliberately holds older (the server instructions, `show_pane`, `message`), so its whole diff fails that same test (`expected [] to deeply equal [ 'message' ]`).
+  Evidence: M1's VM runs at `21eabe708` (nine hunks: four of M1's, five of the held places). M1 applied only its own tools' hunks; a second switch run on the pushed head left only the held places in the diff, which proves the committed entries are the generator's. Every later milestone that rewrites the snapshot (M2, M4, M8, M10) applies the switch's hunks for its own tools alone, the same way.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
@@ -1110,6 +1113,12 @@ The architect's rulings of 2026-11-15 (UTC) on the six points revision 2 could n
 - What an older build's accept of a suggestion does with the page setting is accepted as written: the scenes of U10b-1 on both exact peers are the proof. §G; M3 decision 6.
 - Whether the history rail shows a page-only revision as an empty change is accepted as written: M2's executor reads it and reports.
 - The architect read the three statements the mark of §C.1 rests on in the code, and they hold: the update log has two inserts and no third; the prune keeps each artifact's newest row; both older builds read `meta` by key only.
+
+Decisions made while U10b-1 is built (2026-11-15, the controller, from the executors' reports).
+
+- M1: a publish with both `path` and `files`, or neither, is answered with `publishPathOrFiles` alone, not the generic invalid-arguments text (which would name the tool twice). `path` on any kind but html answers `publishPathHtmlOnly` before today's per-kind refusals. A publish by path runs: the replay check, then the kind refusals and the suggestion policy, then the file read, then any write; a replay reads no file, a refused path writes nothing. `externalReferences` is counted in the page the version stored, for `path`, `files` and a replay alike. A publish by path keeps the page's stored name, not the file's.
+- M1: the rule that leaves `html` out of an html page's formats is in `library/export.ts`, so the viewer, the row menu and the Send-to sheet agree; one predicate, `savesCopy(kind)`, drives "Save a copy…" in both menus. A Library test that clicked Export on an html row moved to a deck's row, since an html row now shows Export before main answers.
+- M1: the probe snapshot takes the switch's hunks for M1's two tools only (Surprises & Discoveries); the charter's two X9 lines are dated sentences at the end of its X9 paragraph, as U5a's are.
 
 ## Outcomes & Retrospective
 
