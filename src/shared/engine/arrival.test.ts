@@ -352,7 +352,7 @@ describe('the reader, on a slash command’s output (u3-commands)', () => {
     });
     const terminal = transcriptArrivals('u3-terminal-commands-r1');
     expect(Object.keys(terminal).map(Number)).toEqual([6, 50, 57, 67, 71, 76, 78, 119]); // 56, 70 and 77 hold the command; 79 the unknown one
-    expect(terminal[50]).toEqual(['command (no run): Compacted (ctrl+o to see full summary)']);
+    expect(terminal[50]).toEqual(['command (no run), plain: Compacted (ctrl+o to see full summary)']); // dimmed by the terminal: escapes removed
     expect(terminal[57]).toEqual(['command /context, plain:  Context Usage']); // the terminal's grid, its escapes removed
     expect(terminal[71]).toEqual(['command /rename uxw renamed: Session renamed to: uxw renamed']);
     expect(JSON.stringify(Object.values(terminal))).not.toContain('\\u001b');
@@ -372,7 +372,11 @@ describe('the reader, on a slash command’s output (u3-commands)', () => {
     expect(live.filter((line) => line.includes(', plain'))).toEqual([]);
     expect(Object.values(transcriptArrivals('u3-commands-r1')).flat().filter((line) => line.includes(', plain'))).toEqual([]);
     const terminal = Object.values(transcriptArrivals('u3-terminal-commands-r1')).flat();
-    expect(terminal.filter((line) => line.includes(', plain'))).toEqual(['command /context, plain:  Context Usage']);
+    expect(terminal.filter((line) => line.includes(', plain'))).toEqual([ // the grid, and the two dimmed "Compacted" rows (lines 50 and 119)
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+      'command /context, plain:  Context Usage',
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+    ]);
     const coloured = { type: 'system', subtype: 'local_command', uuid: 'c-1', content: '<local-command-stderr>\u001b[31mfailed\u001b[39m</local-command-stderr>', commandRun: { command: 'demo' } };
     expect(readArrivals(coloured)).toEqual([{ class: 'command', run: { command: 'demo', args: '' }, stdout: '', stderr: 'failed', plain: true }]);
   });

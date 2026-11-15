@@ -129,6 +129,45 @@ describe('a command’s output, drawn', () => {
     expect(model.container.querySelector('.transcript-command')?.hasAttribute('data-error')).toBe(false);
   });
 
+  // The architect's rulings on the drawn example (the document's Decision Log, R2 and R4)
+  it('keeps the output’s line ends: the recorded /cost output draws each of its source lines on a line of its own, closed and open (R4)', () => {
+    renderedOutputs(longOutput);
+    const row = starting(live('u3-commands-r1'), 'Total cost:');
+    const source = row.text.split('\n');
+    expect(source).toHaveLength(7);
+    const { container } = renderRow(row, { disclosures: new Disclosures() });
+    const output = container.querySelector<HTMLElement>('.transcript-command-output')!;
+    const drawnLines = () => output.querySelectorAll('p, h1, h2, h3, h4, h5, h6, li, tr').length + output.querySelectorAll('br').length;
+    expect(drawnLines()).toBe(source.length);
+    fireEvent.click(within(container).getByRole('button', { name: 'Show more' }));
+    expect(drawnLines()).toBe(source.length);
+    const words = (output.textContent ?? '').replace(/\s+/g, ' ');
+    let from = 0;
+    for (const line of source) {
+      const at = words.indexOf(line.trim().replace(/\s+/g, ' '), from);
+      expect(at, line).toBeGreaterThanOrEqual(from);
+      from = at;
+    }
+  });
+
+  it('sits on the bubble’s side when its text is one line, and is a block of the column when its text has a line end (R2)', () => {
+    renderedOutputs(longOutput);
+    const rows = live('u3-commands-r1');
+    const shape = (row: CommandRow) => {
+      const { container } = renderRow(row);
+      const block = container.querySelector('.transcript-command')!.hasAttribute('data-block');
+      cleanup();
+      return block;
+    };
+    expect(shape(starting(rows, 'Session renamed to: uxw renamed'))).toBe(false);
+    expect(shape(starting(rows, 'Error: No messages to compact'))).toBe(false);
+    expect(shape(starting(rows, 'Total cost:'))).toBe(true);
+    expect(shape(starting(rows, '## Context Usage'))).toBe(true);
+    const base: CommandRow = { id: 'local:o2' as CommandRow['id'], turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'local_command', messageUuid: null, text: 'one line', lone: true, run: { command: 'usage', args: '' } };
+    expect(shape(base)).toBe(false); // a lone output follows the same rule
+    expect(shape({ ...base, text: 'first line\nsecond line' })).toBe(true);
+  });
+
   it('a line that stands alone names its command first, outside the output, where a run is known', () => {
     renderedOutputs(longOutput);
     const base: CommandRow = { id: 'local:o1' as CommandRow['id'], turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'local_command', messageUuid: null, text: 'Total cost: $0.01' };

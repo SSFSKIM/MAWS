@@ -172,7 +172,8 @@ describe('a background task’s end is kept until the model is told (Interfaces 
       let onTurn = 0;
       for (const event of live(loadUxwaveJournal(name))) {
         if (event.kind === 'turn.started' && event.parentToolUseId === null) [lastTurn, onTurn] = [event.origin, 0];
-        if (event.kind !== 'user.message' || event.arrival === undefined) continue;
+        // a line's carrier is a synthetic message; a command's output carries its `command` entry and is none (UX wave U3b, decision 2)
+        if (event.kind !== 'user.message' || !event.isSynthetic || event.arrival === undefined) continue;
         if (carriedOf(event.arrival).length === 0) {
           expect(standing.has(event.messageUuid), `${name} ${event.seq}: a withdrawal of a line that stands`).toBe(true);
           standing.delete(event.messageUuid);

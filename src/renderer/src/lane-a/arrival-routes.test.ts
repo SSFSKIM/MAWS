@@ -382,12 +382,13 @@ describe('a slash command’s output, from the file (Acceptance 6)', () => {
 });
 
 // UX wave U3b (M1; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, Acceptance 1 and 2,
-// decisions 2 and 3): an output's row says the command the engine ran (`run`), whether all of it was an error, whether its
-// text was a terminal's (`plain`) and whether it stands with no bubble of its command (`lone`), the same on every route.
+// decisions 2 and 3): an output's row says the command the engine ran (`run`), whether all of it was an error and whether
+// its text was a terminal's (`plain`), the same on every route. (`lone` is not compared across routes: the file's
+// routes place an output loose, after its command's turn, where the live route places it in that turn.)
 // Another machine's rows ride the backfill (`recordToEvents`), so the reader of them gains nothing: its events carry
 // the same entry as the file's.
 const commandRows = (rows: Row[]): string[] =>
-  ofKind(rows, 'local_command').map((row) => `${row.run === undefined ? '-' : `/${row.run.command}`}${row.error ? ' error' : ''}${row.plain ? ' plain' : ''}${row.lone ? ' lone' : ''}: ${firstLine(row.text)}`);
+  ofKind(rows, 'local_command').map((row) => `${row.run === undefined ? '-' : `/${row.run.command}`}${row.error ? ' error' : ''}${row.plain ? ' plain' : ''}: ${firstLine(row.text)}`);
 const outputEntries = (events: SessionEvent[]) => events.flatMap((event) => (event.kind === 'user.message' && event.origin === 'local-command' ? [event.arrival ?? null] : []));
 
 describe('a slash command’s output names its command, its error and its kind of text, on every route', () => {
@@ -411,7 +412,7 @@ describe('a slash command’s output names its command, its error and its kind o
     expect(commandRows(drawn(stateOf(fromJournal('u3-commands-r1'))))).toEqual(file);
   });
 
-  it('u3-terminal-commands-r1: the terminal’s grid is a plain row with no escape in it, named by its run, under its bubble', async () => {
+  it('u3-terminal-commands-r1: the terminal’s grid is a plain row with no escape in it, named by its run', async () => {
     const text = recorded('u3-terminal-commands-r1');
     const [fileEvents, remoteEvents] = [await fromFile(text), await fromRows(text)];
     expect(outputEntries(remoteEvents)).toEqual(outputEntries(fileEvents));
@@ -419,8 +420,7 @@ describe('a slash command’s output names its command, its error and its kind o
     const grid = ofKind(rows, 'local_command').find((row) => row.text.startsWith('Context Usage'));
     expect(grid).toMatchObject({ run: { command: 'context', args: '' }, plain: true });
     expect(grid!.text).not.toContain('\u001b');
-    expect(grid!.lone).toBeUndefined();
-    expect(commandRows(rows).filter((row) => row.includes(' plain'))).toEqual(['/context plain: Context Usage']);
+    expect(commandRows(rows).filter((row) => row.includes(' plain'))).toEqual(['- plain: Compacted (ctrl+o to see full summary)', '/context plain: Context Usage', '- plain: Compacted (ctrl+o to see full summary)']);
     expect(commandRows(rows)[0]).toBe('/compact error: Error: No messages to compact');
     expect(commandRows(drawn(stateOf(remoteEvents)))).toEqual(commandRows(rows));
   });
