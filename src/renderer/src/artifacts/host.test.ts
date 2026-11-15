@@ -550,6 +550,7 @@ describe('an artifact on another machine (M5b)', () => {
     const states: Array<string | undefined> = [];
     handle.subscribe((state) => states.push(state.refused));
     later.answers.set('artifacts.open', refused); // the member lost `view`: the stream closed `removed`, and the reopen is refused
+    later.answers.set('artifacts.get', refused); // fix wave 1: and so is the read of why, which is the host's answer
     later.host.dropAll();
     await settle(RECONNECT_BACKOFF_MS[0]);
     expect(handle.state().refused).toBe(words);

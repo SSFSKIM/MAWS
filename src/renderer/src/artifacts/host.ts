@@ -263,7 +263,7 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
     }
 
     // UX wave U10b (M5): what the host says of the artifact: live, deleted by an agent with Undo able to bring it back,
-    // gone (deleted for good, or not there), or unknown (the host did not answer). Fix wave 1: `current` is false when a
+    // gone (deleted for good, not there, or refused to this window), or unknown (the host did not answer). Fix wave 1: `current` is false when a
     // later read or a `created` came while it was asked.
     private async standing(): Promise<{ now: 'live' | 'deletedByAgent' | 'gone' | 'unknown'; current: boolean }> {
       const ticket = ++this.standingTicket;
@@ -272,8 +272,9 @@ export function createArtifactHost({ ipc, ports, log = (line) => console.warn(`[
         const answer = await call('artifacts.get', { artifactId: this.artifactId });
         now = answer.artifact ? 'live' : answer.deleted?.undoable === true ? 'deletedByAgent' : 'gone';
       } catch (error) {
-        log(`${this.artifactId}: the host did not say why it was refused: ${error instanceof Error ? error.message : String(error)}`);
-        now = 'unknown';
+        // a refusal of the read itself (not found, not viewable) is the host's answer; anything else is none
+        now = error instanceof ArtifactCommandError && artifactRefusalOf(error.error) !== null ? 'gone' : 'unknown';
+        if (now === 'unknown') log(`${this.artifactId}: the host did not say why it was refused: ${error instanceof Error ? error.message : String(error)}`);
       }
       return { now, current: !this.closed && ticket === this.standingTicket };
     }
