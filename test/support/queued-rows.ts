@@ -20,9 +20,13 @@ export function queuedPrompt(prompt: string): object {
   return recorded(row, 'Reply TERMINAL_QUEUED', prompt, 'w1-terminal-queued');
 }
 
-/** A peer session's message the inbox queued (origin `peer`, a meta row): u3-sminos-r1-maws's line 59. */
+/**
+ * A peer session's message the inbox queued (origin `peer`, a meta row): u3-sminos-r1-maws's line 59, which recorded the
+ * person's own words sminos delivered; its frame here names a session, as a peer's does (U3a's reader, arrival.ts).
+ */
 export function queuedPeerMessage(words: string): object {
-  return recorded(loadUxwaveTranscript('u3-sminos-r1-maws')[58], 'UXW owner busy: also say THREE.', words, 'u3-sminos-r1-maws:59');
+  const own = recorded(loadUxwaveTranscript('u3-sminos-r1-maws')[58], 'UXW owner busy: also say THREE.', words, 'u3-sminos-r1-maws:59');
+  return replaced(own, 'from human id=90624e56', 'from session:7ef6ac00 id=90624e56') as object;
 }
 
 /** A background task's notification queued (mode `task-notification`): u3-tasks-r2's line 132; `words` replaces its summary. */

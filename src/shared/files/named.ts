@@ -1014,6 +1014,11 @@ export type RowClaim = { names: true } | { names: false; pending: PendingCall[];
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
 const OTHER: RowClaim = { names: false, pending: [], other: true };
+// UX wave U6e (Decision Log 8; the panel's finding 2): a carrier of a person's message (a `user` row, a queued prompt)
+// holds the person's own text when U3a's reader of arrivals reads none off its marks, or only the person's own words
+// sminos delivered; a peer's message, a notification, MAWS's answer and consent texts and every other arrival are text
+// someone else wrote, the class of a tool's result. The one test, both carriers'.
+const personsOwn = (row: unknown): boolean => readArrivals(row).every((arrival) => arrival.class === 'own');
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
@@ -1121,11 +1126,9 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8): the text is
-      // the person's when U3a's reader of arrivals reads none off the row's marks, or only the person's own words
-      // sminos delivered; a peer's message, a notification, MAWS's answer and consent texts and every other arrival are
-      // text someone else wrote, the class of a tool's result
-      if (yield* personNames(content, path)) return readArrivals(row).every((arrival) => arrival.class === 'own') ? NAMES : OTHER;
+      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8): the person's
+      // own text names the path; someone else's names it for a read only (`personsOwn`)
+      if (yield* personNames(content, path)) return personsOwn(row) ? NAMES : OTHER;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const value of listOf(content)) {
@@ -1142,7 +1145,8 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
       const attachment = record(fields.attachment);
       const human = attachment.type === 'queued_command' && record(attachment.origin).kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
       if (!human || typeof attachment.source_uuid !== 'string' || attachment.source_uuid === '') return NOTHING;
-      return (yield* personNames(attachment.prompt, path)) ? NAMES : NOTHING;
+      // U6e (the panel's finding 2): as the `user` row's text, a queued answer or consent text of MAWS's names it for a read only
+      return (yield* personNames(attachment.prompt, path)) ? (personsOwn(row) ? NAMES : OTHER) : NOTHING;
     }
     default:
       return NOTHING;
