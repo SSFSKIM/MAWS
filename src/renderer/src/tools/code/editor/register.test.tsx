@@ -369,9 +369,29 @@ describe('editor registrations', () => {
       const { disk, writes } = await lockedInMerge(route);
       const before = writes();
       const closing = requestCloseTab(OUT_ID);
-      fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Don’t save' }));
+      const question = await screen.findByRole('dialog');
+      expect(within(question).queryByRole('button', { name: 'Save' })).toBeNull(); // the task review's finding 3
+      fireEvent.click(within(question).getByRole('button', { name: 'Don’t save' }));
       await act(() => closing);
       expect(allTabs(useLayout.getState().main).some((tab) => tab.id === OUT_ID)).toBe(false);
+      expect(writes()).toBe(before);
+      expect(disk.files[OUT]).toBe('theirs\n');
+    });
+    // The task review's finding 3: the locked question offers no Save, a save that cannot happen; its two answers are
+    // Cancel and Don't save, and Cancel, which keeps the tab and writes nothing, holds the keyboard.
+    it.each(['conflict read', 'session move'] as const)('the close question offers no Save (%s); Cancel holds the keyboard and keeps the tab, the bytes unchanged', async (route) => {
+      const { disk, writes } = await lockedInMerge(route);
+      const before = writes();
+      const closing = requestCloseTab(OUT_ID);
+      const question = await screen.findByRole('dialog');
+      expect(within(question).getAllByRole('button').map((button) => button.textContent)).toEqual(['Don’t save', 'Cancel']);
+      expect(within(question).queryByRole('button', { name: 'Save' })).toBeNull();
+      const cancel = within(question).getByRole('button', { name: 'Cancel' });
+      await waitFor(() => expect(document.activeElement).toBe(cancel));
+      fireEvent.click(cancel);
+      await act(() => closing);
+      expect(allTabs(useLayout.getState().main).some((tab) => tab.id === OUT_ID)).toBe(true);
+      expect(outsideEntry()).toMatchObject({ dirty: true, locked: 'result' });
       expect(writes()).toBe(before);
       expect(disk.files[OUT]).toBe('theirs\n');
     });
@@ -476,7 +496,7 @@ describe('a file beside the chat as an editor', () => {
       const asked = await screen.findByRole('dialog', { name: 'Save changes to app.ts?' });
       expect(sheet()!.getAttribute('data-editor-close')).toBe(ID);
       fireEvent.click(within(asked).getByRole('button', { name: 'Cancel' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
       expect(entry().dirty).toBe(true);
 
@@ -494,7 +514,7 @@ describe('a file beside the chat as an editor', () => {
       disk.files[APP] = 'const a = 2;\n'; // no event: the save finds it
       let closing = closeSide(tabId);
       fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Save' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
       expect(entry().theirs?.view).toBe('merge');
 
@@ -503,7 +523,7 @@ describe('a file beside the chat as an editor', () => {
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).not.toContain(tabId);
       const writes = disk.callsOf('files.write').length;
       closing = closeSide(tabId);
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sheet()).toBeNull();
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toContain(tabId);
       expect(disk.callsOf('files.write')).toHaveLength(writes);
@@ -550,7 +570,7 @@ describe('a file beside the chat as an editor', () => {
       act(() => void openFile(A, LIB, null, { keep: true }));
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).not.toContain(tabId);
       fireEvent.click(within(asked).getByRole('button', { name: 'Save' }));
-      expect(await act(() => closing)).toBe(false);
+      await act(() => closing);
       expect(sideTabs().map((tab) => tab.id)).toContain(tabId);
       expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toContain(tabId);
       expect(disk.callsOf('files.write')).toHaveLength(1);

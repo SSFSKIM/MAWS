@@ -636,7 +636,8 @@ describe('an open the agent asked for (U6e)', () => {
   };
   const agentsRead = (appSessionId: AppSessionId) => ({ appSessionId: bareOf(appSessionId), path: OUT, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true, agent: true });
 
-  it('W9: the agent’s show of a restored main tab with no entry reads with agent', async () => {
+  // A main tab restored with the layout, its entry not read yet, drawn by the main area; `held` gates every read of OUT.
+  const restoredMain = async (held?: Promise<void>) => {
     resetPanelStores({ hydrated: false });
     unregisterFiles = registerPanelTool(filesTool);
     const strip = openTab(openTab(mainShowing(A), { kind: 'file', path: OUT, line: null, appSessionId: A, machine: TEST_MACHINE }), { kind: 'session', appSessionId: A });
@@ -645,17 +646,56 @@ describe('an open the agent asked for (U6e)', () => {
     await hydrateHeld(bridge);
     await settle();
     granted.add(OUT);
-    main = mainFor({ [OUT]: 'chosen\n' }, { outside: { granted, named } });
+    main = mainFor({ [OUT]: 'chosen\n' }, { outside: { granted, named }, ...(held ? { held: new Map([[OUT, held]]) } : {}) });
     render(<MAIN_FILE />);
     expect(entry()).toBeUndefined();
+  };
+  // The person's open of the tab still drawn at its line: the entry's reads become the person's (the task review's
+  // finding 1), so the person's grant admits the file.
+  const personsOpenTakesItBack = async (open: () => void) => {
+    const reads = readsOf(OUT).length;
+    act(open);
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+    expect(readsOf(OUT).at(-1)).not.toHaveProperty('agent');
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', text: 'chosen\n', agent: false }));
+    expect(document.querySelector('[data-refusal]')).toBeNull();
+  };
+
+  it('W9: the agent’s show of a restored main tab with no entry reads with agent; its show at another line keeps the refusal; the person’s open then admits it', async () => {
+    await restoredMain();
     act(() => void openFile(A, OUT, null, { asked: 'agent' }));
     expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(OUT));
     await waitFor(() => expect(readsOf(OUT)).toHaveLength(1));
     expect(readsOf(OUT)[0]).toEqual(agentsRead(A));
     await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull()); // a grant alone admits nothing
+    // the task review's finding 2: the agent's show again, at another line, is still the agent's
+    act(() => void openFile(A, OUT, 7, { asked: 'agent' }));
+    expect(activeTab(useLayout.getState().main)).toMatchObject({ id: KEY(OUT), line: 7 });
+    await settle();
+    await settle();
+    expect(readsOf(OUT).every((input) => input.agent === true)).toBe(true);
+    expect(entry()).toMatchObject({ status: 'error', agent: true, line: 7 });
+    expect(document.querySelector('[data-refusal]')).not.toBeNull();
+    await personsOpenTakesItBack(() => void openFile(A, OUT, 7, { main: true }));
   });
 
-  it('W9: the agent’s show of a side tab whose entry was evicted reads with agent', async () => {
+  it('W9: the person’s open of a restored main tab while the agent’s first read is out supersedes it and admits the file', async () => {
+    const gate = deferred<void>();
+    await restoredMain(gate.promise);
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(1));
+    expect(readsOf(OUT)[0]).toEqual(agentsRead(A));
+    act(() => void openFile(A, OUT, null, { main: true })); // the person's open, the agent's read still out
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(2));
+    expect(readsOf(OUT)[1]).not.toHaveProperty('agent');
+    gate.resolve();
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', text: 'chosen\n', agent: false }));
+    await settle();
+    expect(document.querySelector('[data-refusal]')).toBeNull();
+  });
+
+  // An evicted side entry of the person's kept tab; `held` gates every read of OUT from the agent's show on.
+  const evictedSide = async (held?: Promise<void>) => {
     granted.add(OUT);
     render(<TestHost />);
     act(() => void openFile(A, OUT, null, { keep: true })); // the person's tab
@@ -666,11 +706,52 @@ describe('an open the agent asked for (U6e)', () => {
     // the cap's eviction: the tab stays, its entry goes
     act(() => useViewer.setState((s) => ({ entries: new Map([...s.entries].filter(([key]) => key !== KEY(OUT))) })));
     expect(entry()).toBeUndefined();
+    if (held) main = mainFor({ [OUT]: 'chosen\n', '/r/a.ts': 'a\n' }, { outside: { granted, named }, held: new Map([[OUT, held]]) });
+    return tab;
+  };
+
+  it('W9: the agent’s show of a side tab whose entry was evicted reads with agent; the person’s open then admits it', async () => {
+    const tab = await evictedSide();
     const reads = readsOf(OUT).length;
     act(() => void openFile(A, OUT, null, { asked: 'agent' }));
     expect(inView(A)).toEqual([tab.id]);
     await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
     expect(readsOf(OUT).at(-1)).toEqual(agentsRead(A));
+    await waitFor(() => expect(document.querySelector('[data-refusal]')).not.toBeNull());
+    await personsOpenTakesItBack(() => void openFile(A, OUT));
+  });
+
+  it('W9: the person’s open of a side tab whose entry was evicted, while the agent’s read is out, supersedes it and admits the file', async () => {
+    const gate = deferred<void>();
+    await evictedSide(gate.promise);
+    act(() => void openFile(A, OUT, null, { asked: 'agent' }));
+    await waitFor(() => expect(readsOf(OUT).at(-1)).toEqual(agentsRead(A)));
+    const reads = readsOf(OUT).length;
+    act(() => void openFile(A, OUT)); // the person's open, the agent's read still out
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+    expect(readsOf(OUT).at(-1)).not.toHaveProperty('agent');
+    gate.resolve();
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', text: 'chosen\n', agent: false }));
+    await settle();
+    expect(document.querySelector('[data-refusal]')).toBeNull();
+  });
+
+  // The task review's finding 2: an agent's show that draws nothing again leaves no mark for a later mount.
+  it('W9: the agent’s show of a main tab drawn at its line leaves no mark: the person’s return to it after its entry goes reads as the person’s', async () => {
+    granted.add(OUT);
+    render(<MAIN_FILE />);
+    act(() => void openFile(A, OUT, null, { main: true }));
+    await waitFor(() => expect(entry()?.status).toBe('ready'));
+    act(() => void openFile(A, OUT, null, { asked: 'agent' })); // drawn already, at its line: no mount follows
+    await settle();
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: A }));
+    await settle();
+    act(() => useViewer.setState((s) => ({ entries: new Map([...s.entries].filter(([key]) => key !== KEY(OUT))) })));
+    const reads = readsOf(OUT).length;
+    act(() => useLayout.getState().activateTab(KEY(OUT))); // the person's click on the tab
+    await waitFor(() => expect(readsOf(OUT)).toHaveLength(reads + 1));
+    expect(readsOf(OUT).at(-1)).not.toHaveProperty('agent');
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'ready', agent: false }));
   });
 
   it('W9: the agent’s show that retargets a main tab to its own session reads with agent', async () => {
