@@ -3,7 +3,8 @@
 // on no session), the local refusals, the `session.capabilities` substitute, the machine's `artifacts` feed, open-a-copy
 // paging a file, a library file and an export into the temporary directory, and Save As of a remote artifact.
 import { createHash } from 'node:crypto';
-import { mkdtempSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from 'node:fs';
+import { open, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -274,6 +275,47 @@ describe('remote.openCopy', () => {
     expect(await l.adapter.artifacts.openCopy({ machine: MINI, source: { appSessionId: 'app-1', path: '/work/notes.txt' } as never })).toMatchObject({ ok: true, value: { opened: true } });
     expect(readFileSync(log, 'utf8')).toMatch(/maws-remote-copies\/.+\/notes\.txt\n$/);
     expect(l.opened).toEqual([]);
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §D, "From U9's files"): a
+// file frame's copy of another machine's file, paged into the descriptor main hands it, which has no name
+describe('copyInto', () => {
+  const MiB = 1024 * 1024;
+  const SENT = ['appSessionId', 'path', 'offset', 'length', 'hash'];
+  const pageOf = (bytes: Buffer, offset: number, length: number) => {
+    const chunk = bytes.subarray(offset, offset + length);
+    return { ok: true as const, output: { encoding: 'base64', content: chunk.toString('base64'), bytes: bytes.length, offset, length: chunk.length, truncated: offset + chunk.length < bytes.length, mime: 'application/pdf', hash: null, utf8: null } };
+  };
+
+  it('pages a session’s file into the sink it is given, asking the hash and nothing else, and answers null where no link reaches', async () => {
+    const l = lab();
+    const file = Buffer.from(Array.from({ length: 12 * MiB }, (_, i) => i % 251)); // past one call's 8 MiB, past the hash's cap
+    l.link.answers.set('files.read', (input) => pageOf(file, Number(input.offset ?? 0), Math.min(Number(input.length ?? MiB), 3 * MiB)));
+    const dir = scratch('maws-copy-into-');
+    const sink = await open(join(dir, 'sink'), 'wx+', 0o600);
+    await unlink(join(dir, 'sink'));
+    try {
+      const seen: Array<{ mime: string; bytes: number }> = [];
+      const source = { appSessionId: 'app-1', path: '/work/invented/ledger.pdf' } as never;
+      const copied = await l.adapter.artifacts.copyInto(MINI, source, sink, REMOTE_COPY_MAX_BYTES, { label: 'a file frame of app-1', seen: (first) => void seen.push(first) });
+      expect(copied).toEqual({ ok: true, value: { written: file.length } });
+      expect(seen).toEqual([{ mime: 'application/pdf', bytes: file.length }]);
+      const held = Buffer.alloc(file.length);
+      await sink.read(held, 0, file.length, 0);
+      expect(held.equals(file)).toBe(true);
+      expect(readdirSync(dir)).toEqual([]);
+      const reads = l.link.calls.filter((c) => c.name === 'files.read').map((c) => c.input as Record<string, unknown>);
+      expect(reads.length).toBeGreaterThan(1);
+      for (const read of reads) {
+        expect(read.hash).toBe(true);
+        expect(Object.keys(read).filter((key) => !SENT.includes(key))).toEqual([]);
+      }
+      expect(l.link.calls.every((c) => c.name === 'files.read')).toBe(true);
+      expect(await l.adapter.artifacts.copyInto(OTHER, source, sink, REMOTE_COPY_MAX_BYTES, { label: 'a file frame of app-1', seen: () => {} })).toBeNull();
+    } finally {
+      await sink.close();
+    }
   });
 });
 

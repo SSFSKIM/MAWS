@@ -532,7 +532,42 @@ describe('layout value shapes', () => {
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
       'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
       'layout.nativeEdit': 'main', // P4-B2 K6: the Edit menu's Undo or Redo no editor in the page claimed, run natively
+      'layout.frameFile': 'main', // UX wave U6b-2: a file frame's token, issued to the asking page
+      'layout.releaseFrame': 'main', // UX wave U6b-2: its release by that page
     });
+  });
+
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §D): a file frame's issue,
+  // its release, and the event that a read for its token failed; a token is 32 lower-case hexadecimal characters
+  it('carries a file frame’s issue, its release and the failure of a read for it as Interfaces §D shows them, and no token of another shape', () => {
+    const TOKEN = '3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b';
+    const frameFile = commands['layout.frameFile'];
+    expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf' }).success).toBe(true);
+    for (const input of [{ appSessionId: 'app-1', path: '' }, { appSessionId: 'app-1' }, { path: '/w/a.pdf' }, { appSessionId: 'app-1', path: '/w/a.pdf', named: true }, { appSessionId: 'app-1', path: '/w/a.pdf', raw: true }]) {
+      expect(frameFile.input.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    }
+    const url = `maws-artifact://${TOKEN}/ledger.pdf`;
+    for (const framed of ['pdf', 'video', 'audio'] as const) expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed }).success, framed).toBe(true);
+    expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed: 'html', neighbours: true }).success).toBe(true);
+    expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed: 'html' }).success).toBe(true);
+    for (const why of ['too-large', 'unserved', 'unframed'] as const) expect(frameFile.output.safeParse({ status: 'row', why }).success, why).toBe(true);
+    for (const output of [
+      { status: 'ready', token: TOKEN, url, framed: 'image' },
+      { status: 'ready', token: TOKEN, url, framed: 'pdf', path: '/w/a.pdf' },
+      { status: 'row', why: 'unplayable' },
+      { status: 'row', why: 'too-large', token: TOKEN },
+      { status: 'ready', url, framed: 'pdf' },
+    ]) expect(frameFile.output.safeParse(output).success, JSON.stringify(output)).toBe(false);
+    expect(commands['layout.releaseFrame'].input.safeParse({ token: TOKEN }).success).toBe(true);
+    expect(commands['layout.releaseFrame'].output.safeParse(undefined).success).toBe(true);
+    expect(events['layout.frameFailed'].safeParse({ token: TOKEN }).success).toBe(true);
+    for (const token of [TOKEN.toUpperCase(), TOKEN.slice(1), `${TOKEN}0`, '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d', `${TOKEN.slice(0, 31)}g`, '']) {
+      expect(frameFile.output.safeParse({ status: 'ready', token, url, framed: 'pdf' }).success, token).toBe(false);
+      expect(commands['layout.releaseFrame'].input.safeParse({ token }).success, token).toBe(false);
+      expect(events['layout.frameFailed'].safeParse({ token }).success, token).toBe(false);
+    }
+    expect(commands['layout.releaseFrame'].input.safeParse({ token: TOKEN, path: '/w/a.pdf' }).success).toBe(false);
+    expect(events['layout.frameFailed'].safeParse({ token: TOKEN, path: '/w/a.pdf' }).success).toBe(false);
   });
 
   // Edit ▸ Select All (sitting finding, 2026-09-30): the application menu's own item tells the page, with nothing to add

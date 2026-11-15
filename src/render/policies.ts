@@ -43,6 +43,12 @@ export interface FrameLike {
 
 const MAX_DEPTH = 64; // frames nest far less deep; a bound keeps a malformed chain from looping
 
+// UX wave U6b-2, red first: the owner's check names nothing yet.
+export type StoreHostOwner = (host: string) => number | null | undefined;
+export function shouldCancelForOwner(_details: { url: string; webContentsId: number | undefined; ownerOf: StoreHostOwner }): boolean {
+  return false;
+}
+
 // Whether a frame is a store frame or lies beneath one; null when that cannot be read (Electron throws on a disposed
 // frame's properties), so the caller falls back to what else it knows.
 export function beneathStoreFrame(frame: FrameLike | null | undefined): boolean | null {
@@ -233,7 +239,9 @@ export function appOriginOf(appUrl: string): string {
 
 // The session's request filter (its only `onBeforeRequest` listener: nothing else in main installs one) and download
 // filter. `appOrigin`: the app's renderer origin (`appOriginOf`), the one initiator trusted to reach every artifact.
-export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: string | null = null): void {
+export function writeSeam(_env: SeamEnv, _line: string): void {}
+
+export function installFramePolicies(session: Session, env: SeamEnv, appOrigin: string | null = null, _ownerOf?: StoreHostOwner): void {
   session.webRequest.onBeforeRequest({ urls: ['<all_urls>'] }, (details, callback) => {
     const own = details.webContentsId === undefined ? undefined : ownFilters.get(details.webContentsId);
     if (own) return callback({ cancel: own(details.url) });
