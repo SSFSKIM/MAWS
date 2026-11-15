@@ -9,7 +9,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { validateEventPayload } from '@shared/ipc/validate';
-import { READ_LINES } from '@shared/plugins/cli';
+import { mcpShownCommand, READ_LINES, type McpEntry } from '@shared/plugins/cli';
 import type { BinaryCheck } from '../binary-info';
 import type { ReloadTarget } from './reload-after';
 import { CLI_TIMEOUT_MS, KILL_GRACE_MS, OUTPUT_LIMIT_BYTES, PluginsRunner, pluginsEnvironment, SETTLE_MS, SHUTDOWN_KILL_GRACE_MS, type PluginsRunnerDeps } from './runner';
@@ -467,5 +467,236 @@ describe('mcp add and remove', () => {
     const { opId } = await r.start('mcp-remove', { name: 'linear', scope: 'user' }, cwd, bin);
     expect(await done(opId)).toMatchObject({ action: 'mcp-remove', outcome: { ok: false, error: { code: 'cli_failed', message: 'No MCP server named "linear" in user scope' } } });
     expect(calls()).toEqual(['mcp remove linear --scope user']);
+  });
+});
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §C "What may leave the runner"): a
+// custom add runs `claude mcp add-json` in the same queue; no line of its stdout is emitted, a line of its stderr only
+// when it holds no value slot's content, so the replay holds only such lines; its outcome is §B's; a spawn's or a thrown
+// error's message is forwarded or logged only when it holds none. The fake CLI here prints the very values it was given.
+describe('a custom add and the rule about values', () => {
+  const entry: McpEntry = { type: 'stdio', command: 'files-probe', args: ['--root', '/tmp/my files'], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }, { name: 'OTHER_KEY', value: 'say "two" \\ more' }] };
+  const input = { name: 'files-probe', scope: 'user' as const, entry };
+  const SLOTS = ['value-one', 'say "two" \\ more'];
+  const holds = (text: string) => SLOTS.some((slot) => text.includes(slot) || text.includes(JSON.stringify(slot).slice(1, -1)));
+  const ECHO_ALL = `printf '%s\\n' "$@"\nprintf '%s\\n' "$@" >&2\necho "FILES_PROBE_KEY=value-one" >&2\n`;
+
+  it('passes the add-json arguments one by one, tells the change, asks no reload, and words its success from the input', async () => {
+    behave(`printf '%s\\n' "$@" > "${fake}/args.txt"\necho "Added stdio MCP server files-probe to user config"\n`);
+    const reloadTargets = vi.fn(() => [] as ReloadTarget[]);
+    const { runner: r, events, changes, done } = make({ reloadTargets });
+    const { opId } = await r.start('mcp-add', input, cwd, bin);
+    const end = await done(opId);
+    expect(readFileSync(join(fake, 'args.txt'), 'utf8').split('\n').slice(0, -1)).toEqual(['mcp', 'add-json', 'files-probe', '{"type":"stdio","command":"files-probe","args":["--root","/tmp/my files"],"env":{"FILES_PROBE_KEY":"value-one","OTHER_KEY":"say \\"two\\" \\\\ more"}}', '--scope', 'user']);
+    expect(end).toMatchObject({ action: 'mcp-add', target: 'files-probe', outcome: { ok: true, result: { command: 'mcp add-json', message: 'Added stdio MCP server files-probe to user config', name: 'files-probe', scope: 'user' } } });
+    expect(events.filter((e) => e.opId === opId).map((e) => e.phase)).toEqual(['started', 'done']); // stdout is never emitted
+    expect(reloadTargets).not.toHaveBeenCalled();
+    expect(changes()).toBe(1);
+  });
+
+  it('lets no slot’s content into any event, the replay or the log while the CLI prints its whole argument list on both streams', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    behave(`${ECHO_ALL}echo "a clean progress line" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n${ECHO_ALL}exit 1\n`);
+    const { runner: r, events, done } = make();
+    const { opId } = await r.start('mcp-add', input, cwd, bin);
+    await until(() => events.some((e) => e.line === 'a clean progress line'), 'the clean line');
+    const replay = r.running();
+    expect(replay).toEqual([{ opId, action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'a clean progress line' }]);
+    writeFileSync(join(fake, 'go'), '');
+    const end = await done(opId);
+    expect(end.outcome).toEqual({ ok: false, error: { code: 'cli_failed', message: `Claude Code exited 1. Its message repeats a header or variable value, so it is not shown. To read it, run this in a terminal with your values in place of •••: ${mcpShownCommand(input)}`, failureCode: 'message_withheld', shownCommand: null } });
+    const lines = events.filter((e) => e.phase === 'output').map((e) => e.line);
+    expect(lines).toContain('add-json'); // clean stderr lines pass whole
+    expect(lines).toContain('--scope');
+    expect(lines.some((line) => line?.startsWith('{'))).toBe(false); // the JSON argument holds the values
+    expect(lines.filter((line) => line === 'mcp').length).toBe(2); // stderr's copy in each round; stdout's is not emitted
+    for (const event of [...events, ...replay]) expect(holds(JSON.stringify(event)), JSON.stringify(event)).toBe(false);
+    for (const call of warn.mock.calls) expect(holds(call.map(String).join(' '))).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('replays only a clean line: held open after a line holding a value, a clean one, and another holding one, it answers the clean one', async () => {
+    behave(`echo "saw value-one" >&2\necho "step two" >&2\nprintf '%s\\n' 'saw say "two" \\ more' >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\n`);
+    const { runner: r, events, done } = make();
+    const { opId } = await r.start('mcp-add', input, cwd, bin);
+    await until(() => events.some((e) => e.line === 'step two'), 'the clean line');
+    await new Promise((resolve) => setTimeout(resolve, 100)); // the third line has been read
+    expect(r.running()).toEqual([{ opId, action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'step two' }]);
+    expect(events.filter((e) => e.phase === 'output').map((e) => e.line)).toEqual(['step two']);
+    writeFileSync(join(fake, 'go'), '');
+    expect((await done(opId)).outcome).toMatchObject({ ok: true });
+    expect(r.running()).toEqual([]);
+  });
+
+  it('withholds a spawn error that quotes the argument list, and forwards one that does not', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const quoting = make({ spawn: ((_file: string, args: readonly string[]) => { throw new Error(`spawn E2BIG with ${args.join(' ')}`); }) as unknown as typeof nodeSpawn });
+    expect((await quoting.done((await quoting.runner.start('mcp-add', input, cwd, bin)).opId)).outcome).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'The command could not be started. The system’s message repeats a header or variable value, so it is not shown.', failureCode: 'message_withheld', shownCommand: null } });
+    const plain = make({ spawn: (() => { throw new Error('spawn EACCES'); }) as unknown as typeof nodeSpawn });
+    expect((await plain.done((await plain.runner.start('mcp-add', input, cwd, bin)).opId)).outcome).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'spawn EACCES', failureCode: null, shownCommand: null } });
+    for (const call of warn.mock.calls) expect(holds(call.map(String).join(' '))).toBe(false);
+    warn.mockRestore();
+  });
+
+  it('logs an error thrown while it runs only when its message holds no slot’s content', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    behave('');
+    const leaking = make({ changed: () => { throw new Error('the change failed for value-one'); } });
+    await leaking.runner.start('mcp-add', input, cwd, bin);
+    await until(() => warn.mock.calls.length === 1, 'the log line');
+    expect(String(warn.mock.calls[0][0])).toBe('[engine-host] plugins mcp-add failed: its message repeats a header or variable value and is withheld');
+    const clean = make({ changed: () => { throw new Error('the window went'); } });
+    await clean.runner.start('mcp-add', input, cwd, bin);
+    await until(() => warn.mock.calls.length === 2, 'the second log line');
+    expect(String(warn.mock.calls[1][0])).toBe('[engine-host] plugins mcp-add failed: the window went');
+    warn.mockRestore();
+  });
+
+  // M1's review: the line is tested as the CLI wrote it, before it is trimmed
+  it('withholds a value with a space or a Unicode space at either end, in a header and in a variable, from output, done and the replay', async () => {
+    const values = [' lead-space-one', 'trail-space-two ', 'nbsp-three\u00a0', '\u2003em-space-four', 'ideographic-five\u3000'];
+    for (const value of values) {
+      for (const entry of [{ type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }, { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
+        rmSync(join(fake, 'go'), { force: true });
+        behave(`printf '%s\\n' 'refused ${value}' >&2\necho "a clean line" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '%s\\n' 'refused ${value}' >&2\nexit 1\n`);
+        const { runner: r, events, done } = make();
+        const { opId } = await r.start('mcp-add', { name: 'files-probe', scope: 'user', entry }, cwd, bin);
+        await until(() => events.some((e) => e.opId === opId && e.line === 'a clean line'), 'the clean line');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const replay = r.running();
+        writeFileSync(join(fake, 'go'), '');
+        const end = await done(opId);
+        expect(end.outcome, JSON.stringify(value)).toMatchObject({ ok: false, error: { code: 'cli_failed', failureCode: 'message_withheld' } });
+        expect(events.filter((e) => e.opId === opId && e.phase === 'output').map((e) => e.line)).toEqual(['a clean line']);
+        for (const said of [...events, ...replay]) expect(JSON.stringify(said).includes(value.trim()), JSON.stringify(value)).toBe(false);
+        await r.stop();
+      }
+    }
+  }, 30_000); // ten runs of the fake CLI
+
+  // the same, with the value at the head of the line: a trim before the test would cut its leading space and pass the line
+  it('withholds a line that begins with a value led by a space or a non-breaking space, in a header and in a variable, from output, done and the replay', async () => {
+    for (const value of [' lead-space-one', '\u00a0lead-nbsp-two']) {
+      for (const entry of [{ type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }, { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }] as McpEntry[]) {
+        rmSync(join(fake, 'go'), { force: true });
+        behave(`printf '%s\\n' '${value} was refused' >&2\necho "a clean line" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '%s\\n' '${value} was refused' >&2\nexit 1\n`);
+        const { runner: r, events, done } = make();
+        const { opId } = await r.start('mcp-add', { name: 'files-probe', scope: 'user', entry }, cwd, bin);
+        await until(() => events.some((e) => e.opId === opId && e.line === 'a clean line'), 'the clean line');
+        await new Promise((resolve) => setTimeout(resolve, 50));
+        const replay = r.running();
+        writeFileSync(join(fake, 'go'), '');
+        const end = await done(opId);
+        expect(end.outcome, JSON.stringify(value)).toMatchObject({ ok: false, error: { code: 'cli_failed', failureCode: 'message_withheld' } });
+        expect(events.filter((e) => e.opId === opId && e.phase === 'output').map((e) => e.line)).toEqual(['a clean line']);
+        for (const said of [...events, ...replay]) expect(JSON.stringify(said).includes(value.trim()), JSON.stringify(value)).toBe(false);
+        await r.stop();
+      }
+    }
+  }, 30_000); // four runs of the fake CLI
+
+  // R10: the engine's read-back error is withheld whole by its phrase, whatever fragment of the file it quotes
+  it('withholds the engine’s read-back error whole from output, done, the replay and the log, tells the change, and forwards a duplicate-name line', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const header = { name: 'files-probe', scope: 'user' as const, entry: { type: 'http' as const, url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value: 'value-one-two-three' }] } };
+    const readback = 'MCP server "files-probe" may not have been saved to user config: /cfg/.claude.json could not be read to confirm the change (Unexpected token in JSON: "X-Files-Key": "value-one-t). Run claude mcp list to check.';
+    behave(`printf '%s\\n' '${readback}' >&2\necho "a clean line" >&2\nwhile [ ! -f "${fake}/go" ]; do sleep 0.02; done\nprintf '%s\\n' '${readback}' >&2\nexit 1\n`);
+    const { runner: r, events, done, changes } = make();
+    const { opId } = await r.start('mcp-add', header, cwd, bin);
+    await until(() => events.some((e) => e.opId === opId && e.line === 'a clean line'), 'the clean line');
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const replay = r.running();
+    expect(replay).toEqual([{ opId, action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'a clean line' }]);
+    writeFileSync(join(fake, 'go'), '');
+    const end = await done(opId);
+    expect(end.outcome).toEqual({ ok: false, error: { code: 'cli_failed', message: 'Claude Code exited 1. It could not read its configuration file back after writing it, and its message may quote that file, so it is not shown. The connector may have been added: check the list before adding it again.', failureCode: 'readback_unconfirmed', shownCommand: null } });
+    expect(changes()).toBe(1); // the list is read again, as after a success
+    for (const said of [...events, ...replay, ...warn.mock.calls]) expect(JSON.stringify(said)).not.toContain('value-one');
+    for (const said of events) expect(JSON.stringify(said)).not.toContain('confirm the change');
+    rmSync(join(fake, 'go'));
+    behave(`echo "MCP server files-probe already exists in user config" >&2\nexit 1\n`);
+    const dup = await r.start('mcp-add', header, cwd, bin);
+    const ended = await done(dup.opId);
+    expect(events.filter((e) => e.opId === dup.opId && e.phase === 'output').map((e) => e.line)).toEqual(['MCP server files-probe already exists in user config']);
+    expect(ended.outcome).toEqual({ ok: false, error: { code: 'cli_failed', message: 'MCP server files-probe already exists in user config', failureCode: null, shownCommand: null } });
+    warn.mockRestore();
+  });
+
+  it('ends a cancel while it runs, the timeout and the overflow in their own words, a one-character value notwithstanding', async () => {
+    const one = { name: 'files-probe', scope: 'user' as const, entry: { ...entry, env: [{ name: 'A', value: 'e' }] } };
+    behave('sleep 30\n');
+    const cancelling = make();
+    const running = await cancelling.runner.start('mcp-add', one, cwd, bin);
+    await until(() => existsSync(join(fake, 'pid')) && readFileSync(join(fake, 'pid'), 'utf8').trim(), 'the pid');
+    cancelling.runner.cancel(running.opId);
+    expect((await cancelling.done(running.opId)).outcome).toEqual({ ok: false, error: { code: 'cancelled', message: 'cancelled before the CLI finished', failureCode: null, shownCommand: null } });
+    const late = make({ timers: shortened({ [CLI_TIMEOUT_MS]: 300, [KILL_GRACE_MS]: 100 }) });
+    expect((await late.done((await late.runner.start('mcp-add', one, cwd, bin)).opId)).outcome).toEqual({ ok: false, error: { code: 'timeout', message: 'the CLI was still running after 10 minutes and was stopped', failureCode: null, shownCommand: null } });
+    behave(`head -c 100000 /dev/zero | tr '\\0' 'x' >&2\nsleep 30\n`);
+    const long = make();
+    expect((await long.done((await long.runner.start('mcp-add', one, cwd, bin)).opId)).outcome).toMatchObject({ ok: false, error: { code: 'output_overflow', failureCode: null, message: expect.stringMatching(/^the CLI printed a line longer than 64 KiB \(\d+ bytes\) and was stopped$/) } });
+  });
+});
+
+// UX wave U11g (§B, R3): the check the runner awaits inside its queue, after `started` and before anything is spawned
+describe('the check before the run', () => {
+  const entry: McpEntry = { type: 'http', url: 'https://files.example.test/mcp', headers: [] };
+  const input = { name: 'files-probe', scope: 'local' as const, entry };
+  const REFUSED = { ok: false as const, error: { code: 'spawn_failed' as const, message: 'files-probe is already configured here (user scope). Nothing was added.', failureCode: 'name_configured', shownCommand: null } };
+
+  it('ends the operation with the check’s refusal and starts no CLI; a check that passes lets it run', async () => {
+    const spawn = vi.fn(nodeSpawn);
+    const { runner: r, events, done, changes } = make({ spawn: spawn as unknown as typeof nodeSpawn });
+    const refused = await r.start('mcp-add', input, cwd, bin, async () => REFUSED);
+    expect((await done(refused.opId)).outcome).toEqual(REFUSED);
+    expect(events.filter((e) => e.opId === refused.opId).map((e) => e.phase)).toEqual(['started', 'done']);
+    expect(spawn).not.toHaveBeenCalled();
+    expect(changes()).toBe(1);
+    behave('echo ok\n');
+    const passed = await r.start('mcp-add', input, cwd, bin, async () => null);
+    expect((await done(passed.opId)).outcome).toMatchObject({ ok: true });
+    expect(calls()).toEqual(['mcp add-json files-probe {"type":"http","url":"https://files.example.test/mcp"} --scope local']);
+  });
+
+  it('ends with the result for a read that was not whole when the check throws, starting nothing', async () => {
+    const spawn = vi.fn(nodeSpawn);
+    const { runner: r, done } = make({ spawn: spawn as unknown as typeof nodeSpawn });
+    const { opId } = await r.start('mcp-add', input, cwd, bin, async () => { throw new Error('value-one unreadable'); });
+    expect((await done(opId)).outcome).toEqual({ ok: false, error: { code: 'spawn_failed', message: 'Not every configuration here could be read, so the name can’t be checked. Nothing was added.', failureCode: 'configuration_unread', shownCommand: null } });
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it('ends cancelled with nothing started when a cancel or a stop arrives during the check', async () => {
+    const spawn = vi.fn(nodeSpawn);
+    let release!: (answer: null) => void;
+    const { runner: r, events, done } = make({ spawn: spawn as unknown as typeof nodeSpawn });
+    const { opId } = await r.start('mcp-add', input, cwd, bin, () => new Promise((resolve) => (release = resolve)));
+    await until(() => events.some((e) => e.opId === opId && e.phase === 'started'), 'started');
+    expect(r.cancel(opId)).toBe(true);
+    release(null);
+    expect((await done(opId)).outcome).toEqual({ ok: false, error: { code: 'cancelled', message: 'cancelled before the CLI finished', failureCode: null, shownCommand: null } });
+    const stopping = make({ spawn: spawn as unknown as typeof nodeSpawn });
+    const held = await stopping.runner.start('mcp-add', input, cwd, bin, () => new Promise((resolve) => (release = resolve)));
+    await until(() => stopping.events.some((e) => e.opId === held.opId && e.phase === 'started'), 'started');
+    const stopped = stopping.runner.stop();
+    release(null);
+    await stopped;
+    expect((await stopping.done(held.opId)).outcome).toMatchObject({ ok: false, error: { code: 'cancelled', message: 'stopped with the engine host' } });
+    expect(spawn).not.toHaveBeenCalled();
+    expect(calls()).toEqual([]);
+  });
+
+  it('runs a queued operation’s check only once the one before it has ended', async () => {
+    behave(`while [ ! -f "${fake}/go" ]; do sleep 0.02; done\necho ok\n`);
+    const { runner: r, events, done } = make();
+    const seen: string[] = [];
+    const first = await r.start('mcp-add', { ...input, scope: 'user' }, cwd, bin, async () => (seen.push(`first, ${calls().length} started`), null));
+    const second = await r.start('mcp-add', input, cwd, bin, async () => (seen.push(`second, ${calls().length} started, first ${events.some((e) => e.opId === first.opId && e.phase === 'done') ? 'done' : 'running'}`), REFUSED));
+    await until(() => calls().length === 1, 'the first CLI');
+    expect(seen).toEqual(['first, 0 started']);
+    writeFileSync(join(fake, 'go'), '');
+    expect((await done(second.opId)).outcome).toEqual(REFUSED);
+    expect(seen).toEqual(['first, 0 started', 'second, 1 started, first done']);
+    expect(calls()).toHaveLength(1);
   });
 });

@@ -30,7 +30,8 @@ import {
 } from '../../artifacts/connectors';
 import { AppSessionIdSchema } from '../../graph/ids';
 import { OperationReceiptSchema } from '../../engine/operations'; // P4-AGG M4
-import { isMcpName, isMcpUrl, MCP_TRANSPORTS } from '../../plugins/cli'; // P4-AGG M4
+import { isMcpName, isMcpUrl, MCP_ENTRY_BOUNDS, MCP_TRANSPORTS, mcpEntryProblem } from '../../plugins/cli'; // P4-AGG M4; UX wave U11g: the entry's bounds and its rule
+import { isReservedServerName } from '../../engine/app-mcp-servers'; // UX wave U11g
 import { PluginsBinarySchema, PluginsCwdSchema, PluginsScopeSchema } from './plugins'; // P4-AGG M4
 import { JsonValueSchema, type CommandSpec } from './common';
 import { MachineRefSchema } from '../../machine/ref'; // P5 O7 M5c
@@ -379,6 +380,26 @@ export const ConnectorSignInChangedSchema = z.strictObject({
 export type ConnectorSignInChanged = z.infer<typeof ConnectorSignInChangedSchema>;
 // P4-AGG M4 end
 
+// UX wave U11g start (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §B): "Add custom connector…",
+// a whole entry the engine host runs as `claude mcp add-json` in the runner's queue, after it has checked the name
+// against the configuration of the page's `folder` (null on the user configuration's page, where the scope is `user`
+// and `cwd` is the engine's configuration directory; with a folder, `cwd` is that folder). A value slot (a header's or a
+// variable's value) is a bounded string and nothing else, so no issue raised on one can carry what it received (R2);
+// the entry's one rule (`mcpEntryProblem`) stands on the whole entry under one fixed message. These bounds are fixed
+// for the wire's major.
+const McpPairSchema = z.strictObject({ name: z.string().max(MCP_ENTRY_BOUNDS.pairName), value: z.string().max(MCP_ENTRY_BOUNDS.value) });
+export const McpEntrySchema = z
+  .discriminatedUnion('type', [
+    z.strictObject({ type: z.enum(['http', 'sse']), url: z.string().max(MCP_ENTRY_BOUNDS.url), headers: z.array(McpPairSchema).max(MCP_ENTRY_BOUNDS.headers) }),
+    z.strictObject({ type: z.literal('stdio'), command: z.string().max(MCP_ENTRY_BOUNDS.command), args: z.array(z.string().max(MCP_ENTRY_BOUNDS.arg)).max(MCP_ENTRY_BOUNDS.args), env: z.array(McpPairSchema).max(MCP_ENTRY_BOUNDS.env) }),
+  ])
+  .refine((entry) => mcpEntryProblem(entry) === null, 'not an entry Claude Code can be given (a field breaks the entry’s rule)');
+const McpCustomNameSchema = McpServerNameSchema.refine((name) => !isReservedServerName(name), 'a name Claude Code or MAWS reserves');
+const McpAddJsonSchema = z
+  .strictObject({ cwd: PluginsCwdSchema, binary: PluginsBinarySchema, name: McpCustomNameSchema, scope: PluginsScopeSchema, entry: McpEntrySchema, folder: PluginsCwdSchema.nullable() })
+  .refine(({ cwd, scope, folder }) => (folder === null ? scope === 'user' : cwd === folder), { message: 'the folder is the cwd, or null with the user scope', path: ['folder'] });
+// UX wave U11g end
+
 // P5 O4 M2 (U7, Interfaces §C): a saved grant's record as the sealed store keeps it (the version line aside), crossing
 // once from the app to the machine at the adoption (`connectors.adoptGrant`), as `connectors.directStart`'s credential
 // crosses (the same uid; P3-HD's rule). The store's own schema is this one with its `version` (src/services/connectors/
@@ -445,6 +466,7 @@ export const commands = {
   // P4-AGG M4 start: Customize › Connectors (above)
   'connectors.add': host(z.strictObject({ ...McpAt, url: McpServerUrlSchema, transport: z.enum(MCP_TRANSPORTS) }), OperationReceiptSchema),
   'connectors.remove': host(z.strictObject(McpAt), OperationReceiptSchema),
+  'connectors.addJson': host(McpAddJsonSchema, OperationReceiptSchema), // UX wave U11g (above)
   // the connector is its configuration (name, scope, and the directory for a project or local one): one sign-in at a time
   'connectors.signIn': machine(z.strictObject({ name: McpServerNameSchema, scope: PluginsScopeSchema, cwd: PluginsCwdSchema.nullable(), path: PluginsCwdSchema, appSessionId: AppSessionIdSchema, ...Callback /* P5 O7 M5c */ }), OperationReceiptSchema), // path: the file the entry is in
   'connectors.signInCancel': machine(z.strictObject({ opId: z.string() }), z.strictObject({ cancelled: z.boolean() })),

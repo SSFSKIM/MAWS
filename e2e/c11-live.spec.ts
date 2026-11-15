@@ -294,7 +294,7 @@ test('every widget opens with live engine data; controls take effect and are rea
       await row.getByRole('button', { name: 'Reconnect' }).click();
       await expect(w.getByRole('status')).toHaveText('Reconnected', { timeout: 30_000 });
       const toggle = w.getByRole('switch', { name: 'Enabled: c11probe' });
-      await expect(w.locator('[data-widget-note]')).toHaveText(/^Off here is off for every session in .+\.$/);
+      await expect(w.locator('[data-widget-note]')).toHaveText(/^A switch here is for this chat, and every session started in .+ afterwards\.$/);
       await expect(w.locator('[data-widget-note]')).toHaveAttribute('title', 'The engine records it in ~/.claude.json.');
       await toggle.click();
       await expect(toggle).toHaveAttribute('aria-checked', 'false', { timeout: 30_000 });

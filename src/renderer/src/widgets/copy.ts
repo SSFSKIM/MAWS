@@ -156,7 +156,7 @@ export const MCP = {
   none: 'No connectors',
   list: 'Connectors',
   subtitle: 'MCP servers',
-  reach: (place: string) => `Off here is off for every session in ${place}.`,
+  reach: (place: string) => `A switch here is for this chat, and every session started in ${place} afterwards.`,
   reachTip: 'The engine records it in ~/.claude.json.',
   failed: 'Failed',
   off: 'Off',
