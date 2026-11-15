@@ -352,6 +352,39 @@ test('--peer-exact takes a master ancestor off the first-parent chain as given, 
   assert.match(onChain.notes.join('\n'), new RegExp(`peer ${landed} taken exactly \\(--peer-exact ${landed}\\)`));
 });
 
+// An equal wire is admitted for a named build alone: a change to a stored form takes no WIRE_MINOR bump, yet a go-back to
+// the build the machines run reads it. --peer maps to a master state, so it names no build and keeps the refusal.
+test('--peer-exact beside an explicit peer group admits an equal wire, saying stored forms only; --peer and another major do not', (t) => {
+  const { peer, base } = repository(t, { master: { [MANIFEST]: manifest(3, 2) }, branch: { 'src/layout.ts': 'a stored form\n' } });
+  for (const gates of ['e2e:cross-build', 'static, e2e:cross-build,unit']) {
+    assert.deepEqual(peer('--gates', gates, '--peer-exact', base), {
+      status: 0,
+      trailers: [`Peer: ${base}`, 'Peer-Wire: 3.2', 'Wire: 3.2'],
+      notes: [`ci-gate: peer ${base} taken exactly (--peer-exact ${base}), not mapped to a first-parent master state: wire 3.2; this tree's 3.2, equal wire: stored forms only`],
+    });
+    const mapped = peer('--gates', gates, '--peer', base);
+    assert.equal(mapped.status, 2);
+    assert.deepEqual(mapped.trailers, []);
+    assert.match(mapped.notes.join('\n'), /e2e:cross-build cannot check peer [0-9a-f]{8}, wire 3\.2; this tree's wire 3\.2/);
+  }
+  // without a peer group, as before: the trailers, and no word of stored forms
+  for (const args of [[], ['--gates', 'static,unit']]) {
+    assert.deepEqual(peer(...args, '--peer-exact', base), {
+      status: 0,
+      trailers: [`Peer: ${base}`, 'Peer-Wire: 3.2', 'Wire: 3.2'],
+      notes: [`ci-gate: peer ${base} taken exactly (--peer-exact ${base}), not mapped to a first-parent master state: wire 3.2; this tree's 3.2`],
+    });
+  }
+  const major = repository(t, { master: { [MANIFEST]: manifest(3, 2) }, branch: { [MANIFEST]: manifest(4, 2) } });
+  const crossed = major.peer('--gates', 'e2e:cross-build', '--peer-exact', major.base);
+  assert.equal(crossed.status, 2);
+  assert.deepEqual(crossed.trailers, []);
+  assert.match(crossed.notes.join('\n'), /e2e:cross-build cannot check peer [0-9a-f]{8}, wire 3\.2; this tree's wire 4\.2/);
+  // nor the tested commit as its own peer
+  const own = repository(t, { master: { [MANIFEST]: manifest(3, 2) } });
+  assert.equal(own.peerAt(own.base, ['--gates', 'e2e:cross-build', '--peer-exact', own.base]).status, 2);
+});
+
 test('--peer-exact requires a commit with a manifest that is an ancestor of origin/master, naming the flag', (t) => {
   const { git, peerAt, base, tested, clone } = middleOfMergedBranch(t);
   for (const ref of [tested, 'child']) {

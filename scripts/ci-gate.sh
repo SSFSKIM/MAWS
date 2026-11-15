@@ -85,15 +85,19 @@
 #                      line carries the peer as resolved, its sha or `none`. Naming a PEER_E2E group in --gates
 #                      requires two wires with different minors within one major; equal minors, different majors and
 #                      --peer none are refused before pushing. Choose --peer at a master commit a minor apart, or leave
-#                      the group out of --gates. This does not change the default set selected by --gates all
+#                      the group out of --gates (--peer-exact admits an equal wire). This does not change the default
+#                      set selected by --gates all
 #   --peer-exact       the peer as one commit and no other: it is not mapped to a first-parent master state. For a
 #                      build that is a master ancestor off master's first-parent chain (it came in as a merge's second
 #                      parent, as a build the machines run can), which --peer would replace with the merge that contains
 #                      it, a different tree. The commit must hold a manifest and be an ancestor of origin/master (exit 2
 #                      otherwise, naming --peer-exact); it is refused beside --peer (exit 2); the transcript says the
-#                      peer was taken exactly, with its full sha and wire. --peer's other rules hold: the trailers, the
-#                      two minors a named PEER_E2E group needs, a shallow checkout refused. A refused run's relaunch
-#                      line and an alert refusal's override carry --peer-exact with that sha
+#                      peer was taken exactly, with its full sha and wire. --peer's other rules hold: the trailers, a
+#                      shallow checkout refused. One exception: a PEER_E2E group named in --gates also takes a peer of
+#                      the tree's own wire (same major and minor; never the tested commit itself), for a change to a
+#                      stored form alone, which takes no WIRE_MINOR bump; the transcript says `equal wire: stored forms
+#                      only`, and the spec skips its wire-skew assertions. A different major stays refused. A refused
+#                      run's relaunch line and an alert refusal's override carry --peer-exact with that sha
 #   --hosted-route     override HOSTED_MAC_ROUTE for this run: direct (macos-26 in MAWS) or mirror (maws-app).
 #                      Unset uses the repository variable, which defaults to mirror. Admission and --lane still apply.
 #   --no-mini-copy     no mini copies for this run, for the reason given (letters, digits, spaces and . _ : / # , = + -),

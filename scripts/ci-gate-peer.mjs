@@ -13,7 +13,11 @@
 // master ancestor off master's first-parent chain (it came in as a merge's second parent), and the merge that contains
 // it is a different tree. The commit must hold a manifest and be an ancestor of origin/master (exit 2 otherwise, naming
 // --peer-exact), it cannot be given beside --peer (exit 2), and stderr says it was taken exactly, with its full sha.
-// Explicit --gates peer groups require different minors within one major, including when --peer is none.
+// Explicit --gates peer groups require different minors within one major, including when --peer is none. One exception:
+// an equal wire (same major and minor) is admitted for an exact peer, `--peer-exact` beside peer groups named in --gates,
+// so a change to a stored form alone, which takes no WIRE_MINOR bump, is checked against the build the machines run; the
+// spec skips its wire-skew assertions for such a pair, and stderr says `equal wire: stored forms only`. Never the tested
+// commit itself, and never under --peer, which maps to a first-parent master state rather than a named build.
 // Usage: node scripts/ci-gate-peer.mjs --git-dir <dir> --sha <commit> [--peer <ref>|none | --peer-exact <ref>] [--gates <list>]
 import { execFileSync } from 'node:child_process';
 import { realpathSync } from 'node:fs';
@@ -63,7 +67,7 @@ export function resolvePeer({ git, sha, peer, peerExact = '', gates = '' }) {
     }
   }
   const refuseGroups = (pair) => {
-    say(`${groups.join(', ')} cannot check ${pair}; pass --peer <ref> naming a master commit a minor apart within the same major, or leave ${groups.join(', ')} out of --gates`);
+    say(`${groups.join(', ')} cannot check ${pair}; pass --peer <ref> naming a master commit a minor apart within the same major (or --peer-exact <ref> naming a build of this same wire, for stored forms alone), or leave ${groups.join(', ')} out of --gates`);
     return { trailers: [], notes, status: 2 };
   };
   // `none` is --peer's word for no peer; after --peer-exact it is a ref like any other, and names no commit.
@@ -146,9 +150,11 @@ export function resolvePeer({ git, sha, peer, peerExact = '', gates = '' }) {
   }
   const [major, minor] = wire.split('.');
   const [peerMajor, peerMinor] = peerWire.split('.');
+  // The pair as the note names it: a minor apart, or the equal wire an exact peer group run is admitted at.
   const apart = major === peerMajor && minor !== peerMinor ? ', a minor apart' : '';
-  if (groups.length > 0 && !apart) return refuseGroups(`peer ${base.slice(0, 8)}, wire ${peerWire}; this tree's wire ${wire}`);
-  if (exact) say(`peer ${base} taken exactly (${how}), not mapped to a first-parent master state: wire ${peerWire}; this tree's ${wire}${apart}`);
+  const equal = exact && groups.length > 0 && wire === peerWire && base !== sha ? ', equal wire: stored forms only' : '';
+  if (groups.length > 0 && !apart && !equal) return refuseGroups(`peer ${base.slice(0, 8)}, wire ${peerWire}; this tree's wire ${wire}`);
+  if (exact) say(`peer ${base} taken exactly (${how}), not mapped to a first-parent master state: wire ${peerWire}; this tree's ${wire}${apart}${equal}`);
   else say(`peer ${base.slice(0, 8)} (${how}), wire ${peerWire}; this tree's ${wire}${apart}`);
   return { trailers: [`Peer: ${base}`, `Peer-Wire: ${peerWire}`, `Wire: ${wire}`], notes, status: 0 };
 }
