@@ -1279,7 +1279,7 @@ test.describe('sessions', () => {
       await page.waitForFunction(() => window.innerWidth === 1600 && window.innerHeight === 900);
       const [s] = await indexed(page, [S]);
 
-      await test.step('A11: with no session’s chat in front, File › Open File… is disabled; with one, enabled; under a page, disabled', async () => {
+      await test.step('A11: with no session’s chat in front, File › Open File… is disabled; with one, enabled; under a page or the Overview, disabled', async () => {
         await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'no session in front' }).toBe(false);
         await (await sidebarRow(page, { appSessionId: s! })).click();
         await expect(page.getByRole('tab', { name: /^A session that links no file/ })).toHaveAttribute('aria-selected', 'true');
@@ -1288,6 +1288,14 @@ test.describe('sessions', () => {
         await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'a page over the session’s tab' }).toBe(false);
         await backToTabs(page);
         await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the session’s chat in front again' }).toBe(true);
+        // decision 15: the floating Overview over the session's chat (the toolbar's toggle)
+        const overviewButton = page.getByRole('button', { name: 'Overview', exact: true });
+        await overviewButton.click();
+        await expect(page.getByRole('dialog', { name: 'Overview' })).toBeVisible();
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the Overview over the session’s chat' }).toBe(false);
+        await overviewButton.click();
+        await expect(page.getByRole('dialog', { name: 'Overview' })).toHaveCount(0);
+        await expect.poll(() => menuEnabled(maws, 'file.open'), { message: 'the Overview closed' }).toBe(true);
       });
 
       const strip = await tabIdsOf(page);

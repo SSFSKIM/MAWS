@@ -2,8 +2,9 @@
 // decisions 13 to 16, sequence W1). `openChosen` asks main's chooser for a session; the file chosen (its real path, which
 // the daemon granted) opens beside the chat as a kept tab. A refusal or an error is a notice at level danger; a cancel,
 // and an answer that lands after its session left the page's records, open nothing and say nothing. `connectOpenFile`
-// keeps `file.open` (File menu, ⌘O) registered exactly while a session's chat of this Mac is in front: no page covers
-// the tab and the session in front is one the page knows (R10); otherwise it is disabled as every unregistered action.
+// keeps `file.open` (File menu, ⌘O) registered exactly while a session's chat of this Mac is in front: no page and no
+// Overview covers the tab and the session in front is one the page knows (R10); otherwise it is disabled as every
+// unregistered action.
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../../ipc/client';
 import { machineFor } from '../../../ipc/machine';
@@ -33,10 +34,11 @@ export async function openChosen(appSessionId: AppSessionId): Promise<void> {
   useViewer.getState().readAdmission(appSessionId, result.path);
 }
 
-// The session whose chat is in front on this Mac, or null.
+// The session whose chat is in front on this Mac, or null: none under a page, nor while the Overview is open over the
+// chat (decision 15; a file opened then would land beside a chat the Overview covers).
 function frontSession(): AppSessionId | null {
   const state = useLayout.getState();
-  if (pageOpen(state)) return null;
+  if (pageOpen(state) || state.overviewOpen) return null;
   const session = shownSession(state.main);
   return session !== null && machineFor(session) === ipc.localMachine && state.knownSession(session) ? session : null;
 }
@@ -57,7 +59,7 @@ export function connectOpenFile(): () => void {
     }
   };
   sync();
-  const unsubscribe = useLayout.subscribe(sync); // the tab in front, a page over it, and the sessions the page knows
+  const unsubscribe = useLayout.subscribe(sync); // the tab in front, a page or the Overview over it, and the sessions the page knows
   return () => {
     unsubscribe();
     unregister?.();
