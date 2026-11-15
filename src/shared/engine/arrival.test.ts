@@ -495,6 +495,14 @@ describe('the answer envelopes inside a joined text', () => {
     expect(readAnswerEnvelopes(joined(broken, 'Also fix the footer.'))).toEqual({ envelopes: [], rest: joined(broken, 'Also fix the footer.') });
   });
 
+  // the task review (Decision Log): `parseAskSteer` pairs the first tag with the last result block, so a slice runs only
+  // to the line before the next tag line, or a malformed member would swallow the words and the envelope after it
+  it('a malformed envelope, then words, then a valid one for the same ask: the valid one alone, the first two the rest', () => {
+    const broken = A1.replace('"answered"', '"answred"');
+    const words = 'Do not lose these words.';
+    expect(readAnswerEnvelopes(joined(broken, words, A1))).toEqual({ envelopes: [read(A1)], rest: joined(broken, words) });
+  });
+
   it('a plain prompt with the tag mid-line stays text', () => {
     const text = `Please read ${A1}`;
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });

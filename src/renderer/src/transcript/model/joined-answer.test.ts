@@ -8,7 +8,7 @@
 // reads as before.
 import { describe, expect, it } from 'vitest';
 import type { MessageUuid } from '@shared/graph/ids';
-import { parseAskSteer } from '@shared/maws/ask';
+import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
@@ -81,5 +81,35 @@ describe('an answer envelope the engine joined with a waiting prompt', () => {
     const byUuid = new Map(users(drawn(journalToEvents(rows))).map((row) => [row.messageUuid, row.text]));
     expect(byUuid.get(e.uuid)).toBe(e.message.content); // no call for the invented ask: its envelope keeps its bubble, as today
     expect(byUuid.get(p.uuid)).toBe(KIWI);
+  });
+});
+
+// the task review (Decision Log): a join of envelopes alone, each for an ask answered here, is no bubble, as one envelope
+// is; one whose ask is not answered here keeps the bubble, as an orphan envelope does
+describe('a join of answer envelopes with no prompt', () => {
+  const question = (id: string) => ({ id: 'q1', question: `Which option for ${id}?`, header: id, modality: 'choice' as const, options: [{ label: 'One' }, { label: 'Two' }] });
+  const envelopeOf = (askId: string) => askSteerText(askId, [question(askId)], [{ id: 'q1', question: question(askId).question, status: 'answered', value: ['Two'] }]);
+  function stateWith(asks: string[], text: string) {
+    const b = builder();
+    b.turn('u0');
+    for (const askId of asks) b.toolUse(askId, 'mcp__maws__ask', { blocking: false, questions: [question(askId)] });
+    for (const askId of asks) b.result(askId, [{ type: 'text', text: JSON.stringify({ status: 'asked', askId }) }]);
+    b.end(['u0']);
+    b.turn('u1', text);
+    b.end(['u1']);
+    return drawn(b.events);
+  }
+
+  it('two asks answered here: both capsules Answered, and no bubble for the join', () => {
+    const rows = stateWith(['toolu_ask_a', 'toolu_ask_b'], `${envelopeOf('toolu_ask_a')}\n${envelopeOf('toolu_ask_b')}`);
+    expect(rows.filter((r): r is AskRow => r.kind === 'ask').map((r) => [r.askId, r.state])).toEqual([['toolu_ask_a', 'answered'], ['toolu_ask_b', 'answered']]);
+    expect(users(rows).map((r) => r.text)).toEqual(['prompt u0']);
+  });
+
+  it('one of them for an ask not answered here: the join keeps its bubble, as an orphan envelope does', () => {
+    const text = `${envelopeOf('toolu_ask_a')}\n${envelopeOf('toolu_ask_c')}`;
+    const rows = stateWith(['toolu_ask_a'], text);
+    expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: 'toolu_ask_a', state: 'answered' });
+    expect(users(rows).map((r) => r.text)).toEqual(['prompt u0', text]);
   });
 });
