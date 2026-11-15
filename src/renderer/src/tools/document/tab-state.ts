@@ -333,8 +333,8 @@ export class DocumentTabState {
     if (!handle || handle.state().unsaved === 0) return true;
     // UX wave U10b fix wave 4: read-only or not, an edit the host never acknowledged is asked about; a read-only replica
     // (one an agent's delete parked) will acknowledge nothing meanwhile, so it is asked at once
-    const ask = () => this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
-    if (handle.state().readOnly) return ask();
+    const askToClose = () => this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
+    if (handle.state().readOnly) return askToClose();
     const saved = await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         off();
@@ -347,7 +347,7 @@ export class DocumentTabState {
         resolve(true);
       });
     });
-    return saved || ask();
+    return saved || askToClose();
   };
 
   /**
