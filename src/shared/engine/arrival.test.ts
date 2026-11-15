@@ -4,6 +4,7 @@
 // read whole, in order, through `readNext`, and the table names every frame or row that yields an arrival: one it does
 // not name yields none.
 import { describe, expect, it } from 'vitest';
+import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { consentMessage, nothingOpen, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
@@ -520,5 +521,44 @@ describe('the answer envelopes inside a joined text', () => {
     expect(readAnswerEnvelopes(A1)).toEqual({ envelopes: [read(A1)], rest: '' });
     expect(readAnswerEnvelope(A1)).not.toBeNull();
     expect(readAnswerEnvelopes('Just a prompt.')).toEqual({ envelopes: [], rest: 'Just a prompt.' });
+  });
+});
+
+// The architect's review of the joined answer (the Decision Log), finding 1: a pasted segment's body is data. No line
+// inside one opens or ends an envelope, so an envelope pasted as a log stays in the segment, whole.
+describe('the answer envelopes inside a joined text: a pasted segment is data', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const A1 = askSteerText('ask-1', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+
+  it('a prompt with a pasted segment whose body is a valid envelope: nothing read, the text whole', () => {
+    const text = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
+  });
+
+  it('the same prompt joined with a real envelope after it: the real one alone is read, the segment stays whole', () => {
+    const prompt = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
+    expect(readAnswerEnvelopes(`${prompt}\n${A1}`)).toEqual({ envelopes: [parseAskSteer(A1)!], rest: prompt });
+  });
+});
+
+// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. The model's
+// question is written verbatim and may hold a line that begins with the tag.
+describe('the answer envelopes inside a joined text: the member boundary is the writer\'s whole first line', () => {
+  const TAGGED = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice' as const, options: [{ label: 'Hash' }, { label: 'Star' }] };
+  const envelope = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+
+  it('a question whose second line begins with the tag: its envelope alone is read', () => {
+    expect(envelope.split('\n')[2]).toMatch(/^\[MAWS ask /);
+    expect(readAnswerEnvelopes(envelope)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '' });
+  });
+
+  it('and joined with a prompt, before or after it', () => {
+    expect(readAnswerEnvelopes(`${envelope}\nAlso fix the footer.`)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: 'Also fix the footer.' });
+    expect(readAnswerEnvelopes(`Also fix the footer.\n${envelope}`)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: 'Also fix the footer.' });
+  });
+
+  it('a line that begins with the tag but is not the writer\'s first line opens nothing: it stays text', () => {
+    const text = `[MAWS ask ask-1] is how the answers start\n${envelope}`;
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '[MAWS ask ask-1] is how the answers start' });
   });
 });

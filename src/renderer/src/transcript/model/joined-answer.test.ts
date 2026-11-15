@@ -7,16 +7,19 @@
 // read from its file, which keeps no line of the envelope's own). A pair the engine delivered apart (a tool boundary)
 // reads as before.
 import { describe, expect, it } from 'vitest';
+import { framePasted } from '@shared/composer/pasted-content';
+import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
+import type { AskQuestion } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
-import { builder } from './test-events';
-import { copiedUserText } from './user-text';
+import { builder, uuid } from './test-events';
+import { copiedUserText, userTextOf } from './user-text';
 
 type UserRow = Extract<Row, { kind: 'user' }>;
 type AskRow = Extract<Row, { kind: 'ask' }>;
@@ -111,5 +114,82 @@ describe('a join of answer envelopes with no prompt', () => {
     const rows = stateWith(['toolu_ask_a'], text);
     expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: 'toolu_ask_a', state: 'answered' });
     expect(users(rows).map((r) => r.text)).toEqual(['prompt u0', text]);
+  });
+});
+
+// The architect's review of the joined answer (the Decision Log): four findings. Each case stages the ask's call by hand,
+// then the person's message, and reads what the reducer recorded and what derive draws.
+describe('the joined answer, the architect\'s review', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const envelopeOf = (askId: string, question: AskQuestion = LAYOUT) => askSteerText(askId, [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
+  const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  function rowsAfter(asks: { askId: string; question?: AskQuestion }[], content: string | ContentBlock[]) {
+    const b = builder();
+    b.turn('u0');
+    for (const { askId, question } of asks) b.toolUse(askId, 'mcp__maws__ask', { blocking: false, questions: [question ?? LAYOUT] });
+    for (const { askId } of asks) b.result(askId, [{ type: 'text', text: JSON.stringify({ status: 'asked', askId }) }]);
+    b.end(['u0']);
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.end(['u1']);
+    return drawn(b.events);
+  }
+  const asksOf = (rows: Row[]) => rows.filter((r): r is AskRow => r.kind === 'ask').map((r) => [r.askId, r.state]);
+  const promptOf = (rows: Row[]) => users(rows).find((r) => r.messageUuid === 'u1');
+
+  // (1) a pasted segment's body is data
+  describe('a prompt with a pasted segment whose body is a valid envelope', () => {
+    const prompt = `Why did the agent stop after this?\n${framePasted('a1b2', envelopeOf('toolu_ask_p'))}`;
+
+    it('keeps the segment whole, as its attachment', () => {
+      const read = userTextOf(prompt);
+      expect(read.text).toBe('Why did the agent stop after this?\n[Pasted text #1 +' + envelopeOf('toolu_ask_p').split('\n').length + ' lines]');
+      expect(read.attachments.map((a) => a.text)).toEqual([envelopeOf('toolu_ask_p')]);
+    });
+
+    it('records no answer for the ask it names, and draws the prompt with its attachment', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_p' }], prompt);
+      expect(asksOf(rows)).toEqual([['toolu_ask_p', 'asked']]);
+      expect(promptOf(rows)?.attachments.map((a) => a.text)).toEqual([envelopeOf('toolu_ask_p')]);
+    });
+  });
+
+  // (2) the engine's joining of a message with image or document blocks is not recorded: such a message is never hidden
+  describe('a message with an image beside envelopes alone', () => {
+    it('every ask answered here: the row draws the image, with the envelopes\' text gone', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [IMAGE, { type: 'text', text: envelopeOf('toolu_ask_i') }]);
+      expect(asksOf(rows)).toEqual([['toolu_ask_i', 'answered']]);
+      expect(promptOf(rows)).toMatchObject({ text: '', lines: 0, attachments: [{ kind: 'image', dataUrl: 'data:image/png;base64,iVBORw0KGgo=' }] });
+    });
+
+    it('two envelopes joined, both answered here: the same', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_i' }, { askId: 'toolu_ask_j' }], [IMAGE, { type: 'text', text: `${envelopeOf('toolu_ask_i')}\n${envelopeOf('toolu_ask_j')}` }]);
+      expect(asksOf(rows)).toEqual([['toolu_ask_i', 'answered'], ['toolu_ask_j', 'answered']]);
+      expect(promptOf(rows)).toMatchObject({ text: '', attachments: [{ kind: 'image' }] });
+    });
+
+    it('an ask not answered here: the row draws the image and the raw text', () => {
+      const text = `${envelopeOf('toolu_ask_i')}\n${envelopeOf('toolu_ask_k')}`;
+      const rows = rowsAfter([{ askId: 'toolu_ask_i' }], [IMAGE, { type: 'text', text }]);
+      expect(promptOf(rows)).toMatchObject({ text, attachments: [{ kind: 'image' }] });
+    });
+  });
+
+  // (3) the member boundary is the writer's whole first line
+  describe('a question whose second line begins with the tag', () => {
+    const TAGGED: AskQuestion = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = envelopeOf('toolu_ask_t', TAGGED);
+
+    it('its envelope alone answers the ask, and draws no bubble', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], envelope);
+      expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: 'toolu_ask_t', state: 'answered', answers: [{ id: 'q1', value: ['Grid'] }] });
+      expect(promptOf(rows)).toBeUndefined();
+    });
+
+    it('joined with a prompt, it answers the ask and the bubble is the prompt', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], `Also fix the footer.\n${envelope}`);
+      expect(asksOf(rows)).toEqual([['toolu_ask_t', 'answered']]);
+      expect(promptOf(rows)?.text).toBe('Also fix the footer.');
+    });
   });
 });
