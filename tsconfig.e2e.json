@@ -128,15 +128,6 @@
     "src/renderer/src/transcript/model/copy.ts",
     "src/renderer/src/transcript/model/rows.ts",
     "src/renderer/src/transcript/model/time.ts",
-    // UX wave U1c (M5): `rows.ts` names a blocked call's type from `blocked.ts` (M2), which names the reducer's state; the
-    // files that chain brings in
-    "src/renderer/src/transcript/model/blocked.ts",
-    "src/renderer/src/transcript/model/gap.ts",
-    "src/renderer/src/transcript/model/head.ts",
-    "src/renderer/src/transcript/model/hooks.ts",
-    "src/renderer/src/transcript/model/keys.ts",
-    "src/renderer/src/transcript/model/reduce.ts",
-    "src/renderer/src/transcript/model/user-text.ts",
     "src/renderer/src/tools/agents/model/elapsed.ts",
     "src/renderer/src/tools/agents/model/relay.ts",
     "src/renderer/src/tools/agents/model/task-graph.ts",

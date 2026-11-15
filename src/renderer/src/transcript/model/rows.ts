@@ -16,7 +16,9 @@ import type { ListingSection } from './agent-listing'; // E7
 import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U3
-import type { BlockedCall } from './blocked'; // UX wave U1c
+
+/** UX wave U1c: what a grant names (the U1c document, Interfaces §B); here with the row types, so they need nothing of `blocked.ts`. */
+export interface BlockedCall { kind: 'command' | 'call'; subject: string }
 
 export type TurnId = string & z.$brand<'TurnId'>; // `turn:<userMessageUuid>`; `turn:e<eventId>` for engine-initiated turns or a user message without uuid
 export type RowId = string & z.$brand<'RowId'>; // formats in keys.ts

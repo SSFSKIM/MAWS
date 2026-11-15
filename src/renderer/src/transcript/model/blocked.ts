@@ -6,7 +6,7 @@
 // approved only on the reader's mark of the person's own send of the grant (`consent` on a `user` row): never on a
 // press, the queue, a later run of the same command, or a row's text.
 import type { TranscriptState } from './reduce';
-import type { Cell, CellId, Row, TurnId } from './rows';
+import type { BlockedCall, Cell, CellId, Row, TurnId } from './rows';
 
 const OPENING = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: ';
 const AFTER = '. If you have other tasks';
@@ -34,8 +34,8 @@ export function classifierReason(resultText: string): string | null {
 // and re-exported by cells.ts, so that this module imports nothing of the cells it names.
 export const shellToolOf = (toolName: string): 'Bash' | 'PowerShell' | null => (toolName === 'Bash' || toolName === 'PowerShell' ? toolName : null);
 
-/** What a grant names. */
-export interface BlockedCall { kind: 'command' | 'call'; subject: string }
+/** What a grant names: defined with the row types (`rows.ts`), and named here for this module's importers. */
+export type { BlockedCall } from './rows';
 
 // The keys of a shell call's input that leave it named by its command: these two always, these two when set false.
 const NAMING_ALWAYS = new Set(['description', 'timeout']);
