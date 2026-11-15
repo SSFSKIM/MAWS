@@ -18,7 +18,7 @@ import { laneAStateOf, useLaneA } from '../stores/lane-a';
 import { useQueueStore } from '../stores/queue';
 import { useTranscriptStore } from '../stores/transcript';
 import { approvalsFor, blockedKey, hiddenTurnsOf, type BlockedCall } from '../transcript/model/blocked';
-import type { Row } from '../transcript/model/rows';
+import { isAbortedReason } from '../transcript/model/classify';
 
 export const SETTLE_MS = 5_000;
 /** Probe B's one place: how a grant is sent to a session MAWS runs while a turn runs. 'after' until probe B's recordings are named here. */
@@ -38,13 +38,13 @@ export function terminalStateOf(appSessionId: AppSessionId): TerminalState {
   return newestTurnStopped(appSessionId) ? 'stopped' : 'idle';
 }
 
-const newestTurnStopped = (appSessionId: AppSessionId): boolean => newestStoppedIn(useTranscriptStore.getState().entries[appSessionId]?.rows);
-function newestStoppedIn(rows: readonly Row[] = []): boolean {
-  for (let i = rows.length - 1; i >= 0; i -= 1) {
-    const row = rows[i]!;
-    if (row.kind === 'divider') return row.state === 'stopped';
-  }
-  return false;
+// The newest turn the engine accepted reads stopped as its divider reads it (derive.ts): closed by a stop, or ended aborted,
+// or closed with no end of its own. A prompt still waiting, or one the engine dropped, is no turn here.
+function newestTurnStopped(appSessionId: AppSessionId): boolean {
+  const state = useTranscriptStore.getState().entries[appSessionId]?.state;
+  const turn = state?.order.map((id) => state.turns.get(id)).findLast((candidate) => candidate?.accepted === true);
+  if (turn === undefined || turn.state === 'open') return false;
+  return turn.closedBy !== null ? turn.closedBy === 'stopped' : turn.ended === null || isAbortedReason(turn.ended.terminalReason);
 }
 
 const keysIn = (content: string | readonly ContentBlock[]): string[] => personsGrants(messageText(content as string | ContentBlock[])).map(blockedKey);
