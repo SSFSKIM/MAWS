@@ -75,7 +75,7 @@ describe('an unsent comment placed again at a refresh', () => {
 
 describe('whether a comment can be placed (Decision Log 21): the table, row by row', () => {
   const added = { anchor: reviewLineAnchor('/repo/src/report.ts', 12, 'new'), quote: 'return quoted(value);' };
-  const file = (blocks: string[][], read = true) => ({ path: 'src/report.ts', absolute: '/repo/src/report.ts', blocks, read });
+  const file = (blocks: string[][], read = true, binary = false) => ({ path: 'src/report.ts', absolute: '/repo/src/report.ts', blocks, read, binary });
   const ready = (...files: ScopeLines['files']): ScopeLines => ({ state: 'ready', files });
 
   it('placeable: the scope holds the file, read, with a line whose text is the quote', () => {
@@ -84,8 +84,12 @@ describe('whether a comment can be placed (Decision Log 21): the table, row by r
   it('its line left the diff: the file is in the scope and read, and no line has the quote', () => {
     expect(placementOf(added, ready(file([[HUNK.replace('+return quoted(value);', '+return escaped(value);')]])))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
   });
+  it('its file is binary now: a completed read with no line, so its line left the diff', () => {
+    expect(placementOf(added, ready(file([], false, true)))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
+    expect(placementOf(added, ready(file([], true, true)))).toEqual({ kind: 'line-left', path: 'src/report.ts' });
+  });
   it('its file is not in the scope', () => {
-    expect(placementOf(added, ready({ path: 'src/other.ts', absolute: '/repo/src/other.ts', blocks: [[HUNK]], read: true }))).toEqual({ kind: 'not-in-scope' });
+    expect(placementOf(added, ready({ path: 'src/other.ts', absolute: '/repo/src/other.ts', blocks: [[HUNK]], read: true, binary: false }))).toEqual({ kind: 'not-in-scope' });
   });
   it('the scope is empty or cannot be read', () => {
     expect(placementOf(added, { state: 'none', files: [] })).toEqual({ kind: 'no-files' });

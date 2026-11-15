@@ -598,6 +598,26 @@ describe('comments on lines in Review', () => {
     expect(document.activeElement).toBe(unplacedEdit(1));
   });
 
+  it('keeps a comment on a file that turned binary reachable: its row under the toolbar says its line left the diff, and its card there edits it', async () => {
+    await mountReview();
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+    leave();
+    await painted(() => card() === null);
+    const binary = ['diff --git a/src/report.ts b/src/report.ts', 'index 1..2 100644', 'Binary files a/src/report.ts and b/src/report.ts differ', ''].join('\n');
+    await reread(binary + OTHER(), [{ path: 'src/report.ts', oldPath: null, insertions: 0, deletions: 0, binary: true }, FILES()[1]]);
+    await painted(() => unplacedRows().length === 1);
+    expect(unplacedWords().map((words) => words.textContent)).toEqual(['The line this comment was on is no longer in this diff.']);
+    expect(unplacedRows()[0].textContent).toBe('return quoted(value);Quote only where a comma is.');
+    fireEvent.click(unplacedEdit(0));
+    await painted(() => (lineLeft()?.contains(card()) ?? false) && field().value === 'Quote only where a comma is.');
+    type('Quote where a comma is, and say why.');
+    leave();
+    await painted(() => card() === null && unplacedRows().length === 1);
+    expect(pass()!.comments.map((c) => c.text)).toEqual(['Quote where a comma is, and say why.']);
+  });
+
   it('keeps a comment whose line left the diff in the pass and the chip, drawn under no line', async () => {
     await mountReview();
     addOn('src/other.ts', 'new', 2);
