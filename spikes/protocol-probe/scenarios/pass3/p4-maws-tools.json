@@ -500,7 +500,7 @@
     {
       "name": "artifact_publish",
       "title": "Publish artifact",
-      "description": "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html); baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
+      "description": "Write files of a MAWS artifact as one change, an html page or a file kind's files; without this tool, write the files to disk and tell the user. files maps each path to its whole new text, null removing it (an html page is its one file, index.html) For an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file's bytes in place of files.; baseRevision is the revision your last artifact_read (or create or publish) of it returned. A publish from an older revision is refused naming the live one: read again. Files nobody changed since your read merge over the live artifact and the others are kept; a file someone else changed since your read refuses the publish naming it (read, apply your change to what you read, publish again; force: true overwrites them as a last resort). All of it lands or none. Returns the new revision and the files changed, kept and removed. mode: \"suggest\" proposes the files instead: the user accepts or rejects them and the artifact stays as it is until then (an artifact the user set to take agent edits as suggestions takes every publish so; an html page takes none).",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -533,6 +533,10 @@
               ]
             }
           },
+          "path": {
+            "type": "string",
+            "minLength": 1
+          },
           "force": {
             "type": "boolean"
           },
@@ -550,8 +554,7 @@
         },
         "required": [
           "artifact",
-          "baseRevision",
-          "files"
+          "baseRevision"
         ],
         "additionalProperties": false
       },
@@ -626,7 +629,7 @@
     {
       "name": "artifact_export",
       "title": "Export artifact",
-      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf or png for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.",
+      "description": "Export a MAWS artifact (its live state, or a retained version) as a file; without this tool, tell the user to export it from MAWS. Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them. Returns the exported file's path; to (a path under the working directory) copies it there too; pageSize (letter or a4) chooses the paper, else the format's own default; fonts chooses a presentation's pptx faces: basic (the default: faces every Office has), named (matching fonts must be installed) or pictures (each slide one picture, notes kept); embedded (uploaded faces inside the file) is not available yet. A presentation also exports as pdf, html (one standalone page), png (one slide: board selects its id, otherwise the cover), pngs (all slides as numbered PNGs in a managed archive) and claude (a zip of Claude-readable slides). A design exports as png (one board: board, the first by default) and pdf (one page per board at its own size: boards, all by default), at native size or at scale (0.1 to 4); a side too large is refused naming the scale that fits. Works whether or not the MAWS app is open.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
