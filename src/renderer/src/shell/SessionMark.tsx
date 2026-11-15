@@ -3,10 +3,15 @@
 // unread (the row's dot). Waiting wins over unread; one mark at a time.
 import type { AppSessionId } from '@shared/graph/ids';
 import { waitingItem } from '../attention/derive';
+import { SIDE_COPY } from '../side/copy';
 import { selectPendingOf, useAttention } from '../stores/attention';
 import { useSessions } from '../stores/sessions';
 
 export type SessionMarkKind = 'waiting' | 'unread';
+
+// What the mark shows, in words for assistive technology (the architect's ruling of 2026-11-15): the side card's words
+// for a session waiting on you, and the unread dot's own label.
+export const SESSION_MARK_WORDS: Record<SessionMarkKind, string> = { waiting: SIDE_COPY.card.needs.other, unread: 'Unread' };
 
 export function useSessionMark(appSessionId: AppSessionId): SessionMarkKind | null {
   const waiting = useAttention((s) => waitingItem(selectPendingOf(s, appSessionId))?.tier === 1);

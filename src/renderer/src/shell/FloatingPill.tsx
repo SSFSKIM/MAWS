@@ -19,7 +19,7 @@ import { currentSet } from '../stores/layout-model';
 import { useSessions } from '../stores/sessions';
 import { SessionPane } from '../session/SessionPane';
 import { CARD_MARGIN, cardOver, cardSession, focusCompactCard, hideChat, openCard, splitFloat, useFloatingCard, usePublishedPlace, useShowChatHeader, type CardHost } from './floating';
-import { SessionMark, useSessionMark } from './SessionMark';
+import { SESSION_MARK_WORDS, SessionMark, useSessionMark } from './SessionMark';
 
 export const useSessionTitle = (appSessionId: AppSessionId) => useSessions((s) => displayTitle(s.records.get(appSessionId)));
 
@@ -146,7 +146,7 @@ export function Pill({ appSessionId }: { appSessionId: AppSessionId }) {
       className="inline-flex h-6 shrink-0 items-center gap-2 rounded-full border border-border-strong bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
     >
       <span className="max-w-[220px] truncate">{title}</span>
-      {unread && <span aria-label="Unread" role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
+      {unread && <span aria-label={SESSION_MARK_WORDS.unread} role="img" className="block size-[5px] shrink-0 rounded-full bg-info" />}
     </button>
   );
 }

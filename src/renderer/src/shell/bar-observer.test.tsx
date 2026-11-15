@@ -1,6 +1,7 @@
 // UX wave U10b (O-43): the observer behind the bar's raised surface (`drawsBesideTheBox` in FloatingPill.tsx), measured.
 // It watches the bar's surface; a session streaming its answer redraws nothing there (the compact pane draws no
-// transcript), so neither its callback nor the bar runs while deltas arrive. Counts, not times.
+// transcript), so neither its callback nor the bar runs while deltas arrive; typing in the box runs it at most once a
+// keystroke. Counts, not times.
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
@@ -32,6 +33,7 @@ vi.mock('./SessionMark', async (original) => {
 
 const A = at('app-a' as AppSessionId);
 const N = 50;
+const K = 20;
 
 // Every observer the page makes, with what it observes, how often its callback ran and whether it was disconnected.
 type Watch = { target: Node | null; options: MutationObserverInit | null; runs: number; disconnected: boolean };
@@ -140,6 +142,19 @@ it('the bar’s observer watches its surface, and an answer streaming above it r
   expect(watch.runs, 'the mark is outside the surface').toBe(before.runs);
   await act(async () => void message().editor.commands.insertContent('a'));
   expect(watch.runs - before.runs, 'a keystroke in the box runs the observer').toBeGreaterThan(0);
+});
+
+// The architect's ruling of 2026-11-15: typing in the box runs the observer, at most once per keystroke, and never
+// redraws the bar.
+it('typing in the bar’s box runs its observer at most once per keystroke and redraws the bar no times', async () => {
+  mount();
+  await waitFor(() => expect(message()).toBeTruthy());
+  const watch = surfaceWatch();
+  const before = { runs: watch.runs, renders: marks.reads };
+  for (let i = 0; i < K; i += 1) await act(async () => void message().editor.commands.insertContent('a')); // a keystroke per task
+  expect(message().textContent).toBe('a'.repeat(K));
+  expect(watch.runs - before.runs, `${K} keystrokes`).toBeLessThanOrEqual(K);
+  expect(marks.reads - before.renders, `${K} keystrokes`).toBe(0);
 });
 
 it('the bar’s observer is disconnected when the bar goes', async () => {
