@@ -3,11 +3,12 @@
 // the library of the artifact's machine lists the artifact (null until that read has answered), and the sentence Undo is
 // disabled with on another machine (UC-7's `disabledWords`). The act is disabled while it runs, so a second press sends
 // nothing; an act that ends without its effect leaves its sentence until the next press.
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';
 import { useLinkPhase } from '../app/machine-mark';
+import { subscribeDeletedReplicas, unsentWhileDeleted } from '../artifacts/deleted-replicas';
 import { recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
@@ -79,4 +80,10 @@ export function useMachineUndoUnavailable(machine: MachineRef): string | null {
   const owner = useMachines((s) => s.machines.get(machine)?.owner ?? null);
   if (local) return null;
   return disabledWords('artifacts.undelete', { machine: name, phase, capabilities: listed === undefined ? null : listed.split('\n').filter(Boolean), owner });
+}
+
+/** Whether a replica of the artifact waiting for its restore holds an edit the host never acknowledged (the notice's
+ * "Your last edit is not saved"); the store's own snapshot, so a compiled render follows it. */
+export function useUnsentWhileDeleted(artifactId: string): boolean {
+  return useSyncExternalStore(subscribeDeletedReplicas, () => unsentWhileDeleted(artifactId));
 }

@@ -39,9 +39,8 @@ import { pageOpen, useLayout, type ReplaceVerdict } from '../stores/layout';
 import { markArtifactViewed, undeleteArtifact } from './actions';
 import { KIND_LABELS, LIBRARY_COPY } from './copy';
 import { library, libraryRow, refreshLibrary, useLibraryRow, type LibraryRead } from './store';
-import { useMachineUndoUnavailable, useUndoAct } from './undo-delete'; // UX wave U10b
+import { useMachineUndoUnavailable, useUndoAct, useUnsentWhileDeleted } from './undo-delete'; // UX wave U10b
 import { artifactMachineOf } from '../artifacts/machines'; // UX wave U10b
-import { useUnsentWhileDeleted } from '../artifacts/deleted-replicas'; // UX wave U10b
 import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's Undo
 
 type ArtifactTabRef = Extract<TabRef, { kind: 'artifact' }>;

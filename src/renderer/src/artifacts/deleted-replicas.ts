@@ -1,8 +1,8 @@
 // UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): the replicas that wait while an
 // agent's delete stands (./host.ts parks a synced replica whose reopen the host refuses because an agent deleted the
 // artifact, until it is restored), and how many edits each holds that the host never acknowledged. The editor's notice
-// reads it: "Your last edit is not saved" while any replica of the artifact holds one.
-import { useSyncExternalStore } from 'react';
+// reads it: "Your last edit is not saved" while any replica of the artifact holds one (its hook is in
+// ../library/undo-delete.ts, so this module, which host.ts imports, stays free of React for the node project).
 
 const held = new Map<object, { artifactId: string; unsent: number }>();
 const listeners = new Set<() => void>();
@@ -26,14 +26,10 @@ export function noteDeletedReplica(replica: object, artifactId: string, unsent: 
 /** Whether a waiting replica of the artifact holds an edit the host never acknowledged. */
 export const unsentWhileDeleted = (artifactId: string): boolean => [...held.values()].some((entry) => entry.artifactId === artifactId && entry.unsent > 0);
 
-const subscribe = (listener: () => void) => {
+/** Called at every change of the waiting replicas; answers its unsubscribe. */
+export function subscribeDeletedReplicas(listener: () => void): () => void {
   listeners.add(listener);
   return () => listeners.delete(listener);
-};
-
-/** The same, followed in a render. */
-export function useUnsentWhileDeleted(artifactId: string): boolean {
-  return useSyncExternalStore(subscribe, () => unsentWhileDeleted(artifactId));
 }
 
 // Tests.
