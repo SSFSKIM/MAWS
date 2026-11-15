@@ -440,6 +440,9 @@ test('from the opening words, with a design system chosen and a Space with instr
     const calls = mcpCalls(rows);
     const reply = mainTurnsEnded(await events()).at(-1)?.resultText ?? '';
     note(`the turn: maws calls ${JSON.stringify(calls.map((c) => [c.name, c.args]))}; permissions allowed once through the card ${JSON.stringify(allowed)}; reply ${JSON.stringify(reply)}`);
+    const [init] = ofKind(await events(), 'session.init');
+    expect(ownerPlugins(init?.plugins ?? [], [root]), 'none of the owner plugins').toEqual([]);
+    note(`init plugins ${JSON.stringify(initPluginsOf(rows))} (none of the owner's)`);
     const create = calls.find((c) => c.name === 'artifact_create');
     expect(create, 'the agent called artifact_create').toBeDefined();
     const chosen = create!.args.designSystem;
