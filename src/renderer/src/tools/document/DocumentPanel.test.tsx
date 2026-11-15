@@ -7,7 +7,7 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MemoryDocumentHost, memoryEditorHost, openMemoryHandle, whenSynced } from '@artifacts/document/editor/memory-host';
-import { setDsOverrides } from '@artifacts/document/meta';
+import { docPage, setDocPage, setDsOverrides } from '@artifacts/document/meta';
 import { addTab, createDocument } from '@artifacts/document/tabs';
 import { schemaFor } from '@artifacts/document/schema';
 import type { ArtifactHost } from '@artifacts/host';
@@ -305,6 +305,24 @@ describe('the document editor in L’s registry', () => {
       ['A4', true],
       ['Compact', false],
     ]);
+  });
+
+  // the branch review's finding 1: an agent's A4 shows checked while the system's page loads, and a size takes no choice
+  it('shows the document’s own size checked while the system’s page is not known, and writes no size chosen then', async () => {
+    const { state } = mount(); // no design system provided: its page is not known here
+    await shown();
+    await until(() => editorHostOf(scope)?.saved === 'saved', 'saved');
+    const doc = state.snapshot().handle!.doc;
+    act(() => setDocPage(doc, { size: 'a4' }));
+    const items = () => editorHostOf(scope)!.exports!.filter((e) => e.checked !== undefined).map((e) => [e.label, e.checked, e.disabled]);
+    await until(() => items()[1]![1] === true, 'A4 checked');
+    expect(items()).toEqual([
+      ['Letter', false, true],
+      ['A4', true, true],
+      ['Compact', false, false],
+    ]);
+    act(() => state.choosePage('letter', null));
+    expect(docPage(doc), 'no explicit Letter written in place of the system’s').toEqual({ size: 'a4' });
   });
 
   it('registers the page as the tab’s Mark-up surface while it is visible', async () => {

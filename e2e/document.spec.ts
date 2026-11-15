@@ -478,16 +478,30 @@ test('UX wave U10b (A3): the agent’s set_page makes a two-page memo one A4 pag
       ['artifact_export', false],
     ]);
     const [created, standard, edited, compact] = answers.map(({ answer }) => answer) as [{ artifactId: string }, { path: string; pages?: number }, { results: unknown[] }, { path: string; pages?: number }];
+    // each PDF's bytes kept as it is read: an export of the same revision and format reuses the format's cache file
+    const standardPdf = readFileSync(standard.path);
+    const compactPdf = readFileSync(compact.path);
     expect(standard.pages, 'the memo at standard density on its system’s Letter page').toBe(2);
-    expect(pdfPages(readFileSync(standard.path))).toEqual({ pages: 2, width: 612, height: 792 });
+    expect(pdfPages(standardPdf)).toEqual({ pages: 2, width: 612, height: 792 });
     expect(edited.results).toEqual([{ op: 'set_page', size: 'a4', density: 'compact' }]);
     expect(compact.pages, 'the agent’s answer after set_page').toBe(1);
-    expect(pdfPages(readFileSync(compact.path)), 'the scene’s own count of the same file').toEqual({ pages: 1, width: 595, height: 842 });
-    // Proof 2 (the owner's look at a memo at two densities): the standard PDF and the compact one, on Letter too
-    const compactLetter = value(await invoke(page, 'artifacts.export', { artifactId: created.artifactId, format: 'pdf', pageSize: 'letter' }));
-    await test.info().attach('memo-standard-letter.pdf', { body: readFileSync(standard.path), contentType: 'application/pdf' });
-    await test.info().attach('memo-compact-letter.pdf', { body: readFileSync(compactLetter.path), contentType: 'application/pdf' });
-    await test.info().attach('memo-compact-a4.pdf', { body: readFileSync(compact.path), contentType: 'application/pdf' });
+    expect(pdfPages(compactPdf), 'the scene’s own count of the same file').toEqual({ pages: 1, width: 595, height: 842 });
+    // Proof 2 (the owner's look at a memo at two densities): the standard PDF and the compact one, on Letter too (a file
+    // of its own, so the compact A4 file stays as the agent's export left it)
+    const compactLetter = value(await invoke(page, 'artifacts.export', { artifactId: created.artifactId, format: 'pdf', pageSize: 'letter', ownFile: true }));
+    const compactLetterPdf = readFileSync(compactLetter.path);
+    const attachments = { 'memo-standard-letter.pdf': standardPdf, 'memo-compact-letter.pdf': compactLetterPdf, 'memo-compact-a4.pdf': compactPdf };
+    const sizes = Object.fromEntries(Object.entries(attachments).map(([name, bytes]) => {
+      const { width, height } = pdfPages(bytes);
+      return [name, { width, height }];
+    }));
+    expect(sizes, 'each attachment is on the page its name says (their page counts are pinned above)').toEqual({
+      'memo-standard-letter.pdf': { width: 612, height: 792 },
+      'memo-compact-letter.pdf': { width: 612, height: 792 },
+      'memo-compact-a4.pdf': { width: 595, height: 842 },
+    });
+    expect(readFileSync(compact.path).equals(compactPdf), 'the compact A4 file unchanged by the Letter export').toBe(true);
+    for (const [name, body] of Object.entries(attachments)) await test.info().attach(name, { body, contentType: 'application/pdf' });
 
     // the window: the document's Export menu shows the page the agent set, and the menu's PDF prints on it
     await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();

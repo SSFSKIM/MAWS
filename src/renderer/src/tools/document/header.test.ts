@@ -112,6 +112,13 @@ describe('documentHeader', () => {
       ['A4', true],
       ['Compact', false],
     ]);
+    // the document's own A4 shown checked while the system's page loads, and neither size takes a choice
+    const own = documentHeader(state({ page: { size: 'a4', compact: false, sizeKnown: false, disabled: false } }), commands());
+    expect(own.exports!.filter((e) => e.checked !== undefined).map((e) => [e.label, e.checked, e.disabled])).toEqual([
+      ['Letter', false, true],
+      ['A4', true, true],
+      ['Compact', false, false],
+    ]);
   });
 
   // M3 decision 2: a document opened to view, or a version shown, shows the setting and takes no write

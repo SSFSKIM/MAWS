@@ -27,9 +27,12 @@ describe('the size in force', () => {
     expect(pageInForce({ density: 'compact' }, {}, 'letter')).toEqual({ size: 'letter', compact: true, sizeKnown: true });
   });
 
-  it('is not known while the system’s page is not, unless the document names its own size', () => {
+  // M3 decision 6 and the branch review's finding 1: a size choice rests on the system's page (choosing it clears the
+  // document's size), so the sizes take no choice until it is known; a size the document names is still shown
+  it('is not known while the system’s page is not, and still names the size the document sets', () => {
     expect(pageInForce({}, {}, null)).toEqual({ size: null, compact: false, sizeKnown: false });
-    expect(pageInForce({ size: 'letter', density: 'compact' }, {}, null)).toEqual({ size: 'letter', compact: true, sizeKnown: true });
+    expect(pageInForce({ size: 'letter', density: 'compact' }, {}, null)).toEqual({ size: 'letter', compact: true, sizeKnown: false });
+    expect(pageInForce({}, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' }, null), 'both sides overridden').toEqual({ size: 'a4', compact: false, sizeKnown: false });
   });
 
   // L4: the document's own overrides of the page's width or height decide the size its exports print on
@@ -82,8 +85,15 @@ describe('choosing a page item', () => {
     expect([docPage(doc), doc.get('meta').getAttr('dsOverrides')]).toEqual([{}, undefined]);
   });
 
-  it('writes no size while the size in force is not known', () => {
+  it('writes no size while the system’s page is not known, whatever the document sets', () => {
     const doc = newDoc();
     expect(writes(doc, () => expect(choosePage(doc, 'a4', null)).toBe(false))).toEqual([]);
+    setDocPage(doc, { size: 'a4' }); // an agent's A4 on a document whose system is Letter, still loading here
+    expect(writes(doc, () => expect(choosePage(doc, 'letter', null)).toBe(false)), 'no explicit Letter stored in place of the system’s').toEqual([]);
+    expect(docPage(doc)).toEqual({ size: 'a4' });
+    setDocPage(doc, {});
+    setDsOverrides(doc, { '--ds-page-width': '210mm', '--ds-page-height': '297mm' });
+    expect(writes(doc, () => expect(choosePage(doc, 'letter', null)).toBe(false)), 'the overrides spell A4: still no choice').toEqual([]);
+    expect(writes(doc, () => expect(choosePage(doc, 'compact', null)).toBe(true)), 'Compact rests on no system').toEqual([PAGE_ORIGIN]);
   });
 });
