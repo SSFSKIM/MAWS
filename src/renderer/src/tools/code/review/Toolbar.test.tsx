@@ -6,12 +6,14 @@ import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import type { ComponentProps } from 'react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { installResizeObserver } from '../../../test-support/resize';
 import { reviewLayout } from './measure';
 import { Toolbar, totalsWords } from './Toolbar';
 
 afterEach(() => {
   cleanup();
   vi.restoreAllMocks();
+  vi.unstubAllGlobals();
 });
 
 // The parts' natural widths and the toolbar's room, by the first selector an element matches.
@@ -81,6 +83,19 @@ describe('the toolbar’s lines', () => {
     render(<Toolbar {...props()} />);
     expect(lines()).toBe('2');
     expect(counter()).toBe('3 of 41');
+  });
+
+  it('measures its room inside its padding and border', () => {
+    const { resize } = installResizeObserver();
+    widths({ '[data-review-toolbar]': 546, ...PARTS }); // the parts' one line exactly: 200 + 8 + 80 + 8 + 250
+    render(<Toolbar {...props()} />);
+    expect(lines()).toBe('1');
+    const root = document.querySelector<HTMLElement>('[data-review-toolbar]')!;
+    root.style.padding = '0 11px';
+    root.style.borderLeft = '1px solid';
+    root.style.borderRight = '1px solid';
+    resize(root, { width: 522, height: 30 });
+    expect(lines()).toBe('2'); // 24 px of the box are not room
   });
 
   it('is one line when nothing is laid out yet', () => {

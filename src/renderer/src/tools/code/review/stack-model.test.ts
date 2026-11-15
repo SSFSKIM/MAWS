@@ -158,16 +158,18 @@ describe('the place', () => {
 });
 
 describe('folding', () => {
-  it('folds by the person’s choice, else by Viewed, else past the scope’s cap', () => {
-    // the person's own choice wins over both defaults
-    expect(isFolded({ choice: 'open', viewed: true, pastCap: true })).toBe(false);
-    expect(isFolded({ choice: 'closed', viewed: false, pastCap: false })).toBe(true);
+  it('folds by the person’s choice, else by Viewed, else past the scope’s cap, but not a file whose mark dropped', () => {
+    // the person's own choice wins over every default
+    expect(isFolded({ choice: 'open', viewed: true, dropped: false, pastCap: true })).toBe(false);
+    expect(isFolded({ choice: 'closed', viewed: false, dropped: false, pastCap: false })).toBe(true);
+    expect(isFolded({ choice: 'closed', viewed: false, dropped: true, pastCap: true })).toBe(true); // folded since the mark
     // Viewed folds
-    expect(isFolded({ choice: undefined, viewed: true, pastCap: false })).toBe(true);
+    expect(isFolded({ choice: undefined, viewed: true, dropped: false, pastCap: false })).toBe(true);
     // a scope past the cap opens folded
-    expect(isFolded({ choice: undefined, viewed: false, pastCap: true })).toBe(true);
-    // a mark that dropped (the file changed since) leaves nothing that folds it
-    expect(isFolded({ choice: undefined, viewed: false, pastCap: false })).toBe(false);
+    expect(isFolded({ choice: undefined, viewed: false, dropped: false, pastCap: true })).toBe(true);
+    // a mark that dropped (the file changed since) unfolds the file, past the cap too
+    expect(isFolded({ choice: undefined, viewed: false, dropped: true, pastCap: false })).toBe(false);
+    expect(isFolded({ choice: undefined, viewed: false, dropped: true, pastCap: true })).toBe(false);
   });
 
   it('reads "Expand all" while every file is folded, and "Collapse all" otherwise', () => {

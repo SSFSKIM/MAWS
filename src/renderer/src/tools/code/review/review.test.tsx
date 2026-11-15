@@ -28,6 +28,7 @@ import { A, B, panelOf, resetPanelStores, TestHost } from '../../../test-support
 import { useTranscriptStore, type Row, type TranscriptSource, type TurnActivity, type TurnId } from '../../../transcript';
 import { journalToEvents } from '../../../transcript/dev/journal';
 import { api, builder, parent, task, tool, uuid } from '../../../transcript/model/test-events';
+import { codeProbes } from '../../../harness/code/codeProbes';
 import { codeTranscriptActions } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
@@ -773,6 +774,35 @@ describe('review tool', () => {
     ]);
   });
 
+  it('shows Staged only while the index differs, and says why This branch is unavailable on a detached head', async () => {
+    main().state.status = statusOf({ dirty: false, branch: null, head: 'fedcba9876543210' });
+    main().state.uncommitted = { patch: '', files: [] };
+    render(<TestHost />);
+    openReview();
+    await waitFor(() => expect(chipOf('uncommitted')?.getAttribute('aria-pressed')).toBe('true'));
+    expect(chips()).toEqual([
+      ['uncommitted', false, 'true', ''],
+      ['branch', true, 'false', 'Detached HEAD'],
+      ['turn', true, 'false', 'No turn has changed files yet'],
+    ]);
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No uncommitted changes'));
+    expect(sections()).toEqual([]);
+    expect(document.querySelector('[data-review-toolbar]')).toBeNull();
+    expect(footer()).toBe('detached at fedcba9 · Working tree against HEAD');
+  });
+
+  it('keeps Staged selected but disabled once the index matches HEAD again', async () => {
+    render(<TestHost />);
+    openReview({ scope: 'staged' });
+    await waitFor(() => expect(header()).toBe('1 file changed · +1 −0'));
+    expect(paths()).toEqual(['src/staged.ts']);
+    const clean = statusOf({ dirty: true, files: [DIRTY.files[0], DIRTY.files[2]] });
+    main().state.status = clean;
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: clean, reason: 'index' }));
+    await waitFor(() => expect(chips().find((c) => c[0] === 'staged')).toEqual(['staged', true, 'true', 'Index matches HEAD']));
+    expect(document.querySelector<HTMLElement>('[data-review]')!.dataset.scope).toBe('staged');
+  });
+
   it('heads each file with its path, a badge for every kind but Modified, its counts, Viewed and Open file ↗, and no menu and no Staged badge', async () => {
     main().state.status = KINDS_STATUS;
     main().state.uncommitted = KINDS;
@@ -900,6 +930,50 @@ describe('review tool', () => {
     expect(reads()).toHaveLength(scopeReads);
   });
 
+  it('says why a binary file’s own read failed, with Retry, and draws it as a binary once the read answers', async () => {
+    const binary = {
+      patch: 'diff --git a/logo.png b/logo.png\nindex 1..2 100644\nBinary files a/logo.png and b/logo.png differ\n',
+      files: [{ path: 'logo.png', oldPath: null, insertions: 0, deletions: 0, binary: true }],
+    };
+    main().state.uncommitted = { patch: binary.patch + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: binary.files };
+    let failing = true;
+    main().state.diff = (input) => (input.path === 'logo.png' ? Promise.resolve(failing ? fail('git busy') : ok(binary)) : undefined);
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(sectionOf('logo.png')).not.toBeNull());
+    fold('logo.png');
+    await waitFor(() => expect(bodyOf('logo.png')?.textContent).toBe('Diff unavailable: git busyRetry'));
+    failing = false;
+    fireEvent.click(within(bodyOf('logo.png')!).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(bodyOf('logo.png')?.textContent).toBe('Binary file'));
+    expect(reads('logo.png')).toHaveLength(2);
+    expect(inSection('logo.png', '[data-review-viewed]')).not.toBeNull(); // its header read: a mark can sign it
+  });
+
+  it('lets the harness read and drive each section by its path: its hunks, its fold, its mark and its Open file ↗', async () => {
+    main().state.status = statusOf({ dirty: true, files: DIRTY.files.slice(0, 2) });
+    openReview();
+    render(
+      <div data-region="panel">
+        <TestHost />
+      </div>,
+    );
+    await painted(() => (bodyOf('src/staged.ts')?.querySelector('table') ?? null) !== null);
+    expect(codeProbes.section('src/staged.ts')).toEqual({ path: 'src/staged.ts', kind: 'added', added: 1, removed: 0, folded: false, viewed: false, hunks: [expect.stringContaining('+export const staged = 1;')] });
+    expect(codeProbes.section('src/app.ts')?.hunks).toHaveLength(2);
+    expect(codeProbes.section('gone.ts')).toBeNull();
+    act(() => codeProbes.setFolded('src/staged.ts', true));
+    expect(folded('src/staged.ts')).toBe(true);
+    act(() => codeProbes.setFolded('src/staged.ts', true)); // folded already: nothing changes
+    expect(codeProbes.section('src/staged.ts')?.folded).toBe(true);
+    act(() => codeProbes.setFolded('src/staged.ts', false));
+    expect(codeProbes.section('src/staged.ts')?.folded).toBe(false);
+    await act(() => codeProbes.markViewed('src/staged.ts'));
+    expect(codeProbes.section('src/staged.ts')).toEqual(expect.objectContaining({ viewed: true, folded: true }));
+    act(() => codeProbes.openFileOf('src/app.ts'));
+    expect(fileTabs()).toEqual([expect.objectContaining({ path: '/repo/src/app.ts', line: 5 })]);
+  });
+
   it('in a narrow column shows Viewed as a check box and Open file as ↗, each with its words as a tooltip (card 2)', async () => {
     widths({ '[data-review]': 360 });
     openReview();
@@ -968,7 +1042,9 @@ describe('review tool', () => {
     openReview();
     await painted(() => (stackText()?.includes('@@ -12,3 +13,4 @@') ?? false) && (bodyOf('src/staged.ts')?.querySelector('table') ?? null) !== null);
     const splitViews = () => stack()!.querySelectorAll('.split-diff-view').length;
+    const hunkRows = () => bodyOf('src/app.ts')!.querySelectorAll('tr[data-state="hunk"]:not([data-side="new"])').length;
     expect(splitViews()).toBe(0);
+    expect(hunkRows()).toBe(2);
     await user.click(screen.getByRole('button', { name: 'View' }));
     expect((await screen.findAllByRole('menuitemradio')).map((item) => [item.textContent, item.getAttribute('aria-checked')])).toEqual([
       ['Unified', 'true'],
@@ -976,6 +1052,7 @@ describe('review tool', () => {
     ]);
     await user.click(screen.getByRole('menuitemradio', { name: 'Split' }));
     await waitFor(() => expect(splitViews()).toBe(2)); // both sections
+    expect(hunkRows()).toBe(2); // the same hunks
     expect(useViewer.getState().wrap).toBe(false);
     await user.click(screen.getByRole('button', { name: 'View' }));
     await user.click(await screen.findByRole('menuitemcheckbox', { name: 'Wrap' }));
@@ -1115,6 +1192,33 @@ describe('review tool', () => {
     expect([viewed('src/app.ts'), folded('src/app.ts')]).toEqual([true, true]);
   });
 
+  it('past the scope cap, a marked file that changes unfolds again, and stays folded where the person folded it', async () => {
+    main().state.uncommitted = { patch: APP_PATCH + 'x'.repeat(REVIEW_SCOPE_BYTES_CAP), files: APP_FILES };
+    main().state.status = statusOf({ dirty: true, files: [DIRTY.files[0]] });
+    main().state.perFile = { 'src/app.ts': { patch: APP_PATCH, files: APP_FILES } };
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(sectionOf('src/app.ts')).not.toBeNull());
+    fold('src/app.ts');
+    await waitFor(() => expect(hunkLabel()).toBe('Showing hunk 1 of 2'));
+    markViewed('src/app.ts');
+    expect([viewed('src/app.ts'), folded('src/app.ts')]).toEqual([true, true]);
+    main().state.perFile = { 'src/app.ts': { patch: APP_PATCH.replace('+n', '+changed'), files: APP_FILES } };
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(reads('src/app.ts')).toHaveLength(2));
+    await waitFor(() => expect(viewed('src/app.ts')).toBe(false));
+    expect(folded('src/app.ts')).toBe(false); // the mark dropped: the cap's default does not fold it again
+    markViewed('src/app.ts');
+    fold('src/app.ts'); // the person's own choices: open, then closed
+    fold('src/app.ts');
+    expect([viewed('src/app.ts'), folded('src/app.ts')]).toEqual([true, true]);
+    main().state.perFile = { 'src/app.ts': { patch: APP_PATCH.replace('+n', '+again'), files: APP_FILES } };
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
+    await waitFor(() => expect(reads('src/app.ts')).toHaveLength(3));
+    await waitFor(() => expect(viewed('src/app.ts')).toBe(false));
+    expect(folded('src/app.ts')).toBe(true); // folded by the person, it stays folded
+  });
+
   it('marks a binary file viewed over its header, and drops the mark, unfolding it, when the header changes', async () => {
     const binary = (index: string) => ({
       patch: `diff --git a/logo.png b/logo.png\nindex ${index} 100644\nBinary files a/logo.png and b/logo.png differ\n`,
@@ -1158,6 +1262,7 @@ describe('review tool', () => {
     act(() => main().emit('git.changed', { repoRoot: '/repo', status: statusOf({ ...DIRTY }), reason: 'worktree' }));
     await waitFor(() => expect(reads('logo.png')).toHaveLength(3));
     await waitFor(() => expect(viewed('logo.png')).toBe(false));
+    expect(folded('logo.png')).toBe(false); // a mark that dropped unfolds its file, past the cap too
   });
 
   // P5 O7 M8 (e2e/code-tools.spec.ts's untracked rows): an untracked symlink reads as git shows one (services/git
