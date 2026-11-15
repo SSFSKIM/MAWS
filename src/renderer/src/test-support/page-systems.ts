@@ -4,7 +4,7 @@
 import { PAGE_KEY } from '@artifacts/design-system/extensions';
 import { officeThemeXml } from '@artifacts/design-system/office';
 import { resolveDsVars } from '@artifacts/design-system/resolve-vars';
-import type { TokenSet } from '@artifacts/design-system/tokens';
+import type { Token, TokenSet } from '@artifacts/design-system/tokens';
 import { builtinView } from '@artifacts/design-system/view';
 import type { DesignSystemExport, PageSize } from '@artifacts/document/export/design-system';
 
@@ -17,3 +17,8 @@ export function pageSystem(size: PageSize): DesignSystemExport<TokenSet> {
 }
 export const LETTER_SYSTEM = pageSystem('letter');
 export const A4_SYSTEM = pageSystem('a4');
+
+/** `system` with one of its tokens (`path`, as the token file names it) set to `token`. */
+export function withToken(system: DesignSystemExport<TokenSet>, path: string, token: Token): DesignSystemExport<TokenSet> {
+  return { ...system, tokens: { tokens: new Map(system.tokens.tokens).set(path, token), groups: system.tokens.groups } };
+}

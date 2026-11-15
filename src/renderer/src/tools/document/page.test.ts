@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { docPage, dsOverrides, setDocPage, setDsOverrides } from '@artifacts/document/meta';
 import { newDoc, onUpdate, type Doc } from '@artifacts/yjs';
 import { exportDesign, pageOf } from '@artifacts/document/export/design-system';
-import { A4_SYSTEM, LETTER_SYSTEM } from '../../test-support/page-systems';
+import { A4_SYSTEM, LETTER_SYSTEM, withToken } from '../../test-support/page-systems';
 import { choosePage, PAGE_ORIGIN, pageInForce } from './page';
 
 /** The origins of the transactions `doc` saw while `act` ran. */
@@ -71,6 +71,16 @@ describe('the size in force, read as the export reads it', () => {
     expect(pageOf(exportDesign(LETTER_SYSTEM, lost))).toMatchObject({ width: '8.5in', height: '11in' });
     expect(pageOf(exportDesign(A4_SYSTEM, lost))).toMatchObject({ width: '210mm', height: '297mm' });
     expect([pageInForce({}, lost, LETTER_SYSTEM).size, pageInForce({}, lost, A4_SYSTEM).size]).toEqual(['letter', 'a4']);
+  });
+
+  // the branch review's second finding: Compact scales the system's spaces before the overrides resolve, as the export
+  // reads a compact document; a width that names a space is read at the document's density
+  it('reads a reference to a system’s space at the document’s density, as a compact export does', () => {
+    const wide = withToken(LETTER_SYSTEM, 'space.8', { $type: 'dimension', $value: { value: 793.7, unit: 'px' } }); // 210mm, near enough
+    const overrides = both('var(--ds-space-8)', '297mm');
+    expect(pageInForce({}, overrides, wide), 'standard: the space is 210mm wide').toMatchObject({ size: 'a4' });
+    expect(pageOf(exportDesign(wide, overrides, 'compact')).width, 'the compact export’s width, the space at 75 %').not.toBe('793.7px');
+    expect(pageInForce({ density: 'compact' }, overrides, wide), 'compact: neither, as it prints').toMatchObject({ size: null, compact: true });
   });
 
   it('writes a fallback’s size as the size in force: choosing it writes nothing', () => {
