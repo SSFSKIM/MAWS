@@ -295,7 +295,7 @@ describe('a stretch stays the one the reader opened', () => {
     b.turn('u1', 'Read the second file');
     b.text('m1', 0, 'Looking at the second file first.');
     if (!textless) b.thinking('m2', 0, 'Which of the two holds the answer?');
-    // a thought with no text: streaming alone it has a row; finished, the derivation keeps it only inside a run
+    // a thought with no text: streaming it has a row; finished, it has none, alone or beside its call (`thoughtRow`)
     else if (step === 0) b.emit('assistant.block.delta', { apiMessageId: 'm2' as never, blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
     else b.thinking('m2', 0, '');
     if (step >= 1) b.toolUse('t1', 'Bash', { command: 'cat second.txt' }, 'm2', 1);
@@ -355,10 +355,12 @@ describe('a stretch stays the one the reader opened', () => {
     expect(lines(mirrorRows(window, { openStretches: after })).every((line) => !line.open)).toBe(true);
   });
   // The thirteenth timeline: a thought with no text, opened while it streams alone (its row's id is the key the press
-  // writes), taken into its call's run, then gone when the run of one call unwraps; the opening passes to the call.
-  it('a thought with no text, opened while it streams alone: open in its call’s run, and still open once the run unwraps without it', () => {
+  // writes), gone once its call comes, where the run that call starts stands in its place, and the run unwrapped at the
+  // completion; the opening passes to the run, then to the call.
+  it('a thought with no text, opened while it streams alone: still open once its call’s run stands in its place, and once the run unwraps', () => {
     expect(windowAt(0, false, true).map((r) => r.kind)).toEqual(['thinking']);
-    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']); // the thought is gone
+    expect(windowAt(1, false, true).map((r) => r.kind)).toEqual(['group']); // the thought is gone: the run holds the call alone
+    expect(windowAt(2, false, true).map((r) => r.kind)).toEqual(['cell']);
     const pressed = lines(mirrorRows(windowAt(0, false, true), {})).at(-1)!;
     const openStretches = new Set([pressed.stretch]);
     let before = windowAt(0, false, true);
@@ -367,6 +369,30 @@ describe('a stretch stays the one the reader opened', () => {
       for (const key of carriedKeys(before, window, openStretches)) openStretches.add(key); // as the store's update does
       before = window;
       expect(lines(mirrorRows(window, { openStretches })).map((line) => line.open), `at ${STEPS[step]}`).toEqual([true]);
+    }
+  });
+  // The same thought finishing in an update of its own, before its call comes: for that update no row stands in its
+  // place, and the opening stays with the commentary it folded with.
+  it('a thought with no text that finishes before its call comes: the stretch stays open by the commentary it folded with', () => {
+    const at = (step: 'streaming' | 'finished' | 'called'): Row[] => {
+      const b = builder();
+      b.turn('u1', 'Read the second file');
+      b.text('m1', 0, 'Looking at the second file first.');
+      if (step === 'streaming') b.emit('assistant.block.delta', { apiMessageId: 'm2' as never, blockIndex: 0, blockType: 'thinking', textDelta: null, thinkingDelta: '', inputJsonDelta: null, userMessageUuid: null });
+      else b.thinking('m2', 0, '');
+      if (step === 'called') b.toolUse('t1', 'Bash', { command: 'cat second.txt' }, 'm2', 1);
+      const state = applyEvents(createState(null, null), b.events);
+      return rowsOf(withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }));
+    };
+    const thought = at('streaming').find((row) => row.kind === 'thinking')!;
+    expect(at('finished').some((row) => row.id === thought.id)).toBe(false);
+    const openStretches = new Set([thought.id]); // a press on the thought's own key
+    let before = at('streaming');
+    for (const step of ['streaming', 'finished', 'called'] as const) {
+      const rows = at(step);
+      for (const key of carriedKeys(before, rows, openStretches)) openStretches.add(key);
+      before = rows;
+      expect(lines(mirrorRows(rows, { openStretches })).map((line) => line.open), step).toEqual([true]);
     }
   });
 });
