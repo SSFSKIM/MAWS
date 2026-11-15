@@ -1014,11 +1014,17 @@ export type RowClaim = { names: true } | { names: false; pending: PendingCall[];
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
 const OTHER: RowClaim = { names: false, pending: [], other: true };
-// UX wave U6e (Decision Log 8; the panel's finding 2): a carrier of a person's message (a `user` row, a queued prompt)
-// holds the person's own text when U3a's reader of arrivals reads none off its marks, or only the person's own words
-// sminos delivered; a peer's message, a notification, MAWS's answer and consent texts and every other arrival are text
-// someone else wrote, the class of a tool's result. The one test, both carriers'.
-const personsOwn = (row: unknown): boolean => readArrivals(row).every((arrival) => arrival.class === 'own');
+// UX wave U6e (Decision Log 8, amended by 22: the person's own text fails closed): a carrier of a person's message (a
+// `user` row, a queued prompt) holds the person's own text only when it is positively the person's: its origin is the
+// person's (`human`, what the engine writes on a typed prompt) and U3a's reader of arrivals reads no other arrival off
+// its marks. A row of any other origin (a plugin's, with `asUser` or without, a peer's, a notification's, every kind that
+// is no person) or of none is never the person's text, whatever the reader returns; nor is MAWS's answer or consent text
+// in a person's row. Such text is the class of a tool's result. The one test, both carriers'.
+const originKindOf = (row: unknown): unknown => {
+  const fields = record(row);
+  return record(fields.type === 'attachment' ? record(fields.attachment).origin : fields.origin).kind;
+};
+const personsOwn = (row: unknown): boolean => originKindOf(row) === 'human' && readArrivals(row).every((arrival) => arrival.class === 'own');
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
