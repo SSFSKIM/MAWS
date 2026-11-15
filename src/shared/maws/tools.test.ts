@@ -337,7 +337,7 @@ describe('X9 artifact tools (E2)', () => {
 
   // UX wave U10b (l6-artifacts-18, §A.2 and §A.3): the publish's path and the html page's own export, word for word
   it('tells the agent of a publish from a file and an html page exported as itself', () => {
-    expect(MAWS_TOOLS.artifact_publish.description).toContain('(an html page is its one file, index.html) For an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file\'s bytes in place of files.; baseRevision is');
+    expect(MAWS_TOOLS.artifact_publish.description).toContain('(an html page is its one file, index.html); for an html page, path (the .html file you wrote, absolute or relative to the working directory) publishes that file\'s bytes in place of files; baseRevision is');
     expect(MAWS_TOOLS.artifact_export.description).toContain('Formats: pdf, png or html (the stored page, unchanged) for an html page; docx, pptx, md and html where the kind supports them.');
     expect(MAWS_TOOLS.artifact_export.description).not.toContain('Formats: pdf or png for an html page;');
   });
