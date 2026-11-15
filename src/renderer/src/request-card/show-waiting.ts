@@ -17,10 +17,11 @@ const GONE_COPY = 'That request is no longer waiting';
 
 const sayGone = () => useNotices.getState().toast({ level: 'info', text: GONE_COPY, actions: [], dismissible: true });
 
-// The sessions in front of the person: the one the tab on screen shows, and the one the open floating card draws.
+// The sessions in front of the person: the one the tab on screen shows (none behind a page or the Overview), and the
+// one the open floating card draws.
 function inFront(): AppSessionId[] {
   const layout = useLayout.getState();
-  const tab = tabOnScreen(layout);
+  const tab = layout.overviewOpen ? null : tabOnScreen(layout);
   return [tab?.kind === 'session' ? tab.appSessionId : null, openCardSession(layout)].filter((id): id is AppSessionId => id !== null);
 }
 
@@ -40,16 +41,23 @@ export function showWaiting(appSessionId: AppSessionId, attentionId: AttentionId
     if (!answers.includes('shown')) sayGone();
     return;
   }
+  // Each caller opens the session synchronously before it calls (its tab, the card), so the front read now is the one
+  // the navigation made. Any change of it that leaves the session out, to another session or to none (a page, the
+  // Overview), is the person leaving. A front that never held the session (a caller whose session shows in no tab or
+  // card) is not required at the mount, only a change away from what it was.
   let seen = inFront().join('\n');
+  let held = inFront().includes(appSessionId);
   const watch = () => {
     const now = inFront();
     if (now.join('\n') === seen) return;
     seen = now.join('\n');
-    if (now.length > 0 && !now.includes(appSessionId)) forget(); // the person moved to another session
+    if (now.includes(appSessionId)) held = true;
+    else forget();
   };
   const offs = [
     whenWaitingViewMounts(appSessionId, (view) => {
       forget();
+      if (held && !inFront().includes(appSessionId)) return; // checked again: the session is no longer in front
       if (view.show(id) === 'gone') sayGone();
     }),
     useLayout.subscribe(watch),
