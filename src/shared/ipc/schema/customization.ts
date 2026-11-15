@@ -23,19 +23,52 @@ export const CustomizationServerSchema = z.strictObject({
 // engine host keys per run, so a press from Customize can name the configuration its row showed; null: no address;
 // absent from an engine host of an earlier build.
 export const CustomizationEndpointSchema = z.strictObject({ name: z.string(), scope: z.enum(['app', 'user', 'project', 'local']), path: AbsolutePath, transport: CustomizationServerSchema.shape.transport, url: z.string().max(4096).nullable(), revision: z.string().max(64).nullable().optional() });
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §A): a connector that an installed
+// plugin's files declare. Three names kept apart: `plugin`, the key it is installed by (a session's `source` for it);
+// `pluginName`, its manifest's `name`; `name`, the engine's `plugin:<pluginName>:<server>`, under which a session lists it.
+// Its address never crosses to the window: `address` is the address's shape alone.
+const InstallScope = z.enum(['user', 'project', 'local']);
+export const CustomizationPluginServerSchema = z.strictObject({
+  plugin: z.string().min(1).max(256), // the key, `<name>@<marketplace>`: installed_plugins.json's, the id of its row in My items
+  pluginName: z.string().max(256).nullable(), // the manifest name; null: not readable
+  server: z.string().min(1).max(256), // the name the plugin's file gives the server, as written
+  name: z.string().min(1).max(1024).nullable(), // the engine's name, whole; null when pluginName is null or the key ends `@builtin`
+  installScope: InstallScope,
+  version: z.string().max(256).nullable(), // the installation record's version
+  path: AbsolutePath, // the file that declares it
+  transport: CustomizationServerSchema.shape.transport,
+  address: z.enum(['literal', 'templated', 'templated-origin']).nullable(), // the shape of its address, never its text; null: it has none (a local command)
+  sameAddressAs: z.string().max(256).nullable(), // a `user`, `project` or `local` entry of this read with the same address, by its name
+});
+// The same connector as main and the services read it: with its address and the engine host's revision of it (an HMAC
+// over the key, the installation, the engine name, the transport and the address; null without an engine name or an address).
+export const CustomizationPluginEndpointSchema = z.strictObject({
+  plugin: z.string().min(1).max(256), pluginName: z.string().max(256).nullable(), server: z.string().min(1).max(256),
+  name: z.string().min(1).max(1024).nullable(), version: z.string().max(256).nullable(),
+  path: AbsolutePath, transport: CustomizationServerSchema.shape.transport,
+  url: z.string().max(4096).nullable(), revision: z.string().max(64).nullable(),
+});
 export const CustomizationInventorySchema = z.strictObject({
   skills: z.array(CustomizationSkillSchema), servers: z.array(CustomizationServerSchema), warnings: z.array(z.string()),
   // P4-AGG M4: every MCP configuration file that applies (app, user, local, each project `.mcp.json`) read without a
   // warning, so `servers` is the whole set; Connectors' duplicate refusal needs it before it lets Add run
   serversRead: z.boolean(),
+  // UX wave U11h (§A): each connector an installed plugin's files declare for the folder, and every plugin installation
+  // kept for the folder, one per key (also one that declares no connector: its manifest name alone can make it a possible
+  // owner of another's engine name). Absent from an engine host of an earlier build; this build always sends both, empty
+  // where there is nothing.
+  pluginServers: z.array(CustomizationPluginServerSchema).optional(),
+  plugins: z.array(z.strictObject({ plugin: z.string().min(1).max(256), pluginName: z.string().max(256).nullable(), installScope: InstallScope })).optional(),
 });
 export type CustomizationInventory = z.infer<typeof CustomizationInventorySchema>;
 export type CustomizationSkill = z.infer<typeof CustomizationSkillSchema>;
 export type CustomizationServer = z.infer<typeof CustomizationServerSchema>;
 export type CustomizationEndpoint = z.infer<typeof CustomizationEndpointSchema>;
+export type CustomizationPluginServer = z.infer<typeof CustomizationPluginServerSchema>;
+export type CustomizationPluginEndpoint = z.infer<typeof CustomizationPluginEndpointSchema>;
 
 export const commands = {
   'customization.inventory': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: CustomizationInventorySchema, owner: 'engine-host' },
-  'customization.serverEndpoints': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: z.strictObject({ servers: z.array(CustomizationEndpointSchema) }), owner: 'engine-host' }, // P4-AGG M4, main-only
+  'customization.serverEndpoints': { input: z.strictObject({ cwd: AbsolutePath.nullable() }), output: z.strictObject({ servers: z.array(CustomizationEndpointSchema), pluginServers: z.array(CustomizationPluginEndpointSchema).optional() /* UX wave U11h (§A): absent from an earlier build */ }), owner: 'engine-host' }, // P4-AGG M4, main-only
 } as const satisfies Record<string, CommandSpec<z.ZodType, z.ZodType>>;
 export const events = {} as const;

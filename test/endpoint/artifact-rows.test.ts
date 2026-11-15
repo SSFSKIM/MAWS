@@ -396,6 +396,15 @@ describe('M5c’s rows', () => {
     expect(codeOf(await call(a, 'connectors.addJson', { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', folder: '/tmp/files-probe', entry: { type: 'stdio', command: 'files-probe', args: [], env: [] } }))).toBe('not-offered');
   });
 
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, H9): Customize's two reads, a
+  // plugin's connectors among them, are this Mac's alone: no offer row, and a caller on another machine is refused
+  it('Customize’s inventory and its endpoints, a plugin’s connectors among them, are not offered to a caller on another machine', async () => {
+    for (const name of ['customization.inventory', 'customization.serverEndpoints']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    const { a } = await scene();
+    expect(codeOf(await call(a, 'customization.inventory', { cwd: null }))).toBe('not-offered');
+    expect(codeOf(await call(a, 'customization.serverEndpoints', { cwd: null }))).toBe('not-offered');
+  });
+
   it('take each lease command at its floor: a `view` holder opens and uses a lease, and is refused its tool calls (`converse` by effect)', async () => {
     const { f, shared, other, b, asked } = await scene('view');
     expect(codeOf(await call(b, 'connectors.open', { artifactId: other }))).toBe('grade');

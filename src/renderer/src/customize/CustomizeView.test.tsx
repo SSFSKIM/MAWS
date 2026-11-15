@@ -336,7 +336,7 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }], plugins: [] }));
   const mountWith = (client: QueryClient) => mountCustomize({ view: 'mine', show: 'connectors' }, client);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
@@ -350,7 +350,7 @@ describe('Connectors', () => {
     const ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/tides.svg';
     const at = (name: string, iconUrl: string | null) => ({ name, scope: 'user', path: '/config/.claude.json', authPosture: null, fingerprint: null, revision: null, iconUrl });
     backend.script('customization.inventory', () => ({ skills: [], servers: ['tides', 'buoy'].map((name) => ({ name, scope: 'user', path: '/config/.claude.json', transport: 'http' })), warnings: [], serversRead: true }));
-    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)] }));
+    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)], plugins: [] }));
     backend.script('catalog.icon', () => ({ dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }));
     mountWith(fresh());
     const imageOf = (name: string) => document.querySelector<HTMLElement>(`[data-connector="${name}"] [data-item-image]`)!;
@@ -428,7 +428,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -460,7 +460,7 @@ describe('Connectors', () => {
     backend.script('catalog.postures', () => ({ servers: [
       { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null, iconUrl: null },
       { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null, iconUrl: null },
-    ] }));
+    ], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
     const here = { ...pageStatus('here'), cwd: '/one' };
@@ -488,7 +488,7 @@ describe('Connectors', () => {
   // host of an earlier build) it offers nothing, and with no such session it says to open one.
   describe('a row of MAWS’s own list', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
-    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }] }));
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }], plugins: [] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
     // the disk row, not the live list's line of the same name below it
     const ownRow = () => waitFor(() => {
