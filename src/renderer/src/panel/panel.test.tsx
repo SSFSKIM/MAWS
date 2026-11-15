@@ -517,6 +517,21 @@ describe('a side tab dragged between the groups', () => {
     expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
   });
 
+  // The medium review of finding 5: the upper group's only tab moved below joins both groups into the upper one; the move
+  // was made, so the tab is kept though it lands in the upper group.
+  it('by its menu’s Move below the upper group’s only tab, a preview file tab, joins the groups into one and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    expect(groupsOf()).toEqual([[file], [review], review]);
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()[1]).toBeNull();
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
   it('onto the lower part of a one-group column it makes the second group; the target shows only while a side tab drags', () => {
     renderHost();
     const review = add('review');
