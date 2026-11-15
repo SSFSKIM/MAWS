@@ -41,9 +41,10 @@ export interface HtmlExportOptions<T> extends ExportOptions<T> {
 // What the page adds to the editor's theme: the printed page, a title per tab, an empty paragraph's line, the
 // placeholders' labels, and a dark ground's colour scheme, so the native controls (a checklist's boxes) draw in the
 // page's ground (P4, tracker L308; the theme's own rule is keyed to the editor's `data-ground` and stripped below).
-// `--ds-*` only, resolved with the theme. UX wave U10b: the blocks' browser margins removed; a tab's blocks, which sit in
-// its section and not directly in the page's content, take the theme's gap between top-level blocks as the editor draws
-// them in that tab; in print a heading is kept with its next block.
+// `--ds-*` only, resolved with the theme. UX wave U10b: the browser's block margin removed from every element the export
+// writes that has one (a drawn view's figure among them), as the editor's base stylesheet removes it; a tab's
+// blocks, which sit in its section and not directly in the page's content, take the theme's gap between top-level blocks
+// as the editor draws them in that tab; in print a heading is kept with its next block.
 const pageCss = (page: { width: string; height: string; margin: string }, dark: boolean) => `
 html, body { margin: 0; }${dark ? '\n.ds-doc { color-scheme: dark; }' : ''}
 body { background: var(--ds-color-bg); }
@@ -51,7 +52,7 @@ body { background: var(--ds-color-bg); }
 .ds-doc-page { max-width: ${page.width}; }
 .ds-doc-page[data-whitespace="preserve"] { white-space: pre-wrap; }
 .ds-doc-page p:empty::after { content: "\\a0"; }
-.ds-doc :where(p, h1, h2, h3, ul, ol, blockquote, table, pre) { margin-block: 0; }
+.ds-doc :where(p, h1, h2, h3, ul, ol, blockquote, table, pre, hr, figure) { margin-block: 0; }
 .ds-doc .doc-tab > * + * { margin-top: var(--ds-space-3); }
 .ds-doc .doc-tab + .doc-tab { margin-top: var(--ds-space-8); }
 .ds-doc .doc-tab-title { font-family: var(--ds-font-display); font-size: var(--ds-type-title-size); line-height: var(--ds-type-title-line); font-weight: var(--ds-type-title-weight); }
