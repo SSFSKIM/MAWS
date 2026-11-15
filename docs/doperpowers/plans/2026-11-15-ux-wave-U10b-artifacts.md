@@ -379,7 +379,7 @@ Eleven milestones in four pull requests. Each stands on this document and the co
 
 **What exists at its end.** `artifact_create` takes `designSystem`. On the Library page the section is four cards (Document, Presentation, Dashboard, Design), each one button that starts a chat with the opening words, beside a "Blank" link; a More menu (Design system, HTML page, Add a file…) as the row's last cell; and one design-system choice in the heading.
 
-**What it touches.** `src/shared/maws/tools.ts`, `tools.test.ts`, the probe snapshot; `src/engine-host/tool-server/artifact-tools.ts`, `documents.ts` (the document and dashboard create) and tests; `src/renderer/src/library/MakeSomethingNew.tsx`, `copy.ts`, `Library.test.tsx`, `LibraryMachineMenu.test.tsx`.
+**What it touches.** `src/shared/maws/tools.ts`, `tools.test.ts`, the probe snapshot; `src/engine-host/tool-server/artifact-tools.ts`, `documents.ts` (the document and dashboard create) and tests; `src/renderer/src/library/MakeSomethingNew.tsx`, `copy.ts`, `Rows.tsx` (the section kept mounted under the list's virtualiser; added 2026-11-15), `Library.test.tsx`, `LibraryMachineMenu.test.tsx`.
 
 **Interfaces.** Exposes §D.
 
@@ -685,9 +685,9 @@ Undo here is the row's: the same action, the same disabled sentences (`disabledW
 
 **§D.1** `ArtifactCreateInputSchema` gains `designSystem: z.string().min(1).max(200).optional()`. In `src/shared/maws/tools.ts`: `export const DESIGN_SYSTEM_KINDS = ['document', 'presentation', 'design', 'dashboard'] as const`. In the tool server, beside `spaceNamed`: `designSystemNamed(store, ref)`, with the refusals
 
-    noDesignSystem: (ref: string, names: readonly string[]) => `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}`,
+    noDesignSystem: (ref: string, names: readonly string[]) => names.length ? `artifact_create: no design system "${ref}"; the design systems are: ${names.join(', ')}` : `artifact_create: no design system "${ref}"; there are no design systems`,
     designSystemAmbiguous: (ref: string, ids: readonly string[]) => `artifact_create: more than one design system is named "${ref}"; give one of these ids: ${ids.join(', ')}`,
-    designSystemNotForKind: (kind: string) => `artifact_create: a ${kind} takes no design system`,
+    designSystemNotForKind: (kind: string) => `artifact_create: kind "${kind}" takes no design system; designSystem is for ${DESIGN_SYSTEM_KINDS.join(', ')}`,
 
 `artifact_create`'s description gains, after the sentence on `space`: ` Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused.` (The description's length pinned in `tools.test.ts` moves with it.)
 
@@ -1121,6 +1121,8 @@ Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's 
 - M8 (2026-11-15): "Blank" shows only when the kind's editor has registered (today's rule for "New"). While the narrowed Space loads, More's two ask entries and its Blank are disabled too (the same acts as a card's); Add a file… stays enabled (H23).
 - M8 (2026-11-15): the section's line is kept mounted by the Library's list virtualiser (`library/Rows.tsx`, three lines in the existing kept-lines mechanism, pinned by a test), so the choice holds while the page is open (decision 3); without it a scroll of about seven lines reset the choice. `Rows.tsx` is this child's file and M9 edits it too. A chosen system holds across Spaces while the page is open, and falls back to the default when it becomes the default or leaves the library.
 - M8 (2026-11-15): accessible names only, no new words on screen: a card is named by its visible name, "Blank" by `Blank <noun>`, the choice by `Design system: <shown>`. When nothing else governs, the bundled floor is shown as "MAWS", as a document's breadcrumb names it. More's submenu is placed on the menu's left by a right-side collision padding on Radix's `SubContent` (not seen laid out; M11's scene and the owner's look). A card's line wraps rather than truncates.
+- M8 (2026-11-15, the architect's ruling): §D.1's two refusals are replaced. `designSystemNotForKind` echoes the kind as the agent passed it, in quotes, and names the kinds that take one (`artifact_create: kind "html" takes no design system; designSystem is for document, presentation, design, dashboard`), so no article is needed; the first text, filled with a code name, read "a html" and "a design_system". `noDesignSystem` with no live design system ends "there are no design systems" in place of an empty list, with a test for the empty case.
+- M8 (2026-11-15, the architect's ruling): the drawn page's frame 6 differs from the document; the document's version (each card, its Blank and the choice disabled while the Space loads) is right. `library/Rows.tsx` is accepted into M8's touch list.
 
 ## Outcomes & Retrospective
 
