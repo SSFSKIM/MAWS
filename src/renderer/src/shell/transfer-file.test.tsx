@@ -625,11 +625,12 @@ describe('the person’s moves of a file the agent marked (U6e)', () => {
 
   // The agent's open beside A's chat: a marked tab, read as the agent's, refused.
   async function agentMarkedBeside(): Promise<string> {
+    const from = reads().length;
     act(() => void openFile(A, OUT, null, { asked: 'agent' }));
     const tabId = sideTabOf(OUT)!;
     expect(paramsOf(tabId)).toMatchObject({ agent: true });
     await waitFor(() => expect(refusal()).not.toBeNull());
-    expect(reads().every((input) => input.agent === true)).toBe(true);
+    expect(reads().slice(from).every((input) => input.agent === true)).toBe(true);
     expect(entry()).toMatchObject({ status: 'error', agent: true });
     return tabId;
   }

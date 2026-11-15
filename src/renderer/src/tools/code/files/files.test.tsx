@@ -1066,9 +1066,10 @@ describe('the tree at the file’s left', () => {
 
   // M3's review: the first click of a double-click ends the tree in the file's place, so the second lands on the file
   // UX wave U6e (decision 19): a row's click is the person's open, through `openFile` with no `asked`: on the file the
-  // agent's tab holds, the tab's mark and the entry's go and the file is read again as the person's; the narrow tree's
+  // agent's tab holds, the tab's mark and the entry's go, so the entry's next reads are the person's (a file the tree lists
+  // is inside the session's folders, admitted either way, so a shown one is not read again for it); the narrow tree's
   // double-click then keeps the tab, still unmarked.
-  it('a row’s click on the file the agent’s tab holds takes the agent’s mark back and reads as the person’s; the narrow tree’s double-click keeps it unmarked', async () => {
+  it('a row’s click on the file the agent’s tab holds takes the agent’s mark back from the tab and the entry; the narrow tree’s double-click keeps it unmarked', async () => {
     render(<TestHost />);
     act(() => void openFile(A, APP, null, { asked: 'agent' }));
     const [tab] = sideTabs();
@@ -1081,12 +1082,9 @@ describe('the tree at the file’s left', () => {
     await shown('/r/src');
     fireEvent.click(row('/r/src')!, { detail: 1 });
     await shown(APP);
-    const before = reads().length;
     fireEvent.click(row(APP)!, { detail: 1 }); // the person's open of the file the tab holds
     expect(paramsOf(tab.id)).toEqual({ file: APP, line: null, preview: true });
-    await waitFor(() => expect(reads().length).toBeGreaterThan(before));
-    expect(reads().at(-1)).not.toHaveProperty('agent');
-    await waitFor(() => expect(useViewer.getState().entries.get(`file:${TEST_MACHINE}:${APP}`)).toMatchObject({ status: 'ready', agent: false }));
+    expect(useViewer.getState().entries.get(`file:${TEST_MACHINE}:${APP}`)).toMatchObject({ status: 'ready', agent: false });
     await waitFor(() => expect(fileShown()).toBe(true));
     const there = document.querySelector<HTMLElement>('[data-file-viewer]')!;
     fireEvent.click(there, { detail: 2 });
