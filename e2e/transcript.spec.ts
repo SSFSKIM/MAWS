@@ -264,7 +264,7 @@ test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({
   const shown = await list.evaluate((scroller) => {
     const top = scroller.getBoundingClientRect().top;
     const bottom = scroller.getBoundingClientRect().bottom;
-    const lines = [...scroller.querySelectorAll<HTMLElement>('[data-row-id^="record-fold:closed:"]')];
+    const lines = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id^="record-fold:closed:"]'));
     return lines.find((line) => line.getBoundingClientRect().top >= top && line.getBoundingClientRect().bottom <= bottom)?.getAttribute('data-row-id') ?? null;
   });
   expect(shown, 'a closed record line in view far up the history').not.toBeNull();
