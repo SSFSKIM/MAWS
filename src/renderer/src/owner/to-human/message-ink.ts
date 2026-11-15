@@ -1,28 +1,27 @@
-// Presentation only: closed output tags are transparent, not a report grammar. The shared owner parser still
-// extracts attention and summary marks independently. Keep one Markdown tree so inline tags cannot split a list,
-// paragraph, or emphasis; code is literal and an unfinished message is never repaired. The tags come out of the tree
-// and the top-level blocks that carry a message's text sit in one wrapper, never one mark per text span. A message that
-// starts or ends on its own line starts or ends its own paragraph; one inside a line keeps its paragraph.
+// Presentation only: output tags are transparent, not a report grammar. Keep one Markdown tree so inline tags cannot
+// split a list, paragraph, or emphasis; code is literal. The tags come out of the tree and the top-level blocks that
+// carry a message's text sit in one wrapper, never one mark per text span. A message that starts or ends on its own
+// line starts or ends its own paragraph; one inside a line keeps its paragraph.
 //
 // UX wave U2b (M2; A12): the wrapper is the mod's drawing of a message (`owner/view/Message.tsx`): its label first, then
-// its blocks. A message is what the mod reads as one (`parseMarked`, `to-human/hooks/mods/to-human.tsx` 144, at 0.8.2):
-// every mark, the older `to-human`, `essential`, `need-input` and `insight` as `<message>`, and each run of text under
-// one mark a message of its own, so a mark nested in another, and the outer one's text after it, are each their own.
-// The first message of the text carries the bullet (`spanRows`, 1411; the engine marks every text row of its
-// conversation as the first of its reply, ruling 4), a later one none. While the text streams a mark still open at its
-// end reads as open (the shared grammar's `parseLive`): its message is drawn under its label and ` …`. A closed
-// stretch's head draws its message spans alone (`owner/view/marked.ts`, in `Presenter.tsx`), not through this tree.
+// its blocks. Which tags are tags and which words are a message is the one reading of a text's marks
+// (`src/shared/owner/marked.ts`), which every reader of the renderer takes: this tree takes out exactly its tags (a
+// tag it does not take stays literal: in code, after a backslash, a mark left open in a completed text, a stray or
+// crossing tag) and splits the messages as it does, each run of text under one mark a message of its own. The first
+// message of the text carries the bullet (`spanRows`, 1411; the engine marks every text row of its conversation as the
+// first of its reply, ruling 4), a later one none; while the text streams a mark still open at its end is drawn under
+// its label and ` …`. A closed stretch's head draws the reading's spans alone (`Presenter.tsx`), not through this tree.
 import type { Element, ElementContent, Root, RootContent } from 'hast';
 import type { Plugin } from 'unified';
-import { codeRegions, insideCode } from '@shared/owner/to-human-parser';
+import { readMarked } from '@shared/owner/marked';
 import { messageLabelNode } from '../view/Message';
-import { isOutputTag, outputTagPattern, sourceTags } from './source-tags';
+import { isOutputTag, sourceTags } from './source-tags';
 
 type Token = { close: boolean; name: string };
 const tokenOf = (tag: string): Token => ({ close: tag.startsWith('</'), name: tag.replace(/^<\/?|(?: recommended)?>$/g, '') });
-// The tokens that pair: an opener with the closer that ends it, innermost first; a crossing closer is no pair and drops
-// the openers before it. `live`: an opener still open at the end pairs with the end of the text.
-function paired<T extends Token>(tokens: T[], live: boolean): Set<T> {
+// A question's `choice` tags that pair: an opener with the closer that ends it, innermost first; a crossing closer is no
+// pair and drops the openers before it. (The mark tags are the one reading's.)
+function paired<T extends Token>(tokens: T[]): Set<T> {
   const stack: T[] = [];
   const pairs = new Set<T>();
   for (const token of tokens) {
@@ -32,25 +31,16 @@ function paired<T extends Token>(tokens: T[], live: boolean): Set<T> {
       pairs.add(token);
     } else stack.length = 0;
   }
-  if (live) for (const open of stack) pairs.add(open);
   return pairs;
 }
 
 const MARKS = ['message', 'to-human', 'essential', 'need-input', 'insight']; // `choice` is a question's own, inside its mark
 
-// Whether the text draws a message: a mark that closes, or (`live`, a streaming block) one still open at its end. Tags
-// in code, and tags escaped by a backslash, are literal.
-export function hasMessages(text: string, live = false): boolean {
-  const inCode = insideCode(codeRegions(text));
-  const tokens = [...text.matchAll(outputTagPattern())].filter((tag) => {
-    let backslashes = 0;
-    for (let at = tag.index - 1; at >= 0 && text[at] === '\\'; at--) backslashes++;
-    return !inCode(tag.index) && backslashes % 2 === 0;
-  });
-  return [...paired(tokens.map((tag) => tokenOf(tag[0])), live)].some((token) => MARKS.includes(token.name));
-}
+/** Whether the text draws a message, by the one reading (`live`: while its block streams). */
+export const hasMessages = (text: string, live = false): boolean => readMarked(text, live).spans.length > 0;
 
-export const hasClosedMarks = (text: string): boolean => hasMessages(text, false);
+// `transcript/surface/Rows.tsx`'s question of a completed text the engine's surface drew natively.
+export const hasClosedMarks = (text: string): boolean => hasMessages(text);
 
 const blank = (node: RootContent | undefined): boolean => node?.type === 'text' && !node.value.trim();
 const lineBreak = (node: RootContent | undefined): boolean => node?.type === 'element' && node.tagName === 'br';
@@ -69,7 +59,28 @@ const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (t
     if ('children' in node) for (const child of node.children) collect(child);
   };
   collect(tree);
-  const byNode = new Map<RootContent, Token>([...paired(tokens, live)].map((token) => [token.node, token]));
+  const reading = readMarked(source, live);
+  const taken = new Set(reading.tags);
+  const isMarkTag = (token: Token) => MARKS.includes(token.name);
+  const marks = tokens.filter((token) => isMarkTag(token) && taken.has(token.node.position!.start.offset!));
+  const byNode = new Map<RootContent, Token>([...marks, ...paired(tokens.filter((token) => !isMarkTag(token)))].map((token) => [token.node, token]));
+  // A tag the reading takes that Markdown put inside code: a closer glued after a closing fence (the glued reading),
+  // which CommonMark reads as more of the fence's code. It comes out of the code with its fence line, as the reading
+  // closes the fence before it.
+  const glued = (node: Element): Token[] => {
+    const at = node.position;
+    if (!at) return [];
+    return reading.tags.filter((offset) => offset >= at.start.offset! && offset < at.end.offset! && !marks.some((token) => token.node.position!.start.offset === offset))
+      .map((offset) => tokenOf(/^<\/?[a-z-]+>/.exec(source.slice(offset))![0]));
+  };
+  const unglue = (node: Element, count: number) => {
+    const fenceLine = /\n?[ \t]*(?:`{3,}|~{3,})?[ \t]*(?:<\/?(?:message|to-human|essential|need-input|insight)>[ \t]*)+\n?$/;
+    const strip = (child: ElementContent): void => {
+      if (child.type === 'text') child.value = child.value.replace(fenceLine, '');
+      else if (child.type === 'element') child.children.forEach(strip);
+    };
+    if (count > 0) node.children.forEach(strip);
+  };
   const open: { name: string; message: number }[] = []; // message: the ordinal of an open mark's current run, else 0
   let messages = 0;
   let touched: number | null = null; // the message whose text the block being drawn holds
@@ -94,7 +105,12 @@ const decorateWith = ({ live }: { live: boolean }): Plugin<[], Root> => () => (t
       if (token) { enter(token); return []; }
       const before = removed;
       // Code keeps its own syntax styling and literal tags, even inside a message.
-      if (node.tagName === 'code' || node.tagName === 'pre') touch();
+      if (node.tagName === 'code' || node.tagName === 'pre') {
+        touch();
+        const inside = glued(node);
+        unglue(node, inside.length);
+        inside.forEach(enter);
+      }
       else node.children = node.children.flatMap(transform) as Element['children'];
       if (node.tagName === 'p' && before !== removed && node.children.every((child) => blank(child) || lineBreak(child))) return [];
     }
