@@ -22,7 +22,7 @@ import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
 import type { LaneAAgent } from '@shared/lane-a/agents';
 import { isAddress, machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
-import { withStatuses, type StatusedMeta } from '../../lane-a/agents/task-feed';
+import { sameTasks, withStatuses, type StatusedMeta } from '../../lane-a/agents/task-feed';
 import { watchLaneA } from '../../lane-a/watches';
 import { forgetLaneAAgents, useLaneA } from '../../stores/lane-a';
 import { useSessions } from '../../stores/sessions';
@@ -134,10 +134,14 @@ export function createTaskGraphStore({ sessions = useSessions }: { sessions?: ty
         w.laid = null;
         return reads;
       }
-      if (w.laid !== null && w.laid.reads === reads && w.laid.agents === agents) return w.laid.published;
+      const last = w.laid;
+      if (last !== null && last.reads === reads && last.agents === agents) return last.published;
       // the body crossed IPC as JSON, so each meta is the JSON object DX4's type names
-      w.laid = { reads, agents, published: withStatuses(reads, agents as readonly StatusedMeta[]) };
-      return w.laid.published;
+      const laid = withStatuses(reads, agents as readonly StatusedMeta[]);
+      // a body whose change alters no node (what a status rests on, say) publishes the same graph again
+      const published = last !== null && last.reads === reads && sameTasks(last.published, laid) ? last.published : laid;
+      w.laid = { reads, agents, published };
+      return published;
     };
     // The graph the store's own reads built: the published one, unless that is the overlay last laid over them.
     const readsOf = (id: AppSessionId): TaskGraph => {

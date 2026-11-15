@@ -86,6 +86,17 @@ const sameShallow = (a: object | null, b: object | null): boolean =>
   a === b || (a !== null && b !== null && Object.keys(b).every((key) => (a as Record<string, unknown>)[key] === (b as Record<string, unknown>)[key]));
 const sameNode = (a: TaskNode, b: TaskNode): boolean => (Object.keys(b) as (keyof TaskNode)[]).every((key) => (key === 'agent' ? sameShallow(a.agent, b.agent) : a[key] === b[key]));
 
+/** Whether two graphs' nodes say the same (an overlay's nodes are fresh objects even when they say what the last one did). */
+export function sameTasks(a: TaskGraph, b: TaskGraph): boolean {
+  if (a.tasks === b.tasks) return true;
+  if (a.tasks.size !== b.tasks.size) return false;
+  for (const [taskId, node] of b.tasks) {
+    const held = a.tasks.get(taskId);
+    if (held === undefined || (held !== node && !sameNode(held, node))) return false;
+  }
+  return true;
+}
+
 /**
  * The graph the held rows built, with each agent's status as a producer of DC8 or later carries it (above). The same
  * graph when nothing changes, so MAWS's selectors, memoised on it, keep their answers.
