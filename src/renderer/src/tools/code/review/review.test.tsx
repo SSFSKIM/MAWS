@@ -1525,7 +1525,7 @@ describe('a file’s diff body', () => {
     const { default: FileBody } = await import('./FileBody');
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const data = (blocks: string[][]) => blocks.map((hunks) => ({ oldFile: { fileName: 'a.ts' }, newFile: { fileName: 'a.ts' }, hunks: diffViewHunks({ path: 'a.ts', oldPath: null, hunks }) }));
-    render(<FileBody data={data([['@@ -1,1 +1,1 @@\nnot a diff line'], ['@@ -1 +1 @@\n-a\n+b']])} mode="unified" wrap={false} />);
+    render(<FileBody path="a.ts" data={data([['@@ -1,1 +1,1 @@\nnot a diff line'], ['@@ -1 +1 @@\n-a\n+b']])} mode="unified" wrap={false} />);
     await waitFor(() => expect(document.body.textContent).toContain('Diff unavailable: Malformed diff, empty hunk'));
     expect(document.querySelectorAll('[data-review-block]')).toHaveLength(2); // the other block still draws
     errors.mockRestore();
@@ -1535,9 +1535,9 @@ describe('a file’s diff body', () => {
     const { default: FileBody } = await import('./FileBody');
     const errors = vi.spyOn(console, 'error').mockImplementation(() => {});
     const data = (blocks: string[][]) => blocks.map((hunks) => ({ oldFile: { fileName: 'a.ts' }, newFile: { fileName: 'a.ts' }, hunks: diffViewHunks({ path: 'a.ts', oldPath: null, hunks }) }));
-    const { rerender } = render(<FileBody data={data([['@@ -1,1 +1,1 @@\nnot a diff line']])} mode="unified" wrap={false} />);
+    const { rerender } = render(<FileBody path="a.ts" data={data([['@@ -1,1 +1,1 @@\nnot a diff line']])} mode="unified" wrap={false} />);
     await waitFor(() => expect(document.body.textContent).toContain('Diff unavailable: Malformed diff, empty hunk'));
-    rerender(<FileBody data={data([['@@ -1 +1 @@\n-before\n+after']])} mode="unified" wrap={false} />);
+    rerender(<FileBody path="a.ts" data={data([['@@ -1 +1 @@\n-before\n+after']])} mode="unified" wrap={false} />);
     await waitFor(() => expect(document.body.textContent).toContain('after'));
     expect(document.body.textContent).not.toContain('Diff unavailable');
     errors.mockRestore();
