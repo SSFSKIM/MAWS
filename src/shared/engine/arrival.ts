@@ -10,8 +10,9 @@
 // The rules of reading (UC-2): (1) marks first, text second: a class is given only where the carrier's own marks allow
 // it (its origin object, its envelope tag, its attachment type, `local_command_source`, the fields the engine writes for
 // a scheduled fire), and the person's typed prompt is never an arrival, but for MAWS's own two texts (its answer
-// envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line: UX
-// wave U1c) and a background session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
+// envelope, read whole, and its consent message, read whole or, in a text the engine may have joined, line by line, and,
+// where a sminos bridge carried it for the person to a terminal session, read whole: UX wave U1c) and a background
+// session's prompt that opens with a whole sminos frame line (decision 19); (2) sminos's
 // frame line says whose a delivered row is: `human` is the person (`own`), any other sender a peer; (3) one carrier can
 // hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
 // (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
@@ -21,7 +22,7 @@ import type { Arrival } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
-import { BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
+import { BRIDGE_PLUGINS, BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
 import { notificationText, taskNotificationBlocks } from './task-notification';
 
 export { ArrivalEntrySchema, CarriedArrivalSchema, carriedOf, type Arrival, type ArrivalEntry, type CarriedArrival } from './arrival-schema';
@@ -256,7 +257,12 @@ function inboxPeer(text: string, origin: Json | null, frame: string | null, via:
   ];
 }
 
-/** A row of the bridge's plugin: its answer prompt, its wake, or a delivery it submitted as the user or appended into the running turn. */
+/**
+ * A row of the bridge's plugin: its answer prompt, its wake, or a delivery it submitted as the user or appended into the
+ * running turn. UX wave U1c (M4, Interfaces §C, 6): a row a bridge plugin submitted as the user whose whole text is the
+ * grant is the grant it carried for the person (MAWS's "Approve and retry" through the terminal's bridge, probe T); a
+ * row that opens with a sminos frame line is read as the delivery it is, before this.
+ */
 function pluginRow(row: Json): Arrival[] {
   const answers = answersOf(row);
   if (answers.length > 0) return answers;
@@ -270,8 +276,10 @@ function pluginRow(row: Json): Arrival[] {
   }
   const text = deliveredText(prompts);
   const delivery = text === null ? null : framedDelivery(text, 'bridge', appended);
-  return delivery === null ? [] : [delivery];
+  if (delivery !== null) return [delivery];
+  return !appended && text !== null && isBridgePlugin(object(row.origin)?.name) ? readConsents(text) : [];
 }
+const isBridgePlugin = (name: unknown): boolean => (BRIDGE_PLUGINS as readonly unknown[]).includes(name);
 
 /**
  * A delivery whose text opens with sminos's whole frame line, the words after it: the person's own when the frame names
