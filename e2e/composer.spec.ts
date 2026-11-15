@@ -1127,7 +1127,8 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(await geometry(userRow.locator('.transcript-user-bubble p').first())).toMatchObject({ fontSize: '14px', lineHeight: '22.75px' });
 
   // B2: Codex's bubble. At most 70 percent of the column, 22px corners, 10 by 16px inside, the text colour at 5 percent
-  // (the token), the prose's size; Time, Copy and Edit overlay beside it on hover and reserve no line under it.
+  // (the token), the prose's size. Time, Copy and Edit sit on one line under it, at its side, shown on hover or focus
+  // within, in the 16 px the row already has under the bubble (B2 as amended 2026-11-12, UX wave U3, O-02).
   const bubble = userRow.locator('[data-bubble]');
   const look = await bubble.evaluate((el) => {
     const style = getComputedStyle(el);
@@ -1148,15 +1149,18 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(look).toEqual({ radius: '22px', padding: ['10px', '16px', '10px', '16px'], fontSize: '14px', border: '0px', tinted: true, maxWidth: '70%' });
   const restRow = (await userRow.boundingBox())!.height;
   const bubbleHeight = (await bubble.boundingBox())!.height;
-  expect(restRow - bubbleHeight).toBe(16); // the row's own gap, nothing reserved for the actions
-  const overlay = userRow.locator('.transcript-user-actions');
-  await expect(overlay).toHaveCSS('opacity', '0');
-  await overlay.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
-  await expect(overlay).toHaveCSS('opacity', '1');
-  expect((await userRow.boundingBox())!.height).toBe(restRow);
-  const actionsBox = (await overlay.boundingBox())!;
+  expect(restRow - bubbleHeight).toBe(16); // the line under the bubble is laid out in the row's own 16 px
+  const actions = userRow.locator('.transcript-user-line-actions');
+  await expect(actions).toHaveCSS('opacity', '0');
+  await actions.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
+  await expect(actions).toHaveCSS('opacity', '1');
+  expect((await userRow.boundingBox())!.height).toBe(restRow); // showing them adds no height
+  const actionsBox = (await actions.boundingBox())!;
   const bubbleBox = (await bubble.boundingBox())!;
-  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(bubbleBox.x); // beside the bubble, not over it
+  const rowBox = (await userRow.boundingBox())!;
+  expect(actionsBox.y).toBeGreaterThanOrEqual(bubbleBox.y + bubbleBox.height - 0.5); // under the bubble, not beside it
+  expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 0.5); // inside the row
+  expect(actionsBox.x + actionsBox.width).toBeCloseTo(bubbleBox.x + bubbleBox.width, 0); // at the bubble's side: their right edge at its
 
   // C1: Codex's box. 44px at rest with 22px corners and the faint shadow; the editor grows to a quarter of the window,
   // then scrolls inside it.

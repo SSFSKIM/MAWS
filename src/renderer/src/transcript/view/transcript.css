@@ -323,7 +323,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-command[data-error] .transcript-command-output { color: var(--danger); }
 .transcript-command-output > pre { margin: 0; overflow-x: auto; font-family: var(--font-mono); font-size: inherit; line-height: inherit; white-space: pre; overflow-wrap: normal; }
 .transcript-command-output > .transcript-prose { color: inherit; font-size: inherit; line-height: inherit; }
-.transcript-command-output .transcript-prose :is(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, [data-streamdown="table-wrapper"], [data-streamdown="code-block"]) { margin-top: 0; margin-bottom: 0; }
+.transcript-command-output .transcript-prose :where(p, h1, h2, h3, h4, h5, h6, ul, ol, blockquote, pre, [data-streamdown="table-wrapper"], [data-streamdown="code-block"]) { margin-top: 0; margin-bottom: 0; } /* :where, so the 4 px between blocks below outranks it */
 .transcript-command-output .transcript-prose :is(h1, h2, h3, h4, h5, h6) { font-size: inherit; line-height: inherit; font-weight: 600; }
 .transcript-command-output .transcript-prose > * + *,
 .transcript-command-output .transcript-prose > [dir] > * + * { margin-top: 4px; }

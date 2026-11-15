@@ -815,11 +815,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
     await expect(card.getByText(FIRST_REPLY), 'none of the parent’s copied history').toHaveCount(0);
     await expect(card.getByText(FIRST_PROMPT)).toHaveCount(0);
-    // the comment row's time, Copy and Edit, shown on hover, sit inside the card (the card's narrow width; whole-branch
-    // review, fix wave)
+    // the comment row's time, Copy and Edit, shown on hover on their line under the bubble (UX wave U3b, decision 10),
+    // sit inside the card (the card's narrow width; whole-branch review, fix wave)
     const comment = card.getByRole('region', { name: 'Your message' }).first();
     await comment.hover();
-    const toolbar = comment.locator('.transcript-user-actions');
+    const toolbar = comment.locator('.transcript-user-line-actions');
     await expect(toolbar).toHaveCSS('opacity', '1');
     const [cardBox, toolbarBox] = [(await card.boundingBox())!, (await toolbar.boundingBox())!];
     expect(toolbarBox.x, 'the toolbar’s left inside the card').toBeGreaterThanOrEqual(cardBox.x);
