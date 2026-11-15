@@ -2317,8 +2317,8 @@ test('(deleted draft, both ways) this build’s agent makes two drafts and delet
     await theirs.page.locator('[data-library]').getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 20_000 });
     const editor = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${plan}"] .ProseMirror[data-editor="live"]`);
     await expect(editor, `${peer.label} draws the draft`).toContainText('An agent wrote this.', { timeout: 20_000 });
-    // the store's revision, read and never written through a session (a session's read migrates a document as it), so
-    // the only write under the peer is the person's
+    // the store's revision, read through the window and no session's tool, so the only content write under the peer is
+    // the person's
     const revisionOf = async (page: Page) => value(await invoke(page, 'artifacts.get', { artifactId: plan })).artifact?.revision ?? -1;
     const before = await revisionOf(theirs.page);
     await editor.click();
