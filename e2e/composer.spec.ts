@@ -23,6 +23,7 @@ import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/c
 import { invoke, launchReady, promoteNowJournal, queueInterruptJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { ALLOW_ONCE_KEY, answerByKey } from './support/request-keys';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -1415,5 +1416,76 @@ test('plugin mode drawings stay inside a split composer while short labels remai
       await testInfo.attach(`plugin-mode-${index}-${width}x820`, { body: await toolbar.screenshot(), contentType: 'image/png' });
     }
   }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1b: the composer beside a waiting prompt ----------------------------------------------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Proof 1, `e2e:composer`; acceptance 1 and 2.)
+// The recorded permission round trip (`permission-roundtrip`, held at its answer, seq 50) in the session's transcript above
+// its composer: the prompt stands at the transcript's end and the composer is never replaced. ⌘Enter with a draft is the
+// composer's (§F: the claim yields to a draft) and keeps the message for after the turn, which writes nothing while the
+// turn runs, so the replay still holds at the answer; the message is taken back (↑, which needs the session's record:
+// launched under the scratch home's indexed session) and the box emptied, and ⌘Enter from the empty box then allows the
+// prompt, the one write the replay waits on.
+const PERMISSION_FIXTURE = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
+function firstRecordedPrompt(fixture: string): string {
+  for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
+    if (!line) continue;
+    const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
+    if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;
+  }
+  throw new Error(`${fixture} records no prompt`);
+}
+
+test('U1b, a prompt waits at the transcript’s end while the editor takes text: ⌘Enter with a draft queues it and leaves the prompt, with none it allows', async ({ editor }) => {
+  const { page } = editor;
+  await openComposerPage(page);
+  let id = '';
+  await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
+  await launchReady(page, id, PERMISSION_FIXTURE);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(firstRecordedPrompt(PERMISSION_FIXTURE));
+  await page.keyboard.press('Enter');
+  const card = pane(page, 0).locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+  const allow = card.getByRole('button', { name: 'Allow once', exact: true });
+  await expect(allow, 'the prompt stands at the transcript’s end').toBeVisible();
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /).first(), 'the call says it waits').toBeVisible();
+  await expect(messageIn(page, 0), 'the composer is not replaced').toBeVisible();
+  await expect(messageIn(page, 0), 'nothing took the focus from the editor').toBeFocused();
+  await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
+  await expect(pane(page, 0).getByText('Composer paused')).toHaveCount(0);
+
+  // a draft: ⌘Enter is the composer's, kept for after the turn; the prompt still waits and nothing is written
+  const later = 'Then list the tags as well.';
+  await page.keyboard.type(later);
+  await page.keyboard.press(ALLOW_ONCE_KEY);
+  await expect(messageIn(page, 0), 'the box is cleared by the queue').toHaveText('');
+  await expect(stackOf(page, 0).locator('li[data-queue-state="after"]')).toContainText(later);
+  await page.waitForTimeout(300);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_response'), 'the prompt is not answered').toEqual([]);
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'the queued message is not written while the turn runs').toBe(false);
+  await expect(allow).toBeEnabled();
+
+  // taken back and emptied, so the turn's end releases nothing the replay did not record
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0)).toHaveText(later);
+  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'true');
+  await expect(stackOf(page, 0)).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await expect(messageIn(page, 0)).toHaveText('');
+
+  // none: ⌘Enter from the empty box allows the prompt, and the editor keeps the keyboard
+  await answerByKey(page, {
+    focus: messageIn(page, 0),
+    control: allow,
+    key: ALLOW_ONCE_KEY,
+    answered: async () => (await outFrames(page, id)).some((f) => f.type === 'control_response'),
+    what: id,
+  });
+  await expect(card).toHaveCount(0);
+  await expect(messageIn(page, 0)).toBeFocused();
+  await expect.poll(async () => (await statusOf(page, id)).turn, { message: 'the allowed command ran and the turn ended' }).toBeNull();
   expect(editor.consoleErrors()).toEqual([]);
 });

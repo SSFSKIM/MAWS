@@ -34,7 +34,7 @@ import { connectShell } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
-import { RequestCard, renderSessionRequest } from '../../request-card';
+import { connectRequestCard, RequestCard, renderSessionRequest } from '../../request-card';
 import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useHosts } from '../../stores/hosts';
@@ -157,7 +157,9 @@ export function ComposerHarness() {
     // store, which App.tsx connects app-wide (connectSupervisorNotices), so a plan card reads main's host.status here too.
     // UX wave U11a M3 (e2e run 43359967651): and the transcript in its slot, as App.tsx connects it, so a `shell` pane's
     // started session draws its transcript above its composer rather than C5's "Transcript unavailable"
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
+    // UX wave U1b: and the request card as App.tsx connects it (the transcript's request renderer and the followers of
+    // settlements), so a composer pane's transcript and a `shell` pane draw a waiting request where the app does
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), connectRequestCard(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).

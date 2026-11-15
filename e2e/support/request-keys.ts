@@ -9,7 +9,15 @@ export const ALLOW_ONCE_KEY = 'Meta+Enter';
 export const ALLOW_LASTING_KEY = 'Meta+Shift+Enter';
 export const DENY_KEY = 'Escape';
 
-// `focus` takes the key (the docked frame, or the Overview card's article); `control` is the card's button that the key
+// UX wave U1b: a session's request is drawn in its transcript, a question's or a plan's form in the row of its call and
+// every other request at the transcript's end (`[data-request-end]`, in the end row). Its keys are owned by the
+// transcript row that holds it (decision 6: the row a jump puts the keyboard on), a `.transcript-row` the list makes
+// focusable; the card itself is a `group` named by its kind's heading and takes no focus.
+export const END_ROW = '.transcript-row:has([data-request-end])';
+// The transcript row that holds `card` (a request's group, or any element inside a row).
+export const rowOf = (card: Locator): Locator => card.locator('xpath=ancestor::*[contains(concat(" ", normalize-space(@class), " "), " transcript-row ")][1]');
+
+// `focus` takes the key (the transcript row that holds the card, `rowOf`, or the Overview card's article); `control` is the card's button that the key
 // answers for, read enabled before each press (a key the card took disables it before the press returns, so a taken key
 // is never pressed twice); `answered` reads the answer where the scene sees it (the event stream, the bridge double).
 export async function answerByKey(page: Page, opts: { focus: Locator; control: Locator; key: string; answered: () => Promise<boolean>; what: string }): Promise<void> {
@@ -56,8 +64,8 @@ export async function pastGrace(page: Page, card: Locator): Promise<void> {
     .toBeGreaterThanOrEqual(400);
 }
 
-// A chord dispatched by the page itself at the frame `frame` (a selector), `after` ms after that frame first holds a keyed
-// button: the one way a scene can be sure a key lands inside a prompt's first 400 ms on a loaded machine. The frame is
+// A chord dispatched by the page itself at the frame `frame` (a selector: since U1b, the transcript row that holds the
+// prompt, e.g. `END_ROW` under a pane), `after` ms after that frame first holds a keyed button: the one way a scene can be sure a key lands inside a prompt's first 400 ms on a loaded machine. The frame is
 // focused first, as a real press would find it: the keymap's dispatcher gives a key to a binding only when both the
 // event's target and the focused element are inside it, so a key sent at an unfocused frame would answer nothing for a
 // reason other than the 400 ms. Armed before the prompt is drawn; `earlyPress` then answers how long after the drawing
