@@ -492,7 +492,8 @@ export class ArtifactStore {
       const mark = readMark(this.storage.getMeta(agentDraftKey(artifactId)));
       if (!mark?.deleted) throw new ArtifactStoreError('invalid', 'this artifact was deleted in the Library, not by an agent', { artifactId });
       this.storage.db.prepare('UPDATE artifacts SET deletedAt = NULL, updatedAt = ? WHERE id = ?').run(at, artifactId);
-      const { deleted: _deleted, ...kept } = mark;
+      const kept: AgentDraftMark = { ...mark };
+      delete kept.deleted;
       this.storage.setMeta(agentDraftKey(artifactId), JSON.stringify(kept));
       inFrame?.();
       return true;
