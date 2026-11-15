@@ -325,6 +325,68 @@ describe('the /btw card', () => {
     expect(fake.invoked('session.acquire')).toHaveLength(1);
   });
 
+  // UX wave U4b (M2; its document's decision 4, Interfaces B): a fold, or a move between the pane's corner and the card
+  // column's foot, mounts the card again; the start in flight and its refusal are the card's store's, so neither is lost.
+  const READY = { status: 'ready', appSessionId: A_ID, launched: true, joined: false };
+  const answerEveryStart = async () => {
+    while (fake.pending('session.acquire') > 0) await act(() => fake.reply('session.acquire', READY));
+  };
+  it('a start in flight stays in flight across a fold: Enter in the card opened again asks nothing more, and the start’s answer asks one side question', async () => {
+    listing([exchange({})]);
+    withProcess(A, 'exited');
+    act(() => openBtwCard(A));
+    render(<BtwCard appSessionId={A} />);
+    await screen.findByText('ZEBRA');
+    await userEvent.type(field(), 'More?{Enter}');
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    await userEvent.click(chip()!);
+    await screen.findByText('ZEBRA');
+    expect(within(card()!).getByText('Starting…')).toBeTruthy();
+    await userEvent.type(field(), '{Enter}');
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+    await answerEveryStart();
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
+    expect(field().value).toBe('');
+  });
+
+  it('a start in flight stays in flight across a mount of the card in another place: Enter there asks nothing more, and one side question is asked', async () => {
+    listing([exchange({})]);
+    withProcess(A, 'exited');
+    act(() => openBtwCard(A));
+    const first = render(<BtwCard appSessionId={A} />);
+    await screen.findByText('ZEBRA');
+    await userEvent.type(field(), 'More?{Enter}');
+    first.unmount(); // the card leaves the place it stood in
+    render(<BtwCard appSessionId={A} />); // and is drawn where it now stands
+    await screen.findByText('ZEBRA');
+    expect(within(card()!).getByText('Starting…')).toBeTruthy();
+    await userEvent.type(field(), '{Enter}');
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+    await answerEveryStart();
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: A_ID, question: 'More?' }]);
+  });
+
+  it('a refused start still says why after a fold and after a mount in another place, and keeps the question', async () => {
+    listing([exchange({})]);
+    withProcess(A, 'exited');
+    act(() => openBtwCard(A));
+    const first = render(<BtwCard appSessionId={A} />);
+    await screen.findByText('ZEBRA');
+    await userEvent.type(field(), 'More?{Enter}');
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: A_ID, directory: '/invented/gone' }));
+    const refusal = () => within(card()!).getByRole('alert').textContent;
+    expect(refusal()).toBe('Directory not found: /invented/gone');
+    await userEvent.click(within(card()!).getByRole('button', { name: 'Fold side chat' }));
+    await userEvent.click(chip()!);
+    expect(refusal()).toBe('Directory not found: /invented/gone');
+    first.unmount();
+    render(<BtwCard appSessionId={A} />);
+    expect(refusal()).toBe('Directory not found: /invented/gone');
+    expect(field().value).toBe('More?');
+    expect(fake.invoked('session.sideQuestion')).toEqual([]);
+  });
+
   it('a session a terminal holds: Enter and Retry ask nothing, the holder named; continuing as a thread stays possible', async () => {
     listing([exchange({}), exchange({ id: 'op-2', state: 'failed', response: null, error: 'The session ended' })]);
     useSessions.setState((s) => ({ records: new Map(s.records).set(A, { ...record(A), holder: { kind: 'terminal', pid: 42 } }), digests: new Map([[A, digest(A, { availability: 'foreign_held' })]]) }));
