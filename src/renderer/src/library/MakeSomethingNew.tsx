@@ -281,7 +281,7 @@ export function MakeSomethingNew({ spaceId }: { spaceId: string | null }) {
         <SystemChoice choice={choice} />
       </div>
       <div className="flex items-stretch gap-2">
-        <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(200px,1fr))] gap-2">
+        <div className="grid min-w-0 flex-1 grid-cols-[repeat(auto-fit,minmax(180px,1fr))] gap-2">
           {CARD_KINDS.map((kind) => (
             <KindCard key={kind} kind={kind} spaceId={spaceId} space={space} spaceKnown={spaceKnown} system={choice?.bound ?? null} instructions={instructions} />
           ))}
