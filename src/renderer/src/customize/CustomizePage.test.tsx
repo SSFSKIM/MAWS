@@ -46,7 +46,12 @@ let listAnswer: Promise<unknown> | null; // plugins.list's answer, when a test h
 let servers: { name: string; scope: string; path: string; transport: string }[];
 let opSeq: number;
 
-const emit = (name: EventName, payload: unknown) => act(() => listeners.get(name)?.forEach((listener) => listener(payload)));
+const deliver = (name: EventName, payload: unknown) => listeners.get(name)?.forEach((listener) => listener(payload));
+const emit = (name: EventName, payload: unknown) => {
+  act(() => {
+    deliver(name, payload);
+  });
+};
 const invoked = (name: string) => calls.filter((call) => call.name === name).map((call) => call.input);
 let shelf: CatalogItem[];
 const home = (): CatalogHome => ({ featured: null, shelves: [{ key: 'added', kind: 'added', title: 'Your sources', items: shelf, total: shelf.length }], categories: [], total: shelf.length });
@@ -93,9 +98,10 @@ function answer(name: CommandName, input: unknown): unknown {
         if (holdReceipt.has(name)) return new Promise((resolve) => held.set(name, () => resolve({ opId })));
         return { opId };
       }
-      const done = (outcome: unknown = { ok: true, result: { message: `${ACTION_OF[name]} done` } }) => emit('plugins.operation', { opId, action: ACTION_OF[name], target: 'x', phase: 'done', outcome });
-      if (holdDone.has(name)) held.set(name, done);
-      else queueMicrotask(() => done());
+      const event = (outcome: unknown = { ok: true, result: { message: `${ACTION_OF[name]} done` } }) => ({ opId, action: ACTION_OF[name], target: 'x', phase: 'done', outcome });
+      // a held done is released by the test (inside its act); an automatic one arrives while the test waits
+      if (holdDone.has(name)) held.set(name, (outcome) => emit('plugins.operation', event(outcome)));
+      else queueMicrotask(() => deliver('plugins.operation', event()));
       return { opId };
     }
     default:
@@ -178,7 +184,7 @@ describe('the head', () => {
     mountCustomize({ view: 'mine', show: 'connectors' });
     const rows = [...header().children] as HTMLElement[];
     expect(rows).toHaveLength(2);
-    expect(within(rows[0]!).getByRole('group', { name: 'Library' })).toBeTruthy();
+    expect(within(rows[0]!).getByRole('radiogroup', { name: 'Library' })).toBeTruthy();
     expect(within(rows[0]!).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', A);
     expect(rows[1]!.textContent).toMatch(/^Show:/);
     const choices = within(rows[1]!).getAllByRole('radio');
@@ -214,7 +220,7 @@ describe('the head', () => {
 
   it('draws no tools while a plugin’s or a skill’s detail is open; pressing the view shown or a Show value returns to the list', async () => {
     mountCustomize({ view: 'mine', show: 'plugins' });
-    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View buoy-log' }));
+    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View Buoy log' }));
     await waitFor(() => expect(tools()).toBeNull());
     expect(showGroup()).toBeTruthy();
     chooseView('My items');
@@ -358,7 +364,7 @@ describe('what a person started outlives the view', () => {
     fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
     expect(screen.queryByRole('dialog')).toBeNull(); // not again on return
     chooseShow('Plugins');
-    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View buoy-log' }));
+    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View Buoy log' }));
     await found('[data-plugin-detail]');
     fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: B } });
     await waitFor(() => expect(document.querySelector('[data-plugin-detail]')).toBeNull());
@@ -415,7 +421,7 @@ describe('ways in', () => {
     mountCustomize({ view: 'mine', show: 'plugins' });
     act(() => openMine('plugins', { pluginId: 'quay-ledger@harbour-market' }));
     await act(async () => release());
-    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View buoy-log' }));
+    fireEvent.click(within(await pluginRow('buoy-log@harbour-market')).getByRole('button', { name: 'View Buoy log' }));
     expect((await found('[data-plugin-detail]')).getAttribute('data-plugin-detail')).toBe('buoy-log@harbour-market');
     listAnswer = null;
     installed = [buoyLog, installedLedger];

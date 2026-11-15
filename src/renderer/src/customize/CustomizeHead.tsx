@@ -61,7 +61,6 @@ export function CustomizeHead({ view, show, inDetail, onView, onShow, project, l
           <span className="text-ui-sm text-fg-muted">{PAGE.show}</span>
           <ToggleGroup.Root
             type="single"
-            role="radiogroup"
             aria-label={PAGE.showGroup}
             value={show}
             // a press of the value shown emits '' (Radix's single group unpressing it): that value, its list again
