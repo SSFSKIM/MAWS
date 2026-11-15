@@ -3,7 +3,7 @@
 // is drawn beside the widget frame rather than inside a row, so it survives the row leaving the list and its Escape
 // closes only the sheet.
 import { useQueryClient } from '@tanstack/react-query';
-import { createContext, useCallback, useContext, useMemo, useRef, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useLayoutEffect, useMemo, useRef, useState, type Dispatch, type ReactNode, type SetStateAction } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { displayTitle } from '../../sessions/title';
 import { useSessions } from '../../stores/sessions';
@@ -11,8 +11,8 @@ import { PLUGIN_MANAGEMENT as W } from '../copy';
 import { TextButton } from '../parts';
 import { CATALOG_INSTALL as D } from './catalog-words';
 import { ConfirmSheet, type Declared, type EngineResolution } from './ConfirmSheet';
-import { usePluginOperations, type PluginOperations } from './operation';
-import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, scopeOf, uninstallsOf, type PluginsRequest } from './present';
+import { factsOf, usePluginOperations, type PluginOperations } from './operation';
+import { addStepOf, afterAddOf, declaredOf, operationWords, requestFor, uninstallsOf, type PluginsRequest } from './present';
 import { readInstalledNow } from './read';
 import { errorWords } from '../read';
 import { IpcCommandError } from '../../ipc/query';
@@ -38,14 +38,49 @@ export const ManageProvider = ({ value, children }: { value: Manage; children: R
 // engine as this opening read it (`loading` until that read answered).
 type Asking = { key: string; request: PluginsRequest; declared: Declared | null; engine: EngineResolution; opening: number };
 
+/**
+ * UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D): what is asked on one visit to a place,
+ * held only while that visit lasts. Customize's page holds its sheets above every body and is not remounted when its
+ * project changes (its head keeps the keyboard), so a sheet open on one project is closed by the change, is not drawn
+ * again on the return, and a sheet that a change asked for after the page left (a marketplace-declared command's second
+ * sheet) is not opened anywhere, the same place visited again included: each visit has its own setter, and a setter of
+ * an earlier visit sets nothing, so an old request never becomes a change on a later visit.
+ */
+export function usePlaceHeld<T>(place: string): [T | null, Dispatch<SetStateAction<T | null>>] {
+  const [visited, setVisited] = useState<{ place: string; visit: number }>({ place, visit: 0 });
+  let visit = visited.visit;
+  if (visited.place !== place) {
+    visit += 1; // another place, or this one again after another: a new visit
+    setVisited({ place, visit });
+  }
+  const [held, setHeld] = useState<{ visit: number; value: T } | null>(null);
+  const current = useRef(visit);
+  useLayoutEffect(() => {
+    current.current = visit;
+  }, [visit]);
+  if (held !== null && held.visit !== visit) setHeld(null); // the visit ended: what it held goes
+  const set = useCallback<Dispatch<SetStateAction<T | null>>>(
+    (update) =>
+      setHeld((prior) => {
+        if (current.current !== visit) return prior; // asked on a visit that has ended
+        const before = prior !== null && prior.visit === visit ? prior.value : null;
+        const next = typeof update === 'function' ? (update as (prior: T | null) => T | null)(before) : update;
+        return next === null ? null : { visit, value: next };
+      }),
+    [visit],
+  );
+  return [held !== null && held.visit === visit ? held.value : null, set];
+}
+
 // The widget's management state and the sheet to draw beside its frame. `resolveEngine` reads `plugins.env` again: every
 // opening of a sheet asks it and the sheet names no binary and confirms nothing until it answered, so a binary chosen in
 // Settings › Engine since the widget opened is the one the sheet shows and the host runs (E8 whole-branch review).
-// `keep` names a Customize page's operations (its section and directory), which outlive the page's views: choosing another
-// project unmounts the page, and an add-then-install asked there still installs once the add succeeds (scalpel-5#1).
+// `keep` names a Customize page's operations (its place, UX wave U11c: one book for every kind), which outlive the page's
+// views: an add-then-install asked there still installs once the add succeeds after another project is chosen
+// (scalpel-5#1). The sheet is that place's (`usePlaceHeld`).
 export function useManageState(base: { cwd: string; readySessions: number; keep?: string }, reloadMods: (() => void) | null, resolveEngine: () => Promise<EngineResolution>): { manage: Manage; sheet: ReactNode } {
   const ops = usePluginOperations(base.keep);
-  const [asking, setAsking] = useState<Asking | null>(null);
+  const [asking, setAsking] = usePlaceHeld<Asking>(base.keep ?? base.cwd);
   const openings = useRef(0);
   const open = useCallback(
     (key: string, request: PluginsRequest, declared: Declared | null) => {
@@ -53,7 +88,7 @@ export function useManageState(base: { cwd: string; readySessions: number; keep?
       setAsking({ key, request, declared, engine: { state: 'loading' }, opening });
       void resolveEngine().then((engine) => setAsking((current) => (current?.opening === opening ? { ...current, engine } : current)));
     },
-    [resolveEngine],
+    [resolveEngine, setAsking],
   );
   const ask = useCallback((key: string, request: PluginsRequest) => open(key, request, null), [open]);
   const { run } = ops;
@@ -75,7 +110,7 @@ export function useManageState(base: { cwd: string; readySessions: number; keep?
       const declared = declaredOf(done, request.action);
       if (declared) open(key, { ...request, input: { ...request.input, acceptCommand: declared.sha256 } } as PluginsRequest, declared);
     },
-    [run, cwd, open],
+    [run, cwd, open, setAsking],
   );
   const manage = useMemo(() => ({ cwd, ops, ask, reloadMods }), [cwd, ops, ask, reloadMods]);
   const sheet = asking && (
@@ -106,10 +141,11 @@ export function OperationLine({ opKey, label }: { opKey: string; label?: string 
   const client = useQueryClient();
   const [unread, setUnread] = useState<string | null>(null); // the installed list could not be read for the removal
   const entry = ops.entries.get(opKey);
-  const words = entry ? operationWords(entry.state, titleOf, scopeOf(entry.request)) : null;
-  if (!entry || words === null) return null;
+  const facts = entry ? factsOf(entry) : null;
+  const words = entry && facts ? operationWords(entry.state, titleOf, facts.scope) : null;
+  if (!entry || !facts || words === null) return null;
   const stoppable = entry.state.phase === 'working' && entry.opId !== null && !entry.state.reloading;
-  const added = entry.request.afterAdd;
+  const added = facts.afterAdd;
   const stays = added && words.failed ? added : null;
   return (
     <span className="flex min-w-0 flex-wrap items-baseline gap-x-2">

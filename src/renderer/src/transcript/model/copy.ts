@@ -531,20 +531,42 @@ export const ARTIFACT = {
   neverAnswered: (name: string) => `Registering artifact ${name} was never answered`, // E11
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
+  // UX wave U10b (M5, §C.4): an agent's delete
+  deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
+  neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`, // E11 (fix wave 1): the family's form, its turn closed first
+  couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`,
 } as const;
+
+// UX wave U10b (M5, §C.4; R2, R3): the reason a refused delete's row gives the person, by the refusal's `why`. The agent's
+// sentence names the tool and "the user"; the row never does. A `why` this table lacks (a newer machine's) is drawn as
+// the refusal reader leaves the agent's sentence.
+const DELETE_REASONS: Readonly<Record<string, string>> = {
+  byUser: 'you made it. Delete it from the Library if you no longer need it.',
+  edited: 'you have edited it. Delete it from the Library if you no longer need it.',
+  otherSession: 'another session made it. Delete it from the Library if you no longer need it.',
+  unknown: 'MAWS cannot tell that only agents have written to it. Delete it from the Library if you no longer need it.',
+  designSystemInUse: 'it still styles other artifacts. Move them to another design system first.',
+};
 
 // The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead (P3-A: or the
 // refusal's machine-readable JSON). The human reads the reason alone, as the artifact cells show theirs.
 const refusalForHuman = (error: string) =>
   error
-    .replace(/^artifact_(create|update|publish): /, '')
+    .replace(/^artifact_(create|update|publish|delete): /, '') // UX wave U10b: the delete's prefix too
     .replace(/ \{"reason":.*\}$/, '')
     .replace(/; use artifact_(create|update|publish)$/, '');
 
 // The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
 // E11), else the version it registered (without a version when the result named none).
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true }): string {
+// UX wave U10b (M5, §C.4): a delete's heading is "Deleting <title>…" until its answer, then "Deleted <title>", or its refusal
+// in the person's words (never answered, E11, when its turn closed first). Whether the artifact is live again ("Restored <title>") is read by the row's view, not here.
+export function artifactHeading(row: { action: 'create' | 'update' | 'delete'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true; why?: string }): string {
   const name = row.title ?? row.artifactId;
+  if (row.action === 'delete') {
+    if (row.error !== null) return ARTIFACT.couldNotDelete(name, (row.why !== undefined ? DELETE_REASONS[row.why] : undefined) ?? refusalForHuman(row.error));
+    if (row.neverAnswered) return ARTIFACT.neverAnsweredDelete(name);
+    return row.answered ? ARTIFACT.deleted(name) : ARTIFACT.deleting(name);
+  }
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
   if (row.neverAnswered) return ARTIFACT.neverAnswered(name);
   if (row.version === null && !row.answered) return ARTIFACT.registering(name);

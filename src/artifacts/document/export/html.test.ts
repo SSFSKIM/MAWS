@@ -2,9 +2,12 @@
 // from outside it but `maws-artifact:` and `data:`), the editor's theme inlined with every `--ds-*` resolved, math and
 // code pre-rendered, the page Letter by default. Runs under Node, as A's export service in main runs it.
 import { describe, expect, it } from 'vitest';
+import { exportTheme, prepareViews } from '../../dashboard/export';
+import { exportDashboard, SNAPSHOTS } from '../../dashboard/fixtures/export';
 import { everyKindSource } from '../convert.fixture';
 import { houseSystem, type DesignSystemExport, type LocalTokens } from './design-system';
 import { exportHtml } from './html';
+import { defaultAuthorName, exportSource } from './source';
 
 const PNG = Uint8Array.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 const loadImage = async () => ({ bytes: PNG, mime: 'image/png' });
@@ -138,5 +141,72 @@ describe('exportHtml', () => {
     const titles = [...html.matchAll(/<h1 class="doc-tab-title">([^<]*)<\/h1>/g)].map(([, title]) => title);
     expect(titles).toEqual(['Overview', 'Notes']);
     expect(html).toContain('<h2>회의 메모</h2>');
+  });
+});
+
+// UX wave U10b (l6-artifacts-07 (b), M2 decisions 7 and 8; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §B.4):
+// the exported page is spaced as the editor is, a heading is not left alone at a page's foot, and the page and its
+// density are the document's unless the call names a size
+describe('the exported page', () => {
+  const printBlock = (html: string): string => /@media print \{([\s\S]*?)\n\}/.exec(html)?.[1] ?? '';
+
+  // The elements the browser pads of its own accord (Chromium's html.css and mathml.css, which the PDF is drawn with:
+  // the lists' inline start, a table cell's 1px, the form controls, fieldset and legend, dialog; MathML's fraction and
+  // table cell). The editor's base stylesheet (Tailwind's preflight) zeroes margin and padding on every element; the page
+  // mirrors its margins whole, and leaves padding to the theme, which sets it on each HTML element the export writes
+  // with one. A fraction's padding is MathML's own layout: the editor draws math with KaTeX's HTML, not MathML.
+  const BROWSER_PADDINGS = new Set(['ul', 'ol', 'menu', 'dir', 'td', 'th', 'fieldset', 'legend', 'dialog', 'button', 'select', 'textarea', 'option', 'mtd', 'mfrac']);
+
+  it('removes the browser’s own margin from every element at zero specificity, as the editor’s reset does', async () => {
+    const { doc } = exportDashboard();
+    const views = await prepareViews(doc, { read: async ({ ref }) => SNAPSHOTS[ref], theme: exportTheme(), authorName: defaultAuthorName });
+    // one of each block kind, and a drawn view (its figure, caption, SVG and table)
+    const pages = [await exportHtml(everyKindSource()), await exportHtml(exportSource(doc, 'Board'), { renderView: views })];
+    const written = new Set(pages.flatMap((html) => [...(/<main[\s\S]*<\/main>/.exec(html)?.[0] ?? '').matchAll(/<([a-z][a-z0-9]*)[\s>]/g)].map((match) => match[1])));
+    // the padded elements the export writes (a checklist's box, its one input, is a checkbox, which the browser does not
+    // pad), and the theme's padding of each HTML one
+    expect([...written].filter((tag) => BROWSER_PADDINGS.has(tag)).sort()).toEqual(['mfrac', 'ol', 'td', 'th', 'ul']);
+    for (const html of pages) {
+      expect(html).toMatch(/\.ds-doc ul,\s*\.ds-doc ol \{[^}]*padding-left:/);
+      expect(html).toMatch(/\.ds-doc th,\s*\.ds-doc td \{[^}]*padding:/);
+      expect(html).toContain('\n.ds-doc :where(*) { margin: 0; }\n');
+    }
+    // the theme's own gap rule still stands beside it, with the spacing token resolved
+    expect(pages[0]).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 12px;/);
+  });
+
+  it('spaces a tab’s blocks, under its title, by the theme’s gap, as the editor spaces that tab', async () => {
+    const html = await exportHtml(everyKindSource());
+    expect(html).toContain('\n.ds-doc .doc-tab > * + * { margin-top: 12px; }\n');
+    expect(html).toMatch(/<section class="doc-tab" data-tab="[^"]*"><h1 class="doc-tab-title">/);
+  });
+
+  it('keeps a heading with what follows it in print', async () => {
+    const print = printBlock(await exportHtml(everyKindSource()));
+    expect(print).toContain('.ds-doc :where(h1, h2, h3) { break-after: avoid; }');
+  });
+
+  it('prints on the call’s size, else the document’s, else the system’s, else Letter', async () => {
+    const a4System: DesignSystemExport<LocalTokens> = { ...houseSystem, tokens: { properties: { ...houseSystem.tokens.properties, '--ds-page-width': '210mm', '--ds-page-height': '297mm' } } };
+    const source = everyKindSource();
+    expect(await exportHtml(source)).toContain('@page { size: 8.5in 11in; margin: 72px; }');
+    expect(await exportHtml(source, { system: a4System })).toContain('@page { size: 210mm 297mm; margin: 72px; }');
+    source.page = { size: 'a4' };
+    expect(await exportHtml(source)).toContain('@page { size: 210mm 297mm; margin: 72px; }');
+    expect(await exportHtml(source, { pageSize: 'letter' })).toContain('@page { size: 8.5in 11in; margin: 72px; }');
+    source.page = { size: 'letter' };
+    expect(await exportHtml(source, { system: a4System })).toContain('@page { size: 8.5in 11in; margin: 72px; }');
+  });
+
+  it('draws a compact document at compact density, the document’s own override of a size still winning', async () => {
+    const source = everyKindSource();
+    expect(await exportHtml(source)).toMatch(/\.ds-doc h1 \{[^}]*font-size: 26px;/);
+    source.page = { density: 'compact' };
+    const compact = await exportHtml(source);
+    expect(compact).toMatch(/\.ds-doc h1 \{[^}]*font-size: 23\.4px;/);
+    expect(compact).toMatch(/\.ds-doc \.doc-content > \* \+ \* \{\s*margin-top: 9px;/);
+    expect(compact).not.toContain('var(');
+    source.overrides = { '--ds-type-h1-size': '30px' };
+    expect(await exportHtml(source)).toMatch(/\.ds-doc h1 \{[^}]*font-size: 30px;/);
   });
 });

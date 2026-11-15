@@ -16,8 +16,9 @@ export interface TranscriptActions {
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
-  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine.
-  openFile(path: string, line?: number, appSessionId?: AppSessionId | null): void;
+  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
+  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
   // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
   openExternal(url: string, appSessionId?: AppSessionId | null): void;
@@ -52,6 +53,10 @@ export interface TranscriptActions {
   // An artifact mention's click asks it first (card C5, "Show that tab"; Link.tsx's openArtifactMention); when omitted,
   // the click opens beside the chat as before
   showOpenArtifactTab?(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean;
+  // UX wave U10b: undo an agent's delete on the session's machine. Resolves null when the artifact is live again, else the sentence to show.
+  // library/actions.ts's undeleteSessionArtifact, registered from App.tsx's E2 block beside openArtifact; when omitted, as
+  // in the desk, the delete's row draws no Undo
+  undeleteArtifact?(appSessionId: AppSessionId, artifactId: string): Promise<string | null>;
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end

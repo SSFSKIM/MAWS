@@ -13,7 +13,10 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, AttentionId, RequestId, SessionId, ToolUseId } from '@shared/graph/ids';
 import { PANE_ANSWER_MS } from '@shared/maws/panes';
 import { askSteerText } from '@shared/maws/ask';
-import { MAWS_TOOL_ANNOTATIONS, mawsToolList, SHOW_PANE_NOTES /* U12a */, TOOL_ERRORS, type AskAnswer } from '@shared/maws/tools';
+import {
+  ArtifactCreateResultSchema, ArtifactDescribeTypeResultSchema, ArtifactReadResultSchema, // UX wave U10b (M10)
+  MAWS_TOOL_ANNOTATIONS, mawsToolList, SHOW_PANE_NOTES /* U12a */, TOOL_ERRORS, type AskAnswer,
+} from '@shared/maws/tools';
 import { MAWS_SERVER_INSTRUCTIONS, mawsServerInstructions } from '@shared/maws/instructions'; // P4-B4; U12a: the join
 import type { StdinFrame } from '@shared/wire/frames';
 import type { JournalRow } from '@shared/wire/journal';
@@ -30,6 +33,7 @@ import { EngineSession, type EngineSessionOptions } from './session';
 import { SessionStream } from './session-stream';
 import { AskAnswerMismatch } from './tool-server/ask';
 import { openDocuments, type Documents } from './documents'; // P3-A
+import { linkedReadOf } from '@shared/maws/linked-read'; // UX wave U10b (M10)
 
 async function until(check: () => boolean, what: string, ms = 10_000): Promise<void> {
   const start = Date.now();
@@ -103,6 +107,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
       ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }], ['artifact_comments', { ...MAWS_TOOL_ANNOTATIONS, title: 'List document comments' }],
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }], ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's; P4-R7z took P4-R7's message out after it
+      ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4): last
     ]);
     // P4-A3's tools an edit needs are listed always loaded
     expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toMatchObject(
@@ -809,6 +814,223 @@ describe('the artifact tools on an EngineSession (scripted)', () => {
   });
 });
 // E2 end
+
+// UX wave U10b (M10; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, §E.4, A8's third sentence): a Space's
+// instructions in the artifact tools' answers, through the session's real tool server. An answer about a Space carries
+// them the first time the session meets the Space, and again only once the text has changed or the session's context
+// was compacted (the recorded compact_boundary frame of pass3/compact); the read MAWS makes for an artifact a message
+// links, and a held legacy dashboard's raw read, neither carry them nor count as given. The texts and names are invented.
+describe('a Space’s instructions in the artifact tools’ answers on an EngineSession (scripted)', () => {
+  const json = (rpc: Rpc) => {
+    expect(rpc.result!.isError, rpc.result!.content![0]!.text).toBeUndefined();
+    return JSON.parse(rpc.result!.content!.find((b) => (b as { type?: string }).type === 'text')!.text) as Record<string, unknown>;
+  };
+  const NOTES = 'Write dates as 14 March.\nUse metres.';
+  let documents: Documents;
+  beforeEach(() => {
+    documents = openDocuments(userData, () => {})!;
+  });
+  afterEach(() => documents.close());
+  const withStore = (spec: Partial<LaunchSpec> = {}) => mawsSession({}, { artifacts: () => documents.store }, spec);
+  const ask = async (run: Awaited<ReturnType<typeof withStore>>, name: string, args: Record<string, unknown>) => json(await run.answered(run.call(name, args)));
+  const space = async (name: string, text?: string) => {
+    const made = await documents.store.createSpace({ name });
+    if (text !== undefined) await documents.store.setSpaceInstructions(made.id, text);
+    return made;
+  };
+  const given = (made: { id: string; name: string }, text: string) => ({ spaceId: made.id, name: made.name, text });
+  // the engine's frame as the probe recorded it, restamped with this session's id
+  const compaction = (): Record<string, unknown> => ({
+    ...(loadJournal('pass3', 'compact').map((row) => row.frame as Record<string, unknown>).find((frame) => frame.subtype === 'compact_boundary')!),
+    session_id: launchSpec().sessionId,
+  });
+  const finish = async (run: Awaited<ReturnType<typeof withStore>>) => {
+    run.transport.exit(0);
+    await run.session.exited;
+  };
+
+  it('create in a Space, then a read in the same Space, gives the instructions once', async () => {
+    const notes = await space('Field notes', NOTES);
+    const run = await withStore();
+    const created = await ask(run, 'artifact_create', { title: 'Tide table', content: '<p>Low tide at 06:10.</p>', space: 'Field notes' });
+    expect(ArtifactCreateResultSchema.parse(created).spaceInstructions).toEqual(given(notes, NOTES));
+    const read = await ask(run, 'artifact_read', { artifact: created.artifactId as string });
+    expect(ArtifactReadResultSchema.parse(read)).not.toHaveProperty('spaceInstructions');
+    expect(await ask(run, 'artifact_describe_type', { kind: 'html', artifact: created.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    expect(await ask(run, 'artifact_create', { title: 'Second page', content: '<p>x</p>', space: notes.id })).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
+  it('a change of the text gives them again at the next answer; the same text saved again does not', async () => {
+    const notes = await space('Field notes', NOTES);
+    const run = await withStore();
+    const created = await ask(run, 'artifact_create', { title: 'Tide table', content: '<p>Low tide at 06:10.</p>', space: 'Field notes' });
+    expect(created.spaceInstructions).toEqual(given(notes, NOTES));
+    await documents.store.setSpaceInstructions(notes.id, NOTES); // saved again, unchanged
+    expect(await ask(run, 'artifact_read', { artifact: created.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    await documents.store.setSpaceInstructions(notes.id, 'Write dates as 14 March.\nUse metres and Celsius.');
+    expect((await ask(run, 'artifact_read', { artifact: created.artifactId as string })).spaceInstructions).toEqual(given(notes, 'Write dates as 14 March.\nUse metres and Celsius.'));
+    expect(await ask(run, 'artifact_read', { artifact: created.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
+  it('the recorded compaction frame, fed to the session, gives them again at the next answer, and so does one marked historical', async () => {
+    const notes = await space('Field notes', NOTES);
+    const run = await withStore();
+    const created = await ask(run, 'artifact_create', { title: 'Tide table', content: '<p>Low tide at 06:10.</p>', space: 'Field notes' });
+    expect(created.spaceInstructions).toEqual(given(notes, NOTES));
+    expect(await ask(run, 'artifact_read', { artifact: created.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    // the boundary and the next call arrive together, in this order: the call answers after the boundary was seen
+    run.transport.push(compaction());
+    const after = run.call('artifact_read', { artifact: created.artifactId as string });
+    expect(json(await run.answered(after)).spaceInstructions).toEqual(given(notes, NOTES));
+    expect(run.events.filter((e) => e.kind === 'boundary.compaction')).toMatchObject([{ trigger: 'manual', preTokens: 28986, historical: false }]);
+    expect(await ask(run, 'artifact_read', { artifact: created.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    run.transport.push({ ...compaction(), historical: true });
+    expect((await ask(run, 'artifact_describe_type', { kind: 'html', space: 'Field notes' })).spaceInstructions).toEqual(given(notes, NOTES));
+    await finish(run);
+  });
+
+  it('two Spaces are tracked apart', async () => {
+    const notes = await space('Field notes', NOTES);
+    const lab = await space('Lab', 'Cite each run by its number.');
+    const run = await withStore();
+    const page = await ask(run, 'artifact_create', { title: 'Tide table', content: '<p>x</p>', space: 'Field notes' });
+    expect(page.spaceInstructions).toEqual(given(notes, NOTES));
+    const memo = await ask(run, 'artifact_create', { kind: 'document', title: 'Run log', content: '# Run log', space: 'Lab' });
+    expect(memo.spaceInstructions).toEqual(given(lab, 'Cite each run by its number.'));
+    await documents.store.setSpaceInstructions(lab.id, 'Cite each run by its number and date.');
+    expect(await ask(run, 'artifact_read', { artifact: page.artifactId as string })).not.toHaveProperty('spaceInstructions'); // Field notes is unchanged
+    expect((await ask(run, 'artifact_read', { artifact: memo.artifactId as string })).spaceInstructions).toEqual(given(lab, 'Cite each run by its number and date.'));
+    await finish(run);
+  });
+
+  it('a Space with no text adds no field, and neither does an artifact in no Space', async () => {
+    await space('Scratch');
+    const run = await withStore();
+    const scratch = await ask(run, 'artifact_create', { title: 'Sketch', content: '<p>x</p>', space: 'Scratch' });
+    expect(scratch).toMatchObject({ spaceName: 'Scratch' });
+    expect(scratch).not.toHaveProperty('spaceInstructions');
+    expect(await ask(run, 'artifact_read', { artifact: scratch.artifactId as string })).not.toHaveProperty('spaceInstructions');
+    expect(await ask(run, 'artifact_describe_type', { kind: 'document', space: 'Scratch' })).not.toHaveProperty('spaceInstructions');
+    const loose = await ask(run, 'artifact_create', { kind: 'document', title: 'Loose note' });
+    expect(loose).not.toHaveProperty('spaceInstructions');
+    expect(await ask(run, 'artifact_describe_type', { kind: 'document' })).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
+  it('a linked read neither carries them nor marks them given', async () => {
+    const notes = await space('Field notes', NOTES);
+    const page = await documents.store.create({ kind: 'html', title: 'Tide table', spaceId: notes.id, content: { bytes: Buffer.from('<p>Low tide at 06:10.</p>'), name: 'index.html' } }, { kind: 'human' });
+    const run = await withStore();
+    await run.session.send(`Check [the tide table](maws-artifact:${page.id}).`);
+    const users = () => run.transport.writes.filter((f): f is Extract<StdinFrame, { type: 'user' }> => f.type === 'user');
+    await until(() => users().length === 1, 'the message with its linked read');
+    const blocks = users()[0]!.message.content as unknown as { text: string }[];
+    expect(linkedReadOf(blocks[1]!.text)).toMatchObject({ artifactId: page.id, title: 'Tide table' }); // the read went out with the message
+    expect(blocks[1]!.text).not.toContain('spaceInstructions');
+    expect(blocks[1]!.text).not.toContain('Use metres.');
+    expect((await ask(run, 'artifact_read', { artifact: page.id })).spaceInstructions).toEqual(given(notes, NOTES)); // the agent's own read is the first
+    await finish(run);
+  });
+
+  it('a session a member who does not own the machine drives receives them as any session does (F4, pinned as intended)', async () => {
+    const notes = await space('Field notes', NOTES);
+    const page = await documents.store.create({ kind: 'html', title: 'Tide table', spaceId: notes.id, content: { bytes: Buffer.from('<p>x</p>'), name: 'index.html' } }, { kind: 'human' });
+    // spawned for a remote member who is not among the machine's owners (P5 O12 M11's launchedBy), and driven by them
+    const run = await withStore({ launchedBy: { appSessionId: launchSpec().appSessionId, member: 'member-guest', device: 'device-guest', opId: 'op-0123456789abcdef', proofFile: '/p/app-s.json' } });
+    expect((await ask(run, 'artifact_read', { artifact: page.id })).spaceInstructions).toEqual(given(notes, NOTES));
+    expect((await ask(run, 'artifact_create', { kind: 'document', title: 'Notes', space: notes.id }))).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
+  it('every path of the three tools carries them: the document and dashboard creates, the document read and a version read, describe by artifact and by space', async () => {
+    const notes = await space('Field notes', NOTES);
+    const lab = await space('Lab', 'Cite each run by its number.');
+    const desk = await space('Desk', 'Keep it short.');
+    const run = await withStore();
+    const memo = await ask(run, 'artifact_create', { kind: 'document', title: 'Memo', content: '# Memo\n\nLow tide at 06:10.', space: 'Field notes' });
+    expect(memo.spaceInstructions).toEqual(given(notes, NOTES));
+    const board = await ask(run, 'artifact_create', { kind: 'dashboard', title: 'Runs', space: 'Lab' });
+    expect(board.spaceInstructions).toEqual(given(lab, 'Cite each run by its number.'));
+    const deck = await ask(run, 'artifact_create', { kind: 'presentation', title: 'Deck', space: 'Desk' });
+    expect(deck.spaceInstructions).toEqual(given(desk, 'Keep it short.'));
+    await documents.store.setSpaceInstructions(notes.id, 'Use metres.');
+    await documents.store.setSpaceInstructions(lab.id, 'Cite each run.');
+    await documents.store.setSpaceInstructions(desk.id, 'Keep it shorter.');
+    expect((await ask(run, 'artifact_read', { artifact: memo.artifactId as string })).spaceInstructions).toEqual(given(notes, 'Use metres.')); // the document read
+    expect((await ask(run, 'artifact_read', { artifact: board.artifactId as string })).spaceInstructions).toEqual(given(lab, 'Cite each run.')); // a dashboard read as a document
+    expect((await ask(run, 'artifact_describe_type', { kind: 'presentation', artifact: deck.artifactId as string })).spaceInstructions).toEqual(given(desk, 'Keep it shorter.'));
+    const version = (await documents.store.createVersion(memo.artifactId as string, { kind: 'named', actor: { kind: 'human' }, label: 'first' }))!;
+    await documents.store.setSpaceInstructions(notes.id, 'Use metres and Celsius.');
+    expect((await ask(run, 'artifact_read', { artifact: memo.artifactId as string, version })).spaceInstructions).toEqual(given(notes, 'Use metres and Celsius.')); // a retained version's read
+    await documents.store.setSpaceInstructions(lab.id, 'Cite each run by its date.');
+    const described = ArtifactDescribeTypeResultSchema.parse(await ask(run, 'artifact_describe_type', { kind: 'dashboard', space: 'lab' })); // a name in another case
+    expect(described).toMatchObject({ home: 'Lab', spaceInstructions: given(lab, 'Cite each run by its date.') });
+    expect(described).not.toHaveProperty('artifactId');
+    await finish(run);
+  });
+
+  it('a replayed create answers what it recorded and marks nothing', async () => {
+    const notes = await space('Field notes', NOTES);
+    const run = await withStore();
+    const first = json(await run.answered(run.call('artifact_create', { kind: 'document', title: 'Memo', space: 'Field notes' }, 'toolu_memo')));
+    expect(first.spaceInstructions).toEqual(given(notes, NOTES));
+    run.transport.push(compaction()); // nothing is marked given now
+    const replayed = json(await run.answered(run.call('artifact_create', { kind: 'document', title: 'Memo', space: 'Field notes' }, 'toolu_memo')));
+    expect(replayed).toEqual(first); // the recorded answer, instructions included
+    expect((await ask(run, 'artifact_read', { artifact: first.artifactId as string })).spaceInstructions).toEqual(given(notes, NOTES)); // the replay marked nothing
+    const page = json(await run.answered(run.call('artifact_create', { title: 'Page', content: '<p>x</p>', space: 'Field notes' }, 'toolu_page')));
+    expect(page).not.toHaveProperty('spaceInstructions');
+    await documents.store.setSpaceInstructions(notes.id, 'Use metres.');
+    expect(json(await run.answered(run.call('artifact_create', { title: 'Page', content: '<p>x</p>', space: 'Field notes' }, 'toolu_page')))).toEqual(page); // the generic create's replay: as recorded
+    expect((await ask(run, 'artifact_read', { artifact: page.artifactId as string })).spaceInstructions).toEqual(given(notes, 'Use metres.'));
+    await finish(run);
+  });
+
+  // the branch review of U10b-4: what an answer carries counts as given only once the server hands that answer to the
+  // engine. A call the engine withdrew while it ran still does its store work, but its answer is dropped, so the next
+  // answer about the Space carries the instructions; an answer the engine has marks them given once.
+  it('a call withdrawn after its store work marks nothing: the next answer carries them, and that answer marks them once', async () => {
+    const notes = await space('Field notes', NOTES);
+    const brand = await documents.store.create({ kind: 'design_system', title: 'Brand' }, { kind: 'human' });
+    await documents.store.setDefaults({ owner: brand.id, spaces: {} });
+    const held: (() => void)[] = []; // the governing system's guide, held open per ask
+    documents.store.registerDesignSystemContext(() => new Promise((resolve) => held.push(() => resolve('# DESIGN of Brand'))));
+    const run = await withStore();
+    const withdraw = async (id: RequestId) => {
+      await until(() => held.length === 1, `${id} holding on its design system`);
+      run.transport.push({ type: 'control_cancel_request', request_id: id });
+      await run.answered(run.mcp({ method: 'notifications/initialized' })); // read after the withdrawal, so that was read too
+      expect(run.session.status().pendingRequests).toBe(1); // still running: its tool reads no signal
+      held.shift()!();
+      await until(() => run.session.status().pendingRequests === 0, `${id} settled`);
+      expect(run.answerOf(id)).toBeUndefined();
+    };
+    await withdraw(run.call('artifact_create', { kind: 'document', title: 'Memo', content: '# Memo', space: 'Field notes' }));
+    const [memo] = documents.store.list({ kind: 'document' });
+    expect(memo).toMatchObject({ title: 'Memo', spaceId: notes.id }); // the store work was done
+    await withdraw(run.call('artifact_describe_type', { kind: 'document', space: 'Field notes' }));
+    expect((await ask(run, 'artifact_read', { artifact: memo!.id })).spaceInstructions).toEqual(given(notes, NOTES));
+    expect(await ask(run, 'artifact_read', { artifact: memo!.id })).not.toHaveProperty('spaceInstructions');
+    await finish(run);
+  });
+
+  it('a held legacy dashboard’s raw read neither carries them nor marks them given', async () => {
+    const notes = await space('Field notes', NOTES);
+    const run = await withStore();
+    const appSessionId = run.session.status().appSessionId;
+    const preE2 = (doc: Parameters<NonNullable<Parameters<Documents['store']['create']>[0]['initial']>>[0]) => {
+      doc.get('files').setAttr('index.html', '<p>old</p>'); // a dashboard made from files before E2
+    };
+    const legacy = await documents.store.create({ kind: 'dashboard', title: 'Old board', spaceId: notes.id, initial: preE2 }, { kind: 'session', appSessionId });
+    const read = await ask(run, 'artifact_read', { artifact: legacy.id });
+    expect(read).toMatchObject({ artifactId: legacy.id, files: { 'index.html': '<p>old</p>' }, held: [{ path: 'index.html' }] });
+    expect(read).not.toHaveProperty('spaceInstructions');
+    expect((await ask(run, 'artifact_describe_type', { kind: 'dashboard', artifact: legacy.id })).spaceInstructions).toEqual(given(notes, NOTES));
+    await finish(run);
+  });
+});
 
 // The app-replay pattern (surface-replay.test.ts): the app's own handshake through the replay transport, surface reads
 // on, the recorded prompt sent and the recorded permission allowed through the session, ended where the probe's own

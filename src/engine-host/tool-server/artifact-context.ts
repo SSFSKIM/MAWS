@@ -1,6 +1,6 @@
 // What the artifact tools share (X25; the P3-A document's M6 and Decision Log 3, 9, 11, 33): the engine host's artifact
 // store, the calling session's lineage, the session's own memory (its bases for byte kinds, the kinds whose guide it was
-// given), and the refusals.
+// given, the Spaces whose instructions it was given), and the refusals.
 //
 // Store state reaches a tool's answer only once it may be revealed (Decision Log 33): reads go through
 // `readCommitted`, writes run inside `writeCommitted`, and an answer that carries store state is re-read through
@@ -8,14 +8,14 @@
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, stat, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
 import type { Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName } from '@shared/maws/tools';
+import { ARTIFACT_MAX_BYTES, TOOL_ERRORS, type ArtifactEditor, type ArtifactPublishResult, type ArtifactRefusal, type ArtifactToolName, type SpaceInstructionsAnswer } from '@shared/maws/tools';
 import { ArtifactStoreError, StoreTooNewError } from '../documents/errors';
 import type { ArtifactStore } from '../documents/store';
 import type { McpToolContext, McpToolResult } from './server';
@@ -28,16 +28,15 @@ export interface ByteBase {
   sha256: string;
 }
 
-// One session's memory, made with its tools and gone with its process (so a base never outlives the session, as its
-// replicas do not).
-export class ArtifactSession {
-  readonly byteBases = new Map<string, ByteBase>(); // by artifact id
-  readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+// One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
+// for the first one's whole response (its write and its decorations) and answers it, never a bare recorded result while
+// the first call is still decorating its answer. Once answered, a repeat is the op ledger's (`replayOf`). UX wave U10b
+// (M10 fix wave 1): one per session, shared by A's tools and the document tools (`DocumentToolSession.ops`), so an
+// overlapping call never settles decorations of its own (a Space's instructions it would mark given) and answers
+// another's.
+export class OpJoin {
   private readonly calls = new Map<string, Promise<McpToolResult>>(); // by op id: the writing calls still answering
 
-  // One response per tool-use id while a call is answering (Decision Log 11): an overlapping call with the same id waits
-  // for the first one's whole response (its write and its decorations) and answers it, never a bare recorded result
-  // while the first call is still decorating its answer. Once answered, a repeat is the op ledger's (`replayOf`).
   joined(opId: string | null, answer: () => Promise<McpToolResult>): Promise<McpToolResult> {
     if (opId === null) return answer();
     const running = this.calls.get(opId);
@@ -46,6 +45,57 @@ export class ArtifactSession {
     this.calls.set(opId, call);
     return call;
   }
+}
+
+// One session's memory, made with its tools and gone with its process (so a base never outlives the session, as its
+// replicas do not).
+export class ArtifactSession {
+  readonly byteBases = new Map<string, ByteBase>(); // by artifact id
+  readonly guided = new Set<ArtifactKind>(); // the kinds whose guide this session was given (§4.3: once per session)
+  readonly instructed = new Map<string, number>(); // UX wave U10b (M10, §E.4): per Space, the stamp of the instructions this session was given
+  readonly ops = new OpJoin(); // the writing calls still answering, by op id
+
+  joined(opId: string | null, answer: () => Promise<McpToolResult>): Promise<McpToolResult> {
+    return this.ops.joined(opId, answer);
+  }
+
+  // UX wave U10b (M10): the session's context was compacted, so what it was given may be gone from it: every Space's
+  // instructions go with the next answer about that Space again.
+  forgetInstructed(): void {
+    this.instructed.clear();
+  }
+}
+
+// ── a Space's instructions in an answer (UX wave U10b, M10; §E.4) ──
+//
+// An answer about a Space (a create in it, a read of an artifact in it, a describe of a kind there) carries the Space's
+// instructions when the Space has some and the session was not given them at this stamp (M9 restamps a text only when
+// it changes), so once per session and Space, again after a change or a compaction. What an answer carries is settled
+// with the answer; it counts as given only once that answer's write to the engine succeeded (`instructedOnDelivery`, the
+// result's `delivered`, run as the write's `flushed`; the branch review of U10b-4), so a call that fails, one the engine
+// withdrew while it ran, or one whose answer could not be written gives nothing. A replayed call answers what it recorded and marks nothing.
+export interface HeldInstructions {
+  given: SpaceInstructionsAnswer;
+  at: number;
+}
+
+// The Space's instructions as the store holds them now, with its name; null for no Space, no text or a Space gone.
+// Called inside the read or write that reads the rest of the answer.
+export function instructionsIn(store: ArtifactStore, spaceId: string | undefined): HeldInstructions | null {
+  if (spaceId === undefined) return null;
+  const space = store.getSpace(spaceId);
+  const held = space && store.spaceInstructions(spaceId);
+  return space && held ? { given: { spaceId, name: space.name, text: held.text }, at: held.at } : null;
+}
+
+// What an answer adds: the instructions, unless this session was given them at this stamp.
+export function instructionsField(session: { instructed: ReadonlyMap<string, number> }, held: HeldInstructions | null): { spaceInstructions?: SpaceInstructionsAnswer } {
+  return held && session.instructed.get(held.given.spaceId) !== held.at ? { spaceInstructions: held.given } : {};
+}
+
+// The answer, with the mark of what it carries made once the engine has it.
+export function instructedOnDelivery(result: McpToolResult, session: { instructed: Map<string, number> }, held: HeldInstructions | null, field: { spaceInstructions?: SpaceInstructionsAnswer }): McpToolResult {
+  return held && field.spaceInstructions ? { ...result, delivered: () => void session.instructed.set(held.given.spaceId, held.at) } : result;
 }
 
 export interface ArtifactToolDeps {
@@ -231,6 +281,18 @@ export async function readSourceFile(tool: ArtifactToolName, path: string): Prom
   const bytes = await readFile(path);
   if (bytes.length > ARTIFACT_MAX_BYTES) throw new ToolRefusal(TOOL_ERRORS.tooLarge(tool, path, bytes.length));
   return bytes;
+}
+
+const HTML_EXTENSIONS = new Set(['.html', '.htm']);
+
+// The .html source an agent names: relative to the working folder or absolute; .html or .htm; a regular file; at most ARTIFACT_MAX_BYTES.
+// UX wave U10b (§A.1): `artifact_create`'s own steps, taken out unchanged so `artifact_publish`'s `path` reads a page as
+// a create does. The bytes are the file's, never decoded; `name` is the file's own, `source` the path it resolved.
+export async function readHtmlSource(tool: ArtifactToolName, cwd: string, path: string): Promise<{ bytes: Buffer; name: string; source: string }> {
+  const source = resolve(cwd, path);
+  const found = await stat(source).catch(() => null);
+  if (found?.isFile() && !HTML_EXTENSIONS.has(extname(source).toLowerCase())) throw new ToolRefusal(TOOL_ERRORS.notHtml(tool, source));
+  return { bytes: await readSourceFile(tool, source), name: basename(source), source };
 }
 
 export const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

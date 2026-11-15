@@ -15,7 +15,7 @@
 // replays, lane A, the prompt history's commands, the worktree and session services, the owner channel, the sweep,
 // yield, side threads, the configure and defaults relays, the retired custody's removal); the read model, the inert index source,
 // observed facts and the library still answer, and the view says why the spine cannot be read.
-import { rm } from 'node:fs/promises';
+import { realpath, rm } from 'node:fs/promises';
 import { hostname, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { isActionable as archiveActionable, waits as archiveWaits } from '@shared/attention/kinds';
@@ -43,6 +43,8 @@ import { listenLoopback, type ListenLoopback } from './connectors/oauth-callback
 import { createRelayedCallbacks } from './connectors/relayed-callback'; // P5 O7 M5c
 import { startSignIn } from './connectors/sign-in';
 import { startDelivery } from './delivery';
+import { followView, openFileGrants } from './files/grants';
+import { ownFolders } from './files/own';
 import { uploadRootsOf } from './files/upload';
 import { createGitRunner } from './git/runner';
 import { WorktreeService } from './git/worktrees';
@@ -140,6 +142,9 @@ export interface SpineDeps {
   clientPort: ClientPort; // OX4
   interest(): ReadonlySet<AppSessionId>; // the machine's interest union (OX5), read by the sweep at each check
   browserSocket(appSessionId: AppSessionId): string | null; // the cua socket a launch is told (E13); O5's
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8): the app bundles the
+  // attached apps told (mawsd's front); none when absent
+  appBundles?: () => readonly string[];
   trash(path: string): Promise<void>; // the OS trash; the root applies the e2e seam (trashFor) itself
   engineEnv: Promise<Record<string, string>>; // the login-shell capture (captureShellEnvironment), as it types it
   env: NodeJS.ProcessEnv;
@@ -543,6 +548,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
   // their acts are claimable by machine.op above, and a release or a yield waits for scm's runs in flight (D14)
   // M3 (Interfaces §F): files.upload's root record, a spine file under the lock beside the intents, none in a refused run
   const uploadRoots = spineRuns ? uploadRootsOf(join(sessionsDir, 'uploads.json'), { log: (line) => console.warn(`[files] ${line}`) }) : null;
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B Wiring; decisions 4 and 21): the
+  // grants of chosen files, a spine file beside the upload roots' and none in a refused run (where files.grant is
+  // refused); reconciled once the view can be read, and a removed record's dropped
+  const grants = spineRuns ? openFileGrants(join(sessionsDir, 'file-grants.json'), { known: (id) => spineView.view.known(id), log: (line) => console.warn(`[files] ${line}`) }) : null;
+  if (grants !== null) {
+    const unfollow = followView(grants, spineView.view);
+    parts.push(['file grants', unfollow]);
+  }
   const checkouts = startCheckouts({
     view: spineView.view, bus, clientPort: deps.clientPort, engineEnv, env: deps.env, uploadRoots,
     // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, decision 13): files' admission by name
@@ -556,6 +569,14 @@ export function startSpine(deps: SpineDeps): SpineRoot {
       const known = index.sessions.summaryOf(appId)?.transcriptPath;
       return known?.endsWith(`/${record.engineSessionId}.jsonl`) ? known : transcriptPathOf(await engineEnv, record.directory, record.engineSessionId);
     },
+    grants,
+    // U6e (decision 20): a File artifact of the Library whose maker is a session of the asking session's line, compared
+    // by real path as `fileAdmission` compares the linked ones; none while the index is not read
+    sent: async (appSessionId, real) => {
+      for (const path of index.unavailable === null ? index.library.fileSentPaths(appSessionId) : []) if ((await realpath(path).catch(() => null)) === real) return true;
+      return false;
+    },
+    own: ownFolders(profile, process.execPath, deps.appBundles ?? (() => [])), // U6e (decision 8): no write reaches them
   });
   parts.push(['checkouts', () => checkouts.stop()]);
   settling.push(checkouts);

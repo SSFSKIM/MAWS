@@ -71,7 +71,8 @@ import {
 import { actorKey, type Actor } from '@shared/artifacts/actor';
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { AppSessionId } from '@shared/graph/ids';
-import { StoreTooNewError } from './errors';
+import { mainOf, SUGGESTION_SUFFIX, suggestionKey } from './doc-keys';
+import { ArtifactStoreError, StoreTooNewError } from './errors';
 import { frameLabel, timed } from './host-work'; // P4-R6
 import { fromNodePort, type HostPort } from './ports';
 import { AgentReplica, type Presence } from './replica';
@@ -172,6 +173,7 @@ export interface ServiceOptions {
   defer?: (run: () => void) => void; // when the batch commits; the next event-loop turn by default
   adapters?: KindAdapter[];
   kindOf?: (artifactId: string) => ArtifactKind | null; // the artifact's kind from its entity row (M3)
+  isDeleted?: (artifactId: string) => boolean; // whether the artifact's row holds `deletedAt` (UX wave U10b, the fence)
   headTailRows?: number;
   headTailBytes?: number;
   replicaIdleMs?: number;
@@ -180,16 +182,15 @@ export interface ServiceOptions {
 
 const LOAD = Symbol('load'); // the origin of a load's applies, which are already in the log
 const MIRROR = Symbol('mirror'); // the origin of the live doc's updates applied to a host replica
+const DELETED = 'deleted: the artifact was deleted'; // UX wave U10b (§C.5): the fence's refusal
 const BASE = Symbol('base'); // the origin of a main doc's update flowing into its suggestion doc, logged in the main doc's log
 
 // An artifact's suggestion doc (M8; Decision Log 23e, S1's topology) is the document stored under this key: a gc-off
 // doc that holds the main doc and, on top of it, the proposals written to it. It is loaded as the main doc's state plus
 // its own head and rows, and while it is loaded every update the main doc integrates flows into it unlogged (the main
-// doc's own row already holds it), so its log holds only what was written to it.
-export const SUGGESTION_SUFFIX = ':suggest';
-export const suggestionKey = (artifactId: string): string => `${artifactId}${SUGGESTION_SUFFIX}`;
-// The main doc a key is the suggestion doc of, or null for a main doc's key.
-export const mainOf = (key: string): string | null => (key.endsWith(SUGGESTION_SUFFIX) ? key.slice(0, -SUGGESTION_SUFFIX.length) : null);
+// doc's own row already holds it), so its log holds only what was written to it. The keys live in doc-keys.ts, which the
+// storage reads too (UX wave U10b).
+export { SUGGESTION_SUFFIX, suggestionKey, mainOf };
 
 export class DocumentService {
   readonly stats: ServiceStats = { framesIn: 0, contentFramesIn: 0, rowsAppended: 0, commits: 0, rejections: 0, rejected: [], lostBatches: 0 };
@@ -217,6 +218,7 @@ export class DocumentService {
   private readonly log: (line: string) => void;
   private readonly defer: (run: () => void) => void;
   private readonly kindOf: (artifactId: string) => ArtifactKind | null;
+  private isDeletedOf: (artifactId: string) => boolean;
   private readonly headTailRows: number;
   private readonly headTailBytes: number;
   private readonly replicaIdleMs: number;
@@ -233,6 +235,7 @@ export class DocumentService {
     // artifact has an entity row. The doc keeps its own key (`hostDoc.id`, the hooks' `artifactId`).
     const kindOf = options.kindOf ?? (() => null);
     this.kindOf = (key) => kindOf(mainOf(key) ?? key);
+    this.isDeletedOf = options.isDeleted ?? (() => false);
     this.headTailRows = options.headTailRows ?? HEAD_TAIL_ROWS;
     this.headTailBytes = options.headTailBytes ?? HEAD_TAIL_BYTES;
     this.replicaIdleMs = options.replicaIdleMs ?? REPLICA_IDLE_MS;
@@ -284,9 +287,28 @@ export class DocumentService {
     return this.adapters.get(kind);
   }
 
-  // A replica's port to the doc, under `actor` (main's human for a renderer, the session for an agent replica).
+  // UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5, "the fence"): the store's answer
+  // to whether an artifact is deleted, read on this thread, which also admits frames. It reads the artifact's row through
+  // the open batch, so a delete fences its artifact from the statement that writes `deletedAt`, inside the batch whose
+  // rules read the rows admitted before it, an undelete lowers the fence with its own statement, a lost batch lowers it
+  // with the rollback, and the fence holds across a restart. A suggestion document is asked by its main artifact's id.
+  setIsDeleted(isDeleted: (artifactId: string) => boolean): void {
+    this.isDeletedOf = isDeleted;
+  }
+
+  private isDeleted(key: string): boolean {
+    return this.isDeletedOf(mainOf(key) ?? key);
+  }
+
+  // A replica's port to the doc, under `actor` (main's human for a renderer, the session for an agent replica). A
+  // replica's open of a deleted artifact's document is refused, its connection closed as a refused frame's is (U10b).
   attach(artifactId: string, port: HostPort, actor: Actor): Connection {
     if (this.closed) throw new Error('the document service is closed');
+    if (this.isDeleted(artifactId)) {
+      const refused: Connection = { kind: 'connection', id: this.nextConnId++, artifactId, actor, key: actorKey(actor), received: 0, ackDue: false, closed: false, awarenessClients: new Set(), port };
+      this.reject(refused, DELETED);
+      return refused;
+    }
     const hostDoc = this.open(artifactId);
     this.cancelIdle(hostDoc);
     const conn: Connection = { kind: 'connection', id: this.nextConnId++, artifactId, actor, key: actorKey(actor), received: 0, ackDue: false, closed: false, awarenessClients: new Set(), port };
@@ -333,6 +355,7 @@ export class DocumentService {
   writeAs(artifactId: string, actor: Actor, edit: (doc: Doc) => void, options: WriteOptions = {}): Promise<number> {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
+    if (this.isDeleted(artifactId)) return Promise.reject(new ArtifactStoreError('notFound', DELETED, { artifactId })); // U10b: the fence
     const hostDoc = this.open(artifactId);
     const writing = this.writing;
     this.writing = { artifactId, mark: this.outbox.length }; // P4-A2: `announceWrite` goes in ahead of this write's frames
@@ -729,6 +752,7 @@ export class DocumentService {
 
   // One content frame; false when it was refused (the connection is closed) or the doc was evicted.
   private content(hostDoc: HostDoc, conn: Connection, update: Uint8Array, step2: boolean): boolean {
+    if (this.isDeleted(hostDoc.id)) return this.refuse(conn, DELETED); // UX wave U10b: the fence, before anything is checked or applied
     const reason = checkUpdate(hostDoc.doc, update);
     if (reason) return this.refuse(conn, reason);
     const ids = contentIdsOf(update);
@@ -846,6 +870,7 @@ export class DocumentService {
     if (this.closed) return Promise.reject(new Error('the document service is closed'));
     if (this.storage.readOnly) return Promise.reject(new StoreTooNewError('a newer app wrote this store'));
     if (mainOf(artifactId) !== null) return Promise.reject(new Error(`${artifactId} is a suggestion doc`));
+    if (this.isDeleted(artifactId)) return Promise.reject(new ArtifactStoreError('notFound', DELETED, { artifactId })); // U10b: the fence
     const main = this.open(artifactId);
     const suggestion = this.open(suggestionKey(artifactId));
     let plan: SuggestionPlan;

@@ -12,13 +12,19 @@
 // markdown expresses follow its markdown and every other mark (a comment) is kept; deleted words lose theirs; inserted
 // words carry a comment when it covers both neighbours or covered every word the hunk replaces; a type change re-maps
 // the kept marks onto the new text through the same diff. Orphaned threads are derived and reported, never written.
+//
+// UX wave U10b (§B.2 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `set_page` is an op of the plan
+// too. It touches no block; the plan carries the page the batch leaves (`page`), which the Yjs half writes to the
+// settings node in the batch's one transaction, so a batch is all or none with it and a batch of `set_page` alone is one
+// write.
 import { Mark, type ContentMatch, type MarkType, type Node as PMNode, type NodeType } from '@tiptap/pm/model';
 import type { Doc } from '../yjs';
 import { YNode } from '../yjs/document';
 import { DocIndex, type TopBlock } from './block-index';
-import { EditError, type ApplyOptions, type EditRefusal, type Op, type OpResult } from './edit-ops';
+import { EditError, type ApplyOptions, type EditRefusal, type Op, type OpResult, type PageOpResult } from './edit-ops';
 import { diffCells, EMBED, equalMap, type DiffCell, type Hunk } from './inline-diff';
 import { docMarkdown, stripMilestones } from './markdown';
+import { docPage, type DocPage } from './meta';
 import { nanoid8, schemaFor } from './schema';
 import { blockThreads, getThread } from './threads';
 
@@ -279,10 +285,12 @@ export interface Plan {
   origins: WeakMap<PMNode, PMNode>;
   /** The key of an existing top-level block. */
   keyOf(top: TopBlock): string;
-  results: OpResult[];
+  results: Array<OpResult | PageOpResult>;
   orphaned: string[];
   answer: { threadId: string; body: string } | null;
   mergeWhitespace: boolean;
+  /** The page the batch leaves, when it holds a `set_page`. */
+  page?: DocPage;
 }
 
 interface Located {
@@ -343,7 +351,8 @@ class Planner {
   readonly orders = new Map<string, string[]>();
   readonly actions: RootAction[] = [];
   readonly origins = new WeakMap<PMNode, PMNode>();
-  readonly results: OpResult[] = [];
+  readonly results: Array<OpResult | PageOpResult> = [];
+  private page: DocPage | undefined; // the page as the batch's set_page ops leave it so far; undefined until one runs
   private readonly used = new Set<string>();
   private readonly keys = new WeakMap<TopBlock, string>();
   private readonly byKey = new Map<string, TopBlock>();
@@ -630,7 +639,7 @@ class Planner {
     }
   }
 
-  private apply(op: Op): OpResult {
+  private apply(op: Op): OpResult | PageOpResult {
     switch (op.op) {
       case 'replace_text':
         return this.replaceText(op);
@@ -684,7 +693,20 @@ class Planner {
         return this.move(op);
       case 'set_cell':
         return this.setCell(op);
+      case 'set_page':
+        return this.setPage(op);
     }
+  }
+
+  /** The page as this op leaves it: a field given is set (`system` and `standard` clear it), one not given is kept. */
+  private setPage(op: Extract<Op, { op: 'set_page' }>): PageOpResult {
+    const page: DocPage = { ...(this.page ?? docPage(this.doc)) };
+    if (op.size === 'system') delete page.size;
+    else if (op.size !== undefined) page.size = op.size;
+    if (op.density === 'standard') delete page.density;
+    else if (op.density !== undefined) page.density = op.density;
+    this.page = page;
+    return { op: 'set_page', size: page.size ?? 'system', density: page.density ?? 'standard' };
   }
 
   private replaceText(op: Extract<Op, { op: 'replace_text' }>): OpResult {
@@ -953,6 +975,7 @@ class Planner {
       orphaned,
       answer: answering === undefined ? null : { threadId: answering, body: ANSWERED_WITHOUT_REPLY },
       mergeWhitespace: this.mergeWhitespace,
+      ...(this.page && { page: this.page }),
     };
   }
 }
@@ -971,6 +994,8 @@ function targetsOf(op: Op): string[] {
       return [op.id, op.after].filter((id): id is string => id != null);
     case 'set_cell':
       return [op.table];
+    case 'set_page':
+      return [];
   }
 }
 

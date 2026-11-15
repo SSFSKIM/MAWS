@@ -419,6 +419,7 @@ export async function startDaemon(options: DaemonOptions): Promise<RunningDaemon
       // P5 O5 M5: the daemon's own socket for the session, stable for its life, listening while a tab engine is attached
       // (the app's machine.client) and relayed to it; P5 O3-D M5b told the app's own, absent while no app was attached
       browserSocket: (appSessionId) => browserSocketFor(appSessionId),
+      appBundles: () => front.appBundles(), // UX wave U6e: MAWS's own folders, as the apps told them (decision 8)
       trash: (path) => trashPath(path, { platform, home: homedir(), env }), // D10: mawsd's own move into the user's trash
       engineEnv: captureShellEnvironment({ cache: false }), // one capture per load
       env,

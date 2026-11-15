@@ -569,6 +569,45 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await read(U, 'kept.txt'), 'no engine session id, no transcript').toEqual(REFUSED);
   });
 
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B Wiring; decision 21, S11): the
+  // grants of chosen files are a file of the profile, read at the open and reconciled with the view, so a session the view
+  // no longer knows loses its grants; a file the session's agent sent is admitted for a save by its record's maker; and
+  // the profile itself is MAWS's own, never written, also through a chat whose folder holds it
+  it('keeps the grants in the profile, drops those of a session the view no longer knows, admits a sent file, and writes nothing of the profile', async () => {
+    const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
+    const outside = realpathSync(mkdtempSync(join(dir.path, 'outside-')));
+    for (const name of ['kept.txt', 'chosen.txt', 'sent.txt']) writeFileSync(join(outside, name), `${name}\n`);
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const K = seeded.sessions.upsertFromSummary(summary({ directory: repository })).record.appId;
+    const W = seeded.sessions.upsertFromSummary(summary({ directory: dir.path })).record.appId; // a chat whose folder holds the profile
+    seeded.close();
+    const grantsFile = writeAt(join(profile, 'sessions', 'file-grants.json'), JSON.stringify({ version: 1, sessions: { [K]: [{ real: join(outside, 'kept.txt'), at: 1 }], 'a-deleted-session': [{ real: join(outside, 'kept.txt'), at: 1 }] } }));
+    const sent = join(outside, 'sent.txt');
+    const ART = '00000000-0000-4000-8000-0000000000e6';
+    const host = new FakeSpineHost();
+    host.answer('library.snapshot', () => ({
+      artifacts: [{ id: ART, kind: 'file', title: 'sent.txt', createdBy: { kind: 'session', appSessionId: K }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'session', appSessionId: K }, lastEditedAt: 2, linkedPath: sent }],
+      links: [{ artifactId: ART, appSessionId: K, role: 'created', lastAt: 1 }],
+      spaces: [],
+    }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the library's text of the stand-in artifact, which the fake host does not answer
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    expect(JSON.parse(readFileSync(grantsFile, 'utf8')).sessions, 'reconciled at the open').toEqual({ [K]: [{ real: join(outside, 'kept.txt'), at: 1 }] });
+    expect(await bus.invoke('files.read', { appSessionId: K, path: join(outside, 'kept.txt'), named: true })).toMatchObject({ ok: true, value: { content: 'kept.txt\n', named: true, outside: { real: join(outside, 'kept.txt'), writable: true } } });
+    expect(await bus.invoke('files.grant', { appSessionId: K, path: join(outside, 'chosen.txt') })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await bus.main('files.grant', { appSessionId: K, path: join(outside, 'chosen.txt') })).toEqual({ ok: true, value: { status: 'granted', path: join(outside, 'chosen.txt') } });
+    expect(JSON.parse(readFileSync(grantsFile, 'utf8')).sessions[K]).toHaveLength(2);
+    await host.ready();
+    await vi.waitFor(async () => expect(await bus.invoke('files.read', { appSessionId: K, path: sent, named: true })).toMatchObject({ ok: true, value: { named: true, outside: { real: sent, writable: true } } }));
+    const read = await bus.invoke('files.read', { appSessionId: W, path: grantsFile, hash: true });
+    expect(read).toMatchObject({ ok: true, value: { own: true } });
+    const before = readFileSync(grantsFile, 'utf8');
+    const forged = JSON.stringify({ version: 1, sessions: { [W]: [{ real: '/', at: 1 }] } });
+    expect(await bus.invoke('files.write', { appSessionId: W, path: grantsFile, content: forged, expectedHash: read.ok ? read.value.hash! : '' })).toEqual({ ok: false, error: { code: 'internal', message: `not writable: ${grantsFile}` } });
+    expect(readFileSync(grantsFile, 'utf8')).toBe(before);
+  });
+
   it('admits nothing by name in launch mode scenario, whose index is not read', async () => {
     const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
     writeFileSync(join(repository, 'inside.txt'), 'inside\n');
