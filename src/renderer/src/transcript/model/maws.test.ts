@@ -5,7 +5,7 @@
 // `p1-maws-*` fixtures and E0a's `p1-question-preview-html` pin the same rows over real journals.
 import { describe, expect, it } from 'vitest';
 import { askSteerText } from '@shared/maws/ask';
-import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
+import { TOOL_ERRORS, type AskAnswer, type AskQuestion } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { artifactHeading, askAnswerCopy, deliveryHeading } from './copy'; // E11; P3-D askAnswerCopy
@@ -344,6 +344,26 @@ describe('show_pane cells', () => {
     b.toolUse('toolu_1', SHOW_PANE, { pane: 'browser', target: 'https://a.test/' });
     b.result('toolu_1', json({ status: 'shown', pane: 'browser', opened: { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' }, page: 'reloaded', note: 'This page is in the session’s in-app browser.' }));
     expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([['done', 'Opened Browser']]);
+  });
+
+  // UX wave U6d (O-44): a call for the artifact pane recorded before the change reads as it did, from its stored result
+  it('read an earlier build’s call for the artifact pane, answered shown, as Opened Artifacts', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_1', SHOW_PANE, { pane: 'artifact', target: '00000000-0000-4000-8000-000000000001', at: { tab: 't2' } });
+    b.result('toolu_1', json({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: 'artifacts:1', title: 'Artifacts' } }));
+    expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([['done', 'Opened Artifacts']]);
+  });
+
+  // U6d: this build's refusal of the retired pane is the row's error, the sentence that teaches the link
+  it('read the refusal of the artifact pane as the sentence', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_1', SHOW_PANE, { pane: 'artifact', target: 'launch-plan' });
+    b.result('toolu_1', TOOL_ERRORS.artifactPaneRetired, { isError: true });
+    expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([
+      ['error', 'Could not open pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.'],
+    ]);
   });
 });
 

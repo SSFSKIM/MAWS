@@ -189,21 +189,26 @@ describe('the maws server on an EngineSession (scripted)', () => {
     expect(JSON.parse((await run.answered(terminal)).result!.content![0]!.text)).toEqual({ status: 'shown', pane: 'terminal', opened });
     expect(run.session.status().pendingRequests).toBe(0);
 
-    const deliverable = run.call('show_pane', { pane: 'artifact', target: 'none' }, 'toolu_deliv');
+    const unavailable = run.call('show_pane', { pane: 'tasks', target: 'release' }, 'toolu_tasks');
     await until(() => run.shows.length === 2, 'the second pane request');
-    run.session.answerPane(deliverable, { ok: false, error: TOOL_ERRORS.paneUnavailable('artifact') });
-    expect((await run.answered(deliverable)).result).toEqual({ content: [{ type: 'text', text: 'show_pane: the artifact pane is not available in this build of MAWS' }], isError: true });
+    run.session.answerPane(unavailable, { ok: false, error: TOOL_ERRORS.paneUnavailable('tasks') });
+    expect((await run.answered(unavailable)).result).toEqual({ content: [{ type: 'text', text: 'show_pane: the tasks pane is not available in this build of MAWS' }], isError: true });
 
+    // UX wave U6d (O-44): the retired artifact pane is refused by the host with the sentence that teaches the link, and
+    // is still a pane call with that error, live and on rebuild
+    const retired = await run.answered(run.call('show_pane', { pane: 'artifact', target: 'launch-plan', at: { slide: 's2' } }, 'toolu_art'));
+    expect(retired.result).toEqual({ content: [{ type: 'text', text: TOOL_ERRORS.artifactPaneRetired }], isError: true });
     const nope = await run.answered(run.call('show_pane', { pane: 'nope' }, 'toolu_nope'));
     expect(nope.result!.content![0]!.text).toBe(TOOL_ERRORS.unknownPane('nope'));
     const noTarget = await run.answered(run.call('show_pane', { pane: 'file' }, 'toolu_file'));
     expect(noTarget.result!.content![0]!.text).toBe(TOOL_ERRORS.targetRequired('file'));
-    expect(run.shows).toHaveLength(2); // neither refusal reached a window
+    expect(run.shows).toHaveLength(2); // no refusal reached a window
 
-    await until(() => run.maws().length === 3, 'the pane events');
+    await until(() => run.maws().length === 4, 'the pane events');
     expect(run.maws()).toMatchObject([
       { kind: 'maws.pane.shown', toolUseId: 'toolu_term', requestId: terminal, pane: 'terminal', target: null, opened, error: null },
-      { kind: 'maws.pane.shown', toolUseId: 'toolu_deliv', pane: 'artifact', target: 'none', opened: null, error: TOOL_ERRORS.paneUnavailable('artifact') },
+      { kind: 'maws.pane.shown', toolUseId: 'toolu_tasks', pane: 'tasks', target: 'release', opened: null, error: TOOL_ERRORS.paneUnavailable('tasks') },
+      { kind: 'maws.pane.shown', toolUseId: 'toolu_art', pane: 'artifact', target: 'launch-plan', opened: null, error: TOOL_ERRORS.artifactPaneRetired },
       { kind: 'maws.pane.shown', toolUseId: 'toolu_file', pane: 'file', target: null, opened: null, error: TOOL_ERRORS.targetRequired('file') }, // admitted, refused by the host after
     ]);
     run.transport.exit(0);

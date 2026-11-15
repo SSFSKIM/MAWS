@@ -9,8 +9,7 @@
 import { createContext, useContext, useId, useState, type MouseEvent, type ReactNode } from 'react';
 import { parseArtifactLink } from '@shared/artifacts/link'; // P4-B4
 import { SURFACE_VALUE_MAX } from '@shared/engine/surface';
-import { isAddress, machineOf } from '@shared/machine/address';
-import { Markdown, registeredActions } from '../transcript';
+import { endsSelection, Markdown, openArtifactMention, registeredActions } from '../transcript';
 import { input as sendInput, press as sendPress, select as sendSelect, type Site } from './actions';
 import { boxStyle, textStyle } from './style';
 import { firstEngineNode, type SurfaceNode } from './tree';
@@ -310,22 +309,17 @@ function MarkdownNode({ node }: { node: Extract<SurfaceNode, { type: 'Markdown' 
   const { text, dimColor, pressableLinks, key } = node.props;
   // links: the plugin's own when it answers them (a press carrying the href), else the app's link handling; the
   // transcript's link component is not mounted under a transcript here, so the click is taken before it. P3-F wave S
-  // (F14): an artifact chip is MAWS's own, opened for this surface's session as the transcript opens it (the panel; a
-  // ⌘-click, its main tab); P4-B4: at the place its fragment names, which the chip carries (`parseArtifactLink`)
+  // (F14): an artifact mention is MAWS's own, opened for this surface's session as the transcript opens it; P4-B4: at
+  // the place its fragment names, which the mention carries (`parseArtifactLink`). UX wave U6d: by the transcript's own
+  // rule (`openArtifactMention`: the main tab that already shows it, else the panel; a ⌘-click, its main tab, on the
+  // session's machine), not on a click that ends a selection in its words; Enter and Space on it arrive here as a click.
   const onClickCapture = (event: MouseEvent<HTMLDivElement>) => {
-    const chip = (event.target as HTMLElement).closest<HTMLElement>('[data-chip="artifact"]');
-    const link = chip ? parseArtifactLink(`maws-artifact:${chip.dataset.artifactId ?? ''}${chip.dataset.artifactAt ?? ''}`) : null;
-    if (link) {
+    const mention = (event.target as HTMLElement).closest<HTMLElement>('[data-chip="artifact"]');
+    const link = mention ? parseArtifactLink(`maws-artifact:${mention.dataset.artifactId ?? ''}${mention.dataset.artifactAt ?? ''}`) : null;
+    if (mention && link) {
       event.preventDefault();
       event.stopPropagation();
-      const { artifactId, at } = link;
-      const actions = registeredActions();
-      if (event.metaKey && actions.openArtifactTab) {
-        if (isAddress(site.appSessionId)) actions.openArtifactTab(artifactId, at, machineOf(site.appSessionId)); // P5 O7 M5a: on the session's machine
-        else if (at) actions.openArtifactTab(artifactId, at);
-        else actions.openArtifactTab(artifactId);
-      } else if (at) actions.openArtifact(site.appSessionId, artifactId, undefined, at);
-      else actions.openArtifact(site.appSessionId, artifactId);
+      if (!endsSelection(event.nativeEvent, mention)) openArtifactMention(registeredActions(), site.appSessionId, link, event.metaKey);
       return;
     }
     const anchor = (event.target as HTMLElement).closest('a[href]');

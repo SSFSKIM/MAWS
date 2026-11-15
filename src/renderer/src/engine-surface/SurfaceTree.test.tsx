@@ -140,6 +140,67 @@ describe('SurfaceTree (R2)', () => {
     expect(openArtifactTab).toHaveBeenCalledWith(ARTIFACT, { tab: 't2', block: 'b7' });
   });
 
+  // UX wave U6d (decision 8): a key on the link is a click on it, so under a surface the key opens through the
+  // surface's capture, for the surface's session, and never through the link's own handler (the host actions here
+  // would open a main tab)
+  it('a Markdown artifact link opens on Enter for the site session, and in its main tab on ⌘Enter, through the surface', () => {
+    const openArtifact = vi.fn();
+    const openArtifactTab = vi.fn();
+    const hostTab = vi.fn();
+    offs.push(registerTranscriptActions({ openArtifact, openArtifactTab }));
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: hostTab });
+    offs.push(() => setHostActions(DEFAULT_ACTIONS));
+    const fake = setup({ type: 'Markdown', props: { text: `[the plan](maws-artifact:${ARTIFACT})`, key: 'md' }, press: { plugin: 'mods-probe', handle: 12 } });
+    const link = screen.getByRole('button', { name: 'the plan' });
+    expect(fireEvent.keyDown(link, { key: 'Enter' })).toBe(false);
+    expect(fireEvent.keyDown(link, { key: ' ' })).toBe(false);
+    expect(openArtifact.mock.calls).toEqual([[ID, ARTIFACT], [ID, ARTIFACT]]);
+    fireEvent.keyDown(link, { key: 'Enter', metaKey: true });
+    expect(openArtifactTab.mock.calls).toEqual([[ARTIFACT]]);
+    expect(hostTab).not.toHaveBeenCalled();
+    expect(fake.invoked('session.ui.press')).toEqual([]);
+  });
+
+  // card C5 ("Show that tab"): the surface's click follows the same rule as the transcript's (Link.tsx's
+  // openArtifactMention), so a main tab that already shows the artifact comes forward, at the link's place
+  it('a Markdown artifact link shows the main tab that already holds the artifact, and opens nothing beside the chat', () => {
+    const openArtifact = vi.fn();
+    const showOpenArtifactTab = vi.fn(() => true);
+    offs.push(registerTranscriptActions({ openArtifact, openArtifactTab: vi.fn(), showOpenArtifactTab }));
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: vi.fn() });
+    offs.push(() => setHostActions(DEFAULT_ACTIONS));
+    setup({ type: 'Markdown', props: { text: `[the plan](maws-artifact:${ARTIFACT}) and [the block](maws-artifact:${ARTIFACT}#block=b7)`, key: 'md' } });
+    fireEvent.click(screen.getByRole('button', { name: 'the plan' }));
+    fireEvent.click(screen.getByRole('button', { name: 'the block' }));
+    expect(showOpenArtifactTab.mock.calls).toEqual([[ID, ARTIFACT], [ID, ARTIFACT, { block: 'b7' }]]);
+    expect(openArtifact).not.toHaveBeenCalled();
+  });
+
+  // decision 12: a click that ends a selection in the link's text opens nothing under a surface either
+  it('a Markdown artifact link opens nothing on a click that ends a selection in its text', () => {
+    const openArtifact = vi.fn();
+    offs.push(registerTranscriptActions({ openArtifact, openArtifactTab: vi.fn() }));
+    setHostActions({ ...DEFAULT_ACTIONS, openArtifactTab: vi.fn() });
+    offs.push(() => setHostActions(DEFAULT_ACTIONS));
+    const fake = setup({ type: 'Markdown', props: { text: `[the long plan](maws-artifact:${ARTIFACT})`, key: 'md' }, press: { plugin: 'mods-probe', handle: 12 } });
+    const link = screen.getByRole('button', { name: 'the long plan' });
+    const selection = document.getSelection()!;
+    const range = document.createRange();
+    range.setStart(link.firstChild!, 2);
+    range.setEnd(link.firstChild!, 6);
+    selection.removeAllRanges();
+    selection.addRange(range);
+    try {
+      fireEvent.click(link, { detail: 1 });
+      expect(openArtifact).not.toHaveBeenCalled();
+      expect(fake.invoked('session.ui.press')).toEqual([]);
+    } finally {
+      selection.removeAllRanges();
+    }
+    fireEvent.click(link, { detail: 1 });
+    expect(openArtifact).toHaveBeenCalledWith(ID, ARTIFACT);
+  });
+
   it('an Svg is a data: image, or a frame with an empty sandbox when interactive', () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16"><circle cx="8" cy="8" r="6"/></svg>';
     setup({ type: 'Box', children: [{ type: 'Svg', props: { source: svg, alt: 'Probe dot', width: 16, height: 16 } }, { type: 'Svg', props: { source: svg, alt: 'Live dot', isInteractive: true } }] });
