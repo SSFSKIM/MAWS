@@ -10,7 +10,9 @@ import { hasMessages, liveMessageInk, liveReportMessageInk, messageInk, reportMe
 function AssistantInk({ text, live }: { text: string; live: boolean }) {
   const only = useReportOnly();
   const decorate = only ? (live ? liveReportMessageInk : reportMessageInk) : live ? liveMessageInk : messageInk;
-  return <div className="transcript-answer"><Markdown markdown={text} live={live} decorate={decorate} /></div>;
+  // Streamdown's root re-renders only when its text or mode changes, never for new plugins, so a head that opens or
+  // folds (the decoration changing over the same text) mounts its Markdown afresh.
+  return <div className="transcript-answer"><Markdown key={only ? 'messages' : 'whole'} markdown={text} live={live} decorate={decorate} /></div>;
 }
 
 export function assistantPresentation(text: string, streaming = false) {
