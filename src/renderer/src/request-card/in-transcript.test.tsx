@@ -101,6 +101,11 @@ function scene() {
   };
 }
 
+// The transcript's waiting view, M3's own module, read at the case's run: a red run (before the module exists) fails the
+// cases that call it, not the whole file.
+const WAITING_VIEW = '../transcript/view/waiting-view';
+const waitingView = (): Promise<typeof import('../transcript/view/waiting-view')> => import(/* @vite-ignore */ WAITING_VIEW);
+
 const list = (items: AttentionItem[]) => act(() => useAttention.getState().applyChanged({ appSessionId: APP, items }, TEST_MACHINE));
 async function mount(items: AttentionItem[], node = <TranscriptSlot appSessionId={APP} />) {
   act(() => useAttention.getState().applySnapshot(items, TEST_MACHINE));
@@ -231,7 +236,7 @@ describe('show, the transcript’s one way to a waiting request', () => {
     const { prompt, second } = scene();
     await mount([prompt, second]);
     await waitFor(() => expect(end()?.querySelector('[data-request-card]')).not.toBeNull());
-    const { waitingViewsOf } = await import('../transcript/view/waiting-view'); // M3's module: a red run fails this case alone
+    const { waitingViewsOf } = await waitingView();
     const [view] = waitingViewsOf(APP);
     expect(view).toBeDefined();
     let shown: string = '';
@@ -254,7 +259,7 @@ describe('show, the transcript’s one way to a waiting request', () => {
     const { question } = scene();
     await mount([question]);
     await waitFor(() => expect(within(questionRow()).queryByRole('radio', { name: 'Red' })).not.toBeNull());
-    const { waitingViewsOf } = await import('../transcript/view/waiting-view');
+    const { waitingViewsOf } = await waitingView();
     let shown: string = '';
     act(() => void (shown = waitingViewsOf(APP)[0]!.show(question.id)));
     expect(shown).toBe('shown');
