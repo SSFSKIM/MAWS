@@ -16,7 +16,7 @@ import { registerSessionCreator } from '../keymap/actions-runtime';
 import { useComposerStore } from '../stores/composer';
 import { useSettings } from '../stores/settings';
 import { useLayout } from '../stores/layout';
-import { allTabs } from '../stores/layout-model';
+import { allTabs, currentSet } from '../stores/layout-model';
 import { deferred, installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetDelivery, useDelivery } from '../delivery/store'; // P4-B5
@@ -896,6 +896,27 @@ describe('Make something new', () => {
     act(() => setLibraryView({ view: 'all', spaceId: null }));
     render(<Library />);
     await waitFor(async () => expect(await shown()).toBe('MAWS · default'));
+  });
+
+  // M8 decision 6 (fix wave 2): a tab the person moved to while the Space's folder was being added stays in front
+  it('a card whose Space’s folder is still being added opens its chat behind a tab the person moved to meanwhile', async () => {
+    const creator = vi.fn(async () => at(S(8)));
+    offs.push(registerSessionCreator(creator));
+    const location = { kind: 'directory', path: '/Users/me/work' };
+    const folder = deferred<unknown>();
+    answers['session.projects.addFolder'] = () => folder.promise;
+    const user = userEvent.setup();
+    act(() => setLibraryView({ view: 'bySpace', spaceId: WORK })); // linked to a folder
+    render(<Library />);
+    const made = await section();
+    await waitFor(() => expect((card(made, 'Document') as HTMLButtonElement).disabled).toBe(false));
+    await user.click(card(made, 'Document'));
+    await waitFor(() => expect(main.callsOf('session.projects.addFolder')).toHaveLength(1));
+    act(() => useLayout.getState().openTab({ kind: 'session', appSessionId: at(S(5)) })); // the person moved meanwhile
+    await act(async () => folder.resolve(ok({ project: { id: 'p-9', name: 'work', directory: '/Users/me/work', order: 3, createdAt: '2026-10-01T00:00:00.000Z' }, location })));
+    await waitFor(() => expect(tabIds()).toContain(`session:${at(S(8))}`));
+    expect(currentSet(useLayout.getState().main).panes[0]!.activeTabId).toBe(`session:${at(S(5))}`);
+    await waitFor(() => expect(prefillOf(8)).toEqual({ text: 'Make a document in the Space “Work”: ' }));
   });
 
   // §I's card row, Constraint 9: the awaited start fails
