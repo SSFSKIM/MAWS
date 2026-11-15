@@ -1349,6 +1349,91 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(main.saves()).toEqual([]);
   });
 
+  // Re-review residual 3 (decision 6): an answer's admission lands when the answer does, not when the load's content
+  // commits; a zero-length continuation's included.
+  it('decision 6: a head that answers MAWS’s own stops a dirty entry’s save while the next chunk is still out', async () => {
+    const main = disk({ [OUT]: BIG }, { names: [OUT] });
+    offs.push(connectCodeEvents());
+    mountOut();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true, pin: OUT }));
+    act(() => useViewer.getState().setDirty(FILE(OUT), true));
+    const before = readsSoFar(main);
+    const head = main.hold('files.read');
+    const next = main.hold('files.read');
+    head.release(); // the head passes; the next chunk is held
+    main.own.add('/elsewhere');
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(readsSoFar(main)).toBe(before + 2));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true }));
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+    expect(main.saves()).toEqual([]);
+    next.release();
+    await waitFor(() => expect(shown().pending).toBe(0));
+    expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true, text: BIG });
+  });
+
+  it('decision 6: a zero-length continuation’s admission is the latest', async () => {
+    const HEAD_BYTES = 5 * 1024 * 1024; // past CODE_CAP: a bounded head
+    const TWO = 2 * 1024 * 1024;
+    const main = disk({ [OUT]: { text: 'n'.repeat(TWO), bytes: HEAD_BYTES } } as never, { names: [OUT] });
+    offs.push(connectCodeEvents());
+    mountOut();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', kind: 'head', loaded: 1024 * 1024 }));
+    act(() => useViewer.getState().loadMore(FILE(OUT)));
+    await waitFor(() => expect(shown()).toMatchObject({ loaded: TWO, loadingMore: false }));
+    const before = readsSoFar(main);
+    const head = main.hold('files.read');
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(readsSoFar(main)).toBe(before + 1));
+    (main.files as Record<string, unknown>)[OUT] = { text: 'n'.repeat(1024 * 1024), bytes: HEAD_BYTES }; // shrank: the next chunk answers no bytes
+    main.own.add('/elsewhere');
+    head.release();
+    await waitFor(() => expect(readsSoFar(main)).toBe(before + 2));
+    await waitFor(() => expect(shown()).toMatchObject({ pending: 0, locked: 'maws' }));
+  });
+
+  // Re-review residual 1: an admission-only answer lands only on the entry it was asked for, and only while no newer read
+  // has spoken: a move to another session, or a newer read, leaves it nowhere.
+  const lockedDirty = async (main: ReturnType<typeof disk>) => {
+    offs.push(connectCodeEvents());
+    mountOut();
+    await waitFor(() => expect(shown()).toMatchObject({ status: 'ready', editable: true, pin: OUT }));
+    act(() => useViewer.getState().setDirty(FILE(OUT), true));
+    main.names.delete(OUT);
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'added', editable: false, dirty: true, pin: OUT, pending: 0 }));
+    main.grant(MAIN_A, OUT); // the person chose the file
+  };
+
+  it('an admission-only answer that lands after the entry moved to another session changes nothing', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    await lockedDirty(main);
+    const asked = main.hold('files.read');
+    act(() => useViewer.getState().readAdmission(A, OUT));
+    await waitFor(() => expect(main.callsOf('files.read').at(-1)).toMatchObject({ offset: 0, length: 1 }));
+    offs.push(useViewer.getState().mount(FILE(OUT), { appSessionId: B, path: OUT, line: null })); // the edits move to session B
+    await waitFor(() => expect(shown()).toMatchObject({ appSessionId: B, pending: 0 }));
+    asked.release();
+    await settle();
+    expect(shown()).toMatchObject({ appSessionId: B, locked: 'added', editable: false, dirty: true });
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+  });
+
+  it('an admission-only answer that lands after a newer read locked the entry leaves it locked', async () => {
+    const main = disk({ [OUT]: 'one\n' }, { names: [OUT], added: [OUT] });
+    await lockedDirty(main);
+    const asked = main.hold('files.read');
+    act(() => useViewer.getState().readAdmission(A, OUT));
+    await waitFor(() => expect(main.callsOf('files.read').at(-1)).toMatchObject({ offset: 0, length: 1 }));
+    main.own.add('/elsewhere'); // the newer read answers MAWS's own
+    act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: OUT, kind: 'changed' }));
+    await waitFor(() => expect(shown()).toMatchObject({ locked: 'maws', pending: 0 }));
+    asked.release(); // the older answer: chosen, writable
+    await settle();
+    expect(shown()).toMatchObject({ locked: 'maws', editable: false, dirty: true });
+    expect(await useViewer.getState().save(FILE(OUT))).toBe('noop');
+  });
+
   // Review finding 3 (decision 18, the panel's promise): choosing the very file a dirty tab holds, after W4 left its edits
   // standing locked, reads its admission once more (the document and the pin standing), and the tab saves again.
   it('W4 then Open File…: choosing the file the dirty tab holds makes it editable again; Save writes it with the pin', async () => {

@@ -755,6 +755,7 @@ describe('the Files list’s menu (U6e)', () => {
   // Review finding 4 (K6, K12): at most the menus' width and never wider than the column less 1rem, the column measured
   // as the menu opens (and its edges the menu's collision boundary); M4's scene measures the boxes.
   const COLUMN_BOUND = 'max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))]';
+  const COLUMN_FLOOR = 'min-w-[min(12rem,calc(var(--files-menu-column,25rem)_-_1rem))]';
   const openTree = async (appSessionId: AppSessionId) => {
     render(<TestHost />);
     act(() => void panelHost.addTool('files', { appSessionId }));
@@ -773,6 +774,20 @@ describe('the Files list’s menu (U6e)', () => {
     expect(rows[0].hasAttribute('data-open-file')).toBe(true);
     fireEvent.click(rows[0]);
     await waitFor(() => expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]));
+  });
+
+  // Re-review residual 2: at the tree's least width (160 px) the menu's least width yields to the column too.
+  it('at a 160 px tree both the menu’s least and its most width stay under the column less 1rem', async () => {
+    const tree = await openTree(A);
+    await waitFor(() => expect(items().length).toBeGreaterThan(0));
+    const column = document.querySelector('[data-tool="files"]')!;
+    vi.spyOn(column, 'getBoundingClientRect').mockReturnValue({ width: 160, height: 400, top: 0, left: 0, right: 160, bottom: 400, x: 0, y: 0, toJSON: () => ({}) });
+    fireEvent.contextMenu(tree);
+    const menu = await screen.findByRole('menu');
+    const classes = menu.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining([COLUMN_BOUND, COLUMN_FLOOR]));
+    expect(classes).not.toContain('min-w-48');
+    expect(menu.style.getPropertyValue('--files-menu-column')).toBe('160px');
   });
 
   it('⇧F10 with the keyboard in the tree opens it', async () => {
