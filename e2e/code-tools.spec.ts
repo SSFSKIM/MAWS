@@ -16,7 +16,7 @@ import type { AppSessionId } from '../src/shared/graph/ids';
 import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
-  addTool, documentEnd, expectHeaderSticks, expectLandedOn, expectPlaceAtTop, expectViewMenuPlaced, hunkCounter, invoke, menu, notice, numstat, openInViewer, openReview,
+  addTool, documentEnd, expectHeaderSticks, expectLandedOn, expectPlaceAtTop, expectToolbarAsDrawn, expectViewMenuPlaced, hunkCounter, invoke, menu, notice, numstat, openInViewer, openReview,
   otherThemeColours, recordNotices, restoreWithTab, reveal, reviewSection, scrollIntoSection, sectionPaths, selectReviewFile, settledTop, shortWindow, stackTop, toolbarLayout,
   treeRow, withProduct,
 } from './support/code-product';
@@ -38,11 +38,15 @@ const HARNESS_ENV = { MAWS_HARNESS: '1', MAWS_SESSION_SOURCE: 'stub:test/fixture
 // sections, every changed file a section whose header sticks to the scroller's top while its diff is under it, and the
 // hunk counter counts across the stack. Over the scratch repository's Uncommitted it counts six once the untracked files
 // near the top are read: src/app.ts's three hunks, src/staged.ts's one, link-out's and scratch.txt's one each (big.log
-// is past the per-file cap and is not counted, §F). The three things only a real layout shows are measured, each in the
-// scene named: the sticky header ("hunk navigation…", "git.changed…", "the place survives"), the toolbar's wrap by
-// measure ("split and unified…", "the diff tab…"), the View menu against its button inside the window ("split and
-// unified…", "both themes…").
+// is past the per-file cap and is not counted, §F). Every scene over the stack measures at least one of the three things
+// only a real layout shows (Decision Log 15 e): the sticky header ("hunk navigation…", "git.changed…", "the place
+// survives"); the toolbar's wrap by measure, at a set width ("split and unified…", "the diff tab…") or as drawn ("viewed
+// markers…", "Review with a path outside the roots…", and every product scene through `openReview`); the View menu
+// against its button inside the window ("Last turn", "split and unified…", "both themes…", "Review Uncommitted…").
 const SCRATCH_HUNKS = 6;
+// A wait longer than the stack's gesture window (500 ms, stack-place.ts), in milliseconds: a pointer held this long and
+// then moved again is still the person's only while the stack tracks the held pointer.
+const PAST_THE_GESTURE = 800;
 
 // ---- the #panel harness ----------------------------------------------------------------------------------------------------
 
@@ -117,6 +121,25 @@ async function reviewAt(h: Harness, width: 280 | 640): Promise<void> {
   await expect.poll(async () => Math.round((await h.region.boundingBox())?.width ?? 0), `Review at ${width} px`).toBe(width);
 }
 
+// A line too long for any of the harness's widths (invented words), and Wrap as drawn on it in scratch.txt's section,
+// measured: wrapped, its row stands several times as high as the short line's row above it and nothing in the file's body
+// scrolls sideways; unwrapped, it is one line high and the body scrolls sideways.
+const LONG_LINE = `A long line for Wrap to fold: ${Array.from({ length: 40 }, (_, i) => `word${i + 1}`).join(' ')}.`;
+async function expectWrap(h: Harness, wrapped: boolean, message: string): Promise<void> {
+  await h.code('selectFile', 'scratch.txt', 'panel');
+  const body = h.region.locator('[data-review-file="scratch.txt"] [data-review-body]');
+  const drawn = () =>
+    body.evaluate((el, long) => {
+      const cells = Array.from(el.querySelectorAll<HTMLElement>('td')).filter((td) => td.querySelector('td') === null);
+      const longCell = cells.find((td) => (td.textContent ?? '').includes(long));
+      const shortCell = cells.find((td) => /^[+-]?\s*scratch$/.test((td.textContent ?? '').trim()));
+      if (!longCell || !shortCell) return null;
+      const overflow = Math.max(0, ...Array.from(el.querySelectorAll<HTMLElement>('*')).map((each) => (getComputedStyle(each).overflowX === 'visible' ? 0 : each.scrollWidth - each.clientWidth)));
+      return { wraps: longCell.getBoundingClientRect().height >= 2 * shortCell.getBoundingClientRect().height, overflows: overflow > 0 };
+    }, LONG_LINE.slice(0, 28));
+  await expect.poll(drawn, { message }).toEqual({ wraps: wrapped, overflows: !wrapped });
+}
+
 test.describe('the #panel harness: Review and its hand-offs', () => {
   test.use({ mawsEnv: HARNESS_ENV });
   test.beforeAll(() => mkdirSync(DIR_A, { recursive: true }));
@@ -144,6 +167,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     expect(collapsed.selected, 'the first file’s section is at the top').toBe(turnFiles[0].path);
     expect(collapsed.hunks?.length, 'the file at the top has hunks').toBeGreaterThan(0);
     expect(collapsed.files.map((f) => f.folded), 'every section unfolded').toEqual([false, false, false]);
+    // over the turn's stack, the View menu opens against its button inside the window (measured)
+    await expectViewMenuPlaced(h.region.locator('[data-review]'));
+    await h.page.keyboard.press('Escape');
+    await expect(h.page.getByRole('menu')).toHaveCount(0);
 
     // Every file's hunks, each read from its own section (a short last section never reaches the top), the turn collapsed
     // (a closed turn's default), then expanded: identical.
@@ -197,9 +224,10 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     h.expectQuietConsole();
   });
 
-  test('split and unified show the same hunks and Wrap toggles; the toolbar wraps by measure and Split needs room', async ({ maws }) => {
+  test('split and unified show the same hunks and Wrap toggles in each; the toolbar wraps by measure and Split needs room', async ({ maws }) => {
     const h = await Harness.open(maws);
-    await withScratch(h, async () => {
+    await withScratch(h, async (scratch) => {
+      writeFileSync(scratch.path('scratch.txt'), `scratch\n${LONG_LINE}\n`); // untracked: one hunk still, the totals unchanged
       await reviewAppTs(h);
       const review = h.region.locator('[data-review]');
       await reviewAt(h, 640);
@@ -232,22 +260,27 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
       await h.page.keyboard.press('Escape');
       await expect(menuOpen).toHaveCount(0);
 
-      // Wrap, at 280 px: nothing in the diff bodies scrolls sideways.
-      const overflow = () =>
-        h.region.locator('[data-review-stack]').evaluate((stack) =>
-          Math.max(0, ...Array.from(stack.querySelectorAll<HTMLElement>('[data-review-body] *')).map((el) => (getComputedStyle(el).overflowX === 'visible' ? 0 : el.scrollWidth - el.clientWidth))),
-        );
-      const unwrapped = await overflow();
+      // Wrap in Unified at 280 px, measured on scratch.txt's long line: unwrapped it is one line high and its body scrolls
+      // sideways; wrapped it takes several lines and nothing scrolls sideways
+      await expectWrap(h, false, 'unified at 280 px without Wrap');
       await h.code('toggleWrap', 'panel');
       await expect.poll(async () => (await h.review('panel'))?.wrap).toBe(true);
-      await expect.poll(overflow, 'no horizontal overflow with Wrap').toBe(0);
-      test.info().annotations.push({ type: 'unified at 280 px: horizontal overflow without Wrap', description: `${unwrapped} px` });
+      await expectWrap(h, true, 'unified at 280 px with Wrap');
       await h.code('toggleWrap', 'panel');
       await expect.poll(async () => (await h.review('panel'))?.wrap).toBe(false);
+      await expectWrap(h, false, 'unified at 280 px with Wrap off again');
 
-      // wide again, the stored choice is drawn
+      // wide again, the stored choice is drawn; and Wrap in Split, the same measures
       await reviewAt(h, 640);
       await expect.poll(async () => (await h.review('panel'))?.mode, 'Split again at 640 px').toBe('split');
+      await expectWrap(h, false, 'split at 640 px without Wrap');
+      await h.code('toggleWrap', 'panel');
+      await expect.poll(async () => (await h.review('panel'))?.wrap).toBe(true);
+      expect((await h.review('panel'))?.mode, 'Wrap keeps Split').toBe('split');
+      await expectWrap(h, true, 'split at 640 px with Wrap');
+      await h.code('toggleWrap', 'panel');
+      await expect.poll(async () => (await h.review('panel'))?.wrap).toBe(false);
+      await expectWrap(h, false, 'split at 640 px with Wrap off again');
     });
     h.expectQuietConsole();
   });
@@ -292,6 +325,7 @@ test.describe('the #panel harness: Review and its hand-offs', () => {
     await withScratch(h, async () => {
       await reviewAppTs(h, { pin: true });
       await reviewAt(h, 640); // Split has room (D9)
+      await expectToolbarAsDrawn(h.region.locator('[data-review]'), 'the toolbar at 640 px under a pin');
       await h.code('markViewed', 'src/app.ts', 'panel');
       await h.code('setMode', 'split', 'panel');
       const appTs = async () => (await h.review('panel'))?.files.find((f) => f.path === 'src/app.ts');
@@ -669,6 +703,10 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const sum = numstat(p.scratch);
       expect(sum).toEqual({ files: 2, added: 4, removed: 0 });
       await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added} −${sum.removed}`); // the scope is the pressed chip's (card 1)
+      // over the product's stack, the View menu opens against its button inside the window (measured)
+      await expectViewMenuPlaced(review);
+      await p.page.keyboard.press('Escape');
+      await expect(p.page.getByRole('menu')).toHaveCount(0);
       // every file a section, in the list's order: its kind, and its counts (a new file +N alone; an untracked one none until
       // U5b-2 counts it)
       const rows = await review.locator('[data-review-stack] > [data-review-file]').evaluateAll((sections) =>
@@ -795,18 +833,48 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await resize(1100, 540);
         await expectPlaceAtTop(review, read, 'the same file and line after a resize');
 
-        // a drag of the scroll bar: the press a drag of its thumb makes on the scroller, the scroll it makes while the
-        // pointer is held, and the release (the scroll bar itself is the system's, overlay or classic); then a resize
-        await stack.evaluate(async (scroller) => {
-          const frame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
-          scroller.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, isPrimary: true, pointerId: 1, button: 0 }));
-          for (let step = 0; step < 8; step++) {
-            scroller.scrollTop += 15;
-            await frame();
-          }
-          window.dispatchEvent(new PointerEvent('pointerup', { isPrimary: true, pointerId: 1, button: 0 }));
+        // a drag of the scroll bar's thumb with the mouse, held past the placer's gesture window before each further move
+        // (stack-place.ts: a scroll is the person's within 500 ms of their input, or while a pointer is held), so only its
+        // tracking of the held pointer keeps the later scrolls the person's; then a resize. The launch asks for classic
+        // scroll bars, as on a Mac with a mouse: an overlay one takes no width and shows only while the stack scrolls,
+        // so there is no thumb standing still to press.
+        const scrollTop = () => stack.evaluate((el) => el.scrollTop);
+        const bar = await stack.evaluate((el) => {
+          const box = el.getBoundingClientRect();
+          const gutter = el.offsetWidth - el.clientLeft - el.clientWidth - parseFloat(getComputedStyle(el).borderRightWidth);
+          const track = el.clientHeight; // no buttons on a Mac's scroll bar, and no horizontal one here
+          const length = (track * el.clientHeight) / el.scrollHeight; // a longer minimum thumb still covers this middle
+          const travel = (track - length) * (el.scrollTop / (el.scrollHeight - el.clientHeight));
+          return { gutter, x: box.left + el.clientLeft + el.clientWidth + gutter / 2, y: box.top + el.clientTop + travel + length / 2, scrollTop: el.scrollTop };
         });
+        expect(bar.gutter, "the stack's scroll bar takes width (classic scroll bars)").toBeGreaterThan(0);
+        let pointer = bar.y;
+        const pull = async (pixels: number, message: string) => {
+          // the thumb moved down a pixel at a time until the stack has scrolled `pixels` further
+          const from = await scrollTop();
+          for (let step = 0; step < 120 && (await scrollTop()) - from < pixels; step++) await p.page.mouse.move(bar.x, ++pointer);
+          expect((await scrollTop()) - from, message).toBeGreaterThanOrEqual(pixels);
+        };
+        await p.page.mouse.move(bar.x, bar.y);
+        await p.page.mouse.down();
+        await p.page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+        expect(Math.abs((await scrollTop()) - bar.scrollTop), 'the press is on the thumb (one on the track would page)').toBeLessThanOrEqual(1);
+        await pull(40, 'the thumb’s first move scrolls the stack');
+        await p.page.waitForTimeout(PAST_THE_GESTURE);
+        await pull(40, 'held past the gesture window, the thumb’s move still scrolls the stack');
+        await p.page.waitForTimeout(PAST_THE_GESTURE);
+        await pull(40, 'and again');
+        let last = NaN;
+        let held = NaN;
+        await expect
+          .poll(async () => {
+            [last, held] = [held, await scrollTop()];
+            return held === last;
+          }, 'the held thumb comes to rest')
+          .toBe(true);
+        await p.page.mouse.up();
         const dragged = await settledTop(review);
+        expect(Math.abs((await scrollTop()) - held), 'the scrolls made while held stand after the release').toBeLessThanOrEqual(1);
         expect({ path: dragged.path, row: dragged.row }, 'the drag moved the place').not.toEqual({ path: read.path, row: read.row });
         await resize(1280, 460);
         await expectPlaceAtTop(review, dragged, 'the same file and line after the drag and a resize');
@@ -826,6 +894,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       (scratch) => {
         for (const file of ['README.md', 'notes/guide.md']) writeFileSync(scratch.path(file), `${readFileSync(scratch.path(file), 'utf8')}${added}\n`);
       },
+      { appKitDefaults: { AppleShowScrollBars: 'Always' } }, // classic scroll bars, whatever the desktop's setting
     );
   });
 
@@ -879,6 +948,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const inside = p.page.locator('[data-diff-tab="uncommitted @ src/app.ts"] [data-review]');
       await expect(reviewSection(inside, 'src/app.ts').locator('[data-review-body] table').first()).toBeVisible();
       await expect.poll(async () => (await stackTop(inside))?.path, 'its section at the top').toBe('src/app.ts');
+      await expectToolbarAsDrawn(inside, "the diff tab's toolbar as drawn at the main area's width");
       await expect.poll(() => hunkCounter(inside)).toEqual({ index: 1, count: SCRATCH_HUNKS });
     });
   });

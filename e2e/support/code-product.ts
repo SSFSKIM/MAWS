@@ -5,7 +5,7 @@
 import { expect, type Locator, type Page } from '@playwright/test';
 import { addressed } from './address';
 import { buildCodeScratch, type CodeScratch } from './code-scratch';
-import { launchMaws, type MawsLaunch } from './launch';
+import { launchMaws, type MawsLaunch, type ShellLaunchOptions } from './launch';
 import { CHARTER } from './panel-support';
 import { sidebarOf, sidebarRow } from './sidebar';
 import { mainTabById, openSurface, surface } from './shell';
@@ -76,12 +76,13 @@ export interface Product {
   scratch: CodeScratch;
 }
 
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void): Promise<void> {
+// `launch`: the app's AppKit defaults for this launch (classic scroll bars, for a scene that drags one).
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, launch: Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
   const scratch = buildCodeScratch();
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
-    maws = await launchMaws({ env: scratch.env });
+    maws = await launchMaws({ env: scratch.env, ...launch });
     const { page } = maws;
     // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
@@ -128,13 +129,14 @@ export async function openInViewer(p: Product, relative: string): Promise<Locato
   return viewer;
 }
 
-// Review in the panel on its default scope (Uncommitted on this dirty tree). UX wave U5b: the totals no longer name the
-// scope (card 1 at its default), the pressed chip above them does.
+// Review in the panel on its default scope (Uncommitted on this dirty tree), its toolbar measured as drawn. UX wave U5b:
+// the totals no longer name the scope (card 1 at its default), the pressed chip above them does.
 export async function openReview(p: Product): Promise<Locator> {
   await addTool(p, 'Review');
   const review = surface(p.page, 'review').locator('[data-review]');
   await expect(review.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true');
   await expect(review.locator('[data-review-header]')).toContainText(' changed · ');
+  await expectToolbarAsDrawn(review, "Review's toolbar as drawn in the panel"); // measured, in every scene that opens it here
   return review;
 }
 
@@ -286,6 +288,22 @@ export function toolbarLayout(review: Locator): Promise<{ lines: number; bar: Bo
     const of = (selector: string) => bar.querySelector(selector)!.getBoundingClientRect();
     return { lines: Number(bar.getAttribute('data-lines')), bar: box([bar.getBoundingClientRect()]), totals: box([of('[data-review-header]')]), controls: box([of('[data-review-collapse]'), of('[data-review-nav]')]) };
   });
+}
+
+// The toolbar as drawn at whatever width it has, measured against the lines it says it drew: on one line its totals
+// beside its controls, on two or three (a comment chip of its own line) its controls under its totals; its controls
+// inside the bar either way.
+export async function expectToolbarAsDrawn(review: Locator, message: string): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const { lines, bar, totals, controls } = await toolbarLayout(review);
+        const laid = lines === 1 ? Math.abs(totals.middle - controls.middle) <= 2 : (lines === 2 || lines === 3) && controls.top >= totals.bottom - 0.5;
+        return { laid, inside: controls.left >= bar.left - 0.5 && controls.right <= bar.right + 0.5 };
+      },
+      { message },
+    )
+    .toEqual({ laid: true, inside: true });
 }
 
 // The View menu opened by a press on its button, then measured: it stands against the button (below it, or above where

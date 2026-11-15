@@ -20,7 +20,7 @@ import { addressed, localRef } from './support/address';
 import { bareOf } from '../src/shared/machine/address';
 import { collectBestEffortEvidence } from './support/best-effort-evidence';
 import { StoreFixture } from '../test/support/store-fixture';
-import { menu, otherThemeColours } from './support/code-product';
+import { expectToolbarAsDrawn, menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
@@ -1122,6 +1122,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const unplaced = review.locator('[data-review-unplaced]');
     await expect(unplaced.locator('[data-review-unplaced-words="line-left"]')).toHaveText(LINE_LEFT_DIFF, { timeout: 20_000 });
     await expect(review.locator('[data-review-unsent-comment]'), 'under no line').toHaveCount(0);
+    // the toolbar as drawn with the row, and the row under it (measured)
+    await expectToolbarAsDrawn(review, 'the toolbar over the row of comments it cannot place');
+    const [bar, row] = [await review.locator('[data-review-toolbar]').boundingBox(), await unplaced.boundingBox()];
+    expect(row!.y, 'the row under the toolbar').toBeGreaterThanOrEqual(bar!.y + bar!.height - 0.5);
     await unplaced.locator('[data-review-unplaced-edit]').click();
     const away = unplaced.getByRole('dialog', { name: `Comment on ${basename(TOTAL)}:5` });
     await expect(away.getByRole('textbox', { name: 'Comment' }), 'its words, in the card under the toolbar').toHaveValue(COMMENT_LEFT);
