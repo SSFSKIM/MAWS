@@ -1092,18 +1092,20 @@
    is on from the same numbers these rules draw. */
 .x-layers { --xl-tab-end: 13px; }
 .x-layers[data-face='system'] { --xl-tab-end: 9px; }
-/* 1. The tab on screen keeps its whole title. The others shorten together; a title fades out where it is cut. */
+/* 1. The tab on screen keeps its whole title. The others shorten together, as far as a few letters; a title fades
+   out where it is cut. */
 .x-layers .xl-tabs-room { position: fixed; top: 0; height: 0; left: var(--xl-tabs-l); right: var(--xl-tabs-r); visibility: hidden; pointer-events: none; }
-/* A tab is never narrower than its mark, 44 px of its title and its end. */
-.x-layers .xl-tabs .xl-tab { flex: 0 1 auto; min-width: calc(30px + 44px + var(--xl-tab-end)); }
+/* A tab that has a name is never narrower than its mark, 26 px of its title (a few letters) and its end. */
+.x-layers .xl-tabs .xl-tab { flex: 0 1 auto; min-width: calc(30px + 26px + var(--xl-tab-end)); }
 .x-layers .xl-tabs .xl-tab[data-current='true'] { flex: none; }
 .x-layers .xl-tabs .xl-tab-main { flex: 1; padding-right: 0; }
 .x-layers .xl-tabs .xl-tab-title {
   flex: 0 1 auto; min-width: 0; padding-right: var(--xl-tab-end); text-overflow: clip;
   mask-image: linear-gradient(to right, #000 calc(100% - var(--xl-tab-end)), transparent);
 }
-/* 2. When a title would be shorter than 44 px, the others give their titles up together and stand as their marks:
-   the state's glyph, and so the waiting disc, is what a tab keeps longest. Its name is under the pointer. */
+/* 2. When even that does not fit, tabs give up their names one at a time from the end of the row, each only when
+   the row is full, and stand as their marks: the state's glyph, and so the waiting disc, is what a tab keeps
+   longest. The names that are left take the room that frees. A mark's name is under the pointer. */
 .x-layers .xl-tabs .xl-tab[data-fold] { flex: none; width: 30px; min-width: 0; }
 .x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-main { justify-content: center; gap: 0; padding: 0; }
 .x-layers .xl-tabs .xl-tab[data-fold] .xl-tab-title { display: none; }

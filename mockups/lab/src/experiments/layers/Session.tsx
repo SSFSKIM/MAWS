@@ -22,42 +22,47 @@ export interface TabItem {
 }
 
 // The row's sizes, as the stylesheet draws them: its padding, the gap between tabs, a tab's own padding and mark,
-// the least of a title that still says which tab it is, a folded tab, a round button.
+// the few letters a title is cut to before it is given up, a tab that is only its mark, a round button.
 const ROW_PAD = 6;
 const GAP = 1;
 /** A tab's own padding, mark and gap; its trailing space is the stylesheet's `--xl-tab-end`. */
 const TAB_LEAD = 8 + 16 + 6;
-const TITLE_FLOOR = 44;
+const TITLE_FLOOR = 26;
 const TAB_MAX = 200;
 const FOLDED = 30;
 const BTN = 30;
 
 /** How the row stands for the room it has (DESIGN.md section 20). */
 export interface TabFit {
-  /** The tabs other than the current one have given up their titles and stand as their marks. */
-  folded: boolean;
+  /** Tabs that have given up their titles and stand as their marks: always the ones nearest the row's end. */
+  folded: string[];
   /** Tabs that are not in the row at all: they wait in the menu at its end. */
   hidden: string[];
 }
 
 /**
- * The rule, as arithmetic. The current tab keeps its whole title. The others shorten together, each no shorter
- * than a floor; when the floor does not fit they all fold to their marks; when the marks do not fit, tabs leave
- * for the menu from the end of the row, and one that waits for the person never leaves.
+ * The rule, as arithmetic. The room decides, and none of it is left unused while a name is hidden. The current
+ * tab keeps its whole title. The others shorten together, as far as a few letters. When even that does not fit,
+ * tabs give up their names one at a time from the end of the row, each only when the row is full, and the names
+ * that are left take the room that frees. When every other tab is a mark and the row is still full, tabs leave for
+ * the menu from the end, and one that waits for the person never leaves.
  */
 export function fitTabs(tabs: { id: string; width: number; current: boolean; waits: boolean }[], room: number, end: number): TabFit {
   const current = tabs.find((t) => t.current);
   const others = tabs.filter((t) => !t.current);
   const fixed = ROW_PAD + BTN + (current ? current.width + GAP : 0);
-  const floors = others.length * (TAB_LEAD + TITLE_FLOOR + end + GAP);
-  if (fixed + floors <= room) return { folded: false, hidden: [] };
-  const fits = Math.floor((room - fixed) / (FOLDED + GAP));
-  if (others.length <= fits) return { folded: true, hidden: [] };
-  // The menu's button takes a place of its own.
-  const places = Math.max(0, Math.floor((room - fixed - BTN - GAP) / (FOLDED + GAP)));
+  const short = TAB_LEAD + TITLE_FLOOR + end + GAP;
+  const mark = FOLDED + GAP;
+  // How many of the others can keep a name, however short: the rest, from the end, are marks.
+  let named = others.length;
+  while (named > 0 && fixed + named * short + (others.length - named) * mark > room) named--;
+  const folded = others.slice(named).map((t) => t.id);
+  if (named > 0 || fixed + others.length * mark <= room) return { folded, hidden: [] };
+  // All marks, and still full. The menu's button takes a place of its own.
+  const places = Math.max(0, Math.floor((room - fixed - BTN - GAP) / mark));
   const hidden: string[] = [];
   for (let i = others.length - 1; i >= 0 && others.length - hidden.length > places; i--) if (!others[i]!.waits) hidden.push(others[i]!.id);
-  return { folded: true, hidden };
+  return { folded, hidden };
 }
 
 interface TabsProps {
@@ -83,7 +88,7 @@ export function Tabs({ list, current, onPick, onClose, live, bar, room: probe, l
     const session = tab.kind === 'session' ? all.find((s) => s.id === tab.id) : undefined;
     return session ? live(session).state : undefined;
   };
-  const [fit, setFit] = useState<TabFit>({ folded: false, hidden: [] });
+  const [fit, setFit] = useState<TabFit>({ folded: [], hidden: [] });
   const [more, setMore] = useState<HTMLButtonElement | null>(null);
   const [menu, setMenu] = useState(false);
   const closeMenu = useCallback(() => setMenu(false), []);
@@ -104,7 +109,7 @@ export function Tabs({ list, current, onPick, onClose, live, bar, room: probe, l
         room,
         end,
       );
-      setFit((was) => (was.folded === next.folded && was.hidden.join() === next.hidden.join() ? was : next));
+      setFit((was) => (was.folded.join() === next.folded.join() && was.hidden.join() === next.hidden.join() ? was : next));
     };
     read();
     const frame = requestAnimationFrame(read);
@@ -138,7 +143,7 @@ export function Tabs({ list, current, onPick, onClose, live, bar, room: probe, l
       {shown.map((tab) => {
         const state = stateOf(tab);
         const isCurrent = tab.id === current;
-        const folded = fit.folded && !isCurrent;
+        const folded = !isCurrent && fit.folded.includes(tab.id);
         return (
           <div key={tab.id} className="xl-tab" data-current={isCurrent} data-fold={folded || undefined}>
             <button

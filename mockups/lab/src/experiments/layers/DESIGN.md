@@ -1915,29 +1915,40 @@ column, and the question is what the tabs do inside it as they are added.
 
 ### 20.1 The rule
 
-**A tab gives up its title before the row gives up a tab, and the row never gives up a tab that waits for you.**
-In three steps:
+**The row's room decides. A tab gives up its title only when the row is full, and the row never gives up a tab
+that waits for you.**
 
-1. **The tab on screen keeps its whole title, always.** The others shorten together, each as far as 44 px of its
-   title; where a title is cut it fades out over its last pixels, with no ellipsis.
-2. **When a title would be shorter than that, the others give their titles up together** and stand as their marks
-   alone, 30 px round: the state's glyph for a session (the orange disc, the solid dot, the breathing dot), a
-   ring for a session at rest, the file mark for a file. A mark's name is under the pointer, sooner than other
-   tooltips arrive. The mark is what a tab keeps longest because it is what this design reads first: state by
-   glyph, and above all the disc.
-3. **When the marks do not fit either, tabs leave from the end of the row** for a menu behind a chevron beside
-   the plus, which lists them by mark and whole title. A tab that waits for the person never leaves: the row
-   gives up its neighbours first. Choosing one in the menu makes it the tab on screen, so it is in the row.
+As first built, the tabs other than the current one gave their titles up all together, the moment one of them
+would have been shorter than 44 px. That kept the row even, and left it standing a third empty with every name
+hidden. Put to the owner, their answer was "Keep names longer": tabs keep short names for as long as the row has
+room and become marks only when the row is full, and the cost is accepted that names are cut to a few letters
+before they go. So evenness gave way to names, and the steps are these:
 
-They fold together, not one by one. A row in which some tabs have names and some do not reads as damage, and
-which ones kept their names would change every time another tab is chosen; all or none is one fact a person can
-hold. The price is in 20.4.
+1. **The tab on screen keeps its whole title, always.**
+2. **The others shorten together**, as far as a few letters (26 px of title, three or four letters and a fade;
+   there is no ellipsis).
+3. **When even that does not fit, tabs give up their names one at a time, from the end of the row**, each only
+   when the row is full, and stand as their marks alone, 30 px round: the state's glyph for a session (the
+   orange disc, the solid dot, the breathing dot), a ring for a session at rest, the file mark for a file. The
+   names that are left take the room a mark frees, so no room stands unused while a name is hidden. A mark's name
+   is under the pointer, sooner than other tooltips arrive.
+4. **When every other tab is a mark and the row is still full, tabs leave from the end of the row** for a menu
+   behind a chevron beside the plus, which lists them by mark and whole title. A tab that waits for the person
+   never leaves: the row gives up its neighbours first. Choosing one in the menu makes it the tab on screen.
 
-**Closing.** The rule's third step is where a person wants to close things, so tabs close now: the mark of a tab
-gives way to a cross under the pointer, as it always did, and the cross works. Closing the tab on screen shows
-its neighbour (the next, or the one before the last); closing the last one leaves New chat. A folded tab is all
-mark, so a press on it opens it and it is closed once it is open; a session that was closed opens again from its
-row in the pane.
+**Why from the end.** A row in which some tabs have names and some do not can read as damage; the question was
+which mix reads least so. From the end, the row thins out the way one title does: whole at its start, cut short,
+then gone. Names stand together on the left, marks together on the right, and the menu and the plus continue in
+the same direction, so the whole row is one gradient and not a scatter. The order is also fixed: it depends on
+where a tab stands, never on which tab is chosen. Choosing another tab moves the boundary by at most the room its
+title needs; it does not pick different tabs to keep. Ordering by what a tab is (waiting first, or files first,
+since every file has the same mark) was weighed and refused: the names kept would then be scattered along the
+row, which is the damage the first build avoided.
+
+**Closing.** Tabs close: the mark of a tab gives way to a cross under the pointer, as it always did, and the
+cross works. Closing the tab on screen shows its neighbour (the next, or the one before the last); closing the
+last one leaves New chat. A tab that is only its mark is pressed to open it and is closed once it is open; a
+session that was closed opens again from its row in the pane.
 
 ### 20.2 What it comes to
 
@@ -1945,20 +1956,22 @@ The room is the reading column less the waiting capsule and its seam: 458 px at 
 and 630 px wherever the column reaches its 744 (1280 with the right column closed, and 1440 and 1728 either way,
 since the column rule holds the row to the column and not to the window). With "Rate limiter rewrite" on screen:
 
-| the room | titles, whole or shortened | marks | the menu |
-|---|---|---|---|
-| 458 px: 1280, both panes | up to 4 tabs | 5 to 9 | from 10 |
-| 630 px: 1280 with the right column closed; 1440; 1728 | up to 6 | 7 to 14 | from 15 |
+| tabs open | 458 px: 1280, both panes | 630 px: 1280 with the right column closed; 1440; 1728 |
+|---|---|---|
+| 4 | every tab named, the three others shortened | every tab named, whole |
+| 6 | three names, two marks | every tab named, shortened |
+| 9 | the current tab and eight marks | five names, three marks |
+| 14 | the current tab, seven marks, and six in the menu | the current tab and thirteen marks |
 
 A shorter title on screen leaves a little more, a longer one a little less; the row decides from the widths it
 draws (`fitTabs` in `Session.tsx`, fed by a hidden element that is laid from the row's left limit to its right,
 so every rule that moves a limit is already in it).
 
 Held, at every count and size looked at: the disc of a waiting tab is in the row; the tab on screen has its whole
-title; the row starts on the column's edge; and between the row and the waiting capsule there is the seam or
-more. The runtime's own check, with `dev=1`, raised nothing at 1280, 1440 and 1728 with 4, 6, 9 and 14 tabs, with
-the right column open and closed (the overlap that 15.1 tuned for cannot return: the row cannot be wider than
-its room).
+title; the row starts on the column's edge and is as wide as its room allows and no wider; and between the row
+and the waiting capsule there is the seam or more. The runtime's own check, with `dev=1`, raised nothing at 1280
+and 1440 with 4, 6, 9 and 14 tabs, with the right column open and closed (the overlap that 15.1 tuned for cannot
+return: the row cannot be wider than its room).
 
 ### 20.3 What was added to draw it
 
@@ -1973,10 +1986,10 @@ its room).
 
 ### 20.4 Readings
 
-`measure.mjs`, Warm paper under the defaults, 1280 by 800, 1440 by 900 and 1728 by 1117, 22 routes at each: a
-session with 4, 6, 9 and 14 tabs; 14 with the menu open; 9 with the right column closed; two more with one of the
-added tabs on screen; the Overview with 9; a file's card with 14; and a session whose sheet has lines taken out.
-Each in both schemes. 66 routes, 9,000 gated readings, none under its floor.
+`measure.mjs`, Warm paper under the defaults, 1280 by 800, 1440 by 900 and 1728 by 1117, 22 routes at each,
+taken again after the owner's change: a session with 4, 6, 9 and 14 tabs; 14 with the menu open; 6, 9 and 14 with
+the right column closed; one with an added tab on screen; the Overview with 9; a file's card with 14. Each in
+both schemes. 66 routes, 9,119 gated readings, none under its floor.
 
 | in the row | light | dark |
 |---|---|---|
@@ -1985,28 +1998,32 @@ Each in both schemes. 66 routes, 9,000 gated readings, none under its floor.
 | the glyph in a disc | 6.57 | 6.50 |
 | the menu: a name / a mark | 15.8 / 8.43 | 10.1 / 7.10 |
 
-The dots and the ring are drawn in CSS and are not read by the script, as before. The same routes read the
-transcript's sheet again after the spaces between its tokens were mended (19.6): its lowest token is 6.25 by day
-and 6.22 at night, as in 19.3.
+The dots and the ring are drawn in CSS and are not read by the script, as before. A title's fade is not read
+either: the script composites a line's colour at full strength, so the last letters of a shortened name are
+fainter on screen than their reading.
 
 ### 20.5 Not good about it
 
-- **Folded, the row can stand half empty with every name hidden.** At 1280 with the right column closed, or at
-  1728, nine tabs fold to 440 px of a 630 px room. Shortening further instead was refused (a title of three
-  letters is what this replaces), and folding one by one was refused above; but it is room spent on nothing.
+- **A name of three letters says little.** "buc", "Fix", "Off": at the floor a name tells its tab from its
+  neighbours and not much more. This is the cost the owner accepted for keeping names; the floor is one number
+  (26 px of title) if it should be longer, at the price of fewer names.
+- **The row is two things side by side when it is full**: names, then marks. It reads as thinning out, but a
+  person's own order of tabs decides which keep their names, and the newest tabs, at the end, lose theirs first.
+  Those are often the ones in use.
 - **Marks do not say which.** Two files are the same mark; two working sessions are the same breathing dot. The
-  name is a hover away and the pane lists every session by name, but the row alone no longer tells them apart.
-  A file's mark could carry its first letter; not drawn.
-- **The row changes its width when another tab is chosen**, because the tab on screen takes its whole title and
-  the one that was gives its up. With folded tabs every mark to the right of the two moves.
+  name is a hover away and the pane lists every session by name. A file's mark could carry its first letter; not
+  drawn.
+- **Choosing another tab still reflows the row**: the tab on screen takes its whole title and the one that was
+  gives its up, and the boundary between names and marks can move by a tab.
 - **1728 gains nothing over 1440.** The row is held to the column by the column rule, so a wide window has the
   same room for tabs and more empty field beside them.
-- **The steps cut, they do not move.** A tab folding, a title shortening, a tab leaving for the menu: none is
-  animated, and none was watched.
+- **The steps cut, they do not move.** A title shortening, a tab becoming its mark, a tab leaving for the menu:
+  none is animated, and none was watched.
 - **Not drawn:** more waiting tabs than the row can hold as marks (the rule keeps them all, so the row would
   then pass its room); dragging a tab; a keyboard path along the row; the menu when it is longer than the
   window (it scrolls inside itself, not seen); reopening a closed file other than through its session.
-- **On the Overview no tab is current**, so with many open the row there is marks only.
+- **On the Overview, Artifacts and Customize no tab is current**, so every tab shortens and the row has no whole
+  title in it.
 
 ### 20.6 What changed in the code
 
