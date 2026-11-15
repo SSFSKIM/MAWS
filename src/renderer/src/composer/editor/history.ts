@@ -4,8 +4,11 @@
 // sources, newest first: this session's own human prompts from the transcript (a `peer` turn's opening message is not
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
 // display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
-// the search's matching and keys. Pure.
+// the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run): MAWS's answer envelope is never a
+// prompt to recall: an answer waiting at the next step is a row of the running turn, and ↑ walks past it as the stack's
+// take-back does (`readAnswerEnvelope`, the one reader of the envelope). Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { readAnswerEnvelope } from '@shared/engine/arrival';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -71,6 +74,7 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
   let last: string | null = null;
   for (const row of rows) {
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
+    if (readAnswerEnvelope(row.text) !== null) continue; // an answer, not a prompt (U4b)
     const prefill = rowPrefill(row);
     const key = prefillKey(prefill);
     if (key === last) continue;
