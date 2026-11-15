@@ -50,9 +50,11 @@ export function useStack(input: { files: readonly ReviewFile[]; target: DiffTarg
       const markable = binary ? header !== null : !untrackedDirectory && hunks !== null;
       const signature = markable ? viewedSignature({ kind: binary ? 'binary' : file.kind, header }, hunks) : null;
       const mark = marks.get(key)?.get(file.path);
-      // A mark on a file whose own read has not answered yet holds until it does, so the file does not unfold meanwhile.
+      // A mark on a file whose own read has not answered yet holds until it does, so the file does not unfold meanwhile;
+      // one that no longer signs the file's change has dropped, and unfolds it.
       const viewed = mark !== undefined && (signature === null ? ownRead : mark === signature);
-      const folded = isFolded({ choice: folds.get(key)?.get(file.path), viewed, pastCap });
+      const dropped = mark !== undefined && signature !== null && mark !== signature;
+      const folded = isFolded({ choice: folds.get(key)?.get(file.path), viewed, dropped, pastCap });
       return {
         file,
         hunks,

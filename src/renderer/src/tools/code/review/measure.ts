@@ -6,6 +6,14 @@ export const reviewLayout = {
   width(element: Element): number {
     return element.getBoundingClientRect().width;
   },
+  // The room inside an element's padding and border: its width less both (0 while it is not laid out).
+  contentWidth(element: Element): number {
+    const box = reviewLayout.width(element);
+    if (box <= 0) return 0;
+    const style = getComputedStyle(element);
+    const inset = [style.paddingLeft, style.paddingRight, style.borderLeftWidth, style.borderRightWidth].reduce((sum, value) => sum + (Number.parseFloat(value) || 0), 0);
+    return Math.max(0, box - inset);
+  },
 };
 
 // Under this width a side shows fewer than about twenty characters of code in Split (D9): the View menu's Split is

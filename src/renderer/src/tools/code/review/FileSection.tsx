@@ -71,18 +71,18 @@ export function FileSection({ section, width, mode, wrap, target, scopeDiff, ope
           {REVIEW_COPY.untrackedNote}
         </p>
       );
-    if (binary) return <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.binaryFile}</p>;
-    if (hunks === null)
-      return failed !== null ? (
+    // A failed own read says so first, a binary's (its header, what a mark signs) as much as a text file's.
+    if (hunks === null && failed !== null)
+      return (
         <div role="status" className="flex items-start gap-2 px-3 py-2">
           <p className="m-0 min-w-0 flex-1 text-ui-sm text-fg-muted">{REVIEW_COPY.unavailable(failed)}</p>
           <button type="button" className={`${toggle} min-w-6`} onClick={() => target && useReview.getState().retryFile(target, file.path, untracked)}>
             {REVIEW_COPY.retry}
           </button>
         </div>
-      ) : (
-        <Loading />
       );
+    if (binary) return <p className="m-0 px-3 py-2 text-ui-sm text-fg-muted">{REVIEW_COPY.binaryFile}</p>;
+    if (hunks === null) return <Loading />;
     if (tooLarge({ hunks }))
       return (
         <p data-review-too-large className="m-0 px-3 py-2 text-ui-sm text-fg-muted">

@@ -141,11 +141,13 @@ export function topOfPlace(layout: StackLayout, place: StackPlace, rowsOf: RowsO
 
 export type FoldChoice = 'open' | 'closed';
 
-// The fold rule (§F, decision 9): the person's own choice, else folded when marked Viewed (a mark that still holds:
-// one that dropped because the file changed leaves it unfolded), else when the scope is past its cap.
-export function isFolded(input: { choice: FoldChoice | undefined; viewed: boolean; pastCap: boolean }): boolean {
+// The fold rule (§F, decision 9): the person's own choice, else folded when marked Viewed (a mark that still holds),
+// else unfolded when a mark dropped because the file changed (past the cap too: the change is what the person has not
+// seen), else folded when the scope is past its cap.
+export function isFolded(input: { choice: FoldChoice | undefined; viewed: boolean; dropped: boolean; pastCap: boolean }): boolean {
   if (input.choice !== undefined) return input.choice === 'closed';
-  return input.viewed || input.pastCap;
+  if (input.viewed) return true;
+  return !input.dropped && input.pastCap;
 }
 
 // "Collapse all" reads "Expand all" while every file is folded (and then sets `open` on every file).

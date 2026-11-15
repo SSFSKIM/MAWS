@@ -80,7 +80,7 @@ export function Toolbar({ totals, chip, allFolded, onFoldAll, counter, onHunk, m
     };
     const measure = () => {
       const next = toolbarFit({
-        room: reviewLayout.width(el),
+        room: reviewLayout.contentWidth(el), // inside its padding and border
         totals: part('[data-review-header]'),
         chip: part('[data-review-toolbar-chip]'),
         collapse: part('[data-review-collapse]'),

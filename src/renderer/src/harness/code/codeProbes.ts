@@ -15,7 +15,7 @@ import { diffOf, fileDiffOf, turnKeyOf, useReview, type DiffTarget } from '../..
 import type { ReviewState } from '../../tools/code/review/ReviewTool';
 import { useViewer } from '../../tools/code/viewer/viewer-store';
 import { useTranscriptStore, type TurnId } from '../../transcript';
-import type { CodeHarnessApi, CodeHarnessReview, CodeHarnessViewer, ReviewSurface } from './api';
+import type { CodeHarnessApi, CodeHarnessReview, CodeHarnessSection, CodeHarnessViewer, ReviewSurface } from './api';
 import { transcriptKey } from './CodeHarnessBlock';
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -135,21 +135,37 @@ function sectionOf(root: HTMLElement, path: string): HTMLElement | null {
 
 const countOf = (text: string, sign: '+' | '−') => Number((sign === '+' ? /\+([\d,]+)/ : /−([\d,]+)/).exec(text)?.[1]?.replaceAll(',', '') ?? 0);
 
+// A section's row in `files`: what its header and attributes say.
+function fileOf(section: HTMLElement): CodeHarnessReview['files'][number] {
+  const counts = section.querySelector('[data-review-counts]')?.textContent ?? '';
+  return {
+    path: section.dataset.reviewFile!,
+    added: countOf(counts, '+'),
+    removed: countOf(counts, '−'),
+    viewed: section.hasAttribute('data-viewed'),
+    kind: section.dataset.kind ?? '',
+    folded: section.hasAttribute('data-folded'),
+  };
+}
+
+function section(path: string, surface?: ReviewSurface): CodeHarnessSection | null {
+  const root = reviewRoot(surface);
+  const found = root ? sectionOf(root, path) : null;
+  if (!root || !found) return null;
+  return { ...fileOf(found), hunks: hunksOf(root, (root.dataset.scope || null) as ReviewScope | null, path) };
+}
+
+function mustSection(path: string, surface?: ReviewSurface): HTMLElement {
+  const found = sectionOf(mustRoot(surface), path);
+  if (!found) throw new Error(`harness.code: no section for ${path}`);
+  return found;
+}
+
 function review(surface?: ReviewSurface): CodeHarnessReview | null {
   const root = reviewRoot(surface);
   if (!root) return null;
   const scope = (root.dataset.scope || null) as ReviewScope | null;
-  const files = sectionsOf(root).map((section) => {
-    const counts = section.querySelector('[data-review-counts]')?.textContent ?? '';
-    return {
-      path: section.dataset.reviewFile!,
-      added: countOf(counts, '+'),
-      removed: countOf(counts, '−'),
-      viewed: section.hasAttribute('data-viewed'),
-      kind: section.dataset.kind ?? '',
-      folded: section.hasAttribute('data-folded'),
-    };
-  });
+  const files = sectionsOf(root).map(fileOf);
   const selected = topSection(root)?.dataset.reviewFile ?? null;
   const counter = /(\d+) of (\d+)/.exec(root.querySelector('[data-review-hunk]')?.textContent ?? '');
   return {
@@ -260,6 +276,12 @@ export const codeProbes: CodeHarnessApi = {
     if (!section) throw new Error('harness.code: no section in view');
     click(section, '[data-open-file]', 'Open file ↗');
   },
+  section,
+  setFolded(path, folded, surface) {
+    const found = mustSection(path, surface);
+    if (found.hasAttribute('data-folded') !== folded) click(found, '[data-review-fold]', `${path}'s fold`);
+  },
+  openFileOf: (path, surface) => click(mustSection(path, surface), '[data-open-file]', `${path}'s Open file ↗`),
   files,
   async expand(path) {
     const row = await until(() => treeRow(path), `tree row ${path}`);

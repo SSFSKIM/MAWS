@@ -11,7 +11,7 @@ export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged';
 export type ReviewSurface = 'panel' | 'tab'; // the panel's Review tool, or a diff tab in the page's left column
 
 // UX wave U5b (M3): Review is one stack of sections. `files` are its sections in order, each with its fold; `selected`
-// is the file whose section is at the top of the stack; `mode` is what the stack draws.
+// is the file whose section is at the top of the stack (`section` reads one by its path); `mode` is what the stack draws.
 export interface CodeHarnessReview {
   scope: ReviewScope | null;
   turnId: string | null; // Last turn's turn (the panel tool's state, or a diff tab's ref)
@@ -23,6 +23,18 @@ export interface CodeHarnessReview {
   wrap: boolean;
   footer: string;
   header: string;
+}
+
+// UX wave U5b (M3): one file's section, read by its path, so a scene asserts per file whichever section is at the top
+// (a short last section never reaches it). `hunks` as in `CodeHarnessReview`, for this file.
+export interface CodeHarnessSection {
+  path: string;
+  kind: string;
+  added: number;
+  removed: number;
+  folded: boolean;
+  viewed: boolean;
+  hunks: string[] | null;
 }
 
 export interface CodeHarnessViewer {
@@ -47,6 +59,9 @@ export interface CodeHarnessApi {
   toggleWrap(surface?: ReviewSurface): void; // through the View menu: read `review().wrap` after
   markViewed(path: string, surface?: ReviewSurface): Promise<void>; // brings the file's section to the top, then marks it
   openSelectedFile(surface?: ReviewSurface): void; // `Open file ↗` of the section at the top
+  section(path: string, surface?: ReviewSurface): CodeHarnessSection | null; // null: no section for the path
+  setFolded(path: string, folded: boolean, surface?: ReviewSurface): void; // a click on the header when it differs
+  openFileOf(path: string, surface?: ReviewSurface): void; // `Open file ↗` of that file's section
   files(): { roots: string[]; expanded: string[]; selected: string | null; rows: { path: string; kind: string; depth: number }[] } | null;
   expand(path: string): Promise<void>; // resolves once the directory's listing (or its notice) is drawn
   selectEntry(path: string): void;
