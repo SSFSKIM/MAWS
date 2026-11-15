@@ -924,7 +924,7 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
   const editorEditable = () => view().state.facet(EditorView.editable);
   // The disk as this build's daemon answers it: `/elsewhere` outside session A's folders; what admits a file there for A
   // (a counted name, a result-only name, an added record, the agent's delivery), and MAWS's own folders.
-  function disk(files: Record<string, string>, how: { names?: string[]; results?: string[]; sent?: string[]; added?: string[]; own?: string[]; older?: boolean } = {}) {
+  function disk(files: Record<string, string>, how: { names?: readonly string[]; results?: readonly string[]; sent?: readonly string[]; added?: readonly string[]; own?: readonly string[]; older?: boolean } = {}) {
     const names = new Set(how.names ?? []);
     const results = new Set(how.results ?? []);
     const sent = new Set(how.sent ?? []);
