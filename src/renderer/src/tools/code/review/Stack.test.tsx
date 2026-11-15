@@ -767,16 +767,55 @@ describe('the stack laid out', { timeout: SUITE_TIMEOUT }, () => {
       expect(drawnBodies().map((section) => section.dataset.reviewFile)).toContain(files[0].path); // the first still in the band
       const reading = page.rowAtTop();
       expect(reading).toEqual(expect.objectContaining({ path: files[1].path }));
-      const atEachScroll: unknown[] = []; // the row at the top as each scroll the stack writes lands
-      scroller().addEventListener('scroll', () => atEachScroll.push(page.rowAtTop()));
+      // The browser's focus scroll as the card's field takes the keyboard: the field's row scrolled into view.
+      const focus = HTMLElement.prototype.focus;
+      let focusScrolls = 0;
+      vi.spyOn(HTMLElement.prototype, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+        focus.call(this, options);
+        const row = this.closest('[data-comment-card]')?.closest('tr');
+        if (!row || options?.preventScroll) return;
+        const top = page.topOf(row);
+        const bottom = top + page.height(row);
+        const at = scroller().scrollTop;
+        const to = top < at ? top : bottom > at + VIEWPORT ? bottom - VIEWPORT : at;
+        if (to === at) return;
+        focusScrolls += 1;
+        scroller().scrollTop = to;
+      });
+      // the row at the top once each scroll is handled (the stack's writes, and the browser's focus scroll)
+      const atEachScroll: unknown[] = [];
+      scroller().addEventListener('scroll', () => queueMicrotask(() => atEachScroll.push(page.rowAtTop())));
+      clock += 100; // the read answers inside the wheel's window
       main.release(files[0].path);
       await page.settle();
       expect(card()?.closest('[data-review-file]')).toBe(sectionOf(files[0].path)); // opened under its line
+      expect(focusScrolls).toBe(1); // the field took the keyboard, and the browser scrolled it into view
       expect(page.rowAtTop()).toEqual(reading);
-      // each write the first file's growth above the place made (its rows, then the card's row) held the place; none
-      // went back to the comment
-      expect(atEachScroll.length).toBeLessThanOrEqual(2);
+      // the first file's growth above the place (its rows, then the card's row) and the field's focus scroll, each held
+      // or undone: none went back to the comment
+      expect(atEachScroll.length).toBeLessThanOrEqual(5);
       expect(atEachScroll.filter((row) => JSON.stringify(row) !== JSON.stringify(reading))).toEqual([]);
+    });
+
+    // The architect's re-review (X-072): a card left open is the surface's, not the stack mount's. Review hidden and shown
+    // again stands the place the person left at the top, and leaves the card where it is; a chip's reopening still
+    // reveals it (“brings into view the line of a card opened from the chip…”).
+    it('stands the place the person left at the top when Review is shown again with a card open elsewhere', async () => {
+      const files = Array.from({ length: 5 }, (_, i) => made(i, 1, 40));
+      offs.push(registerCommentComposer(openComment));
+      await mount(files);
+      addOn(files[0].path, files[0].added[0]); // in view at the top; the card stays open
+      await page.settle();
+      expect(card()).not.toBeNull();
+      page.scrollTo(page.topOf(sectionOf(files[2].path)) + HEADER + 15 * ROW + 5); // by hand, into the third file
+      await page.settle();
+      const reading = page.rowAtTop();
+      expect(reading).toEqual(expect.objectContaining({ path: files[2].path }));
+      hide();
+      show();
+      await page.settle();
+      expect(useCommentCard.getState().open).not.toBeNull(); // still open
+      expect(page.rowAtTop()).toEqual(reading);
     });
 
     it('stands wholly in view the card opened from the chip on a line in view near the bottom, its field’s focus scroll kept', async () => {
