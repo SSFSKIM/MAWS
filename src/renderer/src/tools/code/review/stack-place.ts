@@ -157,6 +157,12 @@ export class StackPlacer {
     else {
       const target = topOfPlace(layout, this.live, rows);
       if (target !== null) this.write(el, Math.max(0, target.top - sticky));
+      // A place read where its file was not drawn yet names no row; once the file draws, the row at the same spot is
+      // read, so the place survives what moves inside the file from then on.
+      if (target !== null && this.live.row === null && !this.pending && this.drawsRows(layout, this.live.path, rows)) {
+        this.live = placeAt(layout, el.scrollTop + sticky, rows);
+        if (this.live) this.host.saved(this.live);
+      }
     }
     this.setBand(this.bandFor(m, el.scrollTop));
   }
@@ -192,6 +198,11 @@ export class StackPlacer {
     };
     const sticky = layout.tops.length > 0 ? layout.bodyTops[0] - layout.tops[0] : 0;
     return { el, laidOut, viewport, layout, rows, sticky };
+  }
+
+  private drawsRows(layout: StackLayout, path: string, rows: RowsOf): boolean {
+    const index = layout.paths.indexOf(path);
+    return index >= 0 && (rows(index)?.length ?? 0) > 0;
   }
 
   private measureSection(path: string, { header, body }: DrawnSection): void {
