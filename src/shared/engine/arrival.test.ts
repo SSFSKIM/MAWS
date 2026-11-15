@@ -566,9 +566,9 @@ describe('the grant a sminos bridge carried to a terminal session (U1c, M4; prob
     const blocks = (...content: unknown[]) => ({ type: 'user', uuid: 'u-b', origin: { kind: 'plugin', name: 'sminos', asUser: true }, promptSource: 'system', message: { role: 'user', content } });
     const text = (t: string) => ({ type: 'text', text: t });
     expect(readArrivals(blocks(text(GRANT))), 'one text block, the sentence').toEqual([grant('make build')]);
-    expect(readArrivals(blocks(text(GRANT), text('Also run the linter.'))), 'the sentence, then words').toEqual([]);
-    expect(readArrivals(blocks(text(GRANT), text(`${PEER_FRAME}\nCould you rerun the lint?`))), 'the sentence, then a peer’s frame').toEqual([]);
-    expect(readArrivals(blocks(text(GRANT), { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } })), 'the sentence, then an image').toEqual([]);
+    expect.soft(readArrivals(blocks(text(GRANT), text('Also run the linter.'))), 'the sentence, then words').toEqual([]);
+    expect.soft(readArrivals(blocks(text(GRANT), text(`${PEER_FRAME}\nCould you rerun the lint?`))), 'the sentence, then a peer’s frame').toEqual([]);
+    expect.soft(readArrivals(blocks(text(GRANT), { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } })), 'the sentence, then an image').toEqual([]);
   });
 
   it('a grant behind a sminos frame line is the delivery it was: the person’s own words, or a peer’s, never an approval', () => {
