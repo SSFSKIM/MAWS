@@ -30,7 +30,7 @@ After the four pull requests of this landing:
 - [x] (2026-11-15) The six pages of "The look" drawn, printed and measured, the memo redrawn on the export as ruled; the architect's rulings on what they found (L1 to L7; B1 to B10; R1 to R5; M1, M2).
 - [x] (2026-11-15) Revision 2: the review's rulings and the drawn pages' rulings folded in (Decision Log).
 - [x] (2026-11-15) The owner's answers to four of the eight cards, each the recommended option: "PDF spacing", "Compact", "Export menu", "Above the bar" (Decision Log).
-- [ ] The owner's answers to the four cards still open ("Bar glyphs", "Other session", "New cards", "Space mark"); M7, M6, M8 and M9 build each card's first option, at its one named place, until then.
+- [x] (2026-11-15) The owner's answers to the other four cards, each the recommended option: "Bar glyphs", "Other session", "New cards", "Space mark" (Decision Log). No card is open; what remains for the owner is the look on a Mac at each landing.
 - [ ] M1 — An HTML page is published from a file and exported as itself.
 - [ ] M2 — A document's page is a setting of the document, and an export says how many pages it has.
 - [ ] M3 — The person's Export menu shows the page, and the scenes of U10b-1.
@@ -131,7 +131,7 @@ Checked at the pin. "Default" is what this document builds unless the architect 
 | H9 | `artifact_export` accepts `html` for an HTML artifact, and the Export menus gain "Save a copy…" | `html` is already in `ARTIFACT_EXPORT_FORMATS`; the menus list whatever the registry serves for the kind, so registering the exporter also adds an "HTML" row beside "Save a copy…": two rows for the same bytes | the person's menus leave the `html` format out for an HTML artifact and show "Save a copy…", which also works against a machine of an older build | §A.3 |
 | H10 | the design-system choice "applies to the kinds a design system governs (document, presentation, design)" | A dashboard is given the governing system's guide at its create (`documentCreateTool`) and is themed by it at export (`src/artifacts/dashboard/export.ts`); all four cards are therefore governed kinds | `designSystem` is accepted for document, presentation, design and dashboard, and the choice applies to all four cards | §D.1, `DESIGN_SYSTEM_KINDS` |
 | H11 | in the bar "nothing under the box" | The composer draws a plugin's hint under its frame (`PluginHint`), which is a mod's drawing (law 2). The three chords that open the toolbar's menus ask a predicate the composer registers (`draftShown`), which knows a docked card and not the bar | the hint is not drawn in the bar; the plugin's band above the frame is. The bar joins the predicate the chords ask, so they change no menu state and run no open callback (ruled 2026-11-15, F5) | §F.3 |
-| H12 | "the float changing to another session's shows the card, as today" | For the float over a side surface the card is one card that follows the session in front (`floatIdentity` answers `'panel'`), and its closed state is kept when another session's tab comes in front. The section's "as today" rests on a premise the code contradicts | **an owner's card** (card 8; ruled 2026-11-15). Built until answered: it stays as the person left it, and "Show chat" carries the new session's mark. The rule is one function, so each answer is one edit | §F.1, `presentationForNewSession` |
+| H12 | "the float changing to another session's shows the card, as today" | For the float over a side surface the card is one card that follows the session in front (`floatIdentity` answers `'panel'`), and its closed state is kept when another session's tab comes in front. The section's "as today" rests on a premise the code contradicts | **the owner's decision** (the card "Other session", answered 2026-11-15: "As you left it"): over a side surface the chat stays as the person left it when another session comes in front, a bar a bar and a hidden chat hidden, and "Show chat" carries the new session's mark. It does not become the card, as the section's sentence has it. The rule is one function | §F.1, `presentationForNewSession` |
 | H13 | "only an artifact that this session, or a session it was opened from, created (the lineage the handle lookup already uses)" | The lookup applies the lineage to a handle only; an id resolves for any session. The lineage is the side thread's ancestors (`artifactScopeOf`), not a fork's source, and is empty after an engine-host handover | `createdBy` is compared with `lineageOf(ctx, deps)`; an artifact another session made is refused with a third sentence | §C.1 |
 | H14 | "Restored <title> with Open" | The row draws Open only for a registered HTML delivery (`deliverableId` and `version`) | the delete row's Open calls `actions.openArtifact` with the artifact's id for any kind | §C.4 |
 | H15 | Undo is disabled with "<machine> is offline" | UC-7's one function words a disabled act "<Act> is unavailable while <machine> is offline." (`disabledWords` in `src/shared/ipc/remote-unavailable.ts`); only a refusal after the fact reads "Not <done>: <machine> is offline" | the function's words: "Restore is unavailable while <machine> is offline." | §C.3 |
@@ -340,7 +340,7 @@ Eleven milestones in four pull requests. Each stands on this document and the co
 2. The table of §F.1 is fixed before any code: the events, the three states, the next state and where the keyboard goes. The rule for a new request reads the presentation at the moment the request arrives: from the bar it opens the card as today; from hidden it does nothing.
 3. Hidden exists only while a header holds "Show chat" (§F.2). When what the float sits over changes to something with no such header, a hidden chat becomes the bar once and stays the bar; it does not hide again by itself when the header comes back.
 4. Every end of the float (Dock, Restore split, the float's identity changing) clears both flags, as it clears `closed` today. Neither is stored.
-5. What the float over a side surface shows when another session's tab comes in front is one function, `presentationForNewSession` (§F.1), because it is an owner's card (card 8; H12). Built until answered: the presentation stays as the person left it.
+5. What the float over a side surface shows when another session's tab comes in front is one function, `presentationForNewSession` (§F.1). It keeps what the person left: the owner's answer of 2026-11-15 to the card "Other session" ("As you left it"), in place of the section's "the card, as today" (H12).
 6. While the chat is hidden the side column's float control keeps its label and its act: it opens the card. "Show chat" brings the bar (B7).
 
 **What it does not touch.** `transfer.ts`; the layout store; the card's size and the column reservation; who counts as on screen.
@@ -742,8 +742,8 @@ The field (L6): eight lines tall at first, growing with its text to 40 % of the 
 
 `openCard`, `closeCard`, `expandPane`, `focusSplitCard`, `togglePanelFloat` and `dockCard` keep their names and their acts: while the chat is hidden, the float control keeps its label and its act (it opens the card), and "Show chat" brings the bar (B7).
 
-    // What the float over a side surface shows when another session's tab comes in front (card 8). Built: the presentation the person left.
-    export function presentationForNewSession(left: ChatPresentation): ChatPresentation;   // 'keep' today: returns `left`
+    // What the float over a side surface shows when another session's tab comes in front: what the person left (the owner's answer of 2026-11-15, "As you left it").
+    export function presentationForNewSession(left: ChatPresentation): ChatPresentation;   // returns `left`
 
 The bar publishes its height as the open card publishes its place (`rect` and `host` in the store), so that a scrolling artifact under it leaves that much room at its end (B6). The table, which is the section's with the two rows this document adds (the last two):
 
@@ -759,7 +759,7 @@ The bar publishes its height as the open card publishes its place (`rect` and `h
 | hidden | a new request of that session | hidden | where it was |
 | any | Dock, Restore split, the float ending | no float | as today |
 | hidden | what the float sits over changes to something with no header for Show chat | bar | where it was |
-| bar or hidden, over a side surface | another session's tab comes in front | what `presentationForNewSession` answers: the same presentation, for that session, until card 8 is answered | where it was |
+| bar or hidden, over a side surface | another session's tab comes in front | what `presentationForNewSession` answers: the same presentation, for that session (the owner's answer of 2026-11-15) | where it was |
 
 **§F.2** Where Hide chat is offered: one hook in `src/renderer/src/shell/`, `useShowChatHeader(): boolean`, true for the panel's float always (the side column's controls are drawn), and for the split's float while the tab in front of the other pane registers a header (`useEditorHostRegistration` for its scope). The bar draws Hide chat only while it is true, and the float's layer calls `showChatHeaderGone` when it turns false.
 
@@ -883,10 +883,10 @@ Each line has an owner other than an executor.
 
 | # | what | when | what it needs | what comes back |
 |---|---|---|---|---|
-| 1 | **The owner's answers to the four cards still open** ("Bar glyphs", "Other session", "New cards", "Space mark") | before U10b-3 and U10b-4 land; M7, M6, M8 and M9 build each card's first option until the answer is in | "The look": the six pages are drawn and ruled on; four cards are answered, each with the recommended option | each answer changes the one place its card names |
+| 1 | **The owner's cards** | done: all eight are answered (2026-11-15), each with the recommended option | "The look": the six pages are drawn and ruled on | nothing is open; what remains for the owner is the look on a Mac at each landing (rows 2, 3 and 11) |
 | 2 | **The owner's look at a memo at two densities** | on the drawn page: done, and the cards "Compact" and "PDF spacing" are answered (2026-11-15); on the built branch before U10b-1 lands | the two PDFs A3's scene attaches (an invented memo, standard and compact, Letter), and the spacing scene's verdict | the owner's word on the built PDFs |
 | 3 | **The owner's look at the component cards** (A10; closes two tracker rows) | before U10b-4 lands | the branch running on a Mac, a design system's page for each of the three bundled systems at three columns | the owner's word. A component that reads badly at the canvas reached is the declared-size route, a new item |
-| 4 | **The owner's look at the bar and "Show chat"** | on the drawn page (done; "Above the bar" answered) | page 1 of "The look" | answers to the cards "Bar glyphs" and "Other session" |
+| 4 | **The owner's look at the bar and "Show chat"** | on the drawn page: done, and its cards are answered | page 1 of "The look" | the built bar is seen with U10b-3's Mac runs (row 11) |
 | 5 | **The new and reworked scenes, alone** | after each pull request's last milestone | a Mac under the load rule. U10b-1: `e2e/document.spec.ts` (the export scene, A3's two) in `e2e:document-app`; `e2e/artifacts-store.spec.ts` in `e2e:artifacts`; `e2e/library.spec.ts` in `e2e:library`. U10b-2: `e2e/maws-tools.spec.ts` in `e2e:tools`; `e2e/library.spec.ts`; `e2e/remote.spec.ts` in `e2e:remote`. U10b-3: `e2e/panel.spec.ts` in `e2e:panel`, the combined scene with U1b on a head that holds both; `e2e/layout-transfer.spec.ts` in `e2e:default`. U10b-4: `e2e/library.spec.ts`; `e2e/design-systems.spec.ts` in `e2e:design-systems` | a verdict per scene; a red scene goes back as a fix |
 | 6 | **The groups each change reaches** | after the scenes alone are green | U10b-1: `e2e:document-app`, `e2e:document`, `e2e:dashboard` (its export scene picks "PDF (.pdf)" and "Markdown (.md)", which a dashboard keeps; its exports are spaced as the editor's from M2 on, so any expectation there that rests on a block's height is read again), `e2e:artifacts`, `e2e:library`, `e2e:remote` (another machine's PDF export), `e2e:deliverables` (a replayed publish with `files`), `e2e:panel` (its Export › PDF scene), `e2e:tools`. U10b-2: `e2e:tools`, `e2e:deliverables` (the artifact row's replay), `e2e:library`, `e2e:remote`, `e2e:machines`, `e2e:transcript`; and, because every delete now raises the fence and every content row passes the mark's upkeep, the groups that write or delete artifacts: `e2e:document-app`, `e2e:document`, `e2e:dashboard`, `e2e:presentations`, `e2e:design`, `e2e:artifacts`, `e2e:design-systems`, `e2e:connectors`, `e2e:supervisor-daemon`. U10b-3: `e2e:panel`, `e2e:default`, `e2e:browser` (the chip, unchanged), `e2e:composer` and `e2e:side` (the composer's frame and the `/btw` card with the bar property off), `e2e:layout`, `e2e:document-app` (a document's room under the bar). U10b-4: `e2e:library`, `e2e:design-systems`, `e2e:tools`, `e2e:composer` (a prefill's chip), `e2e:document-app` (a document's create). `e2e:requests` and `e2e:discover` cross none of it and run on their own lane only | verdicts by group |
 | 7 | **The cross-build runs** | after the last milestone of U10b-1, U10b-2 and U10b-4 | `scripts/ci-gate.sh "$PWD" --gates e2e:cross-build` in the background, twice for each of the three: `--peer-exact f1852de3a` and `--peer-exact 2c7044231`. A stored form is owed against both whether or not a minor is taken; U10b-1 takes none, and its scene runs on an equal wire without skipping. U10b-3 stores and sends nothing and owes none; its pull request says so with the `--stat` above | the runs' ids; a red is read against the same command on master |
@@ -912,7 +912,7 @@ Two drawn examples of this wave found faults the text had missed, so every new o
 
 **Page 6 · A design system's page (M11).** Each bundled component on today's canvas and on the three smaller ones; the tallest table; the title's sample in a narrow cell. What it found (L7): 960 × 540 does not hold two tables; the border's 2 px; the Korean word does break.
 
-**Cards for the owner.** Eight, sent by the architect; each question stands on its own, and its first option is the one recommended and the one built until the owner answers otherwise. In order of consequence: 9, 1, 8, 3, 2, 4, 6, 7. **Answered on 2026-11-15, each with the recommended option:** card 9 ("PDF spacing": "Yes, match the editor"), card 3 ("Compact": "As specified: 90 % / 75 %"), card 2 ("Export menu": "Always show the page in force") and card 1 ("Above the bar": "A surface only while needed"). **Still open:** card 7 ("Bar glyphs"), card 8 ("Other session"), card 4 ("New cards") and card 6 ("Space mark"); the first option of each stays the built default at its one named place. Card 5 (the words or an icon for "Show chat" in a narrow side column) is withdrawn: while the chat floats, the side column fills the main area, and its first strip is never narrower than 588 px, where the words fit (B9).
+**Cards for the owner.** Eight, sent by the architect; each question stands on its own. **All eight are answered (2026-11-15), each with its first, recommended option,** which is what is built: card 9 ("PDF spacing": "Yes, match the editor"), card 1 ("Above the bar": "A surface only while needed"), card 8 ("Other session": "As you left it"), card 3 ("Compact": "As specified: 90 % / 75 %"), card 2 ("Export menu": "Always show the page in force"), card 4 ("New cards": "Icon, name, one line, Blank"), card 6 ("Space mark": "The word "Instructions"") and card 7 ("Bar glyphs": "Expand glyph and ×"). Card 5 (the words or an icon for "Show chat" in a narrow side column) was withdrawn: while the chat floats, the side column fills the main area, and its first strip is never narrower than 588 px, where the words fit (B9). The cards as they were put:
 
 1. **Over an artifact the chat shrinks to its box alone. When files are attached or a message is waiting to be sent, they are drawn above the box. What should be behind them?**
    - *One raised surface from the topmost of them down to the box, only while something is there (recommended).* The chips and the waiting message are readable over any page, and with nothing attached the bar is the box alone, as you asked.
@@ -941,7 +941,7 @@ Two drawn examples of this wave found faults the text had missed, so every new o
    - *A chat bubble and a chevron pointing down.* Says "chat" and "put away". Both glyphs exist in the app already: the bubble is the comments glyph, and the chevron folds lists.
    - Place: the two buttons in `shell/FloatingPill.tsx`.
 8. **You shrank or hid the chat over a side surface and then bring another session in front. How does that session's chat appear?**
-   - *It stays as you left it (built until answered).* A bar stays a bar and a hidden chat stays hidden; "Show chat" carries the new session's mark.
+   - *It stays as you left it (recommended, and the owner's answer).* A bar stays a bar and a hidden chat stays hidden; "Show chat" carries the new session's mark.
    - *A bar stays a bar, and a hidden chat comes back as the bar.* The new session's box is always in reach.
    - *The card, as the plan's text says.* The new session's whole conversation opens over the surface each time.
    - Place: `presentationForNewSession` in `shell/floating.ts`.
@@ -1018,7 +1018,7 @@ What the counts rest on, for the largest: M2's planner (`apply` 56 lines, `targe
 
 Class 1a on GitHub Actions is the gate of record for each.
 
-## What was not verified, and what could not be settled
+## What was not verified, and what was ruled where the document could not decide
 
 - The owner's look at the screenshot of the caret under a final chart (U10a's): the repository records the scenes green, not the look.
 - Whether the history rail lists a revision that changes only the settings node, and what `sinceRevision` answers after one. M2's executor reads it; a page-only revision that the rail shows as an empty change is reported, not patched (accepted as written, 2026-11-15).
@@ -1095,7 +1095,11 @@ The owner's answers of 2026-11-15 (UTC), on the cards, labels verbatim; each bes
 - "Compact" = "As specified: 90 % / 75 % (Recommended)". Place: `COMPACT` in `src/artifacts/document/export/design-system.ts` (§B.4; M2 decision 4).
 - "Export menu" = "Always show the page in force (Recommended)". Place: `documentExports` in `src/renderer/src/tools/document/header.ts` (§B.5; M3 decision 1).
 - "Above the bar" = "A surface only while needed (Recommended)". Place: the bar's wrapper in `src/renderer/src/shell/FloatingPill.tsx` (§F.3; M7 decision 3).
-- Still open, the recommended option built at its one place until answered: "Bar glyphs" (the two buttons in `shell/FloatingPill.tsx`), "Other session" (`presentationForNewSession` in `shell/floating.ts`), "New cards" (the card in `library/MakeSomethingNew.tsx`), "Space mark" (the mark in `library/Rows.tsx` and `Library.tsx`).
+- "Bar glyphs" = "Expand glyph and × (Recommended)". Place: the two buttons in `src/renderer/src/shell/FloatingPill.tsx` (M7 decision 6).
+- "Other session" = "As you left it (Recommended)". H12 is the owner's decision: `presentationForNewSession` keeps what the person left, in place of the section's "the card, as today". Place: `presentationForNewSession` in `src/renderer/src/shell/floating.ts` (§F.1; M6 decision 5).
+- "New cards" = "Icon, name, one line, Blank (Recommended)". Place: the card in `src/renderer/src/library/MakeSomethingNew.tsx` (§D.2; M8 decision 5).
+- "Space mark" = "The word "Instructions" (Recommended)". Place: the mark in `src/renderer/src/library/Rows.tsx` and `Library.tsx` (§E.2; M9 decision 5).
+- No card is open. What remains for the owner is the look on a Mac at each landing.
 
 The architect's rulings of 2026-11-15 (UTC) on the six points revision 2 could not settle.
 
