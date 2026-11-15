@@ -81,74 +81,75 @@ export function readAnswerEnvelope(text: string): Answer | null {
 }
 
 type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
-const TAG_OPENS = '[MAWS ask ';
-const TAGGED_ID = /^\[MAWS ask ([^\]\s]+)\] /; // the tag's id as `parseAskSteer` reads it
-
-// A line that opens an envelope: the whole first line `askSteerText` writes, built by the writer's own function. A line
-// that only begins with the tag (the model's question, header and labels are written verbatim) opens nothing.
-function opensEnvelope(line: string): boolean {
-  const id = TAGGED_ID.exec(line)?.[1];
-  return id !== undefined && line === askSteerOpening(id);
-}
 
 /**
  * MAWS's answer envelopes inside a user text the engine may have joined from several waiting messages (members in order,
  * one newline between, under the last one's uuid; U4a's decision 32 c), and the rest of the text (the UX wave, U4b: the
  * Decision Log's line on the architect's medium review, form (b), and on the architect's review of the joined answer).
- * An envelope opens at the writer's whole first line (`askSteerOpening`), and is the shortest slice from there that
- * `parseAskSteer` reads whole and that ends the text or a line, before the next such line: shortest and bounded, so a
- * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices never parse.
- * A pasted segment's body is data: none of its lines opens or ends an envelope, so an envelope pasted as a log stays in
- * its segment, whole. The rest is the other members, the newline that separated each envelope gone; a text that is all
- * envelope has an empty rest. The transcript (its row text, the answers it records, the rows it hides) and the recall
- * all read here, so they agree.
+ * An envelope opens at the writer's whole first line (`opening`, `askSteerOpening`), and is the shortest slice from
+ * there that `read` takes whole and that ends the text or a line, before the next such line: shortest and bounded, so a
+ * later member is never swallowed. A line that opens nothing stays text, as does an opening whose slices are never
+ * read. A pasted segment's body is data (`pasted`, `PASTED_BLOCK`, global): none of its lines opens or ends an envelope,
+ * so an envelope pasted as a log stays in its segment, whole. The rest is the other members, the newline that separated
+ * each envelope gone; a text that is all envelope has an empty rest. Each member is the slice's bytes and what `read`
+ * made of it. It uses its arguments alone: the search text's worker runs its source (ticket 704, decision 8), so its
+ * helpers live inside it.
  */
-export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
-  if (!text.includes(TAG_OPENS)) return { envelopes: [], rest: text }; // read on every user text the transcript draws
+export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: RegExp, read: (slice: string) => T | null): { members: { text: string; read: T }[]; rest: string } {
+  if (!text.includes('[MAWS ask ')) return { members: [], rest: text }; // read on every user text the transcript draws
+  // A line that opens an envelope: the whole first line the writer writes. A line that only begins with the tag (the
+  // model's question, header and labels are written verbatim) opens nothing. The tag's id as `parseAskSteer` reads it.
+  const opens = (line: string): boolean => {
+    const id = /^\[MAWS ask ([^\]\s]+)\] /.exec(line)?.[1];
+    return id !== undefined && line === opening(id);
+  };
   const lines = text.split('\n');
-  const pasted = pastedLines(text, lines);
-  const envelopes: AskSteer[] = [];
-  const kept: string[] = [];
-  for (let i = 0; i < lines.length; ) {
-    const end = !pasted[i] && opensEnvelope(lines[i]!) ? envelopeEnd(lines, pasted, i) : null;
-    if (end === null) {
-      kept.push(lines[i]!);
-      i += 1;
-      continue;
-    }
-    envelopes.push(end.steer);
-    i = end.next;
-  }
-  return { envelopes, rest: kept.join('\n') };
-}
-
-// The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does.
-// A run ends before the next opening line: `parseAskSteer` pairs the first tag with the last result block, so a
-// malformed member would otherwise run over the words and the envelope after it (the joined answer's task review).
-function envelopeEnd(lines: readonly string[], pasted: readonly boolean[], start: number): { steer: AskSteer; next: number } | null {
-  for (let last = start; last < lines.length; last++) {
-    if (pasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
-    if (last > start && opensEnvelope(lines[last]!)) return null;
-    if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
-    const steer = parseAskSteer(lines.slice(start, last + 1).join('\n'));
-    if (steer !== null) return { steer, next: last + 1 };
-  }
-  return null;
-}
-
-// Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame,
-// `PASTED_BLOCK`, as the transcript's `splitPastedSegments` reads it).
-function pastedLines(text: string, lines: readonly string[]): boolean[] {
-  const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => {
+  // Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame, as
+  // the transcript's `splitPastedSegments` reads it).
+  const spans = [...text.matchAll(pasted)].map((match) => {
     const whole = match[0];
     return { from: match.index + /^\n*/.exec(whole)![0].length, to: match.index + whole.length - /\n*$/.exec(whole)![0].length };
   });
   let offset = 0;
-  return lines.map((line) => {
+  const inPasted = lines.map((line) => {
     const at = offset;
     offset += line.length + 1;
     return spans.some(({ from, to }) => at >= from && at < to);
   });
+  // The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does.
+  // A run ends before the next opening line: `parseAskSteer` pairs the first tag with the last result block, so a
+  // malformed member would otherwise run over the words and the envelope after it (the joined answer's task review).
+  const envelopeAt = (start: number): { member: { text: string; read: T }; next: number } | null => {
+    for (let last = start; last < lines.length; last++) {
+      if (inPasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
+      if (last > start && opens(lines[last]!)) return null;
+      if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
+      const slice = lines.slice(start, last + 1).join('\n');
+      const value = read(slice);
+      if (value !== null) return { member: { text: slice, read: value }, next: last + 1 };
+    }
+    return null;
+  };
+  const members: { text: string; read: T }[] = [];
+  const kept: string[] = [];
+  for (let i = 0; i < lines.length; ) {
+    const found = !inPasted[i] && opens(lines[i]!) ? envelopeAt(i) : null;
+    if (found === null) {
+      kept.push(lines[i]!);
+      i += 1;
+      continue;
+    }
+    members.push(found.member);
+    i = found.next;
+  }
+  return { members, rest: kept.join('\n') };
+}
+
+/** The envelopes inside a text as `parseAskSteer` reads them, and the rest: `envelopeSlices` with the writer's opening line,
+ *  the pasted segment and `parseAskSteer` (U4b's answer, kept). A caller that needs a member's bytes calls `envelopeSlices`. */
+export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string } {
+  const { members, rest } = envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+  return { envelopes: members.map((member) => member.read), rest };
 }
 
 /**
@@ -233,11 +234,12 @@ function personsPrompt(row: Json, text: string): Arrival[] {
   return personsText(text);
 }
 
+// MAWS's consent message, read whole; else one answer per envelope the text holds (rule 3; ticket 704, decision 12), its
+// summary the envelope's own text, as a lone envelope's is.
 function personsText(text: string): Arrival[] {
   const consent = consentOf(text);
   if (consent !== null) return [consent];
-  const answer = readAnswerEnvelope(text);
-  return answer === null ? [] : [answer];
+  return envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer).members.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
 }
 
 /** A row or a queued command of the peer origin (or a teammate's, which has none): the engine's inbox. */
