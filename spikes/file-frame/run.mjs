@@ -56,7 +56,7 @@ const opened = join(runs, 'opened.txt');
 mkdirSync(fakebin);
 writeFileSync(opened, '');
 for (const name of ['xdg-open', 'gio', 'gvfs-open', 'kde-open', 'kde-open5', 'kfmclient', 'gnome-open', 'exo-open', 'sensible-browser', 'x-www-browser', 'www-browser', 'firefox', 'chromium', 'google-chrome', 'lp', 'lpr', 'evince', 'okular', 'sh-launch']) {
-  writeFileSync(join(fakebin, name), `#!/bin/sh\necho "${name} $*" >> '${opened}'\n`);
+  writeFileSync(join(fakebin, name), `#!/bin/sh\necho "${name} $*" >> "$FILE_FRAME_OPENED"\n`); // the path the run passes each suite
   chmodSync(join(fakebin, name), 0o755);
 }
 
