@@ -362,7 +362,6 @@ async function drawnOnce(page: Page, texts: string[]): Promise<void> {
 }
 const ARRIVAL = '[data-kind="agent_message"]'; // a subagent's or a peer's message, drawn as an arrival
 const modBand = (scope: Locator) => scope.locator('[data-plugin-band]').filter({ hasText: 'to-human view' });
-const textsOf = async (lines: Locator) => (await lines.allTextContents()).map((text) => text.trim());
 // The rows the full transcript shows and the report hides, by what the list draws for each
 const HIDDEN = {
   thought: '[data-kind="thinking"], [data-cell-id^="cell:think:"]',
