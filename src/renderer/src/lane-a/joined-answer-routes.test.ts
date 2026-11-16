@@ -404,3 +404,77 @@ describe('made by hand: an undone input that holds a literal envelope, through t
   });
 });
 
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The branch panel's findings 1 and 3 and the landing session's ruling (2026-11-16): an answer is recorded, and a
+// message hidden, only where the split itself reads an envelope out of that message; nothing reads one apart from it.
+// Both cases are made by hand from a recording (its real ask's call kept), and drawn from each road.
+
+type Frame = { type?: string; uuid?: string; event?: string; message?: { content?: unknown } };
+/** The recorded journal, each frame changed by `change`, or dropped where it gives null. */
+const journalWith = (name: string, change: (frame: Frame) => Frame | null): SessionEvent[] =>
+  journalToEvents(loadUxwaveJournal(name).flatMap((row) => {
+    const frame = row.frame === null || typeof row.frame !== 'object' ? row.frame : change(row.frame as Frame);
+    return frame === null ? [] : [{ ...row, frame }];
+  }));
+/** The recorded file, each `user` row's content changed by `change`. */
+const fileWith = (name: string, change: (row: JsonObject & Frame) => unknown): string =>
+  recorded(name).split('\n').map((line) => {
+    if (line.trim() === '') return line;
+    const row = JSON.parse(line) as JsonObject & Frame;
+    return row.type === 'user' ? JSON.stringify({ ...row, message: { ...row.message, content: change(row) } }) : line;
+  }).join('\n');
+const withContent = (frame: Frame, content: unknown): Frame => ({ ...frame, message: { ...frame.message, content } });
+const askOf = (rows: Row[], askId: string) => asks(rows).find((row) => row.askId === askId);
+
+describe('made by hand from u704-end-image-1: an envelope spread over two text blocks beside an image (the panel’s finding 1)', () => {
+  const { joined, members, envelopes } = recordedJoin('u704-end-image-1');
+  const envelope = envelopes[0]!;
+  const askId = parseAskSteer(envelope)!.askId;
+  const cut = envelope.indexOf('\n```json');
+  const [head, tail] = [envelope.slice(0, cut), envelope.slice(cut + 1)];
+  const imageOf = (content: unknown) => (content as Content as Exclude<Content, string>).find((block) => block.type === 'image')!;
+  const spread = (content: unknown) => [{ type: 'text', text: head }, { type: 'text', text: tail }, imageOf(content)];
+  const [written, last] = [members[0]!, members[1]!]; // the envelope written first, alone; the prompt with its image under the joined uuid
+
+  // live: the person's own message under the joined uuid holds the spread envelope and the image, and its replay is its
+  // echo; the envelope MAWS wrote alone, its replay and the host's row of its answers are taken out, so no other
+  // message answers the ask
+  const fromLive = () =>
+    journalWith('u704-end-image-1', (frame) => {
+      if (frame.type === 'user' && frame.uuid === written.uuid) return null;
+      if (frame.event === 'maws_ask_answered') return null;
+      return frame.type === 'user' && frame.uuid === last.uuid ? withContent(frame, spread(last.content)) : frame;
+    });
+  const text = fileWith('u704-end-image-1', (row) => (row.uuid === joined.uuid ? spread(row.message!.content) : row.message!.content));
+  const ON: Record<Road, () => Promise<SessionEvent[]>> = { journal: async () => fromLive(), file: () => fromFile(text), rows: () => fromRows(text) };
+
+  it.each(ROADS)('from the %s: the message is drawn, its text and its image, and no answer is recorded', async (road) => {
+    expect([written.content, last.uuid]).toEqual([envelope, joined.uuid]);
+    const rows = drawn(stateOf(await ON[road]()));
+    expect(users(rows).filter((row) => row.messageUuid === joined.uuid).map((row) => [row.text, row.attachments.map((attachment) => attachment.kind)])).toEqual([[`${head}\n\n${tail}`, ['image']]]);
+    expect(askOf(rows, askId)).toMatchObject({ answers: null });
+    expect(askOf(rows, askId)!.state).not.toBe('answered');
+  });
+});
+
+describe('made by hand from u704-end-prompt-first-1: a prompt that opens with the tag of the held ask and ends in an answered block of no answers (the panel’s finding 3)', () => {
+  const { prompt, envelopes } = recordedJoin('u704-end-prompt-first-1');
+  const envelope = envelopes[0]!;
+  const steer = parseAskSteer(envelope)!;
+  const LOG = `[MAWS ask ${steer.askId}] Please explain this log:\n\`\`\`json\n${JSON.stringify({ status: 'answered', askId: steer.askId, answers: [] }, null, 2)}\n\`\`\``;
+  const swap = (content: unknown) => (typeof content === 'string' ? content.split(prompt as string).join(LOG) : content);
+  // the person's prompt is LOG wherever the recording holds it: as MAWS wrote it, its replay alone, the joined replay and
+  // the file's joined line
+  const live = () => journalWith('u704-end-prompt-first-1', (frame) => (frame.type === 'user' ? withContent(frame, swap(frame.message?.content)) : frame));
+  const text = fileWith('u704-end-prompt-first-1', (row) => swap(row.message!.content));
+  const ON: Record<Road, () => Promise<SessionEvent[]>> = { journal: async () => live(), file: () => fromFile(text), rows: () => fromRows(text) };
+
+  it.each(ROADS)('from the %s: the prompt is drawn as the person’s, and the real answer after it is taken: the capsule reads answered with its answers', async (road) => {
+    expect(parseAskSteer(LOG)).not.toBeNull(); // the loose reading takes it for an answer
+    const rows = drawn(stateOf(await ON[road]()));
+    expect(users(rows).filter((row) => row.text === LOG)).toHaveLength(1);
+    expect(users(rows).some((row) => row.text.includes(envelope.split('\n')[0]!))).toBe(false);
+    expect(askOf(rows, steer.askId)).toMatchObject({ state: 'answered', answers: steer.result.answers });
+  });
+});

@@ -6,7 +6,10 @@ import { join } from 'node:path';
 import type { ContentBlock } from '@shared/graph/events';
 import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins';
+import type { SessionId } from '@shared/graph/ids';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
+import { TranscriptRecordSchema } from '@shared/wire/transcript';
+import { createBackfillContext, recordToEvents } from './backfill';
 import { SearchTextReader } from './search-text';
 
 let reader: SearchTextReader;
@@ -307,5 +310,33 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
       expect(before.text + after.text).toBe(await wholeText(path));
       expect(holdsEnvelope(after.text)).toBe(false);
     } finally { await rm(dir, { recursive: true }); }
+  });
+});
+
+// The branch panel's finding 2 and the landing session's ruling (2026-11-16): a shell row is no person's text to read
+// envelopes out of. The worker passes it over by the backfill's own test of a shell row (`parseBash`, run from its
+// source), so the search text holds what the window draws of it: the whole command, the whole output.
+describe('made by hand: a shell row that holds a literal envelope (ticket 704)', () => {
+  const envelope = recordedJoin('u704-end-env-first-1').envelopes[0]!;
+  const INPUT = `<bash-input>cat > note.md <<'EOF'\n${envelope}\nEOF</bash-input>`;
+  const OUTPUT = `<bash-stdout>Wrote the note:\n${envelope}\ndone</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`;
+  const rows = [
+    { type: 'user', uuid: 'b0b0b0b0-0000-4000-8000-000000000701', parentUuid: null, timestamp: '2026-11-16T10:00:00.000Z', origin: { kind: 'human' }, message: { role: 'user', content: INPUT } },
+    { type: 'user', uuid: 'b0b0b0b0-0000-4000-8000-000000000702', parentUuid: 'b0b0b0b0-0000-4000-8000-000000000701', timestamp: '2026-11-16T10:00:01.000Z', message: { role: 'user', content: OUTPUT } },
+  ];
+
+  it('the search text over a person’s <bash-input> row holding a heredoc envelope, and over a shell output row holding one, holds the whole command and the whole output', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, rows.map((row) => JSON.stringify(row)).join('\n') + '\n');
+      expect(await wholeText(path)).toBe(`${INPUT}\n${OUTPUT}`);
+    } finally { await rm(dir, { recursive: true }); }
+  });
+
+  it('the backfill keeps the same rows whole: shell messages, which the split does not read', () => {
+    const ctx = createBackfillContext({ sessionId: 'sess-shell' as SessionId, agent: null });
+    const messages = rows.flatMap((row) => recordToEvents(TranscriptRecordSchema.parse(row), ctx)).filter((event) => event.kind === 'user.message');
+    expect(messages.map((event) => [event.bash?.part, event.content])).toEqual([['input', INPUT.slice('<bash-input>'.length, -'</bash-input>'.length)], ['output', `Wrote the note:\n${envelope}\ndone`]]);
   });
 });

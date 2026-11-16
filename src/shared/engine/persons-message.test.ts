@@ -12,7 +12,7 @@ import type { AskQuestion } from '@shared/maws/tools';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
 import { consentMessage, envelopeSlices, readAnswerEnvelopes, readArrivals } from './arrival';
-import { answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
+import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
   if (block?.type !== 'text' || typeof block.text !== 'string') throw new Error('not a text block');
@@ -333,5 +333,67 @@ describe('the arrivals of a person’s row that holds envelopes', () => {
   it('a consent message reads as before', () => {
     const row = { type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000704', origin: { kind: 'human' }, message: { role: 'user', content: consentMessage('command', 'pnpm test') } };
     expect(readArrivals(row)).toEqual([{ class: 'consent', kind: 'command', subject: 'pnpm test' }]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// answerEnvelopeOf: the one reading of "this content is an answer envelope" (the Decision Log's ruling of 2026-11-16 on
+// the branch panel's findings)
+
+describe('answerEnvelopeOf: a content is an answer envelope only where the split reads it as one envelope alone', () => {
+  const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const text = (value: string): ContentBlock => ({ type: 'text', text: value });
+  const message = (content: string | ContentBlock[]): UserMessage => ({ kind: 'user.message', messageUuid: 'b7a1c2d3-0000-4000-8000-000000000707' as MessageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  const askOf = (content: string | ContentBlock[]) => {
+    const answer = answerEnvelopeOf(content);
+    return answer === null ? null : { askId: answer.call, answers: answer.answers };
+  };
+  const recordedEnvelopes = [...PROBE_JOINS, ...U4B_JOINS].flatMap((name) => recordedJoin(name).envelopes);
+  // made by hand: the tag of a held ask and a closing answered block of no answers, around words that are not the
+  // writer's first line
+  const LOG = `[MAWS ask ask-1] Please explain this log:\n\`\`\`json\n${JSON.stringify({ status: 'answered', askId: 'ask-1', answers: [] }, null, 2)}\n\`\`\``;
+  const cut = A1.indexOf('\n```json');
+  const [HEAD, TAIL] = [A1.slice(0, cut), A1.slice(cut + 1)];
+
+  it('a text, or a single text block, that is one envelope whole gives its ask and its answers: the recorded envelopes and the hand-made ones', () => {
+    for (const envelope of [...recordedEnvelopes, A1, MULTI, TAGGED_ENVELOPE]) {
+      const steer = parseAskSteer(envelope)!;
+      expect(askOf(envelope)).toEqual({ askId: steer.askId, answers: steer.result.answers });
+      expect(askOf([text(envelope)])).toEqual({ askId: steer.askId, answers: steer.result.answers });
+    }
+  });
+
+  it('made by hand: a text that opens with the tag but not with the writer’s whole first line is none, though parseAskSteer reads it', () => {
+    expect(parseAskSteer(LOG)).not.toBeNull();
+    expect(answerEnvelopeOf(LOG)).toBeNull();
+    expect(answerEnvelopeOf([text(LOG)])).toBeNull();
+  });
+
+  it('made by hand: an envelope spread over two text blocks, beside an image or not, is none; so is a whole envelope beside any other block, or beside anything at all', () => {
+    expect(parseAskSteer(`${HEAD}\n${TAIL}`)).not.toBeNull();
+    for (const content of [[text(HEAD), text(TAIL), IMAGE], [text(HEAD), text(TAIL)], [text(A1), IMAGE], [IMAGE, text(A1)], [text(A1), text('')], `${A1}\n`, `Also this.\n${A1}`, joinedText(A1, A2), '', []]) {
+      expect(answerEnvelopeOf(content as string | ContentBlock[]), JSON.stringify(content).slice(0, 60)).toBeNull();
+    }
+  });
+
+  it('holds for a message the split returns as it is for being one envelope alone, and for every envelope it splits out; never for the person’s part, nor for a message that holds no envelope', () => {
+    const contents: (string | ContentBlock[])[] = [...READER_CORPUS, `${A1}\n`, LOG, joinedText(LOG, A1)].flatMap((value) => [value, [text(value)], [text(value), IMAGE]]);
+    let envelopes = 0;
+    for (const content of contents) {
+      const before = message(content);
+      const parts = splitPersonsMessage(before);
+      const { own, envelopes: read } = personsParts(content);
+      if (parts.length === 1 && parts[0] === before) {
+        expect(answerEnvelopeOf(content) !== null, JSON.stringify(content).slice(0, 60)).toBe(read.length > 0);
+        continue;
+      }
+      parts.forEach((part, at) => {
+        const isEnvelope = own === null || at > 0;
+        expect(answerEnvelopeOf(part.content) !== null, JSON.stringify(part.content).slice(0, 60)).toBe(isEnvelope);
+        if (isEnvelope) expect(answerEnvelopeOf(part.content)!.call).toBe(parseAskSteer(part.content as string)!.askId);
+        if (isEnvelope) envelopes += 1;
+      });
+    }
+    expect(envelopes).toBeGreaterThan(contents.length / 3); // the corpus splits envelopes out, not only plain texts
   });
 });
