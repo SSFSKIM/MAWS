@@ -127,8 +127,10 @@ describe('the file and another machine’s rows: the same pair for the joined li
       expect(run.map((event) => event.id)).toEqual([whole.id, ...run.slice(1).map((_, k) => `${joined.uuid}#${ordinals + k}`)]);
       // what the file does not carry: no `joined`, no replay
       expect(run.map((event) => ['joined' in event, event.isReplay, event.origin])).toEqual(run.map(() => [false, false, 'human']));
-      // no existing id moves: the split taken back, the events are build G's
-      expect([...events.slice(0, at), { ...run[0]!, content: whole.content }, ...events.slice(at + run.length)]).toEqual(before);
+      // no existing id moves: the split taken back, the events are build G's (but for a rewind's anchor text, which this
+      // landing reads too: u704-rewind-1's, below)
+      const anchorless = (list: SessionEvent[]) => list.map((event) => (event.kind === 'boundary.rewind' ? { ...event, prefillText: null } : event));
+      expect(anchorless([...events.slice(0, at), { ...run[0]!, content: whole.content }, ...events.slice(at + run.length)])).toEqual(anchorless(before));
     });
 
     it('from the same rows, as another machine sends them: the same pair as the file', async () => {
