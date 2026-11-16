@@ -263,13 +263,10 @@ export class StackPlacer {
     if (reveal && at === null) this.reveal = null; // its file left the stack: the live place stands
     if (reveal && at !== null) {
       // A section folded is not reached yet: the jump that unfolds it draws it next. A section's top (a request, or a
-      // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top. A drawn
-      // body still settling (its read, or the library's rows after its first paint) weighs next to nothing, so a place
-      // read under its header would fall in the next file: the section is reached once its body settles.
+      // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top, and is
+      // reached once its body settles.
       const index = layout.index.get(reveal.place.path)!;
-      const section = this.input.sections[index];
-      const settling = section !== undefined && !section.folded && section.lines > 0 && rows(index) === null;
-      const exact = at.exact && !section?.folded && !settling;
+      const exact = at.exact && !this.input.sections[index]?.folded && !this.settling(index, rows);
       const want = reveal.top ? Math.max(0, at.top) : this.scrollFor(layout, at);
       this.write(el, want);
       const band = this.bandFor(m, el.scrollTop);
@@ -283,8 +280,9 @@ export class StackPlacer {
       this.at = el.scrollTop;
       return;
     }
-    if (this.live === null) this.read(m);
-    else {
+    if (this.live === null) {
+      if (!this.settling(sectionAt(layout, el.scrollTop), rows)) this.read(m); // the first place, once it can be read
+    } else {
       const target = topOfPlace(layout, this.live, rows);
       if (target !== null) this.write(el, this.scrollFor(layout, target));
       // A place read where its file was not drawn yet names no row; once the file draws, the row at the same spot is
@@ -398,6 +396,14 @@ export class StackPlacer {
       return cache.get(index)!;
     };
     return { el, laidOut, viewport, layout, rows };
+  }
+
+  // A section whose body has lines and no rows to read yet: drawn and still settling (its read, or the library's rows
+  // after its first paint), when it weighs next to nothing, or not drawn yet. A place read under its header there would
+  // fall in the next file.
+  private settling(index: number, rows: RowsOf): boolean {
+    const section = this.input.sections[index];
+    return section !== undefined && !section.folded && section.lines > 0 && rows(index) === null;
   }
 
   private drawsRows(layout: StackLayout, path: string, rows: RowsOf): boolean {
