@@ -136,6 +136,8 @@ const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-bord
 // file's own column is where the keyboard can hold the file (R4); the tree beside it is not. While the tree stands in the
 // file's place the viewer stays mounted, hidden and inert, so the file keeps its editor's state and its viewer entry
 // stays mounted (the cap never takes it), and it is not where the keyboard is.
+// UX wave U6b-2 (Decision Log 29): while the tree stands in the file's place or the panel is not on screen, the file is
+// not in view, and a framed file's element is not in the document.
 function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean }) {
   const machine = machineFor(appSessionId);
   const key = held ? fileKey(machine, held.file) : null;
@@ -154,6 +156,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
   const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on });
   useEffect(() => (visible && key !== null && fileColumn && place !== 'instead' ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn, place]);
+  const inView = visible && place !== 'instead'; // UX wave U6b-2 (Decision Log 29)
   // The button: with room for both it folds the tree for the session (stored); too narrow, it shows the tree in the file's
   // place in this tab, until a file is chosen or it is pressed again.
   const toggleTree = () => {
@@ -200,7 +203,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
       ) : null}
       {held ? (
         <div ref={setFileColumn} hidden={place === 'instead'} inert={place === 'instead'} className="h-full min-h-0 min-w-0 flex-1">
-          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} host="side" />
+          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} host="side" inView={inView} />
         </div>
       ) : null}
     </div>

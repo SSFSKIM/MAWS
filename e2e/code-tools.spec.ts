@@ -676,6 +676,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
   // its position is the tab's, so moved to the main area the new element is at the time it left, paused. A sound plays,
   // and seeks to a time it has not loaded: two minutes of WAV at 44.1 kHz (10.6 MB, as the scene of record's), of which
   // the player, preloading metadata, holds the start; the seek near its end is answered by a ranged request for it.
+  // Playing, hidden by the tree in its place, it leaves no element, and comes back paused at its time (Decision Log 29).
   test('a video by a path plays and seeks, and a sound plays and seeks to a time not yet loaded by a ranged request; moved to the main area the video is at the time it left', async () => {
     await withProduct(async (p) => {
       writeFileSync(p.scratch.path('clip.webm'), await recordedWebm(p.page));
@@ -746,6 +747,31 @@ test.describe('the product in stub mode over a scratch repository', () => {
       await expect
         .poll(() => entryRanges(p, src).slice(entriesBefore).some((range) => Number(/^bytes=(\d+)-/.exec(range)?.[1] ?? -1) >= from), { message: `a ranged request from byte ${from} or later reached the responder` })
         .toBe(true);
+
+      // Decision Log 29: the sound playing, the tree shown in the file's place takes its element out of the document; shown
+      // again it is paused at the time it left. The side column at its least width leaves the tab room for the file alone,
+      // so the tree's button shows the tree in the file's place. The time is read and the button pressed in one turn of the
+      // page, so the time the tab keeps (the element's last report while it played) is at most that time.
+      await audio.evaluate(async (a: HTMLAudioElement) => {
+        a.muted = true;
+        await a.play();
+      });
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.paused), { message: 'the sound plays' }).toBe(false);
+      await p.page.getByRole('separator', { name: 'Resize right panel' }).press('Home');
+      const soundTab = `[data-files-tab][data-file="${p.scratch.path('long.wav')}"]`;
+      await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree]`), 'a tab too narrow for the tree beside the file').toHaveCount(0);
+      const left = await p.page.evaluate((tab) => {
+        const time = document.querySelector<HTMLAudioElement>(`${tab} audio[data-artifact-media="audio"]`)!.currentTime;
+        document.querySelector<HTMLElement>(`${tab} [data-files-tree-toggle]`)!.click();
+        return time;
+      }, soundTab);
+      await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"]`), 'the tree in the file’s place').toBeVisible();
+      await expect(p.page.locator('audio[data-artifact-media="audio"]'), 'no audio element left').toHaveCount(0);
+      await sideColumn(p.page).locator(`${soundTab} [data-files-tree-toggle]`).click();
+      const back = sound.locator('audio[data-artifact-media="audio"]');
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'at the time it left' }).toBeCloseTo(left, 0);
+      expect(await back.evaluate((a: HTMLAudioElement) => a.paused), 'paused').toBe(true);
       expect(await snapshot(p), 'nothing created').toEqual(before);
     });
   });

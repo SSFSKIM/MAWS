@@ -8,11 +8,14 @@
 //   no pick, no locate, no connector port (decision 13). Its title is the file's base name (decision 9).
 // - Failed: one sentence in the frame's place and, under it, the button that reads the entry again (decision 3; L7).
 // - A row: `ExternalRow`, which says why (decision 12). So does an entry read by its artifact alone, which asks nothing.
+// - Not in view while its body stays mounted (Files' tree in the file's place, the panel collapsed: "A hide", Decision
+//   Log 29): no frame element, so nothing of the file runs or plays; a video's or a sound's time is the entry's and comes
+//   back paused, a page starts again, and a named or failed file is read again on show, as a tab shown again is.
 //
 // Two of the owner's answers live here, each at one place: card 4 in `pdfFragment` (Chromium's PDF toolbar hidden beside
 // the chat, kept in the main area; its thumbnail sidebar never opening by itself), and card 2 in the HTML branch (one
 // line under the bar when the page names files beside it, the page still drawn).
-import type { ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
 import { HtmlFrame } from '../../artifacts/viewers/frames/HtmlFrame';
 import { Media } from '../../artifacts/viewers/frames/Media';
 import { PdfFrame } from '../../artifacts/viewers/frames/PdfFrame';
@@ -28,13 +31,19 @@ export function pdfFragment(host: 'side' | 'main'): string {
 
 const nameOf = (path: string) => path.slice(path.lastIndexOf('/') + 1);
 
-export function FrameBody({ entry, host }: { entry: ViewerEntry; host: 'side' | 'main' }): ReactNode {
-  const { frame } = entry;
+export function FrameBody({ entry, host, inView }: { entry: ViewerEntry; host: 'side' | 'main'; inView: boolean }): ReactNode {
+  const { frame, tabId } = entry;
+  const hidden = useRef(!inView);
+  useEffect(() => {
+    if (inView && hidden.current) useViewer.getState().revisit(tabId); // reads only a named or a failed entry
+    hidden.current = !inView;
+  }, [inView, tabId]);
   if (frame === null || frame.status === 'row') return <ExternalRow entry={entry} />;
-  if (frame.status === 'failed') return <Stopped tabId={entry.tabId} />;
+  if (frame.status === 'failed') return <Stopped tabId={tabId} />;
   const shown = frame.status === 'asking' ? frame.shown : frame;
   if (shown === null) return <p className="p-4 text-ui text-fg-muted">{VIEWER_COPY.loading}</p>;
-  return <Drawn tabId={entry.tabId} frame={shown} title={nameOf(entry.path)} host={host} />;
+  if (!inView) return null;
+  return <Drawn tabId={tabId} frame={shown} title={nameOf(entry.path)} host={host} />;
 }
 
 function Drawn({ tabId, frame, title, host }: { tabId: string; frame: ReadyFrame; title: string; host: 'side' | 'main' }) {

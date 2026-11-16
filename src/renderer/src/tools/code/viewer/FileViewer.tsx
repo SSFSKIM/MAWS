@@ -16,7 +16,8 @@
 // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5): a PDF, an HTML page, a video or a
 // sound is drawn by `FrameBody`, with Open externally in the bar unless its body is a row (which holds its own, or none);
 // `data-frame` on the viewer says what the frame shows. `host` says where the tab is drawn (`'side'` beside the chat,
-// `'main'` in the main area), and only the PDF's fragment reads it.
+// `'main'` in the main area), and only the PDF's fragment reads it. `inView` false: the tab's body is kept mounted while it
+// is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29).
 import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
@@ -63,8 +64,9 @@ function PathLead({ path }: { path: string }) {
 
 // UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
 // what it puts at the bar's end (Move to main area).
-// UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent.
-export function FileViewer({ tab, start, end, host }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main' }) {
+// UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent. (Decision Log 29) `inView`,
+// whether the mounted body is in view; in view when absent.
+export function FileViewer({ tab, start, end, host, inView }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean }) {
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const lead = (
     <>
@@ -72,7 +74,7 @@ export function FileViewer({ tab, start, end, host }: { tab: FileTab; start?: Re
       <PathLead path={tab.path} />
     </>
   );
-  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} host={host} />;
+  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} host={host} inView={inView} />;
 }
 
 function NoSession({ path }: { path: string }) {
@@ -106,9 +108,10 @@ interface FileBodyProps {
   controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls)
   end?: ReactNode; // UX wave U6b-1: the bar's last control (a side tab's Move to main area)
   host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
+  inView?: boolean; // UX wave U6b-2 (Decision Log 29): false while the mounted body is not in view
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, end, host = 'main' }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, end, host = 'main', inView = true }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -141,7 +144,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {entry ? <Controls entry={entry} wrap={wrap} zoom={zoom} /> : null}
         {end}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} inView={inView} /> : <Loading />}</div>
     </div>
   );
 }
@@ -164,10 +167,10 @@ const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom, host }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main' }) {
+function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
-  if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} />;
+  if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (
       <Suspense fallback={<Loading />}>
