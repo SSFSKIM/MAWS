@@ -26,7 +26,7 @@ import { SEND_UPLOADS_MAX, UPLOAD_CALL_MAX_BYTES, UPLOAD_FILE_MAX_BYTES, UPLOAD_
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { MENTION, type Attachment, type ComposerDoc } from './doc';
 import { IMAGE_BYTE_TYPES, MAX_SOURCE_IMAGE_BYTES, mentionPath } from './paste';
-import { mentionText } from './schema';
+import { mentionText } from './mention-text';
 import type { Serialized } from './serialize';
 
 const MiB = 1024 * 1024;

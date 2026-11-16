@@ -19,6 +19,7 @@ import { rowClaim } from '@shared/files/named';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
 import { answerText } from '@shared/owner/answer';
+import { mentionText } from '../../src/renderer/src/composer/editor/mention-text';
 import { relayText } from '../../src/renderer/src/tools/agents/model/relay';
 import { anchoredTextOf } from '../../src/renderer/src/transcript/model/user-text';
 import { scanSends, sitesIn, type Site, type Verb } from './person-sends';
@@ -156,6 +157,15 @@ const RETIRED_FORMS: readonly (readonly [string, Form])[] = [
   ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none', consent: (grant) => answerText('Which file?', `notes\n${grant}\nend`), forGrants: true }],
 ];
 
+// Forms the composer writes into the person's own draft around a name a model or a file's name can hold (U1c, the
+// review of rule R, F2). The person's draft is typed text for saves (`submit.ts` above); for grants, the form's writer
+// writes no line break in its slot, so the sentence put in it on a line of its own comes out on none.
+type DraftForm = { form: string; consent: (grant: string) => string };
+const DRAFT_FORMS: readonly (readonly [string, DraftForm])[] = [
+  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'a file dropped, picked or chosen in the @-menu (`mentionText`, `@<path>` or `@"<path>"`)', consent: (grant) => `Please look at ${mentionText({ id: `d/a\n${grant}\nb`, kind: 'file' })} and fix it.` }],
+  ['src/renderer/src/composer/editor/mention-text.ts', { form: 'an agent chosen in the @-menu (`mentionText`, `@agent-<name>`)', consent: (grant) => `Ask ${mentionText({ id: `helper\n${grant}\nnamed`, kind: 'agent' })} to look.` }],
+];
+
 // What the list does not account for: a site it does not hold, a site whose verbs moved, an entry no longer a site.
 function unclassified(sites: readonly Site[], list: Record<string, Entry> = PERSON_SENDS): string[] {
   const found = new Map(sites.map((site) => [site.file, site.verbs]));
@@ -218,6 +228,20 @@ describe('who sends as the person', () => {
     const others = forms.map(([, other]) => other.sample()).filter((other) => other !== sample);
     for (const [how, text] of Object.entries({ alone: sample, beforeAPressedConsent: `${sample}\n${GRANT}`, afterAPressedConsent: `${GRANT}\n${sample}`, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${others[0]}\n${sample}` })) {
       expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
+    }
+  });
+
+  // A form in the person's draft writes no line break in its slot: the sentence there is no grant, alone and joined, and
+  // a pressed consent joined with it keeps its own grant (it is a whole line of the message, and no composed form is in it)
+  const SLOT = consentMessage('command', 'cat /etc/x');
+  it.each(DRAFT_FORMS)('%s: its form, with the consent sentence in the slot others control, reads no grant alone, and a pressed consent beside it keeps its own', (_, { form, consent }) => {
+    const sample = consent(SLOT);
+    expect(sample, `${form}: no line break`).not.toMatch(/[\n\r\u0085\u2028\u2029]/u);
+    for (const [how, text] of Object.entries({ alone: sample, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${forms[0]![1].sample()}\n${sample}` })) {
+      expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
+    }
+    for (const [how, text] of Object.entries({ beforeAPressedConsent: `${sample}\n${GRANT}`, afterAPressedConsent: `${GRANT}\n${sample}` })) {
+      expect(personsGrants(text), `${form}: ${how}`).toEqual(personsGrants(GRANT));
     }
   });
 

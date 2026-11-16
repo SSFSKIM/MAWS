@@ -10,7 +10,8 @@ import { countLines, neutralisePastedTags, pastedTagId, wrapPasted } from '@shar
 import type { ContentBlock } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { attachmentsOf, MENTION, PASTED, type MentionAttrs, type PastedAttrs } from './doc';
-import { atomPlaceholder, mentionText } from './schema';
+import { mentionText } from './mention-text';
+import { atomPlaceholder } from './schema';
 
 export interface SerializeContext {
   sessionId: SessionId | string | null;
@@ -31,6 +32,10 @@ export interface Serialized {
 
 // One piece of the flattened document: typed text (wire form and typed form) or an atom.
 type Piece = { kind: 'text'; wire: string; typed: string } | { kind: 'mention'; text: string } | { kind: 'pasted'; attrs: PastedAttrs };
+// Every kind of piece, closed: a kind added to `Piece` fails to compile here until it is listed, and the serialiser's
+// test then fails until the kind has a row saying what its wire text can hold (U1c, the review of rule R, F2).
+export const PIECE_KINDS = Object.keys({ text: true, mention: true, pasted: true } satisfies Record<Piece['kind'], true>) as Piece['kind'][];
+export type PieceKind = Piece['kind'];
 
 function piecesOf(doc: JSONContent): { pieces: Piece[]; paragraphs: number } {
   const pieces: Piece[] = [];
