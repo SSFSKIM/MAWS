@@ -115,10 +115,8 @@ class Reading {
     this.check(); if (this.pluginServers.length >= INVENTORY_BOUNDS.rows) throw new Stop();
     const { plugin, installScope, version, name, transport, url } = configuration;
     this.pluginServers.push({ plugin, pluginName: row.pluginName, server: row.server, name, installScope, version, path: row.path, transport, address: url === null ? null : addressFormOf(url), sameAddressAs: this.sameAddressAs(transport, url) });
-    // the address is classified, compared and revised whole; an address past the endpoint's bound is sent as no `url` at
-    // all, never cut: a cut text is another address, which a session's live address could equal (M2's (c) refuses a
-    // remote entry with none)
-    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url: url !== null && url.length <= URL_BOUND ? url : null, revision: pluginRevisionOf(configuration) });
+    // the address is classified, compared and revised whole; `pluginServers` lists none past the endpoint's bound
+    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url, revision: pluginRevisionOf(configuration) });
   }
   // The engine drops a plugin's server whose address a file-configured server names
   // (spikes/protocol-probe/findings-uxwave-u11-plugin-server-dedup.txt), after it has merged the files' servers by name
@@ -270,7 +268,7 @@ const isUrl = (value: string) => /^[a-z][a-z\d+.-]*:/i.test(value);
 // `experimental.mcpServers`, the first declaration of a name winning. A bundle (.mcpb, .dxt) is never read and a URL where
 // a path belongs never fetched; neither is listed nor warned of, since a warning reads as configuration that could not be
 // read. Every file is confined to the plugin's folder, as its skills' are. A name is listed as written; one its field
-// cannot hold is not listed, since a cut name is another name.
+// cannot hold is not listed, since a cut name is another name, and so for an address past the endpoints' bound.
 async function pluginServers(r: Reading, installation: Omit<PluginConfiguration, 'name' | 'transport' | 'url'>, pluginName: string | null, anchor: string, manifest: Record<string, unknown> | null, manifestPath: string): Promise<void> {
   const { plugin, installPath } = installation;
   const seen = new Set<string>();
@@ -288,6 +286,9 @@ async function pluginServers(r: Reading, installation: Omit<PluginConfiguration,
       // key's; a built-in plugin's carries an alias the inventory cannot know (2.1.322 cli.pretty.js:954009-954011)
       const name = pluginName === null || plugin.endsWith('@builtin') ? null : `plugin:${pluginName}:${server}`;
       const url = typeof entry.url === 'string' ? entry.url : null;
+      // an address past the endpoints' bound is not listed, as a name past its field's is: a cut address is another one,
+      // which a session's live address at that prefix would match (the architect's ruling of 2026-11-15)
+      if (url !== null && url.length > URL_BOUND) continue;
       r.addPluginServer({ ...installation, name, transport: transportOf(entry), url }, { pluginName, server, path });
     }
   };
