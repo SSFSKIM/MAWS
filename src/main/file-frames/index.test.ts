@@ -377,6 +377,41 @@ describe('layout.frameFile for another machine', () => {
   });
 });
 
+// M5, decision 14 (the owner's answer to card 2): an HTML file's ready answer says whether its head names files beside
+// it, read from the head already read for the charset; never for another kind.
+describe('the files beside an HTML page', () => {
+  it('an HTML file’s ready answer carries neighbours from its head, on this Mac and from a copy', async () => {
+    const { link } = machine();
+    const l = await lab({ link });
+    await writeFile(join(l.root, 'styled.html'), '<!doctype html><link rel="stylesheet" href="ledger.css"><p>Kassenbuch</p>');
+    await writeFile(join(l.root, 'alone.html'), '<!doctype html><style>p { margin: 0 }</style><p>Kassenbuch</p><img src="data:image/gif;base64,R0lGODlhAQABAAAAACw=">');
+    const owner = l.pageOf(7);
+    for (const target of [LOCAL, MINI]) {
+      const styled = await l.ready(join(l.root, 'styled.html'), owner, target);
+      expect(styled, target).toStrictEqual({ status: 'ready', token: styled.token, url: frameUrl(styled.token, 'styled.html'), framed: 'html', neighbours: true });
+      const alone = await l.ready(join(l.root, 'alone.html'), owner, target);
+      expect(alone, target).toStrictEqual({ status: 'ready', token: alone.token, url: frameUrl(alone.token, 'alone.html'), framed: 'html', neighbours: false });
+    }
+  });
+
+  it('a PDF’s, a video’s and a sound’s ready answer carries no neighbours', async () => {
+    const { link } = machine();
+    const l = await lab({ link });
+    // each names a file beside it in the shape a page would, so only the kind keeps the fact away
+    const named = '<link rel="stylesheet" href="ledger.css"><script src="app.js"></script>';
+    await writeFile(join(l.root, 'ledger.pdf'), `%PDF-1.4 ${named}`);
+    await writeFile(join(l.root, 'tide.webm'), Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.from(named)]));
+    await writeFile(join(l.root, 'bell.wav'), Buffer.concat([Buffer.from('RIFF\0\0\0\0WAVE'), Buffer.from(named)]));
+    const owner = l.pageOf(7);
+    for (const target of [LOCAL, MINI]) {
+      for (const [name, framed] of [['ledger.pdf', 'pdf'], ['tide.webm', 'video'], ['bell.wav', 'audio']] as const) {
+        const answer = await l.ready(join(l.root, name), owner, target);
+        expect(answer, `${name} ${target}`).toStrictEqual({ status: 'ready', token: answer.token, url: frameUrl(answer.token, name), framed });
+      }
+    }
+  });
+});
+
 describe('a token’s page', () => {
   it('an issue whose page ended during its admission read, or during its copy, records nothing and closes the copy’s descriptor', async () => {
     // on this Mac: the head's read held while the page reloads

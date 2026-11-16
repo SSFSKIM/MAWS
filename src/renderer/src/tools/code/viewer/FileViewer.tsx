@@ -57,7 +57,8 @@ function PathLead({ path }: { path: string }) {
 
 // UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
 // what it puts at the bar's end (Move to main area).
-export function FileViewer({ tab, start, end }: { tab: FileTab; start?: ReactNode; end?: ReactNode }) {
+export function FileViewer({ tab, start, end, host }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main' }) {
+  void host;
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const lead = (
     <>

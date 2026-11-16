@@ -17,6 +17,10 @@ import { useLayout } from '../../../stores/layout';
 import { allTabs, openTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
+import { frameToken } from '../../../test-support/code-disk';
+import { frameUrl } from '@shared/files/framed';
+import { moveFileToMain } from '../../../shell/transfer';
+import { FileViewer } from '../viewer/FileViewer';
 import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { sideFilesViewer } from '../editor/register';
 import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
@@ -38,6 +42,7 @@ const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)))
 // the service refuses it (its `path must be absolute`, which main's router answers with the error's message).
 const REFUSAL = "path outside the session's directories";
 function mainFor(files: Record<string, string>, opts: { refused?: string[]; held?: Map<string, Promise<void>> } = {}) {
+  let frames = 0;
   return installFakeMain(async (name, input) => {
     if (name === 'files.watch' || name === 'files.unwatch' || name === 'layout.set' || name === 'git.unwatch') return ok();
     if (name === 'git.watch') return fail('not a git repository'); // the summary's reads, as the panel suites answer them
@@ -54,8 +59,15 @@ function mainFor(files: Record<string, string>, opts: { refused?: string[]; held
       if (opts.refused?.includes(path)) return fail(REFUSAL);
       const text = files[path];
       if (text === undefined) return fail(`not found: ${path}`);
-      return ok({ encoding: 'utf8', content: text, bytes: text.length, offset: 0, length: text.length, truncated: false, mime: 'text/plain', hash: null, utf8: null });
+      const mime = path.endsWith('.pdf') ? 'application/pdf' : 'text/plain'; // UX wave U6b-2: a PDF is a framed kind
+      return ok({ encoding: 'utf8', content: text, bytes: text.length, offset: 0, length: text.length, truncated: false, mime, hash: null, utf8: null });
     }
+    // UX wave U6b-2: main's file frames, one token per ask
+    if (name === 'layout.frameFile') {
+      const token = frameToken(++frames);
+      return ok({ status: 'ready', token, url: frameUrl(token, (input.path as string).slice((input.path as string).lastIndexOf('/') + 1)), framed: 'pdf' });
+    }
+    if (name === 'layout.releaseFrame') return ok();
     return fail(`unexpected ${name}`);
   });
 }
@@ -535,5 +547,29 @@ describe('the viewer’s prune counts the files beside the chat', () => {
     await settle();
     expect(document.querySelector('[data-file-viewer]')!.getAttribute('data-path')).toBe('/r/b.ts');
     expect(useViewer.getState().entries.has(KEY('/r/a.ts'))).toBe(false);
+  });
+});
+
+// ---- a framed file's move (UX wave U6b-2, docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, sequence 8) ---
+
+describe('a framed file moved to the main area', () => {
+  it('a move keeps the token', async () => {
+    const main = mainFor({ '/r/ledger.pdf': '%PDF-1.4 invented\n' });
+    render(<TestHost />);
+    act(() => void openFile(A, '/r/ledger.pdf'));
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY('/r/ledger.pdf'))?.frame?.status).toBe('ready'));
+    const url = frameUrl(frameToken(1), 'ledger.pdf');
+    const beside = document.querySelector('[data-artifact-frame="pdf"]')!;
+    expect(beside.getAttribute('src')).toBe(`${url}#toolbar=0&navpanes=0`); // beside the chat: the side tab's fragment
+    const [side] = filesOf(A);
+    act(() => void moveFileToMain(side!.id));
+    const moved = allTabs(useLayout.getState().main).find((tab) => tab.id === KEY('/r/ledger.pdf')) as Extract<ReturnType<typeof allTabs>[number], { kind: 'file' }>;
+    expect(moved).toBeDefined();
+    render(<FileViewer tab={moved} />); // the main area draws the moved tab
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="pdf"]')?.getAttribute('src')).toBe(`${url}#navpanes=0`));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    expect(main.callsOf('layout.releaseFrame')).toEqual([]);
+    expect(main.callsOf('files.read')).toHaveLength(1);
   });
 });

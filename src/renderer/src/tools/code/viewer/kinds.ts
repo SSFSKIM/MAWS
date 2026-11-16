@@ -6,7 +6,7 @@
 import { extensionOf } from '@shared/files/mime';
 import type { FilesReadOutput } from '@shared/ipc/schema/files';
 
-export type ViewerKind = 'code' | 'markdown' | 'image' | 'external' | 'head';
+export type ViewerKind = 'code' | 'markdown' | 'image' | 'frame' | 'external' | 'head';
 export type ExternalKind = 'PDF' | 'HTML' | 'Audio' | 'Video' | 'Image' | 'Binary';
 type Encoding = FilesReadOutput['encoding'];
 

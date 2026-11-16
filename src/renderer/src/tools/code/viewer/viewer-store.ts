@@ -43,6 +43,7 @@ import { sideFileKeys } from '../files/tabs'; // UX wave U6b-1
 import { dirname, sameFile } from '../files/tree';
 import { EDITOR_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
+import type { FramedKind } from '@shared/files/framed';
 
 export const VIEWER_ENTRIES_MAX = 20;
 
@@ -89,7 +90,23 @@ export interface ViewerEntry {
   // E5 end
   readOnly: boolean; // E2: mounted read-only (the File artifact viewer; E2's Decision Log 7): never editable, whatever the file
   named: boolean; // U6c: the last load's answer carried `named`: the file is outside the session's folders, admitted by the transcript
+  frame: EntryFrame | null; // UX wave U6b-2: a framed file's token, as main answered it
 }
+
+// UX wave U6b-2 (Interfaces §E): what a framed file's tab draws.
+export interface ReadyFrame {
+  status: 'ready';
+  token: string;
+  url: string;
+  framed: FramedKind;
+  neighbours?: boolean;
+}
+export type EntryFrame =
+  | { status: 'asking'; shown: ReadyFrame | null }
+  | ReadyFrame
+  | { status: 'failed' }
+  | { status: 'row'; why: 'too-large' | 'unserved' }
+  | { status: 'row'; why: 'unplayable'; from: string };
 
 // E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found
 // it, as the merge view.
@@ -119,6 +136,7 @@ export interface ViewState {
   docOf: (() => string) | null; // the document as the file's text (the baseline's line breaks); the view's, live or left behind
   clean: unknown; // the view's own: CodeMirror's Text equal to the entry's `text`, never written here
   // E5 end
+  mediaAt: number; // UX wave U6b-2: a video's or a sound's position, seconds
 }
 
 export interface ViewerStore {
@@ -150,6 +168,10 @@ export interface ViewerStore {
   // UX wave U6b-1 (Decision 20b): a key on its way between two views (a move) is kept out of the ownership prune and the
   // cap until its next mount, or until no tab holds it
   holdKey(key: string): void;
+  // UX wave U6b-2 (Interfaces §E)
+  frameFailed(token: string): void;
+  frameUnplayable(tabId: string): void;
+  openAgain(tabId: string): void;
 }
 
 // E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
@@ -163,7 +185,7 @@ export const existingViewState = (tabId: string): ViewState | undefined => views
 
 export function viewState(tabId: string): ViewState {
   let view = views.get(tabId);
-  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false, docOf: null, clean: null }));
+  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false, docOf: null, clean: null, mediaAt: 0 }));
   return view;
 }
 
@@ -592,7 +614,7 @@ export function createViewerStore(client: MawsBridge) {
           const fresh: ViewerEntry = {
             tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
-            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false,
+            hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false, frame: null,
           };
           incarnations.set(tabId, ++lastIncarnation);
           set((s) => ({ entries: new Map(s.entries).set(tabId, fresh) }));
@@ -751,6 +773,10 @@ export function createViewerStore(client: MawsBridge) {
       holdKey(key) {
         held.add(key);
       },
+
+      frameFailed() {},
+      frameUnplayable() {},
+      openAgain() {},
 
       reset() {
         for (const hold of holds.values()) hold.release();

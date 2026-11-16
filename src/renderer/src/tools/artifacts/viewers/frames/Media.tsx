@@ -12,6 +12,9 @@ interface Props {
   kind: 'video' | 'audio';
   url: string;
   onLoad?(): void;
+  onError?(): void; // UX wave U6b-2 (M5, decision 6); not yet built
+  startAt?: number;
+  onTime?(seconds: number): void;
 }
 
 export function Media({ kind, url, onLoad }: Props) {

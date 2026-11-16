@@ -42,6 +42,12 @@ export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessio
   );
 }
 
+// UX wave U6b-2 (M5, decision 12): the row's sentence and whether it offers Open externally. Not yet built.
+export function rowWords(entry: ViewerEntry): { sentence: string; open: boolean } {
+  const kind = externalKindOf(entry) ?? 'Binary';
+  return { sentence: kind === 'Binary' ? VIEWER_COPY.binary(entry.bytes) : VIEWER_COPY.externalKind(kind), open: true };
+}
+
 export function ExternalRow({ entry }: { entry: ViewerEntry }) {
   const kind = externalKindOf(entry) ?? 'Binary';
   return (

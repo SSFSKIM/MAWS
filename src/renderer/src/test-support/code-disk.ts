@@ -5,7 +5,10 @@
 // UX wave U6c: folders outside the session's (`outside`), and the files there its transcript names (`names`): as the
 // service, a read or an "Open externally" of such a file answers only when it asks with `named` and the transcript
 // names the path, a read then answering `named: true`; any other call on a path there answers the refusal.
+// UX wave U6b-2 (M5): main's file frames. `layout.frameFile` answers a fresh token of the path's framed kind (`frames`
+// answers otherwise when the test gives it), `layout.releaseFrame` is recorded and answered; every token issued is listed.
 import type { CommandName } from '@shared/ipc/schema';
+import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { mimeOf } from '@shared/files/mime';
 import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
 import { deferred, fail, installFakeMain, ok } from './code';
@@ -30,15 +33,35 @@ export function fakeHash(text: string): string {
 
 export const OUTSIDE_REFUSAL = "path outside the session's directories";
 
+// UX wave U6b-2: the `n`th token the fake main issues, 32 lower-case hexadecimal characters built, never written out.
+export const frameToken = (n: number): string => n.toString(16).padStart(32, 'a');
+
+type Answer = ReturnType<typeof ok>;
+// What main answers `layout.frameFile` for a path: by default a ready token of the path's framed kind (an HTML page that
+// names no file beside it), `unframed` for another type.
+export type FrameAnswerer = (input: { appSessionId: string; path: string }, issue: (extra?: { neighbours?: boolean }) => Answer) => Answer;
+
 export interface DiskOptions {
   outside?: Iterable<string>; // folders outside the session's; a test adds and removes them through the returned `outside`
   names?: (appSessionId: string, path: string) => boolean; // whether the session's transcript names the path (bare ids)
+  frames?: FrameAnswerer; // UX wave U6b-2: main's answer to `layout.frameFile`, when not the default
 }
 
 export function installDisk(files: Record<string, DiskFile>, options: DiskOptions = {}) {
   const outside = new Set(options.outside ?? []);
   const isOutside = (path: string) => [...outside].some((folder) => path === folder || path.startsWith(`${folder}/`));
   const held = new Map<CommandName, ReturnType<typeof deferred<void>>[]>();
+  const issued: string[] = []; // UX wave U6b-2: every token `layout.frameFile` answered, in order
+  const frameFile = (input: { appSessionId: string; path: string }) => {
+    const issue = (extra: { neighbours?: boolean } = {}) => {
+      const framed = framedKindOf(mimeOf(input.path));
+      if (framed === null) return ok({ status: 'row', why: 'unframed' });
+      const token = frameToken(issued.length + 1);
+      issued.push(token);
+      return ok({ status: 'ready', token, url: frameUrl(token, input.path.slice(input.path.lastIndexOf('/') + 1)), framed, ...(framed === 'html' ? { neighbours: extra.neighbours ?? false } : {}) });
+    };
+    return options.frames ? options.frames(input, issue) : issue();
+  };
   const textOf = (path: string) => {
     const file = files[path];
     return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true } : { utf8: true, ...file };
@@ -50,6 +73,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
     if (name === 'layout.get') return ok({ value: null }); // UX wave U6b-1 (M3): nothing stored, Files' tree state among it
     if (name === 'layout.set') return ok();
+    if (name === 'layout.frameFile') return frameFile(input as { appSessionId: string; path: string }); // UX wave U6b-2
+    if (name === 'layout.releaseFrame') return ok();
     const path = input.path as string;
     const file = textOf(path);
     const named = isOutside(path) && (name === 'files.read' || name === 'files.openExternal') && input.named === true && options.names?.(input.appSessionId as string, path) === true;
@@ -89,6 +114,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     ...main,
     files,
     outside,
+    issued, // UX wave U6b-2
+    released: () => main.callsOf('layout.releaseFrame').map((input) => input.token as string), // UX wave U6b-2
     // The next call of `name` is answered (as the disk is when it arrives) only once the returned gate is released.
     hold(name: CommandName) {
       const gate = deferred<void>();

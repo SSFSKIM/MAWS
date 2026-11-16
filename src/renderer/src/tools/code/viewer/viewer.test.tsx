@@ -21,7 +21,8 @@ import { useFiles } from '../files/store';
 import { codeTranscriptActions, normalizeLexically, openFile, sessionOfTurn } from '../open-file';
 import { FLASH_CLASS } from './CodeView';
 import { FileBody, FileViewer } from './FileViewer';
-import { fakeHash, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
+import { fakeHash, frameToken, installDisk, OUTSIDE_REFUSAL } from '../../../test-support/code-disk';
+import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CODE_CAP, dataUrl, externalKindOf, IMAGE_CAP, jumpTarget, kindOf, MARKDOWN_RENDER_CAP } from './kinds';
 import { existingViewState, readOnlyReason, useViewer, VIEWER_ENTRIES_MAX } from './viewer-store';
@@ -39,12 +40,16 @@ describe('viewer kinds', () => {
     expect(kindOf({ name: '/r/a.markdown', mime: 'text/plain', bytes: 10, ...text })).toBe('markdown');
     expect(kindOf({ name: '/r/dot.png', mime: 'image/png', bytes: 70, ...binary })).toBe('image');
     expect(kindOf({ name: '/r/label.svg', mime: 'image/svg+xml', bytes: 300, ...text })).toBe('image');
-    expect(kindOf({ name: '/r/doc.pdf', mime: 'application/pdf', bytes: 30, ...binary })).toBe('external');
-    expect(kindOf({ name: '/r/page.html', mime: 'text/html', bytes: 30, ...text })).toBe('external');
-    expect(kindOf({ name: '/r/a.mp3', mime: 'audio/mpeg', bytes: 30, ...binary })).toBe('external');
-    expect(kindOf({ name: '/r/a.mov', mime: 'video/quicktime', bytes: 30, ...binary })).toBe('external');
+    // UX wave U6b-2: a PDF, an HTML page, a sound and a video are drawn in a frame, whatever their size
+    expect(kindOf({ name: '/r/doc.pdf', mime: 'application/pdf', bytes: 30, ...binary })).toBe('frame');
+    expect(kindOf({ name: '/r/page.html', mime: 'text/html', bytes: 30, ...text })).toBe('frame');
+    expect(kindOf({ name: '/r/a.mp3', mime: 'audio/mpeg', bytes: 30, ...binary })).toBe('frame');
+    expect(kindOf({ name: '/r/a.mov', mime: 'video/quicktime', bytes: 30, ...binary })).toBe('frame');
+    expect(kindOf({ name: '/r/long.mp4', mime: 'video/mp4', bytes: CODE_CAP * 40, ...binary })).toBe('frame');
+    expect(kindOf({ name: '/r/big.html', mime: 'text/html', bytes: CODE_CAP + 1, ...text })).toBe('frame');
     expect(kindOf({ name: '/r/data.bin', mime: 'application/octet-stream', bytes: 12, ...binary })).toBe('external');
     expect(kindOf({ name: '/r/scan.tiff', mime: 'image/tiff', bytes: 30, ...binary })).toBe('external'); // not drawable inline
+    expect(kindOf({ name: '/r/huge.png', mime: 'image/png', bytes: IMAGE_CAP + 1, ...binary })).toBe('external'); // past the image cap
     expect(kindOf({ name: '/r/big.log', mime: 'text/plain', bytes: 20 * 1024 * 1024, ...text })).toBe('head');
     expect(kindOf({ name: '/r/app.ts', mime: 'text/x-typescript', bytes: 900, ...text })).toBe('code');
   });
@@ -109,10 +114,17 @@ const MiB = 1024 * 1024;
 type Served = string | { text: string; mime?: string } | { base64: string; bytes: number; mime?: string } | { refusal: string } | { generated: number; line: string };
 
 function serve(files: Record<string, Served>, gate?: (offset: number) => Promise<void>) {
+  let frames = 0;
   return installFakeMain(async (name, input) => {
     if (name === 'layout.openExternal') return ok();
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'files.openExternal') return ok({ opened: true, message: null });
+    if (name === 'layout.releaseFrame') return ok(); // UX wave U6b-2: main's file frames
+    if (name === 'layout.frameFile') {
+      const framed = framedKindOf(mimeOf(input.path as string));
+      const token = frameToken(++frames);
+      return framed === null ? ok({ status: 'row', why: 'unframed' }) : ok({ status: 'ready', token, url: frameUrl(token, 'file'), framed, ...(framed === 'html' ? { neighbours: false } : {}) });
+    }
     if (name !== 'files.read') return fail(`unexpected ${name}`);
     const path = input.path as string;
     const offset = (input.offset as number | undefined) ?? 0;
@@ -339,13 +351,14 @@ describe('viewer', () => {
     await waitFor(() => expect(screen.queryByRole('button', { name: 'Zoom in' })).toBeNull());
   });
 
-  it('offers Open externally for a PDF and only the size for a binary MAWS will not hand out', async () => {
+  // UX wave U6b-2: a PDF is drawn in its frame, with Open externally in the bar; a binary keeps its row
+  it('draws a PDF with Open externally in its bar, and only the size for a binary MAWS will not hand out', async () => {
     const main = serve({ '/r/doc.pdf': { base64: 'JVBERi0xLjQ=', bytes: 30 }, '/r/data.bin': { base64: 'AAEC', bytes: 12, mime: 'application/octet-stream' } });
     const { unmount } = render(<FileViewer tab={fileTab('/r/doc.pdf')} />);
-    expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="pdf"]')).not.toBeNull());
+    expect(screen.queryByText('PDF files open outside MAWS')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
     await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: '/r/doc.pdf', named: true }]));
-    expect(document.querySelector('iframe, embed, object')).toBeNull();
     unmount();
     render(<FileViewer tab={fileTab('/r/data.bin')} />);
     expect(await screen.findByText('Binary file · 12 B')).toBeTruthy();
@@ -682,10 +695,11 @@ describe('a file the transcript names (U6c)', () => {
     expect(main.files[OUT]).toBe('outside text\n');
   });
 
-  it('shows a named PDF as the row whose Open externally asks with named', async () => {
+  it('draws a named PDF, its bar’s Open externally asking with named', async () => {
     const main = disk({ [PDF]: '%PDF-1.4 invented\n' }, [PDF]);
     show(PDF);
-    expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
+    await waitFor(() => expect(document.querySelector('[data-artifact-frame="pdf"]')).not.toBeNull());
+    expect(shown(PDF)).toMatchObject({ named: true, kind: 'frame' });
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
     await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: PDF, named: true }]));
     expect(screen.queryByRole('alert')).toBeNull();
@@ -775,7 +789,7 @@ describe('a file the transcript names (U6c)', () => {
   it('W4: a named PDF shown again with the same bytes lands nothing but named', async () => {
     const main = disk({ [PDF]: '%PDF-1.4 invented\n' }, [PDF]);
     const first = show(PDF);
-    await screen.findByText('PDF files open outside MAWS');
+    await waitFor(() => expect(shown(PDF)?.frame?.status).toBe('ready'));
     const { epoch } = shown(PDF)!;
     first.unmount();
     render(<FileViewer tab={fileTab(PDF)} />);
@@ -789,7 +803,7 @@ describe('a file the transcript names (U6c)', () => {
     const main = disk({ '/r/doc.pdf': '%PDF-1.4 one\n' });
     const offs = [connectCodeEvents()];
     show('/r/doc.pdf');
-    await screen.findByText('PDF files open outside MAWS');
+    await waitFor(() => expect(shown('/r/doc.pdf')?.frame?.status).toBe('ready'));
     const { epoch } = shown('/r/doc.pdf')!;
     main.files['/r/doc.pdf'] = '%PDF-1.4 two\n'; // other bytes, the same length: the external read sees size and type alone
     act(() => main.emit('files.changed', { appSessionId: MAIN_A, path: '/r/doc.pdf', kind: 'changed' }));
@@ -873,6 +887,223 @@ describe('a file the transcript names (U6c)', () => {
     expect(shown()).toMatchObject({ appSessionId: B, status: 'error', named: false, text: '' });
     expect(codeText()).toBeNull();
     expect(main.callsOf('files.read').map((input) => input.appSessionId)).toEqual([MAIN_A, 'app-b']);
+  });
+});
+
+// ---- a framed file (UX wave U6b-2, docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5) ------------------
+// The entry asks main for a token once a read of a PDF, an HTML page, a video or a sound lands, keeps one ask in flight,
+// swaps the frame only when the new token is ready, and releases every token it no longer shows. Main's two commands
+// and its event are the fake disk's (`installDisk`); every path and byte here is invented.
+
+describe('a framed file (UX wave U6b-2)', () => {
+  const PDF = '/r/ledger.pdf';
+  const NAMED = '/elsewhere/ledger.pdf';
+  const offs: (() => void)[] = [];
+  beforeEach(() => {
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useLayout.setState({ main: LAYOUT_DEFAULTS.main, hydrated: true });
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    vi.useRealTimers();
+  });
+
+  const entry = (path = PDF) => useViewer.getState().entries.get(FILE(path));
+  const tokenOf = (path = PDF) => {
+    const frame = entry(path)?.frame;
+    return frame?.status === 'ready' ? frame.token : frame?.status === 'asking' ? (frame.shown?.token ?? null) : null;
+  };
+  const frameSrc = () => document.querySelector('[data-artifact-frame="pdf"]')?.getAttribute('src') ?? null;
+  const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
+  // A main tab of the file the layout holds, so the prune keeps its entry while it is not shown; drawn.
+  const show = (path = PDF) => {
+    act(() => void openFile(A, path, null, { main: true }));
+    return render(<FileViewer tab={fileTab(path)} />);
+  };
+  const changed = (main: { emit: ReturnType<typeof installDisk>['emit'] }, path = PDF) => act(() => main.emit('files.changed', { appSessionId: MAIN_A, path, kind: 'changed' }));
+
+  it('a framed entry asks main once its read lands, with the session, the path and the read’s keys', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    show();
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toEqual([{ appSessionId: MAIN_A, path: PDF, offset: 0, length: FILES_READ_DEFAULT_LENGTH, hash: true, named: true }]);
+    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: PDF }]);
+    expect(entry()).toMatchObject({ kind: 'frame', status: 'ready', frame: { status: 'ready', token: main.issued[0], url: frameUrl(main.issued[0]!, 'ledger.pdf'), framed: 'pdf' } });
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+  });
+
+  it('an entry read by its artifact asks nothing and draws the row', async () => {
+    const main = installFakeMain(async (name) =>
+      name === 'library.read'
+        ? ok({ encoding: 'base64', content: 'JVBERi0xLjQ=', bytes: 8, offset: 0, length: 8, truncated: false, mime: 'application/pdf', hash: null, utf8: null })
+        : fail(`unexpected ${name}`),
+    );
+    const ID = '00000000-0000-4000-8000-0000000000aa';
+    render(<FileBody tabId={`artifact:${ID}:1`} appSessionId={null} path="/w/ledger.pdf" readOnly artifact={{ artifactId: ID, revision: 1 }} />);
+    expect((await screen.findByText('PDF files open outside MAWS')).tagName).toBe('P');
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toEqual([]);
+    expect(document.querySelector('iframe')).toBeNull();
+  });
+
+  it('an ask that fails makes the entry an error that revisit reads again', async () => {
+    let connected = false;
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_, issue) => (connected ? issue() : fail('layout.frameFile: machine mini is not connected')) });
+    show();
+    expect((await screen.findByRole('alert')).textContent).toContain('Refused: layout.frameFile: machine mini is not connected');
+    expect(entry()).toMatchObject({ status: 'error', frame: null });
+    connected = true;
+    act(() => useViewer.getState().revisit(FILE(PDF)));
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toHaveLength(2);
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+  });
+
+  it('a row for a daemon that does not serve asks again when the entry is mounted again', async () => {
+    let served = false;
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' }, { frames: (_, issue) => (served ? issue() : ok({ status: 'row', why: 'unserved' })) });
+    const first = show();
+    expect((await screen.findByText('MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.')).tagName).toBe('P');
+    expect(entry()!.frame).toEqual({ status: 'row', why: 'unserved' });
+    first.unmount();
+    served = true;
+    render(<FileViewer tab={fileTab(PDF)} />);
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toHaveLength(1);
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+  });
+
+  it('a revisit of a named file asks again and flashes nothing when type and size are the same', async () => {
+    const main = installDisk({ [NAMED]: '%PDF-1.4 invented\n' }, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && path === NAMED });
+    const first = show(NAMED);
+    await waitFor(() => expect(entry(NAMED)?.frame?.status).toBe('ready'));
+    first.unmount();
+    render(<FileViewer tab={fileTab(NAMED)} />);
+    await waitFor(() => expect(entry(NAMED)?.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    expect(main.callsOf('files.read')).toHaveLength(2);
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    expect(entry(NAMED)).toMatchObject({ named: true, updated: 0 });
+    expect(document.querySelector('[data-updated]')).toBeNull();
+  });
+
+  it('a failed frame releases its token and is revisitable; a failure starts no read by itself', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    show();
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    const before = main.calls.length;
+    vi.useFakeTimers();
+    act(() => main.emit('layout.frameFailed', { token: main.issued[0]! }));
+    expect(entry()!.frame).toEqual({ status: 'failed' });
+    await act(() => vi.advanceTimersByTimeAsync(60 * 60 * 1000));
+    expect(main.calls.slice(before)).toEqual([{ name: 'layout.releaseFrame', input: { token: main.issued[0] } }]);
+    vi.useRealTimers();
+    act(() => useViewer.getState().revisit(FILE(PDF)));
+    await waitFor(() => expect(entry()?.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    expect(main.callsOf('files.read')).toHaveLength(2);
+  });
+
+  it('frameFailed for a token the entry no longer holds changes nothing', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    show();
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    changed(main);
+    await waitFor(() => expect(tokenOf()).toBe(main.issued[1]));
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    act(() => main.emit('layout.frameFailed', { token: main.issued[0]! }));
+    await settle();
+    expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] });
+    expect(main.released()).toEqual([main.issued[0]]);
+  });
+
+  it('the removal of an entry releases its token', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    const view = show();
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    view.unmount();
+    expect(main.released()).toEqual([]);
+    act(() => useLayout.getState().closeTab(FILE(PDF), { remember: false }));
+    expect(entry()).toBeUndefined();
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+  });
+
+  it('reset releases every token', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n', '/r/tide.webm': 'invented clip bytes' });
+    show();
+    show('/r/tide.webm');
+    await waitFor(() => expect([entry()?.frame?.status, entry('/r/tide.webm')?.frame?.status]).toEqual(['ready', 'ready']));
+    cleanup();
+    act(() => useViewer.getState().reset());
+    await waitFor(() => expect(main.released().sort()).toEqual([...main.issued].sort()));
+    expect(main.issued).toHaveLength(2);
+  });
+
+  // Sequence 1: a token asked while the tab closes.
+  it('an answer for an entry that is gone releases its token', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    const ask = main.hold('layout.frameFile');
+    const view = show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    expect(entry()!.frame).toEqual({ status: 'asking', shown: null });
+    view.unmount();
+    act(() => useLayout.getState().closeTab(FILE(PDF), { remember: false }));
+    expect(entry()).toBeUndefined();
+    ask.release();
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    expect(entry()).toBeUndefined();
+  });
+
+  // Sequence 2: a change during an ask.
+  it('a read that lands during an ask is followed by one more ask, never two in flight', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    const first = main.hold('layout.frameFile');
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    changed(main);
+    await waitFor(() => expect(main.callsOf('files.read')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.pending).toBe(0));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    const second = main.hold('layout.frameFile');
+    first.release();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    expect(entry()!.frame).toMatchObject({ status: 'asking', shown: { token: main.issued[0] } });
+    expect(main.released()).toEqual([]);
+    second.release();
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+  });
+
+  // Sequence 3: the swap.
+  it('the frame drawn stays until the new token is ready, and the old one is released after', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    show();
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`));
+    // what the store shows when it releases a token
+    const invoke = main.bridge.invoke.bind(main.bridge);
+    const drawnAtRelease: (string | null)[] = [];
+    (main.bridge as { invoke: typeof invoke }).invoke = ((name, input, ...rest) => {
+      if (name === 'layout.releaseFrame') drawnAtRelease.push(tokenOf());
+      return invoke(name, input, ...rest);
+    }) as typeof invoke;
+    const next = main.hold('layout.frameFile');
+    changed(main);
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    expect(frameSrc()).toBe(`${frameUrl(main.issued[0]!, 'ledger.pdf')}#navpanes=0`);
+    expect(main.released()).toEqual([]);
+    next.release();
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[1]!, 'ledger.pdf')}#navpanes=0`));
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    expect(drawnAtRelease).toEqual([main.issued[1]]);
+    expect(document.querySelector('[data-updated]')?.textContent).toBe('Updated');
   });
 });
 
