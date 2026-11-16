@@ -1131,3 +1131,78 @@ test('p5 O16 veto (d) a server whose direct child is gone stays connected in mcp
   assert.ok(!treeVeto(sfx,label).rows.some(r=>r.depth===1&&r.pid!==k.pid&&r.command===k.command),sfx+label); // no respawn
  }
 });
+
+// UX wave U2b, check 1 (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md; findings-uxwave-U2b-mod-answers.txt):
+// what the to-human mod answers on MAWS's surface, before (0.8.2) and after its pull request (0.9.0). Integrity of every
+// u2b-mod-* journal, then one check per question the recordings answer.
+const dirU2b=new URL('./fixtures/uxwave/',import.meta.url);
+const u2bFiles=readdirSync(dirU2b).filter(f=>/^u2b-mod-.*\.jsonl$/.test(f));
+const loadU2b=n=>readFileSync(new URL(n+'.jsonl',dirU2b),'utf8').trim().split('\n').map(JSON.parse);
+const u2bJson=n=>JSON.parse(readFileSync(new URL(n,dirU2b),'utf8'));
+const metaU2b=(rows,event)=>rows.filter(r=>r.frame.event===event).map(r=>r.frame);
+const tableU2b=(rows,label)=>Object.fromEntries(metaU2b(rows,'u2b_table').find(t=>t.label===label).rows.map(r=>[r.name,r]));
+const TO_HUMAN_SITES=new Set(['UserMessage','AssistantMessage','ToolUse','ToolResult','ToolGroup','TurnDuration']);
+for(const file of u2bFiles)test('uxwave/'+file+' is ordered NDJSON with correlated replies, a provenance naming its installation, and a clean exit',()=>{
+ const rows=loadU2b(file.slice(0,-6));let seq=0;const pending=new Set();
+ for(const row of rows){assert.equal(row.seq,++seq);const f=row.frame;
+  // Every request the probe sent is answered (the SDK server's MCP replies are logged as they cross, in either direction).
+  if(f.type==='control_request'&&row.direction==='out')pending.add(f.request_id);
+  if(f.type==='control_response'&&row.direction==='in')pending.delete(f.response.request_id);
+  assert.notEqual(f.event,'parse_error');assert.notEqual(f.event,'scenario_error');}
+ assert.equal(pending.size,0);
+ const prov=metaU2b(rows,'provenance')[0];assert.equal(prov.engineVersion,'2.1.322');assert.match(prov.installation.commit,/^[0-9a-f]{40}$/);
+ assert.ok(rows.some(r=>r.frame.event==='exit'&&r.frame.code===0));
+});
+test('U2b A1: at 8, before and after, every site the view hooks keeps the engine\'s drawing (the async question is the sminos ask mod\'s)',()=>{
+ for(const n of ['u2b-mod-8-before','u2b-mod-8-after','u2b-mod-9-before'])for(const a of metaU2b(loadU2b(n),'ui_render_answer'))
+  if(TO_HUMAN_SITES.has(a.component)&&a.instance_id!=='toolu_01SeedAskArchive0005')assert.equal(a.brief.kind,'engine',n+' '+a.label);
+});
+test('U2b A2 (resumed): at 9 after, the run folds behind its first row, the message call is the mod\'s, the full transcript is the engine\'s',()=>{
+ const rows=loadU2b('u2b-mod-9-after');const t=tableU2b(rows,'pass 2');
+ assert.deepEqual(t.thought.buttons,['› working record']);for(const k of ['group','unmarked','listing','hand-back','task notice'])assert.equal(t[k].kind,'empty',k);
+ assert.equal(t['message call'].kind,'mod');assert.equal(t.prompt.kind,'engine');assert.equal(t['answer delivery'].kind,'engine');
+ const open=tableU2b(rows,'run open');assert.equal(open.group.kind,'mod+engine');assert.deepEqual(open.unmarked.buttons,['‹ fold to report']);
+ const full=tableU2b(rows,'full transcript');for(const k of ['thought','group','unmarked','mixed','listing','final'])assert.equal(full[k].kind,'engine',k);
+});
+test('U2b A2 (live): at 9 after the message call\'s row is the mod\'s message; at 8 and at 9 before it is the engine\'s',()=>{
+ const call=n=>metaU2b(loadU2b(n),'ui_render_answer').find(a=>a.label.startsWith('the message call'));
+ assert.equal(call('u2b-mod-9-after-live').brief.kind,'mod');for(const n of ['u2b-mod-8-before-live','u2b-mod-8-after-live','u2b-mod-9-before-live'])assert.equal(call(n).brief.kind,'engine',n);
+});
+test('U2b A3 and B: a reload under 9 follows the installation, and the reported path holds the declaration exactly when the view draws',()=>{
+ const rows=loadU2b('u2b-mod-reload');const [toBefore,toAfter]=metaU2b(rows,'u2b_reload');
+ assert.equal(toBefore.toHumanRoot[0].declaration,null);assert.match(toAfter.toHumanRoot[0].declaration,/"drawsFrom": 9/);
+ assert.equal(tableU2b(rows,'step 2, before after reload_plugins').thought.kind,'engine');assert.equal(tableU2b(rows,'step 3, after after reload_plugins').thought.kind,'mod');
+ for(const n of ['u2b-mod-9-after-live','u2b-mod-none-before-live']){const i=metaU2b(loadU2b(n),'u2b_init')[0];assert.equal(i.plugins.filter(p=>p.name==='to-human').length,1);}
+});
+test('U2b C1 and C3: a turn line and an anchored notice reach the hooks under their own ids and fold with their turn\'s and anchor\'s run',()=>{
+ const rows=loadU2b('u2b-mod-rows');const lines=metaU2b(rows,'u2b_probe_log').flatMap(l=>l.lines);
+ assert.ok(lines.some(l=>l.component==='TurnDuration'&&l.requestId.endsWith('~turn')&&l.surface==='desktop'));assert.ok(lines.some(l=>l.requestId==='toolu_01SeedListAgents0006~peer-1'));
+ const folded=tableU2b(rows,'folded'),open=tableU2b(rows,'first run open');
+ assert.equal(folded['C1 turn 1 line (after the prompt)'].kind,'empty');assert.equal(open['C1 turn 1 line (after the prompt)'].kind,'engine');
+ assert.equal(folded['C3 scheduled trigger after the unmarked text'].kind,'empty');assert.equal(open['C3 scheduled trigger after the unmarked text'].kind,'mod+engine');
+});
+test('U2b C2: a thought under its bare uuid folds with its run; under uuid:thinking:0 it is not placed there',()=>{
+ const rows=loadU2b('u2b-mod-rows');const folded=tableU2b(rows,'folded'),open=tableU2b(rows,'first run open');
+ assert.equal(open['C2 thought, bare uuid'].kind!=='mod'||open['C2 thought, bare uuid'].buttons.length===0,true);
+ assert.deepEqual(folded['C2 thought, uuid:thinking:0'].buttons,['› working record']);assert.equal(open['C2 thought, uuid:thinking:0'].kind,'empty');
+});
+test('U2b C5: an answer notice with origin plugin folds; the delivery\'s own text stays under any origin',()=>{
+ const t=tableU2b(loadU2b('u2b-mod-rows'),'folded');assert.deepEqual(t['C5 answer notice, origin plugin, after the question'].buttons,['› working record']);
+ for(const o of ['sdk','plugin','unclassified'])assert.equal(t['C5 delivery text, origin '+o].kind,'engine',o);
+});
+test('U2b D: with no advertisement the view draws on the desktop surface; with every hook off nothing answers',()=>{
+ for(const n of ['u2b-mod-none-before','u2b-mod-none-after'])assert.deepEqual(tableU2b(loadU2b(n),'pass 2').thought.buttons,['› working record'],n);
+ for(const a of metaU2b(loadU2b('u2b-mod-none-after-nohooks'),'ui_render_answer'))assert.equal(a.brief.hooked,false);
+});
+test('U2b E1, E2, E5, E6: summaries at 9 after, pushes naming the instance that read them, none asked again at a resume, none counted in result',()=>{
+ const s=metaU2b(loadU2b('u2b-mod-summary'),'u2b_summary')[0];assert.equal(s.foldsFile.shape,2);assert.equal(s.foldsFile.runs.length,2);
+ assert.ok(s.foldsFile.runs.every(r=>r.firstOnWire&&r.lastOnWire&&r.firstInFile&&r.lastInFile));assert.equal(s.foldsFile.name,s.sessionId+'.json');
+ assert.ok(s.pushes.some(p=>p.instances?.length===1&&p.instances[0].component==='ToolUse'));
+ const c=metaU2b(loadU2b('u2b-mod-summary'),'u2b_cost')[0];const sums=c.relay.filter(x=>x.kind==='summary');assert.equal(sums.length,2);
+ const counted=c.relay.filter(x=>x.method==='POST'&&x.kind!=='summary'&&x.at<c.relay.at(-1).at).reduce((a,x)=>a+x.usage.output_tokens,0);assert.equal(c.firstTurn.modelUsage['claude-haiku-5-5'].outputTokens,counted);
+ const r=metaU2b(loadU2b('u2b-mod-summary-resume'),'u2b_resume')[0];assert.equal(r.summaryRequests,0);assert.ok(r.foldsFileUnchanged);
+});
+test('U2b E4: the folds file is replaced in one step: no read of it failed to parse, one version per write, both processes\' runs kept',()=>{
+ const s=u2bJson('u2b-mod-folds-stress.reader.json');assert.ok(s.summaryRequests>=50);assert.equal(s.notParsed,0);assert.equal(s.distinctVersions,s.summaryRequests);
+ const t=u2bJson("u2b-mod-folds-two.reader.json");assert.equal(t.notParsed,0);assert.deepEqual([t.final.ofA,t.final.ofB,t.final.ofNeither],[25,25,0]);
+});

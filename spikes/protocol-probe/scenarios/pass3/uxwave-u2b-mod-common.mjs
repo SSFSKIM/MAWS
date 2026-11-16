@@ -23,6 +23,7 @@ import {execFileSync} from 'node:child_process';
 import {mkdtempSync,mkdirSync,writeFileSync,readFileSync,existsSync,cpSync,realpathSync,rmSync,readdirSync} from 'node:fs';
 import {join,dirname} from 'node:path';
 import {createHash} from 'node:crypto';
+import * as crypto from 'node:crypto';
 import {fileURLToPath} from 'node:url';
 export {delay};
 
@@ -208,15 +209,17 @@ export function rootOf(path){try{return {entries:readdirSync(path).sort(),declar
 // ---- one launch as MAWS launches ----
 // advert: '8', '9' or null (no advertisement). resume: the session id to resume, or null for a new session (sessionId).
 // offline: an unreachable API endpoint, so no model call can be made. model: null for none (a resumed run).
-export async function mawsLaunch(name,run,{advert=null,resume=null,sessionId=null,model=null,offline=false,settingsEnv={},hooksOff=false,provenance={},timeout=120000}={},body){
+export async function mawsLaunch(name,run,{advert=null,resume=null,sessionId=null,model=null,offline=false,endpoint=null,relay=null,settingsEnv={},hooksOff=false,debugFile=null,provenance={},timeout=120000}={},body){
  const env={...(advert===null?{}:{MAWS_NATIVE_TO_HUMAN:advert}),...settingsEnv};
  const settings={dialogExpiry:'never',...(hooksOff?{disableAllHooks:true}:{}),...(Object.keys(env).length?{env}:{})};
- const flags=[...PRODUCT_FLAGS,'--await-initialize',...(resume?['--resume',resume]:['--session-id',sessionId]),'--settings',JSON.stringify(settings),...run.dirs.flatMap(d=>['--plugin-dir',d])];
+ const flags=[...PRODUCT_FLAGS,'--await-initialize',...(resume?['--resume',resume]:['--session-id',sessionId]),'--settings',JSON.stringify(settings),...(debugFile?['--debug-file',debugFile]:[]),...run.dirs.flatMap(d=>['--plugin-dir',d])];
  const procEnv={HOME:run.home,CLAUDE_CODE_ENABLE_FUNCTION_HOOKS:'1',CLAUDE_CODE_EMIT_TOOL_USE_SUMMARIES:'false',CLAUDE_CODE_FORK_SUBAGENT:'true',CLAUDE_CODE_ENABLE_SDK_FILE_CHECKPOINTING:'1',CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS:'1',CLAUDE_CODE_QUESTION_PREVIEW_FORMAT:'html',SMNS_MEMBER:String(process.pid),MAWS_LANE:'B',TERM:'dumb',DISABLE_AUTOUPDATER:'1',
-  ...(offline?{ANTHROPIC_BASE_URL:'http://127.0.0.1:9',ANTHROPIC_AUTH_TOKEN:'control-only-no-credential'}:{})};
+  ...(offline?{ANTHROPIC_BASE_URL:'http://127.0.0.1:9',ANTHROPIC_AUTH_TOKEN:'control-only-no-credential'}:{}),
+  ...(endpoint?{ANTHROPIC_BASE_URL:endpoint,ANTHROPIC_AUTH_TOKEN:'local-stand-in-no-credential'}:{}),
+  ...(relay?{ANTHROPIC_BASE_URL:relay}:{})};
  let failure=null;
  const p=await harnessRun(name,async p=>{
-  p.note({event:'provenance',...CHECK,engine:BIN,engineVersion:ENGINE_VERSION,installation:describe(run.installed),advertisement:advert,settings,launch:'MAWS launch: ENGINE_FLAGS, --await-initialize, '+(resume?'--resume':'--session-id')+', --settings, three --plugin-dir; setting sources user,project,local; buildEnvironment constants; HOME scratch, no CLAUDE_CONFIG_DIR',offline,model,scratchRoot:run.root,...provenance});
+  p.note({event:'provenance',...CHECK,engine:BIN,engineVersion:ENGINE_VERSION,installation:describe(run.installed),advertisement:advert,settings,launch:'MAWS launch: ENGINE_FLAGS, --await-initialize, '+(resume?'--resume':'--session-id')+', --settings, three --plugin-dir; setting sources user,project,local; buildEnvironment constants; HOME scratch, no CLAUDE_CONFIG_DIR',offline,endpoint:endpoint?'a local stand-in for the Messages API (uxwave-u2b-mock-api.mjs)':relay?'the gateway, through a local relay that logs each answer\'s usage (uxwave-u2b-mock-api.mjs startRelay)':null,model,scratchRoot:run.root,...provenance});
   p.serve('maws',new SdkServer('maws',MAWS_TOOLS.map(t=>({...t,call:()=>({content:[{type:'text',text:'probe: not served'}],isError:true})}))));
   p.on('can_use_tool',r=>{p.note({event:'permission_asked',tool:r.tool_name});return {behavior:'allow',updatedInput:r.input};});
   p.on('request_user_dialog',r=>{p.note({event:'dialog_seen',kind:r.dialog_kind});return {behavior:'completed',result:'continue'};});
@@ -238,3 +241,29 @@ export async function mawsLaunch(name,run,{advert=null,resume=null,sessionId=nul
 export const removeRun=run=>{if(!process.env.U2B_KEEP)rmSync(run.root,{recursive:true,force:true});};
 export const resultFrames=p=>p.frames.filter(r=>r.frame.type==='result');
 export const initFrames=p=>p.frames.filter(r=>r.frame.type==='system'&&r.frame.subtype==='init');
+
+// ---- a live turn ----
+export function prompt(p,content){const uuid=crypto.randomUUID();p.send({type:'user',uuid,message:{role:'user',content},parent_tool_use_id:null,origin:{kind:'human'}});return {seq:p.seq,uuid};}
+export const waitResult=(p,after,timeout=240000)=>p.wait(f=>f.type==='result',{after,timeout});
+// The stretches the wire shows so far: calls between the rows the person reads (a marked text, a message-tool call),
+// each with its calls (id, tool, input, result text once kept). A stretch opened by a call; its head is that call.
+export function stretches(p,from=0){
+ const out=[];let cur=null;const results=new Map();
+ for(const r of p.frames){if(r.seq<=from)continue;const f=r.frame;
+  if(f.type==='user'&&Array.isArray(f.message?.content))for(const b of f.message.content)if(b.type==='tool_result')results.set(b.tool_use_id,typeof b.content==='string'?b.content:JSON.stringify(b.content));
+  if(f.type!=='assistant'||f.parent_tool_use_id)continue;
+  for(const b of f.message?.content??[]){
+   if(b.type==='tool_use'&&b.name!=='mcp__to-human__message'){if(!cur){cur={head:b.id,calls:[],uuid:f.uuid,seq:r.seq};out.push(cur);}if(!cur.calls.some(c=>c.id===b.id))cur.calls.push({id:b.id,tool:b.name,input:b.input,uuid:f.uuid});}
+   else if(b.type==='tool_use'||(b.type==='text'&&/<message>/.test(b.text))){if(cur)cur.closedAt=r.seq;cur=null;}
+  }
+ }
+ for(const s of out)for(const c of s.calls)c.result=results.get(c.id);
+ return out;
+}
+export const headAsk=s=>{const c=s.calls[0];return {component:'ToolUse',instance_id:c.id,props:{tool_use_id:c.id,tool:c.tool,input:c.input,isRunning:c.result===undefined,isErrored:false,isInterrupted:false,...(c.result!==undefined?{output:c.result}:{})}};};
+export const runAsk=s=>s.calls.length<2?headAsk(s):{component:'ToolGroup',instance_id:'group:'+s.head,props:{calls:s.calls.map(c=>({tool_use_id:c.id,tool:c.tool,input:c.input,isRunning:c.result===undefined,isErrored:false,isInterrupted:false,...(c.result!==undefined?{output:c.result}:{})})),isActive:s.calls.some(c=>c.result===undefined),isExpanded:false}};
+// The message-tool calls the wire shows so far, as MAWS asks each (ToolUse, the call's props).
+export function messageAsks(p,from=0){const out=[];for(const r of p.frames){if(r.seq<=from||r.frame.type!=='assistant'||r.frame.parent_tool_use_id)continue;for(const b of r.frame.message?.content??[])if(b.type==='tool_use'&&b.name==='mcp__to-human__message')out.push({seq:r.seq,ask:{component:'ToolUse',instance_id:b.id,props:{tool_use_id:b.id,tool:b.name,input:b.input,isRunning:false,isErrored:false,isInterrupted:false,output:'sent'}}});}return out;}
+export const labelOf=a=>a.brief.kind==='engine'?'(engine drawing)':a.brief.kind==='empty'?'(hidden)':(a.brief.buttons.map(b=>b.text||b.label).join(' | ')||'(mod drawing, no button)');
+export function readFolds(run,sid){const f=foldsFileOf(run,sid);if(!existsSync(f))return null;const text=readFileSync(f,'utf8');try{return {text,json:JSON.parse(text)};}catch{return {text,json:null};}}
+export const rowKey=id=>/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/.test(id)?id.slice(0,24):id;

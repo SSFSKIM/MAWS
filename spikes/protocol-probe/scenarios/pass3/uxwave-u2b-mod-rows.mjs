@@ -49,7 +49,6 @@ const EXTRA=[
  ['C2 thought, bare uuid',ASK.thought()],
  ['C2 thought, uuid:thinking:0',ASK.thought(ID.a1+':thinking:0')],
  ['C2 thought, uuid:text:0',ASK.thought(ID.a1+':text:0')],
- ['C2 thought, the engine\'s derived form (the uuid\'s first 24 characters, then the block index in 12 hex digits)',ASK.thought(ID.a1.slice(0,24)+'000000000000')],
  ['C3 scheduled trigger after the unmarked text',ASK.notice(ID.a5,'sched-1','scheduled-trigger','Scheduled task "tidy" fired')],
  ['C3 wake (plugin) after the unmarked text',ASK.notice(ID.a5,'wake-1','plugin','sminos woke the session')],
  ['C3 task end after the listing',ASK.notice(ID.t6,'task-1','task-notification','Background command "sleep 2" completed',{task:{id:'bhost0001',status:'completed',toolUseId:'toolu_01SeedBackground00008'}})],

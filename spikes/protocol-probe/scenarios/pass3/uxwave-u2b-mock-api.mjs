@@ -84,3 +84,29 @@ export function startMock(){
  });
  return new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve({port:server.address().port,url:`http://127.0.0.1:${server.address().port}`,log,count:kind=>log.filter(x=>x.kind===kind).length,close:()=>new Promise(r=>server.close(()=>r()))})));
 }
+
+// A pass-through relay to the real endpoint (the VM's gateway forward), for E6: it forwards each request unchanged
+// (headers included, never logged; `accept-encoding` dropped so the answer can be read) and logs, per request, what it
+// was (a summary request by the mod's system prompt, or the main loop's or another) and the usage the answer reports.
+export function startRelay(target){
+ const log=[];const t=new URL(target);
+ const server=http.createServer((req,res)=>{
+  const chunks=[];req.on('data',d=>chunks.push(d));req.on('end',()=>{
+   const raw=Buffer.concat(chunks);let body={};try{body=JSON.parse(raw.toString('utf8')||'{}');}catch{}
+   const system=JSON.stringify(body.system??'');
+   const entry={at:Date.now(),method:req.method,path:(req.url??'').split('?')[0],kind:system.includes(LABEL)?'summary':(body.tools??[]).length?'main':'aside',model:body.model,maxTokens:body.max_tokens,stream:!!body.stream,thinking:body.thinking?.type??null,systemChars:system.length,tools:(body.tools??[]).length};
+   const headers={...req.headers};delete headers['accept-encoding'];headers.host=t.host;
+   const up=http.request({host:t.hostname,port:t.port,method:req.method,path:req.url,headers},r=>{
+    res.writeHead(r.statusCode,r.headers);entry.status=r.statusCode;const got=[];
+    r.on('data',d=>{got.push(d);res.write(d);});
+    r.on('end',()=>{res.end();const text=Buffer.concat(got).toString('utf8');
+     try{if(/^\s*\{/.test(text)){const j=JSON.parse(text);entry.usage=j.usage??null;entry.model=j.model??entry.model;}
+      else{const u={};for(const m of text.matchAll(/^data: (.*)$/gm)){try{const e=JSON.parse(m[1]);if(e.type==='message_start'){Object.assign(u,e.message?.usage??{});entry.model=e.message?.model??entry.model;}if(e.type==='message_delta')Object.assign(u,e.usage??{});}catch{}}entry.usage=u;}}catch{}
+     log.push(entry);});
+   });
+   up.on('error',e=>{entry.error=e.code;log.push(entry);res.writeHead(502);res.end();});
+   up.end(raw);
+  });
+ });
+ return new Promise(resolve=>server.listen(0,'127.0.0.1',()=>resolve({url:`http://127.0.0.1:${server.address().port}`,log,close:()=>new Promise(r=>server.close(()=>r()))})));
+}
