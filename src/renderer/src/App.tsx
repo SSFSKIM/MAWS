@@ -42,7 +42,7 @@ import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 
 // C7 end
 // C8c start
 import { connectCodeEvents } from './ipc/events';
-import { codeTranscriptActions, registerCodeTools } from './tools/code';
+import { codeTranscriptActions, registerCodeTools, reviewTranscriptActions } from './tools/code';
 import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
 // C8c end
 // C10 start
@@ -235,6 +235,7 @@ export function App() {
   }, []);
   useEffect(() => connectCodeEvents(), []);
   useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
+  useEffect(() => registerCodeTranscriptActions(reviewTranscriptActions), []); // UX wave U5b-2: the chip of a commit's comment opens Review
   // C8c end
   // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions

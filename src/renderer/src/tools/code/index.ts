@@ -17,6 +17,7 @@ export { codeTranscriptActions, openFile } from './open-file';
 export { DiffTab } from './review/DiffTab';
 export { defaultScope, firstChangedLine, formatRef, parseRef, splitPatch, tooLarge, type ReviewParams, type ReviewScope } from './review/review-model';
 export { useReview } from './review/review-store';
+export { openCommit, reviewTranscriptActions } from './review/open-commit'; // UX wave U5b-2
 export { ReviewSummary } from './review/ReviewSummary';
 export { reviewTool } from './review/ReviewTool';
 export { FileViewer } from './viewer/FileViewer';

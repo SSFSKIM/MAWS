@@ -3,15 +3,20 @@
 // `@git-diff-view/react` takes, the first changed line a hunk opens at, the size caps, and the file lists each scope
 // shows (the git scopes from `git.diff` and `git.status`, Last turn from divider metadata and C6's disclosure-independent
 // activity). No I/O and no React here.
-import type { GitDiffFile, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import type { GitDiffFile, GitFileStatus, GitStatus, GitUntrackedCount } from '@shared/ipc/schema/git';
 import type { CellDetail, Row, TurnActivity, TurnId } from '../../../transcript';
 
-export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged';
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §E): `commit`, one commit's diff
+export type ReviewScope = 'uncommitted' | 'branch' | 'turn' | 'staged' | 'commit';
 export interface ReviewParams {
   scope?: ReviewScope;
   path?: string;
   turnId?: TurnId;
+  commit?: string; // UX wave U5b-2: a whole object id, with scope `commit`
 }
+
+// A commit is named by its whole object id, SHA-1 or SHA-256 (never an abbreviation: the reads refuse one)
+export const isFullHash = (value: string): boolean => /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(value);
 
 // C6's shapes, derived from its public surface (`transcript/index.ts` exports neither by name).
 export type ChangedFile = NonNullable<Extract<Row, { kind: 'divider' }>['files']>[number];
@@ -29,22 +34,25 @@ export function defaultScope(status: GitStatus | null, branchAvailable: boolean)
 }
 
 // ---- the diffTab ref grammar: `ref := scope [' @ ' path]`, a TurnId (`turn:<uuid>`) being its own scope word --------
+// UX wave U5b-2: and `commit:<whole hash>`, a commit's diff; a hash that is not whole is refused.
 
 const SEPARATOR = ' @ ';
 const SCOPE_WORDS: ReadonlySet<string> = new Set(['uncommitted', 'branch', 'staged']);
+export type CommitWord = `commit:${string}`;
 
-export function formatRef(scope: Exclude<ReviewScope, 'turn'> | TurnId, path?: string | null): string {
+export function formatRef(scope: Exclude<ReviewScope, 'turn' | 'commit'> | TurnId | CommitWord, path?: string | null): string {
   return path ? `${scope}${SEPARATOR}${path}` : scope;
 }
 
 // Split on the first ' @ ', so a path may itself hold one; null for an unknown scope word or an empty path.
-export function parseRef(ref: string): { scope: ReviewScope; turnId: TurnId | null; path: string | null } | null {
+export function parseRef(ref: string): { scope: ReviewScope; turnId: TurnId | null; commit: string | null; path: string | null } | null {
   const at = ref.indexOf(SEPARATOR);
   const word = at === -1 ? ref : ref.slice(0, at);
   const path = at === -1 ? null : ref.slice(at + SEPARATOR.length);
   if (path === '') return null;
-  if (SCOPE_WORDS.has(word)) return { scope: word as ReviewScope, turnId: null, path };
-  if (word.startsWith('turn:') && word.length > 'turn:'.length && !/\s/.test(word)) return { scope: 'turn', turnId: word as TurnId, path };
+  if (SCOPE_WORDS.has(word)) return { scope: word as ReviewScope, turnId: null, commit: null, path };
+  if (word.startsWith('turn:') && word.length > 'turn:'.length && !/\s/.test(word)) return { scope: 'turn', turnId: word as TurnId, commit: null, path };
+  if (word.startsWith('commit:') && isFullHash(word.slice('commit:'.length))) return { scope: 'commit', turnId: null, commit: word.slice('commit:'.length), path };
   return null;
 }
 
@@ -232,6 +240,7 @@ export interface ReviewFile {
   hunks: string[] | null; // null: none to show (untracked, binary), or not fetched yet (a scope past its cap)
   blocks: number[]; // how many of `hunks` each diff block holds, in order: one block for a git scope's file, one per edit for Last turn
   header: string | null; // the patch block's lines before its hunks (what a binary's viewed mark signs)
+  uncounted?: true; // UX wave U5b-2: a new file whose lines are not counted (`added` is 0): not asked, past a cap, binary, or not opened
 }
 
 const joinPath = (root: string, path: string): string => (path.startsWith('/') ? path : `${root.replace(/\/+$/, '')}/${path}`);
@@ -245,12 +254,16 @@ export function unmerged(file: GitFileStatus): boolean {
 // The git scopes: one row per `git.diff` file, with its hunks from the split patch when the scope was within its cap
 // (`patch` null otherwise, each file fetched on selection); Uncommitted adds the untracked files from the status. A file
 // the status lists unmerged is a conflict, but for a binary, whose body says "Binary file" whatever its state.
+// UX wave U5b-2 (§E, l5-code-03 and -04): This branch adds them too, being the working tree against the merge base, and
+// a new file's lines are its count from the working-tree read (`untracked`, by path); one it did not count, or every one
+// where the read was not asked (`untracked` null), is `uncounted`. A commit's diff lists no new file.
 export function gitScopeFiles(input: {
   scope: Exclude<ReviewScope, 'turn'>;
   repoRoot: string;
   files: readonly GitDiffFile[];
   patch: ReadonlyMap<string, PatchFile> | null;
   status: GitStatus | null;
+  untracked?: ReadonlyMap<string, Pick<GitUntrackedCount, 'insertions'>> | null;
 }): ReviewFile[] {
   const conflicts = new Set(input.status?.files.filter(unmerged).map((entry) => entry.path));
   const rows: ReviewFile[] = input.files.map((file) => {
@@ -269,15 +282,32 @@ export function gitScopeFiles(input: {
       header: split?.header ?? null,
     };
   });
-  if (input.scope === 'uncommitted' && input.status) {
+  if ((input.scope === 'uncommitted' || input.scope === 'branch') && input.status) {
     const listed = new Set(rows.map((row) => row.path));
     for (const entry of input.status.files) {
       if (!entry.untracked || listed.has(entry.path)) continue;
-      rows.push({ path: entry.path, displayPath: entry.path, oldPath: null, openPath: joinPath(input.repoRoot, entry.path), kind: 'untracked', added: 0, removed: 0, hunks: null, blocks: [], header: null });
+      const insertions = entry.path.endsWith('/') ? null : (input.untracked?.get(entry.path)?.insertions ?? null); // a new folder is listed, never counted
+      rows.push({
+        path: entry.path,
+        displayPath: entry.path,
+        oldPath: null,
+        openPath: joinPath(input.repoRoot, entry.path),
+        kind: 'untracked',
+        added: insertions ?? 0,
+        removed: 0,
+        hunks: null,
+        blocks: [],
+        header: null,
+        ...(insertions === null && { uncounted: true as const }),
+      });
     }
   }
   return rows;
 }
+
+// UX wave U5b-2 (§I; Decision Log 29, 4): the new files whose lines a scope does not count, which the totals name; a new
+// folder is a listing, not a file, and is not one of them.
+export const uncountedFiles = (files: readonly ReviewFile[]): number => files.filter((file) => file.uncounted === true && !file.path.endsWith('/')).length;
 
 const CHANGE_KIND: Record<ChangedFile['change'], ReviewFileKind> = { create: 'added', update: 'modified', delete: 'deleted' };
 

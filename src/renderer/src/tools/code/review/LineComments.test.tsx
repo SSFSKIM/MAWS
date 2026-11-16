@@ -10,7 +10,7 @@ import { resolve } from 'node:path';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { MESSAGE_COMMENTS_MAX } from '@shared/anchor/message';
+import { commentsMessage, MESSAGE_COMMENTS_MAX, type MessageComment } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { GitDiffFile, GitStatus } from '@shared/ipc/schema/git';
 import { addressOf } from '@shared/machine/address';
@@ -26,13 +26,14 @@ import { builder } from '../../../transcript/model/test-events';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
-import { registerCommentComposer } from '../anchor/anchor';
+import { commitLineAnchor, registerCommentComposer } from '../anchor/anchor';
 import { useViewer } from '../viewer/viewer-store';
 import { DiffTab, resetDiffTabs } from './DiffTab';
 import { UNPLACED_ROWS_SHOWN } from './UnplacedComments';
 import { reviewLayout } from './measure';
 import { REVIEW_SCOPE_BYTES_CAP } from './review-model';
 import { useReview } from './review-store';
+import { useBranchReads } from './branch-read';
 import { reviewTool } from './ReviewTool';
 
 // The highlighter would load shiki's grammars; the diff paints plain until it is ready, which here is never.
@@ -119,6 +120,12 @@ function commentsMain() {
         return ok({ entries: [], paused: false });
       case 'session.intent.get':
         return ok(null);
+      case 'git.changesSince': // UX wave U5b-2: the reads, asked only where the machine serves them
+        return ok({ patch: state.patch, files: state.files, untracked: [] });
+      case 'git.branchCommits':
+        return ok({ base: { ref: 'origin/main', mergeBase: STATUS.head.padEnd(40, '0') }, upstream: null, commits: [], counts: { all: 0, notPushed: 0, pushed: 0 }, behind: 0 });
+      case 'git.commitDiff':
+        return ok({ commit: { sha: input.commit, shortSha: String(input.commit).slice(0, 7), author: 'Ada', authoredAt: '2026-11-14T10:00:00.000Z', subject: 'Quote the cells', parents: ['0000000000000000000000000000000000000001'] }, onHead: true, patch: input.patch === false ? '' : state.patch, files: input.patch === false ? [] : state.files });
       case 'side.comment.content':
         return state.content ? state.content() : ok({ content: BUILT });
       case 'session.send':
@@ -237,6 +244,7 @@ describe('comments on lines in Review', () => {
     offs.splice(0).forEach((off) => off());
     useCommentCard.setState({ open: null });
     resetPlaceNotes();
+    useBranchReads.getState().reset(); // UX wave U5b-2: a case that serves the reads holds the branch read
     vi.restoreAllMocks();
   });
 
@@ -582,7 +590,7 @@ describe('comments on lines in Review', () => {
   it('says which comments’ lines left the diff and which comments’ files it does not hold, each sentence over its own', async () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: REPORT_GONE(), files: [FILES()[0]] }; // Staged: report.ts alone, its line 12 rewritten
-    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null }));
     await mountReview();
     await twoComments();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
@@ -748,7 +756,7 @@ describe('comments on lines in Review', () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: MOVED, files: [FILES(2)[0]] }; // Staged holds the file with two lines more above the commented one
     // Staged read and kept by another surface (a diff tab of it), so choosing it answers at once and the stack stays
-    const release = useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null });
+    const release = useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null });
     offs.push(release);
     await mountReview();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
@@ -773,7 +781,7 @@ describe('comments on lines in Review', () => {
   it('stands an open card whose file is not in the chosen scope under the toolbar, with the keyboard, and back under its line in the scope that has it', async () => {
     main.state.status = { ...STATUS, files: STATUS.files.map((file) => (file.path === 'src/report.ts' ? { ...file, index: 'M' as const } : file)) };
     main.state.staged = { patch: REPORT(), files: [FILES()[0]] }; // Staged has report.ts alone
-    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', base: null }));
+    offs.push(useReview.getState().hold({ machine: TEST_MACHINE, directory: '/repo', scope: 'staged', read: 'git.diff', against: null }));
     await mountReview();
     await painted(() => scopeChip('staged') !== null && !scopeChip('staged')!.disabled);
     addOn('src/other.ts', 'new', 2);
@@ -971,5 +979,59 @@ describe('comments on lines in Review', () => {
       await painted(() => card() === null && unsentRows('/scratch/two.ts').length === 1);
       expect(lineRow('/scratch/two.ts', 'new', 8)!.nextElementSibling?.contains(unsentRows('/scratch/two.ts')[0])).toBe(true);
     });
+  });
+
+  // UX wave U5b-2 (M9, S19): comments on two commits' diffs, made through the card's real store, each drawn only in its own
+  // commit; sent together after an amend, each anchor the producer's, and the one message naming both hashes.
+  it('keeps each commit’s comments its own, draws none in Uncommitted, and sends both after an amend, the message naming each commit (S19)', async () => {
+    const SHA_A = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const SHA_B = 'b2c3d4e5f60718293a4b5c6d7e8f901234567890';
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
+    const openCommit = (commit: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit } }));
+    openCommit(SHA_A);
+    render(<TestHost />);
+    await drawn('src/report.ts');
+    await drawn('src/other.ts');
+    addOn('src/other.ts', 'new', 2);
+    await painted(() => card() !== null);
+    type('Name it for what it counts.');
+    leave();
+    await painted(() => card() === null && unsentRows('src/other.ts').length === 1);
+
+    openCommit(SHA_B);
+    await painted(() => scopeChip('commit')?.textContent === 'Commit b2c3d4e');
+    await drawn('src/report.ts');
+    await drawn('src/other.ts');
+    expect(unsentRows()).toEqual([]); // commit A's comment is not drawn in commit B
+    addOn('src/report.ts', 'new', 12);
+    await painted(() => card() !== null);
+    type('Quote only where a comma is.');
+    leave();
+    await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+    expect(unsentRows('src/other.ts')).toEqual([]);
+
+    fireEvent.click(scopeChip('uncommitted')!);
+    await painted(() => scopeChip('uncommitted')?.getAttribute('aria-pressed') === 'true');
+    await drawn('src/report.ts');
+    expect(unsentRows()).toEqual([]);
+
+    const amended = { ...STATUS, head: 'fedcba9876543210' };
+    main.state.status = amended;
+    act(() => main.emit('git.changed', { repoRoot: '/repo', status: amended, reason: 'head' }));
+    await waitFor(() => expect(main.callsOf('git.commitDiff')).toContainEqual({ directory: '/repo', commit: SHA_B, patch: false }));
+
+    fireEvent.click(scopeChip('commit')!);
+    await drawn('src/report.ts');
+    await painted(() => unsentRows('src/report.ts').length === 1);
+    fireEvent.click(within(unsentRows('src/report.ts')[0]).getByText('Quote only where a comma is.'));
+    await painted(() => card() !== null);
+    expect(sendButton().textContent).toBe('Send 2 comments');
+    fireEvent.click(sendButton());
+    await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+    const [{ comments }] = main.callsOf('side.comment.content') as { comments: MessageComment[] }[];
+    expect(comments.map((c) => c.anchor)).toEqual([commitLineAnchor('src/other.ts', 2, 'new', SHA_A), commitLineAnchor('src/report.ts', 12, 'new', SHA_B)]);
+    const message = commentsMessage(comments, 'main');
+    expect(message).toContain(`commit ${SHA_A}`);
+    expect(message).toContain(`commit ${SHA_B}`);
   });
 });

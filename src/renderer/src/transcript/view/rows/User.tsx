@@ -217,6 +217,25 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
     );
   }
   // E4d end
+  // UX wave U5b-2 (R8, decision 28): a comment on a commit's diff opens Review on that commit at that file, never the path
+  // as a file (it is the commit's, relative to the repository); a label where the mount has no `openCommit`
+  const { commit } = anchor;
+  if (commit !== undefined) {
+    const openCommit = actions.openCommit;
+    return (
+      <div className="transcript-user-anchor">
+        {openCommit !== undefined && session !== null ? (
+          <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => openCommit(session, commit, path)}>
+            {content}
+          </button>
+        ) : (
+          <span className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator}>
+            {content}
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="transcript-user-anchor">
       {path !== undefined ? (

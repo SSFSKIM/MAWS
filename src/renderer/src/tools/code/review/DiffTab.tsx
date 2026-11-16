@@ -30,7 +30,15 @@ function prune(): void {
 type Ref = NonNullable<ReturnType<typeof parseRef>>;
 
 // A tab's view as its ref starts it in `directory`: the ref's scope and turn, its file to be brought into view.
-const fromRef = (ref: Ref, directory: string): Partial<ReviewUi> => ({ directory, scope: ref.scope, turnId: ref.turnId, reveal: ref.path === null ? null : { path: ref.path, n: 1 }, hunk: 0, redecide: null });
+const fromRef = (ref: Ref, directory: string): Partial<ReviewUi> => ({
+  directory,
+  scope: ref.scope,
+  turnId: ref.turnId,
+  commit: ref.commit === null ? null : { sha: ref.commit, subject: null }, // UX wave U5b-2: `commit:<hash>`
+  reveal: ref.path === null ? null : { path: ref.path, n: 1 },
+  hunk: 0,
+  redecide: null,
+});
 
 function viewOf(tab: DiffTabRef, ref: Ref, directory: string): StoreApi<ReviewUi> {
   following ??= useLayout.subscribe((state, prev) => {

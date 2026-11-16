@@ -39,7 +39,7 @@ import type { ContentBlock } from '@shared/graph/events';
 import type { Lineage } from '@shared/graph/session';
 import { sendContentRefusal } from '@shared/engine/session-state-store';
 import type { SideThreadFrom } from '@shared/ipc/schema/side';
-import { commentsContent, withoutScreenshot } from '@shared/anchor/content'; // UX wave U5a: one or several comments
+import { commentsContent, lineageAnchor } from '@shared/anchor/content'; // UX wave U5a: one or several comments; UX wave U5b-2: the lineage's anchor
 import { screenshotRoots } from '../side/content';
 import { screenshotPreview } from '@shared/anchor/screenshot'; // E11 F2b (Q4); UX wave U5a: the reader moved to shared
 import { InvalidSideInput } from '@shared/anchor/invalid';
@@ -1080,7 +1080,7 @@ export class SessionService {
         kind: 'side-thread',
         parentAppSessionId: source.appId,
         parentEngineSessionId: source.engineSessionId,
-        ...(from.kind === 'comment' ? { anchor: withoutScreenshot(from.anchor) } : {}),
+        ...(from.kind === 'comment' ? { anchor: lineageAnchor(from.anchor) } : {}), // UX wave U5b-2: never a commit (§K)
         openedBy: from.kind,
       };
       const intent = await forkIntentOf(s, source, { kind: 'inPlace' }, { message: { content, display }, rewindTo: null }, lineage);

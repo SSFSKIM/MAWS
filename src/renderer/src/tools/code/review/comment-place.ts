@@ -3,9 +3,10 @@
 // quote at every refresh, and where the card stands in the row under its line. Pure; no React and no diff library.
 //
 // A comment's place is `(commit, path, block, side, line)`: `block` is the edit's index in Last turn and 0 elsewhere;
-// `commit` is null until U5b-2 (M9) shows a commit's diff and fills it.
+// `commit` is the commit whose diff it was made on (UX wave U5b-2, M9), read from the comment's own anchor: a commit's
+// scope draws only its own commit's comments, every other scope only those with none (`ofScope`).
 import type { FileLineAnchor } from '@shared/anchor/anchor';
-import { fileLineAnchor } from '../anchor/anchor';
+import { commitLineAnchor, fileLineAnchor } from '../anchor/anchor';
 import { REVIEW_COPY } from '../copy';
 import { tooLarge, type ReviewFile } from './review-model';
 
@@ -144,7 +145,8 @@ export const PLACEMENT_TABLE: Readonly<Record<PlacementCase, Placement['kind']>>
 // The surface's scope as the predicate reads it: `reading` while its list is not read yet, `none` while it cannot be read.
 export interface ScopeLines {
   state: 'reading' | 'none' | 'ready';
-  files: readonly { path: string; absolute: string | null; blocks: readonly (readonly string[])[]; state: SectionState }[]; // `path`, the stack's identity
+  // `path`, the stack's identity; `absolute`, the path a comment on the file names (`anchorPathOf`)
+  files: readonly { path: string; absolute: string | null; blocks: readonly (readonly string[])[]; state: SectionState }[];
 }
 
 // The sentence over each kind of comment the surface cannot place (the table's last column).
@@ -190,9 +192,21 @@ export function placementOf(comment: { anchor: FileLineAnchor; quote?: string | 
  * built here: the label is `<file>:<line>` for either side, with no "· before"; the comment's words say "Before the
  * change:" (`quotedComment`).
  */
-export function reviewLineAnchor(path: string, line: number, side: LineSide): FileLineAnchor {
+export function reviewLineAnchor(path: string, line: number, side: LineSide, commit: string | null = null): FileLineAnchor {
+  if (commit !== null) return commitLineAnchor(path, line, side, commit); // UX wave U5b-2 (§A): `path` the commit's, relative
   const anchor = fileLineAnchor(path, line);
   return side === 'old' ? { ...anchor, side: 'old' } : anchor;
+}
+
+/** UX wave U5b-2: whether a comment belongs to a scope: a commit's scope takes its own commit's comments, every other scope those with none. */
+export const ofScope = (anchor: Pick<FileLineAnchor, 'commit'>, commit: string | null): boolean => (anchor.commit ?? null) === commit;
+
+/**
+ * The path a comment on a file of the stack names (§A): in a commit's scope the path as that commit's diff names it,
+ * relative to the repository; elsewhere the absolute path (`absolutePathOf`).
+ */
+export function anchorPathOf(file: Pick<ReviewFile, 'path'>, repoRoot: string | null, commit: string | null): string | null {
+  return commit !== null ? file.path : absolutePathOf(file, repoRoot);
 }
 
 /**

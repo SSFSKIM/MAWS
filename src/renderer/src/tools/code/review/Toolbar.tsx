@@ -11,8 +11,10 @@ import { REVIEW_COPY } from '../copy';
 import { reviewLayout } from './measure';
 import type { ReviewMode } from './view-state';
 
-// The totals' words (card 1): without the scope's name, which the pressed chip directly above them says.
-export const totalsWords = (sum: { files: number; added: number; removed: number }): string => REVIEW_COPY.totals(sum.files, sum.added, sum.removed);
+// The totals' words (card 1): without the scope's name, which the pressed chip directly above them says. UX wave U5b-2
+// (§I): then the new files whose lines are not counted, where there are any (when that is said: its caller in ReviewShell).
+export const totalsWords = (sum: { files: number; added: number; removed: number }, uncounted = 0): string =>
+  `${REVIEW_COPY.totals(sum.files, sum.added, sum.removed)}${uncounted > 0 ? REVIEW_COPY.uncounted(uncounted) : ''}`;
 
 // The gap between the toolbar's parts (`gap-x-2`).
 const GAP = 8;

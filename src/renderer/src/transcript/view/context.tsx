@@ -15,6 +15,10 @@ export interface TranscriptActions {
   openSubagent(ref: SubagentRef): void; // C8: Subagents tool with that agent selected
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
+  // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, R8, decision 28): the chip of a
+  // comment that names a commit opens Review on that commit at that file (Review's folder implements it, App.tsx registers
+  // it). Optional, with no default: a mount that omits it (the desk) draws such a chip as a label.
+  openCommit?(appSessionId: AppSessionId, commit: string, path?: string): void;
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
   // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
   // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.

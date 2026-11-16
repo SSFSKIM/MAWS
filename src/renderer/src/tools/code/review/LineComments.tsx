@@ -16,7 +16,7 @@ import { CARD_WIDTH } from '../../../side/card/placement';
 import { discardComment, editComment, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
 import { SIDE_COPY } from '../../../side/copy';
 import { openCommentComposer } from '../anchor/anchor';
-import { absolutePathOf, cardOffset, isUnplaced, lineText, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
+import { anchorPathOf, cardOffset, isUnplaced, lineText, ofScope, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
 import { reviewLayout } from './measure';
 import type { StackSection } from './Stack';
 
@@ -59,8 +59,8 @@ export interface UnplacedComment {
  * are the stack's while `state` is `ready`. A file's absolute identity needs no `repoRoot` (Last turn is listed before Git
  * answers, and outside Git); a relative one is placed and commented on only once the root is known.
  */
-export function useLineComments(input: { appSessionId: AppSessionId; hostId: string; repoRoot: string | null; state: ScopeLines['state']; sections: readonly StackSection[] }) {
-  const { appSessionId, hostId, repoRoot, state, sections } = input;
+export function useLineComments(input: { appSessionId: AppSessionId; hostId: string; repoRoot: string | null; commit?: string | null; state: ScopeLines['state']; sections: readonly StackSection[] }) {
+  const { appSessionId, hostId, repoRoot, commit = null, state, sections } = input;
   const key = passKey('review', appSessionId, appSessionId);
   const pass = useCommentCard((s) => s.passes.get(key) ?? null);
   const open = useCommentCard((s) => s.open);
@@ -75,9 +75,10 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     let waiting: { path: string; serial: number } | null = null;
     if (pass === null) return { rows, unplaced, card, holdPath, waiting };
     const lines: ScopeLines =
-      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: absolutePathOf(section.file, repoRoot), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
-    // M9: a commit's scope draws its commit's comments, every other scope those with none
-    const comments = pass.comments.filter(isFileLine).sort((a, b) => Number(a.id) - Number(b.id));
+      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: anchorPathOf(section.file, repoRoot, commit), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
+    // UX wave U5b-2 (§G): a commit's scope draws its own commit's comments, every other scope those with none, each by
+    // the comment's own anchor
+    const comments = pass.comments.filter(isFileLine).filter((comment) => ofScope(comment.anchor, commit)).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
       const at = placementOf(comment, lines, madeIn.get(comment.id));
       if (comment.id === ours && 'path' in at && at.path !== null) holdPath = at.path;
@@ -88,23 +89,23 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
       } else if (isUnplaced(at)) unplaced.push({ comment, kind: at.kind });
     }
     return { rows, unplaced, card, holdPath, waiting };
-  }, [repoRoot, state, pass, sections, ours, serial]);
+  }, [repoRoot, commit, state, pass, sections, ours, serial]);
 
-  const addable = useCallback((path: string) => absolutePathOf({ path }, repoRoot) !== null, [repoRoot]);
+  const addable = useCallback((path: string) => anchorPathOf({ path }, repoRoot, commit) !== null, [repoRoot, commit]);
   const add = useCallback(
     (path: string, block: number, side: LineSide, line: number) => {
       const section = sections.find((each) => each.file.path === path);
-      const absolute = section ? absolutePathOf(section.file, repoRoot) : null;
-      if (!section || absolute === null) return;
+      const named = section ? anchorPathOf(section.file, repoRoot, commit) : null;
+      if (!section || named === null) return;
       const quote = lineText(section.blocks[block] ?? [], side, line);
       // A full pass adds nothing and opens the card on its newest comment, which keeps the block it was made in: only a
       // comment this add made takes the clicked block.
       const before = new Set(useCommentCard.getState().passes.get(key)?.comments.map((comment) => comment.id));
-      openCommentComposer(reviewLineAnchor(absolute, line, side), { appSessionId, placement: { kind: 'card', host: 'review', hostId }, destination: 'main', ...(quote !== null && { quote }) });
+      openCommentComposer(reviewLineAnchor(named, line, side, commit), { appSessionId, placement: { kind: 'card', host: 'review', hostId }, destination: 'main', ...(quote !== null && { quote }) });
       const opened = useCommentCard.getState().open;
       if (opened?.phase.kind === 'composing' && !before.has(opened.phase.comment)) madeIn.set(opened.phase.comment, block);
     },
-    [sections, repoRoot, appSessionId, hostId, key],
+    [sections, repoRoot, commit, appSessionId, hostId, key],
   );
 
   return { key, card: placed.card, waiting: placed.waiting, unplaced: placed.unplaced, opened: ours, holdPath: placed.holdPath, rows: placed.rows, addable, add };

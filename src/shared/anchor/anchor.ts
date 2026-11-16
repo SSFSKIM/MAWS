@@ -56,6 +56,11 @@ export const AnchorSchema = z.strictObject({
   // comment is on, a board or one of its elements; additive, absent meaning an element's for a design, every other lead
   // unchanged
   artifactTarget: z.enum(['board', 'element']).optional(),
+  // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §A): a file-line comment
+  // made on one commit's diff names that commit by its whole object id; its `path` is then the path as that commit's diff
+  // names the file, relative to the repository, and its `side` is always given. Both builds that bind have a strict schema
+  // without it, so it never enters a structured value that is stored or read by another process (`lineageAnchor`, §K)
+  commit: z.string().regex(/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/).optional(),
 });
 export type Anchor = z.infer<typeof AnchorSchema>;
 export type FileLineAnchor = Anchor & { kind: 'file-line'; path: string; line: number }; // E5's shape, now the union's member
