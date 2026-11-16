@@ -866,9 +866,10 @@ describe('review store', () => {
       expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
     });
 
-    it('a release that arrives after a reset deletes no newer hold, a tab’s included', async () => {
+    it('a release that arrives after a reset deletes no newer hold, a tab’s and a commit’s membership included', async () => {
       const { store } = setup();
       const late = store.getState().hold(on(ONE));
+      const lateCommit = store.getState().hold(commitOn(ONE));
       const tab = {};
       store.getState().keepCommit(tab, commitOn(ONE), true);
       await tick();
@@ -876,9 +877,14 @@ describe('review store', () => {
       const newer = store.getState().hold(on(ONE));
       store.getState().keepCommit(tab, commitOn(ONE), true);
       await tick();
+      store.getState().checkMembership(commitOn(ONE));
+      await tick();
+      expect(onHeadOf(store.getState(), commitOn(ONE))).toBe(false);
       late();
+      lateCommit();
       expect(diffOf(store.getState(), on(ONE))?.status).toBe('ok');
       expect(diffOf(store.getState(), commitOn(ONE))?.status).toBe('ok');
+      expect(onHeadOf(store.getState(), commitOn(ONE))).toBe(false); // the newer hold's membership stands
       newer();
       store.getState().releaseTab(tab);
     });
