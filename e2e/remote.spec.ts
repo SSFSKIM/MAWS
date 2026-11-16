@@ -14,9 +14,10 @@
 //      streams to A as deltas, a permission card A answers, a pasted image B's transcript records;
 //      then (M4) a text file dropped into the composer goes up to B's desk-uploads and the message names its path there;
 //      the panel's tools work on B's checkout (a git repository of B's): the Files tool lists it and the editor saves a
-//      file there, read back over B's machine.sock; a file the spec writes on B shows in A's tree and in the Source
-//      control tool's status with no click, and so does one written while A's way to B is cut (the scene's pipe to the
-//      hub), once the link is up again; the Source control tool commits;
+//      file there, read back over B's machine.sock; a file the spec writes on B shows in A's tree and in Source control's
+//      Uncommitted count with no click, and so does one written while A's way to B is cut (the scene's pipe to the
+//      hub), once the link is up again; Source control's page names B and lists a commit made on B first under "Not
+//      pushed", which opens in Review with its diff read on B (UX wave U5b-2: the page changes nothing);
 //      then (M3) the Terminal tool opens a shell on B in the session's checkout, where `pwd` prints it; a reload of A's
 //      window re-attaches the same shell (one pty on B, its label the tab's) and shows what it printed; a dev server
 //      started in that shell (`python3 -m http.server`, dual-stack) opens from the `[::]` link B's reply names in A's
@@ -451,6 +452,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
   const openLog = join(root, 'a-open.log'); // M5a: what A's main hands the OS to open (MAWS_E2E_OPEN_LOG)
   for (const dir of [checkout, journals, hooks, aCheckout, savedOnA]) mkdirSync(dir);
   checkoutRepository(checkout, hooks);
+  // UX wave U5b-2 (M11): B's checkout tracks a bare `origin` of its own, so Source control's page measures B's commits
+  // against `origin/main` and says which are not pushed
+  const bOrigin = join(root, 'b-origin.git');
+  git(root, 'init', '--quiet', '--bare', '-b', 'main', bOrigin);
+  git(checkout, 'remote', 'add', 'origin', bOrigin);
+  git(checkout, 'push', '--quiet', '-u', 'origin', 'main');
+  git(checkout, 'remote', 'set-head', 'origin', 'main');
   checkoutRepository(aCheckout, hooks); // a repository too: New chat offers Worktree only in git
   let scene: RemoteScene | null = null;
   let a: MawsLaunch | null = null;
@@ -732,8 +740,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // The panel's tools over B's checkout. Each surface's rows, by path.
     const files = surface(page, 'files');
     const treeRow = (name: string) => files.locator(`[role="treeitem"][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
-    const scm = surface(page, 'source-control').locator('[data-scm]');
-    const scmRow = (group: 'staged' | 'unstaged' | 'untracked', path: string) => scm.locator(`[data-scm-group="${group}"] [data-scm-row][data-path="${path}"]`);
+    // UX wave U5b-2: Source control is a page to read; its Uncommitted count is B's status
+    const scm = surface(page, 'source-control').locator('[data-scm-page]');
+    const uncommittedCount = scm.locator('[data-scm-part="uncommitted"] [data-scm-count]');
 
     await test.step('M4: the Files tool lists B’s checkout, and the editor saves a file there', async () => {
       await openSurface(page, 'Files');
@@ -779,15 +788,16 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await moveSideTab(page, 'Source control', 'below');
       await expect(sideGroup(page, 'lower')).toHaveAttribute('aria-label', 'Source control');
       await expect(sideGroup(page, 'upper')).toHaveAttribute('aria-label', 'Files');
-      await expect(scm.locator('[data-scm-header]'), `B's repository in A's Source control tool\n${mainSaid(page)}`).toContainText('⎇ main', { timeout: 60_000 });
-      await expect(scmRow('unstaged', NOTES), 'the saved file is a change in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(scm.locator('[data-scm-where-branch]'), `B's repository in A's Source control page\n${mainSaid(page)}`).toHaveText('⎇ main', { timeout: 60_000 });
+      await expect(scm.locator('[data-scm-where]'), 'the page names B').toContainText(B_NAME);
+      await expect(uncommittedCount, 'the saved file is a change in B’s status').toHaveText('1', { timeout: 60_000 });
       await expect(files, 'both tools are on screen').toBeVisible();
       await expect(treeRow(NOTES)).toBeVisible();
 
       // Nothing is clicked from here on in this step: each change reaches the tools through the checkout's feed.
       writeFileSync(join(checkout, ON_B), 'Written on B.\n');
       await expect(treeRow(ON_B), `B's new file in A's tree\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
-      await expect(scmRow('untracked', ON_B), 'and in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(uncommittedCount, 'and in B’s status').toHaveText('2', { timeout: 60_000 });
 
       // A's way to B cut (the relay through the hub; the direct dial already fails): the link goes down, the file is
       // written, and A is let back.
@@ -801,18 +811,27 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         .poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` })
         .toBe('up');
       await expect(treeRow(WHILE_CUT), `the file written while cut off, in A's tree after the reconnect\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
-      await expect(scmRow('untracked', WHILE_CUT), 'and in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(uncommittedCount, 'and in B’s status').toHaveText('3', { timeout: 60_000 });
     });
 
-    await test.step('M4: the Source control tool commits on B', async () => {
-      await scmRow('unstaged', NOTES).getByRole('button', { name: `Stage ${NOTES}`, exact: true }).click();
-      await expect(scmRow('staged', NOTES)).toBeVisible({ timeout: 60_000 });
-      await scm.getByRole('textbox', { name: 'Commit message' }).fill(COMMIT);
-      await scm.getByRole('button', { name: 'Commit', exact: true }).click();
-      await expect(scm.locator('[data-scm-last-commit]')).toHaveText(new RegExp(`^[0-9a-f]{7} · ${COMMIT}$`), { timeout: 60_000 });
-      expect(git(checkout, 'log', '-1', '--format=%s'), 'B’s repository has the commit').toBe(COMMIT);
+    await test.step('UX wave U5b-2: a commit made on B is first under Not pushed on the page, and opens in Review read on B', async () => {
+      // the commit is made on B by git itself, as the agent would make it: the window commits nothing
+      git(checkout, 'add', NOTES);
+      git(checkout, 'commit', '--quiet', '-m', COMMIT, '--', NOTES);
+      const sha = git(checkout, 'rev-parse', 'HEAD');
       expect(git(checkout, 'show', 'HEAD:notes.txt'), 'with the saved file').toBe(`${TYPED}\n${NOTES_TEXT}`.trim());
-      await expect(scmRow('staged', NOTES)).toHaveCount(0);
+      const row = scm.locator('[data-scm-part="commits"] button[data-scm-commit]').first();
+      await expect(row, `the commit first on A's page, read on B\n${mainSaid(page)}`).toHaveAccessibleName(`Open commit ${sha.slice(0, 7)} in Review`, { timeout: 60_000 });
+      await expect(row).toContainText(COMMIT);
+      await expect(scm.locator('[data-scm-commit-group="not-pushed"]')).toContainText('Not pushed');
+      await expect(scm.locator('[data-scm-commit-group="not-pushed"] [data-scm-count]')).toHaveText('1');
+      await expect(uncommittedCount, 'the two files written on B are left').toHaveText('2', { timeout: 60_000 });
+      await row.click();
+      const review = surface(page, 'review');
+      await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`, { timeout: 60_000 });
+      await expect(review.locator('[data-chip="commit"]')).toHaveAttribute('aria-pressed', 'true');
+      await expect(review.locator('[data-review-header]'), `the commit's diff, read on B\n${mainSaid(page)}`).toHaveText('1 file changed · +1 −0', { timeout: 60_000 });
+      await expect(review.locator(`[data-review-file="${NOTES}"] [data-review-block]`).first()).toContainText(TYPED, { timeout: 60_000 });
     });
 
     // M3: the session's shells on B, as B's own pty host lists them
