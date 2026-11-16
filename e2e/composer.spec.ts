@@ -1000,12 +1000,16 @@ test('ticket 704, a joined answer: the prompt and the answer the engine joined d
   await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === 'next').length).toBe(2);
 
   // the joined turn (676 to 726) drawn and ended
+  // the prompt as the bubble draws it: its text is Markdown, so the backticks around `echo KIWI` draw as inline code
+  const drawn = recorded.prompt.replace(/`([^`]*)`/g, '$1');
   const transcript = transcriptOf(page, 0);
-  const bubble = transcript.locator('.transcript-user').filter({ hasText: recorded.prompt });
+  const bubble = transcript.locator('.transcript-user').filter({ hasText: drawn });
   await expect(bubble).toHaveCount(1);
   await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
   await expect(bubble).toHaveCount(1);
-  await expect(bubble, 'the person’s words alone').not.toContainText('[MAWS ask');
+  await expect(bubble.locator('[data-user-content]'), 'the person’s words alone, exactly').toHaveText(drawn);
+  await expect(bubble.locator('[data-user-content] code')).toHaveText('echo KIWI');
+  await expect(bubble, 'nothing of the envelope').not.toContainText('[MAWS ask');
   await expect(transcript, 'no envelope anywhere on the page').not.toContainText('[MAWS ask');
   await expect(pane(page, 0), 'nor its block').not.toContainText('"status": "answered"');
   await expect(transcript.locator('section.transcript-ask')).toHaveAttribute('data-ask-state', 'answered');
