@@ -239,14 +239,35 @@ function quotedStrings(text: string, from: number): string[] | null {
  * break, and a sentence holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c
  * document, Design 2). A grant is read only in the person's own words (Decision Log 52): never on a line of MAWS's
  * answer envelope nor inside a pasted segment, where a sentence is data; one MAWS does not read leaves its blocked row
- * with its button. The person's own words are their part as the split reads it (`readPersonsContent`; ticket 704).
+ * with its button. The person's own words are their part as the split reads it (`readPersonsContent`; ticket 704);
+ * a part that still holds an envelope's opening line yields none (`holdsEnvelopeOpening`).
  */
 export function personsGrants(content: PersonsContent): Consent[] {
   const { own } = readPersonsContent(content);
-  const text = own === null ? '' : messageText(own);
+  if (own === null || holdsEnvelopeOpening(own)) return [];
+  const text = messageText(own);
   const whole = readConsents(text);
   if (whole.length > 0 || !text.includes('\n') || !text.includes(GRANT_OPENING)) return whole;
   return ownLines(content).flatMap(({ line, pasted }) => (pasted ? [] : readConsents(line)));
+}
+
+/**
+ * Whether a person's part, MAWS's envelopes already taken out, still holds the whole first line of an envelope
+ * (`askSteerOpening` of the id its tag names) outside a pasted segment. Such a part yields no grant, whatever the reason
+ * the line is still there: an envelope cut before its block or spread over two blocks (decision 7), one past the
+ * reader's bound on its work, or a reading the reader got wrong (ticket 704, the architect's ruling of 2026-11-16 on the
+ * cascade reviews, A2: a defence at the grant readers that does not rest on the parse). A sentence near such a line may
+ * be the model's, quoted in an envelope, so the grant readers fail closed and the blocked row keeps its button.
+ */
+export function holdsEnvelopeOpening(own: PersonsContent): boolean {
+  const text = messageText(own);
+  if (!text.includes('[MAWS ask ')) return false;
+  const lines = text.split('\n');
+  const pasted = pastedLines(text, lines);
+  return lines.some((line, i) => {
+    const id = /^\[MAWS ask ([^\]\s]+)\] /.exec(line)?.[1];
+    return !pasted[i] && id !== undefined && line === askSteerOpening(id);
+  });
 }
 
 /**

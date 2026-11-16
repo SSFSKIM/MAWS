@@ -19,7 +19,7 @@
 // stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
 // message and keeps its reading.
 import type { SendContent } from '@shared/engine/session-state-store';
-import { readConsents } from '@shared/engine/arrival'; // U1c
+import { holdsEnvelopeOpening, readConsents } from '@shared/engine/arrival'; // U1c; ticket 704, holdsEnvelopeOpening
 import { messageText } from '@shared/engine/peer-envelope';
 import { answerEnvelopeOf, personsParts } from '@shared/engine/persons-message';
 import type { ContentBlock } from '@shared/graph/events';
@@ -109,10 +109,11 @@ function waitingAnswer(content: SendContent, questions: Read['questions']): stri
 // image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview. Decision Log 53: read
 // from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`. Ticket 704:
 // what the message holds is the person's part, as the split reads it (`personsParts`), MAWS's answer envelopes beside it
-// being answers of their own, as the transcript reads the message once the engine has it
+// being answers of their own, as the transcript reads the message once the engine has it; a part that still holds an
+// envelope's opening line is no grant (`holdsEnvelopeOpening`, the architect's ruling of 2026-11-16, A2)
 const grantOf = (content: SendContent): BlockedCall | null => {
   const own = personsParts(content as string | ContentBlock[]).own;
-  if (own === null || (typeof own !== 'string' && !own.every((block) => block.type === 'text'))) return null;
+  if (own === null || (typeof own !== 'string' && !own.every((block) => block.type === 'text')) || holdsEnvelopeOpening(own)) return null;
   const grants = readConsents(messageText(own));
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
