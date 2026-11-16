@@ -187,11 +187,11 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined, given:
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
 // `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the
 // AskResult of status `answered` as a fenced JSON block. Neither a question's header, its words, its labels nor its id
-// (model text too) are on its line. In the block every answer keeps its `id`, which the readers of this build and of
-// the builds before it join an answer to its question by (the capsule's AnswerLine, the read-only sheet's
-// QuestionSection, the transcript's markdown); its `question` is written as the empty string (AskAnswerSchema, as the
-// earlier builds have it, requires the key, and a block they could not parse would draw the envelope as raw text), and
-// a choice's `value` holds the picks by their place, and its `id` is the question's place, `q<n>`. No reader takes a
+// (model text too) are on its line. In the block every answer's `id` is its question's place, `q<n>` (the readers of
+// this build join an answer to its question by that place and hand on the question's own id; the capsule's AnswerLine,
+// the read-only sheet's QuestionSection and the transcript's markdown then join by id as before); its `question` is
+// written as the empty string (AskAnswerSchema, as the earlier builds have it, requires the key, and a block they could
+// not parse would draw the envelope as raw text), and a choice's `value` holds the picks by their place. No reader takes a
 // question's words from a steer: they come from the ask's call, joined by the place, and so do the labels and the
 // question's own id (askAnswersFromSteer).
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
