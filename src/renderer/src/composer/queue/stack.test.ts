@@ -7,6 +7,7 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
 import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
 const APP = 'app-1' as AppSessionId;
@@ -24,7 +25,7 @@ const read = (unread: Read['unread'] = [], started: readonly MessageUuid[] = [],
 });
 const NONE = new Set<string>();
 const kinds = (rows: StackRow[]) => rows.map((row) => row.kind);
-// an async ask's answer envelope, as `askSteerText` writes it (invented questions)
+// an async ask's answer envelope, as `askSteerText` writes it (invented questions): the new form since board ticket 711
 const LAYOUT: AskQuestion = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }], multi: true };
 const THEME: AskQuestion = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice', options: [{ label: 'Dark' }, { label: 'Light' }] };
 const SIZE: AskQuestion = { id: 'q3', question: 'How large should the tiles be?', modality: 'text' };
@@ -75,22 +76,25 @@ describe('the stack’s rows', () => {
 
   it('gives a sending and a handed row an answer’s words too, and what they read today otherwise', () => {
     const q = queue({ entries: [entry('q-s', 1, { state: 'submitting', submittedAt: at(1), content: ANSWER }), entry('q-t', 2, { state: 'submitting', submittedAt: at(2) })] });
-    const rows = stackRows(q, new Set(['q-s', 'q-t']), read([{ messageUuid: U3, text: ANSWER, at: at(0) }, { messageUuid: U2, text: 'typed', at: at(0) }]));
+    const rows = stackRows(q, new Set(['q-s', 'q-t']), read([{ messageUuid: U3, text: ANSWER, at: at(0) }, { messageUuid: U2, text: 'typed', at: at(0) }], [], { 'ask-1': [LAYOUT] }));
     expect(rows.map((row) => [row.kind, rowText(row)])).toEqual([
-      ['handed', `Answer to ${LAYOUT.question}: Grid`],
+      ['handed', 'Answer to Layout: Grid'],
       ['handed', 'typed'],
-      ['sending', `Answer to ${LAYOUT.question}: Grid`],
+      ['sending', 'Answer to Layout: Grid'],
       ['sending', 'entry q-t'],
     ]);
   });
 });
 
 describe('a waiting answer’s words', () => {
-  it('one question: the header where the window holds the ask, else the question’s own text', () => {
+  it('one question: the header where the window holds the ask, else the question’s own text, which only the earlier form carries', () => {
     expect(answerWords(ANSWER, (call) => (call === 'ask-1' ? [LAYOUT] : null))).toBe('Answer to Layout: Grid');
-    expect(answerWords(ANSWER, noAsks)).toBe('Answer to Which layout should the gallery use?: Grid');
-    // the window holds the ask, and no question of it has the answer's id
-    expect(answerWords(ANSWER, () => [THEME])).toBe('Answer to Which layout should the gallery use?: Grid');
+    // the new form holds neither the question's words nor the label: without the ask, the bare words, the pick by its place
+    expect(answerWords(ANSWER, noAsks)).toBe('Answer: option 1');
+    const earlier = earlierAskSteerText('ask-1', [LAYOUT], [GRID]);
+    expect(answerWords(earlier, noAsks)).toBe('Answer to Which layout should the gallery use?: Grid');
+    // the window holds the ask, and no question of it has the earlier form's id
+    expect(answerWords(earlier, () => [THEME])).toBe('Answer to Which layout should the gallery use?: Grid');
   });
 
   it('a question with no header reads its question; an empty header reads the bare words, as the capsule’s label is empty', () => {
@@ -117,14 +121,75 @@ describe('a waiting answer’s words', () => {
     const reversed = askSteerText('ask-4', [LAYOUT, THEME], [theme, GRID]);
     expect(answerWords(reversed, () => [LAYOUT, THEME])).toBe('Answers to 2 questions: Layout: Grid; Theme: Dark');
     // where the window holds no such row, the array's own order is the only one it has
-    expect(answerWords(reversed, noAsks)).toBe('Answers to 2 questions: Which theme?: Dark; Which layout should the gallery use?: Grid');
+    expect(answerWords(reversed, noAsks)).toBe('Answers to 2 questions: option 1; option 1');
+    expect(answerWords(earlierAskSteerText('ask-4', [LAYOUT, THEME], [theme, GRID]), noAsks)).toBe('Answers to 2 questions: Which theme?: Dark; Which layout should the gallery use?: Grid');
+    // an answer no question holds: the new form's writer leaves it out (it names no place); an earlier build's block may hold one
     const stray: AskAnswer = { id: 'q9', question: 'Anything else?', status: 'answered', value: 'No' };
-    expect(answerWords(askSteerText('ask-4', [LAYOUT, THEME], [stray, theme, GRID]), () => [LAYOUT, THEME])).toBe('Answers to 3 questions: Layout: Grid; Theme: Dark; Anything else?: No');
+    expect(answerWords(askSteerText('ask-4', [LAYOUT, THEME], [stray, theme, GRID]), () => [LAYOUT, THEME])).toBe('Answers to 2 questions: Layout: Grid; Theme: Dark');
+    expect(answerWords(earlierAskSteerText('ask-4', [LAYOUT, THEME], [stray, theme, GRID]), () => [LAYOUT, THEME])).toBe('Answers to 3 questions: Layout: Grid; Theme: Dark; Anything else?: No');
   });
 
   it('a text that is no envelope is no answer, one changed character in the tag included', () => {
     expect(answerWords('Use the grid', noAsks)).toBeNull();
     expect(answerWords(ANSWER.replace('[MAWS ask', '[MAWS asc'), noAsks)).toBeNull();
+  });
+
+  // board ticket 711: the envelope's new form (each question by its number, no text the model wrote) and the form the
+  // earlier builds wrote (the question's words on its line and in its block) are both an answer's
+  it('knows an answer’s envelope in the new form and in the form the earlier builds wrote, held after the turn too', () => {
+    const answered = askSteerText('ask-2', [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Blue' }] }], [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }]);
+    expect(answered.split('\n')[1]).toBe('1. option 1');
+    const old = ['[MAWS ask ask-3] The user answered the questions you asked:', '1. Which colour? — Blue', '```json', JSON.stringify({ status: 'answered', askId: 'ask-3', answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }] }, null, 2), '```'].join('\n');
+    const rows = stackRows(queue({ steers: [steer(U1, 1, answered)], entries: [entry('q-1', 2, { content: old }), entry('q-2', 3)] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'answer' in row && row.answer !== null])).toEqual([['next', true], ['after', true], ['after', false]]);
+  });
+});
+
+// board ticket 711: the new form names each question by its place and a pick by `option <k>`; with the ask's questions in
+// hand the row reads it back (askAnswersFromSteer) and says what the same answers said in the earlier form. The questions
+// carry ids the model chose, so the place and the id differ.
+describe('a waiting answer in the new form', () => {
+  const PLAN: AskQuestion = { id: 'gallery-layout', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }, { label: 'Masonry' }], multi: true };
+  const NOTES: AskQuestion = { id: 'footer-notes', question: 'What should the footer say?', modality: 'text' };
+  const TONE: AskQuestion = { id: 'tone', question: 'Which tone fits?', header: 'Tone', modality: 'choice', options: [{ label: 'Warm' }, { label: 'Plain' }] };
+  const picked: AskAnswer = { id: 'gallery-layout', question: PLAN.question, status: 'answered', value: ['Masonry', 'Grid'] };
+  const typed: AskAnswer = { id: 'footer-notes', question: NOTES.question, status: 'answered', value: 'Made with care' };
+  const skipped: AskAnswer = { id: 'tone', question: TONE.question, status: 'skipped' };
+  const noted: AskAnswer = { id: 'tone', question: TONE.question, status: 'answered', value: ['Plain'], note: 'the shorter one' };
+  const cases: { name: string; questions: AskQuestion[]; answers: AskAnswer[]; row: string }[] = [
+    { name: 'a choice, by its labels', questions: [PLAN], answers: [picked], row: 'Answer to Layout: Masonry, Grid' },
+    { name: 'a text', questions: [NOTES], answers: [typed], row: 'Answer to What should the footer say?: Made with care' },
+    { name: 'a skipped one', questions: [TONE], answers: [skipped], row: 'Answer to Tone: Skipped' },
+    { name: 'one with a note', questions: [TONE], answers: [noted], row: 'Answer to Tone: Plain · Note: the shorter one' },
+    { name: 'all of them, in the asked order', questions: [PLAN, NOTES, TONE], answers: [noted, picked, typed], row: 'Answers to 3 questions: Layout: Masonry, Grid; What should the footer say?: Made with care; Tone: Plain · Note: the shorter one' },
+  ];
+
+  it.each(cases)('$name: the row the earlier form of the same answers gives', ({ questions, answers, row }) => {
+    const envelope = askSteerText('ask-n', questions, answers);
+    for (const question of questions) expect(envelope).not.toContain(question.question); // the new form, as the host writes it
+    const asked = (call: string) => (call === 'ask-n' ? questions : null);
+    expect(answerWords(envelope, asked)).toBe(row);
+    expect(answerWords(envelope, asked)).toBe(answerWords(earlierAskSteerText('ask-n', questions, answers), asked));
+  });
+
+  it('on a next-step row and on a held one, as the queue lists them', () => {
+    const envelope = askSteerText('ask-n', [PLAN], [picked]);
+    const asks = { 'ask-n': [PLAN] };
+    expect(stackRows(queue({ steers: [steer(U1, 1, envelope)] }), NONE, read([], [], asks)).map(rowText)).toEqual(['Answer to Layout: Masonry, Grid']);
+    expect(stackRows(queue({ paused: true, pauseReason: 'interrupt', entries: [entry('q-a', 1, { content: envelope })] }), NONE, read([], [], asks)).map(rowText)).toEqual(['Answer to Layout: Masonry, Grid']);
+  });
+
+  it('the earlier form reads as before, with the ask’s questions in hand or without', () => {
+    const earlier = earlierAskSteerText('ask-n', [PLAN, NOTES], [picked, typed]);
+    expect(answerWords(earlier, () => [PLAN, NOTES])).toBe('Answers to 2 questions: Layout: Masonry, Grid; What should the footer say?: Made with care');
+    expect(answerWords(earlier, noAsks)).toBe('Answers to 2 questions: Which layout should the gallery use?: Masonry, Grid; What should the footer say?: Made with care');
+  });
+
+  it('without the ask’s questions in hand: the bare words, a pick by its place, never the envelope', () => {
+    const envelope = askSteerText('ask-n', [PLAN, NOTES, TONE], [picked, typed, skipped]);
+    expect(answerWords(askSteerText('ask-n', [PLAN], [picked]), noAsks)).toBe('Answer: option 3, option 1');
+    expect(answerWords(envelope, noAsks)).toBe('Answers to 3 questions: option 3, option 1; Made with care; Skipped');
+    expect(answerWords(envelope, noAsks)).not.toMatch(/MAWS ask|q1|```/);
   });
 });
 

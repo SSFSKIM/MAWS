@@ -5,9 +5,10 @@
 // not name yields none.
 import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
-import { askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, nothingOpen, personsGrants, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, nothingOpen, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -386,7 +387,9 @@ describe('the reader, on an answer to a question asked without waiting', () => {
   it('MAWS’s own envelope, from its prompt and from its text alone; any other text is none', () => {
     const answers = [{ id: 'q1', question: 'Which color do you prefer?', status: 'answered' as const, value: ['Blue'] }];
     const text = askSteerText('toolu_f', QUESTIONS.map((q) => ({ ...q, modality: 'choice' as const })), answers);
-    const expected = { class: 'answer', tool: 'maws', call: 'toolu_f', summary: text, answers, dismissed: false };
+    // the envelope's block carries every answer's question empty and a pick by its place (board ticket 711: no text the
+    // model wrote); this reader has no call in hand, so the pick stays `option <k>`
+    const expected = { class: 'answer', tool: 'maws', call: 'toolu_f', summary: text, answers: answers.map((answer) => ({ ...answer, question: '', value: ['option 1'] })), dismissed: false };
     expect(readAnswerEnvelope(text)).toEqual(expected);
     expect(readArrivals({ type: 'user', uuid: 'u-steer', origin: { kind: 'human' }, message: { role: 'user', content: text } })).toEqual([expected]);
     expect(readArrivals({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt: text, source_uuid: 'u-steer', commandMode: 'prompt', origin: { kind: 'human' } } })).toEqual([expected]);
@@ -396,6 +399,30 @@ describe('the reader, on an answer to a question asked without waiting', () => {
 });
 
 describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => {
+  // board ticket 711: the opening the ask tool refuses an ask for quoting (tool-server/ask.ts) is this sentence's own
+  it('opens with GRANT_OPENING, the one definition the ask tool’s guard reads', () => {
+    expect(GRANT_OPENING).toBe('Permission granted for ');
+    for (const kind of ['command', 'call'] as const) expect(consentMessage(kind, 'x').startsWith(GRANT_OPENING)).toBe(true);
+  });
+
+  // addition B (2026-11-16): the one test of one string, which the ask tool's guard and the steer's writer both call
+  it('quotesGrant: the sentence quotes the grant, read with tags removed or with their brackets’ words kept', () => {
+    for (const kind of ['command', 'call'] as const) expect(quotesGrant(consentMessage(kind, 'x'))).toBe(true);
+    expect(quotesGrant('**Permission** granted <b>for</b> it')).toBe(true);
+    expect(quotesGrant('Permission granted <for it>')).toBe(true);
+    expect(quotesGrant('Was permission granted by the reviewer?')).toBe(false);
+  });
+
+  // the high-rung review of the fix wave (2026-11-16): each pair of angle brackets is read both ways by itself, so a
+  // tag around one word and words inside another pair, in one string, hide nothing
+  it('quotesGrant: every pair of angle brackets is read both ways, whichever the others are read', () => {
+    expect(quotesGrant('<b>Permission</b> granted <for this exact command only>')).toBe(true);
+    expect(quotesGrant('<Permission> <i>granted</i> <b>for</b> it')).toBe(true);
+    expect(quotesGrant(`${'<i>x</i>'.repeat(40)}<b>Permission</b> <u>granted</u> <for it>${'<s></s>'.repeat(40)}`)).toBe(true); // many pairs: no cost that doubles
+    expect(quotesGrant('Permission <b>was</b> granted <i>to none</i> for it')).toBe(false); // words stand between the opening's, read either way
+    expect(quotesGrant('<b>Was</b> permission granted <by the reviewer>?')).toBe(false);
+  });
+
   it('is one template with two words, the subject quoted as one JSON string', () => {
     expect(consentMessage('command', 'pnpm test')).toBe(
       'Permission granted for this exact command only, as one whole string: "pnpm test". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.',
@@ -694,6 +721,15 @@ describe('the answer envelopes inside a joined text', () => {
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
   });
 
+  // board ticket 711: A1 and A2 are this build's new form; an earlier build's envelope still reads, alone or beside one
+  it('an envelope an earlier build wrote, joined with a prompt and with a new-form one', () => {
+    const earlier = earlierAskSteerText('ask-1', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+    expect(A1.split('\n')[1]).toBe('1. option 1');
+    expect(earlier.split('\n')[1]).toBe('1. Layout — Grid');
+    expect(readAnswerEnvelopes(joined(earlier, 'Also fix the footer.'))).toEqual({ envelopes: [read(earlier)], rest: 'Also fix the footer.' });
+    expect(readAnswerEnvelopes(joined(earlier, A2))).toEqual({ envelopes: [read(earlier), read(A2)], rest: '' });
+  });
+
   it('a text that is all envelope: the envelope, and an empty rest, as today', () => {
     expect(readAnswerEnvelopes(A1)).toEqual({ envelopes: [read(A1)], rest: '' });
     expect(readAnswerEnvelope(A1)).not.toBeNull();
@@ -718,11 +754,19 @@ describe('the answer envelopes inside a joined text: a pasted segment is data', 
   });
 });
 
-// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. The model's
-// question is written verbatim and may hold a line that begins with the tag.
+// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. An earlier
+// build's writer wrote the model's question verbatim, and it may hold a line that begins with the tag; such an envelope
+// may still be read (board ticket 711: this build's writes no text the model wrote, so only its first line begins so).
 describe('the answer envelopes inside a joined text: the member boundary is the writer\'s whole first line', () => {
   const TAGGED = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice' as const, options: [{ label: 'Hash' }, { label: 'Star' }] };
-  const envelope = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+  const answered = [{ id: 'q1', question: TAGGED.question, status: 'answered' as const, value: ['Star'] }];
+  const envelope = earlierAskSteerText('ask-7', [TAGGED], answered);
+
+  it('this build’s writer begins only its first line with the tag, that line askSteerOpening', () => {
+    const lines = askSteerText('ask-7', [TAGGED], answered).split('\n');
+    expect(lines[0]).toBe(askSteerOpening('ask-7'));
+    expect(lines.filter((line) => line.startsWith('[MAWS ask'))).toEqual([lines[0]]);
+  });
 
   it('a question whose second line begins with the tag: its envelope alone is read', () => {
     expect(envelope.split('\n')[2]).toMatch(/^\[MAWS ask /);
