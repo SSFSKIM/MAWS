@@ -167,10 +167,10 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // P3-H H4: the page's connectors: shown only while the body and the window's document are, read grants kept current
   const { connectors } = state;
   const pageShown = useDocumentVisible() && visible;
-  // UX wave U6b-2 (Decision Log 35): the file viewer's body is on screen while the host says so and, in the main area, while
-  // the main area is (a sheet over it is not in the main tab's `visible`)
+  // UX wave U6b-2 (Decision Log 35): the file viewer's body is on screen, in the main area while the main area is (the shell's
+  // reading, which a sheet over it is in and the main tab's `visible` is not), beside the chat while the panel says so
   const mainOnScreen = useMainAreaOnScreen();
-  const fileInView = visible && (scope.surface !== 'main' || mainOnScreen);
+  const fileInView = scope.surface === 'main' ? mainOnScreen : visible;
   useEffect(() => connectors?.setVisible(pageShown), [connectors, pageShown]);
   useEffect(() => () => connectors?.setVisible(false), [connectors]);
   useEffect(() => {
