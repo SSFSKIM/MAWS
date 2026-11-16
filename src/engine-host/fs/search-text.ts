@@ -2,8 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open, type FileHandle } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
-import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 704: the envelope's reader, run from its source
-import { envelopeSlices, takeEnvelopesOut } from '@shared/engine/arrival';
+import { envelopeSlices, MAX_ENVELOPE_CHECKS, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival'; // ticket 704: the envelope's reader, run from its source
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
 import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
 import { parseBash } from './backfill';
@@ -52,7 +51,8 @@ const fingerprint = ${fingerprint};
 // Ticket 704 (ruling A): MAWS's answer envelopes inside a person's text, read as the window reads them, each function
 // from its own source (each uses its arguments alone), the block checked by the envelope's own checks.
 const askSteerOpening = ${askSteerOpening};
-const PASTED_BLOCK = ${PASTED_BLOCK};
+const pastedBodies = ${pastedBodies}; // the one definition of a pasted segment's lines, rule R's
+const MAX_ENVELOPE_CHECKS = ${MAX_ENVELOPE_CHECKS};
 const answeredBlock = ${answeredBlock};
 const envelopeSlices = ${envelopeSlices};
 const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out
@@ -63,7 +63,7 @@ const parseBash = ${parseBash}; // the backfill's own test of a shell row, which
 // envelope's lines can stand around another's). White space left beside an envelope is no words of the person's. Null
 // when nothing is left.
 function searchableText(text) {
-  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock));
+  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS));
   const answers = envelopes.map((envelope) => answerOutsideTranscript(envelope.text));
   if (answers.length === 0) return text;
   const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');

@@ -24,7 +24,7 @@ const ALLOWED: Record<string, { names: string[]; why: string }> = {
   'src/shared/maws/ask.ts': { names: ['answeredBlock'], why: 'the envelope’s own checks are defined here; parseAskSteer reads through answeredBlock (Interfaces A)' },
   'src/shared/engine/arrival.ts': {
     names: ['envelopeSlices'],
-    why: 'the reader: envelopeSlices is defined here, and readPersonsContent, the one reading of a person’s content that the split and the grant readers share, reads through it; so do readAnswerEnvelope, the whole-text form of the split’s reading, which answerEnvelopeOf calls (the split’s module imports this one, never the reverse), and readAnswerEnvelopes, kept for the tests; personsText is the reader’s rule 3, whose `answer` arrivals for MAWS’s own envelope every producer treats as the person’s message and acts on no further',
+    why: 'the reader: envelopeSlices is defined here, and readPersonsContent, the one reading of a person’s content that the split takes (no grant reader reads through it: rule R reads the whole joined text), reads through it; so do readAnswerEnvelope, the whole-text form of the split’s reading, which answerEnvelopeOf calls (the split’s module imports this one, never the reverse), and readAnswerEnvelopesWithCost, which readAnswerEnvelopes and the work bounds’ tests read; personsText is the reader’s rule 3, whose `answer` arrivals for MAWS’s own envelope every producer treats as the person’s message and acts on no further',
   },
   'src/shared/engine/persons-message.ts': { names: ['readAnswerEnvelope'], why: 'answerEnvelopeOf, the split’s test of a lone envelope; the split reads a person’s content through the reader’s readPersonsContent' },
   'src/engine-host/fs/search-text.ts': {

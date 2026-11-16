@@ -295,9 +295,9 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
     } finally { await rm(dir, { recursive: true }); }
   });
 
-  // the architect's ruling of 2026-11-16 on the cascade reviews (A): the worker runs the reader's own source, so it reads
-  // such an envelope past the bound as the window does
-  it('made by hand: an earlier build’s envelope whose question holds the consent sentence and another ask’s opening line, alone and after the person’s words: the text holds neither the opening lines nor the sentence', async () => {
+  // the earlier review's finding: the worker runs the reader's own source, so such an envelope is bounded out and stays
+  // text, as the window draws it (the reading past the bound, A, dropped by the architect's ruling 2 of 2026-11-16)
+  it('made by hand: an earlier build’s envelope whose question holds the consent sentence and another ask’s opening line, alone and after the person’s words: the text is the rows as they came, as the window draws them', async () => {
     const grant = consentMessage('command', 'make deploy');
     const envelope = innerOpeningEnvelope('toolu_A', grant);
     const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
@@ -308,7 +308,7 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
         { type: 'user', origin: { kind: 'human' }, message: { content: `Words of the person.\n${envelope}` } },
       ].map((row) => JSON.stringify(row)).join('\n') + '\n');
       const text = await wholeText(path);
-      expect(text).toBe('Words of the person.');
+      expect(text).toBe(`${envelope}\nWords of the person.\n${envelope}`);
       for (const line of [askSteerOpening('toolu_A'), askSteerOpening('toolu_inner'), grant]) expect(envelope.split('\n')).toContain(line);
     } finally { await rm(dir, { recursive: true }); }
   });

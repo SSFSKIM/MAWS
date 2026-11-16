@@ -15,7 +15,8 @@ export type UserMessage = Extract<EventPayload, { kind: 'user.message' }>;
 type Content = string | ContentBlock[];
 
 /** A person's content read apart: their own part, null when nothing of theirs is left, and the envelopes' texts in order.
- *  The reading is the reader's one (`readPersonsContent`, arrival.ts), which the grant readers share. */
+ *  The reading is the reader's one (`readPersonsContent`, arrival.ts); no grant reader reads it (rule R reads the whole
+ *  joined text, ticket 704's ruling 1 of 2026-11-16). */
 export function personsParts(content: Content): { own: Content | null; envelopes: string[] } {
   const { own, envelopes } = readPersonsContent(content);
   return { own, envelopes: envelopes.map((envelope) => envelope.text) };

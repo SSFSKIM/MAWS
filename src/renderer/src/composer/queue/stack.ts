@@ -19,9 +19,9 @@
 // stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
 // message and keeps its reading.
 import type { SendContent } from '@shared/engine/session-state-store';
-import { holdsEnvelopeOpening, readConsents } from '@shared/engine/arrival'; // U1c; ticket 704, holdsEnvelopeOpening
+import { readConsents } from '@shared/engine/arrival'; // U1c
 import { messageText } from '@shared/engine/peer-envelope';
-import { answerEnvelopeOf, personsParts } from '@shared/engine/persons-message';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askAnswersFromSteer } from '@shared/maws/ask';
@@ -107,14 +107,12 @@ function waitingAnswer(content: SendContent, questions: Read['questions']): stri
 // UX wave U1c: the call a message's content grants, when its whole text is exactly one grant sentence. Decision Log 44: a
 // row is a grant's only when the sentence is everything the message holds; a message with any block that is not text (an
 // image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview. Decision Log 53: read
-// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`. Ticket 704:
-// what the message holds is the person's part, as the split reads it (`personsParts`), MAWS's answer envelopes beside it
-// being answers of their own, as the transcript reads the message once the engine has it; a part that still holds an
-// envelope's opening line is no grant (`holdsEnvelopeOpening`, the architect's ruling of 2026-11-16, A2)
+// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`. Ticket 704
+// (the architect's ruling 1 of 2026-11-16): the whole joined text, never the part the split draws as the person's; the
+// whole-sentence reading is rule R's first step (`personsLines`)
 const grantOf = (content: SendContent): BlockedCall | null => {
-  const own = personsParts(content as string | ContentBlock[]).own;
-  if (own === null || (typeof own !== 'string' && !own.every((block) => block.type === 'text')) || holdsEnvelopeOpening(own)) return null;
-  const grants = readConsents(messageText(own));
+  if (typeof content !== 'string' && !(content as readonly ContentBlock[]).every((block) => block.type === 'text')) return null;
+  const grants = readConsents(messageText(content as string | ContentBlock[]));
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
 

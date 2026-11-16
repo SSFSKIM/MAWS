@@ -34,9 +34,11 @@ const GRANT = consentMessage('command', MARKER);
 // an invented async ask's answer envelope, as MAWS writes it
 const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
 const ENVELOPE = askSteerText('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
-// A, a line break, G, a line break, A: three parts, as the split reads a person's message (board ticket 704, at the
-// chain's merge): the person's part G, and each envelope an answer of its own; so the transcript records the approval,
-// and every row of the stack reads the grant
+// A, a line break, G, a line break, A: three parts, as the split draws a person's message (board ticket 704), the
+// person's part G and each envelope an answer of its own; rule R reads the grant on the whole joined text, so the
+// transcript records the approval and the handed row, which carries the transcript's classification, reads it. A waiting
+// row reads a grant only where the sentence is the whole message (Decision Log 44), so the queued rows read none (the
+// architect's ruling 1 of 2026-11-16; the stack's rows are left to the wave's ruling 5)
 const SPANNING = `${ENVELOPE}\n${GRANT}\n${ENVELOPE}`;
 
 const uuid = (loadUxwaveJournal(RECORDING).find((row) => row.seq === WRITTEN)!.frame as { uuid: MessageUuid }).uuid;
@@ -87,16 +89,18 @@ describe('a handed row reads as a grant exactly where the transcript records one
     expect(rows.map((row) => [row.kind, row.key, grantOf(row), rowText(row)])).toEqual([['handed', uuid, { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
   });
 
-  it('A + G + A, queued at the next step: the queue’s steer is the row, read as the split reads it, the grant and no answer, as the transcript records the approval', () => {
+  it('A + G + A, queued at the next step: the queue’s steer is the row, no answer and no grant (the sentence is not the whole message), while the transcript records the approval', () => {
     const { approvals } = transcriptOf(SPANNING, WAITING);
     expect(approvals).toHaveLength(1);
     const rows = stackRows(queue({ steers: [{ messageUuid: uuid, content: SPANNING, createdAt: '2026-11-15T10:00:00.000Z' }] }), new Set(), readOf(APP));
-    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, grantOf(row), rowText(row)])).toEqual([['next', null, { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, grantOf(row)])).toEqual([['next', null, null]]);
+    expect(rowText(rows[0]!)).not.toMatch(/^You approved /);
   });
 
-  it('A + G + A, waiting after the turn and on its way: the grant on either row, and once delivered the transcript records the approval', () => {
+  it('A + G + A, waiting after the turn and on its way: no grant on either row, and once delivered the transcript records the approval', () => {
     const rows = stackRows(queue({ entries: [entry(SPANNING), entry(SPANNING, { queueId: 'q-s', state: 'submitting', submittedAt: '2026-11-15T10:00:01.000Z' })] }), new Set(['q-s']), readOf(APP));
-    expect(rows.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['after', { kind: 'command', subject: MARKER }, `You approved ${MARKER}`], ['sending', { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
+    expect(rows.map((row) => [row.kind, grantOf(row)])).toEqual([['after', null], ['sending', null]]);
+    for (const row of rows) expect(rowText(row)).not.toMatch(/^You approved /);
     const { consents, approvals } = transcriptOf(SPANNING);
     expect(consents).toEqual([{ class: 'consent', kind: 'command', subject: MARKER }]);
     expect(approvals).toHaveLength(1);

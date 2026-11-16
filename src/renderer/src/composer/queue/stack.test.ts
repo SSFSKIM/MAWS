@@ -279,39 +279,41 @@ describe('a grant’s row', () => {
     expect(rowText(row!)).toBe(answerWords(ANSWER, read().questions));
   });
 
-  // board ticket 704 at the chain's merge: a waiting message is read as the split reads a person's message, so the grant
-  // that is the person's whole part is the row's grant, and the envelopes beside it are answers of their own
-  it('an answer, the grant and the answer again, as one text or as text blocks: the grant’s row, no answer, whichever wait it is in', () => {
+  // ticket 704 at the chain's merge of rule R (the architect's ruling 1 of 2026-11-16): a waiting message's grant is read on
+  // its whole joined text, never on the part the split draws as the person's; the row is a grant's only where the sentence
+  // is everything the message holds (Decision Log 44, rule R's first step), so A + G + A is no grant's row, nor an answer's
+  it('an answer, the grant and the answer again, as one text or as text blocks: no grant’s row and no answer, whichever wait it is in', () => {
     const joined = `${ANSWER}\n${GRANT}\n${ANSWER}`;
     const blocks = [{ type: 'text' as const, text: ANSWER }, { type: 'text' as const, text: GRANT }, { type: 'text' as const, text: ANSWER }];
     const rows = stackRows(queue({ steers: [steer(U1, 1, joined)], entries: [entry('q-1', 2, { content: blocks }), entry('q-u', 3, { content: joined, uncertain: true })] }), NONE, read());
-    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, 'grant' in row ? row.grant : undefined, rowText(row)])).toEqual([
-      ['next', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
-      ['after', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
-      ['uncertain', undefined, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, 'grant' in row ? row.grant : undefined])).toEqual([
+      ['next', null, null],
+      ['after', null, null],
+      ['uncertain', undefined, null],
     ]);
+    for (const row of rows) expect(rowText(row)).not.toMatch(/^You approved /);
     // an attachment beside them keeps the message the person's own (Decision Log 44), as beside the grant alone
     const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'iVBORw0KGgo=' } };
     const [row] = stackRows(queue({ entries: [entry('q-i', 4, { content: [...blocks, image] })] }), NONE, read());
     expect(row).toMatchObject({ kind: 'after', answer: null, grant: null });
   });
 
-  // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A2), made by hand: a part left to the person
-  // that still holds an envelope's whole opening line is no grant. The row reads a grant only where that part is the
-  // sentence whole, so this holds by that rule too; it is pinned here beside the grant readers that read lines
-  it('a message whose person’s part still holds an envelope’s opening line is no grant: an envelope cut before its block beside the sentence, in either order', () => {
+  // made by hand: an envelope cut before its block beside the sentence is no grant's row, the sentence not being the
+  // whole message (Decision Log 44; the cascade reviews' A2, dropped by the architect's ruling 1 of 2026-11-16, pinned it)
+  it('an envelope cut before its block beside the sentence, in either order: no grant’s row', () => {
     const cut = ANSWER.slice(0, ANSWER.indexOf('\n```json'));
     const rows = stackRows(queue({ steers: [steer(U1, 1, `${GRANT}\n${cut}`)], entries: [entry('q-1', 2, { content: `${cut}\n${GRANT}` })] }), NONE, read());
     expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined])).toEqual([['next', null], ['after', null]]);
   });
 
-  // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A), made by hand: an earlier build's envelope
-  // whose question holds the sentence and another ask's whole opening line is read past the reader's bound as one answer
-  it('an earlier build’s envelope whose question holds the sentence and another ask’s opening line: an answer’s row, no grant', () => {
+  // ticket 704, the earlier review's finding, made by hand: an earlier build's envelope whose question holds the sentence
+  // and another ask's whole opening line is bounded out and stays text (the reading past the bound, A, dropped by the
+  // architect's ruling 2 of 2026-11-16): an ordinary message's row, no answer and no grant
+  it('an earlier build’s envelope whose question holds the sentence and another ask’s opening line: no answer’s row, no grant', () => {
     const inner = innerOpeningEnvelope('ask-1', GRANT);
     const [row] = stackRows(queue({ steers: [steer(U1, 1, inner)] }), NONE, read());
-    expect(answerWords(inner, read().questions)).not.toBeNull();
-    expect(row).toMatchObject({ kind: 'next', answer: answerWords(inner, read().questions), grant: null });
+    expect(answerWords(inner, read().questions)).toBeNull();
+    expect(row).toMatchObject({ kind: 'next', answer: null, grant: null });
   });
 
   it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {

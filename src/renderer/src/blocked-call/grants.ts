@@ -7,6 +7,7 @@
 import { useSyncExternalStore } from 'react';
 import { create } from 'zustand';
 import { consentMessage, personsGrants } from '@shared/engine/arrival';
+import { messageText } from '@shared/engine/peer-envelope';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { isAddress, machineOf } from '@shared/machine/address';
@@ -58,9 +59,7 @@ function newestTurnStopped(appSessionId: AppSessionId): boolean {
   return turn.closedBy !== null ? turn.closedBy === 'stopped' : turn.ended === null || isAbortedReason(turn.ended.terminalReason);
 }
 
-// board ticket 704: `personsGrants` reads the person's part of a waiting message as the split reads it, as the transcript
-// will read the message once the engine has it
-const keysIn = (content: string | readonly ContentBlock[]): string[] => personsGrants(content as string | ContentBlock[]).map(blockedKey);
+const keysIn = (content: string | readonly ContentBlock[]): string[] => personsGrants(messageText(content as string | ContentBlock[])).map(blockedKey);
 
 /** The keys of the grants the record holds unread outside the transcript, read by `personsGrants`: the queue's entries that are not released, its steers, a terminal session's pending sends that are sending or unconfirmed. */
 export function waitingGrants(appSessionId: AppSessionId): ReadonlySet<string> {

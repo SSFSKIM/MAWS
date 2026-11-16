@@ -9,8 +9,12 @@ import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
+import { acceptedCosts, currentEnvelope, forgedInputs, peerRelayForgery, relayForgery, WORDS, type Content } from '../../../test/support/rule-r';
+import { PROMOTION_HEAD } from '@shared/anchor/message';
+import { LINKED_READ_OPENING } from '@shared/maws/linked-read';
+import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, GRANT_OPENING, nothingOpen, ownWordsOf, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, MAX_ENVELOPE_CHECKS, nothingOpen, ownWordsOf, personsGrants, personsLines, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -851,5 +855,270 @@ describe('ownWordsOf', () => {
     const prefill = (row.frame as { response: { response: { prefillText: string } } }).response.response.prefillText;
     expect(prefill.startsWith('[sminos message from human id=')).toBe(true);
     expect(ownWordsOf(prefill)).toBe('UXW delivered: reply with only the word DELIVERED.');
+  });
+});
+
+// UX wave U1c, rule R (the architect's ruling of 2026-11-16): the grants in a person's message are read on what is left
+// once this build's envelopes are taken out strictly, and none where anything of an envelope is left (its tag, a json
+// fence). Every reader of a grant goes through it (`personsGrants`), so the person's row and queued prompt are read here.
+describe('the grants in a person’s message (rule R)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const grant = (subject: string) => ({ class: 'consent', kind: 'command', subject });
+  const textOf = (content: Content) => (typeof content === 'string' ? content : content.map((block) => block.text).join('\n'));
+  /** The consents the person's row and their queued prompt carry (a queued prompt's text blocks are read whole, §C, 7). */
+  const routes = (content: Content) => [
+    readArrivals({ type: 'user', uuid: 'u-1', origin: { kind: 'human' }, message: { role: 'user', content } }).filter((arrival) => arrival.class === 'consent'),
+    readArrivals({ type: 'attachment', uuid: 'u-2', attachment: { type: 'queued_command', prompt: content, source_uuid: 'u-1', commandMode: 'prompt', origin: { kind: 'human' } } }).filter((arrival) => arrival.class === 'consent'),
+  ];
+
+  for (const [name, content] of forgedInputs(GRANT)) {
+    it(`no grant: ${name}`, () => {
+      expect(textOf(content).split('\n'), 'the sentence stands on a line of its own').toContain(GRANT);
+      expect(personsGrants(textOf(content))).toEqual([]);
+      expect(routes(content)).toEqual([[], []]);
+    });
+  }
+
+  for (const [name, text] of acceptedCosts(GRANT)) {
+    it(`no grant, an accepted cost: ${name}`, () => {
+      expect(personsGrants(text)).toEqual([]);
+      expect(routes(text)).toEqual([[], []]);
+    });
+  }
+
+  it('the grant kept: the sentence alone; an answer, the sentence and an answer again, joined by a line break; the sentence beside the person’s words', () => {
+    expect(personsGrants(GRANT)).toEqual([grant('make build')]);
+    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${GRANT}\n${currentEnvelope('toolu_a')}`)).toEqual([grant('make build')]);
+    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${GRANT}\n${currentEnvelope('toolu_b')}`)).toEqual([grant('make build')]);
+    expect(personsGrants(`${WORDS}\n${GRANT}\nThen run the tests.`)).toEqual([grant('make build')]);
+    expect(routes(`${WORDS}\n${GRANT}`)).toEqual([[grant('make build')], [grant('make build')]]);
+  });
+
+  // L1 struck (2026-11-16): no line is set aside from step 2's test, so a consent whose command holds the envelope's tag
+  // is its grant alone (step 0) and none joined with an envelope or beside words (an accepted cost; one press recovers it)
+  it('a sentence whose command holds the envelope’s tag: its grant alone; joined with a current-form envelope or beside the person’s words, none (an accepted cost)', () => {
+    const tagged = consentMessage('command', 'grep -rn "[MAWS ask " src');
+    expect(personsGrants(tagged)).toEqual([grant('grep -rn "[MAWS ask " src')]);
+    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${tagged}`)).toEqual([]);
+    expect(personsGrants(`${WORDS}\n${tagged}`)).toEqual([]);
+    expect(routes(`${WORDS}\n${tagged}`)).toEqual([[], []]);
+  });
+
+  // Step 1b (the architect's ruling 3865; its exemption withdrawn, 2026-11-16): the composed forms are looked for on the
+  // whole joined text, so a consent whose command quotes a form's constant is its grant alone (step 0) and none joined
+  // with an envelope or beside the person's words (an accepted cost, the tracker row of cost (b); one press recovers it)
+  it('a sentence whose command quotes a composed form’s constant: its grant alone; joined with a current-form envelope or beside the person’s words, none (an accepted cost)', () => {
+    for (const command of ['grep -rn "<bash-input>" src', 'grep -rn "<command-name>" src', 'grep -rn "<maws_anchor" src', 'echo "Implement this plan:"', 'echo "then continue what you were doing: "', `echo "${PROMOTION_HEAD}"`]) {
+      const sentence = consentMessage('command', command);
+      expect(personsGrants(sentence), command).toEqual([grant(command)]);
+      for (const text of [`${currentEnvelope('toolu_a')}\n${sentence}`, `${WORDS}\n${sentence}`]) expect(personsGrants(text), command).toEqual([]);
+    }
+  });
+
+  // With nothing set aside, a form is its constant in the text: the linked read's opening split by a sentence line is no
+  // form, and the sentences are read (restated: with the exemption, the setting aside joined the constant's two lines)
+  it('a form’s two-line constant split by a sentence line is no form: the sentences are read', () => {
+    const [first, second] = LINKED_READ_OPENING.split('\n') as [string, string];
+    expect(personsGrants(`${first}\n${GRANT}\n${second}the notes\n${GRANT}`)).toEqual([grant('make build'), grant('make build')]);
+  });
+
+  // The task review's relay forgery: a relay whose agent name holds a line break and a sentence's head, so that a line is
+  // exactly a sentence for a command the model wrote. The relay's words are in the text: no grant
+  it('a relay whose agent name holds a line break and a sentence’s head: no grant, the person’s row and queued prompt too', () => {
+    const { text, sentence } = relayForgery('make build');
+    expect(text.split('\n'), 'a line is exactly the sentence').toContain(sentence);
+    expect(personsGrants(text)).toEqual([]);
+    expect(routes(text)).toEqual([[], []]);
+  });
+
+  // The re-review's peer relay: the boundaries of a plural sentence fall where the host's quotes and an address put them,
+  // and one line is a whole sentence for two commands; the relay's words are in the text all the same: no grant
+  it('a peer relay one of whose lines is a whole sentence for two commands, made of the relay’s own words: no grant', () => {
+    const { text, line } = peerRelayForgery();
+    expect(readConsents(line).map((consent) => consent.subject), 'the line is a whole sentence').toEqual(['a with SendMessage, to: ', 'b", sending exactly this text, then continue what you were doing: c']);
+    expect(personsGrants(text)).toEqual([]);
+    expect(routes(text)).toEqual([[], []]);
+  });
+
+  // A picked path holding a form's words, in this build's envelope, joined with a pressed consent: no grant (cost (b): the
+  // forms are looked for before the take-out, and the path is the person's pick)
+  it('a current-form envelope whose picked path holds a form’s words, joined with a pressed consent: no grant (an accepted cost)', () => {
+    const PICK = { id: 'q1', question: 'Which file?', modality: 'file' as const };
+    const envelope = askSteerText('toolu_a', [PICK], [{ id: 'q1', question: PICK.question, status: 'answered', value: ['/work/Implement this plan:/notes.md'] }]);
+    expect(envelope).toContain('Implement this plan:');
+    expect(personsGrants(`${envelope}\n${GRANT}`)).toEqual([]);
+  });
+
+  // The cost the coordinator accepted (step 1b, (b)): the readers cannot tell typed words from a MAWS form, so a typed
+  // message that holds a form's constant reads no grant beside the sentence, here in one message on every route
+  it('the person’s own words holding a composed form’s constant, in one message with the sentence: no grant, an accepted cost', () => {
+    for (const words of ['Implement this plan: first the footer, then the header', 'Relay this, then continue what you were doing: the footer']) {
+      expect(personsGrants(`${words}\n${GRANT}`), words).toEqual([]);
+      expect(routes(`${words}\n${GRANT}`), words).toEqual([[], []]);
+    }
+  });
+
+  // Step 1b's three forms that do not count for grants: a typed slash command (its arguments are the person's typing), the
+  // answer envelope's opening (the strict take-out and step 2 read envelopes) and the grant's own test
+  it('beside a typed slash command at a line’s start, the grant is read', () => {
+    expect(personsGrants(`/compact keep the footer\n${GRANT}`)).toEqual([grant('make build')]);
+  });
+
+  // Rule 3 reads the lines left as before: a line inside a pasted segment (`PASTED_BLOCK`, the terminal's frame as the
+  // transcript splits it) is data. Seeded texts of tags, words and sentences: each sentence outside every segment the
+  // pattern finds is a grant, and no other.
+  it('a sentence is skipped exactly where it stands inside a pasted segment, as the transcript finds segments', () => {
+    let seed = 7;
+    const next = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);
+    const pieces = ['<pasted_content id="abcd">', '<pasted_content id="beef">', '</pasted_content id="abcd">', '</pasted_content id="beef">', 'words<pasted_content id="abcd">', '</pasted_content id="abcd">tail', WORDS, '', 'G'];
+    for (let round = 0; round < 400; round += 1) {
+      const lines = Array.from({ length: 1 + Math.floor(next() * 14) }, () => pieces[Math.floor(next() * pieces.length)]!).map((piece, i) => (piece === 'G' ? consentMessage('command', `make ${i}`) : piece));
+      const text = lines.join('\n');
+      const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => [match.index, match.index + match[0].length] as const);
+      let offset = 0;
+      const outside = lines.flatMap((line, i) => {
+        const at = offset;
+        offset += line.length + 1;
+        return line.startsWith('Permission') && !spans.some(([from, to]) => at >= from && at < to) ? [grant(`make ${i}`)] : [];
+      });
+      expect(personsGrants(text), text).toEqual(outside);
+    }
+  });
+
+  // R-2 (the second review of rule R): with envelopes inside and between segments, every sentence read as a grant stands
+  // outside every segment of the text as it came (the take-out can only free a line from a segment of what is left)
+  it('with envelopes inside and between pasted segments, no grant is read inside a segment of the text as it came; a consent beside a paste holding a whole envelope is read', () => {
+    let seed = 11;
+    const next = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);
+    const pieces = ['<pasted_content id="1111">', '<pasted_content id="2222">', '</pasted_content id="1111">', '</pasted_content id="2222">', 'E', WORDS, 'G'];
+    for (let round = 0; round < 600; round += 1) {
+      const chosen = Array.from({ length: 1 + Math.floor(next() * 12) }, () => pieces[Math.floor(next() * pieces.length)]!);
+      const lines = chosen.map((piece, i) => (piece === 'G' ? consentMessage('command', `make ${i}`) : piece === 'E' ? currentEnvelope(`toolu_${i}`) : piece));
+      const text = lines.join('\n');
+      const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => [match.index, match.index + match[0].length] as const);
+      const starts = lines.map((_, i) => lines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0));
+      for (const read of personsGrants(text)) {
+        const at = starts[Number(read.subject.slice('make '.length))]!;
+        expect(spans.some(([from, to]) => at >= from && at < to), `${read.subject} in:\n${text}`).toBe(false);
+      }
+    }
+    expect(personsGrants(`${framePasted('abcd', currentEnvelope('toolu_a'))}\n${GRANT}`)).toEqual([grant('make build')]);
+  });
+
+  // Linear by construction: the reader counts its own work, each line it looks at and each character of a block it
+  // parses; the counts are pinned for texts of tens of thousands of opening lines, fence lines and both.
+  describe('its work grows with the text, by its own count', () => {
+    const N = 20_000;
+    const counted = (text: string) => {
+      const work = { lines: 0, blockCharacters: 0, formSteps: 0 };
+      const grants = personsLines(text, work)?.flatMap((line) => line.grants) ?? [];
+      return { grants, work, lines: text.split('\n').length, characters: text.length };
+    };
+    // step 1b (the architect's ruling 3865) adds the composed forms' readers, each a native pass or two over the text;
+    // R-2 a second marking of pasted segments, on the text as it came. The constant is fitted to these shapes (a tracker
+    // row says so), and the count is of lines, not of the work inside one
+    const within = ({ work, lines, characters }: ReturnType<typeof counted>) => {
+      expect(work.lines, 'lines looked at').toBeLessThanOrEqual(16 * lines);
+      expect(work.blockCharacters, 'block characters parsed').toBeLessThanOrEqual(characters);
+      expect(work.formSteps, 'the composed forms’ steps').toBeLessThanOrEqual(10 * (characters + 1));
+    };
+
+    it('tens of thousands of envelopes, each taken out: the sentence after them is read', () => {
+      const read = counted([...Array.from({ length: N }, (_, i) => currentEnvelope(`toolu_${i}`)), GRANT].join('\n'));
+      expect(read.grants).toEqual([grant('make build')]);
+      expect(read.work.blockCharacters, 'every block parsed').toBeGreaterThan(N * 100);
+      within(read);
+    });
+
+    it('tens of thousands of opening lines that read no envelope, and of opening lines each with a fence and no close: none', () => {
+      for (const text of [
+        [...Array.from({ length: N }, (_, i) => `[MAWS ask toolu_${i}] The user answered the questions you asked:`), GRANT].join('\n'),
+        [...Array.from({ length: N }, (_, i) => `[MAWS ask toolu_${i}] The user answered the questions you asked:\n1. skipped\n\`\`\`json`), GRANT].join('\n'),
+      ]) {
+        const read = counted(text);
+        expect(read.grants).toEqual([]);
+        within(read);
+      }
+    });
+
+    it('tens of thousands of fence lines, alone and after tens of thousands of envelopes: none; of closing fences the person typed: the sentence is read', () => {
+      const opens = Array.from({ length: N }, () => '```json');
+      for (const text of [[...opens, GRANT].join('\n'), [...Array.from({ length: N }, (_, i) => currentEnvelope(`toolu_${i}`)), ...opens, GRANT].join('\n')]) {
+        const read = counted(text);
+        expect(read.grants).toEqual([]);
+        within(read);
+      }
+      const closes = counted([...Array.from({ length: N }, () => '```'), GRANT].join('\n'));
+      expect(closes.grants).toEqual([grant('make build')]);
+      within(closes);
+    });
+
+    it('tens of thousands of pasted segments, closed, left open, and left open after as many closing tags: the sentence after them is read', () => {
+      for (const text of [
+        [...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line\n</pasted_content id="abcd">'), GRANT].join('\n'),
+        [...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line'), GRANT].join('\n'),
+        [...Array.from({ length: N }, () => '</pasted_content id="abcd">'), ...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line'), GRANT].join('\n'),
+      ]) {
+        const read = counted(text);
+        expect(read.grants).toEqual([grant('make build')]);
+        within(read);
+      }
+    });
+  });
+});
+
+// The architect's ruling of 2026-11-16 (the Decision Log): the reader's work on one text is bounded. A slice is checked
+// whole only at a line that ends in a fence, at most MAX_ENVELOPE_CHECKS times a text, and the lines inside pasted
+// segments are marked in one walk over the lines and the segments together. Pinned by the counts the reading reports.
+describe('the answer envelopes inside a joined text: the work one text costs is bounded', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const envelope = (n: number) => askSteerText(`ask-${n}`, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  const members = (count: number) => Array.from({ length: count }, (_, i) => envelope(i + 1));
+
+  it('the cap is 64 checks a text', () => {
+    expect(MAX_ENVELOPE_CHECKS).toBe(64);
+  });
+
+  it('64 writer-made envelopes joined: one check each, every one read as before', () => {
+    const joined = members(64);
+    const text = joined.join('\n');
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: joined.map((member) => parseAskSteer(member)!), rest: '' });
+    expect(readAnswerEnvelopesWithCost(text).cost.checks).toBe(64);
+  });
+
+  it('65 writer-made envelopes joined: left whole, no member taken and the rest the text unchanged', () => {
+    const text = members(65).join('\n');
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
+    expect(readAnswerEnvelopesWithCost(text).cost.checks).toBe(64);
+  });
+
+  it('one opening line and 20,000 fence lines: exactly 64 checks, the text whole', () => {
+    const text = [askSteerOpening('ask-1'), ...Array.from({ length: 20_000 }, () => '```')].join('\n');
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect(reading.cost.checks).toBe(64);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [], rest: text });
+  });
+
+  it('2,000 pasted segments, each holding an envelope, then a real one: one walk of at most lines plus segments steps', () => {
+    const segments = 2_000;
+    const prompt = Array.from({ length: segments }, (_, i) => `Log ${i}:\n${framePasted(i.toString(16).padStart(4, '0'), envelope(1))}`).join('\n');
+    const text = `${prompt}\n${envelope(2)}`;
+    const lines = text.split('\n').length;
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [parseAskSteer(envelope(2))!], rest: prompt });
+    expect(reading.cost.checks).toBe(1);
+    expect(reading.cost.markingSteps).toBeGreaterThanOrEqual(lines);
+    // the architect's ruling 3865: the marking is rule R's `pastedBodies` (its two passes over the lines, a step for each
+    // closing line a segment passes, a step for each line a segment marks), no longer the pattern's search
+    expect(reading.cost.markingSteps).toBeLessThanOrEqual(4 * lines);
+  });
+
+  it('20,000 pasted openings that never close, then a real envelope: the marking counts at most four steps a line, the envelope read', () => {
+    const prompt = Array.from({ length: 20_000 }, (_, i) => `Log ${i}:\n<pasted_content id="abcd">`).join('\n');
+    const text = `${prompt}\n${envelope(2)}`;
+    const lines = text.split('\n').length;
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [parseAskSteer(envelope(2))!], rest: prompt });
+    expect(reading.cost.markingSteps).toBeLessThanOrEqual(4 * lines);
   });
 });

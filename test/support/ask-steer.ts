@@ -37,10 +37,10 @@ export function earlierAskSteerText(askId: string, questions: readonly AskQuesti
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
 }
 
-// Made by hand (ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews, A): an earlier build's envelope
-// for `askId` whose question holds, on lines of their own, `sentence` and then the whole opening line of each of
-// `innerIds`. The earlier writer wrote a question's words verbatim, so the model's text could hold both; no recording does.
-export function innerOpeningEnvelope(askId: string, sentence: string, innerIds: readonly string[] = ['toolu_inner']): string {
-  const question: AskQuestion = { id: 'q1', question: ['Which?', sentence, ...innerIds.map(askSteerOpening), 'Pick one.'].join('\n'), modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+// Made by hand (ticket 704, the earlier review's finding): an earlier build's envelope for `askId` whose question holds,
+// on lines of their own, `sentence` and then the whole opening line of another ask (`toolu_inner`). The earlier writer
+// wrote a question's words verbatim, so the model's text could hold both; no recording does.
+export function innerOpeningEnvelope(askId: string, sentence: string): string {
+  const question: AskQuestion = { id: 'q1', question: ['Which?', sentence, askSteerOpening('toolu_inner'), 'Pick one.'].join('\n'), modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
   return earlierAskSteerText(askId, [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
 }
