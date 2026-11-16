@@ -16,7 +16,7 @@ Verdict.
     started; nothing in the numbers asks for a smaller one, and a larger one is not this probe's question.
   - The branch read's two minutes stand. It answers in 0.46 s (median) where the repository has a commit-graph (what
     `git gc` and `git maintenance` write) and 2.15 s where it has none (a fresh clone), once per two minutes per
-    repository in view: at most about 2 % of one core. Two of its git runs walk history, the merge base and `behind`
+    repository in view (wall time; the read's CPU time was not measured, and its two walks run side by side). Two of its git runs walk history, the merge base and `behind`
     (about 2.6 s each with no commit-graph, 0.15 s and 0.55 s with one); the first build asked them one after the
     other (5.1 s median); they are now asked side by side, which this build measures. Risk left: a repository of the
     Linux kernel's size with no commit-graph could bring one of those walks near git's 10 s run limit, which answers

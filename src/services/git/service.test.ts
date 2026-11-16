@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFileSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -650,6 +650,27 @@ describe('the three reads', () => {
       await expect(service.commitDiff({ directory: repo.root, commit: tree })).rejects.toThrow(`no commit ${tree} in this repository`);
     });
 
+    // Review fix 1: a path is a literal pathspec after `--`, never an option; a file named like the commit's whole id
+    // leaves the revisions revisions; a path outside the repository reads nothing outside it
+    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and nothing outside the repository', async () => {
+      const parent = initial;
+      await repo.write('--output=x', 'option-shaped\n');
+      await repo.write('-p', 'dash p\n');
+      await repo.write(parent, 'named like the parent\n'); // a file whose name is the parent's whole id
+      await repo.git('add', '--', '--output=x', '-p', parent);
+      await repo.git('commit', '-q', '-m', 'odd names');
+      const odd = await rev('HEAD');
+      await repo.write(odd, 'named like the commit itself\n'); // untracked: `odd` is both a revision and a file here
+      for (const path of ['--output=x', '-p']) {
+        const read = await service.commitDiff({ directory: repo.root, commit: odd, path });
+        expect(read.files, path).toEqual([{ path, oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+      }
+      expect(existsSync(repo.path('x'))).toBe(false); // no `--output` was obeyed
+      const whole = await service.commitDiff({ directory: repo.root, commit: odd });
+      expect(whole.files.map((f) => f.path).sort()).toEqual(['--output=x', '-p', parent].sort());
+      await expect(service.commitDiff({ directory: repo.root, commit: odd, path: '../outside.txt' })).rejects.toThrow(/outside repository/);
+    });
+
     it('reads a SHA-256 repository\'s root commit and the commit after it', async () => {
       const sha256 = realpathSync(mkdtempSync(join(tmpdir(), 'maws-git-sha256-')));
       try {
@@ -671,6 +692,27 @@ describe('the three reads', () => {
   });
 
   describe('git.changesSince', () => {
+    // Review fix 1, the same three for the working-tree read
+    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and nothing outside the repository', async () => {
+      await repo.write('--output=x', 'option-shaped\n');
+      await repo.write('-p', 'dash p\n');
+      await repo.git('add', '--', '--output=x', '-p');
+      await repo.git('commit', '-q', '-m', 'odd names');
+      const against = await rev('HEAD');
+      await repo.write('--output=x', 'option-shaped\nedited\n');
+      await repo.write('-p', 'dash p\nedited\n');
+      await repo.write(against, 'named like the commit compared against\n'); // `against` is both a revision and a new file
+      for (const path of ['--output=x', '-p']) {
+        const read = await service.changesSince({ directory: repo.root, against, path });
+        expect(read.files, path).toEqual([{ path, oldPath: null, insertions: 1, deletions: 0, binary: false }]);
+      }
+      expect(existsSync(repo.path('x'))).toBe(false);
+      const whole = await service.changesSince({ directory: repo.root, against });
+      expect(whole.files.map((f) => f.path).sort()).toEqual(['--output=x', '-p'].sort());
+      expect(whole.untracked).toEqual([{ path: against, insertions: 1, binary: false }]);
+      await expect(service.changesSince({ directory: repo.root, against, path: '../outside.txt' })).rejects.toThrow(/outside repository/);
+    });
+
     it('against HEAD answers what git.diff\'s all scope answers for the same tree', async () => {
       await commit('kept.txt', 'kept\n');
       await repo.write('README.md', 'hello\nedited\n');
