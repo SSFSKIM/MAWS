@@ -40,7 +40,7 @@ const ENVELOPE = askSteerText('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT
 // person's part G and each envelope an answer of its own; rule R reads the grant on the whole joined text, so the
 // transcript records the approval and the handed row, which carries the transcript's classification, reads it. A waiting
 // row reads a grant only where the sentence is the whole message (Decision Log 44), so the queued rows read none (the
-// architect's ruling 1 of 2026-11-16; the stack's rows are left to the wave's ruling 5)
+// architect's ruling 1 of 2026-11-16; ruling 5 pins both rows in both forms, below)
 const SPANNING = `${ENVELOPE}\n${GRANT}\n${ENVELOPE}`;
 
 const uuid = (loadUxwaveJournal(RECORDING).find((row) => row.seq === WRITTEN)!.frame as { uuid: MessageUuid }).uuid;
