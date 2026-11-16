@@ -17,6 +17,10 @@
 // - Every failed read of a live token is told to its page alone (`layout.frameFailed`), never broadcast: a token told to
 //   another window would be a token another window holds.
 //
+// - An HTML file's ready answer also says whether its head names files beside it (`neighbours`, M5 decision 14; the
+//   owner's answer to card 2), read from the same head as its `Content-Type`, so the tab can say the page is shown without
+//   them. Never for another kind.
+//
 // Main writes no token to a log and names a frame by its session, never by its path; the one exception is the e2e seam
 // (`seam`, under MAWS_E2E=1), whose `frame-entry` lines the request filter's `frame-decision` lines are walked against.
 import { randomBytes } from 'node:crypto';
@@ -33,6 +37,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { STORE_FRAME_CSP, type SchemeResponder } from '../../render/store-serving';
 import type { registerMainHandler } from '../ipc/router';
 import { FRAME_HEAD_BYTES, htmlContentType } from './charset';
+import { neighboursOf } from './neighbours';
 import { fileFrameResponder } from './responder';
 import { copySource, localSource, type ByteSource, type FrameAsk, type RawRead } from './source';
 import { createFrameTokens, type FrameTokens } from './tokens';
@@ -68,8 +73,13 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
   const entered = deps.seam && ((request: Request) => deps.seam!(`frame-entry ${request.method} ${request.headers.get('Range') ?? '-'} ${request.url}`));
   const responder = fileFrameResponder(tokens, (token) => deps.page(token.owner)?.send('layout.frameFailed', { token: token.token }), entered);
 
+  // What a head fixes with the token: the type (an HTML file's settled from its head, decision 18) and, for an HTML file
+  // alone, whether it names files beside it (M5, decision 14).
+  const fixedBy = (framed: FramedKind, mime: string, head: Uint8Array): { type: string; neighbours?: boolean } =>
+    framed === 'html' ? { type: htmlContentType(head), neighbours: neighboursOf(head) } : { type: mime };
+
   // The token recorded for the asking page, if it still lives and holds fewer than the bound; else `source` is closed.
-  async function issue(client: ClientRef, path: string, framed: FramedKind, mime: string, source: ByteSource): Promise<FrameAnswer> {
+  async function issue(client: ClientRef, path: string, framed: FramedKind, { type: mime, neighbours }: { type: string; neighbours?: boolean }, source: ByteSource): Promise<FrameAnswer> {
     const name = posix.basename(path);
     const page = deps.page(client);
     const issued = page === null ? 'gone' : tokens.issue(client, page.id, { name, framed, mime, csp: framed === 'pdf' ? null : STORE_FRAME_CSP, source });
@@ -77,7 +87,7 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
       await source.close();
       return issued === 'full' ? fail('invalid_input', 'layout.frameFile: too many file frames in this window') : fail('internal', 'layout.frameFile: the window that asked has gone');
     }
-    return { status: 'ready', token: issued.token, url: frameUrl(issued.token, name), framed };
+    return { status: 'ready', token: issued.token, url: frameUrl(issued.token, name), framed, ...(neighbours !== undefined && { neighbours }) };
   }
 
   // On this Mac: the head, read raw as the asking page; its type fixes the frame.
@@ -88,8 +98,7 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
     if (identity === undefined || encoding !== 'base64') return { status: 'row', why: 'unserved' }; // a daemon that dropped `raw`
     const framed = framedKindOf(mime);
     if (framed === null) return { status: 'row', why: 'unframed' };
-    const type = framed === 'html' ? htmlContentType(Buffer.from(content, 'base64')) : mime;
-    return issue(client, path, framed, type, localSource(deps.read, client, { appSessionId, path }, FRAME_ASK));
+    return issue(client, path, framed, fixedBy(framed, mime, Buffer.from(content, 'base64')), localSource(deps.read, client, { appSessionId, path }, FRAME_ASK));
   }
 
   // A sink for a copy: created exclusively, owner-only, in the profile's own folder, and its name removed at once.
@@ -123,14 +132,14 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
       const framed = framedKindOf(mime); // the type the pass that was written answered
       if (framed === null) return { status: 'row', why: 'unframed' };
       const { written } = copied.value;
-      let type = mime;
+      let head = new Uint8Array();
       if (framed === 'html') {
-        const head = Buffer.alloc(Math.min(FRAME_HEAD_BYTES, written));
-        const { bytesRead } = await sink.read(head, 0, head.length, 0);
-        type = htmlContentType(head.subarray(0, bytesRead));
+        const read = Buffer.alloc(Math.min(FRAME_HEAD_BYTES, written));
+        const { bytesRead } = await sink.read(read, 0, read.length, 0);
+        head = read.subarray(0, bytesRead);
       }
       handedOn = true; // the copy's source holds the descriptor from here, and `issue` closes it if nothing is recorded
-      return await issue(client, path, framed, type, copySource(sink, written));
+      return await issue(client, path, framed, fixedBy(framed, mime, head), copySource(sink, written));
     } finally {
       if (!handedOn) await sink.close();
     }

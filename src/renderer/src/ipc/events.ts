@@ -535,6 +535,9 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
     useFiles.getState().applyChanged(event);
     useViewer.getState().applyChanged(event);
   });
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5): main tells this page alone that a
+  // read for one of its file frames' tokens failed
+  const offFrames = client.on('layout.frameFailed', ({ token }) => useViewer.getState().frameFailed(token));
   // E5 start (M5): the quit guard's unsaved files. The window's dirty file tabs go to main on every change of the set,
   // and main's Save all saves them and is answered with those left unsaved (after the saves' own pushes).
   const offUnsaved = pushUnsavedFiles(client);
@@ -556,6 +559,7 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
   );
   return () => {
     offFiles();
+    offFrames();
     offUnsaved();
     offSaveAll();
   };

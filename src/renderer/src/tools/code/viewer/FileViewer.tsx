@@ -12,6 +12,11 @@
 // bar's start and E5's editor controls beside the notices.
 //
 // P2-F W-V (L95, §2 item 6): an image's zoom lives here, beside the bar that draws its controls and the view it sizes.
+//
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5): a PDF, an HTML page, a video or a
+// sound is drawn by `FrameBody`, with Open externally in the bar unless its body is a row (which holds its own, or none);
+// `data-frame` on the viewer says what the frame shows. `host` says where the tab is drawn (`'side'` beside the chat,
+// `'main'` in the main area), and only the PDF's fragment reads it.
 import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
@@ -20,6 +25,7 @@ import { VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls } from '../editor/EditorControls';
 import { ExternalRow, OpenExternally } from './ExternalRow';
+import { FrameBody } from './FrameBody';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
@@ -57,8 +63,8 @@ function PathLead({ path }: { path: string }) {
 
 // UX wave U6b-1 (M3): `start`, what a side tab puts at the bar's start before the path (Files' tree button); (M4) `end`,
 // what it puts at the bar's end (Move to main area).
+// UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent.
 export function FileViewer({ tab, start, end, host }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main' }) {
-  void host;
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const lead = (
     <>
@@ -66,7 +72,7 @@ export function FileViewer({ tab, start, end, host }: { tab: FileTab; start?: Re
       <PathLead path={tab.path} />
     </>
   );
-  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} />;
+  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} host={host} />;
 }
 
 function NoSession({ path }: { path: string }) {
@@ -99,9 +105,10 @@ interface FileBodyProps {
   lead?: ReactNode; // the bar's start (the file tab's path); without one the notices lead and the controls keep right
   controls?: (entry: ViewerEntry) => ReactNode; // beside the notices (the file tab's editor controls)
   end?: ReactNode; // UX wave U6b-1: the bar's last control (a side tab's Move to main area)
+  host?: 'side' | 'main'; // UX wave U6b-2: where the tab is drawn; the main area when absent
 }
 
-export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, end }: FileBodyProps) {
+export function FileBody({ tabId, appSessionId, path, line = null, readOnly = false, artifact, lead, controls, end, host = 'main' }: FileBodyProps) {
   const found = useViewer((s) => s.entries.get(tabId));
   const wrap = useViewer((s) => s.wrap);
   const zoom = useMediaZoom(`${tabId}\n${path}`);
@@ -119,6 +126,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       data-file-viewer
       data-path={path}
       data-kind={entry?.kind ?? ''}
+      data-frame={entry ? frameMarker(entry) : ''}
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
       data-dirty={String(entry?.dirty ?? false)}
       data-theirs={entry?.theirs?.view ?? ''}
@@ -133,19 +141,33 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
         {entry ? <Controls entry={entry} wrap={wrap} zoom={zoom} /> : null}
         {end}
       </div>
-      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} /> : <Loading />}</div>
+      <div className="relative min-h-0 flex-1">{entry ? <Body entry={entry} wrap={wrap} zoom={zoom} host={host} /> : <Loading />}</div>
     </div>
   );
 }
 
 const showsCode = (entry: ViewerEntry) => entry.kind === 'code' || entry.kind === 'head' || (entry.sourceView && (entry.kind === 'markdown' || entry.kind === 'image'));
+// UX wave U6b-2, card 1's one place ("The page alone"): a framed file (an HTML page among them) has no Source view.
 const hasSource = (entry: ViewerEntry) => entry.kind === 'markdown' || (entry.kind === 'image' && entry.encoding === 'utf8');
+
+// UX wave U6b-2 (M5, decision 8): what a framed file's body shows, for scenes; empty for another kind.
+function frameMarker(entry: ViewerEntry): string {
+  if (entry.kind !== 'frame' || entry.status !== 'ready') return '';
+  const { frame } = entry;
+  if (frame === null || frame.status === 'row') return 'row';
+  if (frame.status === 'failed') return 'failed';
+  const shown = frame.status === 'asking' ? frame.shown : frame;
+  return shown === null ? 'loading' : shown.framed;
+}
+// A framed file's bar holds Open externally unless its body is a row, which holds its own (or none: L4).
+const barOpens = (entry: ViewerEntry) => entry.kind === 'frame' && entry.frame !== null && entry.frame.status !== 'row';
 
 const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(entry);
 
-function Body({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom }) {
+function Body({ entry, wrap, zoom, host }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main' }) {
   if (entry.status === 'loading') return <Loading />;
   if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
+  if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} />;
   if (showsCode(entry)) {
     return (
       <Suspense fallback={<Loading />}>
@@ -193,7 +215,7 @@ function Controls({ entry, wrap, zoom }: { entry: ViewerEntry; wrap: boolean; zo
           {VIEWER_COPY.loadMore}
         </button>
       ) : null}
-      {entry.kind === 'head' && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null}
+      {(entry.kind === 'head' || barOpens(entry)) && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null}
       {hasSource(entry) ? (
         <button type="button" className={toggle} aria-pressed={entry.sourceView} onClick={() => useViewer.getState().toggleSource(tabId)}>
           {entry.sourceView ? VIEWER_COPY.rendered : VIEWER_COPY.source}
