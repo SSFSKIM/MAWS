@@ -16,12 +16,15 @@ const isSource = (name: string) => /\.(ts|tsx|mts|js|mjs)$/.test(name) && !/\.(t
 /** The calls that read an envelope from a text: the envelope's own checks, the reader's slicing, and the reader's answers. */
 const PARSE = /\b(parseAskSteer|answeredBlock|envelopeSlices|readAnswerEnvelopes?)\s*\(/g;
 
+/** The text before a match that makes it a function's definition, not a call: `function <name>(`. */
+const DEFINITION = /\bfunction\s*\*?\s*$/;
+
 /** Each allowed file, the names it may call, and why. */
 const ALLOWED: Record<string, { names: string[]; why: string }> = {
-  'src/shared/maws/ask.ts': { names: ['answeredBlock', 'parseAskSteer'], why: 'the envelope’s own checks are defined here; parseAskSteer reads through answeredBlock (Interfaces A)' },
+  'src/shared/maws/ask.ts': { names: ['answeredBlock'], why: 'the envelope’s own checks are defined here; parseAskSteer reads through answeredBlock (Interfaces A)' },
   'src/shared/engine/arrival.ts': {
-    names: ['envelopeSlices', 'readAnswerEnvelopes', 'readAnswerEnvelope'],
-    why: 'the reader: envelopeSlices and readAnswerEnvelopes are defined here, and readPersonsContent, the one reading of a person’s content that the split and the grant readers share; readAnswerEnvelope is the whole-text form of the split’s reading, which answerEnvelopeOf calls (the split’s module imports this one, never the reverse); personsText is the reader’s rule 3, whose `answer` arrivals for MAWS’s own envelope every producer treats as the person’s message and acts on no further',
+    names: ['envelopeSlices'],
+    why: 'the reader: envelopeSlices is defined here, and readPersonsContent, the one reading of a person’s content that the split and the grant readers share, reads through it; so do readAnswerEnvelope, the whole-text form of the split’s reading, which answerEnvelopeOf calls (the split’s module imports this one, never the reverse), and readAnswerEnvelopes, kept for the tests; personsText is the reader’s rule 3, whose `answer` arrivals for MAWS’s own envelope every producer treats as the person’s message and acts on no further',
   },
   'src/shared/engine/persons-message.ts': { names: ['readAnswerEnvelope'], why: 'answerEnvelopeOf, the split’s test of a lone envelope; the split reads a person’s content through the reader’s readPersonsContent' },
   'src/engine-host/fs/search-text.ts': {
@@ -45,6 +48,7 @@ it('no source outside the named sites parses an answer envelope from a message: 
     const text = readFileSync(file, 'utf8');
     for (const match of text.matchAll(PARSE)) {
       const name = match[1]!;
+      if (DEFINITION.test(text.slice(Math.max(0, match.index - 40), match.index))) continue; // a function’s own definition is no use of it
       if (ALLOWED[path]?.names.includes(name)) {
         seen.add(`${path} ${name}`);
         continue;

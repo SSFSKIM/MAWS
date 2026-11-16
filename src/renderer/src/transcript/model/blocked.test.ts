@@ -542,8 +542,9 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const state = stateOf(events);
     const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
-    // What the arrival reader reads each of the person's messages that holds an envelope as, whole (`readAnswerEnvelope`,
-    // which `personsText` applies before any grant is looked for), as its tool, its call and how many answers it holds;
+    // What each of the person's messages that holds an envelope reads as, whole (`readAnswerEnvelope`, the whole-text form
+    // of the split's reading; `personsText` takes the envelopes out through the same reader before any grant is looked
+    // for), as its tool, its call and how many answers it holds;
     // null where it is no answer. The events carry no answer arrival on either route here (the live host carries its
     // consent marks alone), so the reading is taken from each message as the route delivered it
     const said = (answer: { tool: string; call: string; answers: unknown[] | null } | null) => JSON.stringify(answer === null ? null : [answer.tool, answer.call, answer.answers?.length ?? null]);

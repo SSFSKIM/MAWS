@@ -61,7 +61,8 @@ const MULTI = askSteerText('ask-3', [LAYOUT, FOLDER], [
   { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'], note: 'wide screens first' },
   { id: 'q3', question: FOLDER.question, status: 'answered', value: ['/work/site/pages', '/work/site/parts'] },
 ]);
-const TAGGED_ENVELOPE = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+// an earlier build's: only its writer put a question's words, and so a line beginning with the tag, on the envelope's lines
+const TAGGED_ENVELOPE = earlierAskSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
 const BROKEN = A1.replace('"answered"', '"answred"');
 const FENCED_PROMPT = `Compare it with this:\n\`\`\`json\n${JSON.stringify(parseAskSteer(A1)!.result)}\n\`\`\``;
 const PASTED_PROMPT = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
@@ -82,6 +83,12 @@ const READER_CORPUS: string[] = [
 const isolated = <F>(fn: F): F => new Function(`return (${String(fn)});`)() as F;
 
 describe('envelopeSlices', () => {
+  it('the corpus’s tagged envelope is an earlier build’s, its third line beginning with the tag and opening nothing', () => {
+    const third = TAGGED_ENVELOPE.split('\n')[2]!;
+    expect(third.startsWith('[MAWS ask ')).toBe(true);
+    expect(third).not.toBe(askSteerOpening('lines'));
+  });
+
   it.each(PROBE_JOINS.filter((name) => !name.startsWith('u704-end-image')))('%s: one member per envelope, its text the envelope member’s frame content byte for byte, and the rest the prompt', (name) => {
     const { joined, envelopes, prompt } = recordedJoin(name);
     const { members, rest } = envelopeSlices(joined.content as string, askSteerOpening, PASTED_BLOCK, parseAskSteer);
@@ -569,7 +576,8 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
     });
 
     // the landing's case (c), U1c's Decision Log 56: the consent sentence the person typed as a text answer is a JSON
-    // string on the envelope's line and inside its block, never a line of their own words
+    // string on the envelope's line and inside its block, never a line of their own words. This pins the writer only:
+    // the writer quotes the sentence, so no line holds it and no reader is put to the test
     it('a typed text answer that holds the consent sentence: no grant, the envelope alone or beside the person’s words', () => {
       const typed = write('toolu_n3', [FOOTER], [{ id: 'footer', question: FOOTER.question, status: 'answered', value: NEW_FORM_GRANT }]);
       expect(typed.split('\n')).not.toContain(NEW_FORM_GRANT);

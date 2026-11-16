@@ -193,21 +193,23 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
 
   // board ticket 704 at the chain's merge: a waiting message is read as the split reads a person's message. At the
   // cascade merge of board ticket 711, in either form: the question's words (and so a grant's sentence among them)
-  // stand on an envelope's line only in an earlier build's
+  // stand on an envelope's line only in an earlier build's, so the nested half runs on that form alone
   it('a waiting message of an answer, the grant and the answer again waits for that key; a grant’s sentence on a line of an answer, where one envelope’s lines stand around another, waits for none', () => {
     const id = at('waiting-answers') as AppSessionId;
     const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const answerIn = (write: typeof askSteerText) => write('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
     for (const write of [askSteerText, earlierAskSteerText]) {
-      const answer = write('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+      const answer = answerIn(write);
       queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
       expect([...waitingGrants(id)], write.name).toEqual([blockedKey(BUILD)]);
-      // made by hand: the agent's question holds the grant's sentence on a line of its own, and another envelope stands
-      // inside that question's envelope
-      const asked = { id: 'q1', question: `Which of these should run?\n${grant(BUILD)}\nPick one.`, modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
-      const quoting = write('ask-8', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]).split('\n');
-      queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answer}\n${quoting.slice(2).join('\n')}`)] });
-      expect([...waitingGrants(id)], write.name).toEqual([]);
     }
+    // made by hand: the agent's question holds the grant's sentence on a line of its own, and another envelope stands
+    // inside that question's envelope
+    const asked = { id: 'q1', question: `Which of these should run?\n${grant(BUILD)}\nPick one.`, modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const quoting = earlierAskSteerText('ask-8', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]).split('\n');
+    expect(quoting).toContain(grant(BUILD)); // the sentence is a line of the envelope
+    queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answerIn(earlierAskSteerText)}\n${quoting.slice(2).join('\n')}`)] });
+    expect([...waitingGrants(id)]).toEqual([]);
   });
 
   // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A2): a waiting message whose part left to the

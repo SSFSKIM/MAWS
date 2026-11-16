@@ -171,7 +171,7 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined, given:
 }
 
 // The steer's first line, whole: the tag with the ask's id, then the writer's fixed sentence. A reader of envelopes the
-// engine joined with other messages opens a member only at this line (`readAnswerEnvelopes`, shared/engine/arrival.ts).
+// engine joined with other messages opens a member only at this line (`envelopeSlices`, shared/engine/arrival.ts).
 export const askSteerOpening = (askId: string): string => `[MAWS ask ${askId}] The user answered the questions you asked:`;
 
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
