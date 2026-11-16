@@ -610,6 +610,12 @@ const isWaiting = (ctx: BackfillContext, messageUuid: MessageUuid) => ctx.waitin
 // the interrupt's marker follows it and no model request does (every such result in the fixtures, 5 of 5), so it is no
 // read boundary.
 const REJECTED_BY_PERSON = 'User rejected tool use';
+// The result the engine writes for a call whose session ended before its result was recorded (`toolDenialKind`
+// `interrupted`; `pass3/p1-side-thread-live-resume`, the snapshot's records 27 and 28: the result, then "No response
+// requested.", then the next prompt): no model request follows it either (Decision Log 49 (3)). The engine's other
+// interruption results (`cancelled`, and `interrupted` for a turn ended to deliver a message) are in no recorded
+// transcript file and are not read here.
+const noRequestFollows = (record: TranscriptRecord): boolean => record.toolUseResult === REJECTED_BY_PERSON || record.toolDenialKind === 'interrupted';
 
 // The read boundary of the approvals held (Decision Log 38, its boundary as Decision Log 43 replaced it): the result
 // that completes the running turn's round, the engine's next request carrying the rows appended before it, so their
@@ -632,7 +638,8 @@ function withHeldApprovals(record: TranscriptRecord, events: SessionEvent[], ctx
 // engine sends its next request only once every call of the round has its result (`u3-tasks-r2` lines 156 to 161: an
 // Agent call answered at once, a parallel Bash call thirty seconds later, then the request), so a result that leaves a
 // call of the round open is no read boundary, nor is a result for a call outside the round, a subagent's (its own
-// context, or a sidechain record here), or the refusal an Esc writes for the running call.
+// context, or a sidechain record here), or a result no request follows (the refusal an Esc writes for the running call,
+// the interruption a resume writes).
 function roundCompleted(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext): boolean {
   if (ctx.agentId !== null || record.isSidechain === true) return false;
   const round = ctx.round;
@@ -645,7 +652,7 @@ function roundCompleted(record: TranscriptRecord, events: SessionEvent[], ctx: B
     if (event.kind === 'tool.use') round.open.add(event.toolUseId);
     else if (event.kind === 'tool.result' && round.open.delete(event.toolUseId)) answered = true;
   }
-  return answered && round.open.size === 0 && record.toolUseResult !== REJECTED_BY_PERSON;
+  return answered && round.open.size === 0 && !noRequestFollows(record);
 }
 
 // A slash command's output (class `command`): the engine's own tag around it, its terminal escapes removed, in the turn

@@ -15,7 +15,7 @@ import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
 import { createBackfillContext, recordToEvents } from '../../../engine-host/fs/backfill';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR, loadUxwaveJournal, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
+import { FIXTURE_DIR, loadJournal, loadUxwaveJournal, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
 import { journalToEvents } from '../transcript/dev/journal';
 import { blockedStates } from '../transcript/model/blocked';
@@ -376,5 +376,20 @@ describe('an approval held during a round is read at the result that completes t
     // 158 the grant, 159 its mirror line, 160 the subagent's call, 161 its result, 162 the Agent call's result, 163 the Bash call's
     const lines = [...tasks.slice(0, 157), ...grantAfter(BASH_CALL), call, result, AGENT_RESULT, BASH_RESULT];
     expect(readings(lines, 159)).toEqual([WAITING, WAITING, WAITING, WAITING, 'read']);
+  });
+
+  // Decision Log 49 (3): the engine's interruption results, each only where a recorded transcript holds it. The one
+  // recorded form is `toolDenialKind: "interrupted"`, written for a call whose session ended before its result
+  // (`pass3/p1-side-thread-live-resume`, the transcript its seq-35 snapshot holds: record 26 the Bash call, 27 its
+  // interrupted result, 28 "No response requested.", 29 the next prompt).
+  it('p1-side-thread-live-resume, the call its session ended during: its interrupted result is no read boundary; the next prompt’s turn takes the grant', () => {
+    const snapshot = loadJournal('pass3', 'p1-side-thread-live-resume').find((row) => row.seq === 35)!.frame as { records: JsonObject[] };
+    const records = snapshot.records;
+    const call = records[26]!;
+    expect(records[27]!.toolDenialKind).toBe('interrupted');
+    expect(((records[28]!.message as JsonObject).content as JsonObject[])[0]!.text).toBe('No response requested.');
+    // 28 the grant, 29 its mirror line, 30 the interrupted result, 31 "No response requested.", 32 the next prompt
+    const lines = [...records.slice(0, 27), ...grantAfter(call), records[27]!, records[28]!, records[29]!];
+    expect(readings(lines, 28)).toEqual(['none', WAITING, WAITING, WAITING, 'read']);
   });
 });
