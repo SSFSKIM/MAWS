@@ -40,6 +40,8 @@ const painted = async () => {
   await nextFrame();
 };
 
+const noMoments = () => undefined; // the harness has no folds store to tell of a moment
+
 export function Harness() {
   const params = new URLSearchParams(location.search);
   const [session, setSession] = useState<HarnessSession | null>(null);
@@ -58,7 +60,7 @@ export function Harness() {
   const [realCards, setRealCards] = useState(false); // UX wave U1b: the real card's renderer, from the first `raise`
   const [effort, setEffort] = useState<string | null>(params.get('effort')); // W8
   const [stored, setStored] = useState<readonly StoredRun[] | null>(null); // UX wave U2b: the folds file's runs, if one was handed in
-  const summaries = useMemo(() => (stored === null ? undefined : { stored }), [stored]);
+  const summaries = useMemo(() => (stored === null ? undefined : { stored, moved: noMoments }), [stored]); // `moved` as the product hands it, so its per-change watch is inside the measured reading
   const sessionRef = useRef<HarnessSession | null>(null);
   const listRef = useRef<TranscriptListHandle>(null);
   const frames = useRef(new FrameMetrics());

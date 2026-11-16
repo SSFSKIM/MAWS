@@ -16,16 +16,19 @@
 //               messages, the record lines and the switch are the mod's, none is MAWS's, and nothing is drawn twice; the
 //               closed record line reads a summary (its stretch opens with a thought, §M); the render asks MAWS sent
 //               from the first call to the turn's end (check 5's third reading);
-//   turn 2      a message mid-turn, two commands, then a final message carrying a must-read and a path link;
+//   turn 2      a message mid-turn, two commands, a small artifact made from the repository's invented page, then a
+//               final message carrying a must-read, a path link and a mention of the artifact;
 //   turn 3      a listing (ListAgents), a background task's notification and a subagent's message (check 7's live half:
 //               a message from another session needs sminos's hub, which a scratch home has not; the subagent's
-//               message is the arrival of a peer the scratch can make);
+//               message is the arrival of a peer the scratch can make, and its row is read in the window);
 //   full        a thought, a listing, a notice and a turn's line hidden in the mod's report, and all in sight in its
-//               full transcript, the list walked from its top so that rows unmount and mount again;
+//               full transcript, the list walked from its top in a shortened window, so that rows unmount and mount
+//               again (asserted: a row mounted at one stop has left the list at a later one);
 //   jump        the must-read's Needs-you row lands on its text, in sight;
-//   links       the path link inside a mod-drawn message, and every link the mod's messages hold: what each opens;
-//   second      a second window on the running session reads the same record lines (MAWS has no gesture that opens a
-//               second window: the trial opens a further app window through main's e2e seam, as e2e/artifacts-store does);
+//   links       the path link and the artifact mention inside mod-drawn messages: what each opens;
+//   second      a second window on the running session reads the same record lines, drawn by the mod or the mirror
+//               (§M), the drawer recorded (MAWS has no gesture that opens a second window: the trial opens a further
+//               app window through main's e2e seam, as e2e/artifacts-store does);
 //   lane off    the session's lane off (its override), resumed with no prompt: no advertisement, drawn by the mod with
 //               no turn fold of MAWS's;
 //   at rest     the app quit and reopened, the session at rest: drawn by the mirror, the same messages and the same
@@ -34,7 +37,10 @@
 //               stretch reads `working record`, the earlier lines keep their summaries.
 // The second case is check 5: a seeded session of two hundred invented turns with a message in each, resumed with no
 // prompt sent (no model call), scrolled from the end to the top and back; the mounted rows and MAWS's render asks are
-// read at each stop and recorded, for the architect to read against the anchoring bound of 40.
+// read at each stop and recorded, for the architect to read against the anchoring bound of 40. It installs the plugins
+// itself when the first case did not.
+// The record lines are read only once they settle (none reads `working record` or a call's own words, and the same
+// words come back on consecutive reads), and always by walking the whole list, since the rows are virtual.
 //
 // Safety (P1's harness rules): the scratch config home only (the engine's CLI under `env -i`); nothing written under
 // ~/.claude or ~/.claude.json (the A-15 reading before and after, ~/.claude/settings.json's digest compared); the relay's
@@ -92,10 +98,12 @@ const PLUGINS = ['doperpowers', 'to-human', 'sminos'] as const;
 const HAIKU = /^(Haiku|claude-haiku)/;
 const REPO_NAME = 'u2b-trial-repo';
 const MUST_READ = 'check the tree before the release';
+const ARTIFACT = 'Trial page';
+const PAGE_FILE = 'trial-page.html';
 const NONE = '› working record';
 const PROMPTS = {
   one: 'Think it through first. Then run these five shell commands, one at a time: `ls`, `git status --short`, `git log --oneline -1`, `echo one`, `echo two`. Then send me one short final message saying what you found. Do not create or edit any file.',
-  two: `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then send me one final message that links the file README.md by its path and that marks as a must-read, the way your instructions describe, the words "${MUST_READ}". Do not create or edit any file.`,
+  two: `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one final message that links the file README.md by its path, links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>), and marks as a must-read, the way your instructions describe, the words "${MUST_READ}". Do not create or edit any file.`,
   three: 'Call the ListAgents tool once. Then run the shell command `sleep 3 && echo done` in the background and wait for its notification. Then use your agent tool to ask a subagent to reply with the one word ready, and wait for it. Then send me one short final message. Do not create or edit any file.',
   four: 'Run `echo five` and then `echo six`, one at a time. Then send me one short final message. Do not create or edit any file.',
 } as const;
@@ -141,7 +149,7 @@ function cli(args: string[]): string {
 function writeSettings(extra: Record<string, unknown>): void {
   const file = join(config, 'settings.json');
   const prior = existsSync(file) ? (JSON.parse(readFileSync(file, 'utf8')) as Record<string, unknown>) : {};
-  const allow = ['Bash(ls)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(echo:*)', 'Bash(sleep:*)', 'ListAgents', 'Task', 'Agent'];
+  const allow = ['Bash(ls)', 'Bash(git status:*)', 'Bash(git log:*)', 'Bash(echo:*)', 'Bash(sleep:*)', 'ListAgents', 'Task', 'Agent', 'mcp__maws__artifact_create'];
   writeFileSync(file, `${JSON.stringify({ ...prior, model: 'haiku', alwaysThinkingEnabled: true, permissions: { defaultMode: 'default', allow }, ...extra }, null, 2)}\n`);
 }
 
@@ -150,10 +158,13 @@ type Installed = Record<string, { version: string; installPath: string }[]>;
 async function prepare(real: string, cap: number): Promise<{ marketplace: string; installed: Installed }> {
   for (const dir of [config, userData, repo, join(root, 'engine')]) mkdirSync(dir, { recursive: true });
   writeFileSync(join(repo, 'README.md'), '# U2b trial\n\nAn invented repository for the trial.\n');
+  writeFileSync(join(repo, PAGE_FILE), '<!doctype html><html><head><meta charset="utf-8"><title>Trial page</title></head><body><p>An invented page for the trial.</p></body></html>\n');
   const git = (...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'user.name=Trial', '-c', 'user.email=trial@localhost', '-c', 'commit.gpgsign=false', ...args], { env: isolatedGitEnv(), cwd: repo, stdio: 'ignore' });
-  git('init', '-q');
-  git('add', '.');
-  git('commit', '-qm', 'seed');
+  if (!existsSync(join(repo, '.git'))) {
+    git('init', '-q');
+    git('add', '.');
+    git('commit', '-qm', 'seed');
+  }
   writeFileSync(join(config, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, theme: 'light', projects: { [repo]: { hasTrustDialogAccepted: true, hasCompletedProjectOnboarding: true } } }, null, 2));
   writeSettings({});
   const declares = await binaryDeclares(real, SYSTEM_PROMPT_SNAPSHOT_FLAG);
@@ -202,7 +213,15 @@ const calls = (id: string, name: string) => mainBlocks(id).filter((b) => b.type 
 const renderAsks = (id: string, from = 0) => journal(id).slice(from).filter((r) => r.direction === 'out' && frameOf(r).request?.subtype === 'ui_render').length;
 // What the person reads as messages, as the engine sent them: the mod's message tool's texts
 const messageTexts = (id: string): string[] => mainBlocks(id).filter((b) => b.type === 'tool_use' && b.name?.endsWith('to-human__message') === true).map((b) => String(b.input?.text ?? '')).filter((text) => text.trim() !== '');
-const opening = (text: string) => text.trim().split('\n')[0]!.slice(0, 40);
+// A message's first run of plain words, cut before any Markdown or mark syntax, to find its drawing by (null when it has
+// none long enough to be its own)
+function opening(text: string): string | null {
+  for (const raw of text.replace(/<\/?[a-z-]+>/g, '\n').split('\n')) {
+    const run = /^[\p{L}\p{N} ,.;:'’!?()-]+/u.exec(raw.replace(/^[\s#>*+-]+|^\s*\d+\.\s+/, ''))?.[0]?.trim() ?? '';
+    if (run.length >= 12) return run.slice(0, 40).trim();
+  }
+  return null;
+}
 
 // ---- the page --------------------------------------------------------------------------------------------------------
 
@@ -261,7 +280,87 @@ async function open(page: Page, id: string): Promise<void> {
 }
 // The record lines as drawn: by the mod (buttons reading `› …` inside a drawing of the mod's), by MAWS's mirror
 const modLines = (scope: Locator) => scope.locator('[data-plugin-drawn]').getByRole('button', { name: /^› / });
-const mirrorLines = (scope: Locator) => scope.locator('[data-kind="record_fold"]').getByRole('button', { name: /^› / });
+const LINE = { mod: '[data-plugin-drawn] button', mirror: '[data-kind="record_fold"] button' } as const;
+type Drawer = keyof typeof LINE;
+// Every record line of the list in order, the list walked from its top (rows are virtual: only those near the viewport
+// are mounted), each line keyed by its row's index; the list is left at its end.
+async function walkLines(page: Page, drawer: Drawer): Promise<string[]> {
+  return paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, selector) => {
+    const seen = new Map<string, string>();
+    scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scroller.scrollTop = 0;
+    for (let guard = 0; guard < 400; guard += 1) {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      for (const button of Array.from(scroller.querySelectorAll<HTMLElement>(selector))) {
+        const words = (button.textContent ?? '').trim();
+        if (!words.startsWith('› ')) continue;
+        const row = button.closest<HTMLElement>('[data-index]');
+        seen.set(`${String(row?.dataset.index ?? '?').padStart(6, '0')}|${words}`, words);
+      }
+      if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
+      scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+    return [...seen.entries()].sort(([a], [b]) => (a < b ? -1 : 1)).map(([, words]) => words);
+  }, LINE[drawer]);
+}
+// The record lines once they settle: `done` holds for the walked lines, and the same lines come back on three reads in a
+// row (a bounded poll on a count of agreeing reads, never a time)
+async function settledLines(page: Page, drawer: Drawer, done: (lines: string[]) => boolean, message: string): Promise<string[]> {
+  let lines: string[] = [];
+  let last = '';
+  let agreeing = 0;
+  await expect
+    .poll(async () => {
+      lines = await walkLines(page, drawer);
+      const key = JSON.stringify(lines);
+      agreeing = done(lines) ? (key === last ? agreeing + 1 : 1) : 0;
+      last = key;
+      return agreeing;
+    }, { timeout: 180_000, intervals: [3_000], message })
+    .toBeGreaterThanOrEqual(3);
+  return lines;
+}
+// What a growing line reads: a shell call's description or command
+const callWords = (id: string) => calls(id, 'Bash').flatMap((b) => [`› ${String(b.input?.description ?? '')}`, `› ${String(b.input?.command ?? '')}`]);
+// Every closed line reads a summary: neither `working record` nor a call's own words
+const summarised = (id: string) => (lines: string[]) => lines.length > 0 && lines.every((line) => line !== NONE && !callWords(id).includes(line));
+// Who draws the record lines in a window now: the mod or MAWS's mirror (§M, "What a person sees")
+async function drawerOf(page: Page): Promise<Drawer> {
+  let drawer: Drawer | null = null;
+  await expect.poll(async () => {
+    for (const d of ['mod', 'mirror'] as const) if ((await walkLines(page, d)).length > 0) return (drawer = d);
+    return null;
+  }, { timeout: 30_000, message: 'the window draws record lines' }).not.toBeNull();
+  return drawer!;
+}
+// Each message drawn once: its opening words found in the list and never twice at one stop, the list walked from its
+// top (a message's drawing is the innermost element holding its words; one with no plain opening is left out, named)
+async function drawnOnce(page: Page, texts: string[]): Promise<void> {
+  const phrases = texts.map(opening);
+  const most = await paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, words) => {
+    const top = words.map(() => 0);
+    scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
+    scroller.scrollTop = 0;
+    for (let guard = 0; guard < 400; guard += 1) {
+      await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const all = Array.from(scroller.querySelectorAll<HTMLElement>('*'));
+      words.forEach((phrase, k) => {
+        if (phrase === null) return;
+        const holders = all.filter((el) => (el.textContent ?? '').includes(phrase) && !Array.from(el.children).some((child) => (child.textContent ?? '').includes(phrase)));
+        top[k] = Math.max(top[k]!, holders.length);
+      });
+      if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
+      scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
+    }
+    scroller.scrollTop = scroller.scrollHeight;
+    return top;
+  }, phrases);
+  const read = phrases.map((phrase, k) => ({ phrase, most: most[k] }));
+  log(`drawn once: ${JSON.stringify(read)}`);
+  expect(read.filter((r) => r.phrase !== null), 'each message drawn exactly once').toEqual(read.filter((r) => r.phrase !== null).map((r) => ({ ...r, most: 1 })));
+}
+const ARRIVAL = '[data-kind="agent_message"]'; // a subagent's or a peer's message, drawn as an arrival
 const modBand = (scope: Locator) => scope.locator('[data-plugin-band]').filter({ hasText: 'to-human view' });
 const textsOf = async (lines: Locator) => (await lines.allTextContents()).map((text) => text.trim());
 // The rows the full transcript shows and the report hides, by what the list draws for each
@@ -271,24 +370,30 @@ const HIDDEN = {
   notice: '[data-kind="notice"]',
   'turn line': '[data-kind="divider"], [data-plugin-drawn="TurnDuration"]',
 } as const;
-// Whether a row `selector` matches is drawn in sight anywhere in the list, the list walked from its top as a reader
-// scrolls (the rows are virtual: a row is in the DOM only near the viewport)
-async function seenWhileScrolling(page: Page, selector: string): Promise<boolean> {
+// Whether a row `selector` matches is drawn in sight anywhere in the list, the list walked from its top to its end as a
+// reader scrolls (the rows are virtual: a row is in the DOM only near the viewport), and whether the walk unmounted a
+// row: an index mounted at one stop and gone at a later one
+async function seenWhileScrolling(page: Page, selector: string): Promise<{ shown: boolean; unmounted: boolean }> {
   return paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, sel) => {
     scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // a reader's scroll, so the list stops following the end
     scroller.scrollTop = 0;
+    let shown = false;
+    let unmounted = false;
+    const mountedOnce = new Set<string>();
     for (let guard = 0; guard < 400; guard += 1) {
       await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
+      const mounted = new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]')).map((row) => row.dataset.index ?? ''));
+      if ([...mountedOnce].some((index) => !mounted.has(index))) unmounted = true;
+      for (const index of mounted) mountedOnce.add(index);
       const view = scroller.getBoundingClientRect();
-      const shown = Array.from(scroller.querySelectorAll<HTMLElement>(sel)).some((row) => {
+      shown ||= Array.from(scroller.querySelectorAll<HTMLElement>(sel)).some((row) => {
         const box = row.getBoundingClientRect();
         return box.height > 0 && box.bottom > view.top && box.top < view.bottom && getComputedStyle(row).visibility !== 'hidden';
       });
-      if (shown) return true;
-      if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) return false;
+      if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
       scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
     }
-    return false;
+    return { shown, unmounted };
   }, selector);
 }
 
@@ -326,6 +431,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
   let id = '';
   let labels: string[] = []; // the record lines' words where the mod draws, before the quit
   let messages: string[] = [];
+  let artifactId: string | null = null; // the artifact turn two made, as its final message mentions it
   try {
     await step('setup', 'the plugins from the checkout, the to-human style selected', async () => {
       const { marketplace, installed } = await prepare(engine.bin, cap);
@@ -342,7 +448,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
     });
 
-    await step('turn-1', 'a thought and five calls, then a message: the mod draws, at 9, nothing twice; the closed line reads a summary', async () => {
+    await step('turn-1', 'a thought and five calls, then a message: the mod draws, at 9, nothing twice; each closed line reads a summary', async () => {
       id = await newSession(page);
       budget(cap);
       await send(page, PROMPTS.one);
@@ -364,27 +470,25 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await expect(modBand(pane), 'the mod’s band with its switch').toBeVisible({ timeout: 30_000 });
       messages = messageTexts(id);
       expect(messages.length, 'at least one message').toBeGreaterThan(0);
-      for (const text of messages) await expect(pane.getByText(opening(text), { exact: false }), `drawn once: ${opening(text)}`).toHaveCount(1);
-      // the summary comes after the stretch closed (one model call of the mod's): the line leaves its newest call's words
-      const callWords = bash.flatMap((b) => [`› ${String(b.input?.description ?? '')}`, `› ${String(b.input?.command ?? '')}`]);
-      await expect.poll(async () => (await textsOf(modLines(pane))).filter((t) => t !== NONE && !callWords.includes(t)).length, { timeout: 90_000, message: 'a closed record line reads a summary' }).toBeGreaterThan(0);
-      labels = await textsOf(modLines(pane));
-      line(`turn 1: ${NATIVE_TO_HUMAN_ENV}=9, drawnBy mod; ${bash.length} calls, ${thoughtFirst ? 'a thought first' : 'NO thought before the first call'}; the mod's lines ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; no record line, switch or message drawing of MAWS's; render asks from the first call to the turn's end: ${asks}`);
+      await drawnOnce(page, messages);
+      // the summary comes after the stretch closed (one model call of the mod's): each line leaves its newest call's words
+      labels = await settledLines(page, 'mod', summarised(id), 'each closed record line reads a summary where the mod draws');
+      line(`turn 1: ${NATIVE_TO_HUMAN_ENV}=9, drawnBy mod; ${bash.length} calls, ${thoughtFirst ? 'a thought first' : 'NO thought before the first call'}; the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; no record line, switch or message drawing of MAWS's; render asks from the first call to the turn's end: ${asks}`);
       observe('turn1', { launched, calls: bash.length, thoughtFirst, labels, messages: messages.length, renderAsks: asks });
       expect(thoughtFirst, 'the stretch opens with a thought (it reads its summary on both routes)').toBe(true);
     });
 
-    await step('turn-2', 'a message mid-turn, two calls, then a message with a must-read and a path link', async () => {
+    await step('turn-2', 'a message mid-turn, two calls and an artifact, then a message with a must-read, a path link and the artifact’s mention', async () => {
       budget(cap);
       const before = written(id);
       await send(page, PROMPTS.two);
       await settle(page, id, before);
-      const pane = paneOf(page);
       messages = messageTexts(id);
-      for (const text of messages) await expect(pane.getByText(opening(text), { exact: false }), `drawn once: ${opening(text)}`).toHaveCount(1);
-      await expect.poll(async () => (await textsOf(modLines(pane))).filter((t) => t !== NONE).length, { timeout: 90_000, message: 'two closed lines read summaries' }).toBeGreaterThanOrEqual(2);
-      labels = await textsOf(modLines(pane));
-      line(`turn 2: the mod's lines ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once`);
+      await drawnOnce(page, messages);
+      artifactId = /maws-artifact:([A-Za-z0-9_-]+)/.exec(messages.join('\n'))?.[1] ?? null;
+      labels = await settledLines(page, 'mod', (lines) => summarised(id)(lines) && lines.length >= 2, 'two closed lines, each reading a summary');
+      line(`turn 2: the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; artifact_create ${calls(id, 'mcp__maws__artifact_create').length} call(s), mentioned as ${artifactId ?? 'NOTHING'}`);
+      expect(artifactId, 'the final message mentions the artifact it made').not.toBeNull();
     });
 
     await step('turn-3', 'a listing, a background task’s notification and a subagent’s message (check 7’s live half)', async () => {
@@ -395,23 +499,41 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       const listed = calls(id, 'ListAgents').length > 0;
       const notified = journal(id).some((r) => r.direction === 'in' && JSON.stringify(r.frame).includes('task-notification'));
       const agent = calls(id, 'Task').length + calls(id, 'Agent').length > 0;
-      labels = await textsOf(modLines(paneOf(page)));
-      line(`turn 3: ListAgents ${listed ? 'called' : 'NOT called'}; a task notification ${notified ? 'arrived' : 'NOT seen'}; a subagent ${agent ? 'ran' : 'NOT run'}; the mod's lines ${JSON.stringify(labels)}`);
-      expect([listed, notified, agent]).toEqual([true, true, true]);
+      // the subagent's hand-back as an arrival row in the window: in the report, else in the full transcript
+      const band = modBand(paneOf(page));
+      let arrival = (await seenWhileScrolling(page, ARRIVAL)).shown ? 'the report' : null;
+      if (arrival === null) {
+        await band.getByRole('button', { name: /full transcript/ }).click();
+        arrival = (await seenWhileScrolling(page, ARRIVAL)).shown ? 'the full transcript' : null;
+        await band.getByRole('button', { name: /report only/ }).click();
+      }
+      messages = messageTexts(id);
+      labels = await settledLines(page, 'mod', summarised(id), 'each closed record line reads a summary where the mod draws');
+      line(`turn 3: ListAgents ${listed ? 'called' : 'NOT called'}; a task notification ${notified ? 'arrived' : 'NOT seen'}; a subagent ${agent ? 'ran' : 'NOT run'}, its arrival row ${arrival === null ? 'NOT seen' : `seen in ${arrival}`}; the mod's lines, settled ${JSON.stringify(labels)}`);
+      expect([listed, notified, agent, arrival !== null]).toEqual([true, true, true, true]);
     });
 
     await step('full', 'hidden in the mod’s report, all in sight in its full transcript, also after scrolling', async () => {
+      // a shorter window for the walk, so the list holds more than its viewport and rows unmount as it scrolls
+      await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1100, 520));
       const report: Record<string, boolean> = {};
-      for (const [name, selector] of Object.entries(HIDDEN)) report[name] = await seenWhileScrolling(page, selector);
+      for (const [name, selector] of Object.entries(HIDDEN)) report[name] = (await seenWhileScrolling(page, selector)).shown;
       const band = modBand(paneOf(page));
       await band.getByRole('button', { name: /full transcript/ }).click();
       await expect(band.getByRole('button', { name: /report only/ })).toBeVisible({ timeout: 20_000 });
       const full: Record<string, boolean> = {};
-      for (const [name, selector] of Object.entries(HIDDEN)) full[name] = await seenWhileScrolling(page, selector);
-      line(`full: in the report ${JSON.stringify(report)}; in the full transcript, the list walked from its top ${JSON.stringify(full)}`);
+      let unmounted = false;
+      for (const [name, selector] of Object.entries(HIDDEN)) {
+        const read = await seenWhileScrolling(page, selector);
+        full[name] = read.shown;
+        unmounted ||= read.unmounted;
+      }
+      line(`full: in the report ${JSON.stringify(report)}; in the full transcript, the list walked from its top ${JSON.stringify(full)}; a row unmounted during the walk: ${unmounted}`);
       expect(report, 'hidden in the report').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, false])));
       expect(full, 'all in sight in the full transcript').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, true])));
+      expect(unmounted, 'the walk unmounted a row and mounted it again, so each was found after scrolling').toBe(true);
       await band.getByRole('button', { name: /report only/ }).click();
+      await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900));
     });
 
     await step('jump', 'the must-read’s Needs-you row lands on its text, in sight', async () => {
@@ -421,24 +543,34 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await page.mouse.move(700, 450);
       const address = await addressed(page, id);
       await page.getByRole('list', { name: 'Needs you' }).locator(`[data-needs-you="${id}"], [data-needs-you="${address}"]`).first().click();
-      await expect(paneOf(page).getByText(MUST_READ, { exact: false }).first(), 'the jump’s target in sight').toBeInViewport({ timeout: 20_000 });
-      line('jump: the Needs-you row opened the session and its target is in the viewport');
+      // the must-read as the mod draws it, not the person's own prompt that asked for it
+      await expect(paneOf(page).locator('[data-plugin-drawn]').getByText(MUST_READ, { exact: false }).first(), 'the jump’s target in sight').toBeInViewport({ timeout: 20_000 });
+      line('jump: the Needs-you row opened the session and the must-read the mod draws is in the viewport');
     });
 
-    await step('links', 'the path link inside a mod-drawn message, and every link the messages hold: what each opens', async () => {
+    await step('links', 'the path link and the artifact mention inside mod-drawn messages: what each opens', async () => {
       const pane = paneOf(page);
-      const links = pane.locator('[data-plugin-drawn] a');
-      const hrefs = await links.evaluateAll((all) => all.map((a) => `${a.textContent?.trim() ?? ''} → ${a.getAttribute('href') ?? ''}`));
-      const path = links.filter({ hasText: 'README.md' }).first();
+      const drawn = pane.locator('[data-plugin-drawn]');
+      const selectedTab = () => page.locator('[data-region="main"] [role="tab"][aria-selected="true"]').allTextContents();
+      const path = drawn.locator('a').filter({ hasText: 'README.md' }).first();
       await expect(path, 'a path link inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
       await path.click();
-      await expect.poll(async () => page.locator('[data-region="main"] [role="tab"][aria-selected="true"]').allTextContents(), { timeout: 20_000, message: 'what the path link opened' }).toContainEqual(expect.stringContaining('README'));
-      line(`links: the links inside the mod's messages ${JSON.stringify(hrefs)}; README.md opened in the main strip`);
-      observe('links', { hrefs });
+      await expect.poll(selectedTab, { timeout: 20_000, message: 'what the path link opened' }).toContainEqual(expect.stringContaining('README'));
+      const pathOpened = await selectedTab();
+      await open(page, id);
+      const mention = drawn.locator(`[data-chip="artifact"][data-artifact-id="${artifactId}"]`).first();
+      await expect(mention, 'the artifact mention inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
+      await mention.click();
+      // the transcript's rule (openArtifactMention): the main tab that already shows it, else the session's side column
+      await expect.poll(() => page.locator(`[data-artifact-viewer="${artifactId}"]`).count(), { timeout: 20_000, message: 'the mention opened the artifact’s viewer' }).toBeGreaterThan(0);
+      const mentionOpened = (await page.locator(`[data-artifact-tab="${artifactId}"]`).count()) > 0 ? 'its main tab' : 'the side column';
+      line(`links: README.md opened ${JSON.stringify(pathOpened)}; the mention of ${artifactId} opened ${JSON.stringify(mentionOpened)}`);
+      observe('links', { pathOpened, artifactId, mentionOpened });
       await open(page, id);
     });
 
-    await step('second', 'a second window on the running session reads the same record lines', async () => {
+    await step('second', 'a second window on the running session reads the same record lines, drawn by the mod or the mirror', async () => {
+      labels = await settledLines(page, 'mod', summarised(id), 'the first window’s lines, settled');
       const app = maws!.app;
       const [second] = await Promise.all([
         app.waitForEvent('window'),
@@ -446,8 +578,11 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       ]);
       await expect(second.locator('[data-region="main"]')).toBeVisible({ timeout: 30_000 });
       await (await sidebarRow(second, { appSessionId: id })).click();
-      await expect.poll(async () => textsOf(modLines(paneOf(second))), { timeout: 30_000, message: 'the second window’s lines' }).toEqual(labels);
-      line(`second window: the same lines ${JSON.stringify(labels)}`);
+      // §M: a second window draws the session's view by the mod or by the mirror; either reads the same words
+      const drawer = await drawerOf(second);
+      const there = await settledLines(second, drawer, (lines) => lines.length === labels.length, 'the second window’s lines, settled');
+      line(`second window: drawn by ${drawer === 'mod' ? 'the mod' : 'the mirror'}, the lines ${JSON.stringify(there)}`);
+      expect(there, 'the same words in the second window').toEqual(labels);
       await second.close();
     });
 
@@ -461,23 +596,29 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await expect(modLines(pane).first(), 'the mod’s fold').toBeVisible({ timeout: 30_000 });
       await expect(pane.locator('.transcript-divider .transcript-disclosure'), 'no turn fold of MAWS’s').toHaveCount(0);
       await expect(pane.locator('[data-kind="record_fold"], [data-view-switch]')).toHaveCount(0);
-      line(`lane off: no ${NATIVE_TO_HUMAN_ENV}, drawnBy mod, the mod's lines ${JSON.stringify(await textsOf(modLines(pane)))}, no turn fold of MAWS's`);
+      line(`lane off: no ${NATIVE_TO_HUMAN_ENV}, drawnBy mod, the mod's lines ${JSON.stringify(await walkLines(page, 'mod'))}, no turn fold of MAWS's`);
       await stop(page, id);
       value(await invoke(page, 'mods.setSessionOverride', { appSessionId: id as AppSessionId, id: 'maws.to-human', value: 'inherit' }));
     });
 
     await step('at-rest', 'quit and reopen: the session at rest drawn by the mirror, the same messages and words', async () => {
+      // the words just before the quit: the session is at rest since the lane-off step, so whoever draws it now reads
+      // them, and they are the words the mod drew while it ran
+      const running = labels;
+      const drawerBefore = await drawerOf(page);
+      labels = await settledLines(page, drawerBefore, (lines) => lines.length === running.length, 'the lines before the quit, settled');
+      expect(labels, `the words before the quit, drawn by ${drawerBefore === 'mod' ? 'the mod' : 'the mirror'}, are the mod’s`).toEqual(running);
       consoleErrors.push(...maws!.consoleErrors());
       await maws!.cleanup();
       maws = await launch();
       page = maws.page;
       await expect(page.locator('[data-region="main"]')).toBeVisible();
       await open(page, id);
-      const pane = paneOf(page);
-      await expect(pane.locator('[data-view-switch]'), 'the mirror’s switch').toBeVisible({ timeout: 30_000 });
-      await expect.poll(async () => textsOf(mirrorLines(pane)), { timeout: 60_000, message: 'the mirror reads the mod’s file' }).toEqual(labels);
-      for (const text of messages) await expect(pane.locator('.owner-message-ink').filter({ hasText: opening(text) }), `drawn once by the mirror: ${opening(text)}`).toHaveCount(1);
-      line(`at rest: the mirror's lines ${JSON.stringify(labels)}, the same words; ${messages.length} message(s), each drawn once`);
+      await expect(paneOf(page).locator('[data-view-switch]'), 'the mirror’s switch').toBeVisible({ timeout: 30_000 });
+      const mirrored = await settledLines(page, 'mirror', (lines) => lines.length === labels.length, 'the mirror reads the mod’s file');
+      expect(mirrored, 'the same words, read by the mirror from the mod’s file').toEqual(labels);
+      await drawnOnce(page, messages);
+      line(`at rest: the mirror's lines ${JSON.stringify(mirrored)}, the same words; ${messages.length} message(s), each drawn once`);
     });
 
     await step('switch-off', 'new summaries off: the next launch carries it, a new stretch reads working record, the earlier keep theirs', async () => {
@@ -488,8 +629,8 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       const before = written(id);
       await send(page, PROMPTS.four);
       await settle(page, id, before);
-      await page.waitForTimeout(45_000); // past where a summary would have come: none is asked for
-      const now = await textsOf(modLines(paneOf(page)));
+      // settled: one line more than before, the same on three reads in a row
+      const now = await settledLines(page, 'mod', (lines) => lines.length === labels.length + 1, 'the new stretch closed and settled');
       line(`switch off: ${FOLD_SUMMARIES_ENV}=${FOLD_SUMMARIES_OFF}; the lines ${JSON.stringify(now)}`);
       expect(now.slice(0, labels.length), 'the earlier lines keep their summaries').toEqual(labels);
       expect(now.at(-1), 'the new stretch reads working record').toBe(NONE);
@@ -501,7 +642,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
     const teardown = await cleanupFailure(maws);
     const after = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')) };
     const total = spent();
-    line(`spend: US$${total.toFixed(4)} across the run's journals (cap US$${cap}); ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; teardown ${teardown ?? 'clean'}`);
+    line(`spend: US$${total.toFixed(4)} across the run's journals (cap US$${cap}; the mod's summary calls are not in it: no result frame counts them); ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; teardown ${teardown ?? 'clean'}`);
     line(a15Line('after the run', owner.a15, after.a15, [root]));
     observe('after', { failures, consoleErrors, spentUsd: total, teardown });
     console.log(`U2b trial: scratch root ${root}`);
@@ -539,12 +680,19 @@ function seedLongSession(engineId: string, version: string): void {
 }
 
 test('U2b check 5: a long seeded session the mod draws, resumed with no prompt and scrolled end to top and back: mounted rows and render asks at each stop', async () => {
-  test.skip(!existsSync(join(config, 'plugins', 'installed_plugins.json')), 'the first case installs the plugins this case resumes under');
+  const cap = capUsd();
+  const engine = installedEngine();
+  mkdirSync(OUT, { recursive: true });
+  // the scratch home as the first case leaves it; made here when that case stopped before its setup finished
+  if (!existsSync(join(config, 'plugins', 'installed_plugins.json'))) await prepare(engine.bin, cap);
   const engineId = randomUUID();
-  seedLongSession(engineId, installedEngine().version);
+  seedLongSession(engineId, engine.version);
   const maws = await launch();
   try {
     const { page } = maws;
+    const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
+    if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
+    budget(cap); // the resume sends no prompt; the forwarding script still reads what the cap leaves
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? ''), { timeout: 30_000, message: 'the seeded session listed' }).not.toBe('');
     await open(page, id);

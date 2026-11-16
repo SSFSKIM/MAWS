@@ -254,8 +254,11 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
 // U2b's M6 (the architect's ruling on M7's batch 0): the labelled variant, run only under MAWS_TRANSCRIPT_PERF=1, hands
 // the transcript the runs of an invented folds file in the to-human mod's form (shape 2, one run per turn's work from its
 // first call to its last, as Step 0's scratch run recorded the mod's file), written to a scratch configuration directory
-// under the synthetic session's id and read by MAWS's own reader, so each record line reads its summary while the rows
-// change; the measured cost of those labels is the reading the Mac takes.
+// under the synthetic session's id, read back whole and parsed by MAWS's `storedRunsOf` in the harness's `foldsFile` (the
+// owner service's file read is not exercised here: e2e/to-human.spec.ts reads the file through the product), so each
+// record line reads its summary while the rows change; the measured cost of those labels is the reading the Mac takes.
+// Base against landing: a base build has no `foldsFile`, so its reading is this unlabelled scene on the base build, and
+// the labelled variant is read from this landing on, against the unlabelled scene on the same build and on the base.
 async function mirroredStream(harness: MawsLaunch, label: string, folds: string | null): Promise<void> {
   const { page } = harness;
   await harnessReady(page);
@@ -284,7 +287,7 @@ async function mirroredStream(harness: MawsLaunch, label: string, folds: string 
   });
   expect(shown, 'a closed record line in view far up the history').not.toBeNull();
   const closedWords = await list.locator('[data-row-id^="record-fold:closed:"]').getByRole('button').allTextContents();
-  if (folds !== null) expect(closedWords.filter((words) => words !== '› working record').length, 'the mounted record lines read their stored summaries').toBeGreaterThan(0);
+  if (folds !== null) expect(closedWords.filter((words) => /^› Checked fixture batch \d+; its cases pass$/.test(words)).length, 'the mounted record lines read their stored summaries').toBeGreaterThan(0);
   else expect(new Set(closedWords), 'with no folds file every line reads working record').toEqual(new Set(['› working record']));
   const stretch = shown!.slice('record-fold:closed:'.length);
   await list.locator(rowSelector(shown!)).getByRole('button').click();
