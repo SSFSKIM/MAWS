@@ -59,7 +59,8 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 // path). UX wave U6e (K11; decision 11): the path is cut in its middle with both ends drawn: the folder part keeps two
 // characters (its first and the ellipsis, where one character left a stray glyph), the slash before the name stays, and
 // the lead's least width counts them, within the 40. A savable outside file's path says where Save writes, as its tooltip
-// and its accessible description; `outside` marks how the file stands outside the folders.
+// and its accessible description (UX wave U6b-2: only where the body is text Save writes); `outside` marks how the file
+// stands outside the folders.
 const NAME_MIN_CH = 40;
 const FOLDER_MIN_CH = 2;
 
@@ -160,7 +161,10 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   const { appSessionId } = tab;
   const lead = (entry: ViewerEntry | null) => {
     const reason = entry === null ? null : readOnlyReason(entry);
-    const savesTo = entry !== null && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
+    // UX wave U6b-2 at the chain merge (the architect's ruling): only a body that can be saved (the code view's text) says
+    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is
+    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown');
+    const savesTo = savable && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
     return (
       <>
         {start}
