@@ -29,8 +29,9 @@ const sessionIdOf = (rows: JsonObject[]): string => rows.map((row) => row.sessio
 
 const drawn = (state: TranscriptState): Row[] => rowsOf(withAllExpanded(state));
 // what the person reads of the user rows and the asks' capsules
-const reading = (rows: Row[]) =>
-  rows.flatMap((row) => (row.kind === 'user' ? [{ user: row.messageUuid, text: row.text }] : row.kind === 'ask' ? [{ ask: row.askId, state: row.state, answers: row.answers }] : []));
+type Read = { user: string | null; text: string } | { ask: string; state: string; answers: unknown };
+const reading = (rows: Row[]): Read[] =>
+  rows.flatMap((row): Read[] => (row.kind === 'user' ? [{ user: row.messageUuid, text: row.text }] : row.kind === 'ask' ? [{ ask: row.askId, state: row.state, answers: row.answers }] : []));
 const holdsEnvelope = (text: string) => text.includes('[MAWS ask') || text.includes('```json');
 
 const session = {
@@ -73,9 +74,9 @@ describe('a joined answer drawn in the desk’s session view (ticket 704)', () =
     const desk = reading(drawn(entry!.state));
     expect(desk).toEqual(reading(window));
     expect(desk.filter((row) => 'text' in row && holdsEnvelope(row.text))).toEqual([]);
-    const asks = desk.filter((row) => 'ask' in row);
+    const asks = desk.flatMap((row) => ('ask' in row ? [row.state] : []));
     expect(asks.length).toBeGreaterThan(0);
-    expect(asks.map((row) => (row as { state: string }).state)).toEqual(asks.map(() => 'answered'));
+    expect(asks).toEqual(asks.map(() => 'answered'));
     expect(holdsEnvelope(container.textContent ?? '')).toBe(false);
     act(() => controller.close());
   });
