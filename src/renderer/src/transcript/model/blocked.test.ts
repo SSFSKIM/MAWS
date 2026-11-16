@@ -624,7 +624,8 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   // Decision Log 53's spanning case, at ticket 704's chain merge of rule R (the architect's rulings 1 and 3 of
   // 2026-11-16): the split draws A + G + A as three parts, each envelope an answer of its own; rule R reads the grants on
   // the whole joined text, so in this build's form the grant is the person's, and beside an earlier build's envelope none
-  // (rule R's accepted cost). The ask is none of this session's, so neither envelope draws (ticket 704's orphan rule)
+  // (rule R's accepted cost). The ask is none of this session's, so neither envelope draws (ticket 704's orphan rule).
+  // Ruling 5 pins the two routes here and the gate in grants.test, which reads the same on each form
   it('(c3) one message of an answer, a grant and an answer again: each envelope an answer of its own; in this build’s form the grant, its approval row alone, the blocked row approved; in an earlier build’s form none (rule R)', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
@@ -663,16 +664,23 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   });
 
   // The same family the other way (the architect's ruling of 2026-11-16, the tracker row of Decision Log 53): the
-  // person's one message A + G + A, in this build's form (every word of it theirs), joined at the turn's end with another
-  // waiting message. Since ticket 704's chain merge of rule R the host reads the frame it wrote by rule R too (no longer
-  // whole as one answer), so live it marks G, and the file's joined row reads G; the wave pins the three routes (ruling 5)
-  it('(c3b) the person’s A + G + A joined with another message: the grant live and from the file (rule R on both routes)', async () => {
-    const answer = envelope();
-    const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]]));
-    expect(results.live!.consents, 'live').toEqual([MARKER('1')]);
-    expect(results.live!.readings, 'live').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
-    expect(results['from the file']!.consents, 'from the file').toEqual([MARKER('1')]);
-    expect(results['from the file']!.readings, 'from the file').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  // person's one message A + G + A (every word of it theirs), joined at the turn's end with another waiting message.
+  // Since ticket 704's chain merge of rule R the host reads the frame it wrote by rule R too (no longer whole as one
+  // answer), so live it marks G in this build's form, and the file's joined row reads G; beside an earlier build's
+  // envelope neither route reads it (rule R's accepted cost). The two routes agree on each form (ruling 5); the gate
+  // reads the waiting message alike (grants.test)
+  it('(c3b) the person’s A + G + A joined with another message: in this build’s form the grant live and from the file; in an earlier build’s form none on either route (rule R on both routes)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        if (write === earlierAskSteerText) {
+          expect([consents, drawnReadings], `${form}, ${route}`).toEqual([[], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
   });
 
   // The person typed the exact sentence as a text answer: it is their answer to the model's question, carried on a line of

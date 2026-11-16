@@ -13,6 +13,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { JournalRow } from '@shared/wire/journal';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import type { SessionQueue } from '../../stores/queue';
 import { useTranscriptStore } from '../../stores/transcript';
@@ -20,6 +21,7 @@ import { journalToEvents } from '../../transcript/dev/journal';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import type { Row } from '../../transcript/model/rows';
+import { entryDisplay } from './entry-text';
 import { answerWords, rowText, stackRows, type StackRow } from './stack';
 import { readOf } from './stack-acts';
 
@@ -136,5 +138,41 @@ describe('a handed row reads as a grant exactly where the transcript records one
     const next = stackRows(queue({ steers: [{ messageUuid: uuid, content: TYPED, createdAt: '2026-11-15T10:00:00.000Z' }] }), new Set(), readOf(APP));
     expect(next.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['next', null, answerWords(TYPED, readOf(APP).questions)]]);
     for (const row of [...handed, ...next]) expect(rowText(row)).not.toMatch(/^You approved /);
+  });
+});
+
+// Ticket 704's ruling 5 (2026-11-16), the tracker row of Decision Log 53: A + G + A in one message, each row of the stack
+// as the tree that holds rule R and the split reads it, in both envelope forms. The handed row carries the transcript's
+// classification of the original message (the person's part G and its consent mark); a waiting row reads a grant only
+// where the sentence is the whole message (Decision Log 44, the stack's whole-text reading, the chain merge's decision 1)
+// and no answer, the message holding more than one envelope, so it draws the message's text, the envelopes' lines and
+// blocks with it. In this build's form the two rows differ: handed “You approved …”, waiting the message as text, while
+// the gate, the live route and the file route read the grant. In an earlier build's form no reading holds the grant
+describe('A + G + A, the stack’s waiting and handed rows in both envelope forms (ticket 704’s ruling 5)', () => {
+  const EARLIER = earlierAskSteerText('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  const forms = [
+    ['this build’s form', ENVELOPE, { kind: 'command', subject: MARKER }],
+    ['an earlier build’s form', EARLIER, null],
+  ] as const;
+
+  it.each(forms)('%s: the handed row reads the grant exactly where the transcript records it, its text G’s line', (_, answer, granted) => {
+    const message = `${answer}\n${GRANT}\n${answer}`;
+    const { consents, own } = transcriptOf(message, WAITING);
+    expect(consents).toEqual(granted === null ? [] : [{ class: 'consent', ...granted }]);
+    expect(own.map((row) => [row.unread, row.text]), 'the person’s part is G, unread').toEqual([[true, GRANT]]);
+    const [handed, ...more] = stackRows(queue(), new Set(), readOf(APP));
+    expect(more).toEqual([]);
+    expect([handed!.kind, grantOf(handed!), rowText(handed!)]).toEqual(['handed', granted, granted === null ? GRANT : `You approved ${MARKER}`]);
+  });
+
+  it.each(forms)('%s: a waiting row, at the next step, after the turn, uncertain and on its way: no grant and no answer, the message drawn as its text', (_, answer) => {
+    const message = `${answer}\n${GRANT}\n${answer}`;
+    const rows = stackRows(queue({
+      steers: [{ messageUuid: uuid, content: message, createdAt: '2026-11-15T10:00:00.000Z' }],
+      entries: [entry(message), entry(message, { queueId: 'q-u', uncertain: true }), entry(message, { queueId: 'q-s', state: 'submitting', submittedAt: '2026-11-15T10:00:01.000Z' })],
+    }), new Set(['q-s']), readOf(APP));
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, grantOf(row)])).toEqual([['next', null, null], ['after', null, null], ['uncertain', undefined, null], ['sending', undefined, null]]);
+    for (const row of rows) expect(rowText(row), row.kind).toBe(entryDisplay(message));
+    expect(entryDisplay(message)).toContain(answer.split('\n')[0]);
   });
 });

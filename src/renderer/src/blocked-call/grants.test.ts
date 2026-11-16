@@ -17,7 +17,7 @@ import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../test/support/ask-steer';
-import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
+import { acceptedCosts, currentEnvelope, earlierEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -239,15 +239,21 @@ describe('the grants a waiting message holds, by rule R', () => {
     expect([...waitingGrants(id)]).toEqual([]);
   });
 
-  // A + G + A in this build's form holds no word of the model's, so the gate's grant is the person's. The transcript's
-  // reader takes the delivered message whole for one answer and records none (blocked.test's (c3)), which fails toward
-  // the button kept: the architect's ruling of 2026-11-16, the tracker row of Decision Log 53. Ticket 704's link pins this
-  // case afresh on the gate and on both routes once its split lands
-  it('waits: an answer, the sentence and the same answer again, joined by a line break (as the transcript under-reads it until ticket 704)', () => {
+  // Ticket 704's ruling 5 (2026-11-16), the tracker row of U1c's Decision Log 53: A + G + A in one message, as the gate
+  // reads it in the tree that holds rule R and the split. In this build's form it holds no word of the model's, so the
+  // gate's grant is the person's, as both routes record it once delivered (blocked.test's (c3)); beside an earlier
+  // build's envelope none, as on both routes (rule R's accepted cost). The message the person typed whole as A + G + A
+  // that the engine then joins with another waits as this same message, so the gate reads it alike (blocked.test's (c3b))
+  it.each([
+    ['this build’s form', currentEnvelope('toolu_a'), [blockedKey(BUILD)]],
+    ['an earlier build’s form', earlierEnvelope('toolu_a'), []],
+  ])('an answer, the sentence and the same answer again, joined by a line break, waiting and steering, %s: the grant as both routes record it', (_, answer, expected) => {
     const id = at('waiting-aga') as AppSessionId;
-    const answer = currentEnvelope('toolu_a');
-    queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
-    expect([...waitingGrants(id)]).toEqual([blockedKey(BUILD)]);
+    const text = `${answer}\n${grant(BUILD)}\n${answer}`;
+    queueOf(id, { entries: [entry(id, text)] });
+    expect([...waitingGrants(id)], 'queued').toEqual(expected);
+    queueOf(id, { steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)], 'steering').toEqual(expected);
   });
 
   for (const [name, content] of [...forgedInputs(grant(BUILD)), ...acceptedCosts(grant(BUILD))]) {
