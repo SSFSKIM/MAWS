@@ -409,17 +409,21 @@ describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => 
 
   // the cascade merge of U4b into U1c (2026-11-16): the opening is written once, in grant.ts; every other source file of
   // src (the reader's grantHead among them) reads the constant, so no second literal can drift from the one the ask
-  // tool's guard and the steer's writer read
-  it('is written once in src, in grant.ts: no other source file holds the opening’s words', () => {
+  // tool's guard and the steer's writer read. Every non-test file under src is read, whatever its kind (a page, a
+  // stylesheet, a document, data), and every occurrence counts, grant.ts's own included
+  it('is written once in src, in grant.ts: the opening’s words occur once among every non-test source file', () => {
     const root = resolve(__dirname, '../..');
     const sources = (dir: string): string[] =>
       readdirSync(dir).flatMap((name) => {
         const path = join(dir, name);
         if (statSync(path).isDirectory()) return sources(path);
-        return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+        return /\.test\.[cm]?[jt]sx?$/.test(name) ? [] : [path];
       });
-    const holding = sources(root).filter((path) => readFileSync(path, 'utf8').includes(GRANT_OPENING.trimEnd()));
-    expect(holding.map((path) => relative(root, path))).toEqual([join('shared', 'engine', 'grant.ts')]);
+    const occurrences = sources(root).flatMap((path) => {
+      const count = readFileSync(path, 'utf8').split(GRANT_OPENING.trimEnd()).length - 1;
+      return count === 0 ? [] : [[relative(root, path), count] as const];
+    });
+    expect(occurrences).toEqual([[join('shared', 'engine', 'grant.ts'), 1]]);
   });
 
   // addition B (2026-11-16): the one test of one string, which the ask tool's guard and the steer's writer both call
