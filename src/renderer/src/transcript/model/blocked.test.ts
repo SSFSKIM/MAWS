@@ -636,6 +636,18 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     }
   });
 
+  // The same family the other way (the architect's ruling of 2026-11-16, accepted, the tracker row of Decision Log 53): the
+  // person's one message A + G + A, in this build's form (every word of it theirs), joined at the turn's end with another
+  // waiting message. Live the host reads the message it wrote whole as one answer and marks nothing; the file's joined row
+  // no longer reads whole, and rule R reads G. Ticket 704's link pins this case on the gate and on both routes afterwards
+  it('(c3b) the person’s A + G + A joined with another message: live no mark, from the file the grant (rule R; as it reads until ticket 704)', async () => {
+    const answer = envelope();
+    const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]]));
+    expect([results.live!.consents, results.live!.approvals, results.live!.readings], 'live').toEqual([[], [], NONE]);
+    expect(results['from the file']!.consents, 'from the file').toEqual([MARKER('1')]);
+    expect(results['from the file']!.readings, 'from the file').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  });
+
   // The person typed the exact sentence as a text answer: it is their answer to the model's question, carried on a line of
   // MAWS's envelope (a JSON string) and in its block, never their own line; so by Decision Log 52 it is no grant, and the
   // blocked row keeps its button (it fails closed)
