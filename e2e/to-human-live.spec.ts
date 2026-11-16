@@ -16,8 +16,11 @@
 //               messages, the record lines and the switch are the mod's, none is MAWS's, and nothing is drawn twice; the
 //               closed record line reads a summary (its stretch opens with a thought, §M); the render asks MAWS sent
 //               from the first call to the turn's end (check 5's third reading);
-//   turn 2      a message mid-turn, two commands, a small artifact made from the repository's invented page, then a
-//               final message carrying a must-read, a path link and a mention of the artifact;
+//   turn 2      a message mid-turn, two commands, a small artifact made from the repository's invented page, a message
+//               carrying a path link and a mention of the artifact, then the turn's end as a plain-text must-read
+//               (`<essential>`: MAWS makes its must-read only from a finished main-thread text block,
+//               shared/owner/to-human-items.ts `finishedTextOf`; the mod draws that text as a message through its
+//               parser; no check-1 recording holds an `<essential>` block, so the mod's drawing of it is not verified);
 //   turn 3      a listing (ListAgents), a background task's notification and a subagent's message (check 7's live half:
 //               a message from another session needs sminos's hub, which a scratch home has not; the subagent's
 //               message is the arrival of a peer the scratch can make, and its row is read in the window);
@@ -41,6 +44,11 @@
 // itself when the first case did not.
 // The record lines are read only once they settle (none reads `working record` or a call's own words, and the same
 // words come back on consecutive reads), and always by walking the whole list, since the rows are virtual.
+// Notes on what the readings do not prove:
+// - hiddenWhileScrolling does not prove that the stop it reads has rendered: stops overlap by half a viewport, so the
+//   list's last half-viewport is read once.
+// - a SurfaceRow that remounts is concealed while its ask is pending, so an absence read can land before its answer.
+// - drawerOf can read `mirror` on a switch shown for a moment, if the sessions snapshot arrives after the owner state.
 //
 // Safety (P1's harness rules): the scratch config home only (the engine's CLI under `env -i`); nothing written under
 // ~/.claude or ~/.claude.json (the A-15 reading before and after, ~/.claude/settings.json's digest compared); the relay's
@@ -105,7 +113,7 @@ const NONE = '› working record';
 const PROMPTS = {
   one: 'Think it through first. Then run these five shell commands, one at a time: `ls`, `git status --short`, `git log --oneline -1`, `echo one`, `echo two`. Then send me one short final message saying what you found. Do not create or edit any file.',
   // the path link is absolute: a relative one is a path the Files tab refuses (tools/code/files/tabs.ts)
-  two: (readme: string) => `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one final message that links the file README.md exactly as [README.md](${readme}), links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>), and marks as a must-read, the way your instructions describe, the words "${MUST_READ}". Do not create or edit any file.`,
+  two: (readme: string) => `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one more message, not your final one, that links the file README.md exactly as [README.md](${readme}) and links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>). Then end your turn with this line as plain text, outside any tool call: <essential>${MUST_READ}</essential> Do not create or edit any file.`,
   three: 'Call the ListAgents tool once. Then run the shell command `sleep 3 && echo done` in the background and wait for its notification. Then use your agent tool to ask a subagent to reply with the one word ready, and wait for it. Then send me one short final message. Do not create or edit any file.',
   four: 'Run `echo five` and then `echo six`, one at a time. Then send me one short final message. Do not create or edit any file.',
 } as const;
@@ -364,7 +372,7 @@ async function drawnOnce(page: Page, texts: string[]): Promise<void> {
       const all = Array.from(scroller.querySelectorAll<HTMLElement>('*'));
       words.forEach((phrase, k) => {
         if (phrase === null) return;
-        const holders = all.filter((el) => (el.textContent ?? '').includes(phrase) && !Array.from(el.children).some((child) => (child.textContent ?? '').includes(phrase)) && inSight(el));
+        const holders = all.filter((el) => (el.textContent ?? '').includes(phrase) && !Array.from(el.children).some((child) => (child.textContent ?? '').includes(phrase)) && !el.closest('[data-kind="user"]') && inSight(el));
         top[k] = Math.max(top[k]!, holders.length);
       });
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
@@ -545,6 +553,8 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await drawnOnce(page, messages);
       artifactId = /maws-artifact:([A-Za-z0-9_-]+)/.exec(messages.join('\n'))?.[1] ?? null;
       labels = await settledLines(page, 'mod', async (lines) => lines.length >= 2 && (await summarised(() => page, id)(lines)), 'two closed lines, each reading a summary');
+      // the must-read stored as MAWS reads it: an essential mark whose head holds the words (a model that strays fails here)
+      await expect.poll(async () => value(await invoke(page, 'ownerChannel.state', { appSessionId: id as AppSessionId })).marks.filter((m) => m.kind === 'essential').map((m) => m.head), { timeout: 30_000, message: 'an essential mark holding the must-read' }).toContainEqual(expect.stringContaining(MUST_READ));
       line(`turn 2: the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; artifact_create ${calls(id, 'mcp__maws__artifact_create').length} call(s), mentioned as ${artifactId ?? 'NOTHING'}`);
       expect(artifactId, 'the final message mentions the artifact it made').not.toBeNull();
     });
