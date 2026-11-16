@@ -42,6 +42,26 @@ describe('htmlContentType', () => {
     expect(htmlContentType(bytes('<head><meta name="description" content="about charset=nothing"></head>'))).toBe(UTF8);
   });
 
+  // Decision Log 31: comments are skipped as the HTML standard's encoding prescan skips them, from `<!--` to the first `>`
+  // preceded by `--` after the opening `<`, an unterminated one running to the head's end.
+  it('a UTF-8 head whose only meta charset is inside a comment is served as UTF-8', () => {
+    expect(htmlContentType(bytes(`<!doctype html><html><head><!-- <meta charset="windows-1252"> --><title>t</title></head><body>${PAGE}</body></html>`))).toBe(UTF8);
+    expect(htmlContentType(bytes('<head><!--\n<meta http-equiv="Content-Type" content="text/html; charset=ISO-8859-1">\n--></head><p>Déjà vu</p>'))).toBe(UTF8);
+    expect(htmlContentType(bytes('<head><!-- a -- b > c <meta charset="euc-kr"> --></head><p>회의</p>'))).toBe(UTF8); // the `>` after ` b ` is not preceded by `--`
+  });
+
+  it('a real declaration after a comment is still a declaration', () => {
+    expect(htmlContentType(bytes('<head><!-- the old one: <meta charset="utf-8"> --><meta charset="windows-1252"></head><p>plain</p>'))).toBe(BARE);
+    expect(htmlContentType(bytes('<head><!--><meta charset="windows-1252"></head><p>plain</p>'))).toBe(BARE); // `<!-->` is a whole comment
+    expect(htmlContentType(bytes('<head><!---><meta charset="windows-1252"></head><p>plain</p>'))).toBe(BARE); // and so is `<!--->`
+    expect(htmlContentType(bytes('<head><meta name="note" content="<!--" charset="windows-1252"></head><p>plain</p>'))).toBe(BARE); // inside a tag's quoted value, no comment
+  });
+
+  it('an unterminated comment before a meta leaves none', () => {
+    expect(htmlContentType(bytes('<head><!-- never closed <meta charset="windows-1252"></head><p>Déjà vu</p>'))).toBe(UTF8);
+    expect(htmlContentType(bytes('<head><!-- closed only by -> <meta charset="windows-1252"></head><p>plain</p>'))).toBe(UTF8);
+  });
+
   it('a byte that is not valid UTF-8 leaves the type as it is', () => {
     const latin1 = new Uint8Array(Buffer.from('<p>caf\xe9 cr\xe8me</p>', 'latin1'));
     expect(htmlContentType(latin1)).toBe(BARE);
