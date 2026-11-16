@@ -45,7 +45,7 @@ async function setup() {
 describe('artifacts.undelete over the link', () => {
   it('is an act on the artifact, the machine’s owners’, the one row this landing adds, behind its own capability', () => {
     expect(OFFERS.commands['artifacts.undelete']).toEqual({ kind: 'act', executor: 'engine-host', target: 'artifact', owners: true });
-    expect(ENDPOINT_CAPABILITIES.at(-1)).toBe('rl2.artifact-undelete');
+    expect(ENDPOINT_CAPABILITIES).toContain('rl2.artifact-undelete'); // listed, as every capability's test reads it: a later landing appends its own after it (U4b's rl2.send-now)
     // the version restore is unchanged: anyone holding `manage` on the artifact
     expect(OFFERS.commands['artifacts.restore']).toEqual({ kind: 'act', executor: 'engine-host', target: 'artifact' });
   });
