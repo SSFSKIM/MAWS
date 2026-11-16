@@ -6,6 +6,7 @@
 // `user.message` once the relay store follows the child (debt wave 4); a resumed child's receipt is its resume start.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, ToolUseId } from '@shared/graph/ids';
+import { RELAY_CONTINUE } from '@shared/maws/relay-text'; // UX wave U6e: the one copy of the form's words the reader claims
 
 export type RelayState =
   | { kind: 'asked'; messageUuid: MessageUuid; sentAt: string; sentSeq: number | null; parentTurnOpenAtSend: boolean; childEndedAt: string | null } // (a) session.steer answered with the uuid; whether the parent had a turn open when it was sent (the line's clause); childEndedAt: the agent turned terminal or exited before the parent forwarded (the line then warns that the forward may resume it)
@@ -27,7 +28,7 @@ export const isPending = (state: RelayState) => state.kind === 'asked' || state.
 // no `name`, so the named clause fires only for a sidecar that carries one.
 export function relayText(agent: RelayTarget, text: string): string {
   if (isPeerTarget(agent)) return peerRelayText(agent, text); // E7
-  return `Relay to agent ${agent.agentId}${agent.name ? ` (named "${agent.name}")` : ''} with SendMessage, verbatim, then continue what you were doing: ${text}`;
+  return `Relay to agent ${agent.agentId}${agent.name ? ` (named "${agent.name}")` : ''} with SendMessage, verbatim, ${RELAY_CONTINUE}${text}`;
 }
 
 // (b): the parent's own SendMessage (a child's is not the relay) addressed to the agent's id or its real name; the
@@ -105,7 +106,7 @@ export const isPeerPending = (state: PeerRelayState) => state.kind === 'asked' |
 
 // M0 ran the reply wording verbatim on the first try (pass3/e7-peer-a seq 160 → 191).
 function peerRelayText(target: PeerTarget, text: string): string {
-  const tail = `with SendMessage, to: "${target.address}", sending exactly this text, then continue what you were doing: ${text}`;
+  const tail = `with SendMessage, to: "${target.address}", sending exactly this text, ${RELAY_CONTINUE}${text}`;
   if (target.mode === 'message') return `Send a message to ${target.name ?? target.address} ${tail}`;
   return `Reply to the cross-session message from ${target.name ? `${target.name} (${target.address})` : target.address} ${tail}`;
 }

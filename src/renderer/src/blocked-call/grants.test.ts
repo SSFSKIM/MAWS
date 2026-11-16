@@ -17,6 +17,7 @@ import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { earlierAskSteerText } from '../../../../test/support/ask-steer';
+import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -175,21 +176,56 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
   });
 
   // The cascade merge of U4b into U1c: MAWS's answer envelope in this build's new form (board ticket 711) and in an
-  // earlier build's, through the real writers: a grant line beside an envelope waits; a sentence the person typed as a
-  // text answer is on the envelope's line, no line of their own (Decision Log 52), and closes nothing
-  it('a waiting message of an answer envelope: a grant line beside it waits, in either form; the sentence typed as a text answer does not', () => {
+  // earlier build's, through the real writers: a grant line beside this build's envelope waits; beside an earlier build's,
+  // whose lines cannot be told from ones a model forged, it closes nothing (rule R, 2026-11-16: an accepted cost); a
+  // sentence the person typed as a text answer is on the envelope's line, no line of their own (Decision Log 52), and
+  // closes nothing
+  it('a waiting message of an answer envelope: a grant line beside it waits in this build’s form and not in an earlier build’s (rule R); the sentence typed as a text answer does not', () => {
     const id = at('waiting-envelope') as AppSessionId;
     const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
     const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
     for (const write of [askSteerText, earlierAskSteerText]) {
       const answer = write('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
       queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}`)], steers: [{ messageUuid: UUID, content: `${grant(CHECK)}\n${answer}`, createdAt: T0 }] });
-      expect([...waitingGrants(id)].sort(), write.name).toEqual([blockedKey(BUILD), blockedKey(CHECK)].sort());
+      expect([...waitingGrants(id)].sort(), write.name).toEqual(write === askSteerText ? [blockedKey(BUILD), blockedKey(CHECK)].sort() : []);
       const typed = write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: grant(BUILD) }]);
       queueOf(id, { entries: [entry(id, typed)], steers: [{ messageUuid: UUID, content: `${typed}\nAlso fix the footer.`, createdAt: T0 }] });
       expect([...waitingGrants(id)], write.name).toEqual([]);
     }
   });
+});
+
+// Rule R (the architect's ruling of 2026-11-16): the gate reads a waiting message's grants as the transcript does
+// (`personsGrants`). A message that forges one through an earlier build's envelope closes nothing, nor does the person's
+// own sentence at one of the costs the rule accepts, so the blocked row keeps its button
+describe('the grants a waiting message holds, by rule R', () => {
+  // The task review's relay forgery (step 1b): a relay whose agent name holds a line break and a sentence's head
+  it('closes nothing: a relay whose agent name holds a line break and the head of a sentence', () => {
+    const id = at('waiting-relay') as AppSessionId;
+    const { text } = relayForgery(BUILD.subject);
+    queueOf(id, { entries: [entry(id, text)], steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
+  // A + G + A in this build's form holds no word of the model's, so the gate's grant is the person's. The transcript's
+  // reader takes the delivered message whole for one answer and records none (blocked.test's (c3)), which fails toward
+  // the button kept: the architect's ruling of 2026-11-16, the tracker row of Decision Log 53. Ticket 704's link pins this
+  // case afresh on the gate and on both routes once its split lands
+  it('waits: an answer, the sentence and the same answer again, joined by a line break (as the transcript under-reads it until ticket 704)', () => {
+    const id = at('waiting-aga') as AppSessionId;
+    const answer = currentEnvelope('toolu_a');
+    queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
+    expect([...waitingGrants(id)]).toEqual([blockedKey(BUILD)]);
+  });
+
+  for (const [name, content] of [...forgedInputs(grant(BUILD)), ...acceptedCosts(grant(BUILD))]) {
+    it(`closes nothing: ${name}`, () => {
+      const id = at('waiting-rule-r') as AppSessionId;
+      queueOf(id, { entries: [{ ...entry(id, ''), content }], steers: [{ messageUuid: UUID, content, createdAt: T0 }] });
+      if (typeof content === 'string') holdPendingSend(id, { writer: 'maws/m', seq: 1 }, content);
+      expect([...waitingGrants(id)]).toEqual([]);
+    });
+  }
 });
 
 describe('the gate (Design 6): closed over unavailable over open', () => {

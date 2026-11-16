@@ -45,6 +45,7 @@
     "test/support/panel-child-fixture.ts",
     "test/support/panel-child-tail.ts",
     "test/support/r3-surface.ts",
+    "test/support/rule-r.ts", // UX wave U1c, rule R: the inputs every grant reader is pinned on
     "test/support/scenario.ts",
     "test/support/synth-transcript.ts",
     "test/support/web-fetch-recorded.ts", // UX wave U3b M5: the web plugin's recorded fetches, read by the renderer's and the services' suites
