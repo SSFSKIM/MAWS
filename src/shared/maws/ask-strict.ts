@@ -31,12 +31,17 @@ const FIXED = ['skipped', 'decide for me', 'build a new one with me'];
  * once and each block parsed once, so the work is linear in the text.
  */
 export function takeOutEnvelopes(lines: readonly string[], work: ReadingWork): string[] | null {
-  const left: string[] = [];
+  return keptLines(lines, work)?.map((i) => lines[i]!) ?? null;
+}
+
+/** The places of the lines `takeOutEnvelopes` keeps, in order (so a caller can read them against the text's own lines). */
+export function keptLines(lines: readonly string[], work: ReadingWork): number[] | null {
+  const kept: number[] = [];
   for (let i = 0; i < lines.length; ) {
     work.lines += 1;
     const id = openingId(lines[i]!);
     if (id === null) {
-      left.push(lines[i]!);
+      kept.push(i);
       i += 1;
       continue;
     }
@@ -44,7 +49,7 @@ export function takeOutEnvelopes(lines: readonly string[], work: ReadingWork): s
     if (next === null) return null;
     i = next;
   }
-  return left;
+  return kept;
 }
 
 /** The ask id of a line that is an envelope's whole opening line, else null. */

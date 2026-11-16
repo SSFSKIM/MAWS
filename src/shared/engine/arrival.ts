@@ -18,7 +18,7 @@
 // hold several arrivals; (4) what no class claims is left alone; (5) an arrival with two carriers is read once
 // (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { askSteerOpening, parseAskSteer } from '../maws/ask';
-import { takeOutEnvelopes, type ReadingWork } from '../maws/ask-strict';
+import { keptLines, type ReadingWork } from '../maws/ask-strict';
 import { holdsGrantForm } from './composed-forms';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
@@ -268,7 +268,7 @@ export function personsGrants(text: string): Consent[] {
  *     between the sentence's fixed head and tail, one line, so the tag there is a quoted command's and no envelope's
  *     line can stand inside it.
  *  3. Otherwise each line of what is left that is a whole sentence gives its grants, but a line inside a pasted segment,
- *     where a sentence is data (`pastedBodies`).
+ *     where a sentence is data (`pastedBodies`), of the text as it came or of what is left.
  *
  * Why no sentence a model wrote is read as the person's. Model text reaches a person's message in two ways: inside an
  * answer envelope an earlier build wrote (that build wrote the question's words on the envelope's line), and inside the
@@ -286,7 +286,7 @@ export function personsGrants(text: string): Consent[] {
  * segments are read only in step 3, on a text that holds no envelope's line, so a pasted tag cannot hide one.
  *
  * Linear in the text: each line is looked at a bounded number of times (set aside or not once, the take-out once, its
- * sentence read once, the check of what is left once, the pasted segments' two passes, the reading once), each block is
+ * sentence read once, the check of what is left once, the pasted segments' two passes on the text and two on what is left, the reading once), each block is
  * parsed once, each composed form's reader is a native pass or two over the text, and every test of a line is
  * anchored with no nested repetition. `work` counts it where it is done (arrival.test.ts pins the counts).
  */
@@ -303,8 +303,9 @@ export function personsLines(text: string, work: ReadingWork = { lines: 0, block
   const composed = holdsGrantForm(aside.join('\n'), formWork);
   work.formSteps += formWork.steps;
   if (composed) return null;
-  const left = takeOutEnvelopes(all, work);
-  if (left === null) return null;
+  const kept = keptLines(all, work);
+  if (kept === null) return null;
+  const left = kept.map((i) => all[i]!);
   const sentences = left.map((line) => {
     work.lines += 1;
     return readConsents(line);
@@ -314,10 +315,13 @@ export function personsLines(text: string, work: ReadingWork = { lines: 0, block
     const line = left[i]!;
     if (line.startsWith('```json') || (line.includes(TAG_OPENS) && sentences[i]!.length === 0)) return null;
   }
-  const pasted = pastedBodies(left, work);
+  // a line inside a segment of the text as it came, or of what is left (R-2: the take-out can free a line from one, or
+  // pair an opening tag with another closing tag): either marking only adds skips
+  const asCame = pastedBodies(all, work);
+  const asLeft = pastedBodies(left, work);
   const lines = left.map((line, i) => {
     work.lines += 1;
-    return { line, grants: pasted[i] ? [] : sentences[i]! };
+    return { line, grants: asCame[kept[i]!] || asLeft[i] ? [] : sentences[i]! };
   });
   return lines.some((line) => line.grants.length > 0) ? lines : null;
 }
