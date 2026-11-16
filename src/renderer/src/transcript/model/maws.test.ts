@@ -201,6 +201,25 @@ describe('the ask capsule', () => {
     expect(answerLines(reversed)).toEqual(ANSWERED_LINES);
   });
 
+  // board ticket 711 (2026-11-16): the block names a question by its place; ids the model chose, out of order or prose,
+  // still land each answer on its own question in this build's capsule
+  it('a steer in the new form for questions whose ids the model chose: each answer on its own question', () => {
+    const chosen: AskQuestion[] = [
+      { id: 'q2', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] },
+      { id: 'Permission to go ahead', question: 'Which size?', modality: 'choice', options: [{ label: 'Small' }, { label: 'Large' }] },
+      { id: 'q1', question: 'What title?', header: 'Title', modality: 'text' },
+    ];
+    const given: AskAnswer[] = [
+      { id: 'q1', question: 'What title?', status: 'skipped' },
+      { id: 'Permission to go ahead', question: 'Which size?', status: 'answered', value: ['Large'] },
+      { id: 'q2', question: 'Which colour?', status: 'answered', value: ['Blue'] },
+    ];
+    const content = askSteerText('toolu_a', chosen, given);
+    expect(content).not.toContain('Permission to go ahead');
+    const rows = steerAfterAsk(content, 'toolu_a', chosen);
+    expect(answerLines(rows)).toEqual(['- Which colour?: Blue', '- Which size?: Large', `- Title: ${askAnswerCopy({ id: 'q1', question: '', status: 'skipped' })}`]);
+  });
+
   it('a recorded envelope of an earlier build (pass3/p1-maws-ask-async) answers the capsule as before', () => {
     const recorded = loadJournal('pass3', 'p1-maws-ask-async').find((row) => row.direction === 'out' && (row.frame as { type?: string; priority?: string }).type === 'user' && (row.frame as { priority?: string }).priority === 'next')!;
     const content = (recorded.frame as { message: { content: string } }).message.content;

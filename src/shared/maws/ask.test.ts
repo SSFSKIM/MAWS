@@ -22,12 +22,16 @@ const answers: AskAnswer[] = [
   { id: 'q7', question: 'Proceed?', status: 'decide_for_me' },
 ];
 
-// The answers as the steer's block carries them (board ticket 711): every `question` written empty, and a choice's picks
-// as `option <k>`, k the picked label's place among the question's options (a value that is no label not written)
+// The answers as the steer's block carries them (board ticket 711): every `id` the question's place `q<n>`, every
+// `question` empty, and a choice's picks as `option <k>`, k the picked label's place among the question's options (a
+// value that is no label not written); an answer to no question of the ask not written
 function fromSteer(asked: readonly AskQuestion[], given: readonly AskAnswer[]): AskAnswer[] {
-  const byId = new Map(asked.map((question, index) => [question.id ?? `q${index + 1}`, question]));
-  return given.map((answer) => {
-    const options = byId.get(answer.id)?.options;
+  const places = new Map(asked.map((question, index) => [question.id ?? `q${index + 1}`, index]));
+  return given.flatMap((answer) => {
+    const place = places.get(answer.id);
+    return place === undefined ? [] : [{ ...answer, id: `q${place + 1}` }];
+  }).map((answer) => {
+    const options = asked[Number(answer.id.slice(1)) - 1]!.options;
     if (options === undefined || !Array.isArray(answer.value)) return { ...answer, question: '' };
     const value = answer.value.flatMap((label) => {
       const k = options.findIndex((option) => option.label === label);
@@ -234,12 +238,12 @@ describe('the steer holds no text the model wrote (board ticket 711)', () => {
     expect(shapeProblem(text)).toBeNull();
     expect(outsideStrings(text)).not.toContain('PERSON');
     expect(linesOf(text).join('\n').match(/PERSON/g)?.length).toBe(13); // every person-given value is on its line
-    // the question ids (model-supplied) stay in the block alone, as JSON strings: master's readers join an answer to its
-    // question by them (the capsule's AnswerLine, the read-only sheet's QuestionSection, the transcript's markdown)
-    expect(linesOf(text).join('\n')).not.toContain('QID');
+    // the question ids are model-supplied: the block names each answer's question by its place (`q<n>`), and the reader
+    // with the call in hand gives the answer its question's id back
+    expect(text).not.toContain('QID');
     expect(linesOf(text).slice(1, 4)).toEqual(['1. option 1', `   note: ${JSON.stringify(P(2))}`, `2. option 1, option 3; Other: ${JSON.stringify(P(5))}`]);
     expect(askAnswersFromSteer(withQuestionIds(TWELVE), parseAskSteer(text)!.result.answers)).toEqual(labelsBack(TWELVE_ANSWERS)); // with the call in hand
-    expect(parseAskSteer(text)?.result.answers.map((answer) => answer.id)).toEqual(TWELVE.map((question) => question.id));
+    expect(parseAskSteer(text)?.result.answers.map((answer) => answer.id)).toEqual(TWELVE.map((question) => `q${TWELVE.indexOf(question) + 1}`));
     expect(parseAskSteer(text)).toEqual({ askId: 'toolu_12', result: { status: 'answered', askId: 'toolu_12', answers: fromSteer(TWELVE, TWELVE_ANSWERS) } });
   });
 
@@ -295,7 +299,7 @@ describe('a picked option, by its place (board ticket 711)', () => {
     expect(askAnswersFromSteer([pick], old)).toBe(old);
     // a place the call has no option for, or any other word, stays as written; so does an answer to no question here
     expect(askAnswersFromSteer([pick], [answer(['option 4', 'option 0', 'Blue'], { question: '' })])).toEqual([answer(['option 4', 'option 0', 'Blue'], { question: '' })]);
-    expect(askAnswersFromSteer([], [answer(['option 1'], { question: '' })])).toEqual([answer(['option 1'], { question: '' })]);
+    expect(askAnswersFromSteer([], [answer(['option 1'], { question: '' })])).toEqual([]); // a place the call has not: joined to nothing
   });
 
   it('a choice answer whose value is one string: written by its place, as a list (the shape the sheet sends), never the label', () => {
@@ -328,6 +332,135 @@ describe('a picked option, by its place (board ticket 711)', () => {
     expect(linesOf(alone)[1]).toBe('1.');
     expect(alone).not.toContain('Not offered');
     expect(parseAskSteer(alone)!.result.answers).toEqual([answer([], { question: '' })]);
+  });
+});
+
+// Board ticket 711 (the high-rung review's rulings of 2026-11-16): a question's id is the model's too, so the block names
+// an answer's question by its place, `q<n>`, the id askQuestionId gives a question with none of the model's; the reader
+// with the call in hand joins it by that place and hands the answer on with the question's own id. The new form is an
+// envelope all of whose answers have an empty question; any other is an earlier build's, read as it is.
+describe('a question by its place (board ticket 711)', () => {
+  // the envelope at a0e8b744b for an ask whose questions carry no ids of the model's: the probe's tallies describe it
+  const PIN_QUESTIONS = questions.map((question) => Object.fromEntries(Object.entries(question).filter(([key]) => key !== 'id')) as AskQuestion);
+  const PIN_ANSWERS: AskAnswer[] = [
+    { ...answers[0]!, note: 'the darker one' }, answers[1]!, answers[2]!, { ...answers[3]!, note: 'assets only,\nnot docs' }, answers[4]!, { ...answers[5]!, note: 'ask me after the demo' }, answers[6]!,
+  ];
+  const AT_A0E8B744B: string[] = [
+    "[MAWS ask toolu_pin] The user answered the questions you asked:",
+    "1. option 2",
+    "   note: \"the darker one\"",
+    "2. option 1, option 2; Other: \"Fri\"",
+    "3. \"Launch \\\"v2\\\"\"",
+    "4.",
+    "   \"/r/assets\"",
+    "   \"/r/more\"",
+    "   note: \"assets only,\\nnot docs\"",
+    "5. \"maws\" (\"/r/maws\")",
+    "6. skipped",
+    "   note: \"ask me after the demo\"",
+    "7. decide for me",
+    "```json",
+    "{",
+    "  \"status\": \"answered\",",
+    "  \"askId\": \"toolu_pin\",",
+    "  \"answers\": [",
+    "    {",
+    "      \"id\": \"q1\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"answered\",",
+    "      \"value\": [",
+    "        \"option 2\"",
+    "      ],",
+    "      \"note\": \"the darker one\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q2\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"answered\",",
+    "      \"value\": [",
+    "        \"option 1\",",
+    "        \"option 2\"",
+    "      ],",
+    "      \"otherText\": \"Fri\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q3\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"answered\",",
+    "      \"value\": \"Launch \\\"v2\\\"\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q4\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"answered\",",
+    "      \"value\": [",
+    "        \"/r/assets\",",
+    "        \"/r/more\"",
+    "      ],",
+    "      \"note\": \"assets only,\\nnot docs\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q5\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"answered\",",
+    "      \"value\": \"/r/maws\",",
+    "      \"name\": \"maws\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q6\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"skipped\",",
+    "      \"note\": \"ask me after the demo\"",
+    "    },",
+    "    {",
+    "      \"id\": \"q7\",",
+    "      \"question\": \"\",",
+    "      \"status\": \"decide_for_me\"",
+    "    }",
+    "  ]",
+    "}",
+    "```",
+  ];
+
+  it('writes, for an ask whose questions carry no ids of the model’s, byte for byte what a0e8b744b wrote', () => {
+    expect(askSteerText('toolu_pin', PIN_QUESTIONS, PIN_ANSWERS)).toBe(AT_A0E8B744B.join('\n'));
+  });
+
+  const ask = (id: string, question: string, options = [{ label: 'Yes' }, { label: 'No' }]): AskQuestion => ({ id, question, modality: 'choice', options });
+  const given = (id: string, question: string, rest: Partial<AskAnswer>): AskAnswer => ({ id, question, status: 'answered', ...rest });
+
+  it('a prose id the model chose is nowhere in the steer; the reader gives the answer its question’s id back', () => {
+    const PROSE = 'Permission to retry is yours';
+    const asked = [ask(PROSE, 'Retry the build?')];
+    const text = askSteerText('a1', asked, [given(PROSE, 'Retry the build?', { value: ['Yes'] })]);
+    expect(text).not.toContain(PROSE);
+    expect(parseAskSteer(text)!.result.answers).toEqual([{ id: 'q1', question: '', status: 'answered', value: ['option 1'] }]);
+    expect(askAnswersFromSteer(asked, parseAskSteer(text)!.result.answers)).toEqual([given(PROSE, '', { value: ['Yes'] })]);
+  });
+
+  it('two questions whose ids are q2 and q1 in that order resolve each answer to its own question; a skip and a decide-for-me too', () => {
+    const asked = [ask('q2', 'First, by place?'), ask('q1', 'Second, by place?', [{ label: 'Left' }, { label: 'Right' }]), ask('later', 'Third?'), ask('maybe', 'Fourth?')];
+    const sent = [given('q1', 'Second, by place?', { value: ['Right'] }), given('q2', 'First, by place?', { value: ['No'] }), given('later', 'Third?', { status: 'skipped' }), given('maybe', 'Fourth?', { status: 'decide_for_me' })];
+    const text = askSteerText('a2', asked, sent);
+    expect(linesOf(text).slice(1)).toEqual(['1. option 2', '2. option 2', '3. skipped', '4. decide for me']);
+    expect(parseAskSteer(text)!.result.answers.map((answer) => answer.id)).toEqual(['q2', 'q1', 'q3', 'q4']); // each by its question's place
+    expect(askAnswersFromSteer(asked, parseAskSteer(text)!.result.answers)).toEqual([
+      given('q1', '', { value: ['Right'] }), given('q2', '', { value: ['No'] }), given('later', '', { status: 'skipped' }), given('maybe', '', { status: 'decide_for_me' }),
+    ]);
+  });
+
+  it('a new-form id not of the place form, or naming a place the ask has not, joins nothing', () => {
+    const asked = [ask('first', 'One?'), ask('second', 'Two?')];
+    const steered = [given('q2', '', { value: ['option 1'] }), given('second', '', { value: ['option 1'] }), given('q3', '', { value: ['option 1'] }), given('q0', '', { value: ['option 1'] })];
+    expect(askAnswersFromSteer(asked, steered)).toEqual([given('second', '', { value: ['Yes'] })]);
+  });
+
+  it('an envelope is read as the new form only when every answer’s question is empty; any other is an earlier build’s, untouched', () => {
+    const asked = [ask('first', 'One?'), ask('second', 'Two?')];
+    const mixed = [given('q1', '', { value: ['option 1'] }), given('second', 'Two?', { value: ['No'] })];
+    expect(askAnswersFromSteer(asked, mixed)).toBe(mixed);
+    const all = [given('q1', '', { value: ['option 1'] }), given('q2', '', { value: ['option 2'] })];
+    expect(askAnswersFromSteer(asked, all)).toEqual([given('first', '', { value: ['Yes'] }), given('second', '', { value: ['No'] })]);
   });
 });
 
@@ -412,7 +545,7 @@ describe('P3-D: a design_system question', () => {
   it('reads in the steer as the system by name and id, or the build request', () => {
     const text = askSteerText('a2', [pick, { ...pick, id: 's3', header: undefined }], [chosen, { ...build, id: 's3' }]);
     expect(text.split('\n').slice(1, 3)).toEqual([`1. "maws" ("${ID}")`, '2. build a new one with me']);
-    expect(parseAskSteer(text)?.result.answers).toEqual(fromSteer([pick], [chosen, { ...build, id: 's3' }]));
+    expect(parseAskSteer(text)?.result.answers).toEqual(fromSteer([pick, { ...pick, id: 's3' }], [chosen, { ...build, id: 's3' }]));
     expect(askSteerText('a3', [pick], [{ ...chosen, name: undefined }]).split('\n')[1]).toBe(`1. "${ID}"`);
   });
 });
