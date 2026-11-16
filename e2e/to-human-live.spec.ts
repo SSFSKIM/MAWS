@@ -112,8 +112,11 @@ const PAGE_FILE = 'trial-page.html';
 const NONE = '› working record';
 const PROMPTS = {
   one: 'Think it through first. Then run these five shell commands, one at a time: `ls`, `git status --short`, `git log --oneline -1`, `echo one`, `echo two`. Then send me one short final message saying what you found. Do not create or edit any file.',
-  // the path link is absolute: a relative one is a path the Files tab refuses (tools/code/files/tabs.ts)
-  two: (readme: string) => `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one more message, not your final one, that links the file README.md exactly as [README.md](${readme}) and links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>). Then end your turn with this line as plain text, outside any tool call: <essential>${MUST_READ}</essential> Do not create or edit any file.`,
+  // the path link is absolute: a relative one is a path the Files tab refuses (tools/code/files/tabs.ts). The plain-text
+  // `<essential>` line is asked for only so that the jump step has an item to jump to: MAWS marks a must-read only from
+  // plain assistant text, and a session that reports through the message tool has no other source for one (the
+  // product question is board ticket 732)
+  two: (readme: string) => `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one more message, not your final one, that links the file README.md exactly as [README.md](${readme}) and links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>). Then, only so that this test has a must-read to jump to, end your turn with this line as plain text, outside any tool call: <essential>${MUST_READ}</essential> Do not create or edit any file.`,
   three: 'Call the ListAgents tool once. Then run the shell command `sleep 3 && echo done` in the background and wait for its notification. Then use your agent tool to ask a subagent to reply with the one word ready, and wait for it. Then send me one short final message. Do not create or edit any file.',
   four: 'Run `echo five` and then `echo six`, one at a time. Then send me one short final message. Do not create or edit any file.',
 } as const;
