@@ -6,11 +6,14 @@
 // B's joined grants (Acceptance 14's blocked rows).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { framePasted } from '@shared/composer/pasted-content';
 import { consentMessage } from '@shared/engine/arrival';
+import { carriedOf } from '@shared/engine/arrival-schema';
 import type { DenialKind } from '@shared/graph/enums';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
+import { askSteerText } from '@shared/maws/ask';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
@@ -487,6 +490,65 @@ describe('probe B’s joined grants: each blocked row before them reads approved
       expect(readings(stateOf(await fromFile(name))), `${name}, from the file`).toEqual(expected);
     });
   }
+});
+
+// Decision Log 52 (Design 2): a grant is read only in the person's own words. Probe B's joined recordings, with the
+// person's messages swapped in every frame that carries them (MAWS's writes and the engine's replays), through the
+// real normaliser, the arrival reader and the derivation: an answer envelope's line and a pasted segment's line are no
+// words of the person's, so a grant sentence there marks nothing and the blocked row keeps its button (it fails closed).
+describe('a grant is read only in the person’s own words (Decision Log 52)', () => {
+  const OTHER = 'Also say the word EXTRA when done.';
+  const GRANT = consentMessage('command', MARKER('1'));
+  const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const ANSWER = { id: 'q1', question: LAYOUT.question, status: 'answered' as const, value: ['Grid'] };
+  const envelope = (header?: string) => askSteerText('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
+  /** The journal with every string content equal to, or holding, `from` written as `to`. */
+  const swapped = (rows: JournalRow[], swaps: [string, string][]): JournalRow[] => rows.map((row) => {
+    const content = (row.frame as { message?: { content?: unknown } }).message?.content;
+    if (typeof content !== 'string') return row;
+    const text = swaps.reduce((acc, [from, to]) => acc.split(from).join(to), content);
+    return text === content ? row : ({ ...row, frame: { ...row.frame, message: { ...(row.frame as { message: object }).message, content: text } } } as JournalRow);
+  });
+  const read = (rows: JournalRow[]) => {
+    const events = journalToEvents(rows);
+    const state = stateOf(events);
+    const consents = events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).filter((entry) => entry.class === 'consent') : []));
+    const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
+    return { consents, approvals, readings: readings(state) };
+  };
+  const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
+
+  it('(a) an envelope whose header holds the exact sentence on a line of its own, joined with other words: no consent, no approval row, the blocked row not approved', () => {
+    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[GRANT, envelope(`Layout\n${GRANT}\nPick one`)]]);
+    const { consents, approvals, readings: drawnReadings } = read(rows);
+    expect(consents).toEqual([]);
+    expect(approvals).toEqual([]);
+    expect(drawnReadings).toEqual(NONE);
+  });
+
+  it('(b) the exact sentence inside a pasted segment, joined with other words: none', () => {
+    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[GRANT, framePasted('a1b2', `a log line\n${GRANT}\nanother log line`)]]);
+    const { consents, approvals, readings: drawnReadings } = read(rows);
+    expect(consents).toEqual([]);
+    expect(approvals).toEqual([]);
+    expect(drawnReadings).toEqual(NONE);
+  });
+
+  it('(c) an envelope joined with a real grant line: one grant, its approval row alone, the blocked row approved', () => {
+    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[OTHER, envelope()]]);
+    const { consents, approvals, readings: drawnReadings } = read(rows);
+    expect(consents.map((entry) => (entry as { subject: string }).subject)).toEqual([MARKER('1')]);
+    const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+    expect(joined.map((row) => [row.consent!.subject, row.text])).toEqual([[MARKER('1'), GRANT]]);
+    expect(drawnReadings).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  });
+
+  it('(d) two real grant lines joined: two grants, two approval rows, both blocked rows approved', () => {
+    const { consents, approvals, readings: drawnReadings } = read(loadUxwaveJournal('u1c-b-twoend-1'));
+    expect(new Set(consents.map((entry) => (entry as { subject: string }).subject))).toEqual(new Set([MARKER('1a'), MARKER('1b')]));
+    expect(new Set(approvals.map((row) => row.consent!.subject))).toEqual(new Set([MARKER('1a'), MARKER('1b')]));
+    expect(drawnReadings).toEqual(['1a', '1b'].map((marker) => `Auto mode blocked: \`${MARKER(marker)}\` · approved (read)`));
+  });
 });
 
 // M3 (Design 6; Interfaces §E; Decision Log 8): where the row's line names the grant's subject whole, a rule of strings.
