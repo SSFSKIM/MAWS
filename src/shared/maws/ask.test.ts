@@ -243,6 +243,20 @@ describe('the steer holds no text the model wrote (board ticket 711)', () => {
     expect(parseAskSteer(text)).toEqual({ askId: 'toolu_12', result: { status: 'answered', askId: 'toolu_12', answers: fromSteer(TWELVE, TWELVE_ANSWERS) } });
   });
 
+  // the host admits a choice's value as a bare string and checks an answer's id before the writer runs; the writer
+  // fails closed on its own: a string pick by its place too, and an answer to no question of the ask not written
+  it('a marker in a choice value given as one string, and in an answer that names no question of the ask, is nowhere in the steer', () => {
+    const odd: AskAnswer[] = [
+      ...TWELVE_ANSWERS.map((answer) => (answer.id === 'QID-1' ? { ...answer, value: 'MODEL-label-1\n"picked"' } : answer)),
+      { id: 'MODEL-unknown-id', question: 'MODEL-unknown-question', status: 'answered', value: ['MODEL-unknown-value'], otherText: 'MODEL-unknown-other', note: 'MODEL-unknown-note' },
+    ];
+    const text = askSteerText('toolu_12', TWELVE, odd);
+    expect(text).not.toContain('MODEL');
+    expect(shapeProblem(text)).toBeNull();
+    expect(linesOf(text)[1]).toBe('1. option 1');
+    expect(parseAskSteer(text)).toEqual({ askId: 'toolu_12', result: { status: 'answered', askId: 'toolu_12', answers: fromSteer(TWELVE, TWELVE_ANSWERS) } });
+  });
+
   it('an older build reads it whole: its block parses under AskResultSchema, which requires every answer’s question key, so the key stays, empty', () => {
     const text = askSteerText('toolu_12', TWELVE, TWELVE_ANSWERS);
     const block = text.slice(text.lastIndexOf('\n```json\n') + '\n```json\n'.length, text.length - '\n```'.length);
@@ -282,6 +296,20 @@ describe('a picked option, by its place (board ticket 711)', () => {
     // a place the call has no option for, or any other word, stays as written; so does an answer to no question here
     expect(askAnswersFromSteer([pick], [answer(['option 4', 'option 0', 'Blue'], { question: '' })])).toEqual([answer(['option 4', 'option 0', 'Blue'], { question: '' })]);
     expect(askAnswersFromSteer([], [answer(['option 1'], { question: '' })])).toEqual([answer(['option 1'], { question: '' })]);
+  });
+
+  it('a choice answer whose value is one string: written by its place, as a list (the shape the sheet sends), never the label', () => {
+    const text = askSteerText('a5', [pick], [{ id: 'q1', question: 'Which colour?', status: 'answered', value: 'Blue' }]);
+    expect(linesOf(text)[1]).toBe('1. option 2');
+    expect(text).not.toContain('Blue');
+    expect(parseAskSteer(text)!.result.answers).toEqual([answer(['option 2'], { question: '' })]);
+    expect(askAnswersFromSteer([pick], parseAskSteer(text)!.result.answers)).toEqual([answer(['Blue'], { question: '' })]);
+  });
+
+  it('an answer that names no question of the ask is not written into the block, nor on a line', () => {
+    const text = askSteerText('a6', [pick], [answer(['Red']), { id: 'zz-stray', question: 'Stray words', status: 'answered', value: ['Stray label'], note: 'stray note' }]);
+    for (const words of ['zz-stray', 'Stray', 'stray']) expect(text).not.toContain(words);
+    expect(parseAskSteer(text)!.result.answers).toEqual([answer(['option 1'], { question: '' })]);
   });
 
   it('two options with the same label: the pick is written as the first of them and reads back as the label', () => {
