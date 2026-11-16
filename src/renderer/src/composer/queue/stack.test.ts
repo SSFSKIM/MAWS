@@ -6,6 +6,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
+import { entryDisplay } from './entry-text';
 import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
 const APP = 'app-1' as AppSessionId;
@@ -81,6 +82,39 @@ describe('the stack’s rows', () => {
       ['sending', `Answer to ${LAYOUT.question}: Grid`],
       ['sending', 'entry q-t'],
     ]);
+  });
+});
+
+describe('a waiting message that holds an attachment beside an answer’s envelope (the architect’s rule, ticket 704)', () => {
+  // made by hand: what the composer sends when the person pastes an envelope beside an image or a PDF
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const pdf = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0xLjQ=' } };
+  const asks = { 'ask-1': [LAYOUT] };
+
+  it('is no answer row on a next-step, after-the-turn, held or sending row: its text is the message as an ordinary one', () => {
+    const withImage = [{ type: 'text', text: ANSWER }, image];
+    const withPdf = [pdf, { type: 'text', text: ANSWER }];
+    const rows = stackRows(
+      queue({ steers: [steer(U1, 1, withImage as never)], entries: [entry('q-1', 2, { content: withPdf as never }), entry('q-s', 3, { state: 'submitting', submittedAt: at(3), content: withImage as never })] }),
+      new Set(['q-s']),
+      read([], [], asks),
+    );
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined])).toEqual([['next', null], ['after', null], ['sending', undefined]]);
+    // what the stack draws of any message with an attachment: the attachment named, then the text
+    expect(rows.map(rowText)).toEqual([entryDisplay(withImage as never), entryDisplay(withPdf as never), entryDisplay(withImage as never)]);
+    expect(rowText(rows[0]!).startsWith('[Image #1] [MAWS ask ask-1]')).toBe(true);
+    const held = stackRows(queue({ paused: true, pauseReason: 'interrupt', entries: [entry('q-a', 1, { content: withImage as never })] }), NONE, read([], [], asks));
+    expect(held.map((row) => [row.kind, 'answer' in row && row.answer])).toEqual([['held', null]]);
+  });
+
+  it('the up-arrow can take it, as any ordinary waiting message', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 5), steer(U2, 9, [{ type: 'text', text: ANSWER }, image] as never)] }), NONE, read());
+    expect(newestToTake(rows)?.key).toBe(U2);
+  });
+
+  it('the envelope alone in one text block is still the answer row', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 1, [{ type: 'text', text: ANSWER }] as never)] }), NONE, read([], [], asks));
+    expect(rows.map((row) => 'answer' in row && row.answer)).toEqual(['Answer to Layout: Grid']);
   });
 });
 
