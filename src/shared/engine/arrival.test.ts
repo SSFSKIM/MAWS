@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { askSteerText } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, nothingOpen, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, nothingOpen, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -397,6 +397,12 @@ describe('the reader, on an answer to a question asked without waiting', () => {
 });
 
 describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => {
+  // board ticket 711: the opening the ask tool refuses an ask for quoting (tool-server/ask.ts) is this sentence's own
+  it('opens with GRANT_OPENING, the one definition the ask tool’s guard reads', () => {
+    expect(GRANT_OPENING).toBe('Permission granted for ');
+    for (const kind of ['command', 'call'] as const) expect(consentMessage(kind, 'x').startsWith(GRANT_OPENING)).toBe(true);
+  });
+
   it('is one template with two words, the subject quoted as one JSON string', () => {
     expect(consentMessage('command', 'pnpm test')).toBe(
       'Permission granted for this exact command only, as one whole string: "pnpm test". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.',
