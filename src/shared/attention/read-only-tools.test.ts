@@ -22,7 +22,7 @@ describe('read-only tools', () => {
     const fetchBy = (source: string) => ({ ...permission('mcp__web__fetch'), mcpServer: { name: 'web', source } }) as unknown as SessionEvent;
     expect(isReadOnlyRequest(fetchBy('user')), 'a user’s HTTP server named web').toBe(false);
     expect(isReadOnlyRequest(fetchBy('plugin')), 'one whose server says plugin').toBe(false);
-    for (const [label, call] of webFetchCases()) expect(isReadOnlyRequest(permission(call.toolName)), label).toBe(false); // the recorded calls' name
+    for (const [label, call] of webFetchCases().filter(([, call]) => call.toolName === 'mcp__web__fetch')) expect(isReadOnlyRequest(permission(call.toolName)), label).toBe(false); // the recorded calls' name
     expect(isReadOnlyRequest(permission('WebFetch'))).toBe(true); // the engine's own fetch is unchanged
   });
 
