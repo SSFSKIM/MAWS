@@ -20,7 +20,7 @@ import { expect, test as base, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, launchReady, queueInterruptJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
 import { askSteerText } from '../src/shared/maws/ask';
@@ -969,6 +969,46 @@ test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers
   await expect(held.getByRole('button', { name: 'Delete' })).toHaveCount(0);
   await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
   expect((await queueOf(page, id)).paused).toBe(true);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// The UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M3's scene; Acceptance 3 and 4): a prompt
+// sent at the next step while a turn runs, and then the answer to a question the agent asked without waiting, wait
+// together, and the engine writes them to the model as one message (`joinedAnswerJournal`, probe 1's
+// `u704-end-prompt-first-1`). The host splits it where it becomes an event: the person's bubble holds the prompt alone,
+// nothing on the page begins `[MAWS ask` or shows the answer's JSON, and the ask's capsule reads answered. The ask is
+// the recording's real call, answered by the host's own `maws` server; the answer goes through `maws.ask.answer`, as
+// the Question sheet's Submit sends it.
+test('ticket 704, a joined answer: the prompt and the answer the engine joined draw as the person’s prompt alone and an answered capsule', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u704-joined-answer';
+  const recorded = joinedAnswerRecorded();
+  await openComposerPage(page);
+  await launchReady(page, id, joinedAnswerJournal(scratch, id));
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  value(await invoke(page, 'session.send', { appSessionId: id as never, content: recorded.first })); // seq 18
+  // the engine's non-blocking ask (109), answered by the host's server at once; the turn runs on, held at the next write
+  let askId = '';
+  await expect.poll(async () => (askId = value(await invoke(page, 'maws.asks.list', { appSessionId: id as never })).asks[0]?.askId ?? '')).not.toBe('');
+  await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
+
+  await messageIn(page, 0).click();
+  await page.keyboard.type(recorded.prompt);
+  await page.keyboard.press('Enter'); // at the next step (159)
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === recorded.prompt)?.priority).toBe('next');
+  expect(value(await invoke(page, 'maws.ask.answer', { appSessionId: id as never, askId, answers: recorded.answers as AskAnswer[] })).outcome).toBe('delivered'); // the envelope (161)
+  await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === 'next').length).toBe(2);
+
+  // the joined turn (676 to 726) drawn and ended
+  const transcript = transcriptOf(page, 0);
+  const bubble = transcript.locator('.transcript-user').filter({ hasText: recorded.prompt });
+  await expect(bubble).toHaveCount(1);
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  await expect(bubble).toHaveCount(1);
+  await expect(bubble, 'the person’s words alone').not.toContainText('[MAWS ask');
+  await expect(transcript, 'no envelope anywhere on the page').not.toContainText('[MAWS ask');
+  await expect(pane(page, 0), 'nor its block').not.toContainText('"status": "answered"');
+  await expect(transcript.locator('section.transcript-ask')).toHaveAttribute('data-ask-state', 'answered');
   expect(editor.consoleErrors()).toEqual([]);
 });
 
