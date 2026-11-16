@@ -65,9 +65,10 @@ export async function defaultBaseRef(read: GitRun, directory: string): Promise<O
   return { ref: shortName(chosen), commit: commits.get(chosen)! };
 }
 
-// `git merge-base <commit> HEAD`, or null when they share no commit (git exits 1 and prints nothing).
-export async function mergeBaseWithHead(read: GitRun, directory: string, commit: string): Promise<string | null> {
-  return (await read(directory, ['merge-base', commit, 'HEAD'], { acceptExitCodes: [1] })).trim() || null;
+// `git merge-base <commit> HEAD`, or null when they share no commit (git exits 1 and prints nothing). `head`: HEAD's
+// commit as the caller resolved it, so one read measures every step against the same HEAD (Decision Log 52).
+export async function mergeBaseWithHead(read: GitRun, directory: string, commit: string, head = 'HEAD'): Promise<string | null> {
+  return (await read(directory, ['merge-base', commit, head], { acceptExitCodes: [1] })).trim() || null;
 }
 
 // Every configured remote with a URL, by name (git exits 1 when there is none).
@@ -88,7 +89,12 @@ async function currentBranchRef(read: GitRun, directory: string): Promise<string
 
 // The commit HEAD names, or null before the first commit.
 export async function headCommit(read: GitRun, directory: string): Promise<string | null> {
-  return (await read(directory, ['rev-parse', '-q', '--verify', 'HEAD^{commit}'], { acceptExitCodes: [1] })).trim() || null;
+  return commitNamed(read, directory, 'HEAD');
+}
+
+// The commit a full ref name (or HEAD) names now, or null when it names none.
+export async function commitNamed(read: GitRun, directory: string, name: string): Promise<string | null> {
+  return (await read(directory, ['rev-parse', '-q', '--verify', `${name}^{commit}`], { acceptExitCodes: [1] })).trim() || null;
 }
 
 // Which of `refs` exist and name a commit, with the commit. `for-each-ref` matches a pattern from its start up to a

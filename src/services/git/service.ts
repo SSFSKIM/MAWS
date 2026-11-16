@@ -13,7 +13,7 @@ import {
   type GitChangesSinceInput, type GitCommitDiff, type GitCommitDiffInput, type GitDiff, type GitDiffFile, type GitDiffInput, type GitLog, type GitLogInput, type GitStatus,
 } from '@shared/ipc/schema/git';
 import { countAddedLines, type CountHooks } from '../fs/count-lines';
-import { defaultBaseRef, headCommit, mergeBaseWithHead } from './default-base';
+import { commitNamed, defaultBaseRef, headCommit, mergeBaseWithHead } from './default-base';
 import { gitIgnored } from './ignored';
 import { parseBranches, parseCurrentUpstream, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
 import { createGitReader, createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRead, type GitRun } from './runner';
@@ -115,21 +115,25 @@ export class GitService {
   // commits are `<merge base>..HEAD`, newest first, at most `limit`, and with no base the newest of HEAD. A row is pushed
   // when the upstream holds it: false for every row with no upstream, null for every row (and null halves in `counts`)
   // when the upstream is configured and git cannot resolve it. `counts` and `behind` are of the whole range.
+  // One snapshot (the branch's max panel, the document's Decision Log 52): HEAD, the base ref and the upstream are each
+  // resolved to a commit once, and every later step names those ids, never a ref, so a history that moves while the read
+  // runs cannot make one step disagree with another (more not pushed than in all, a negative pushed count).
   async branchCommits({ directory, limit }: GitBranchCommitsInput): Promise<GitBranchCommits> {
     requireAbsolute(directory);
     const [ref, upstream, head] = await Promise.all([defaultBaseRef(this.run, directory), this.currentUpstream(directory), headCommit(this.run, directory)]);
     if (head === null) return { base: null, upstream: upstream.name, commits: [], counts: null, behind: null };
     // the merge base beside `behind`: each walks the history, seconds apiece in a large repository with no commit-graph (P5)
-    const [mergeBase, behindRef] = ref === null ? [null, null] : await Promise.all([
-      mergeBaseWithHead(this.run, directory, ref.commit),
-      this.run(directory, ['rev-list', '--count', ref.commit, '^HEAD', '--']).then(Number),
+    const [mergeBase, behindRef, upstreamCommit] = await Promise.all([
+      ref === null ? null : mergeBaseWithHead(this.run, directory, ref.commit, head),
+      ref === null ? null : this.run(directory, ['rev-list', '--count', ref.commit, `^${head}`, '--']).then(Number),
+      upstream.ref === null || upstream.gone ? null : commitNamed(this.run, directory, upstream.ref),
     ]);
     const base = ref === null || mergeBase === null ? null : { ...ref, mergeBase };
-    const range = base === null ? ['HEAD'] : ['HEAD', `^${base.mergeBase}`];
+    const range = base === null ? [head] : [head, `^${base.mergeBase}`];
     const [rows, notPushed, all] = await Promise.all([
       this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', String(limit), ...range, '--']).then(parseLog),
       // the range's commits the upstream does not hold: few on a branch, and never more than the range
-      upstream.ref === null || upstream.gone ? null : this.run(directory, ['rev-list', ...range, `^${upstream.ref}`, '--']).then(shas),
+      upstreamCommit === null ? null : this.run(directory, ['rev-list', ...range, `^${upstreamCommit}`, '--']).then(shas),
       base === null ? null : this.run(directory, ['rev-list', '--count', ...range, '--']).then(Number),
     ]);
     const behind = base === null ? null : behindRef;
@@ -166,10 +170,13 @@ export class GitService {
   // arguments and prefixes; without `path`, the first UNTRACKED_COUNT_FILES untracked files the fresh status lists (in
   // its order, a `dir/` entry not one), each with its added lines read through an opened descriptor by the service
   // itself (decision 15), never by a git run a file.
+  // `HEAD` is resolved to its commit once, so the patch and the counts name the same one (Decision Log 52); before the
+  // first commit it stays `HEAD`, which git refuses in both alike.
   async changesSince({ directory, against, path, context }: GitChangesSinceInput): Promise<GitChangesSince> {
     requireAbsolute(directory);
+    const since = against === 'HEAD' ? ((await headCommit(this.run, directory)) ?? against) : against;
     const [diff, untracked] = await Promise.all([
-      this.diffOf(directory, [against], path, context, true),
+      this.diffOf(directory, [since], path, context, true),
       path === undefined ? this.untrackedCounts(directory) : [],
     ]);
     return { ...diff, untracked };
