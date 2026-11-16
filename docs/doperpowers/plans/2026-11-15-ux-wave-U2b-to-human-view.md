@@ -617,30 +617,52 @@ In `src/shared/owner/draws.ts` (new, pure, no I/O):
 
 `declaresDrawing`: the parsed file is an object whose `toHumanView.drawsFrom` is an integer not above `at`; a missing, unreadable or otherwise shaped file does not declare. `advertisementFor`: nothing when the lane carries nothing; 9 when the switch is on, the list is not empty and every installation declares; else 8. `Reservation.plugin` is whether the launch found an applicable, enabled installation of the mod whose hooks load. `row` is null when the session has no owner row or the row cannot be read.
 
-**`advertisementOf`,** for the session's running launch `live`:
+**Who draws: the table the code and its tests are checked against** (restated 2026-11-16 (UTC), at the architect's ruling after M4's frontier review: Decision Log, "M4, who draws, closed as one table"; it replaces the prose rows this section first gave). It is read in three steps: what the row says the running launch carried (A), what the facts of the running launch say (B), and which statuses count (C). Two properties are checked over every cell of B, each against what the launch actually carried and what the installation actually does (the mod at 8, and an installation without the declaration at 9, keep the engine's drawing at every site, check 1's A1; a declaring installation at 9, and any installation with no advertisement, draw the view):
 
-| the row | read as |
-|---|---|
-| its reservation is bound to `live` | the reservation's number and `plugin` |
-| its reservation is not bound, and its `prior` (the bound slot) is bound to `live` | the prior's number and `plugin`: this build's running launch, whose relaunch was reserved and not (yet) accepted |
-| its reservation is not bound, and `live` is not the row's `launch_id` | the reservation's: the host accepted the launch and the bind was never written |
-| `live` is the row's `launch_id`, and the reservation is absent, unbound or bound to another launch | an earlier build's launch, or one made before any reservation: nothing when `desired` is `off`, else 8; `plugin` unknown |
-| anything else, or no row | not known |
+- **Never both.** A cell reads `maws` only on evidence that the mod draws no view for that launch: a carried 8 known from a bound record or an earlier build's recorded launch; plugins reported without the mod; a carried 9 with the loaded installation's declaration read and absent; or the launch at rest. A guess never reads `maws`.
+- **Neither, only where named.** The cells where neither side draws a view are marked *neither* in B, each with why it is accepted and what ends it. In each the person sees the full transcript with no fold: `drawnBy` is `mod`, so MAWS draws no mirror and folds no turn once the session holds a message, and every site's answer keeps the engine's drawing, in which MAWS mounts its own row (a message drawn as a message, M2's `MessageView`; M5 pins it over check 1's `u2b-mod-8-*` fixtures).
 
-**`drawnBy`** (`loaded` is null until this launch reported its plugins; `present` is a loaded plugin named `to-human`; `declares` is the declaration read at that plugin's reported `path`):
+**A. `advertisementOf(row, live)`** (the row's two slots as "Two slots" below keeps them; "recorded" is the row's `launch_id`, which this build writes at the bind and an earlier build at its own record):
 
-| the advertisement | the engine | drawn by |
+| | the row | read as | why that is evidence, or why not |
+|---|---|---|---|
+| A1 | the row cannot be read, or there is none | not known | — |
+| A2 | the bound slot (the bound reservation, or the unbound one's `prior`) is bound to `live` | its number and `plugin` | written before the send and bound at the host's answer for this launch |
+| A3 | `live` is the recorded launch and no slot is bound to it | nothing when `desired` is `off`, else 8; `plugin` unknown | an earlier build advertises 8 or nothing; this build records a launch with no bound reservation only when the reservation's write failed, and then sent 8 or nothing |
+| A4 | `live` is not the recorded launch and no slot is bound to it, the unbound reservation included | not known | an unbound reservation for an unrecorded launch is no evidence of what that launch carried: it may be the launch whose bind a daemon's stop lost, or one an earlier build, or this build after a failed write, sent after it |
+| A5 | `desired` is null where A3 would read it | not known | — |
+
+The start's reconciliation binds nothing: by A4 there is no reservation it could prove the running launch's. A launch read through A4 stays not known until its next launch, which this build decides and records.
+
+**B. `drawnBy(advertisement, engine, loaded)`.** "The engine" is the running launch's state by C: *at rest* (a status of the running launch says `exiting` or `exited`, or a status read says the session has no live process); *not yet reported* (live, or not yet discovered: before the first status read, or a launch bound before its first status, both counted live with plugins not reported); *reported* (live, plugins reported). "The declaration" is the one read at the loaded plugin's reported path for the latest observation of plugins: *yes*, *no* (the file is missing, or does not parse to the declaring shape), *outstanding* (the read has not answered), *failed* (an I/O error other than "no such file").
+
+| | the advertisement (A) | the engine | the plugin and its declaration | drawn by | if neither: why accepted, and what ends it |
+|---|---|---|---|---|---|
+| B1 | any | at rest | any | `maws` | — (no engine; the mirror) |
+| B2 | 8 | not yet reported or reported | any | `maws` | — |
+| B3 | 9 | not yet reported | — | `mod` | *neither* if the installation that loads does not declare or none loads: the launch was decided on declaring installations, so only a change between the decision and the load gives it; ends when the plugins are reported |
+| B4 | 9 | reported | the mod loaded, declaration yes | `mod` | — |
+| B5 | 9 | reported | the mod loaded, declaration outstanding or failed | `mod` | *neither* if it does not declare; ends when the read answers, or at the next observation |
+| B6 | 9 | reported | the mod loaded, declaration no | `maws` | — (the declaration ships in the same commit as the gate that draws at 9, §I item 2: a release without it steps aside) |
+| B7 | 9 | reported | the mod not loaded | `maws` | — |
+| B8 | nothing | not yet reported | the launch's `plugin` true or unknown | `mod` | *neither* if no installation loads; ends when the plugins are reported |
+| B9 | nothing | not yet reported | the launch's `plugin` false | `maws` | — (the launch found no installation whose hooks load) |
+| B10 | nothing | reported | the mod loaded | `mod` | — |
+| B11 | nothing | reported | the mod not loaded | `maws` | — |
+| B12 | not known | not yet reported | — | `mod` | *neither* if the launch carried 8, or 9 with no declaring installation, or nothing with none loaded; ends when the plugins are reported (if the mod is not loaded) or at the next launch (decision 4's cost: a launch at 8 shows no fold) |
+| B13 | not known | reported | the mod loaded, whatever its declaration | `mod` | *neither* as B12; ends at the next launch |
+| B14 | not known | reported | the mod not loaded | `maws` | — |
+
+B8 restates this section's first table, which read a launch with nothing advertised and `plugin` unknown as `maws` before the plugins report: an earlier build's lane-off launch with the plugin installed would have been drawn by both until then.
+
+**C. Which status counts.** The running launch is the one a status of a live process names; a status is applied only for it:
+
+| | the status | effect |
 |---|---|---|
-| any | no status, another launch's, or `process` is `exiting` or `exited` | `maws` (at rest) |
-| 8 | live | `maws` |
-| 9 | live, plugins not yet reported | `mod` |
-| 9 | reported, the mod loaded and declaring | `mod` |
-| 9 | reported, the mod loaded without the declaration, or not loaded | `maws` |
-| none | live, not yet reported | `mod` when the reservation's `plugin` is true; `maws` when it is false or unknown |
-| none | reported, the mod loaded | `mod`: it draws as in a terminal once the session holds a message |
-| none | reported, not loaded | `maws`: nobody draws a view |
-| not known | live, the mod loaded or not yet reported | `mod` (decision 4) |
-| not known | live, reported, not loaded | `maws` |
+| C1 | a status of the running launch | applied (its process, its plugins, a new `pluginsObservedAt` starting a declaration read that replaces any outstanding one) |
+| C2 | a status of another launch saying `exiting` or `exited` | ignored: it never puts the running launch at rest, whether or not its id was seen before |
+| C3 | a status of a launch not seen before, with a live process | that launch becomes the running one (a launch another client or an earlier build made) |
+| C4 | a snapshot (the start's read, a reconnect's) of a session for which a newer event has been applied | not applied over it |
 
 `OwnerChannelStateSchema.lane` gains `drawnBy: z.enum(['mod', 'maws']).optional()`. This build always sends it; absent reads as `maws`. `ResolvedStyle` gains `toHuman: { paths: string[]; hooksLoad: boolean }`, the install paths `pluginInstallPaths` accepts for the `to-human` plugin and whether no setting keeps its hooks from loading (it already computes both for `messageTool`). `OwnerChannelFlags` carries the advertisement in place of `laneOn`. It also carries `summariesOff: boolean` (§M, "The switch"). The store gains `reserveLaunch(appSessionId, reservation)`, written before the send, and `recordLaunch` binds the reservation's `launchId`; both write one added column:
 
@@ -1479,6 +1501,9 @@ Each body names: its class 1a run (`scripts/ci-gate.sh "$PWD" --gates static,uni
 - Decision: M4's review, three restatements in decision 4's direction (2026-11-16 (UTC)). The frontier review of M4 found transitions in which "who draws" read an uncertain state as `maws`. Each is restated so that `maws` rests on evidence and uncertainty reads `mod` (a session at rest published `mod` is harmless: a window with no surface attached draws the mirror). (1) *§A's second row.* An unbound reservation read for a running launch the row has not recorded never by itself yields `maws`: at 8 it reads as not known, and the start's reconciliation does not bind an unbound 8 to an unrecorded launch. The sequence: an unbound 8 left by a refused launch; a later lane-off launch whose reservation write fails goes with nothing and is not yet recorded; the abandoned 8 was read for it, `maws` while the loaded mod draws, and reconciliation made it lasting (an earlier build's lane-off launch with an interrupted record, the same). Numbers 9 and null read as before: what they can misread is "neither", never "both". Cost, accepted by decision 4: a real 8 launch whose bind was lost to a daemon stop shows no fold until its next launch. (2) *M4, "the declaration's read is asynchronous".* "Until a read answers the earlier fact stands" is restated: until a read answers for a new observation, the newly loaded plugin counts as declaring; its presence is known at once from the status; a declaration that fails to read with an I/O error other than "no such file" at a reload is unknown (`mod`); a missing or wrongly shaped one is a confirmed non-declaration. At the launch decision nothing changes (an unreadable declaration advertises 8). (3) *Before and between statuses.* A newly bound launch is provisionally live with its plugins unreported until its first status; before the first read of the live sessions the running launch is the row's recorded launch, not an older bound reservation's; an unreadable row before discovery is not known; a status of a launch other than the current one does not move the current one to rest, by launch identity and not observation order, and a snapshot is not applied over newer events.
   Rationale: the header's law and decision 4; each case was reproduced by the reviewer on the VM against the milestone's source.
   Date/Author: 2026-11-16 (UTC), the controller of the second pull request, at M4's frontier review.
+
+- Decision: M4, who draws, closed as one table (2026-11-16 (UTC)). At the architect's ruling that six findings on one rule meant fixing it cause by cause, §A now carries one table (A: what the row says; B: `drawnBy` over the advertisement, the engine and the declaration; C: which status counts), with two properties checked over every cell (never both; neither only in named cells, each with why and what ends it), in place of the prose rows. Writing it changed two readings beyond the review's restatements: (1) *A4* reads an unbound reservation for an unrecorded running launch as not known whatever its number, not only at 8, since an unbound 9 with a non-declaring installation loaded, or an unbound nothing with the plugin installed after it, could each still read `maws` while the mod draws; the start's reconciliation therefore binds nothing. (2) *B8*: no advertisement with the launch's `plugin` unknown (an earlier build's lane-off launch) reads `mod` before the plugins report, where the first table read `maws`. R2's restart proof holds through A4 and B12 (`mod`). The test pinning each cell is named in M4's report and folded here after the fix wave. In every *neither* cell the person sees the full transcript with no fold (the architect's question, answered from check 1's A1 and the mod's `native()`; M5 pins it).
+  Date/Author: 2026-11-16 (UTC), the architect (the ruling to close it as a table); the table by the controller of the second pull request.
 
 ## Outcomes & Retrospective
 
