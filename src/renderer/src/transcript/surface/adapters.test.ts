@@ -9,7 +9,7 @@ import { BASH_RESULT, builder, api, tool, uuid } from '../model/test-events';
 import { commandEntry, type ArrivalEntry } from '@shared/engine/arrival-schema';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, noticeIndexBuilds, questionInput, sentInput, toolInputs, userInput, withToolProps } from './adapters';
+import { arrivalInput, assistantInput, callInput, commandInput, groupInput, noticeFollows, noticeIndexBuilds, questionInput, sentInput, thinkingInput, toolInputs, turnLineInput, userInput, withToolProps } from './adapters';
 
 afterEach(cleanup);
 
@@ -614,3 +614,99 @@ describe('a jump’s revealed target asks no site', () => {
     expect(questionInput(question('q2'), turn, question('q1').id)?.instanceId).toBe('q2');
   });
 });
+
+// UX wave U2b, M5 (the execution document, §E; check 1's C1 to C5): the asks every row the to-human view can fold makes,
+// as check 1 found the mod places them.
+describe('the rows the to-human view folds each ask a site of their own (M5)', () => {
+  const closed = { revealed: undefined, expanded: false };
+  const valid = (component: 'UserMessage' | 'AssistantMessage' | 'ToolUse', input: { props: object } | null) => input !== null && parseTranscriptProps(component, input.props as never, input.props as never) !== null;
+
+  it('a thought outside a run asks AssistantMessage under its row’s bare uuid as a summary (C2), and nothing while revealed or empty', () => {
+    const b = builder();
+    b.turn('u');
+    b.thinking('m', 0, 'The notes come first.');
+    b.text('m', 1, 'Done.');
+    const { rows } = setup(b);
+    const thought = find(rows, 'thinking');
+    const input = thinkingInput(thought);
+    expect(input).toEqual({ instanceId: thought.messageUuid, props: { text: 'The notes come first.', isFirstOfReply: false, isSummary: true } });
+    expect(input!.instanceId).not.toMatch(/:/); // never qualified by its block: the mod would not place it (C2)
+    expect(valid('AssistantMessage', input)).toBe(true);
+    expect(thinkingInput(thought, thought.id)).toBeNull();
+    expect(thinkingInput({ ...thought, text: ' ' })).toBeNull();
+  });
+
+  it('a call a row of its own draws asks ToolUse with its call’s props, under the call’s id', () => {
+    const b = builder();
+    b.turn('u');
+    b.toolUse('t4', 'mcp__to-human__message', { text: 'The notes are sorted.' });
+    b.result('t4', 'sent');
+    b.toolUse('t6', 'ListAgents', {});
+    b.result('t6', 'No agents are running.');
+    const { rows, turn } = setup(b);
+    for (const kind of ['to_human', 'agent_list'] as const) {
+      const row = find(rows, kind);
+      const input = callInput(row, turn);
+      expect(input, kind).toMatchObject({ instanceId: row.toolUseId, props: { tool_use_id: row.toolUseId, isRunning: false, isErrored: false } });
+      expect(valid('ToolUse', input), kind).toBe(true);
+      expect(callInput(row, turn, row.id), kind).toBeNull();
+    }
+  });
+
+  it('a closed turn’s line asks TurnDuration under its prompt’s uuid and `~turn` (C1); a working turn’s line asks nothing', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok');
+    b.tick(42_000);
+    b.text('m', 0, 'Done.');
+    b.end(['u1']);
+    const { rows, turn } = setup(b);
+    const line = find(rows, 'divider');
+    const input = turnLineInput(line, turn);
+    expect(input).toMatchObject({ instanceId: 'u1~turn', props: { word: 'Worked', isExpanded: true } });
+    expect(input!.props.durationMs).toBeGreaterThan(0);
+    expect(turnLineInput(line, turn, line.id)).toBeNull();
+    expect(turnLineInput({ ...line, state: 'working' }, turn)).toBeNull();
+  });
+
+  it('a notice with no record of its own asks its own line under `<anchor>~<its row>`, with the origin of its class (C3)', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('t1', 'Bash', { command: 'count files' });
+    b.result('t1', 'ok');
+    b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [{ class: 'task', taskId: 'bt1', toolUseId: 'tu-bt1', runId: null, outcome: 'completed', summary: 'Background command "count files" completed (exit code 0)', durationMs: null, outputFile: null, detail: null }] });
+    const { rows, turn } = setup(b);
+    const notice = find(rows, 'notice');
+    const input = arrivalInput(notice, turn, closed);
+    expect(input).not.toBeNull();
+    expect(input!.instanceId).toBe(`t1~${notice.id}`); // after the call before it, which the mod places it after
+    expect(input!.props).toMatchObject({ origin: { kind: 'task-notification' }, task: { id: 'bt1', status: 'completed', toolUseId: 'tu-bt1' }, isExpanded: false });
+    expect(valid('UserMessage', input)).toBe(true);
+  });
+
+  it('a scheduled trigger and the bridge’s wake ask under their own origins, the wake’s plugin named', () => {
+    for (const [arrival, origin] of [[{ class: 'schedule', prompt: 'tidy' }, { kind: 'scheduled-trigger' }], [{ class: 'wake' }, { kind: 'plugin', name: 'sminos' }]] as const) {
+      const b = builder();
+      b.turn('u1');
+      b.text('m', 0, 'Waiting.');
+      b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: true, isSynthetic: true, origin: arrival.class === 'wake' ? 'plugin' : 'scheduled-trigger', bash: null, arrival: [arrival as ArrivalEntry] });
+      const { rows, turn } = setup(b);
+      const notice = rows.find((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
+      if (notice === undefined) continue; // the class draws no notice row on this route
+      const input = arrivalInput(notice, turn, closed);
+      expect(input?.props.origin, arrival.class).toEqual(origin);
+      expect(valid('UserMessage', input), arrival.class).toBe(true);
+    }
+  });
+
+  it('the session’s own sends ask no arrival', () => {
+    const b = builder();
+    b.turn('u');
+    b.toolUse('sm1', 'SendMessage', { to: 'uds:/tmp/socks/docs.sock', message: 'the index is fixed' });
+    b.result('sm1', '{"success":true}');
+    const { rows, turn } = setup(b);
+    expect(arrivalInput(find(rows, 'agent_message'), turn, closed)).toBeNull();
+  });
+});
+

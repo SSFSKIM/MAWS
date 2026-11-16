@@ -2,7 +2,7 @@
 // `uiSurface` while its process is ready), the instance's answer, and the connection that re-asks a session's mounted
 // instances when the engine invalidates them and forgets a session's answers when its surface goes.
 import { useEffect, useMemo } from 'react';
-import type { SurfaceSite, SurfaceViewport } from '@shared/engine/surface';
+import type { AskedSite, SurfaceViewport } from '@shared/engine/surface';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { useSurfaceViewport } from './viewport';
@@ -23,7 +23,7 @@ export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
 
 export interface SiteOptions {
   appSessionId: AppSessionId | null;
-  component: SurfaceSite;
+  component: AskedSite;
   instanceId: string;
   props: Record<string, unknown>;
   viewport?: SurfaceViewport;
@@ -54,18 +54,28 @@ export function useSurfaceSite({ appSessionId, component, instanceId, props, vie
 
 const UNHOOKED: SiteAnswer = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: false };
 
-export function useSurfaceHooked(appSessionId: AppSessionId | null, component: SurfaceSite): boolean | undefined {
+export function useSurfaceHooked(appSessionId: AppSessionId | null, component: AskedSite): boolean | undefined {
   return useSurfaceAnswers((s) => appSessionId === null ? undefined : s.hooked.get(hookKey(appSessionId, component)));
 }
 
 // Live batches only (never a snapshot): an invalidate re-asks the session's mounted instances; a session whose status
-// no longer carries the surface forgets its answers.
+// no longer carries the surface forgets its answers. UX wave U2b (the execution document, §E, "After a reload MAWS
+// re-asks by itself"; check 1's C4: `reload_plugins` may push no invalidation): a status whose plugins were observed at
+// another time than the last one this window saw for the session (a reload, a new launch's report) re-asks its mounted
+// instances exactly as an invalidation does.
 export function connectEngineSurface(client: MawsBridge = ipc): () => void {
+  const observed = new Map<AppSessionId, string | null>();
   const offEvents = client.on('session.eventBatch', ({ appSessionId, events }) => {
     if (events.some((event) => event.kind === 'plugin.invalidate')) invalidateSession(appSessionId as AppSessionId);
   });
   const offStatus = client.on('session.status', ({ appSessionId, status }) => {
+    const id = appSessionId as AppSessionId;
     const now = status.process === 'ready' && status.uiSurface !== undefined;
+    if (now) {
+      const before = observed.get(id);
+      observed.set(id, status.pluginsObservedAt);
+      if (before !== undefined && before !== status.pluginsObservedAt) invalidateSession(id);
+    } else observed.delete(id);
     if (!now) {
       forgetSession(appSessionId as AppSessionId);
       // Mounted rows must survive until React hands their presentation back to the detached renderer.

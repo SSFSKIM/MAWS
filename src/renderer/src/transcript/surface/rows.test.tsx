@@ -46,7 +46,8 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.textContent).toBe('to human\nHello');
   });
 
-  it('keeps individual call rows when its group mod draws nothing and honors an expansion rewrite', async () => {
+  // UX wave U2b (M5, §E): the run is a full site: a group mod that draws nothing hides the run, its calls with it
+  it('hides the run, calls and all, when its group mod draws nothing, and honors an expansion rewrite', async () => {
     const b = builder(); b.turn('u'); b.toolUse('t1', 'Bash', { command: 'first' }); b.result('t1', 'ok'); b.toolUse('t2', 'Bash', { command: 'second' });
     const store = await mounted(b); const row = rowOf(store.rows(), 'group');
     const view = renderRow(row, { storeKey: store.key });
@@ -59,6 +60,7 @@ describe('mounted transcript surface integration', () => {
     expect(view.container.querySelector('[data-cell-count]')?.getAttribute('data-cell-count')).toBe('2');
     expect(Array.from(view.container.querySelectorAll('[data-cell-id]'), (cell) => cell.getAttribute('data-cell-id'))).toEqual(['cell:t1', 'cell:t2']);
     expect(view.container.querySelector('.transcript-run-line')?.getAttribute('aria-expanded')).toBe('true');
+    expect(view.container.querySelector('.transcript-group')!.closest('[inert]')).not.toBeNull(); // concealed: the mod drew nothing
     await waitFor(() => expect(asks().filter((x) => x.component === 'ToolUse').map((x) => x.instanceId)).toEqual(['t1', 't2']));
     expect(asks().filter((x) => x.component === 'ToolResult')).toHaveLength(0);
   });

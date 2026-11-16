@@ -114,7 +114,11 @@ export interface TranscriptStore {
   // marked commentary then stays in view when its turn folds) and whether the rows the mount hands the transcript from
   // outside the store hold a message, with `noTurnFold` recomputed in the same update; and a stretch of the to-human
   // view opened or closed again
+  // M5: whether the mod draws the view in this window (`modDraws`, §E): it joins the flag's first term, and a change of
+  // it closes every stretch the mirror held open (fold states are not carried between the mod and the mirror)
   setToHumanView(key: string, view: { lane: boolean; tailMessage: boolean; modDraws?: boolean }): void;
+  // UX wave U2b (M5, R6): the reveal of a jump ends, if `id` is still the tab's revealed row: its rows ask their sites again
+  clearRevealed(key: string, id: RowId | CellId): void;
   // UX wave U2b (M1's fix wave): a mounted view of the key and the rows it composes from the key's before the mirror
   // runs over them (its placed rows, browser activity and tail), with the live marks it reads, so a jump opens the
   // stretch each mounted view draws its target in; the returned function releases it (the view unmounts)
@@ -223,11 +227,12 @@ function eventsHoldMark(state: TranscriptState): boolean {
   return false;
 }
 
-// `noTurnFold`: the lane is on and the session holds a message, in its stored events, in a streaming block of the
-// store, or in the rows the mount hands in from outside (`tailMessage`, which `Transcript` writes before paint). Not
-// sticky: when none holds one any more (a reset, a reply an interrupt cut), the turn fold returns.
+// `noTurnFold`: the lane is on or the mod draws the view (M5; decision 8), and the session holds a message, in its
+// stored events, in a streaming block of the store, or in the rows the mount hands in from outside (`tailMessage`, which
+// `Transcript` writes before paint). Not sticky: when none holds one any more (a reset, a reply an interrupt cut), the
+// turn fold returns.
 const inForce = (state: TranscriptState): boolean =>
-  state.ui.ownerLane === true && (state.ui.tailMessage === true || holdsStoredMessage(state) || liveMarkedRowIds(state) !== '');
+  (state.ui.ownerLane === true || state.ui.modDraws === true) && (state.ui.tailMessage === true || holdsStoredMessage(state) || liveMarkedRowIds(state) !== '');
 
 // The state with `noTurnFold` as its events, its streaming blocks, its lane and its outside rows make it: a change of
 // it re-derives every turn once (no turn folds while it is set).
@@ -642,20 +647,31 @@ export function createTranscriptStore() {
       // P2-C start (2026-10-09)
       // UX wave U2b (R5): the flag is guessed with the lane as it will be, from the turns as they are (no turn derived
       // for it), so a lane turned on over a history that holds a message derives every turn once; `put` settles it
+      // M5: the mod drawing joins the guess as the lane does (with the lane off a folded turn's rows hold no marked
+      // commentary), and a change of who draws closes every stretch the mirror held open
       setToHumanView(key, { lane, tailMessage, modDraws }) {
         const current = entry(key);
         if (!current) return;
         const was = current.state.ui;
+        const draws = modDraws ?? was.modDraws ?? false;
         const laneChanged = (was.ownerLane ?? false) !== lane;
-        if (!laneChanged && (was.tailMessage ?? false) === tailMessage && (modDraws === undefined || (was.modDraws ?? false) === modDraws)) return;
-        const flag = inForce({ ...current.state, ui: { ...was, ownerLane: lane, tailMessage } }) || (lane && laneChanged && eventsHoldMark(current.state));
+        const drawsChanged = (was.modDraws ?? false) !== draws;
+        if (!laneChanged && (was.tailMessage ?? false) === tailMessage && !drawsChanged) return;
+        const flag = inForce({ ...current.state, ui: { ...was, ownerLane: lane, tailMessage, modDraws: draws } }) || ((lane || draws) && (laneChanged || drawsChanged) && eventsHoldMark(current.state));
         const flagChanged = flag !== (was.noTurnFold === true);
-        changeUi(key, () => (laneChanged || flagChanged ? 'all' : []), (ui) => {
+        changeUi(key, () => (laneChanged || drawsChanged || flagChanged ? 'all' : []), (ui) => {
           ui.ownerLane = lane;
           ui.tailMessage = tailMessage;
           ui.noTurnFold = flag;
           if (modDraws !== undefined) ui.modDraws = modDraws;
+          if (drawsChanged) ui.openStretches = new Set();
         });
+      },
+      clearRevealed(key, id) {
+        const current = entry(key);
+        if (current?.state.ui.revealed !== id) return;
+        const turn = turnOfShown(current.rows, id);
+        changeUi(key, () => (turn === null ? 'all' : [turn]), (ui) => void delete ui.revealed);
       },
       setView(key, view) {
         if (entry(key)?.state.ui.view === view) return;

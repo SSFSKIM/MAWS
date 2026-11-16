@@ -1,7 +1,11 @@
 // R3's mounts adapt row bodies without changing history. The sitting's assistant-only probes may promote a drawn
 // row out of the work fold; virtualized-away dividers and folded tool/group rows issue no asks. Child transcripts
 // are not their parent's engine surface.
-import { useCallback, useEffect, useLayoutEffect, useMemo } from 'react';
+// UX wave U2b (the execution document, §E; R3): every row the to-human view can fold asks a site of its own while it is
+// mounted, whoever draws the view: the run as a full `ToolGroup` site, a message tool's call, an agent listing and a
+// browser action at `ToolUse`, a thought at `AssistantMessage`, a closed turn's line at `TurnDuration`; an answer's action
+// row stands only under a body its answer draws (reported point 23).
+import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { assistantDrawingKey, retainAssistantDrawing, useAssistantDrawings } from '../../engine-surface/assistant-drawings';
 import type { AppSessionId } from '@shared/graph/ids';
 import { stripAnsi } from '@shared/wire/ansi';
@@ -9,6 +13,10 @@ import { nativeQuestionsOf, parseTranscriptProps, type TranscriptProps } from '@
 import { SurfaceRow } from '../../engine-surface/SurfaceRow';
 import { assistantPresentation } from '../../owner/to-human/Presenter';
 import { useSurfaceAttached, useSurfaceSite } from '../../engine-surface/site';
+import { siteKey, useSurfaceAnswers, type SiteAnswer } from '../../engine-surface/registry'; // UX wave U2b
+import { SurfaceBoundary } from '../../engine-surface/SurfaceBoundary'; // UX wave U2b
+import { SurfaceTree } from '../../engine-surface/SurfaceTree'; // UX wave U2b
+import { ipc } from '../../ipc/client'; // UX wave U2b
 import { drawsEngine, firstEngineRef, hasInk } from '../../engine-surface/tree';
 import { hasClosedMarks } from '../../owner/to-human/message-ink';
 import { expandedTurnRows, turnRows } from '../model/derive';
@@ -21,7 +29,10 @@ import { LocalCommandRow } from '../view/rows/LocalCommand';
 import { NoticeRow } from '../view/rows/Notice'; // UX wave U3
 import { QuestionRow } from '../view/rows/Question';
 import { UserRow } from '../view/rows/User';
-import { arrivalInput, assistantInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, userInput } from './adapters';
+import { arrivalInput, assistantInput, callInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, thinkingInput, turnLineInput, userInput } from './adapters';
+import { drawsNothing } from './follow'; // UX wave U2b
+import { AnswerActions } from '../view/rows/AnswerActions'; // UX wave U3b; U2b
+import { ThinkingRow } from '../view/rows/Thinking'; // UX wave U2b
 import { setCarrierConcealed, useCarrierConcealed } from './carrier-drawing'; // UX wave U3
 import { SurfaceCellLine } from './Tools';
 
@@ -59,7 +70,7 @@ export function SurfaceNoticeRow({ row }: { row: Extract<Row, { kind: 'notice' }
   const revealed = state?.ui.revealed;
   const drawn = state && turn ? turnRows(state, turn.id) : undefined; // the turn after its fold: its notices elect the carrier's owner
   const follows = noticeFollows(row, turn, revealed, drawn);
-  const input = arrivalInput(row, turn, { revealed, expanded, drawn });
+  const input = arrivalInput(row, turn, { revealed, expanded, drawn, state }); // UX wave U2b: `state`, for an answer's receipt (R13)
   const instanceId = input?.instanceId ?? null;
   // The carrier's other notices follow the drawing this one applied (carrier-drawing.ts); it conceals nothing once gone.
   const report = useCallback((_ink: boolean, native: { visible: boolean }) => {
@@ -170,8 +181,62 @@ export function SurfaceGroupRow({ row }: { row: Extract<Row, { kind: 'group' }> 
     const current = useTranscriptStore.getState().rows(storeKey).find((r) => r.id === row.id);
     if (current?.kind === 'group' && !current.expanded) useTranscriptStore.getState().toggleGroup(storeKey, row.id);
   }, [storeKey, row.id]);
-  return <>
-    {input && <SurfaceRow appSessionId={appSessionId} component="ToolGroup" {...input} drawingOnly onRewrite={expand}>{() => null}</SurfaceRow>}
-    <GroupRow row={row} renderCell={(cell) => <SurfaceCellLine cell={cell} turnId={row.turnId} />} />
-  </>;
+  // UX wave U2b (§E): a full site. An answer with no engine slot replaces the run; one that keeps it draws MAWS's run there
+  // The site stays mounted while the row asks nothing (a request waits on its call, the reader's jump reveals it), so
+  // the run MAWS draws keeps its element and its open state through it.
+  const group = <GroupRow row={row} renderCell={(cell) => <SurfaceCellLine cell={cell} turnId={row.turnId} />} />;
+  return <SurfaceRow appSessionId={appSessionId} component="ToolGroup" {...idle(row, input)} onRewrite={expand} placeholder={<span className="text-fg-faint">…</span>}>{() => group}</SurfaceRow>;
+}
+
+// A site that asks nothing for now: mounted, disabled, so the row's own drawing keeps its element when an ask starts or
+// stops. Its props reach no one (the site's children draw the row itself, and a disabled site sends nothing).
+function idle<P>(row: Row, input: { instanceId: string; props: P } | null): { instanceId: string; props: P; enabled: boolean } {
+  return input ? { ...input, enabled: true } : { instanceId: row.id, props: {} as P, enabled: false };
+}
+
+// UX wave U2b (§E): a thought outside a run asks `AssistantMessage` with the engine's props for one, under its own uuid;
+// MAWS's own row is its drawing (one with no text yet asks nothing, its site idle).
+export function SurfaceThinkingRow({ row }: { row: Extract<Row, { kind: 'thinking' }> }) {
+  const { appSessionId, state } = useTranscriptSurface(row);
+  const input = thinkingInput(row, state?.ui.revealed);
+  return <SurfaceRow appSessionId={appSessionId} component="AssistantMessage" {...idle(row, input)} placeholder={<span className="text-fg-faint">…</span>}>{() => <ThinkingRow row={row} />}</SurfaceRow>;
+}
+
+// UX wave U2b (§E): a call a row of its own draws (a message tool's message, whose drawing is MAWS's `MessageView`; an
+// agent listing; a browser action) asks `ToolUse` with the call's props, and no `ToolResult`.
+export function SurfaceCallRow({ row, children }: { row: Extract<Row, { kind: 'to_human' | 'agent_list' | 'browser_action' }>; children: ReactNode }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = callInput(row, turn, state?.ui.revealed);
+  return <SurfaceRow appSessionId={appSessionId} component="ToolUse" {...idle(row, input)} placeholder={<span className="text-fg-faint">…</span>}>{() => children}</SurfaceRow>;
+}
+
+// UX wave U2b (§E): a closed turn's line, where no turn folds, asks `TurnDuration` (through `session.ui.renderSite`) and
+// is MAWS's own line in the answer's engine slot, hidden where the answer draws nothing; with no answer (none yet, an
+// earlier engine host's `unknown_command`, no surface) MAWS's own. A turn whose line folds (no view in force) asks
+// nothing: its line is the fold's control.
+const NO_PROPS: Record<string, unknown> = {};
+export function SurfaceTurnLine({ row, children }: { row: Extract<Row, { kind: 'divider' }>; children: ReactNode }) {
+  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const input = state?.ui.noTurnFold === true ? turnLineInput(row, turn, state.ui.revealed) : null;
+  const answer = useSurfaceSite({ appSessionId, component: 'TurnDuration', instanceId: input?.instanceId ?? row.id, props: (input?.props ?? NO_PROPS) as Record<string, unknown>, enabled: input !== null });
+  const [failed, setFailed] = useState<SiteAnswer | null>(null);
+  const tree = input !== null && appSessionId !== null && answer?.hooked && answer !== failed ? answer.tree : null;
+  if (tree === null || drawsEngine(tree)) return children;
+  if (drawsNothing(answer)) return null;
+  return (
+    <SurfaceBoundary answer={answer} name={`TurnDuration ${input!.instanceId}`} onError={setFailed}>
+      <div data-plugin-drawn="TurnDuration" style={{ display: 'contents' }}>
+        <SurfaceTree tree={tree} site={{ appSessionId: appSessionId!, component: 'TurnDuration', instanceId: input!.instanceId, client: ipc }} engine={children} />
+      </div>
+    </SurfaceBoundary>
+  );
+}
+
+// UX wave U2b (reported point 23, §E "An answer's action row where the mod draws"): U3b's action row stands under an
+// answer only while its body is drawn: where the answer's site draws nothing it is not laid out, so nothing of it can be
+// hovered or reached by the keyboard. Its placement stays U3b's own.
+export function DrawnAnswerActions({ row }: { row: Extract<Row, { kind: 'assistant_text' }> }) {
+  const { appSessionId, input } = useAssistantInput(row);
+  const hidden = useSurfaceAnswers((s) => !row.cut && appSessionId !== null && input !== null && drawsNothing(s.answers.get(siteKey({ appSessionId, component: 'AssistantMessage', instanceId: input.instanceId }))));
+  return hidden ? null : <AnswerActions row={row} />;
 }

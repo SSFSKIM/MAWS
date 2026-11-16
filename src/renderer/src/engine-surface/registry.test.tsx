@@ -174,3 +174,56 @@ describe('a site of a session on another machine', () => {
     }
   });
 });
+
+// UX wave U2b, M5 (the execution document, §E and §F): a site the wire's closed set does not name, the turn's line, is
+// asked through `session.ui.renderSite`; an engine host of an earlier build answers `unknown_command`, and the session's
+// such sites draw MAWS's own from then on, asking nothing again until its surface goes. A status whose plugins were
+// observed anew re-asks the session's mounted sites as an invalidation does (check 1's C4: a reload may push nothing).
+describe('the second command, and the re-ask after a reload (M5)', () => {
+  function Line({ client, instanceId = 'u1~turn' }: { client: FakeClient['client']; instanceId?: string }) {
+    const answer = useSurfaceSite({ appSessionId: ID, component: 'TurnDuration', instanceId, props: { word: 'Worked', durationMs: 1000, isExpanded: true }, client });
+    return <p data-testid={instanceId}>{answer ? (answer.hooked ? textOf(answer.tree) || 'empty' : 'unhooked') : 'none'}</p>;
+  }
+  // what main reports, to the store and to the connection: the surface on or gone, and when the plugins were observed
+  const report = (on: boolean, at: string | null = null) => act(() => {
+    const event = { appSessionId: ID, status: { ...status(ID), ...(on && { uiSurface: { clientId: 'maws-main' } }), pluginsObservedAt: at } };
+    useSessions.getState().applyStatus(event, TEST_MACHINE);
+    fake.event('session.status', event);
+  });
+  const observed = (at: string) => report(true, at);
+
+  it('asks the turn’s line through session.ui.renderSite, never session.ui.render', async () => {
+    attach(true);
+    render(<Line client={fake.client} />);
+    expect(fake.invoked('session.ui.renderSite')).toEqual([{ appSessionId: ID, component: 'TurnDuration', instanceId: 'u1~turn', props: { word: 'Worked', durationMs: 1000, isExpanded: true } }]);
+    expect(fake.invoked('session.ui.render')).toEqual([]);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['line'] }, props: {}, rewritten: false, hooked: true }));
+    expect(screen.getByTestId('u1~turn').textContent).toBe('line');
+  });
+
+  it('an earlier engine host’s unknown_command draws MAWS’s own for every such site of the session, asked no more until its surface goes', async () => {
+    attach(true);
+    render(<><Line client={fake.client} /><Line client={fake.client} instanceId="u2~turn" /></>);
+    await act(() => fake.fail('session.ui.renderSite', 'unknown command', 'unknown_command'));
+    expect(screen.getByTestId('u1~turn').textContent).toBe('unhooked');
+    await act(() => fake.fail('session.ui.renderSite', 'unknown command', 'unknown_command'));
+    invalidate(fake);
+    expect(fake.pending('session.ui.renderSite')).toBe(0);
+    expect(screen.getByTestId('u2~turn').textContent).toBe('unhooked');
+    report(false);
+    report(true); // a surface again: it may be another engine host's
+    expect(fake.pending('session.ui.renderSite')).toBe(2);
+  });
+
+  it('a status whose plugins were observed anew re-asks the mounted sites; the same report asks nothing', async () => {
+    observed('2026-11-16T10:00:00.000Z');
+    render(<Line client={fake.client} />);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['before'] }, props: {}, rewritten: false, hooked: true }));
+    observed('2026-11-16T10:00:00.000Z');
+    expect(fake.pending('session.ui.renderSite')).toBe(0);
+    observed('2026-11-16T10:05:00.000Z');
+    expect(fake.pending('session.ui.renderSite')).toBe(1);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['after'] }, props: {}, rewritten: false, hooked: true }));
+    expect(screen.getByTestId('u1~turn').textContent).toBe('after');
+  });
+});

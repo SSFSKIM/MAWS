@@ -64,12 +64,15 @@ interface Context {
   spawns: ReadonlySet<string>;
 }
 
+/** Whether a question's or an ask's row carries its answer's receipt (R13): a question with answers, an ask answered or cancelled. */
+export const carriesReceipt = (row: Extract<Row, { kind: 'question' | 'ask' }>): boolean =>
+  row.kind === 'question' ? row.answers !== null : row.state === 'answered' || row.state === 'cancelled';
+
 function contextOf(rows: readonly Row[], liveMarked: string | undefined): Context {
   const receipted = new Set<string>();
   const spawns = new Set<string>();
   for (const row of rows) {
-    if (row.kind === 'question' && row.answers !== null) receipted.add(row.toolUseId);
-    else if (row.kind === 'ask' && (row.state === 'answered' || row.state === 'cancelled')) receipted.add(row.toolUseId);
+    if ((row.kind === 'question' || row.kind === 'ask') && carriesReceipt(row)) receipted.add(row.toolUseId);
     else if (row.kind === 'subagent') for (const agent of row.agents) if (agent.toolUseId !== null) spawns.add(agent.toolUseId);
   }
   return { live: liveSet(liveMarked), receipted, spawns };

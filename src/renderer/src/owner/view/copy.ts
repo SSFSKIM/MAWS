@@ -25,6 +25,10 @@ export const SWITCH = {
   toReport: 'report only ›', // in the full transcript
 } as const;
 
+// The notice when "Toggle report and transcript" is used in a session the mod draws (M5; decision 20, R9): the action
+// changes nothing there and says why.
+export const MOD_DRAWS_NOTICE = 'The to-human mod draws this session’s view. Use its switch above the composer.';
+
 // Kept for the desk web app's own bar (`apps/desk-web/src/views/project/ReportToggle.tsx`; the execution document, §L)
 // and for the mods list's style-mismatch note (`widgets/plugins/BuiltInMods.tsx`), as they read before the bar went.
 export const REPORT = {
