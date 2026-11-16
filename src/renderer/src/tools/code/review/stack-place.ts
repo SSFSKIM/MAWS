@@ -263,8 +263,13 @@ export class StackPlacer {
     if (reveal && at === null) this.reveal = null; // its file left the stack: the live place stands
     if (reveal && at !== null) {
       // A section folded is not reached yet: the jump that unfolds it draws it next. A section's top (a request, or a
-      // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top.
-      const exact = at.exact && !this.input.sections[layout.index.get(reveal.place.path)!]?.folded;
+      // place whose row is not drawn: still being read, or a read that failed) stands at the scroller's top. A drawn
+      // body still settling (its read, or the library's rows after its first paint) weighs next to nothing, so a place
+      // read under its header would fall in the next file: the section is reached once its body settles.
+      const index = layout.index.get(reveal.place.path)!;
+      const section = this.input.sections[index];
+      const settling = section !== undefined && !section.folded && section.lines > 0 && rows(index) === null;
+      const exact = at.exact && !section?.folded && !settling;
       const want = reveal.top ? Math.max(0, at.top) : this.scrollFor(layout, at);
       this.write(el, want);
       const band = this.bandFor(m, el.scrollTop);
