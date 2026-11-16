@@ -312,18 +312,23 @@ describe('a waiting grant’s row', () => {
     expect(newestToTake(stackRows(queue([entry('q-1', { content })]), new Set(), { unread: [], started: () => false, questions: () => null }))?.key).toBe('q-1');
   });
 
-  // Decision Log 49 (2): wherever the message is drawn; here the message the engine holds and the queue does not list
+  // Decision Log 49 (2): wherever the message is drawn; here the message the engine holds and the queue does not list.
+  // Decision Log 53: the handed row takes the transcript row's own reading (`consent`), never the text it draws
   it('a handed message that holds an image beside the exact sentence reads as its own text, not as the line it would become', () => {
     const { client } = bridge();
     const image = { kind: 'image', name: 'Image #1', bytes: 4, dataUrl: null, mediaType: 'image/png' };
-    const handed = (attachments: unknown[]) => ({ id: 'u3', turnId: 't3', at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: U3, text: GRANT, attachments, placeholders: [], lines: 1, editable: false, steer: false, dropped: false, unread: true });
-    useTranscriptStore.setState({ entries: { [APP]: { rows: [handed([image])], state: { index: { messages: new Map() }, turns: new Map() } } as never } });
-    const { unmount } = render(<QueueList appSessionId={APP} busy queue={queue([])} client={client} />);
-    expect(rows()[0]!.querySelector('[data-row-text]')!.textContent, 'with the image').toBe(GRANT);
-    unmount();
-    useTranscriptStore.setState({ entries: { [APP]: { rows: [handed([])], state: { index: { messages: new Map() }, turns: new Map() } } as never } });
-    render(<QueueList appSessionId={APP} busy queue={queue([])} client={client} />);
-    expect(rows()[0]!.querySelector('[data-row-text]')!.textContent, 'the sentence alone').toBe('You approved make build');
+    const consent = { kind: 'command', subject: 'make build' };
+    const handed = (attachments: unknown[], over: object = { consent }) => ({ id: 'u3', turnId: 't3', at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: U3, text: GRANT, attachments, placeholders: [], lines: 1, editable: false, steer: false, dropped: false, unread: true, ...over });
+    const drawn = (row: object) => {
+      useTranscriptStore.setState({ entries: { [APP]: { rows: [row], state: { index: { messages: new Map() }, turns: new Map() } } as never } });
+      const { unmount } = render(<QueueList appSessionId={APP} busy queue={queue([])} client={client} />);
+      const text = rows()[0]!.querySelector('[data-row-text]')!.textContent;
+      unmount();
+      return text;
+    };
+    expect(drawn(handed([image])), 'with the image').toBe(GRANT);
+    expect(drawn(handed([])), 'the sentence alone').toBe('You approved make build');
+    expect(drawn(handed([], {})), 'the sentence drawn, no grant recorded').toBe(GRANT);
   });
 });
 
