@@ -905,6 +905,26 @@ describe('the grants in a person’s message (rule R)', () => {
     }
   });
 
+  // R-2 (the second review of rule R): with envelopes inside and between segments, every sentence read as a grant stands
+  // outside every segment of the text as it came (the take-out can only free a line from a segment of what is left)
+  it('with envelopes inside and between pasted segments, no grant is read inside a segment of the text as it came; a consent beside a paste holding a whole envelope is read', () => {
+    let seed = 11;
+    const next = () => ((seed = (seed * 1103515245 + 12345) % 2147483648), seed / 2147483648);
+    const pieces = ['<pasted_content id="1111">', '<pasted_content id="2222">', '</pasted_content id="1111">', '</pasted_content id="2222">', 'E', WORDS, 'G'];
+    for (let round = 0; round < 600; round += 1) {
+      const chosen = Array.from({ length: 1 + Math.floor(next() * 12) }, () => pieces[Math.floor(next() * pieces.length)]!);
+      const lines = chosen.map((piece, i) => (piece === 'G' ? consentMessage('command', `make ${i}`) : piece === 'E' ? currentEnvelope(`toolu_${i}`) : piece));
+      const text = lines.join('\n');
+      const spans = [...text.matchAll(PASTED_BLOCK)].map((match) => [match.index, match.index + match[0].length] as const);
+      const starts = lines.map((_, i) => lines.slice(0, i).join('\n').length + (i > 0 ? 1 : 0));
+      for (const read of personsGrants(text)) {
+        const at = starts[Number(read.subject.slice('make '.length))]!;
+        expect(spans.some(([from, to]) => at >= from && at < to), `${read.subject} in:\n${text}`).toBe(false);
+      }
+    }
+    expect(personsGrants(`${framePasted('abcd', currentEnvelope('toolu_a'))}\n${GRANT}`)).toEqual([grant('make build')]);
+  });
+
   // Linear by construction: the reader counts its own work, each line it looks at and each character of a block it
   // parses; the counts are pinned for texts of tens of thousands of opening lines, fence lines and both.
   describe('its work grows with the text, by its own count', () => {
