@@ -193,4 +193,33 @@ describe('a round of reads at each close of a stretch and each end of a turn, in
     })();
     expect(await rounds(batch((b) => b.end(['u2'])))).toBe(1);
   });
+
+  // A session whose turns' state comes from the disk while whether one runs is the bridge port's word (`atRest`): the
+  // two arrive apart. A turn counts as ended by "none runs" only once this view saw it run.
+  it('the port says the turn is over before the disk does, and the next turn starts on disk while the port still says none runs: one round at each end', async () => {
+    const { rounds, batch, rest } = await sequence();
+    expect(await rounds(rest(true))).toBe(1); // the port: the turn is over
+    expect(await rounds(batch((b) => b.end(['u1'])))).toBe(0); // the disk's end of it
+    expect(await rounds(batch((b) => b.turn('u2', 'Then the rest')))).toBe(0); // the next turn's rows, at rest
+    expect(await rounds(rest(false))).toBe(0); // the port: it runs
+    expect(await rounds(batch((b) => call(b, 'tb', 'Read the rest')))).toBe(0);
+    expect(await rounds(batch((b) => b.end(['u2'])))).toBe(1);
+  });
+
+  it('the same, with the next turn’s end told by the port: one round at each end', async () => {
+    const { rounds, batch, rest } = await sequence();
+    expect(await rounds(rest(true))).toBe(1);
+    expect(await rounds(batch((b) => b.end(['u1'])))).toBe(0);
+    expect(await rounds(batch((b) => b.turn('u2', 'Then the rest')))).toBe(0);
+    expect(await rounds(rest(false))).toBe(0);
+    expect(await rounds(rest(true))).toBe(1); // the port: the next turn is over
+  });
+
+  it('a session at rest throughout: a whole turn read from disk starts one round, at its end', async () => {
+    const { rounds, batch } = await sequence(true);
+    expect(await rounds(batch((b) => b.end(['u1'])))).toBe(0); // its end was already so when the view first drew it
+    expect(await rounds(batch((b) => b.turn('u2', 'Then the rest')))).toBe(0);
+    expect(await rounds(batch((b) => call(b, 'tb', 'Read the rest')))).toBe(0);
+    expect(await rounds(batch((b) => b.end(['u2'])))).toBe(1);
+  });
 });
