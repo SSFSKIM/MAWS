@@ -411,7 +411,7 @@ describe('the grant readers read a person’s message as the split does', () => 
     const steer = parseAskSteer(envelope)!;
     return { class: 'answer', tool: 'maws', call: steer.askId, summary: envelope, answers: steer.result.answers, dismissed: false };
   };
-  const row = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000708', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const row = (content: string | ContentBlock[]) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000708', origin: { kind: 'human' }, message: { role: 'user', content } });
   const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000708' as MessageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
   const ownText = (text: string) => ownLines(text).map(({ line }) => line).join('\n');
 
@@ -444,5 +444,20 @@ describe('the grant readers read a person’s message as the split does', () => 
     expect(ownText(text)).toBe('Keep these notes.');
     expect(personsGrants(text)).toEqual([]);
     expect(readArrivals(row(text))).toEqual([answerOf(A2), answerOf(QUOTING)]);
+  });
+  // The split reads each text block by itself and does not read an envelope spread over two (decision 7), so such a text
+  // is the person's own; the grant readers read it so too, block by block: the split's reading wins, since it is the one
+  // reading the landing's ruling names (the Decision Log's line of 2026-11-16)
+  it('made by hand: an envelope spread over two text-only blocks is the person’s text for the split and for the grant readers: no answer is read of it, and a grant’s sentence on its own line there is the person’s', () => {
+    const block = (text: string): ContentBlock => ({ type: 'text', text });
+    const [head, tail] = [A1.split('\n').slice(0, 2).join('\n'), A1.split('\n').slice(2).join('\n')];
+    const spread = [block(head), block(`${tail}\n${GRANT}`)];
+    expect(personsParts(spread)).toEqual({ own: spread, envelopes: [] });
+    expect(readArrivals(row(spread)), 'the envelope spread over the blocks is no answer; the grant after it is the person’s').toEqual([consent]);
+    const quoting = QUOTING.split('\n');
+    const quoted = [block(`Keep these notes.\n${quoting.slice(0, 3).join('\n')}`), block(quoting.slice(3).join('\n'))];
+    expect(quoting[2]).toBe(GRANT); // the grant's sentence is the head block's last line
+    expect(personsParts(quoted)).toEqual({ own: quoted, envelopes: [] });
+    expect(readArrivals(row(quoted)), 'a grant’s line among the person’s own lines is theirs').toEqual([consent]);
   });
 });
