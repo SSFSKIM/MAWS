@@ -5,7 +5,8 @@
 // not name yields none.
 import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
-import { askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { consentMessage, GRANT_OPENING, nothingOpen, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
@@ -543,6 +544,15 @@ describe('the answer envelopes inside a joined text', () => {
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
   });
 
+  // board ticket 711: A1 and A2 are this build's new form; an earlier build's envelope still reads, alone or beside one
+  it('an envelope an earlier build wrote, joined with a prompt and with a new-form one', () => {
+    const earlier = earlierAskSteerText('ask-1', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+    expect(A1.split('\n')[1]).toBe('1. option 1');
+    expect(earlier.split('\n')[1]).toBe('1. Layout — Grid');
+    expect(readAnswerEnvelopes(joined(earlier, 'Also fix the footer.'))).toEqual({ envelopes: [read(earlier)], rest: 'Also fix the footer.' });
+    expect(readAnswerEnvelopes(joined(earlier, A2))).toEqual({ envelopes: [read(earlier), read(A2)], rest: '' });
+  });
+
   it('a text that is all envelope: the envelope, and an empty rest, as today', () => {
     expect(readAnswerEnvelopes(A1)).toEqual({ envelopes: [read(A1)], rest: '' });
     expect(readAnswerEnvelope(A1)).not.toBeNull();
@@ -567,11 +577,19 @@ describe('the answer envelopes inside a joined text: a pasted segment is data', 
   });
 });
 
-// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. The model's
-// question is written verbatim and may hold a line that begins with the tag.
+// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. An earlier
+// build's writer wrote the model's question verbatim, and it may hold a line that begins with the tag; such an envelope
+// may still be read (board ticket 711: this build's writes no text the model wrote, so only its first line begins so).
 describe('the answer envelopes inside a joined text: the member boundary is the writer\'s whole first line', () => {
   const TAGGED = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice' as const, options: [{ label: 'Hash' }, { label: 'Star' }] };
-  const envelope = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+  const answered = [{ id: 'q1', question: TAGGED.question, status: 'answered' as const, value: ['Star'] }];
+  const envelope = earlierAskSteerText('ask-7', [TAGGED], answered);
+
+  it('this build’s writer begins only its first line with the tag, that line askSteerOpening', () => {
+    const lines = askSteerText('ask-7', [TAGGED], answered).split('\n');
+    expect(lines[0]).toBe(askSteerOpening('ask-7'));
+    expect(lines.filter((line) => line.startsWith('[MAWS ask'))).toEqual([lines[0]]);
+  });
 
   it('a question whose second line begins with the tag: its envelope alone is read', () => {
     expect(envelope.split('\n')[2]).toMatch(/^\[MAWS ask /);
