@@ -37,7 +37,7 @@ import { setCarrierConcealed, useCarrierConcealed } from './carrier-drawing'; //
 import { SurfaceCellLine } from './Tools';
 
 import { useDisclosure, useTranscriptContext } from '../view/context';
-import { useTranscriptSurface } from './context';
+import { useOwnerChannelSurface, useTranscriptSurface } from './context';
 
 export function SurfaceUserRow({ row }: { row: Extract<Row, { kind: 'user' }> }) {
   const { appSessionId, state, turn } = useTranscriptSurface(row);
@@ -91,10 +91,8 @@ function FollowingNotice({ row, appSessionId, instanceId }: { row: Extract<Row, 
 }
 
 function useAssistantInput(row: Extract<Row, { kind: 'assistant_text' }>) {
-  const { storeKey, variant } = useTranscriptContext();
-  // Local comment threads never ask the attached session's surface.
-  const forcedLocal = useTranscriptContext().presentation === 'local';
-  const appSessionId = variant === 'session' && storeKey && !forcedLocal ? storeKey as AppSessionId : null;
+  const { storeKey } = useTranscriptContext();
+  const appSessionId = useOwnerChannelSurface(); // local comment threads never ask the attached session's surface
   const turn = useTranscriptStore((s) => row.turnId === null ? undefined : s.entries[storeKey]?.state.turns.get(row.turnId));
   const live = useTranscriptStore((s) => liveBuffer(s.entries[storeKey], row));
   const revealed = useTranscriptStore((s) => s.entries[storeKey]?.state.ui.revealed); // UX wave U3
@@ -205,7 +203,8 @@ export function SurfaceThinkingRow({ row }: { row: Extract<Row, { kind: 'thinkin
 // UX wave U2b (§E): a call a row of its own draws (a message tool's message, whose drawing is MAWS's `MessageView`; an
 // agent listing; a browser action) asks `ToolUse` with the call's props, and no `ToolResult`.
 export function SurfaceCallRow({ row, children }: { row: Extract<Row, { kind: 'to_human' | 'agent_list' | 'browser_action' }>; children: ReactNode }) {
-  const { appSessionId, state, turn } = useTranscriptSurface(row);
+  const { state, turn } = useTranscriptSurface(row);
+  const appSessionId = useOwnerChannelSurface(); // panel finding 1: the card's thread draws these through MAWS too
   const input = callInput(row, turn, state?.ui.revealed);
   return <SurfaceRow appSessionId={appSessionId} component="ToolUse" {...idle(row, input)} placeholder={<span className="text-fg-faint">…</span>}>{() => children}</SurfaceRow>;
 }
