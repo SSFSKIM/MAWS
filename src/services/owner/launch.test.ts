@@ -411,7 +411,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     });
 
     it('with the switch of contract.ts off, a newer installation still advertises 8: no launch carries 9 before the cutover', async () => {
-      launchesWith({});
+      launchesWith({ modRoute: false }); // the cutover's switch off
       installToHumanPlugin(configHome, { declares: true });
       const { spec: decided, record: decision } = await decide();
       expect(envOf(decided)[NATIVE_TO_HUMAN_ENV]).toBe('8');
@@ -447,7 +447,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       installToHumanPlugin(configHome, { declares: true });
       ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // the running launch, at 9, bound
       await decide(); // reserved at 9; the host refuses it
-      launchesWith({});
+      launchesWith({ modRoute: false }); // the cutover's switch off
       await decide(); // reserved at 8; refused again
       const row = index.ownerChannel.session(record)!;
       expect(row.advertised).toEqual({ launchId: null, number: 8, plugin: true, at: AT, prior: { launchId: 'l1', number: 9, plugin: true } });
@@ -456,7 +456,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     });
 
     it('a relaunch that the host accepts reads its own, and nothing reads the launch before it', async () => {
-      launchesWith({});
+      launchesWith({ modRoute: false }); // the cutover's switch off
       installToHumanPlugin(configHome, { declares: true });
       ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // at 8, bound
       launchesWith({ modRoute: true });
@@ -483,7 +483,7 @@ describe('ownerChannelLaunch over a scratch config home', () => {
         expect(envOf(off.spec)[NATIVE_TO_HUMAN_ENV]).toBe(number);
         expect(off.record).toMatchObject({ summariesOff: true });
       }
-      launchesWith({});
+      launchesWith({ modRoute: false }); // the cutover's switch off
       appEnabled = true;
       expect(envOf((await decide()).spec)).toEqual({ [NATIVE_TO_HUMAN_ENV]: '8', [FOLD_SUMMARIES_ENV]: 'off' });
     });
