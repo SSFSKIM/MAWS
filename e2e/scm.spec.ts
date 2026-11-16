@@ -183,14 +183,14 @@ function measure(p: Scm): Promise<Measures> {
     const measured = (scope: Element, name: string) => scope.querySelector(`[data-scm-measure="${name}"]`)?.getBoundingClientRect().width ?? 0;
     const whereLine = one('[data-scm-where]')!;
     const uncommittedLine = one('[data-scm-uncommitted]');
-    const headingLine = [...root.querySelectorAll<HTMLElement>('[data-scm-commits-heading]')].at(-1)!;
+    const headingLine = Array.from(root.querySelectorAll<HTMLElement>('[data-scm-commits-heading]')).at(-1)!;
     const since = one('[data-scm-since]', headingLine);
-    const latest = [...headingLine.querySelectorAll<HTMLElement>('span')].find((s) => (s.textContent ?? '').startsWith('· latest')) ?? null;
+    const latest = Array.from(headingLine.querySelectorAll<HTMLElement>('span')).find((s) => (s.textContent ?? '').startsWith('· latest')) ?? null;
     const conflicts = uncommittedLine ? one('[data-scm-conflicts]', uncommittedLine) : null;
     const behind = one('[data-scm-behind]', headingLine);
     const machine = one('[data-scm-where-machine]', whereLine);
     const below = one('[data-scm-where-below]', whereLine);
-    const ages = [...root.querySelectorAll<HTMLElement>('[data-scm-age]')].map((age) => {
+    const ages = Array.from(root.querySelectorAll<HTMLElement>('[data-scm-age]')).map((age) => {
       const range = document.createRange();
       range.selectNodeContents(age);
       return { box: box(age), textRight: range.getBoundingClientRect().right };
@@ -236,14 +236,14 @@ function measure(p: Scm): Promise<Measures> {
         measuredSince: measured(headingLine, 'since'),
         behind: behind === null ? null : { ...box(behind), full: behind.scrollWidth, rects: behind.getClientRects().length },
         latest: latest === null ? null : { ...box(latest), full: latest.scrollWidth, text: latest.textContent ?? '' },
-        review: [...headingLine.querySelectorAll('button')].some((b) => (b.textContent ?? '').trim() === 'Review ›'),
+        review: Array.from(headingLine.querySelectorAll('button')).some((b) => (b.textContent ?? '').trim() === 'Review ›'),
       },
-      phrases: [...root.querySelectorAll<HTMLElement>('[data-scm-phrase]')].map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length })),
-      checkCounts: [...root.querySelectorAll<HTMLElement>('[data-scm-check-count]')].map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length })),
-      messages: [...root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')].map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
+      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length })),
+      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length })),
+      messages: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')).map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
       ages,
       fourDigits,
-      controls: [...root.querySelectorAll<HTMLElement>('button')].map((el) => ({ name: el.getAttribute('aria-label') ?? (el.textContent ?? '').trim(), height: hit(el) })),
+      controls: Array.from(root.querySelectorAll<HTMLElement>('button')).map((el) => ({ name: el.getAttribute('aria-label') ?? (el.textContent ?? '').trim(), height: hit(el) })),
     };
   });
 }
