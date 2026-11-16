@@ -8,7 +8,7 @@
 // missing artifact) is held the same way, so no answer names rows a failed batch takes back.
 import { constants } from 'node:fs';
 import { lstat, mkdir, open, readFile, realpath, stat, type FileHandle } from 'node:fs/promises';
-import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { basename, dirname, extname, isAbsolute, join, relative, resolve } from 'node:path';
 import { publishFiles, readFiles, type PublishOutcome } from '@artifacts/files';
 import type { KindAdapter } from '@artifacts/host';
 import { applyV2, newDoc, type Doc } from '@artifacts/yjs';
@@ -231,6 +231,18 @@ export async function readSourceFile(tool: ArtifactToolName, path: string): Prom
   const bytes = await readFile(path);
   if (bytes.length > ARTIFACT_MAX_BYTES) throw new ToolRefusal(TOOL_ERRORS.tooLarge(tool, path, bytes.length));
   return bytes;
+}
+
+const HTML_EXTENSIONS = new Set(['.html', '.htm']);
+
+// The .html source an agent names: relative to the working folder or absolute; .html or .htm; a regular file; at most ARTIFACT_MAX_BYTES.
+// UX wave U10b (§A.1): `artifact_create`'s own steps, taken out unchanged so `artifact_publish`'s `path` reads a page as
+// a create does. The bytes are the file's, never decoded; `name` is the file's own, `source` the path it resolved.
+export async function readHtmlSource(tool: ArtifactToolName, cwd: string, path: string): Promise<{ bytes: Buffer; name: string; source: string }> {
+  const source = resolve(cwd, path);
+  const found = await stat(source).catch(() => null);
+  if (found?.isFile() && !HTML_EXTENSIONS.has(extname(source).toLowerCase())) throw new ToolRefusal(TOOL_ERRORS.notHtml(tool, source));
+  return { bytes: await readSourceFile(tool, source), name: basename(source), source };
 }
 
 export const messageOf = (error: unknown) => (error instanceof Error ? error.message : String(error));

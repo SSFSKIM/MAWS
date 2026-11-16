@@ -1794,6 +1794,9 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | an async ask's answer envelope (board ticket  | (envelope, to the peer): F draws the answer on its    | (envelope, from the peer): this build draws the    |
 //   | 711): the user message the host writes, kept  | question's row, whole, and never the envelope as raw  | answer of the form F writes the same way           |
 //   | in the session's journal and transcript       | text                                                  |                                                    |
+//   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
+//   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
+//   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3351,6 +3354,102 @@ test('(envelope, from the peer) the peer’s host delivers an async ask’s answ
     await drawsAnswered(back, id, askId);
     await s.quit(back);
     said.push(`  ${here.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
+    record(said);
+  });
+});
+
+// ---- UX wave U10b-1: a document's page, read across the two builds -------------------------------------------------------
+
+// UX wave U10b-1 (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, §G and M3; the wave's root, UC-14): a
+// document's page setting is an attribute `page` on its settings node, beside `dsOverrides`, which build F and build 2c
+// read and keep without knowing it (every reader there asks for `dsOverrides` alone, and an accepted suggestion pairs
+// every root's attributes). Its row is in UC-14's coverage table above (U13a's block).
+//   (document page, both ways) this build's agent makes a document with a suggestion pending and sets its page to A4 at
+//                        compact density. The peer opens the profile: its store is `ok`, its agent's read has no page,
+//                        its PDF of the document prints on its own size (Letter, the system's), the person accepts the
+//                        suggestion in its editor, a version is saved there, and its agent makes a document of its own.
+//                        This build opens the profile again: the document reads the accepted text and its page, A4 and
+//                        compact, live and in the peer's version, and prints on A4; the peer's document reads the
+//                        system's page and prints on Letter. Skipped only for a peer whose settings node already holds
+//                        the page (its src/artifacts/document/meta.ts reads `docPage`), never for an equal wire.
+const knowsDocumentPage = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/artifacts/document/meta.ts'), 'utf8').includes('docPage');
+// A PDF's first page's size in points, rounded (Chromium writes its page objects uncompressed).
+const pdfPageSize = (path: string): { width: number; height: number } => {
+  const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(readFileSync(path).toString('latin1'));
+  return { width: Math.round(Number(box?.[1])), height: Math.round(Number(box?.[2])) };
+};
+const LETTER = { width: 612, height: 792 };
+const A4 = { width: 595, height: 842 };
+const PAGE_DOC = 'Cross-build page memo';
+const PEER_DOC = 'Cross-build peer memo';
+const PROPOSED = 'Proposed by the agent before the page was set.';
+type PageRead = { artifactId: string; markdown: string; page?: { size: string; density: string }; version?: { id: number } };
+
+test('(document page, both ways) this build sets a document’s page and leaves a suggestion; the peer, which knows no page, reads it, prints on its own size, accepts the suggestion and saves a version; this build reads the page back in force, live and in that version', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(knowsDocumentPage(peer), `the peer (wire ${wireOf(peer)}) reads a document's page (its meta.ts names docPage): a build from U10b-1 on, not one that has never heard of the setting`);
+  await withScratch('xb-document-page', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) sets a document's page; ${peer.label} (wire ${wireOf(peer)}) opens the profile; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam (e2e/support/dashboards.ts), at both builds
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const AGENT = 'xb-page-agent';
+    const read = (artifact: string, more: Record<string, unknown> = {}) => agent.ok<PageRead>(AGENT, 'artifact_read', { artifact, ...more });
+    const pdfOf = async (page: Page, artifactId: string) => pdfPageSize(value(await invoke(page, 'artifacts.export', { artifactId, format: 'pdf' })).path);
+    const storeOk = async (page: Page, build: Build) => expect(value(await invoke(page, 'artifacts.status', undefined)), `${build.label}'s store opens the profile writable`).toMatchObject({ status: 'ok' });
+
+    // this build: the agent's document, a suggestion pending on it, then its page
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const created = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PAGE_DOC, content: '# Page memo\n\nThe first paragraph of the memo.\n' });
+    const id = created.artifactId;
+    const first = /\^([A-Za-z0-9_-]+)\s*$/m.exec((await read(id)).markdown)![1]!;
+    await agent.ok(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', mode: 'suggest', ops: [{ op: 'insert', after: first, markdown: PROPOSED }] });
+    const set = await agent.ok<{ results: unknown[] }>(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', ops: [{ op: 'set_page', size: 'a4', density: 'compact' }] });
+    expect(set.results).toEqual([{ op: 'set_page', size: 'a4', density: 'compact' }]);
+    expect((await read(id)).page, 'this build reads the page it wrote').toEqual({ size: 'a4', density: 'compact' });
+    expect(await pdfOf(ours.page, id), 'and prints on it').toEqual(A4);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts its own mawsd and engine host
+    said.push(`  ${here.label}: ${id} set to A4, compact, a suggestion pending`);
+
+    // the peer: its store writable, the page unknown to its read and its export, the suggestion accepted, a version saved
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await storeOk(theirs.page, peer);
+    const peerRead = await read(id);
+    expect(peerRead.page, `${peer.label}'s agent reads no page`).toBeUndefined();
+    expect(peerRead.markdown).toContain('The first paragraph of the memo.');
+    expect(await pdfOf(theirs.page, id), `${peer.label} prints on its own size, the system's Letter`).toEqual(LETTER);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: PAGE_DOC, exact: true }).click({ timeout: 20_000 });
+    const tab = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+    await expect(tab.getByLabel('Suggested document'), `${peer.label} shows the suggestion`).toContainText(PROPOSED, { timeout: 20_000 });
+    await tab.getByRole('button', { name: 'Accept suggestion 1', exact: true }).click();
+    await expect.poll(async () => (await read(id)).markdown, { timeout: 20_000, message: `the suggestion accepted in ${peer.label}'s editor` }).toContain(PROPOSED);
+    const { versionId } = value(await invoke(theirs.page, 'artifacts.saveVersion', { artifactId: id, label: 'Accepted on the peer' }));
+    const own = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PEER_DOC, content: '# Peer memo\n\nWritten by the older build.\n' });
+    await storeOk(theirs.page, peer);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: store ok, no page read, a Letter PDF, the suggestion accepted, version ${versionId}, its own ${own.artifactId}`);
+
+    // this build again: the page in force, live and in the peer's version, and the peer's document on the system's page
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    await storeOk(again.page, here);
+    const live = await read(id);
+    expect([live.page, live.markdown.includes(PROPOSED)], 'the page kept through the peer’s accept, with the accepted text').toEqual([{ size: 'a4', density: 'compact' }, true]);
+    const version = await read(id, { version: versionId });
+    expect([version.version?.id, version.page], 'the peer’s version pins the page as any content').toEqual([versionId, { size: 'a4', density: 'compact' }]);
+    expect(await pdfOf(again.page, id), 'the document prints on its page again').toEqual(A4);
+    expect((await read(own.artifactId)).page, 'the peer’s document: the system’s page at standard density').toEqual({ size: 'system', density: 'standard' });
+    expect(await pdfOf(again.page, own.artifactId)).toEqual(LETTER);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: A4 and compact live and in version ${versionId}, an A4 PDF; ${peer.label}'s document on Letter`);
     record(said);
   });
 });
