@@ -18,7 +18,7 @@ import { turnRows } from '../model/derive';
 import type { Row, RowId } from '../model/rows';
 import { useDisclosure, useTranscriptContext } from '../view/context';
 import { arrivalInput, asksAsRun, assistantInput, callInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, standaloneRunInput, thinkingInput, toolInputs, turnLineInput, userInput } from './adapters';
-import { useTranscriptSurface } from './context';
+import { useOwnerChannelSurface, useTranscriptSurface } from './context';
 
 // What each mounted list says its followers follow, by the list's own prefix (`idPrefix`, unique per mounted transcript).
 // A hook's name, so the React Compiler keeps its call in every render.
@@ -99,11 +99,11 @@ function useRowAsk(row: Row | undefined): Ask | null {
 
 /** A row drawn while the row it follows is in sight, by a probe of that row's ask; drawn as it is where it follows none. */
 export function SurfaceFollower({ row, children }: { row: Row; children: ReactNode }) {
-  const { idPrefix, presentation } = useTranscriptContext();
+  const { idPrefix } = useTranscriptContext();
   const followed = usePublished((s) => s.get(idPrefix)?.get(row.id));
   const asked = useRowAsk(followed);
-  const ask = presentation === 'local' ? null : asked; // a local comment thread asks the session's surface nothing
-  const { appSessionId } = useTranscriptSurface(row);
+  const appSessionId = useOwnerChannelSurface(); // panel finding 1's one rule: a local comment thread asks the session's surface nothing
+  const ask = appSessionId === null ? null : asked;
   const answer = useSurfaceSite({ appSessionId, component: ask?.component ?? 'UserMessage', instanceId: ask?.instanceId ?? row.id, props: ask?.props ?? NO_PROPS, enabled: ask !== null });
   return ask !== null && drawsNothing(answer) ? null : children;
 }

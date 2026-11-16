@@ -16,6 +16,8 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { builder } from '../model/test-events';
 import { Disclosures, NO_ACTIONS, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
+import type { Row } from '../model/rows';
+import { publishFollows } from './follow';
 import type { TranscriptSource } from '../source/types';
 
 afterEach(() => {
@@ -137,4 +139,38 @@ it('forced local: a block with a mark reports local ink, which a surface clear k
   // after the card closes, a surface view of the same thread still treats the marked block as ink (accepted, D6)
   act(() => useTranscriptStore.getState().clearAssistantInk(store.key, 'surface'));
   expect(entry().state.ui.assistantInk.has(marked.id)).toBe(true);
+});
+
+// Panel finding 1, the follower: a browser activity under a message tool's call follows that call's row by asking the
+// call's site at its address; in the card's thread it asks nothing and is drawn, by the same rule.
+function followerOf(store: Awaited<ReturnType<typeof sessionStoreWith>>) {
+  const call = store.rows().find((r) => r.kind === 'to_human')!;
+  const activity = {
+    kind: 'browser_activity', id: 'browser:b_000000000001:1', turnId: call.turnId, at: call.at, toolUseId: 'm1', appSessionId: store.key, tabId: 'b_000000000001',
+    activity: { kind: 'navigated', url: 'http://127.0.0.1:17391/notes.html', title: 'Notes' },
+  } as unknown as Extract<Row, { kind: 'browser_activity' }>;
+  publishFollows('test', new Map([[activity.id, call]]));
+  return activity;
+}
+function One({ storeKey, row, presentation }: { storeKey: string; row: Row; presentation?: 'local' }) {
+  return (
+    <TranscriptProvider value={{ storeKey, variant: 'session', actions: NO_ACTIONS, rewind: null, renderRequest: null, disclosures: new Disclosures(), idPrefix: 'test', sessionDirectory: null, effort: null, presentation }}>
+      <RowView row={row} />
+    </TranscriptProvider>
+  );
+}
+
+it('forced local: a browser activity following a message tool row asks nothing and is drawn; without the option it asks its call’s ToolUse', async () => {
+  const { store, fake } = await attachedMessageCall();
+  const activity = followerOf(store);
+  try {
+    const local = render(<One storeKey={store.key} row={activity} presentation="local" />);
+    expect(local.container.textContent).not.toBe('');
+    expect(toolUseAsks(fake)).toHaveLength(0);
+    local.unmount();
+    render(<One storeKey={store.key} row={activity} />);
+    expect(toolUseAsks(fake)).toHaveLength(1);
+  } finally {
+    publishFollows('test', null);
+  }
 });
