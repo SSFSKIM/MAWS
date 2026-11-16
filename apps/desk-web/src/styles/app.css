@@ -16,6 +16,7 @@
 @source "../../../../src/renderer/src/owner";
 @source "../../../../src/renderer/src/engine-surface";
 @source "../../../../src/renderer/src/ui";
+@source "../../../../src/renderer/src/tools/code/review";
 
 /* The desk's own tokens (values advisory, as X7's): what MAWS's set has no name for. */
 :root {
