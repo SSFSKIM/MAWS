@@ -641,3 +641,85 @@ describe('a person’s part that still holds an envelope’s opening line yields
     }
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The architect's ruling of 2026-11-16 on the cascade reviews, A: the reader's bound kept from U4b (a slice ends before
+// the next opening line) refused an earlier build's envelope whose question holds another ask's whole opening line, so
+// the whole text was the person's and the model's consent sentence on its lines read as a grant. Where a reading with
+// the bound takes nothing, one reading past it: the shortest slice from an opening line that reads whole, the inner
+// opening lines ignored. Made by hand: no recording holds such a question.
+
+describe('made by hand: the reader’s reading past the bound (A)', () => {
+  const GRANT = consentMessage('command', 'make deploy');
+  const INNER = innerOpeningEnvelope('toolu_A', GRANT);
+  const WORDS = 'Keep these notes.';
+  const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000710' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+  const slicesOf = (text: string) => envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+  const loop = (text: string) => takeEnvelopesOut(text, slicesOf);
+  // an earlier build's envelope for the same ask whose block's status is misspelled: it reads as nothing
+  const BROKEN_INNER = earlierAskSteerText('toolu_A', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]).replace('"answered"', '"answred"');
+
+  it('the brief’s envelope reads as one answer, its ask the outer tag’s, in the split, the exact reader and the reader’s loop', () => {
+    expect(INNER.split('\n').filter((line) => line.startsWith('[MAWS ask '))).toEqual([askSteerOpening('toolu_A'), askSteerOpening('toolu_inner')]);
+    expect(answerEnvelopeOf(INNER)?.call).toBe('toolu_A');
+    expect(loop(INNER)).toEqual({ own: '', envelopes: [{ text: INNER, read: parseAskSteer(INNER) }] });
+    const lone = message(INNER);
+    expect(splitPersonsMessage(lone)).toEqual([lone]);
+    expect(splitPersonsMessage(lone)[0]).toBe(lone);
+  });
+
+  it('beside the person’s words, in either order: the words alone are the person’s, then the envelope; no grant, and ownWordsOf the words', () => {
+    for (const text of [joinedText(WORDS, INNER), joinedText(INNER, WORDS)]) {
+      expect(contentsOf(splitPersonsMessage(message(text))), text.slice(0, 40)).toEqual([WORDS, INNER]);
+      expect(personsParts(text)).toEqual({ own: WORDS, envelopes: [INNER] });
+      expect(personsGrants(text)).toEqual([]);
+      expect(ownWordsOf(text)).toBe(WORDS);
+    }
+    expect(ownWordsOf(INNER)).toBe('');
+    expect(personsGrants(INNER)).toEqual([]);
+  });
+
+  it('the reading past the bound runs only where the bound takes nothing: decision 17’s nested case is unchanged, the inner envelope taken, then the outer', () => {
+    const lines = A1.split('\n');
+    const nested = `${WORDS}\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
+    expect(slicesOf(nested).members.map((member) => member.text)).toEqual([A2]);
+    expect(loop(nested).envelopes.map((envelope) => envelope.text)).toEqual([A2, A1]);
+    // and where the outer one is the brief's envelope, the bound takes the inner one and the reading past it the outer
+    const outer = INNER.split('\n');
+    const around = `${WORDS}\n${outer.slice(0, 2).join('\n')}\n${A2}\n${outer.slice(2).join('\n')}`;
+    expect(slicesOf(around).members.map((member) => member.text)).toEqual([A2]);
+    expect(loop(around)).toMatchObject({ own: WORDS, envelopes: [{ text: A2 }, { text: INNER }] });
+  });
+
+  it('a later valid member is never swallowed: a malformed member, words, then a valid one, for another ask or the same, the valid one bounded or read past the bound', () => {
+    for (const [broken, valid] of [[BROKEN, A2], [BROKEN, A1], [BROKEN_INNER, INNER], [BROKEN, INNER]] as const) {
+      const text = joinedText(broken, WORDS, valid);
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: joinedText(broken, WORDS), envelopes: [{ text: valid, read: parseAskSteer(valid) }] });
+    }
+  });
+
+  it('an opening line followed by lines and a block naming another ask stays text: the reading past the bound takes only a block that names the opening’s ask', () => {
+    const other = INNER.replace('"askId": "toolu_A"', '"askId": "toolu_other"');
+    const head = `${askSteerOpening('toolu_X')}\n1. Layout — Grid\n${A1.slice(A1.indexOf('```json'))}`;
+    for (const text of [other, head, joinedText(WORDS, other)]) {
+      expect(parseAskSteer(text)).toBeNull();
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+      expect(personsGrants(text)).toEqual([]);
+    }
+  });
+
+  it('a pasted segment still never opens or ends one: the brief’s envelope pasted whole, and its opening outside a segment that holds its block', () => {
+    const lines = INNER.split('\n');
+    const pastedWhole = joinedText(WORDS, framePasted('a1b2', INNER));
+    const pastedTail = joinedText(lines.slice(0, 3).join('\n'), framePasted('a1b2', lines.slice(3).join('\n')));
+    for (const text of [pastedWhole, pastedTail]) expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+  });
+
+  it('the reading past the bound runs from its own source too, as the search text’s worker runs it', () => {
+    const [slices, block, opening] = [isolated(envelopeSlices), isolated(answeredBlock), isolated(askSteerOpening)];
+    for (const text of [INNER, joinedText(WORDS, INNER), joinedText(BROKEN, WORDS, INNER)]) {
+      expect(slices(text, opening, PASTED_BLOCK, block)).toEqual(envelopeSlices(text, askSteerOpening, PASTED_BLOCK, answeredBlock));
+    }
+    expect(slices(INNER, opening, PASTED_BLOCK, block).members.map((member) => member.text)).toEqual([INNER]);
+  });
+});

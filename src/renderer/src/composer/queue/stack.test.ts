@@ -8,7 +8,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
 import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
 import { entryDisplay } from './entry-text';
-import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../../test/support/ask-steer';
 import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
 const APP = 'app-1' as AppSessionId;
@@ -303,6 +303,15 @@ describe('a grant’s row', () => {
     const cut = ANSWER.slice(0, ANSWER.indexOf('\n```json'));
     const rows = stackRows(queue({ steers: [steer(U1, 1, `${GRANT}\n${cut}`)], entries: [entry('q-1', 2, { content: `${cut}\n${GRANT}` })] }), NONE, read());
     expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined])).toEqual([['next', null], ['after', null]]);
+  });
+
+  // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A), made by hand: an earlier build's envelope
+  // whose question holds the sentence and another ask's whole opening line is read past the reader's bound as one answer
+  it('an earlier build’s envelope whose question holds the sentence and another ask’s opening line: an answer’s row, no grant', () => {
+    const inner = innerOpeningEnvelope('ask-1', GRANT);
+    const [row] = stackRows(queue({ steers: [steer(U1, 1, inner)] }), NONE, read());
+    expect(answerWords(inner, read().questions)).not.toBeNull();
+    expect(row).toMatchObject({ kind: 'next', answer: answerWords(inner, read().questions), grant: null });
   });
 
   it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {

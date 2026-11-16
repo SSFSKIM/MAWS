@@ -648,12 +648,14 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
 
   // Ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (made by hand): an earlier build's envelope
   // whose question holds the exact sentence and then another ask's whole opening line, on lines of their own, alone and
-  // joined with other words. A2: a person's part that still holds an envelope's opening line yields no grant
-  it('(c6) an earlier build’s envelope whose question holds the exact sentence and another ask’s opening line, alone and joined with other words: no consent, no approval row, the blocked row not approved, on both routes', async () => {
+  // joined with other words. A: the reader reads it past its bound as one answer; A2: a person's part that still held an
+  // envelope's opening line would yield no grant
+  it('(c6) an earlier build’s envelope whose question holds the exact sentence and another ask’s opening line, alone and joined with other words: one answer, no consent, no approval row, the blocked row not approved, on both routes', async () => {
     const inner = innerOpeningEnvelope('toolu_a', GRANT);
     expect(inner.split('\n')).toContain(GRANT);
     for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
-      for (const [route, { consents, approvals, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
+        expect(answers, `${name}, ${route}: read past the reader's bound as one answer to the outer tag's ask (A)`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
         expect(consents, `${name}, ${route}`).toEqual([]);
         expect(approvals, `${name}, ${route}`).toEqual([]);
         expect(drawnReadings, `${name}, ${route}`).toEqual(NONE);
