@@ -6,7 +6,7 @@
 // that turn aborted with no `step end`, its text kept settled. M6 (acceptance 3 and 5): the requests the bridge raises, as attention items and
 // docked cards answered through the port, each decision's body as the fake receives it, and the race with the terminal.
 import { randomUUID } from 'node:crypto';
-import { readFileSync, realpathSync } from 'node:fs';
+import { readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
@@ -16,7 +16,8 @@ import { StoreFixture } from '../test/support/store-fixture';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
-import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
+import { openSurface, sessionCard, showSessionCards, sideColumn, surface } from './support/shell';
+import { minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -403,6 +404,34 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await uploads.getByRole('button', { name: 'Dismiss' }).click();
     await expect(uploads).toHaveCount(0);
     expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B5): a terminal session on this Mac
+  // is read by the same files service as a session MAWS runs, so a PDF of its folder, opened from Files' tree, is drawn
+  // beside the chat by Chromium's viewer from a token, the toolbar hidden there, Open externally in the bar.
+  test('a PDF of the terminal session’s folder is drawn beside the chat, as for a session MAWS runs', async () => {
+    const c = await begin();
+    const { page, maws } = c;
+    const path = c.repo.path('notes.pdf');
+    writeFileSync(path, minimalPdf());
+    await drive(c);
+    await openSurface(page, 'Files');
+    const row = surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
+    await expect(row, 'the PDF in Files’ tree of the terminal session’s folder').toBeVisible({ timeout: 20_000 });
+    await row.click();
+    const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);
+    await expect(viewer, 'drawn in its frame').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+    const frame = viewer.locator('[data-artifact-frame="pdf"]');
+    await expect(frame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/notes\.pdf#toolbar=0&navpanes=0$/);
+    const src = (await frame.getAttribute('src'))!;
+    const url = src.slice(0, src.indexOf('#'));
+    // Chromium's viewer beneath the frame (its extension's frame, whose parent is the token's)
+    await expect
+      .poll(() => maws.app.evaluate(({ BrowserWindow }, root) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/') && (f.parent?.url ?? '').startsWith(root)).length, url), { timeout: 20_000, message: 'Chromium’s viewer in the frame' })
+      .toBe(1);
+    await expect(viewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
+    await expect(viewer.getByRole('button', { name: 'Open externally', exact: true }), 'Open externally in the bar').toBeVisible();
+    expect(maws.consoleErrors()).toEqual([]);
   });
 
   test('each control reaches the bridge with its body: the model chip, a slash command, interrupt, compact with instructions, MCP reconnect and enable, a side question answered from its op’s end, and the agent and shell stops', async () => {

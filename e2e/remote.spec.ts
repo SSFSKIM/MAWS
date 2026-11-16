@@ -70,6 +70,7 @@ import { machineProjectId } from '../src/shared/machine/project-ids'; // the UX 
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
+import { REMOTE_COPY_MAX_BYTES } from '../src/shared/ipc/schema/remote'; // UX wave U6b-2: the copy's bound, one byte past it
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { addedListeners, loopbackPort } from './support/connector-direct-checks';
 import { browserOpens, connectionWords } from './support/connector-direct-oauth';
@@ -163,12 +164,14 @@ const SEARCHED = 'hello';
 // M5a: what B's first session makes at A's ask, through its `maws` tools (served by B's engine host, so each artifact is
 // linked to the session): a text file it wrote in B's checkout, delivered as a File artifact, and an HTML page, whose
 // PDF B's render host exports; the title A renames the File artifact to; an HTML file of B's checkout A opens a copy of
+// (UX wave U6b-2: and draws from a copy, its inline script marking that it ran; a file one byte past the copy's bound)
 const MAKE_ASK = 'Make the notes and the report.';
 const MADE_REPLY = 'Both are in B’s library.';
 const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the session on B delivered.\n' };
 const RENAMED = 'B notes, renamed on A';
 const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
-const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
+const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p id="said">A page in the checkout on B.</p><script>document.body.dataset.ran = "yes";</script>\n' };
+const LARGE_ON_B = 'b-large.pdf'; // UX wave U6b-2: REMOTE_COPY_MAX_BYTES + 1 bytes, past what A copies to draw
 // M5b: a document B's first session starts at A's ask (an empty one, linked to the session on B), and what A types in it
 // M5c: the servers of B's user settings, by their names there (the rows server's and its tool's are the
 // dashboard-live-data fixture's, connector-scene.ts's SERVER and TOOL); the rows it answers, first and at the schedule
@@ -976,7 +979,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
 
-    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout opens as a copy, and the Browser tool reads B’s reason', async () => {
+    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout is drawn from a copy and opens as a copy, one past the copy’s bound shows its row, and the Browser tool reads B’s reason', async () => {
       const sessionTab = mainTabById(again, `session:${address}`);
       const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
 
@@ -1045,8 +1048,12 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(again.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
       console.log(`[e2e:remote] M5a: B's PDF export saved on A, ${readFileSync(pdf).length} bytes`);
 
-      // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
+      // An HTML file of B's checkout, drawn here from a copy, and Open externally in its bar: a copy paged here is what main
+      // hands the OS (the open seam). UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6;
+      // B6, B16): the copy a frame draws from has no name while a byte is in it, so A's frame-copies folder lists nothing
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
+      writeFileSync(join(checkout, LARGE_ON_B), Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(REMOTE_COPY_MAX_BYTES + 1 - 9)]));
+      const frameCopies = () => { const dir = join(aUserData, 'frame-copies'); return existsSync(dir) ? readdirSync(dir) : []; }; // prettier-ignore
       // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
       // again (the strip is inert under a page, so the tab is not clicked)
       await backToTabs(again);
@@ -1062,17 +1069,41 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
       await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pageRow.click();
-      const external = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"] [data-external-row]`);
-      const open = external.getByRole('button', { name: 'Open externally', exact: true });
+      const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      await quoting(expect(pageViewer, 'B’s page drawn here from a copy').toHaveAttribute('data-frame', 'html', { timeout: 60_000 }), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const pageSrc = (await pageViewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+      expect(pageSrc, 'a token and the file’s name, no folder of B’s').toMatch(new RegExp(`^maws-artifact://[0-9a-f]{32}/${PAGE_ON_B.name.replace('.', '\\.')}$`));
+      let drawn: ReturnType<Page['frames']>[number] | undefined;
+      await expect.poll(() => (drawn = again.frames().find((frame) => frame.url() === pageSrc)) !== undefined, { message: 'the page’s frame' }).toBe(true);
+      await expect(drawn!.locator('#said')).toHaveText('A page in the checkout on B.');
+      await expect.poll(() => drawn!.evaluate(() => document.body.dataset.ran ?? ''), { message: 'its inline script ran' }).toBe('yes');
+      await expect(pageViewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the page is drawn').toEqual([]);
+      const open = pageViewer.getByRole('button', { name: 'Open externally', exact: true }); // the bar's
       await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
       await open.click();
-      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`));
-      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the row: ${await external.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      // the open seam's lines for the file, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`) && !line.startsWith('frame-'));
+      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
       const [copy] = opened();
       expect(copy, 'a copy under this Mac’s copies of B’s files, not B’s path').toContain(`/maws-remote-copies/${b.ref}/`);
       expect(readFileSync(copy!, 'utf8'), 'holding the file’s bytes').toBe(PAGE_ON_B.content);
-      await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
+      await expect(pageViewer.getByRole('alert'), 'nothing refused').toHaveCount(0);
       rmSync(dirname(copy!), { recursive: true, force: true });
+
+      // a file one byte past the copy's bound: its row says it is too large to show here, with its size, and offers no
+      // Open externally, whose copy has the same bound (L4)
+      const largeRow = files.locator(`[role="treeitem"][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await expect(largeRow, 'the large file written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await largeRow.click();
+      const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await quoting(expect(largeViewer, 'its row, not a frame').toHaveAttribute('data-frame', 'row', { timeout: 60_000 }), async () => `the viewer: ${await largeViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const largeShown = largeViewer.locator('[data-external-row]');
+      await expect(largeShown.getByText('Too large to show here: MAWS copies at most 64.0 MB from another machine.', { exact: true })).toBeVisible();
+      await expect(largeShown.getByText('64.0 MB', { exact: true }), 'its size').toBeVisible();
+      await expect(largeViewer.getByRole('button', { name: 'Open externally' }), 'no act that can only fail').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry after the refused copy').toEqual([]);
+      rmSync(join(checkout, LARGE_ON_B));
 
       // The session's agent has a browser on B, seen from here by screencast (P5 O17's local stage, §I): B's own front reads
       // it, A's main answers it for B's session over the link (M5a's capability read), and A's Browser tool shows the

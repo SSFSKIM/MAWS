@@ -76,13 +76,28 @@ export interface Product {
   scratch: CodeScratch;
 }
 
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void): Promise<void> {
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): `frames`, for a case that draws a
+// session's file in its frame: the closing console check leaves out what the frame and Chromium's PDF viewer beneath it
+// log (a page's refused stylesheet, a released token's 404), which is the file's own console, as the artifact scenes
+// leave out an artifact frame's (support/maws-tools.ts); the window's own errors are still every one it logs.
+const FRAME_LOCATION = /^(maws-artifact|chrome-extension):/;
+
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: boolean } = {}): Promise<void> {
   const scratch = buildCodeScratch();
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
     maws = await launchMaws({ env: scratch.env });
     const { page } = maws;
+    const own: string[] = opts.frames ? maws.consoleErrors() : [];
+    if (opts.frames) {
+      page.on('console', (message) => {
+        if (message.type() === 'error' && !FRAME_LOCATION.test(message.location().url)) own.push(message.text());
+      });
+      page.on('pageerror', (error) => {
+        if (!(error.stack ?? '').includes('maws-artifact://')) own.push(`uncaught: ${error.message}`);
+      });
+    }
     // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
@@ -91,7 +106,7 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await expect(tab).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });
-    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    expect(opts.frames ? own : maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws?.cleanup();
     scratch.cleanup();

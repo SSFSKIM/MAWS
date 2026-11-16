@@ -24,9 +24,9 @@
 // Runs under `pnpm e2e:deliverables` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list); each launch
 // passes MAWS_HARNESS=0, so the window is the product app.
 import { addressed } from './support/address';
-import { hideSurface, openSurface, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
+import { closeSideTab, hideSurface, openSurface, sideColumn, sideGroup, sideTab, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -1116,6 +1116,366 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     }
     expect(whole.filter((line) => onToken(line) && !kinds.some((kind) => line.url === urls[kind]) && (line.kind === 'entry' || line.answer === 'pass')), 'no boundary request passed or answered').toEqual([]);
   });
+});
+
+// ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; Interfaces §H) ---------------
+// A session's file drawn by a path, held to the artifact frames' assertions (decision 1): the delivered files' hostile
+// page and hostile PDF, written into the session's folder as files and opened from Files' tree beside the chat, as a
+// person opens them. A file's frame has no console chip (main attributes no console line to it), so the hostile page
+// writes what its fetch met into its own document. Each scene waits on states (decision 2) and asserts no duration.
+
+// A file of the session's folder opened from Files' tree beside the chat, with the session shown; the viewer, wherever the
+// file's tab is drawn afterwards.
+async function openByPath(s: Scene, id: string, path: string): Promise<Locator> {
+  await show(s, id);
+  await openSurface(s.page, 'Files');
+  const row = surface(s.page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
+  await expect(row, `${path} in Files' tree`).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect(sideColumn(s.page).locator(`[data-file-viewer][data-path="${path}"]`), `${path} beside the chat, as a framed file`).toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });
+  return s.page.locator(`[data-file-viewer][data-path="${path}"]`);
+}
+
+// The delivered page, and what a page by a path may try beside it: its fetch's outcome written where the scene reads it,
+// and three messages to the window in the shapes the artifact frame's bridge posts (a pick, a cancelled pick, a located
+// element), which no listener of the window takes from a file's frame
+const HOSTILE_PAGE = DELIVERED_PAGE.replace(
+  '</body>',
+  `<script>
+fetch('https://example.invalid/file-fetch').then(() => { document.body.dataset.fetch = 'reached'; }, () => { document.body.dataset.fetch = 'failed'; });
+const rect = { x: 1, y: 1, width: 10, height: 10 };
+parent.postMessage({ type: 'maws:picked', selector: '#away', label: 'A link', text: 'A link to the web', rect }, '*');
+parent.postMessage({ type: 'maws:pick-cancelled' }, '*');
+parent.postMessage({ type: 'maws:located', id: 1, selector: '#away', rect }, '*');
+document.body.dataset.posted = 'yes';
+</script>
+</body>`,
+);
+
+// The viewer's Download pressed in each frame of Chromium's PDF viewer in the window, as the delivered files' scene
+// presses it: one answer per viewer frame, ending in ` pressed` where the button was found and clicked.
+const pressPdfDownload = (s: Scene) =>
+  s.maws.app.evaluate(async ({ BrowserWindow }, viewerOrigin) => {
+    const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
+    const script = `(() => {
+      const viewer = document.querySelector('pdf-viewer');
+      const toolbar = viewer && viewer.shadowRoot && viewer.shadowRoot.querySelector('viewer-toolbar');
+      const controls = toolbar && toolbar.shadowRoot && toolbar.shadowRoot.querySelector('viewer-download-controls');
+      const download = controls && controls.shadowRoot && controls.shadowRoot.querySelector('#save');
+      if (!download) return 'no button';
+      download.click();
+      return 'pressed';
+    })()`;
+    const answers: string[] = [];
+    for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewerOrigin))) answers.push(`${frame.url} ${String(await frame.executeJavaScript(script, true))}`);
+    return answers;
+  }, PDF_VIEWER);
+
+// Downloads of the scene's window land in a scratch folder of its own, which must stay empty
+async function scratchDownloads(s: Scene): Promise<string> {
+  const downloads = join(s.scratch.root, 'downloads');
+  mkdirSync(downloads);
+  await s.maws.app.evaluate(({ app }, dir) => app.setPath('downloads', dir), downloads);
+  return downloads;
+}
+
+test("a file by a path: a hostile page's fetch fails, its link is refused, it gathers no server-reflexive candidate, saves nothing, and its messages change nothing", async () => {
+  test.setTimeout(240_000);
+  await scene({ titles: ['U6b-2: a hostile page by a path'] }, async (s) => {
+    const [id] = s.ids;
+    const path = join(s.repo, 'notes.html');
+    writeFileSync(path, HOSTILE_PAGE);
+    const downloads = await scratchDownloads(s);
+    // every message in the bridge's shapes that reaches the window, as the window hears it
+    await s.page.evaluate(() => {
+      const heard: string[] = [];
+      (window as unknown as { __u6b2Heard: string[] }).__u6b2Heard = heard;
+      window.addEventListener('message', (event) => {
+        const type = (event.data as { type?: unknown } | null)?.type;
+        if (typeof type === 'string' && type.startsWith('maws:')) heard.push(type);
+      });
+    });
+    const heard = () => s.page.evaluate(() => [...(window as unknown as { __u6b2Heard: string[] }).__u6b2Heard]);
+
+    const viewer = await openByPath(s, id, path);
+    await expect(viewer).toHaveAttribute('data-frame', 'html');
+    const frameElement = viewer.locator('[data-artifact-frame="html"]');
+    await expect(frameElement, 'the artifact frame’s sandbox, unchanged').toHaveAttribute('sandbox', 'allow-scripts');
+    const src = (await frameElement.getAttribute('src'))!;
+    expect(src, 'a token and the file’s name, no folder').toMatch(/^maws-artifact:\/\/[0-9a-f]{32}\/notes\.html$/);
+    const page = await frameAt(s.page, src);
+    await expect(page.locator('#marker'), 'its inline script ran').toHaveText('SCRIPT_RAN');
+    await expect.poll(() => page.evaluate(() => document.body.dataset.fetch ?? ''), { message: 'its fetch has settled' }).toBe('failed');
+
+    // its messages reached the window and changed nothing: no bridge listens to a file's frame (decision 13)
+    await expect.poll(() => page.evaluate(() => document.body.dataset.posted ?? ''), { message: 'the page posted its messages' }).toBe('yes');
+    await expect.poll(heard, { message: 'the window heard the three messages' }).toEqual(['maws:picked', 'maws:pick-cancelled', 'maws:located']);
+    await expect(s.page.locator('[data-comment-card], [data-comment-composer], [data-picking]'), 'no comment card, composer or picking').toHaveCount(0);
+    await expect(viewer, 'the viewer still draws the page').toHaveAttribute('data-frame', 'html');
+    await expect(frameElement, 'from the same token').toHaveAttribute('src', src);
+
+    // no server-reflexive candidate: WebRTC never left the machine (disable_non_proxied_udp)
+    await expect.poll(() => page.evaluate(() => document.body.dataset.ice ?? ''), { timeout: 15_000 }).toMatch(/^done:/);
+    const ice = await page.evaluate(() => document.body.dataset.ice!);
+    console.log(`[u6b2-file-page] ICE candidate types in the frame: ${JSON.stringify(ice)}`);
+    expect(ice).not.toContain('srflx');
+    // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
+    await page.locator('#save').click();
+    await s.page.waitForTimeout(1_500); // a download that started would have reached main by now; nothing to wait for
+    expect(seamLines(s).filter((l) => l.startsWith('blocked-download')), 'no download reached main').toEqual([]);
+    expect(filesUnder(downloads, () => true)).toEqual([]);
+    expect(filesUnder(s.maws.userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
+    // a link to the web: the app's own `frame-src` refuses the frame's navigation; the window stays where it was
+    const navigations = await recordNavigations(s.maws);
+    const appUrl = s.page.url();
+    await page.locator('#away').click();
+    await expect.poll(navigations).toContain('fail frame -30 https://example.invalid/away'); // ERR_BLOCKED_BY_CSP
+    expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
+    expect(s.page.url()).toBe(appUrl);
+  });
+});
+
+test("a file by a path: a hostile PDF's link is a blocked navigation, its Download a blocked download, and every frame beneath it is the scheme's, the viewer's or chrome://resources", async () => {
+  test.setTimeout(240_000);
+  await scene({ titles: ['U6b-2: a hostile PDF by a path'] }, async (s) => {
+    const [id] = s.ids;
+    const path = join(s.repo, 'report.pdf');
+    writeFileSync(path, minimalPdf('https://example.invalid/pdf-link'));
+    const downloads = await scratchDownloads(s);
+    await openByPath(s, id, path);
+    // moved to the main area, where Chromium's toolbar, and so its Download, shows (decision 15)
+    await sideColumn(s.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+    const viewer = s.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"]`);
+    await expect(viewer).toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+    const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
+    await expect(pdfFrame, 'the stored PDF’s frame: no sandbox').not.toHaveAttribute('sandbox');
+    await expect(pdfFrame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#navpanes=0$/);
+    const url = withoutFragment((await pdfFrame.getAttribute('src'))!);
+    await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
+
+    // its link: the viewer asks to navigate the window, and main's top-level guard refuses it
+    const navigations = await recordNavigations(s.maws);
+    const appUrl = s.page.url();
+    const square = (await darkIn(s, pdfFrame)).centre!;
+    await s.page.mouse.click(square.x, square.y);
+    await expect.poll(navigations, { timeout: 10_000 }).toContain('start window https://example.invalid/pdf-link');
+    await expect.poll(() => seamLines(s)).toContain('blocked-navigation https://example.invalid/pdf-link');
+    await s.page.waitForTimeout(1_000); // a commit the guard let through would have landed by now
+    expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
+    const after = await framesOfWindow(s);
+    expect(after.app).toBe(appUrl);
+    expect(s.page.url()).toBe(appUrl);
+    for (const frame of after.frames.slice(1)) expect(frame, JSON.stringify(after.frames)).toMatch(/^(maws-artifact:\/\/|chrome-extension:\/\/mhjfbmdgcfjbbpaeojofohoefgiehjai\/|chrome:\/\/resources\/)/);
+
+    // its Download, pressed in the viewer's own page: a download of the token's URL, cancelled by the download filter
+    const pressed = await pressPdfDownload(s);
+    expect(pressed.some((answer) => answer.endsWith(' pressed')), JSON.stringify(pressed)).toBe(true);
+    await expect.poll(() => seamLines(s).filter((line) => line.startsWith(`blocked-download ${url}`)).length, { message: 'the viewer’s save cancelled as a download of the token’s URL' }).toBeGreaterThan(0);
+    await s.page.waitForTimeout(1_000); // a download let through would have written its first bytes by now
+    expect(filesUnder(downloads, () => true)).toEqual([]);
+    expect(filesUnder(s.maws.userData, (name) => name.endsWith('.pdf') || name.endsWith('.crdownload'))).toEqual([]);
+  });
+});
+
+test("ticket 662 on a file's frame: its dns-prefetch links ask the resolver for nothing", async () => {
+  test.setTimeout(180_000);
+  await scene({ titles: ['U6b-2: dns-prefetch on a file'] }, async (s) => {
+    const [id] = s.ids;
+    const label = randomUUID().slice(0, 8);
+    const names = { script: `maws-e2e-${label}-script.example.com`, markup: `maws-e2e-${label}-markup.example.com`, control: `maws-e2e-${label}-control.example.com` };
+    const path = join(s.repo, 'travel.html');
+    writeFileSync(path, prefetchPage(names));
+    await s.page.evaluate(() => window.addEventListener('message', (event) => void (event.data === 'e2-prefetch-attached' && ((window as unknown as { __u6b2Prefetch: boolean }).__u6b2Prefetch = true))));
+
+    // the net log of the window's session, the frame's (its default capture mode keeps a request's host)
+    const log = join(s.scratch.root, 'net-log.json');
+    await s.maws.app.evaluate(({ BrowserWindow }, at) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.startLogging(at), log);
+    const viewer = await openByPath(s, id, path);
+    await expect(viewer).toHaveAttribute('data-frame', 'html');
+    await expect.poll(() => s.page.evaluate(() => (window as unknown as { __u6b2Prefetch?: boolean }).__u6b2Prefetch === true), { message: 'the page’s script ran and connected both links' }).toBe(true);
+    // a prefetch goes from the frame's renderer to the browser process and on to the resolver after the insertion
+    await s.page.waitForTimeout(2_000);
+    await s.maws.app.evaluate(async ({ BrowserWindow }, host) => {
+      const { session } = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents;
+      await Promise.race([session.resolveHost(host).catch(() => undefined), new Promise((resolve) => setTimeout(resolve, 5_000))]);
+    }, names.control);
+    await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.session.netLog.stopLogging()); // flushed to disk when it resolves
+
+    const { constants, events } = JSON.parse(readFileSync(log, 'utf8')) as { constants: { logEventTypes: Record<string, number> }; events: { type: number; params?: unknown }[] };
+    const typeNames = new Map(Object.entries(constants.logEventTypes).map(([name, type]) => [type, name]));
+    // each event that names one of the run's names, by its type alone: its other params hold the machine's resolver
+    // settings (search domains among them), which a report keeps out
+    const mentions = (name: string) => events.filter((event) => JSON.stringify(event.params ?? {}).includes(name)).map((event) => typeNames.get(event.type) ?? String(event.type));
+    const found = { control: mentions(names.control), script: mentions(names.script), markup: mentions(names.markup) };
+    const report = `net log: ${events.length} events\n${Object.entries(found).map(([which, types]) => `${which} ${names[which as keyof typeof names]}: ${types.length} events ${JSON.stringify(types)}`).join('\n')}`;
+    console.log(`[u6b2-dns-prefetch] ${report}`);
+    expect(found.control.length, `the control's resolver job is in the log\n${report}`).toBeGreaterThan(0);
+    expect(found.script, `the script-made link asked for no name\n${report}`).toEqual([]);
+    expect(found.markup, `the markup link asked for no name\n${report}`).toEqual([]);
+  });
+});
+
+type Completion = { url: string; method: string; status: number; contents: number | null };
+
+test("a token's URL: its own name's path is the file; another name, a longer path and a query are 404; a POST is 405; a closed tab's is 404", async () => {
+  test.setTimeout(180_000);
+  await scene({ titles: ['U6b-2: a token’s URL'] }, async (s) => {
+    const [id] = s.ids;
+    const path = join(s.repo, 'ledger.html');
+    writeFileSync(path, FRAME_PAGE);
+    const owner = await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.id);
+    // what the window's partition completed for the scheme: each request's status as the responder answered it, and the
+    // web contents that asked (the scene's own listener: the app sets none on this event)
+    await s.maws.app.evaluate(({ session }) => {
+      const done: Completion[] = [];
+      (globalThis as unknown as { __u6b2Completed: Completion[] }).__u6b2Completed = done;
+      session.defaultSession.webRequest.onCompleted({ urls: ['<all_urls>'] }, (details) => {
+        if (details.url.startsWith('maws-artifact://')) done.push({ url: details.url, method: details.method, status: details.statusCode, contents: details.webContentsId ?? null });
+      });
+    });
+    const completed = () => s.maws.app.evaluate(() => [...(globalThis as unknown as { __u6b2Completed: Completion[] }).__u6b2Completed]);
+    let probes = 0;
+    // `url` loaded by the owning window as a person's frame would load it, by a GET in a frame of its own, or by a form's
+    // POST into one; its completion, once the partition has one for it
+    const probe = async (url: string, method: 'GET' | 'POST' = 'GET'): Promise<Completion> => {
+      const before = (await completed()).length;
+      const frame = `u6b2-probe-${++probes}`;
+      if (method === 'GET') await mountFrames(s.page, [{ id: frame, kind: 'html', url }]);
+      else {
+        await s.page.evaluate(({ frame, url }) => {
+          const target = document.createElement('iframe');
+          target.id = frame;
+          target.name = frame;
+          target.style.cssText = 'position:fixed;left:0;top:0;width:320px;height:240px;border:0;z-index:2147483647;background:#fff';
+          document.body.appendChild(target);
+          const form = document.createElement('form');
+          form.method = 'post';
+          form.action = url;
+          form.target = frame;
+          form.style.display = 'none';
+          const field = document.createElement('input');
+          field.type = 'hidden';
+          field.name = 'u6b2';
+          field.value = 'posted';
+          form.append(field);
+          document.body.appendChild(form);
+          form.submit();
+          form.remove();
+        }, { frame, url });
+      }
+      let found: Completion | undefined;
+      await expect.poll(async () => (found = (await completed()).slice(before).find((c) => c.url === url && c.method === method)) !== undefined, { message: `${method} ${url} completed` }).toBe(true);
+      await s.page.evaluate((frame) => document.getElementById(frame)?.remove(), frame);
+      expect(found!.contents, `${method} ${url}: asked by the owning window`).toBe(owner);
+      return found!;
+    };
+
+    const viewer = await openByPath(s, id, path);
+    await expect(viewer).toHaveAttribute('data-frame', 'html');
+    const url = (await viewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+    expect(url).toMatch(/^maws-artifact:\/\/[0-9a-f]{32}\/ledger\.html$/);
+    const root = url.slice(0, url.lastIndexOf('/') + 1); // `maws-artifact://<token>/`
+
+    // its own name's path: the file, whose script runs
+    expect((await probe(url)).status, 'its own name').toBe(200);
+    await expect((await frameAt(s.page, url)).locator('#marker')).toHaveText('SCRIPT_RAN');
+    // every other path under the token, and any query: 404, the same for each
+    expect((await probe(`${root}other`)).status, 'another name').toBe(404);
+    expect((await probe(`${root}nested/ledger.html`)).status, 'a longer path').toBe(404);
+    expect((await probe(`${url}?view=1`)).status, 'a query').toBe(404);
+    // a method other than GET and HEAD
+    expect((await probe(url, 'POST')).status, 'a POST').toBe(405);
+
+    // the tab closed: its entry goes, its token is released, and its URL answers 404
+    await closeSideTab(s.page, 'ledger.html');
+    await expect(s.page.locator(`[data-file-viewer][data-path="${path}"]`)).toHaveCount(0);
+    await expect.poll(async () => (await probe(url)).status, { message: 'the closed tab’s URL, once its token is released' }).toBe(404);
+    await s.maws.app.evaluate(({ session }) => session.defaultSession.webRequest.onCompleted(null));
+  });
+});
+
+test("a read that fails before a PDF's first byte shows the sentence and Open again; pressed while it still fails, the same body; nothing reads again by itself; pressed once the file is readable, the PDF is drawn", async () => {
+  test.setTimeout(240_000);
+  // A PDF outside the session's folder that the session's transcript links (U6c): no watch follows it, so its removal and
+  // its return are seen by nobody until a person asks (sequence 12)
+  const scratch = scratchProject({ titles: ['U6b-2: a read that fails'] });
+  try {
+    const outside = join(scratch.root, 'elsewhere');
+    mkdirSync(outside);
+    const path = join(outside, 'report.pdf');
+    const bytes = minimalPdf();
+    writeFileSync(path, bytes);
+    const transcript = join(scratch.config, 'projects', scratch.repo.replace(/[^a-zA-Z0-9]/g, '-'), `${scratch.engineIds[0]}.jsonl`);
+    const first = JSON.parse(readFileSync(transcript, 'utf8').split('\n')[0]!) as { uuid: string; sessionId: string };
+    const reply = `The report is [here](${path}).`;
+    appendFileSync(transcript, `${JSON.stringify({
+      parentUuid: first.uuid, isSidechain: false, userType: 'external', type: 'assistant', uuid: randomUUID(), timestamp: '2026-10-06T00:00:30.000Z', cwd: scratch.repo, sessionId: first.sessionId, version: '2.1.291',
+      message: { id: 'msg_u6b2m6b15', type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text: reply }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } },
+    })}\n`);
+    const s = await launchScene(scratch);
+    try {
+      const [id] = s.ids;
+      await show(s, id);
+      const chip = s.page.locator(`[data-region="main"] [data-chip="path"][title="${path}"]`);
+      await expect(chip, 'the transcript’s link').toBeVisible({ timeout: 20_000 });
+      await chip.click();
+      const viewer = sideColumn(s.page).locator(`[data-file-viewer][data-path="${path}"]`);
+      await expect(viewer, 'the linked PDF drawn beside the chat').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+      const firstUrl = (await viewer.locator('[data-artifact-frame="pdf"]').getAttribute('src'))!;
+      // kept, so another tab can be shown in its place and it shown again
+      await sideTab(sideColumn(s.page), 'report.pdf').dblclick();
+      await expect(sideColumn(s.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the tab kept').toHaveCount(0);
+
+      // the file removed where no watch sees it; the tab hidden and shown again, so its frame asks its URL once more
+      rmSync(path);
+      await sideGroup(s.page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+      await s.page.getByRole('menuitem', { name: 'Files', exact: true }).click();
+      await expect(sideColumn(s.page).locator('[data-files-tab][data-file=""]'), 'another tab in its place').toBeVisible({ timeout: 20_000 });
+      await sideTab(sideColumn(s.page), 'report.pdf').click();
+      const stopped = viewer.locator('[data-frame-stopped]');
+      const again = stopped.getByRole('button', { name: 'Open again', exact: true });
+      await expect(viewer, 'the read for the frame failed before its first byte').toHaveAttribute('data-frame', 'failed', { timeout: 20_000 });
+      await expect(stopped.getByText('This file stopped loading: it changed, or it can no longer be read.', { exact: true })).toBeVisible();
+      await expect(viewer.locator('iframe'), 'no blank or broken frame').toHaveCount(0);
+      await again.focus();
+      await expect(again, 'the button takes the focus').toBeFocused();
+      // the read the showing made (a named file is read again when shown) has failed too, and is over
+      await expect(viewer.locator('[role="status"][data-notice="File removed"]')).toBeVisible({ timeout: 20_000 });
+      await expect(viewer).toHaveAttribute('data-pending', '0');
+
+      // pressed while the file is still gone: one read, which fails, and the same body; no token asked, so no request
+      const frameRequests = () => seamLines(s).filter((line) => line.startsWith('frame-')).length;
+      const loads = Number(await viewer.getAttribute('data-loads'));
+      const asked = frameRequests();
+      await again.click();
+      await expect(viewer, 'the read the button made has completed').toHaveAttribute('data-loads', String(loads + 1), { timeout: 20_000 });
+      await expect(viewer).toHaveAttribute('data-frame', 'failed');
+      await expect(stopped.getByText('This file stopped loading: it changed, or it can no longer be read.', { exact: true })).toBeVisible();
+      await expect(again).toBeVisible();
+      expect(frameRequests(), 'no frame asked for its URL').toBe(asked);
+
+      // the file back, and time passing: nothing reads it again by itself
+      writeFileSync(path, bytes);
+      await s.page.waitForTimeout(3_000); // what a clock or a watch would have read by now; nothing should
+      await expect(viewer).toHaveAttribute('data-loads', String(loads + 1));
+      await expect(viewer).toHaveAttribute('data-frame', 'failed');
+      expect(frameRequests(), 'no request for the file').toBe(asked);
+
+      // pressed once the file is readable: a new token, and the PDF drawn
+      await again.click();
+      await expect(viewer, 'drawn again').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+      const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
+      await expect(pdfFrame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+      expect(await pdfFrame.getAttribute('src'), 'from a new token').not.toBe(firstUrl);
+      await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
+  } finally {
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
 });
 
 // ---- P2-F W-V (L95, §2 item 6): the media viewers' sizing ------------------------------------------------------------

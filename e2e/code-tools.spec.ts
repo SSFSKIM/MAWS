@@ -7,10 +7,10 @@
 // is opened by writing it into layout.json and reloading (C5's restore path). UX wave U6b-1
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file a session opens is a tab of
 // its side column, beside the chat, with Files' tree at its left; the main strip gains a file tab only on ⌘-click.
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { slugOf } from '../src/engine-host/fs/paths';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
@@ -19,9 +19,10 @@ import type { PanelHarnessApi } from '../src/renderer/src/harness/panel/api';
 import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
   addTool, documentEnd, expectLandedOn, invoke, menu, notice, numstat, openInViewer, openReview, otherThemeColours, recordNotices, restoreWithTab, reveal,
-  selectReviewFile, shortWindow, sideFileTab, treeRow, withProduct,
+  selectReviewFile, shortWindow, sideFileTab, treeRow, withProduct, type Product,
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
+import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
@@ -48,6 +49,49 @@ async function storedFiles(page: Page): Promise<{ beside: string[]; main: string
     return { beside: beside.sort(), main };
   });
 }
+
+// ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
+
+const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'; // Chromium's PDF viewer, beneath a PDF's frame
+const UNLABELLED_WORDS = 'Café, naïve, Ελληνικά, 東京'; // an invented line of non-ASCII text, in a page that declares no charset
+
+// What Chromium's PDF viewer draws under the frame of `url` (a token's URL, no fragment): per viewer frame beneath it, its
+// toolbar's height (0 when the viewer draws none) and its document's title, read in the viewer's own page.
+async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<{ toolbar: number; title: string }[]> {
+  return maws.app.evaluate(
+    async ({ BrowserWindow }, { url, viewer }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
+      const script = `(() => {
+        const element = document.querySelector('pdf-viewer');
+        const toolbar = element && element.shadowRoot && element.shadowRoot.querySelector('viewer-toolbar');
+        return JSON.stringify({ toolbar: toolbar ? toolbar.getBoundingClientRect().height : 0, title: document.title });
+      })()`;
+      const shown: { toolbar: number; title: string }[] = [];
+      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) shown.push(JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string });
+      return shown;
+    },
+    { url, viewer: PDF_VIEWER },
+  );
+}
+
+// The page drawn in a file viewer's HTML frame, as Playwright reaches it (its own document, another origin).
+async function frameOfViewer(page: Page, viewer: Locator): Promise<Frame> {
+  const src = (await viewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+  let found: Frame | undefined;
+  await expect.poll(() => (found = page.frames().find((frame) => frame.url() === src)) !== undefined, { message: `a frame at ${src}` }).toBe(true);
+  return found!;
+}
+
+// What the open seam received, less the file frames' own lines (`frame-decision`, `frame-entry`), which share its log.
+const openedFiles = (p: Product) => readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' }).split('\n').filter((line) => line !== '' && !line.startsWith('frame-'));
+
+// The Library's artifact ids, and every file under a folder, as a case compares them before and after.
+const libraryIds = (page: Page) =>
+  page.evaluate(async () => {
+    const listed = await window.maws.invoke('library.list', {});
+    return listed.ok ? listed.value.rows.map((row) => row.id).sort() : `refused: ${listed.error.message}`;
+  });
+const filesIn = (dir: string) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).sort() : []);
 
 // The themes' scan (`otherThemeColours`) and the stub-mode product helpers live in `support/code-product.ts` (E5 M4),
 // shared with the editor spec.
@@ -527,14 +571,183 @@ test.describe('the product in stub mode over a scratch repository', () => {
     );
   });
 
-  test('a PDF is an Open externally row', async () => {
-    await withProduct(async (p) => {
-      const viewer = await openInViewer(p, 'doc.pdf');
-      await expect(viewer.locator('[data-external-row]')).toContainText('PDF files open outside MAWS');
-      await viewer.getByRole('button', { name: 'Open externally' }).click();
-      await expect.poll(() => (readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' }))).toBe(`${p.scratch.path('doc.pdf')}\n`);
-      await expect(p.page.locator('iframe, embed, object')).toHaveCount(0);
-    });
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B1, B8): a PDF a session's path
+  // names is drawn in its own tab by Chromium's viewer, from a token whose URL ends in the file's name; its toolbar is
+  // hidden beside the chat and kept in the main area (card 4); Open externally is the bar's; no artifact is made.
+  test("a PDF is drawn in its tab: Chromium's viewer in the frame with no toolbar beside the chat, its URL ending in the file's name; Open externally in the bar; nothing new in the Library; moved to the main area its frame is a new one with the main area's fragment", async () => {
+    await withProduct(
+      async (p) => {
+        const path = p.scratch.path('doc.pdf');
+        const artifactsFolder = join(p.maws.userData, 'artifacts');
+        const before = { library: await libraryIds(p.page), artifacts: filesIn(artifactsFolder) };
+        const viewer = await openInViewer(p, 'doc.pdf');
+        await expect(viewer).toHaveAttribute('data-kind', 'frame');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        await expect(viewer.locator('[data-external-row]')).toHaveCount(0);
+        await expect(viewer.getByText('PDF files open outside MAWS')).toHaveCount(0);
+        const frame = viewer.locator('[data-artifact-frame="pdf"]');
+        await expect(frame, 'a token and the file’s name, with the side tab’s fragment').toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
+        const side = (await frame.getAttribute('src'))!;
+        const url = side.slice(0, side.indexOf('#'));
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => shown.toolbar), { message: 'Chromium’s viewer in the frame, drawing no toolbar beside the chat' }).toEqual([0]);
+
+        // Open externally in the bar, above the frame, handing the file itself to the system
+        const open = viewer.getByRole('button', { name: 'Open externally', exact: true });
+        const [button, drawn] = [(await open.boundingBox())!, (await frame.boundingBox())!];
+        expect(button.y + button.height, 'the button above the frame, in the bar').toBeLessThanOrEqual(drawn.y + 0.5);
+        await open.click();
+        await expect.poll(() => openedFiles(p)).toEqual([path]);
+
+        // moved to the main area: a new frame element, from the same token, with the main area's fragment, the viewer's
+        // toolbar shown and titled with the file's name
+        await frame.evaluate((element) => void ((element as unknown as { u6b2Side?: boolean }).u6b2Side = true));
+        await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+        const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] [data-artifact-frame="pdf"]`);
+        await expect(moved, 'the same token, the main area’s fragment').toHaveAttribute('src', `${url}#navpanes=0`, { timeout: 20_000 });
+        expect(await moved.evaluate((element) => (element as unknown as { u6b2Side?: boolean }).u6b2Side === true), 'a new frame element').toBe(false);
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => [shown.toolbar > 0, shown.title]), { message: 'the viewer’s toolbar, titled with the file’s name' }).toEqual([[true, 'doc.pdf']]);
+
+        // nothing created: the Library lists what it listed, and nothing was written under the profile's artifacts folder
+        expect(await libraryIds(p.page), 'the Library as it was').toEqual(before.library);
+        expect(filesIn(artifactsFolder), 'nothing written under the artifacts folder').toEqual(before.artifacts);
+      },
+      (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
+      { frames: true },
+    );
+  });
+
+  // UX wave U6b-2 (M6; B3): an HTML file by a path is drawn in the artifact store's sandboxed frame, alone: its inline
+  // script runs, the stylesheet and the script beside it are not loaded and one line under the bar says so (card 2); a
+  // self-contained page has no line; an unlabelled UTF-8 page is served as UTF-8 and a labelled one decoded by its label.
+  test('an HTML file by a path runs its own script and is drawn without the stylesheet beside it, with the line that says so; a self-contained page has no line; a UTF-8 page with no declared charset reads right', async () => {
+    await withProduct(
+      async (p) => {
+        const besideFiles = (viewer: Locator) => viewer.locator('[data-beside-files]');
+        const page = await openInViewer(p, 'web/page.html');
+        await expect(page).toHaveAttribute('data-frame', 'html');
+        const pageFrame = await frameOfViewer(p.page, page);
+        await expect(pageFrame.locator('#marker'), 'its inline script ran').toHaveText('SCRIPT_RAN');
+        await expect(besideFiles(page), 'the line under the bar').toHaveText('Shown without the files beside it');
+        expect(await pageFrame.evaluate(() => getComputedStyle(document.getElementById('marker')!).color), 'the stylesheet beside it is not loaded').not.toBe('rgb(255, 0, 0)');
+        expect(await pageFrame.evaluate(() => document.documentElement.dataset.external ?? 'none'), 'nor the script beside it').toBe('none');
+        await page.getByRole('button', { name: 'Open externally', exact: true }).click();
+        await expect.poll(() => openedFiles(p), { message: 'the page handed to the system whole' }).toEqual([p.scratch.path('web/page.html')]);
+
+        const alone = await openInViewer(p, 'web/alone.html');
+        await expect(alone).toHaveAttribute('data-frame', 'html');
+        await expect((await frameOfViewer(p.page, alone)).locator('#marker')).toHaveText('SCRIPT_RAN');
+        await expect(besideFiles(alone), 'a self-contained page has no line').toHaveCount(0);
+
+        const unlabelled = await openInViewer(p, 'web/unlabelled.html');
+        await expect((await frameOfViewer(p.page, unlabelled)).locator('#words'), 'an unlabelled UTF-8 page reads right').toHaveText(UNLABELLED_WORDS);
+        await expect(besideFiles(unlabelled)).toHaveCount(0);
+        const labelled = await openInViewer(p, 'web/labelled.html');
+        await expect((await frameOfViewer(p.page, labelled)).locator('#words'), 'a labelled page decoded by its own label').toHaveText('Café naïve');
+      },
+      (scratch) => {
+        mkdirSync(scratch.path('web'));
+        writeFileSync(scratch.path('web/page.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Styled page</title><link rel="stylesheet" href="style.css"><script src="app.js"></script></head><body><p id="marker">waiting</p><script>document.getElementById("marker").textContent = "SCRIPT_RAN";</script></body></html>');
+        writeFileSync(scratch.path('web/style.css'), '#marker { color: rgb(255, 0, 0); }\n');
+        writeFileSync(scratch.path('web/app.js'), 'document.documentElement.dataset.external = "ran";\n');
+        writeFileSync(scratch.path('web/alone.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Alone</title><style>#marker { font-weight: 600; }</style></head><body><p id="marker">waiting</p><script>document.getElementById("marker").textContent = "SCRIPT_RAN";</script></body></html>');
+        writeFileSync(scratch.path('web/unlabelled.html'), `<!doctype html><html><head><title>Unlabelled</title></head><body><p id="words">${UNLABELLED_WORDS}</p></body></html>`);
+        writeFileSync(scratch.path('web/labelled.html'), Buffer.from('<!doctype html><html><head><meta charset="windows-1252"><title>Labelled</title></head><body><p id="words">Café naïve</p></body></html>', 'latin1'));
+      },
+      { frames: true },
+    );
+  });
+
+  // UX wave U6b-2 (M6; B2): a video by a path plays and seeks in the artifact store's player and starts by itself never;
+  // its position is the tab's, so moved to the main area the new element is at the time it left, paused; a sound plays.
+  test('a video by a path plays and seeks, and a sound plays; moved to the main area it is at the time it left', async () => {
+    await withProduct(
+      async (p) => {
+        writeFileSync(p.scratch.path('clip.webm'), await recordedWebm(p.page));
+        writeFileSync(p.scratch.path('tone.wav'), silentWav(2));
+        const path = p.scratch.path('clip.webm');
+        const viewer = await openInViewer(p, 'clip.webm');
+        await expect(viewer).toHaveAttribute('data-frame', 'video');
+        const video = viewer.locator('video[data-artifact-media="video"]');
+        await expect(video).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/clip\.webm$/);
+        await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+        expect(await video.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'it does not start by itself').toEqual([true, 0]);
+        await video.evaluate(async (v: HTMLVideoElement) => {
+          v.muted = true;
+          await v.play();
+        });
+        await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'it plays' }).toBeGreaterThan(1.2);
+        const seeked = await video.evaluate(
+          (v: HTMLVideoElement) =>
+            new Promise<number>((resolve) => {
+              v.pause();
+              v.addEventListener('seeked', () => resolve(v.currentTime), { once: true });
+              v.currentTime = 1;
+            }),
+        );
+        expect(seeked).toBeCloseTo(1, 1);
+
+        await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+        const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] video[data-artifact-media="video"]`);
+        await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+        await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'at the time it left' }).toBeCloseTo(1, 1);
+        expect(await moved.evaluate((v: HTMLVideoElement) => v.paused), 'paused').toBe(true);
+
+        const sound = await openInViewer(p, 'tone.wav');
+        await expect(sound).toHaveAttribute('data-frame', 'audio');
+        const audio = sound.locator('audio[data-artifact-media="audio"]');
+        await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(2, 1);
+        expect(await audio.evaluate((a: HTMLAudioElement) => a.paused), 'it does not start by itself').toBe(true);
+        await audio.evaluate(async (a: HTMLAudioElement) => {
+          a.muted = true;
+          await a.play();
+        });
+        await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'it plays' }).toBeGreaterThan(0);
+      },
+      undefined,
+      { frames: true },
+    );
+  });
+
+  // UX wave U6b-2 (M6; B16): a clip the player cannot play is no disabled player: its row says so and keeps Open
+  // externally (decision 16; card 3).
+  test('a clip the player cannot play shows its sentence and Open externally', async () => {
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, 'broken.mp4');
+        await expect(viewer).toHaveAttribute('data-kind', 'frame');
+        await expect(viewer, 'the row in the player’s place').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+        const row = viewer.locator('[data-external-row]');
+        await expect(row.getByText('This video can’t be played here.', { exact: true })).toBeVisible();
+        await expect(viewer.locator('video, [data-artifact-media]')).toHaveCount(0);
+        await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+        await expect.poll(() => openedFiles(p)).toEqual([p.scratch.path('broken.mp4')]);
+      },
+      (scratch) => writeFileSync(scratch.path('broken.mp4'), Buffer.from('These invented bytes are no video at all.\n'.repeat(64))),
+      { frames: true },
+    );
+  });
+
+  // UX wave U6b-2 (M6; B7): a PDF replaced on disk is read again on its folder's event, which asks for a new token: the
+  // frame is made again from it and the bar flashes Updated.
+  test('a PDF replaced on disk is drawn again', async () => {
+    await withProduct(
+      async (p) => {
+        const viewer = await openInViewer(p, 'doc.pdf');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        const frame = viewer.locator('[data-artifact-frame="pdf"]');
+        const before = (await frame.getAttribute('src'))!;
+        await expect(viewer.locator('[data-updated]')).toHaveCount(0);
+        writeFileSync(p.scratch.path('doc.pdf'), minimalPdf('https://example.invalid/the-new-version'));
+        await expect.poll(() => frame.getAttribute('src'), { timeout: 20_000, message: 'the frame drawn from a new token' }).not.toBe(before);
+        await expect(frame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
+        await expect(viewer.locator('[data-updated]')).toHaveText('Updated');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        const after = (await frame.getAttribute('src'))!;
+        await expect.poll(async () => (await pdfViewerOf(p.maws, after.slice(0, after.indexOf('#')))).length, { message: 'Chromium’s viewer in the new frame' }).toBe(1);
+      },
+      (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
+      { frames: true },
+    );
   });
 
   test('a binary is an Open externally row', async () => {
@@ -764,6 +977,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const locked = await reveal(p, 'locked');
         await locked.click();
         await expect(p.panel.locator('[data-tool="files"] [data-notice="refused"]')).toContainText(`Refused: ${REFUSAL}`);
+        // UX wave U6b-2 (M6; Interfaces §H): a framed file whose load failed, its body the sentence and Open again. A PDF
+        // kept in its tab is removed (its folder's watch says so, and its frame, already drawn, stays); shown again after
+        // another tab, its frame asks its URL once more and the read for it fails.
+        const stopped = await openInViewer(p, 'gone.pdf');
+        await expect(stopped).toHaveAttribute('data-frame', 'pdf');
+        await sideFileTab(p.page, 'gone.pdf').getByRole('tab').dblclick();
+        await expect(sideFileTab(p.page, 'gone.pdf'), 'kept').not.toHaveAttribute('data-preview', 'true');
+        rmSync(p.scratch.path('gone.pdf'));
+        await expect(notice(stopped)).toHaveText('File removed');
         for (const theme of ['dark', 'light'] as const) {
           await menu(p.maws, `theme.${theme}`);
           await expect(p.page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -771,18 +993,28 @@ test.describe('the product in stub mode over a scratch repository', () => {
             ['src/app.ts', '[data-code-view] .cm-line'],
             ['README.md', '[data-markdown-view] h1'],
             ['img/dot.png', '[data-image-view] img'],
-            ['doc.pdf', '[data-external-row]'],
+            ['doc.pdf', '[data-artifact-frame="pdf"]'], // UX wave U6b-2: drawn in its frame, the bar judged with Open externally in it
           ] as const) {
             const viewer = await openInViewer(p, file);
             await expect(viewer.locator(ready).first()).toBeVisible();
+            if (file === 'doc.pdf') await expect(viewer.getByRole('button', { name: 'Open externally', exact: true }), 'the bar’s Open externally').toBeVisible();
             // UX wave U6b-1: the scan covers the tree's column at the file's left and the preview tab's italic title
             await expect(p.panel.locator('[data-files-tree][data-place="beside"]')).toBeVisible();
             await expect(sideFileTab(p.page, basename(file))).toHaveAttribute('data-preview', 'true');
             expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row beside ${file}, its tab the preview`).toEqual([]);
           }
+          // UX wave U6b-2: the failure body and its button
+          await sideFileTab(p.page, 'gone.pdf').getByRole('tab').click();
+          await expect(stopped, 'the read for its frame failed').toHaveAttribute('data-frame', 'failed', { timeout: 20_000 });
+          await expect(stopped.locator('[data-frame-stopped]').getByRole('button', { name: 'Open again', exact: true })).toBeVisible();
+          expect(await otherThemeColours(p.page), `${theme}: the failure body of a framed file, and its Open again`).toEqual([]);
         }
       },
-      (scratch) => mkdirSync(scratch.path('locked'), { mode: 0o000 }),
+      (scratch) => {
+        mkdirSync(scratch.path('locked'), { mode: 0o000 });
+        writeFileSync(scratch.path('gone.pdf'), minimalPdf()); // UX wave U6b-2
+      },
+      { frames: true }, // UX wave U6b-2: the failed frame's 404 is the file's own console
     );
   });
 });

@@ -119,6 +119,8 @@
 // (sidebar, both ways), and its rows are in the same table.
 // UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
+// UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
+// its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -165,6 +167,7 @@ import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
+import { minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1795,6 +1798,15 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
 //   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
 //   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
+//   | U6b-2: nothing stored. On the wire,           | (file frame, both ways): on the peer's mawsd this     | the second half: the peer's app on this build's    |
+//   | `files.read`'s `raw` and its answer's         | build's window draws the PDF's row, with the          | unit mawsd draws its row as it always did, Open    |
+//   | `identity` (`src/shared/ipc/schema/files.ts`) | sentence for a service that cannot serve it, and      | externally reaching the seam, nothing refused. A   |
+//   |                                               | no frame; the peer's daemon drops `raw`, refuses      | peer from before O4 is refused by this build's     |
+//   |                                               | nothing, and its Open externally reaches the seam;    | mawsd: "not run: <reason>", held by                |
+//   |                                               | on this build's own mawsd the tab draws the PDF       | service.test.ts "a plain read's answer is what it  |
+//   |                                               |                                                       | was" and files.test.ts "an answer with identity is |
+//   |                                               |                                                       | read by a reader that does not know it as the      |
+//   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3482,3 +3494,115 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
 });
 // The main strip's file tabs among its tab ids (`file:<machine>:<path>`)
 const mainFileIds = (ids: string[]) => ids.filter((tabId) => tabId.startsWith('file:'));
+
+// ---- UX wave U6b-2: a file frame across builds (UC-14; B13) -----------------------------------------------------------
+// U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B, M6 decision 3) stores nothing and
+// adds `raw` to `files.read`'s input and `identity` to its answer. This build's main draws a PDF, an HTML page, a video or
+// a sound in its frame from raw reads of this Mac's daemon; a daemon of an older build drops the key it does not know and
+// answers the plain read, with no identity, so main serves nothing and the tab shows the row with the sentence for a
+// service that cannot serve it. Each build's mawsd runs as the profile's unit (a LaunchAgent, which the other build's app
+// leaves as it is), as in (update, render). One scene, both ways, with a peer from before this landing (its `files.read`
+// knows no `raw`); a direction that cannot run against a peer is not counted (C2), and a run in which the first half was
+// skipped is not a run of record:
+//   (file frame, both ways)  this build's app on the peer's unit mawsd opens a PDF of the session's folder from Files'
+//                            tree: its row, the sentence for a service that cannot serve it and Open externally, no
+//                            frame; Open externally reaches the open seam through the peer's mawsd; neither main's log nor
+//                            the peer's mawsd's holds a refusal of the read. This build again, on its own mawsd: the tab
+//                            shown again draws the PDF. Then the peer's app on this build's unit mawsd opens the same PDF:
+//                            its row, as it always drew it, Open externally reaching the seam, and no refusal. Where this
+//                            build's mawsd refuses the peer's app (one from before O4), that half says it is not run.
+const knowsRaw = (build: Build) => (commandOf(build, 'files.read')?.input as { properties?: Record<string, unknown> } | undefined)?.properties?.raw !== undefined;
+const knowsRawWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.read's raw: a daemon of this landing or later serves a frame; the runs of record have build F and build M as the peer, --peer-exact f1852de3a and 2c7044231`;
+const OLDER_SERVICE = 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.'; // this build's row (tools/code/copy.ts)
+const PEER_ROW = 'PDF files open outside MAWS'; // the row of both peers (tools/code/copy.ts at f1852de3a and at 2c7044231)
+// What either end would log had it refused the other's read: the validation's own words (src/shared/ipc/validate.ts)
+const READ_REFUSED = /invalid (?:input for|output of) files\.read/;
+
+test('(file frame, both ways) this build’s window on the peer’s unit mawsd draws a PDF’s row with the sentence for a service that cannot serve it, no frame, and nothing refused; on its own mawsd the PDF is drawn; the peer’s app on this build’s unit mawsd draws its row as it always did', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsRaw(peer), knowsRawWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-file-frame', async (s) => {
+    const said = [`${here.label} (wire ${wireOf(here)}) asks files.read with raw to draw a framed file; ${peer.label} (wire ${wireOf(peer)}) knows no raw`];
+    const pdf = join(s.repo, 'report.pdf');
+    writeFileSync(pdf, minimalPdf());
+    const openLog = join(s.root, 'open.log');
+    // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+    const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line !== '' && !line.startsWith('frame-'));
+    const refusals = (text: string) => text.split('\n').filter((line) => READ_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-file-frame-peer', async (unit) => {
+      said.push(`  ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      await treeRow(run.page, 'report.pdf').click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+      await expect(viewer, 'a framed file, beside the chat').toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });
+      await expect(viewer, 'its row, no frame').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+      const row = viewer.locator('[data-external-row]');
+      await expect(row.getByText(OLDER_SERVICE, { exact: true })).toBeVisible();
+      await expect(viewer.locator('iframe, video, audio'), 'nothing drawn in a frame').toHaveCount(0);
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(opened, { timeout: 20_000, message: `${peer.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${peer.label}'s mawsd refuses no read ${here.label} sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the row: "${OLDER_SERVICE}" with Open externally, which reached the seam; no refusal in either log; ${s.daemonLog().split('\n').filter((line) => DROPPED.test(line)).length} dropped-field lines in the mawsd log`);
+      await s.quit(run);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    await endProfileProcesses(s.userData);
+
+    // this build again, on its own mawsd: the tab, shown again, draws the PDF
+    const back = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    await showSession(back.page, id, `session:${address}`);
+    await openSurface(back.page, 'Files');
+    await sideTab(sideColumn(back.page), 'report.pdf').click({ timeout: 20_000 });
+    const drawn = sideColumn(back.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+    await expect(drawn, 'drawn once a daemon of this build serves').toHaveAttribute('data-frame', 'pdf', { timeout: 30_000 });
+    await expect(drawn.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${here.label} again, on its own mawsd: the tab shown again draws the PDF`);
+
+    // the second half: the peer's app on this build's unit mawsd
+    if (!appObeysConnectors(peer)) {
+      const why = `not run: ${here.label}'s mawsd refuses an app from before O4 (${peer.label}, wire ${wireOf(peer)}); held by service.test.ts "a plain read's answer is what it was" and files.test.ts "an answer with identity is read by a reader that does not know it as the answer without it"`;
+      test.info().annotations.push({ type: 'skipped check', description: `the second half, ${why}` });
+      said.push(`  the second half ${why}`);
+      record(said);
+      return;
+    }
+    await withUnit(s, here, 'xb-file-frame-here', async (unit) => {
+      said.push(`  ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog }, peer.root);
+      await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'report.pdf', exact: true }).click({ timeout: 20_000 });
+      const row = old.page.locator(`[data-file-viewer][data-path="${pdf}"] [data-external-row]`);
+      await expect(row, `${peer.label}'s row, as it always drew it`).toContainText(PEER_ROW, { timeout: 20_000 });
+      await expect(old.page.locator('iframe[src^="maws-artifact:"]'), `${peer.label} frames no file`).toHaveCount(0);
+      const before = opened().length;
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(() => opened().slice(before), { timeout: 20_000, message: `${here.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${here.label}'s mawsd refuses no read ${peer.label} sent`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s row: "${PEER_ROW}" with Open externally, which reached the seam; no refusal in either log`);
+      await s.quit(old);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    record(said);
+  });
+});
