@@ -106,14 +106,32 @@ describe('OwnerChannelStore', () => {
       expect(index.ownerChannel.session(a)).toMatchObject({ launchId: 'l2', advertised: reserved({ launchId: 'l1b' }) });
     });
 
-    it('is overwritten by the next launch’s when it never ran, and bound to a running launch at the daemon’s start', () => {
+    // §A, "Two slots": the reservation last bound to a launch, and at most one not yet bound, kept as the unbound one's
+    // `prior`. A new reservation replaces only the unbound one; binding moves it into the bound slot.
+    it('keeps the bound reservation through relaunches reserved and never accepted, as the unbound one’s prior', () => {
+      index.ownerChannel.reserveLaunch(a, reserved({ number: 9 }));
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l1', reserved: true }));
+      index.ownerChannel.reserveLaunch(a, reserved({ number: 8, plugin: false, at: '2026-11-16T10:01:00.000Z' })); // refused
+      expect(index.ownerChannel.session(a)?.advertised).toEqual(reserved({ number: 8, plugin: false, at: '2026-11-16T10:01:00.000Z', prior: { launchId: 'l1', number: 9, plugin: true } }));
+      index.ownerChannel.reserveLaunch(a, reserved({ number: null, plugin: true, at: '2026-11-16T10:02:00.000Z' })); // refused again: the prior carried forward
+      expect(index.ownerChannel.session(a)).toMatchObject({ launchId: 'l1', advertised: reserved({ number: null, at: '2026-11-16T10:02:00.000Z', prior: { launchId: 'l1', number: 9, plugin: true } }) });
+      // the next accepted launch binds its own: the bound slot moves, and no prior is kept
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l3', reserved: true }));
+      expect(index.ownerChannel.session(a)?.advertised).toEqual(reserved({ launchId: 'l3', number: null, at: '2026-11-16T10:02:00.000Z' }));
+    });
+
+    it('a first reservation has no prior, and one that never ran is overwritten by the next with none', () => {
       index.ownerChannel.reserveLaunch(a, reserved({ number: 9 }));
       index.ownerChannel.reserveLaunch(a, reserved({ number: 8, plugin: false }));
       expect(index.ownerChannel.session(a)?.advertised).toEqual(reserved({ number: 8, plugin: false }));
-      index.ownerChannel.bindReservation(a, 'l7');
-      expect(index.ownerChannel.session(a)).toMatchObject({ launchId: null, advertised: reserved({ launchId: 'l7', number: 8, plugin: false }) });
-      index.ownerChannel.bindReservation(b, 'l7'); // no row: nothing to bind, nothing made
-      expect(index.ownerChannel.session(b)).toBeNull();
+    });
+
+    it('a launch whose reservation could not be written leaves both slots as they were', () => {
+      index.ownerChannel.reserveLaunch(a, reserved({ number: 9 }));
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l1', reserved: true }));
+      index.ownerChannel.reserveLaunch(a, reserved({ number: 8 }));
+      index.ownerChannel.recordLaunch(a, launch({ launchId: 'l2' })); // its own write failed: it sent 8 or nothing
+      expect(index.ownerChannel.session(a)).toMatchObject({ launchId: 'l2', advertised: reserved({ number: 8, prior: { launchId: 'l1', number: 9, plugin: true } }) });
     });
 
     it('refuses a session the index has no record of', () => {
@@ -122,7 +140,12 @@ describe('OwnerChannelStore', () => {
 
     it('reads a value that does not parse as no reservation', () => {
       index.ownerChannel.reserveLaunch(a, reserved());
-      for (const value of ['{"launchId":null,"number":10,"plugin":true,"at":"x"}', 'not json', '{"number":9}', '[]']) {
+      for (const value of [
+        '{"launchId":null,"number":10,"plugin":true,"at":"x"}', 'not json', '{"number":9}', '[]',
+        '{"launchId":null,"number":9,"plugin":true,"at":"x","prior":{"launchId":null,"number":9,"plugin":true}}', // a prior is a bound slot
+        '{"launchId":null,"number":9,"plugin":true,"at":"x","prior":{"launchId":"l1","number":7,"plugin":true}}',
+        '{"launchId":"l2","number":9,"plugin":true,"at":"x","prior":{"launchId":"l1","number":9,"plugin":true}}', // a bound reservation has none
+      ]) {
         raw((db) => db.prepare('UPDATE owner_channel_sessions SET advertised = ? WHERE app_session_id = ?').run(value, a));
         expect(index.ownerChannel.session(a)?.advertised, value).toBeNull();
       }

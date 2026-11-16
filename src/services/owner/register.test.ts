@@ -10,6 +10,7 @@ import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema/settings';
 import type { HostState } from '@shared/ipc/schema';
+import type { HostDispatch } from '@shared/host/host-supervisor';
 import { summary, tempDir } from '../../../test/support/index-fixture';
 import { Index } from '../index/index';
 import type { HostEvents } from '../sessions/context';
@@ -52,7 +53,8 @@ describe('startOwnerChannel', () => {
     dir.dispose();
     rmSync(root, { recursive: true, force: true });
   });
-  const start = () =>
+  const noHost: HostDispatch = async () => ({ ok: false, error: { code: 'internal', message: 'no host' } });
+  const start = (dispatch: HostDispatch = noHost) =>
     startOwnerChannel({
       index,
       settings: () => settings,
@@ -65,7 +67,7 @@ describe('startOwnerChannel', () => {
       log: () => {},
       // M4
       attention: { setOwnerItems: (appSessionId, items, silent) => void projected.push({ appSessionId, items, silent }) },
-      dispatch: async () => ({ ok: false, error: { code: 'internal', message: 'no host' } }),
+      dispatch,
       onHostState: (listener) => (hostStates.add(listener), () => void hostStates.delete(listener)),
       onStreaming: (listener) => (streamings.add(listener), () => void streamings.delete(listener)),
       streaming: () => true,
@@ -193,9 +195,15 @@ describe('startOwnerChannel', () => {
   describe('who draws, the mod’s file of summaries and the summaries’ switch', () => {
     const ENGINE = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
 
-    it('publishes drawnBy with every state, MAWS for a session at rest', () => {
-      start();
-      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'maws' } });
+    it('publishes drawnBy with every state: not known before the live statuses are read (mod), MAWS once the read lists no process for it', async () => {
+      let answer!: () => void;
+      const channel = start(async (_owner, name) =>
+        name === 'engine.sessions' ? new Promise((resolve) => (answer = () => resolve({ ok: true, value: [] }))) : { ok: false, error: { code: 'internal', message: 'no host' } });
+      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'mod' } }); // B12: not yet discovered
+      answer();
+      await channel.work.settled();
+      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'maws' } }); // B1
+      expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { drawnBy: 'maws' } } });
     });
 
     it('answers ownerChannel.folds from the engine’s config home, by the session’s engine session id', async () => {

@@ -14,7 +14,7 @@ import {
   CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, SUPPLEMENT_HEADER,
   TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from '@shared/owner/contract';
-import { advertisementOf } from '@shared/owner/draws';
+import { advertisementOf, drawnBy } from '@shared/owner/draws';
 import { FOLD_SUMMARIES_ENV } from '@shared/owner/folds';
 import { slugOf } from '../../engine-host/fs/paths';
 import { installToHumanPlugin, PLUGIN_STYLE } from '../../../test/support/to-human-plugin';
@@ -441,18 +441,30 @@ describe('ownerChannelLaunch over a scratch config home', () => {
       expect(advertisementOf(row, 'l1')).toEqual({ known: true, number: 8, plugin: null }); // read from desired: the 8 it carried
     });
 
-    it('a reserved launch the host refuses is not read as the earlier launch’s, which still runs; the next launch overwrites it', async () => {
+    // §A, "Two slots" (the architect's cases 1 and 3)
+    it('two relaunches refused in a row: the running launch still reads its own bound 9 and draws by the mod', async () => {
+      launchesWith({ modRoute: true });
+      installToHumanPlugin(configHome, { declares: true });
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // the running launch, at 9, bound
+      await decide(); // reserved at 9; the host refuses it
+      launchesWith({});
+      await decide(); // reserved at 8; refused again
+      const row = index.ownerChannel.session(record)!;
+      expect(row.advertised).toEqual({ launchId: null, number: 8, plugin: true, at: AT, prior: { launchId: 'l1', number: 9, plugin: true } });
+      expect(advertisementOf(row, 'l1')).toEqual({ known: true, number: 9, plugin: true });
+      expect(drawnBy(advertisementOf(row, 'l1'), { launchId: 'l1', process: 'ready' }, { present: true, declares: true })).toBe('mod');
+    });
+
+    it('a relaunch that the host accepts reads its own, and nothing reads the launch before it', async () => {
       launchesWith({});
       installToHumanPlugin(configHome, { declares: true });
-      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // the earlier launch, at 8, bound
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l1', at: AT }); // at 8, bound
       launchesWith({ modRoute: true });
-      await decide(); // reserved at 9; the host refuses it, so nothing binds
+      ownerChannelLaunched(s, (await decide()).record, { launchId: 'l2', at: AT }); // at 9, accepted and bound
       const row = index.ownerChannel.session(record)!;
-      expect(row.advertised).toEqual({ launchId: null, number: 9, plugin: true, at: AT });
-      expect(advertisementOf(row, 'l1')).toEqual({ known: true, number: 8, plugin: null });
-      launchesWith({});
-      await decide(); // the next launch's reservation replaces the one that never ran
-      expect(index.ownerChannel.session(record)?.advertised).toEqual({ launchId: null, number: 8, plugin: true, at: AT });
+      expect(row.advertised).toEqual({ launchId: 'l2', number: 9, plugin: true, at: AT });
+      expect(advertisementOf(row, 'l2')).toEqual({ known: true, number: 9, plugin: true });
+      expect(advertisementOf(row, 'l1')).toEqual({ known: false });
     });
 
     it('carries TO_HUMAN_FOLD_SUMMARIES=off in every launch decided while the switch is off, whatever the lane, and none while it is on', async () => {

@@ -1,80 +1,99 @@
 // What the owner service publishes as `drawnBy` (the UX wave, U2b: docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-
-// human-view.md, Interfaces §A; M4's sequences): the session's running launch from the engine host's statuses, the
-// advertisement its stored row says that launch carried, and the declaration read at the loaded plugin's reported path.
-// Each sequence holds its order open and reads the value at the instant before and after the step it stages.
+// human-view.md, Interfaces §A, "Who draws: the table the code and its tests are checked against"): the session's
+// running launch by table C, the advertisement the stored row says it carried (table A, @shared/owner/draws), the
+// engine's state of it and the declaration read at the loaded plugin's reported path (table B). Each case names the
+// cells it pins; each sequence holds its order open and reads the value before and after the step it stages.
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { Reservation } from '@shared/owner/draws';
-import { WhoDraws, type DrawRow } from './drawn-by';
+import { WhoDraws, type DrawRow, type DrawStatus } from './drawn-by';
 
 const APP = 'app-draws' as AppSessionId;
 const AT = '2026-11-16T10:00:00.000Z';
 const NEWER = '/cfg/plugins/cache/doperpowers/to-human/0.9.0';
 const OLDER = '/cfg/plugins/cache/doperpowers/to-human/0.8.2';
-type Status = Pick<EngineSessionStatus, 'appSessionId' | 'launchId' | 'process' | 'plugins' | 'pluginsObservedAt'>;
-const status = (over: Partial<Status> = {}): Status => ({ appSessionId: APP, launchId: 'l1', process: 'ready', plugins: [], pluginsObservedAt: null, ...over });
-const withPlugin = (path: string | null, observedAt: string, over: Partial<Status> = {}): Status =>
+const T = (minute: number) => `2026-11-16T10:${String(minute).padStart(2, '0')}:00.000Z`;
+const status = (over: Partial<DrawStatus> = {}): DrawStatus => ({ appSessionId: APP, launchId: 'l1', launchedAt: T(0), process: 'ready', plugins: [], pluginsObservedAt: null, ...over });
+const withPlugin = (path: string | null, observedAt: string, over: Partial<DrawStatus> = {}): DrawStatus =>
   status({ plugins: [{ name: 'other', path: '/cfg/other', source: 'other@x', version: '1' }, ...(path === null ? [] : [{ name: 'to-human', path, source: 'to-human@doperpowers', version: '0' }])], pluginsObservedAt: observedAt, ...over });
 const reservation = (over: Partial<Reservation> = {}): Reservation => ({ launchId: null, number: 9, plugin: true, at: AT, ...over });
+const bound = (launchId: string, number: 9 | 8 | null, over: Partial<DrawRow> = {}): DrawRow => ({ launchId, desired: number === null ? 'off' : 'external-style-plus-supplement', advertised: reservation({ launchId, number }), ...over });
 
 describe('WhoDraws', () => {
   let row: DrawRow | null;
   let changed: string[];
-  let reads: { path: string; resolve: (declares: boolean) => void }[];
+  let reads: { path: string; resolve: (declares: boolean | null) => void; reject: (error: Error) => void }[];
+  let now: string;
   let draws: WhoDraws;
   beforeEach(() => {
-    row = { launchId: null, desired: 'external-style-plus-supplement', advertised: reservation() };
+    row = bound('l1', 9);
     changed = [];
     reads = [];
+    now = T(1);
     draws = new WhoDraws({
-      row: () => row,
-      declares: (path) => new Promise((resolve) => reads.push({ path, resolve })),
+      row: () => row, // null: no row, or one that cannot be read (the owner service's wiring catches the read)
+      declares: (path) => new Promise((resolve, reject) => reads.push({ path, resolve, reject })),
       changed: (appSessionId) => void changed.push(`${appSessionId}:${draws.drawnBy(appSessionId)}`),
+      now: () => now,
     });
   });
   afterEach(() => draws.stop());
   // one read answers; the others stay in flight (so the wait is for that answer's continuation, not for every read)
-  const answer = async (n: number, declares: boolean) => {
+  const answer = async (n: number, declares: boolean | null) => {
     reads[n]!.resolve(declares);
     await new Promise((resolve) => setTimeout(resolve, 0));
   };
+  const list = (statuses: DrawStatus[] = []) => draws.listed(statuses, draws.mark());
 
-  describe('before the live statuses were read once', () => {
-    it('reads the row’s newest launch as live and unreported: never MAWS where the mod may draw', () => {
-      expect(draws.drawnBy(APP)).toBe('mod'); // unbound at 9
-      row = { launchId: 'l1', desired: 'external-style-plus-supplement', advertised: reservation({ launchId: 'l1', number: 8 }) };
-      expect(draws.drawnBy(APP)).toBe('maws');
-      row = { launchId: 'l1', desired: 'off', advertised: reservation({ launchId: 'l1', number: null, plugin: true }) };
-      expect(draws.drawnBy(APP)).toBe('mod');
-      row = { launchId: 'l1', desired: 'external-style-plus-supplement', advertised: null }; // an earlier build's launch at 8
-      expect(draws.drawnBy(APP)).toBe('maws');
+  describe('before the first read of the live statuses (not yet discovered: live, plugins not reported)', () => {
+    it('A1, B12 · a row that cannot be read is not known: mod', () => {
       row = null;
+      expect(draws.drawnBy(APP)).toBe('mod');
+    });
+    it('A2, B3 and B2 · the recorded launch’s bound reservation: 9 mod, 8 MAWS', () => {
+      expect(draws.drawnBy(APP)).toBe('mod');
+      row = bound('l1', 8);
       expect(draws.drawnBy(APP)).toBe('maws');
     });
-    it('reads a session with no status as at rest once they were read', () => {
-      draws.primed();
+    it('A3, B8 · the recorded launch an earlier build’s lane-off launch after an obsolete reservation at 8: mod, never the older launch’s 8', () => {
+      row = { launchId: 'l-earlier', desired: 'off', advertised: reservation({ launchId: 'l0', number: 8 }) };
+      expect(draws.drawnBy(APP)).toBe('mod');
+      row = { launchId: 'l-earlier', desired: 'external-style-plus-supplement', advertised: reservation({ launchId: 'l0', number: 9 }) }; // an earlier build's lane-on launch: 8
       expect(draws.drawnBy(APP)).toBe('maws');
+    });
+    it('A4, B12 · a reservation not yet bound: the launch running may be the one it was made for, not recorded: mod', () => {
+      row = { launchId: null, desired: 'external-style-plus-supplement', advertised: reservation({ number: 8 }) };
+      expect(draws.drawnBy(APP)).toBe('mod');
+      row = { launchId: 'l1', desired: 'external-style-plus-supplement', advertised: reservation({ number: 9, prior: { launchId: 'l1', number: 8, plugin: true } }) };
+      expect(draws.drawnBy(APP)).toBe('mod'); // the recorded launch's prior says 8, but an accepted relaunch may run
+    });
+    it('A4, B12 · nothing recorded and nothing reserved: not known, mod (a window with no surface draws the mirror)', () => {
+      row = { launchId: null, desired: null, advertised: null };
+      expect(draws.drawnBy(APP)).toBe('mod');
     });
   });
 
   describe('with the statuses read', () => {
-    beforeEach(() => draws.primed());
+    it('B1 · a session the read did not list is at rest: MAWS', () => {
+      list();
+      expect(draws.drawnBy(APP)).toBe('maws');
+    });
 
-    it('a reserved 9, live and not yet reported: mod; reported with the declaring mod: mod; the change published once', async () => {
+    it('C1, B3, B5, B4 · a reserved 9, live and not reported: mod; reported with the mod, its read outstanding: mod; declaring: mod; published once', async () => {
+      list();
       expect(draws.drawnBy(APP)).toBe('maws');
       draws.status(status({ process: 'starting' }));
       expect(draws.drawnBy(APP)).toBe('mod');
-      expect(changed).toEqual([`${APP}:mod`]);
       draws.status(withPlugin(NEWER, AT));
       expect(reads.map((r) => r.path)).toEqual([NEWER]);
-      expect(draws.drawnBy(APP)).toBe('mod'); // the read in flight: nothing reported yet stands
+      expect(draws.drawnBy(APP)).toBe('mod'); // outstanding
       await answer(0, true);
       expect(draws.drawnBy(APP)).toBe('mod');
       expect(changed).toEqual([`${APP}:mod`]);
     });
 
-    it('reported with the mod loaded without the declaration: MAWS, once the read answers', async () => {
+    it('B5, B6 · at 9 the mod loaded without the declaration: mod while its read is outstanding, MAWS once it answers no', async () => {
+      list();
       draws.status(withPlugin(OLDER, AT));
       expect(draws.drawnBy(APP)).toBe('mod');
       await answer(0, false);
@@ -82,32 +101,52 @@ describe('WhoDraws', () => {
       expect(changed).toEqual([`${APP}:mod`, `${APP}:maws`]);
     });
 
-    it('reported without the mod: MAWS at once, with no read', () => {
+    it('B5 · a declaration whose read failed (an I/O error, not a missing file) is unknown: mod, until the next observation', async () => {
+      list();
+      draws.status(withPlugin(NEWER, AT));
+      await answer(0, null);
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(NEWER, T(5)));
+      reads[1]!.reject(new Error('EIO'));
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(NEWER, T(6)));
+      await answer(2, false);
+      expect(draws.drawnBy(APP)).toBe('maws');
+    });
+
+    it('B7 · at 9 reported without the mod: MAWS at once, with no read', () => {
+      list();
       draws.status(withPlugin(null, AT));
       expect(reads).toEqual([]);
       expect(draws.drawnBy(APP)).toBe('maws');
     });
 
-    it('after a reload the declaration is read at the newly reported path; until it answers the earlier fact stands', async () => {
-      draws.status(withPlugin(NEWER, AT));
-      await answer(0, true);
-      draws.status(withPlugin(NEWER, AT)); // the same observation again: no new read
+    it('C1, B5 · after a reload the newly loaded plugin counts as declaring until its read answers (never MAWS on a guess)', async () => {
+      list();
+      draws.status(withPlugin(OLDER, AT));
+      await answer(0, false);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      draws.status(withPlugin(OLDER, AT)); // the same observation again: no new read
       expect(reads).toHaveLength(1);
-      draws.status(withPlugin(OLDER, '2026-11-16T10:05:00.000Z'));
-      expect(reads.map((r) => r.path)).toEqual([NEWER, OLDER]);
+      draws.status(withPlugin(NEWER, T(5))); // reloaded to a declaring installation, its read held open
+      expect(reads.map((r) => r.path)).toEqual([OLDER, NEWER]);
       expect(draws.drawnBy(APP)).toBe('mod');
-      await answer(1, false);
-      expect(draws.drawnBy(APP)).toBe('maws');
-      draws.status(withPlugin(null, '2026-11-16T10:06:00.000Z')); // reloaded with none
-      expect(draws.drawnBy(APP)).toBe('maws');
-      draws.status(withPlugin(NEWER, '2026-11-16T10:07:00.000Z'));
-      await answer(2, true);
+      await answer(1, true);
       expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(null, T(6))); // reloaded with none
+      expect(draws.drawnBy(APP)).toBe('maws');
+      draws.status(withPlugin(OLDER, T(7)));
+      expect(draws.drawnBy(APP)).toBe('mod'); // outstanding again
+      await answer(2, false);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      expect(changed).toEqual([`${APP}:mod`, `${APP}:maws`, `${APP}:mod`, `${APP}:maws`, `${APP}:mod`, `${APP}:maws`]);
     });
 
-    it('drops a read in flight when a later observation arrives', async () => {
+    it('C1 · a new observation replaces the outstanding read: the earlier answer is dropped', async () => {
+      list();
       draws.status(withPlugin(NEWER, AT));
-      draws.status(withPlugin(OLDER, '2026-11-16T10:05:00.000Z'));
+      draws.status(withPlugin(OLDER, T(5)));
       await answer(1, false);
       expect(draws.drawnBy(APP)).toBe('maws');
       await answer(0, true); // the earlier read answers last: dropped
@@ -115,7 +154,8 @@ describe('WhoDraws', () => {
       expect(changed).toEqual([`${APP}:mod`, `${APP}:maws`]);
     });
 
-    it('the process exits while a declaration’s read is in flight: the exit wins', async () => {
+    it('C1, B1 · the running launch exits while a declaration’s read is outstanding: the exit wins', async () => {
+      list();
       draws.status(withPlugin(NEWER, AT));
       expect(draws.drawnBy(APP)).toBe('mod');
       draws.status(withPlugin(NEWER, AT, { process: 'exiting' }));
@@ -126,57 +166,146 @@ describe('WhoDraws', () => {
       expect(changed).toEqual([`${APP}:mod`, `${APP}:maws`]);
     });
 
-    it('ignores a status of an older launch that arrives after a newer launch was bound', () => {
-      row = { launchId: 'l1', desired: 'external-style-plus-supplement', advertised: reservation({ launchId: 'l1', number: 8 }) };
-      draws.status(status({ launchId: 'l1' }));
-      expect(draws.drawnBy(APP)).toBe('maws');
-      row = { launchId: 'l2', desired: 'external-style-plus-supplement', advertised: reservation({ launchId: 'l2', number: 9 }) };
+    it('B3 · a launch bound before its first status is live with its plugins not reported: a just-bound 9 is mod', () => {
+      list();
+      row = bound('l2', 9);
       draws.bound(APP, 'l2');
-      draws.status(status({ launchId: 'l2', process: 'starting' }));
       expect(draws.drawnBy(APP)).toBe('mod');
-      draws.status(status({ launchId: 'l1', process: 'ready' })); // late, from the launch before
+      row = bound('l2', 8);
+      expect(draws.drawnBy(APP)).toBe('maws');
+    });
+
+    it('C2 · another launch’s exit never puts the running launch at rest, its id seen before or not (bound and observed at 9, then an unseen l1 exits)', () => {
+      list();
+      row = bound('l2', 9);
+      draws.bound(APP, 'l2');
+      draws.status(status({ launchId: 'l2', launchedAt: T(1), process: 'starting' }));
+      draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'exited' })); // unseen
       expect(draws.drawnBy(APP)).toBe('mod');
-      draws.status(status({ launchId: 'l1', process: 'exited' }));
+      draws.status(status({ launchId: 'l0', launchedAt: T(2), process: 'exiting' })); // unseen, whatever its time
       expect(draws.drawnBy(APP)).toBe('mod');
     });
 
-    it('the row cannot be read while a launch is live: mod while the mod is loaded or not reported, MAWS once reported without it', async () => {
+    it('C2 · a launch that was running and was replaced: its late statuses, live or exiting, are not applied', () => {
+      row = bound('l1', 8);
+      list([status({ launchId: 'l1', launchedAt: T(0) })]);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      row = bound('l2', 9);
+      now = T(3);
+      draws.bound(APP, 'l2');
+      draws.status(status({ launchId: 'l2', launchedAt: T(2), process: 'starting' }));
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'ready' })); // late, from the launch before
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'exited' }));
+      expect(draws.drawnBy(APP)).toBe('mod');
+    });
+
+    it('C3, A4, B12 · a launch not seen before with a live process becomes the running one (another client’s, or an earlier build’s)', () => {
+      row = bound('l1', 8);
+      list([status({ launchId: 'l1', launchedAt: T(0) })]);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      draws.status(status({ launchId: 'l3', launchedAt: T(4), process: 'starting' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // not recorded, nothing bound to it: not known
+      draws.status(withPlugin(null, AT, { launchId: 'l3', launchedAt: T(4) }));
+      expect(draws.drawnBy(APP)).toBe('maws'); // B14
+    });
+
+    it('C3 · by the engine’s start time: a late live status of an older launch never becomes the running one', () => {
+      row = bound('l2', 9);
+      list([status({ launchId: 'l2', launchedAt: T(2) })]);
+      draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'ready' })); // unseen, started before the running one
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(null, AT, { launchId: 'l1', launchedAt: T(0) }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // not l1's report: l2 is still not reported
+      // and against a launch bound before its first status, the bind's time
+      now = T(6);
+      row = bound('l5', 9);
+      draws.bound(APP, 'l5');
+      draws.status(status({ launchId: 'l4', launchedAt: T(5), process: 'ready' }));
+      draws.status(withPlugin(null, AT, { launchId: 'l4', launchedAt: T(5) }));
+      expect(draws.drawnBy(APP)).toBe('mod');
+    });
+
+    it('C4 · a snapshot is not applied over a newer event of that session, nor puts it at rest', () => {
+      const since = draws.mark();
+      draws.status(status({ process: 'exited' })); // the subscription's event, after the read was sent
+      const applied = draws.listed([status({ process: 'ready' })], since);
+      expect(applied).toEqual([]);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      const other = 'app-other' as AppSessionId;
+      const again = draws.mark();
+      draws.bound(other, 'l9');
+      draws.listed([], again); // absent from the listing, but bound since the read was sent
+      expect(draws.drawnBy(other)).toBe('mod');
+    });
+
+    it('C4 · a snapshot puts a session it does not list at rest, and applies the statuses of sessions with no newer event', () => {
+      list([status({ process: 'starting' })]);
+      expect(draws.drawnBy(APP)).toBe('mod');
+      const applied = list([]);
+      expect(applied).toEqual([]);
+      expect(draws.drawnBy(APP)).toBe('maws');
+      expect(list([status({ launchId: 'l1', process: 'ready' })])).toHaveLength(1);
+      expect(draws.drawnBy(APP)).toBe('mod');
+    });
+
+    it('A1, B12, B13, B14 · the row cannot be read while a launch is live: mod while the mod is loaded or not reported, MAWS once reported without it', async () => {
+      list();
       row = null;
       draws.status(status());
       expect(draws.drawnBy(APP)).toBe('mod');
       draws.status(withPlugin(OLDER, AT));
       await answer(0, false);
-      expect(draws.drawnBy(APP)).toBe('mod'); // loaded, whatever it declares: the unknown number may be none or 9
-      draws.status(withPlugin(null, '2026-11-16T10:05:00.000Z'));
+      expect(draws.drawnBy(APP)).toBe('mod'); // loaded, whatever it declares
+      draws.status(withPlugin(null, T(5)));
       expect(draws.drawnBy(APP)).toBe('maws');
-      draws.status(withPlugin(OLDER, '2026-11-16T10:06:00.000Z'));
-      row = { launchId: 'l1', desired: 'external-style-plus-supplement', advertised: reservation({ launchId: 'l1', number: 8 }) }; // read again at the next status
+      draws.status(withPlugin(OLDER, T(6)));
+      row = bound('l1', 8); // read again at the next status
       await answer(1, false);
       expect(draws.drawnBy(APP)).toBe('maws');
     });
 
-    it('an earlier build’s launch follows a reservation this build left unbound: read from that row’s desired', () => {
-      row = { launchId: 'l-earlier', desired: 'external-style-plus-supplement', advertised: reservation({ number: 9 }) };
-      draws.status(status({ launchId: 'l-earlier' }));
-      expect(draws.drawnBy(APP)).toBe('maws');
-      row = { ...row, desired: 'off' };
-      draws.status(withPlugin(OLDER, AT, { launchId: 'l-earlier' }));
-      expect(draws.drawnBy(APP)).toBe('maws'); // none, not yet reported (the read in flight), plugin unknown
+    it('A4 · an abandoned unbound reservation at 8 is no proof of a later launch’s number (a lane-off launch whose write failed, not yet recorded)', async () => {
+      row = { launchId: 'l0', desired: 'external-style-plus-supplement', advertised: reservation({ number: 8 }) }; // refused, left unbound
+      list();
+      draws.status(status({ launchId: 'l2', launchedAt: T(2), process: 'starting' })); // sent with nothing; its record not yet written
+      expect(draws.drawnBy(APP)).toBe('mod'); // B12
+      draws.status(withPlugin(OLDER, AT, { launchId: 'l2', launchedAt: T(2) }));
+      await answer(0, false);
+      expect(draws.drawnBy(APP)).toBe('mod'); // B13: the loaded mod draws as in a terminal
+      row = { launchId: 'l2', desired: 'off', advertised: reservation({ number: 8 }) }; // the record lands, binding nothing
+      draws.status(withPlugin(OLDER, AT, { launchId: 'l2', launchedAt: T(2) }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // A3, B10
+      expect(changed).not.toContain(`${APP}:maws`);
     });
 
-    it('no advertisement with the plugin loaded: mod, as in a terminal; with none applicable: MAWS', async () => {
-      row = { launchId: null, desired: 'off', advertised: reservation({ number: null, plugin: true }) };
+    it('A3, B8, B10 · an earlier build’s launch after a reservation this build left unbound: read from desired; lane off with the plugin present: mod at once', () => {
+      row = { launchId: 'l-earlier', desired: 'external-style-plus-supplement', advertised: reservation({ number: 9 }) };
+      list([status({ launchId: 'l-earlier' })]);
+      expect(draws.drawnBy(APP)).toBe('maws'); // 8
+      row = { ...row, desired: 'off' };
+      draws.status(status({ launchId: 'l-earlier' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // B8: nothing, plugin unknown, not reported
+      draws.status(withPlugin(OLDER, AT, { launchId: 'l-earlier' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // B10: present, its read outstanding
+      draws.status(withPlugin(null, T(5), { launchId: 'l-earlier' }));
+      expect(draws.drawnBy(APP)).toBe('maws'); // B11
+    });
+
+    it('B8, B9, B10 · no advertisement: mod as the launch found the plugin, MAWS when it found none, mod once the plugin is present', () => {
+      row = bound('l1', null);
+      list([status()]);
+      expect(draws.drawnBy(APP)).toBe('mod');
+      row = { ...bound('l1', null), advertised: reservation({ launchId: 'l1', number: null, plugin: false }) };
       draws.status(status());
-      expect(draws.drawnBy(APP)).toBe('mod');
-      row = { launchId: null, desired: 'off', advertised: reservation({ number: null, plugin: false }) };
-      draws.status(status({ launchId: 'l2' }));
       expect(draws.drawnBy(APP)).toBe('maws');
-      draws.status(withPlugin(OLDER, AT, { launchId: 'l2' }));
-      await answer(0, false);
-      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(OLDER, AT));
+      expect(draws.drawnBy(APP)).toBe('mod'); // presence known at once, before its read answers
     });
 
     it('keeps one session’s facts apart from another’s', () => {
+      list();
       const other = 'app-other' as AppSessionId;
       draws.status(status());
       draws.status(status({ appSessionId: other, launchId: 'l9', process: 'exited' }));
