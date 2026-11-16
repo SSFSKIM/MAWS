@@ -1227,7 +1227,8 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
     let parts = [first];
     if (yield* inOneCall(m, n + 1, (work) => holds(ANCHOR_TAG_OPENING)(first, work))) {
       // an anchored message counts only when read whole: its read comments, written back by the same writer, are the
-      // text to the byte (a lead of the same anchor before it, or other words, read as the same comments; ruling B)
+      // text to the byte, and no comment's words hold a tag (the same anchor's message twice reads as led and writes back
+      // whole, the first's tag and the second's lead then inside the comment); ruling B
       const read = yield* inOneCall(m, ANCHOR_READ_WORK_PER_CHAR * n, (work) => {
         work.steps += ANCHOR_READ_WORK_PER_CHAR * n;
         return readAnchoredMessage(first);
@@ -1236,7 +1237,7 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
       const { comments, destination } = read;
       const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * n + 1, (work) => {
         work.steps += ANCHOR_WRITE_WORK_PER_CHAR * n + 1;
-        return commentsMessage(comments, destination) === first;
+        return commentsMessage(comments, destination) === first && comments.every((comment) => !comment.text.includes(ANCHOR_TAG_OPENING));
       });
       if (!whole) return none;
       parts = comments.map((comment) => comment.text);
