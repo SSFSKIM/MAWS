@@ -48,7 +48,7 @@ export interface ConnectorRowProps {
   revision: string | null;
   iconUrl: string | null;
   kindWord?: boolean; // under My items, All: "Connector" after the trailing controls, and the width of a last control
-  plugin?: { state: PluginRowState; name: string }; // a plugin's row: §E's table now, and its plugin's name as My items shows it
+  plugin?: { state: PluginRowState; name: string; revisionRead: boolean }; // a plugin's row: §E's table now, its plugin's name as My items shows it, and whether main has answered `revision` for the inventory's latest read
 }
 
 // What the row draws and sends for its kind: the name drawn and its marks, the words after the name, the second line, the
@@ -85,7 +85,7 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   const machine = signInMachineOf(row.kind === 'plugin' ? (plugin?.state.signIn ?? null) : session);
   const latest = useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null)));
   // a plugin's row shows a finished result against its revision (§E, "What a retained record is kept by")
-  const known = useKnownRevision(row.kind === 'plugin' ? kept : null, machine, revision, latest);
+  const known = useKnownRevision(row.kind === 'plugin' ? kept : null, machine, revision, plugin?.revisionRead ?? true, latest);
   const record = resultFor(latest, row.kind === 'plugin' ? known : fingerprint);
   const last = record?.event ?? null;
   const pluginView = row.kind === 'plugin' && plugin !== undefined ? pluginRowViewOf(plugin.state, record) : null;
@@ -178,14 +178,14 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   );
 }
 
-// A plugin's row's revision as last known: one not known (main's answer for a re-read still out) changes nothing, so a
-// result is not hidden while it is read again. A revision that changed (the plugin's key, installation, name, transport
-// or address moved) drops the ended record the row was showing (§E): the record was for what the row declared then. Only
-// a change this row saw, and only a record started from it, so another row of the same engine name, and the session's
-// dialog, keep theirs.
-function useKnownRevision(kept: Omit<SignInServer, 'machine'> | null, machine: SignInServer['machine'], revision: string | null, latest: SignInRecord | null): string | null {
+// A plugin's row's revision as last answered: while main's answer for a re-read is out the last one stands, so a result
+// is not hidden while it is read again; an answer is taken as it is, null included (a local command has no address, so
+// no revision). A revision that changed (the plugin's key, installation, name, transport or address moved) drops the
+// ended record the row was showing (§E): the record was for what the row declared then. Only a change this row saw, and
+// only a record started from it, so another row of the same engine name, and the session's dialog, keep theirs.
+function useKnownRevision(kept: Omit<SignInServer, 'machine'> | null, machine: SignInServer['machine'], revision: string | null, answered: boolean, latest: SignInRecord | null): string | null {
   const [known, setKnown] = useState(revision);
-  if (revision !== null && revision !== known) setKnown(revision);
+  if (answered && revision !== known) setKnown(revision);
   const seen = useRef(known);
   useEffect(() => {
     const before = seen.current;

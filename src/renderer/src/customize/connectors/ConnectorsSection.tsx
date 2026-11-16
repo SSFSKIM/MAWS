@@ -191,7 +191,10 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
     [engine, attached, attachedServers],
   );
   const attachedNames = useMemo(() => (attached !== null && attachedServers ? new Set(attachedServers.map((server) => server.name)) : null), [attached, attachedServers]);
-  const postureRead = useCatalogPostures(cwd, inventory, readAt).data;
+  const posturesQuery = useCatalogPostures(cwd, inventory, readAt);
+  const postureRead = posturesQuery.data;
+  // whether main has answered for the inventory's latest read (keyed by it): a failed read answers no revision
+  const revisionRead = postureRead !== undefined || posturesQuery.isError;
   const postures = postureRead?.servers;
   // by the file the entry is in too: two project files may configure one name with different endpoints
   const postureOf = (row: { name: string; scope: string; path: string }) => postures?.find((p) => p.name === row.name && p.scope === row.scope && p.path === row.path) ?? null;
@@ -207,7 +210,7 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
       const posture = postureRead?.plugins.find((p) => p.plugin === row.plugin && p.server === row.server && p.path === row.path) ?? null;
       const facts = { sessions: reporting, attached, attachedServers: attachedNames, attachedReadAt: read.readAt, cwd, list: pluginList, kept: inventory.plugins ?? [], posture: posture?.authPosture ?? null, revision: posture?.revision ?? null };
       const state = pluginRowStateOf(row, facts);
-      return { shadow: null, session: state.signIn, live: state.live, liveRead: state.liveRead, posture: facts.posture, fingerprint: null, revision: facts.revision, iconUrl: posture?.iconUrl ?? null, plugin: { state, name: pluginNameShown(row.plugin, pluginList) } };
+      return { shadow: null, session: state.signIn, live: state.live, liveRead: state.liveRead, posture: facts.posture, fingerprint: null, revision: facts.revision, iconUrl: posture?.iconUrl ?? null, plugin: { state, name: pluginNameShown(row.plugin, pluginList), revisionRead } };
     }
     const posture = postureOf(row);
     return {

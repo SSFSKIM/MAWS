@@ -86,7 +86,8 @@ export interface PluginRowState {
 }
 
 const SIGNS_IN: ReadonlySet<string> = new Set(['http', 'sse']);
-const VERDICTS: readonly PluginInSession[] = ['collision', 'other-plugin', 'other-version', 'not-reported'];
+// row 10's order (the architect's ruling of 2026-11-16 places `absent` after `other-version`)
+const VERDICTS = ['collision', 'other-plugin', 'other-version', 'absent', 'not-reported'] as const satisfies readonly Exclude<PluginInSession, 'ok'>[];
 const NOTHING = { signIn: null, openSession: false, notInAttached: false, live: undefined, liveRead: null } as const;
 const line = (text: string): PluginRowState => ({ text, tone: 'muted', blocking: true, ...NOTHING });
 
@@ -123,20 +124,20 @@ export function pluginRowStateOf(row: PluginRowModel, facts: PluginRowFacts): Pl
     return { ...said, text: state?.text ?? null, tone: state?.tone ?? 'muted', signIn: facts.revision === null ? null : admitted.appSessionId, notInAttached };
   }
   if (listing.length > 0) {
-    const verdicts = listing.map((session) => ({ session, verdict: verdictOf(session) }));
-    const first = VERDICTS.map((verdict) => verdicts.find((v) => v.verdict === verdict)).find((v) => v !== undefined);
-    switch (first?.verdict) {
+    // none of them admitted, so each verdict is one of row 10's
+    const verdicts = listing.map((session) => ({ session, verdict: verdictOf(session) as (typeof VERDICTS)[number] }));
+    const first = VERDICTS.map((verdict) => verdicts.find((v) => v.verdict === verdict)).find((v) => v !== undefined)!;
+    switch (first.verdict) {
       case 'collision':
         return line(C.collision(ownersOf(name, first.session.plugins).map((owner) => (owner.source === null ? owner.name : pluginNameShown(owner.source, list)))));
       case 'other-plugin':
         return line(C.otherPlugin);
       case 'other-version':
         return line(C.otherVersion);
+      case 'absent':
+        return line(C.absent);
       case 'not-reported':
         return line(C.notReported);
-      default:
-        // every listing session reported a list with no possible owner of the name: nothing observed to say, nothing offered
-        return { ...said, text: null, tone: 'muted', blocking: true };
     }
   }
   return { ...said, text: state?.text ?? null, tone: state?.tone ?? 'muted', openSession: true, notInAttached: facts.attachedServers !== null }; // row 11

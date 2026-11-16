@@ -91,6 +91,7 @@ export const CONNECTORS = {
   notInAttached: 'Not in the attached session',
   otherPlugin: 'That session loaded this connector’s name from another plugin.',
   otherVersion: 'That session loaded another version of this plugin. Start a new session, then sign in.',
+  absent: 'That session loaded no plugin that supplies this connector.', // the architect's ruling of 2026-11-16
   notReported: 'Send a message in that session, then sign in.',
   // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §E): a custom connector's sheet
   addCustom: 'Add custom connector…',
