@@ -620,7 +620,10 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   });
 
   // Decision Log 53: the reader takes A + G + A whole for one answer (`parseAskSteer` pairs the first tag with the last
-  // result block); the spanning case ticket 704 forbids, read the same in both forms
+  // result block); the spanning case ticket 704 forbids, read the same in both forms. Under rule R the queue's gate reads
+  // the grant in it (grants.test.ts), and this reading stays as it is (the architect's ruling of 2026-11-16: the file
+  // under-reads it, toward the button kept, the tracker row of Decision Log 53); ticket 704's link pins this case on the
+  // gate and on both routes afterwards
   it('(c3) one message of an answer, a grant and an answer again: one answer, no consent, no approval row, the blocked row not approved, in either form', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
