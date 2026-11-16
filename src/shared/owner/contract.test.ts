@@ -3,7 +3,7 @@ import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   carriesPluginMessageTool, CONTRACT_HEADER, LEGACY_CONTRACT_1, LEGACY_CONTRACT_5, LEGACY_CONTRACT_7, LEGACY_MESSAGE_TOOL_ALIAS, LEGACY_SUPPLEMENT_1, LEGACY_SUPPLEMENT_2, NATIVE_TO_HUMAN_ENV, PLUGIN_MESSAGE_TOOL_FROM,
-  STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
+  STYLE_CONTRACT_KEY, styleShape, SUPPLEMENT, SUPPLEMENT_HEADER, TO_HUMAN_CONTRACT_VERSION, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT, TO_HUMAN_SUPPLEMENT_VERSION,
 } from './contract';
 import { MAWS_MESSAGE_TOOL, PLUGIN_MESSAGE_TOOL } from './message-call';
 import type { MessageUuid } from '../graph/ids';
@@ -48,10 +48,17 @@ const wordsOf = (text: string) => text.split('\n').slice(1).join(' ').split(/\s+
 const MESSAGE_RULE = ['A message you send before another tool call goes through `mcp__maws__message` (its `text` the message, in Markdown), called in the same response as that tool call', 'written as text there, it comes back as a paraphrase that never reaches them'];
 
 // P4-R7z (the P4 spec's Decision Log 92): MAWS has no full contract of its own; the plugin's style carries the rule.
-describe('MAWS’s contract version: 8, no text of its own', () => {
+describe('MAWS’s contract version: 8 where MAWS draws, 9 where the mod does, no text of its own', () => {
   it('advertises 8, MAWS offering no message tool, above the plugin’s 6 and MAWS’s former 7', () => {
-    expect(TO_HUMAN_CONTRACT_VERSION).toBe(8);
-    expect(TO_HUMAN_CONTRACT_VERSION).toBeGreaterThan(LEGACY_CONTRACT_7.version);
+    expect(TO_HUMAN_MIRROR_VERSION).toBe(8);
+    expect(TO_HUMAN_MIRROR_VERSION).toBeGreaterThan(LEGACY_CONTRACT_7.version);
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A): the version is 9,
+  // the number a launch advertises where the mod draws MAWS's view; the mods list reads it
+  it('is 9, the number where the mod draws, one above the mirror’s', () => {
+    expect(TO_HUMAN_CONTRACT_VERSION).toBe(9);
+    expect(TO_HUMAN_CONTRACT_VERSION).toBe(TO_HUMAN_MIRROR_VERSION + 1);
   });
 
   it('a style carries the lane from the plugin’s 6 on, every later declaration of its shape too; no earlier one, and no marks style', () => {

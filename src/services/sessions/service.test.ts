@@ -15,7 +15,7 @@ import { directRouteRefusal } from './start-guards';
 import { RETRY_DETAIL, RETRY_REASON } from './resume'; // C3 corrective
 import { ScratchRepo } from '../../../test/support/scratch-repo'; // C12
 import { OwnerChannelLaunches } from '../owner/launch'; // P2-C
-import { LEGACY_CONTRACT_7, NATIVE_TO_HUMAN_ENV, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C
+import { LEGACY_CONTRACT_7, NATIVE_TO_HUMAN_ENV, TO_HUMAN_MIRROR_VERSION, TO_HUMAN_SUPPLEMENT } from '@shared/owner/contract'; // P2-C; U2b: the mirror's number by name
 import { userScopeProfile } from '@shared/engine/launch-profile'; // P4-A2
 import type { StartOptions } from '@shared/ipc/schema/session'; // P5 O7 M9
 import { ENGINE_ROUTE_MACHINE_CAPABILITY, PEER_CAPABILITIES } from '@shared/host/socket-protocol'; // P5 O7 M9
@@ -1123,11 +1123,13 @@ describe('P2-C: the to-human lane on the session service’s launches', () => {
     expect(bootstrap!.appSessionId).not.toBe(id);
     expect(bootstrap).not.toHaveProperty('appendSystemPrompt');
     expect(bootstrap!.extraSettings).toBeNull();
-    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_SUPPLEMENT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: '8' } } }); // P4-R7z: 8, MAWS offering no message tool
+    expect(launch).toMatchObject({ appSessionId: id, appendSystemPrompt: TO_HUMAN_SUPPLEMENT, extraSettings: { env: { [NATIVE_TO_HUMAN_ENV]: String(TO_HUMAN_MIRROR_VERSION) } } }); // P4-R7z: 8, MAWS offering no message tool; U2b: MAWS draws the view
     expect(launch).not.toHaveProperty('systemPromptSnapshot');
     const row = h.index.ownerChannel.session(id);
     expect(row).toMatchObject({ desired: 'external-style-plus-supplement', recorded: 'unrecorded', appended: true, snapshotOff: false, applied: 'external-style-plus-supplement' });
     expect(row?.launchId).toEqual(expect.any(String)); // the host's answer to this launch
+    // U2b: the advertisement was reserved before the send and bound to the host's answer
+    expect(row?.advertised).toMatchObject({ launchId: row?.launchId, number: TO_HUMAN_MIRROR_VERSION, plugin: true });
     expect(row?.enabledAt).not.toBeNull();
   });
 

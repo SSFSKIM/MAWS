@@ -1,12 +1,12 @@
 // Main's wiring of the owner channel's launch half: `mods.*` registered over the index with the app's switch from
 // settings, the config home from the engine's environment, and the host's event batches feeding the mismatch check.
-import { mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, SessionId } from '@shared/graph/ids';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { Settings } from '@shared/ipc/schema/settings';
 import type { HostState } from '@shared/ipc/schema';
@@ -79,7 +79,7 @@ describe('startOwnerChannel', () => {
   it('registers mods.* and ownerChannel.* over the index, the app switch read from settings at each call', async () => {
     pluginStyle();
     start();
-    expect([...handlers.keys()].sort()).toEqual(['mods.list', 'mods.setSessionOverride', 'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state']);
+    expect([...handlers.keys()].sort()).toEqual(['mods.list', 'mods.setFoldSummaries', 'mods.setSessionOverride', 'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.folds', 'ownerChannel.markRead', 'ownerChannel.state']);
     expect(await handlers.get('mods.list')!({})).toMatchObject([{ id: 'maws.to-human', enabled: true, source: SUPPLEMENTED }]);
     settings = { ...settings, mods: { toHuman: { enabled: false } } };
     expect(await handlers.get('mods.list')!({})).toMatchObject([{ enabled: false, source: 'off' }]);
@@ -101,6 +101,7 @@ describe('startOwnerChannel', () => {
     const decision = (desired: typeof SUPPLEMENTED | 'off') => ({
       appSessionId: a, kind: 'resume' as const, laneOn: true, override: 'inherit' as const, desired, recorded: 'unrecorded' as const, appended: desired !== 'off', snapshotOff: false, offUnavailable: false,
       applied: desired, style: desired === 'off' ? 'default' : 'doperpowers:to-human', decidedBy: desired === 'off' ? 'default' : 'doperpowers:to-human', styleUnresolved: null,
+      advertised: desired === 'off' ? null : 8, plugin: true, reserved: false, summariesOff: false, // U2b
     });
     launches.launched(decision('off'), { launchId: 'l1', at: '2026-10-09T09:00:00.000Z' });
     const block = {
@@ -127,7 +128,7 @@ describe('startOwnerChannel', () => {
     fire('session.eventBatch', { appSessionId: a, events: [block] });
     expect(projected.at(-1)!.items.map((item) => item.kind)).toEqual(['async_input']);
     launches.launched(
-      { appSessionId: a, kind: 'resume', laneOn: true, override: 'inherit', desired: 'off', recorded: SUPP, appended: false, snapshotOff: true, offUnavailable: false, applied: 'off', style: 'default', decidedBy: 'default', styleUnresolved: null },
+      { appSessionId: a, kind: 'resume', laneOn: true, override: 'inherit', desired: 'off', recorded: SUPP, appended: false, snapshotOff: true, offUnavailable: false, applied: 'off', style: 'default', decidedBy: 'default', styleUnresolved: null, advertised: null, plugin: true, reserved: false, summariesOff: false },
       { launchId: 'l2', at: '2026-10-09T11:00:00.000Z' },
     );
     expect(projected.at(-1)).toMatchObject({ appSessionId: a, items: [] });
@@ -161,7 +162,7 @@ describe('startOwnerChannel', () => {
     // and the mods row learn from the owner channel's own event
     expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { on: true, applied: null, pending: 'next-launch' } });
     launches.launched(
-      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: SUPPLEMENTED, recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: SUPPLEMENTED, style: 'default', decidedBy: 'default', styleUnresolved: null },
+      { appSessionId: a, kind: 'new', laneOn: true, override: 'inherit', desired: SUPPLEMENTED, recorded: 'unrecorded', appended: true, snapshotOff: false, offUnavailable: false, applied: SUPPLEMENTED, style: 'default', decidedBy: 'default', styleUnresolved: null, advertised: 8, plugin: true, reserved: false, summariesOff: false },
       { launchId: 'l1', at: 't' },
     );
     expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { lane: { on: true, applied: SUPPLEMENTED, pending: null, mismatch: null } } });
@@ -186,5 +187,38 @@ describe('startOwnerChannel', () => {
     expect(emitted.at(-1)).toMatchObject({ appSessionId: a, state: { marks: [{ question: { state: 'queued', text: 'Answering "Which backend?": SQLite' } }] } });
     channel.stop();
     expect(listeners.get('session.queue')).toEqual([]);
+  });
+
+  // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A, §M; M4)
+  describe('who draws, the mod’s file of summaries and the summaries’ switch', () => {
+    const ENGINE = '7a1b2c3d-4e5f-4a6b-8c7d-9e0f1a2b3c4d';
+
+    it('publishes drawnBy with every state, MAWS for a session at rest', () => {
+      start();
+      expect(handlers.get('ownerChannel.state')!({ appSessionId: a })).toMatchObject({ lane: { drawnBy: 'maws' } });
+    });
+
+    it('answers ownerChannel.folds from the engine’s config home, by the session’s engine session id', async () => {
+      const b = index.sessions.upsertFromSummary(summary({ sessionId: ENGINE as SessionId, directory: root })).record.appId;
+      start();
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: [] });
+      const folds = join(root, 'engine-config', 'to-human', 'folds');
+      mkdirSync(folds, { recursive: true });
+      writeFileSync(join(folds, `${ENGINE}.json`), JSON.stringify({ shape: 2, runs: [['toolu_1', 'toolu_3', 'Read the release notes; three breaking changes found']] }));
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: [{ first: 'toolu_1', last: 'toolu_3', summary: 'Read the release notes; three breaking changes found' }] });
+      writeFileSync(join(folds, `${ENGINE}.json`), JSON.stringify({ shape: 1, runs: [['toolu_1', 'toolu_3', 'A file of a release before the contract']] }));
+      expect(await handlers.get('ownerChannel.folds')!({ appSessionId: b })).toEqual({ runs: null });
+    });
+
+    it('writes the switch with mods.setFoldSummaries; two writes together leave the later, which mods.list answers', async () => {
+      pluginStyle();
+      start();
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: true }]);
+      await Promise.all([handlers.get('mods.setFoldSummaries')!({ on: true }), handlers.get('mods.setFoldSummaries')!({ on: false })]);
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: false }]);
+      expect(await handlers.get('mods.list')!({ appSessionId: a })).toMatchObject([{ summaries: false }]);
+      await handlers.get('mods.setFoldSummaries')!({ on: true });
+      expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: true }]);
+    });
   });
 });
