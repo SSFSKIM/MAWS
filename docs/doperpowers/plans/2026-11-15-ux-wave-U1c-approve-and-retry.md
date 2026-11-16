@@ -854,6 +854,35 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   4. `ownLines` is removed; `wordsBesideGrants` reads `personsLines`.
   5. The forged inputs live once in `test/support/rule-r.ts`, so every route reads the same texts.
   Date/Author: 2026-11-16, the rule-R worker; recorded by the controller.
+- Decision 59 (superseded in its exemption and L1 by Decision 61 and 62; the architect, 2026-11-16 (UTC), ruling 3865, with the coordinator's rulings on its exemption and its cost): rule R's step 1b.
+  - **The rule.** One list of the forms MAWS composes around a model's, a command's or a page's words (`COMPOSED_FORMS`, `src/shared/engine/composed-forms.ts`, a leaf). Each form carries its reader and two flags. The save rule builds `CLAIMED` from the forms flagged for saves. `personsLines`, after the sentence-whole step, reads no grant in a message whose joined text holds a form flagged for grants, its whole-sentence lines set aside.
+  - **For grants:** the linked read, the plan after a clear, the bash echo, the promotion head, a relay, an owner question's answer line, the anchor tag, the recorded slash-command form.
+  - **Not for grants:** the grant's own test (it would refuse every consent); the answer envelope's opening (the strict take-out and the tag test read envelopes); a typed slash command (its arguments are the person's typing).
+  - **Not for saves:** the anchor tag, which the save rule reads whole in a step of its own.
+  - **The exemption** (the coordinator's ruling): the whole-sentence lines are set aside by the same strict test as L1. A sentence's subject is a one-line JSON string between fixed words, so setting it aside removes only what a model chose as a subject.
+  - **L1:** a line that reads as a whole sentence is exempt from the tag test.
+  - **The accepted costs, as a person sees them:**
+    - an approval they pressed that the engine joins with an anchored comment, a promoted side question, a plan handed back or a relay reads approved, and after a reload the blocked row offers its button again;
+    - words they type that hold one of these forms' fixed words ("Implement this plan: …", "… then continue what you were doing: …") read no grant beside the sentence.
+
+    Both have tracker rows beside rule R's. Board ticket 733 (every MAWS writer of a model's or a page's text into a message of the person's origin applies the grant's test where it writes) is the writer-side follow-up.
+  - **Also:** the envelope slicer marks pasted lines with rule R's linear scan, and the cap of 64 is kept.
+  - **Built:** red at `8187e3512` and `da614d5d6`, the change at `24d142d25`.
+  Date/Author: 2026-11-16, the architect's ruling 3865 and the coordinator's rulings; built by the rule-R worker; recorded by the controller.
+- Decision 60 (the second review of rule R, through the coordinator, 2026-11-16):
+  - **R-2:** step 3 skips a line inside a pasted segment of the text as it came, or of what is left after the take-out (either marking only adds skips). Before this, an envelope taken out of one segment could let its opening tag pair with a later closing tag and free a sentence in the next segment. Red at `6b1e81e5b`, built at `97956a5d1` (`keptLines` in `ask-strict.ts`).
+  - **R-3:** the comments now say exactly what keeps an earlier block out (the tool's input requires a question's words, and the earlier sheet copied them into each answer; the answer's schema admits an empty one), and both are pinned (`b66af7fc6`).
+  - **R-4, R-5, C-3:** three tracker rows: the work pin's fitted constant; the corpus's one direction; the slicer marking pin's weakness.
+  Date/Author: 2026-11-16, the second reviewer and the coordinator; built by the rule-R worker; recorded by the controller.
+- Decision 61 (the architect, 2026-11-16 (UTC), on the task review of step 1b): step 1b's exemption is withdrawn.
+  - **The exemption, as built:** the forms flagged for grants were looked for with every whole-sentence line set aside. The coordinator ruled it so that a consent whose command quotes a form's words would keep its grant when joined.
+  - **How it was forged:** the task review wrote, by the real writer, a relay to an agent whose name (which the model controls, and which may hold a line break) holds a line break and the head of a consent sentence, for a command that quotes the relay's own words, with the relayed text as the sentence's end. One line was then exactly a sentence for the model's command. It was set aside, the relay's marker went with it, and the line was read as the person's grant.
+  - **The rule now:** the forms flagged for grants are looked for once on the whole joined text, with nothing set aside, and the save and grant readers differ in the flag alone. A finer detector, a form found only by a host-written constant that other host-written text precedes, was turned down: each form's safety would then rest on an argument about who wrote the text before its marker, one more reader of text a model partly wrote.
+  - **The accepted cost, as a person sees it:** a grant they pressed whose command quotes one of these forms' words reads approved alone. Joined by the engine with another message, it reads approved live and offers its button again after a reload, and one press recovers it.
+  - **Built:** red at `e3985514a`, the change at `69a511594`. The task review of that delta found the guard's per-form case chose its forms by the matcher under test and lacked the engine's recorded slash command: each form now declares its grant flag in the guard, the case asserts the matcher agrees, and the recorded command has its fixture (`d5e64565d`, tests only; a flag planted false for one VM run failed it twice). A peer relay whose address is shaped for a two-subject sentence is pinned as no grant there too.
+  Date/Author: 2026-11-16, the architect; built by the rule-R worker; recorded by the controller.
+- Decision 62 (the session that keeps master, 2026-11-16 (UTC)): L1 is struck, and no line is set aside from step 2's tag and fence test. Reason, verbatim: "every exemption on this surface has been the hole the next review found, and L1 rests on an assumption, a tag always at a line's start, that a join can break; its benefit, a consent whose subject holds the envelope's tag keeping its grant when joined, is rare and recoverable with one press". The cost: a pressed consent whose subject holds `[MAWS ask ` reads its grant alone, and none when joined (cost (b)'s tracker row). Built in `69a511594`.
+  Date/Author: 2026-11-16, the master session; built by the rule-R worker; recorded by the controller.
 
 ## Outcomes & Retrospective
 
