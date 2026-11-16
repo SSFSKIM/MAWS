@@ -1,5 +1,5 @@
-// One file's diff in the stack (UX wave U5b, M3; the execution document's §F; the successor of ReviewView.tsx, which the
-// acting pane still draws through until U5b-2 deletes both): the file's blocks in `@git-diff-view/react`, unified or
+// One file's diff in the stack (UX wave U5b, M3; the execution document's §F; the successor of Review's old one-file
+// viewer, which left the renderer for the desk's web app in U5b-2): the file's blocks in `@git-diff-view/react`, unified or
 // split, wrapped or not, highlighted through `@git-diff-view/shiki` (which shares C6's shiki and creates its
 // highlighter when imported, so it is imported here only). Loaded on first use through React.lazy behind the section,
 // so the main chunk carries none of the library, its stylesheet or the highlighter (ruled 2026-09-29, O2).

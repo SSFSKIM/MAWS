@@ -15,9 +15,9 @@ import { DiffModeEnum, DiffView } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { getDiffViewHighlighter } from '@git-diff-view/shiki';
 import { Component, useEffect, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { REVIEW_COPY } from '../copy';
-import { diffViewHunks, hunkAnchor } from './review-model';
-import type { ReviewMode } from './view-state';
+import { REVIEW_COPY } from '../../../../../src/renderer/src/tools/code/copy';
+import { diffViewHunks, hunkAnchor } from '../../../../../src/renderer/src/tools/code/review/review-model';
+import type { ReviewMode } from '../../../../../src/renderer/src/tools/code/review/view-state';
 
 type Highlighter = Awaited<ReturnType<typeof getDiffViewHighlighter>>;
 
