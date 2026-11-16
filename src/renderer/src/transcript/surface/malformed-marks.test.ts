@@ -13,11 +13,11 @@ import { afterEach, describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
-import { assistantInput } from '../renderer/src/transcript/surface/adapters';
-import { rowsOf, withAllExpanded } from '../renderer/src/transcript/model/derive';
-import { applyEvents, createState } from '../renderer/src/transcript/model/reduce';
-import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter } from './journal';
-import { Normalizer } from './normalizer';
+import { assistantInput } from './adapters';
+import { rowsOf, withAllExpanded } from '../model/derive';
+import { applyEvents, createState } from '../model/reduce';
+import { JOURNAL_MAX_BYTES, JournalReader, JournalWriter } from '../../../../engine-host/journal';
+import { Normalizer } from '../../../../engine-host/normalizer';
 
 const MALFORMED = {
   'a mark left open in a completed text': 'Checked the tree. <message>The fixtures are ready and the suite',
