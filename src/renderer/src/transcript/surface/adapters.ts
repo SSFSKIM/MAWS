@@ -30,20 +30,45 @@ export function userInput(row: RowOf<'user'>, turn: TurnState | undefined, revea
   return { instanceId: row.messageUuid ?? row.id, props: { text: row.text, origin: { kind }, isExpanded: true } };
 }
 
+// UX wave U2b (panel finding 4): what a text's ask reads of its turn's live text blocks, indexed in one pass for each live
+// map (the reducer replaces it whenever the turn changes), so a turn's text rows do not each walk its blocks: by API
+// message, its first text block's index; by API message and message uuid, its first block's; by API message and row,
+// the first such block's delivered text.
+interface TextBlocks { firstOfApi: Map<string, number>; firstOfMessage: Map<string, number>; sourceOf: Map<string, string | undefined> }
+const textBlocksCache = new WeakMap<TurnState['live'], TextBlocks>();
+const pairKey = (a: string, b: string) => `${a}\u0000${b}`;
+function textBlocksOf(live: TurnState['live']): TextBlocks {
+  const cached = textBlocksCache.get(live);
+  if (cached) return cached;
+  const index: TextBlocks = { firstOfApi: new Map(), firstOfMessage: new Map(), sourceOf: new Map() };
+  const lower = (map: Map<string, number>, key: string, value: number) => {
+    const known = map.get(key);
+    if (known === undefined || value < known) map.set(key, value);
+  };
+  for (const b of live.values()) {
+    if (b.blockType !== 'text' || b.apiMessageId === null) continue;
+    lower(index.firstOfApi, b.apiMessageId, b.blockIndex);
+    if (typeof b.messageUuid === 'string') lower(index.firstOfMessage, pairKey(b.apiMessageId, b.messageUuid), b.blockIndex);
+    const rowKey = pairKey(b.apiMessageId, b.rowId);
+    if (!index.sourceOf.has(rowKey)) index.sourceOf.set(rowKey, b.sourceText);
+  }
+  textBlocksCache.set(live, index);
+  return index;
+}
+
 export function assistantInput(row: RowOf<'assistant_text'>, turn: TurnState | undefined, revealed?: RowId | CellId): RowInput<'AssistantMessage'> | null {
   if (!row.markdown.trim() || row.id === revealed) return null;
   const identity = row.id.slice(row.id.indexOf(':') + 1);
   const api = identity.slice(0, identity.lastIndexOf(':'));
-  const peers = [...(turn?.live.values() ?? [])].filter((b) => b.blockType === 'text' && b.apiMessageId === api);
-  const firstIndex = peers.length ? Math.min(...peers.map((b) => b.blockIndex)) : row.blockIndex;
-  const sameMessage = peers.filter((b) => b.messageUuid === row.messageUuid);
-  const firstMessageBlock = sameMessage.length ? Math.min(...sameMessage.map((b) => b.blockIndex)) : row.blockIndex;
+  const blocks = turn === undefined ? undefined : textBlocksOf(turn.live);
+  const firstIndex = blocks?.firstOfApi.get(api) ?? row.blockIndex;
+  const firstMessageBlock = (row.messageUuid === null ? undefined : blocks?.firstOfMessage.get(pairKey(api, row.messageUuid))) ?? row.blockIndex;
   // The terminal passes messageUuid unqualified (chunk-5s6b4r7q, af -> Qs). MAWS can mount multiple blocks of that
   // UUID together: keep its first identity and qualify later ones so one instance never races another's props.
   const instanceId = row.messageUuid === null ? row.id : row.blockIndex === firstMessageBlock ? row.messageUuid : `${row.messageUuid}:text:${row.blockIndex}`;
   // MessageDisplay may replace tags with ANSI headers that another mod understands. Native markdown is stripped;
   // the hook contract is the engine's delivered block, not MAWS's plain drawing of it.
-  const text = peers.find((block) => block.rowId === row.id)?.sourceText ?? row.markdown;
+  const text = blocks?.sourceOf.get(pairKey(api, row.id)) ?? row.markdown;
   return { instanceId, props: { text, isFirstOfReply: row.blockIndex === firstIndex } };
 }
 
