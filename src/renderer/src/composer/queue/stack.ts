@@ -9,8 +9,9 @@
 //
 // A waiting message that is MAWS's answer envelope reads as the answer (UX wave U4b, X-049;
 // docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 2 and 3): whether it is one, from
-// the reader's class, read as the split reads a person's message (`answerEnvelopeOf`; ticket 704); each question's title as its ask's capsule shows it, from the ask's row
-// where the window holds it; each answer in the capsule's words (`askAnswerCopy`).
+// the reader's class, read as the split reads a person's message (`answerEnvelopeOf`; ticket 704); each question's
+// title as its ask's capsule shows it, from the ask's row where the window holds it; each answer in the capsule's words
+// (`askAnswerCopy`).
 // A waiting message that holds an attachment beside the envelope is no answer row (the architect's rule, ticket 704): it
 // stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
 // message and keeps its reading.

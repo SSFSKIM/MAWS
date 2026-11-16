@@ -69,8 +69,8 @@ const isPersons = (message: UserMessage): boolean => !message.isSynthetic && mes
  * or passed over as an answer only where it holds (the Decision Log's ruling of 2026-11-16).
  */
 export function answerEnvelopeOf(content: Content): Extract<Arrival, { class: 'answer' }> | null {
-  const [block, ...more] = typeof content === 'string' ? [] : content;
-  const text = typeof content === 'string' ? content : more.length === 0 && block?.type === 'text' && typeof block.text === 'string' ? block.text : null;
+  const only = typeof content === 'string' || content.length !== 1 ? null : content[0]!;
+  const text = typeof content === 'string' ? content : only?.type === 'text' && typeof only.text === 'string' ? only.text : null;
   return text === null ? null : readAnswerEnvelope(text);
 }
 
