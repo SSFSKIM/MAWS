@@ -24,7 +24,8 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { StoredRun } from '@shared/owner/folds';
 import { ipc } from '../ipc/client';
-import type { Row } from '../transcript/model/rows';
+import type { TurnState } from '../transcript/model/reduce';
+import type { Row, TurnId } from '../transcript/model/rows';
 
 /** A round's reads, in milliseconds after it starts (decision 29). */
 export const ROUND_AFTER_MS: readonly number[] = [3_000, 8_000, 20_000, 45_000];
@@ -205,14 +206,17 @@ export interface FoldMoments {
 }
 
 /**
- * The stretches the drawn rows show closed, and the turns the rows show ended (`rows`: the rows the mirror ran over;
- * `drawn`: its output). Every record line's stretch has closed but the last one's, which has closed once a row the
- * person reads stands after it (`lastStretchClosed`); a turn has ended once its line no longer reads working.
+ * The stretches the drawn rows show closed (`drawn`: the mirror's output), and the turns that have ended, read from the
+ * turns' own state, since a turn of text alone draws no turn line (fix wave 2). Every record line's stretch has closed
+ * but the last one's, which has closed once a row the person reads stands after it (`lastStretchClosed`). A turn has
+ * ended once its state is closed; while the session runs no turn (`working` false: its turn ended, or a session at
+ * rest), no turn of it is running.
  */
-export function foldMoments(rows: readonly Row[], drawn: readonly Row[]): FoldMoments {
+export function foldMoments(drawn: readonly Row[], turns: ReadonlyMap<TurnId, TurnState> | undefined, working: boolean): FoldMoments {
   const lines = drawn.flatMap((row) => (row.kind === 'record_fold' ? [row.stretch] : []));
   const closed = lastStretchClosed(drawn) ? lines : lines.slice(0, -1);
-  const ended = rows.flatMap((row) => (row.kind === 'divider' && row.state !== 'working' && row.turnId !== null ? [row.turnId] : []));
+  const ended: TurnId[] = [];
+  for (const turn of turns?.values() ?? []) if (!working || turn.state === 'closed') ended.push(turn.id);
   return { closed, ended };
 }
 

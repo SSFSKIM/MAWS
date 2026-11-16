@@ -659,8 +659,8 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       return;
     }
     watch.current ??= momentWatch();
-    if (watch.current(foldMoments(queued, merged))) foldsMoved();
-  }, [mirrored, loaded, foldsMoved, queued, merged]);
+    if (watch.current(foldMoments(merged, useTranscriptStore.getState().entries[storeKey]?.state.turns, working))) foldsMoved();
+  }, [mirrored, loaded, foldsMoved, merged, working, storeKey]);
   const shown = useMemo(() => {
     if (startAt === undefined) return merged;
     const start = startAt(merged, loaded);
