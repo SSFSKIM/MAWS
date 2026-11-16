@@ -72,6 +72,9 @@ describe('the switch', () => {
     expect(rule('.owner-view-switch')).toMatch(/font-size:\s*var\(--text-ui\)/);
     expect(rule('.owner-view-switch > button')).toMatch(/font-size:\s*inherit/);
     expect(rule('.owner-view-switch')).not.toMatch(/margin|padding-top/);
+    // the caption's trailing space is drawn: a flex item drops it unless the span keeps white space (a drawn example
+    // showed "·full transcript"; `textContent` above cannot see it)
+    expect(rule('.owner-view-switch > span')).toMatch(/white-space:\s*pre/);
   });
 });
 
