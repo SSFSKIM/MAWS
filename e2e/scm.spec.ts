@@ -328,18 +328,18 @@ test.describe('source control over a scratch repository', () => {
         await expect(where(p)).toHaveAttribute('title', scratch.dir);
 
         // A part whose first read is still out (frames' S9): its heading alone, no count and no rows. The scratch's git
-        // holds the branch read's own run until the scene has looked; where the services ran another git, nothing was
-        // held and the state is said to be unstaged, not asserted.
-        await expect.poll(async () => scratch.readsHeld() || (await commitRows(p).count()) > 0, { timeout: 20_000, message: 'the branch read held, or answered' }).toBe(true);
-        if (scratch.readsHeld() && (await commitRows(p).count()) === 0) {
+        // (MAWS_GIT, which main's env carries to mawsd's git service) holds the branch read's own `rev-list` until the
+        // scene has looked, so the state is staged by construction: a read never held, or a row drawn while it is, fails.
+        try {
+          await expect.poll(() => scratch.readsHeld(), { timeout: 20_000, message: 'the branch read reaches the scratch’s git and is held' }).toBe(true);
           expect(await words(commitsHeading(p)), 'the first read out: the heading alone').toBe('Commits');
           await expect(commitsHeading(p).locator('[data-scm-count]')).toHaveCount(0);
+          await expect(commitRows(p), 'no row while the read is held').toHaveCount(0);
           await expect(part(p, 'commits').locator('[data-scm-commit-group]')).toHaveCount(0);
           said.push('first read out: "Commits" alone');
-        } else {
-          test.info().annotations.push({ type: 'skipped check', description: 'the branch read was not held (the services ran another git than the scratch’s): the outstanding state is not staged' });
+        } finally {
+          scratch.releaseReads(); // a failed step leaves no git process held behind it
         }
-        scratch.releaseReads();
 
         // The parts in order under the Where line
         expect(await page(p).locator('[data-scm-part]').evaluateAll((parts) => parts.map((el) => el.getAttribute('data-scm-part')))).toEqual(['uncommitted', 'commits', 'pr']);
