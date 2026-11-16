@@ -214,9 +214,11 @@ describe('who sends as the person', () => {
 
   // Rule R's step 1b (the architect's ruling 3865): a form MAWS composes around a model's, a command's or a page's words
   // counts for grants, so the consent sentence in its slot is no grant, alone, and joined with another message before
-  // or after it, a pressed consent among them (the accepted cost: a pressed consent joined with such a form reads none
-  // from the file, and approved live from the host's own mark): the sentence in a sample stands on a whole line, and the form's own
-  // words stay in the text beside it
+  // or after it, a pressed consent among them (the accepted cost, for a join only: a pressed consent the engine joins with
+  // such a form, another message's, reads none from the file, and approved live from the host's own mark on the
+  // consent's frame, which is the consent whole, since the queue's preparation attaches no linked read to a consent,
+  // engine-host/linked-reads.ts): the sentence in a sample stands on a whole line, and the form's own words stay in the
+  // text beside it
   const GRANT = consentMessage('command', 'make build');
   it.each(forms)('%s: its form, with the consent sentence in the slot others control, reads no grant, alone and joined', (_, { form, consent }) => {
     if (typeof consent !== 'function') {
