@@ -191,10 +191,10 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
     [engine, attached, attachedServers],
   );
   const attachedNames = useMemo(() => (attached !== null && attachedServers ? new Set(attachedServers.map((server) => server.name)) : null), [attached, attachedServers]);
-  const posturesQuery = useCatalogPostures(cwd, inventory, readAt);
-  const postureRead = posturesQuery.data;
-  // whether main has answered for the inventory's latest read (keyed by it): a failed read answers no revision
-  const revisionRead = postureRead !== undefined || posturesQuery.isError;
+  const postureRead = useCatalogPostures(cwd, inventory, readAt).data;
+  // whether main has answered for the inventory's latest read (keyed by it): only an answer counts, a null revision in it
+  // included; a failed read answers nothing, so the row keeps the revision it last knew
+  const revisionRead = postureRead !== undefined;
   const postures = postureRead?.servers;
   // by the file the entry is in too: two project files may configure one name with different endpoints
   const postureOf = (row: { name: string; scope: string; path: string }) => postures?.find((p) => p.name === row.name && p.scope === row.scope && p.path === row.path) ?? null;
