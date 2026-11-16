@@ -9,10 +9,14 @@
 import { askSteerOpening, LEFT_OUT } from './ask';
 import { AskResultSchema } from './tools';
 
-/** The work a reading did, counted where it is done: each line looked at, and each character of a block it parsed. */
+/**
+ * The work a reading did, counted where it is done: each line looked at, each character of a block it parsed, and the
+ * steps the readers of MAWS's composed forms charged (rule R's step 1b, engine/composed-forms.ts).
+ */
 export interface ReadingWork {
   lines: number;
   blockCharacters: number;
+  formSteps: number;
 }
 
 const TAGGED_ID = /^\[MAWS ask ([^\]\s]+)\] /;
