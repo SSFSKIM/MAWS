@@ -5,13 +5,14 @@
 import type { MessageUuid } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../../../test/support/fixtures';
+import { reportRows } from '../../owner/report/project';
 import { journalToEvents } from '../dev/journal';
 import { aboveLastCompaction, answerActionsOf, answerMarkdownOf } from './answer-actions';
 import { rowsOf } from './derive';
 import { turnId as turnIdOf } from './keys';
-import { applyEvents, createState, withUi } from './reduce';
+import { applyEvents, createState, withUi, type TranscriptState } from './reduce';
 import type { Row, RowId, TurnId } from './rows';
-import { builder, uuid } from './test-events';
+import { BASH_RESULT, builder, uuid } from './test-events';
 
 const AT = '2026-11-15T10:00:00.000Z';
 const turn = (name: string | null) => (name === null ? null : (`turn:${name}` as TurnId));
@@ -186,6 +187,49 @@ describe('a rewound branch (the branch panel’s finding 1)', () => {
     const gone = new Set(revealed.flatMap((row) => (row.kind === 'user' && row.turnId !== null && discarded.includes(row.turnId) ? [row.messageUuid] : [])));
     expect(gone.size).toBe(1);
     for (const entry of answerActionsOf(revealed, discarded).values()) expect(gone.has(entry.rewindTo)).toBe(false);
+  });
+});
+
+// The branch panel's finding 5 (ruled 2026-11-15 (UTC)): an answer of a turn that has not ended gets no action row on
+// any projection of the rows; the report projection's record that says working is a running turn. Through the real
+// projection, then the placement.
+describe('a turn that has not ended, in the report projection (the branch panel’s finding 5)', () => {
+  function runningMarkedTurn(): TranscriptState {
+    const b = builder();
+    b.turn('u1', 'Check the gauges.');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m2', 0, '<essential>All five stations are inside the limit.</essential>'); // a completed, marked answer; no turn.ended
+    const state = applyEvents(createState(null, null), b.events);
+    return withUi(state, { ...state.ui, ownerLane: true, version: state.ui.version + 1, global: state.ui.global + 1 });
+  }
+
+  it('the projection draws the running turn as a working record and its marked answer, with no turn line', () => {
+    const state = runningMarkedTurn();
+    const rows = reportRows(rowsOf(state), state, state.ui);
+    expect(rows.map((row) => row.kind)).toEqual(['time', 'user', 'owner_record', 'assistant_text']);
+    expect(rows.find((row) => row.kind === 'owner_record')).toMatchObject({ working: true });
+    expect(rows.find((row) => row.kind === 'assistant_text')).toMatchObject({ phase: 'answer', live: false });
+  });
+
+  it('gives that answer no action row: no Copy, no Fork, before the turn ends', () => {
+    const state = runningMarkedTurn();
+    expect([...answerActionsOf(reportRows(rowsOf(state), state, state.ui)).entries()]).toEqual([]);
+    expect([...answerActionsOf(rowsOf(state)).entries()]).toEqual([]); // the full transcript already holds it back, by its turn line
+  });
+
+  it('a record that does not say working leaves the answer its row once the turn ends', () => {
+    const b = builder();
+    b.turn('u1', 'Check the gauges.');
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+    b.text('m2', 0, '<essential>All five stations are inside the limit.</essential>');
+    b.end(['u1']);
+    const ended = applyEvents(createState(null, null), b.events);
+    const state = withUi(ended, { ...ended.ui, ownerLane: true, version: ended.ui.version + 1, global: ended.ui.global + 1 });
+    const rows = reportRows(rowsOf(state), state, state.ui);
+    expect(rows.find((row) => row.kind === 'owner_record')).toMatchObject({ working: false });
+    expect([...answerActionsOf(rows).values()]).toEqual([{ turnId: turnIdOf.ofMessage(uuid('u1')), rewindTo: null, fork: true }]);
   });
 });
 
