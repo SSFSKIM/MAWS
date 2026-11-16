@@ -1689,6 +1689,29 @@ describe('a framed file (UX wave U6b-2)', () => {
     expect(main.callsOf('layout.frameFile')).toHaveLength(1);
   });
 
+  // UX wave U6e arrived with the chain ("What this document assumes of landings in flight"): a tab that holds the agent's
+  // mark reads with `agent`, so its frame is asked with it too, at `frameAsk`; a person's tab asks without it.
+  it('a tab that holds the agent’s mark asks its frame with agent, and a person’s tab asks without it', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    act(() => void openFile(A, PDF, null, { main: true }));
+    const { rerender } = render(<FileViewer tab={fileTab(PDF)} agent />);
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: PDF, named: true, agent: true })]);
+    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: PDF, agent: true }]);
+    rerender(<FileViewer tab={fileTab(PDF)} />); // the person's open removes the mark, and the file is read again under it
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: MAIN_A, path: PDF });
+  });
+
+  it('the bar’s Open externally of a drawn file the agent’s tab holds passes agent', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    act(() => void openFile(A, PDF, null, { main: true }));
+    render(<FileViewer tab={fileTab(PDF)} agent />);
+    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
+    fireEvent.click(await screen.findByRole('button', { name: 'Open externally' }));
+    await waitFor(() => expect(main.callsOf('files.openExternal')).toEqual([{ appSessionId: MAIN_A, path: PDF, named: true, agent: true }]));
+  });
+
   it('an entry read by its artifact asks nothing and draws the row', async () => {
     const main = installFakeMain(async (name) =>
       name === 'library.read'

@@ -571,6 +571,16 @@ describe('layout value shapes', () => {
     expect(events['layout.frameFailed'].safeParse({ token: TOKEN, path: '/w/a.pdf' }).success).toBe(false);
   });
 
+  // UX wave U6e arrived with the chain (the U6b-2 document, "What this document assumes of landings in flight"): a frame
+  // asked for a tab that holds the agent's mark carries `agent`, as that tab's reads do; nothing else is admitted
+  it('takes agent on a file frame’s issue only as true', () => {
+    const frameFile = commands['layout.frameFile'];
+    expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf', agent: true }).success).toBe(true);
+    for (const agent of [false, 'true', 1, null]) {
+      expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf', agent }).success, JSON.stringify(agent)).toBe(false);
+    }
+  });
+
   // Edit ▸ Select All (sitting finding, 2026-09-30): the application menu's own item tells the page, with nothing to add
   it('carries the menu’s Select All to the page with an empty payload', () => {
     expect(events['layout.selectAll'].safeParse({}).success).toBe(true);

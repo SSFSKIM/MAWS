@@ -178,6 +178,27 @@ describe('layout.frameFile on this Mac', () => {
     expect((await l.get(clip.url)).headers.get('content-security-policy')).toBe(STORE_FRAME_CSP);
   });
 
+  // UX wave U6e arrived with the chain ("What this document assumes of landings in flight"): a frame asked with `agent`
+  // reads with it, at the head and at every range its token serves, so the daemon admits each read as the tab's own
+  it('a frame asked with agent reads with agent, its head and every range its token serves; one asked without reads without', async () => {
+    const l = await lab();
+    const path = join(l.root, 'ledger.pdf');
+    await writeFile(path, Buffer.from('%PDF-1.4\ninvented\n'));
+    const owner = l.pageOf(7);
+    const asked = await l.call<FrameAnswer>('layout.frameFile', { appSessionId: SESSION, path, agent: true }, owner);
+    if (!asked.ok || asked.value.status !== 'ready') throw new Error(`not ready: ${JSON.stringify(asked)}`);
+    expect((await l.get(asked.value.url)).status).toBe(200);
+    const reads = (l.read as ReturnType<typeof serviceRead>).asked.map(({ input }) => input);
+    expect(reads.length).toBeGreaterThanOrEqual(2);
+    for (const input of reads) expect(input).toMatchObject({ appSessionId: SESSION, path, raw: true, named: true, agent: true });
+    const before = reads.length;
+    const plain = await l.ready(path, owner);
+    expect((await l.get(plain.url)).status).toBe(200);
+    const after = (l.read as ReturnType<typeof serviceRead>).asked.slice(before).map(({ input }) => input);
+    expect(after.length).toBeGreaterThanOrEqual(2);
+    for (const input of after) expect(input).not.toHaveProperty('agent');
+  });
+
   it('answers unserved for a daemon that answers no identity or text, and unframed for a type no frame draws', async () => {
     const plain = (extra: Partial<FilesReadOutput>): RawRead => async () => ({ ok: true, value: { encoding: 'base64', content: '', bytes: 10, offset: 0, length: 0, truncated: true, mime: 'application/pdf', hash: null, utf8: null, ...extra } });
     const older = await lab({ read: plain({}) }); // a daemon that does not know `raw` drops it and answers the plain read
