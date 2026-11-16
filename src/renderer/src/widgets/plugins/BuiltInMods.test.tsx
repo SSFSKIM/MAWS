@@ -193,6 +193,29 @@ describe('the built-in mods section', () => {
       expect(screen.getByRole('listitem').querySelectorAll('[data-mod-pending]')).toHaveLength(pending === undefined ? 0 : 1);
     });
 
+    // Panel finding 3 (the coordinator's ruling): the switch is this machine's, so a write through one mounted list is
+    // main's word to every other (`mods.foldSummariesChanged`), each reading `mods.list` again; a list with no session
+    // (Customize with none attached) among them. Its next press writes the opposite of what the first wrote.
+    it('two mounted lists: one writes on, the other shows on, and that other’s next press writes off', async () => {
+      const first = render(<BuiltInMods appSessionId={APP} search="" />);
+      const other = render(<BuiltInMods appSessionId={null} search="" />);
+      const switchIn = (view: ReturnType<typeof render>) => within(view.container).getByRole('switch', { name: 'Summaries on fold lines' });
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      await act(() => fake.reply('mods.list', [{ ...WITH, summaries: false }]));
+      expect([switchIn(first).getAttribute('aria-checked'), switchIn(other).getAttribute('aria-checked')]).toEqual(['false', 'false']);
+      await act(async () => fireEvent.click(switchIn(first)));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: true }]);
+      await act(() => fake.reply('mods.setFoldSummaries', undefined));
+      await act(() => fake.reply('mods.list', [WITH])); // the writer's own read
+      act(() => fake.event('mods.foldSummariesChanged', {})); // main's word after the write
+      expect(fake.pending('mods.list')).toBe(2); // every mounted list reads again
+      await act(() => fake.reply('mods.list', [WITH]));
+      await act(() => fake.reply('mods.list', [WITH]));
+      expect([switchIn(first).getAttribute('aria-checked'), switchIn(other).getAttribute('aria-checked')]).toEqual(['true', 'true']);
+      await act(async () => fireEvent.click(switchIn(other)));
+      expect(fake.invoked('mods.setFoldSummaries')).toEqual([{ on: true }, { on: false }]);
+    });
+
     it('is drawn only where the row carries summaries (an earlier daemon’s row does not)', async () => {
       render(<BuiltInMods appSessionId={APP} search="" />);
       await act(() => fake.reply('mods.list', [ROW]));
