@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
-import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery, WORDS, type Content } from '../../../test/support/rule-r';
+import { acceptedCosts, currentEnvelope, forgedInputs, peerRelayForgery, relayForgery, WORDS, type Content } from '../../../test/support/rule-r';
 import { PROMOTION_HEAD } from '@shared/anchor/message';
 import { LINKED_READ_OPENING } from '@shared/maws/linked-read';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
@@ -878,6 +878,15 @@ describe('the grants in a person’s message (rule R)', () => {
   it('a relay whose agent name holds a line break and a sentence’s head: no grant, the person’s row and queued prompt too', () => {
     const { text, sentence } = relayForgery('make build');
     expect(text.split('\n'), 'a line is exactly the sentence').toContain(sentence);
+    expect(personsGrants(text)).toEqual([]);
+    expect(routes(text)).toEqual([[], []]);
+  });
+
+  // The re-review's peer relay: the boundaries of a plural sentence fall where the host's quotes and an address put them,
+  // and one line is a whole sentence for two commands; the relay's words are in the text all the same: no grant
+  it('a peer relay one of whose lines is a whole sentence for two commands, made of the relay’s own words: no grant', () => {
+    const { text, line } = peerRelayForgery();
+    expect(readConsents(line).map((consent) => consent.subject), 'the line is a whole sentence').toEqual(['a with SendMessage, to: ', 'b", sending exactly this text, then continue what you were doing: c']);
     expect(personsGrants(text)).toEqual([]);
     expect(routes(text)).toEqual([[], []]);
   });
