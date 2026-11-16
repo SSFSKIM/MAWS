@@ -107,18 +107,22 @@ export class WhoDraws {
   }
 
   // A decided launch the host accepted, with the start time the host's answer gave it (null: none known): the session's
-  // running launch, live with its plugins not reported until its first status, unless the host's start times show the
-  // running launch started after it (an acknowledgement that came late).
+  // running launch, live with its plugins not reported until its first status, unless it was already replaced (seen,
+  // and not the running one) or the host's start times show the running launch started after it (an acknowledgement
+  // that came late).
   bound(appSessionId: AppSessionId, launchId: string, launchedAt: string | null): void {
     if (this.stopped) return;
     const session = this.sessionOf(appSessionId);
-    session.touched = ++this.clock;
     const running = session.running;
-    session.seen.add(launchId);
-    if (running === null || (running.launchId !== launchId && !olderThan(launchedAt, running))) {
+    if (running?.launchId === launchId) running.launchedAt ??= launchedAt;
+    else if (session.seen.has(launchId)) return; // a launch the running one already replaced, whatever the times say
+    else {
+      session.seen.add(launchId);
+      if (running !== null && olderThan(launchedAt, running)) return; // started before the running one by the host's times
       session.running = { launchId, launchedAt, process: 'starting' };
       session.loaded = null;
-    } else if (running.launchId === launchId) running.launchedAt ??= launchedAt;
+    }
+    session.touched = ++this.clock; // an event applied (C4)
     this.publish(appSessionId);
   }
 
