@@ -1615,10 +1615,12 @@ function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['
 // UX wave U1c (Interfaces §C, 5): the person's words beside the grants a message's lines hold, when those grants are
 // exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
 // when the lines do not give the marks, when the content holds anything but text (an image, a document: the whole
-// bubble keeps it), or when the words cannot be told apart from content that is not one string.
+// bubble keeps it), or when the words cannot be told apart from content that is not one string. The lines read are the
+// person's own (UX wave U4b, `readAnswerEnvelopes`): MAWS's answer envelopes the engine joined in are no words of theirs,
+// so an envelope joined with grants and nothing else leaves no bubble (the chain merge with U4b's joined answer).
 function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
   if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
-  const text = messageText(content);
+  const text = readAnswerEnvelopes(messageText(content)).rest;
   const whole = readConsents(text);
   const lines = whole.length > 0 ? [{ line: text, grants: whole }] : text.split('\n').map((line) => ({ line, grants: readConsents(line) }));
   const grants = lines.flatMap((line) => line.grants);
