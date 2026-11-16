@@ -212,7 +212,7 @@ describe('the pull request’s state line and checks (S5, S6; frames’ S11)', (
 
   it('counts the checks in the card’s words, lists failed, cancelled and pending rows in that order, and folds the passed and skipped in the answer’s order', () => {
     const items = [check('build', 'pass'), check('integration', 'pending'), check('docs', 'skipping', null), check('e2e', 'cancel'), check('unit tests', 'fail'), check('lint', 'pass'), check('types', 'pass')];
-    const checks = checksOf(prOf({ checks: { summary: 'fail', items } }));
+    const checks = checksOf(prOf({ checks: { summary: 'fail', items } }))!;
     expect(checks.counts).toBe('3 passed · 1 failed · 1 cancelled · 1 pending · 1 skipped');
     expect(checks.attention.map((c) => [c.name, c.bucket])).toEqual([
       ['unit tests', 'fail'],

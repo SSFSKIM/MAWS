@@ -181,7 +181,7 @@ export const SCM_COPY = {
   uncommitted: 'Uncommitted',
   review: 'Review ›',
   conflicts: (n: number) => `· ${formatCount(n)} ${n === 1 ? 'conflict' : 'conflicts'}`, // frames' S14
-  commits: 'Commits',
+  commitsPart: 'Commits',
   since: (base: string) => `since ${base}`,
   latestOn: (branch: string) => `· latest on ${branch}`, // frames' S8: "Commits · latest on <branch>"
   latest: '· latest', // and on a detached HEAD, "Commits · latest"

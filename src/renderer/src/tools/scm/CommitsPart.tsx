@@ -39,9 +39,9 @@ export function CommitsPart({ appSessionId, status, serves, read, mark, ui, scro
   const state = commitsState(serves, read, mark.offline);
   if (state.kind !== 'ready') {
     return (
-      <Part name="commits" label={SCM_COPY.commits}>
+      <Part name="commits" label={SCM_COPY.commitsPart}>
         <div data-scm-commits-heading className="flex min-h-6 min-w-0 items-center">
-          <span className="shrink-0 text-fg-muted">{SCM_COPY.commits}</span>
+          <span className="shrink-0 text-fg-muted">{SCM_COPY.commitsPart}</span>
           {state.kind === 'failed' && state.refresh && <RefreshButton label={REVIEW_COPY.retry} title={REVIEW_COPY.retry} onClick={retry} />}
         </div>
         {state.kind === 'failed' && (
@@ -92,7 +92,7 @@ function CommitsList({ appSessionId, status, answer, ui, scroller }: { appSessio
   }, [whole, scroller]);
 
   return (
-    <Part name="commits" label={SCM_COPY.commits}>
+    <Part name="commits" label={SCM_COPY.commitsPart}>
       <Heading ref={heading} heading={list.heading} review={list.review} appSessionId={appSessionId} />
       {list.sections.map((section, i) => (
         <div key={section.group?.kind ?? i} className="flex min-w-0 flex-col">
@@ -125,7 +125,7 @@ function Heading({ ref, heading, review, appSessionId }: { ref: RefObject<HTMLDi
   return (
     <div ref={ref} data-scm-commits-heading className="relative flex min-h-6 min-w-0 items-center">
       <span data-scm-fixed className="shrink-0 whitespace-nowrap pr-1.5 text-fg-muted">
-        {SCM_COPY.commits}
+        {SCM_COPY.commitsPart}
       </span>
       {heading.kind === 'since' ? (
         <>
