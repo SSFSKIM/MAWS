@@ -19,7 +19,7 @@ import { ipc } from '../../ipc/client';
 import { useSessionControls } from '../../session/controls/controls-for'; // P5 O9 M4
 import { clearStackNotice, setSendingNow, setStackOpen, useComposerStore } from '../../stores/composer';
 import type { SessionQueue } from '../../stores/queue';
-import { deleteRefusal, sendNowRefusal, stackActs, takeBackRefusal, useRead, useRefusals, type Acts, type Refusals } from './stack-acts';
+import { deleteRefusal, sendNowRefusal, sendsWithNextStep, stackActs, takeBackRefusal, useRead, useRefusals, type Acts, type Refusals } from './stack-acts';
 import { isWaiting, rowText, STACK_WORDS, stackRows, type StackRow, type TakenRow, type WaitingRow } from './stack';
 
 export const SUBMITTING_VISIBLE_MS = 300;
@@ -102,7 +102,7 @@ function useLastingSubmissions(entries: readonly QueueEntry[]): ReadonlySet<stri
 
 export function QueueList({ appSessionId, queue, busy, client = ipc, onTakeBack }: QueueListProps) {
   const controls = useSessionControls(appSessionId, { client });
-  const acts = useMemo(() => stackActs(appSessionId, controls), [appSessionId, controls]);
+  const acts = useMemo(() => stackActs(appSessionId, controls, client), [appSessionId, controls, client]);
   const lasting = useLastingSubmissions(queue.entries);
   const read = useRead(appSessionId);
   const rows = useMemo(() => stackRows(queue, lasting, read), [queue, lasting, read]);
@@ -269,7 +269,9 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
   const sendRefused = sendNowRefusal(refusals, row);
   const editRefused = takeBackRefusal(refusals, row);
   const deleteRefused = deleteRefusal(refusals, row);
-  const sendTitle = sendRefused ?? (!busy ? STACK_WORDS.sendNow : row.kind === 'next' && nextKeys.length > 1 ? STACK_WORDS.sendNowAll(nextKeys.length) : STACK_WORDS.sendNowWhileRunning);
+  // an after-the-turn row while a turn runs goes with every next-step row (U4b, decision 15), so its title counts them
+  const goesWith = row.kind === 'next' ? nextKeys.length : sendsWithNextStep(refusals, row, busy) ? nextKeys.length + 1 : 0;
+  const sendTitle = sendRefused ?? (!busy ? STACK_WORDS.sendNow : goesWith > 1 ? STACK_WORDS.sendNowAll(goesWith) : STACK_WORDS.sendNowWhileRunning);
   const move = row.kind === 'next' ? 'Queue for after the turn' : row.kind === 'after' && busy ? 'Send at the next step' : null;
   return (
     // over the end of the text, behind a short fade; drawn on the row's hover or keyboard focus
@@ -277,7 +279,7 @@ function RowControls({ row, busy, acts, refusals, inFlight, nextKeys, run, onTak
       <button type="button" aria-label="Send now" title={sendTitle} className={ICON_BUTTON} disabled={inFlight || sendRefused !== null} onClick={() => void run(row.key, () => acts.sendNow(row, nextKeys))}>
         <SendNowGlyph />
       </button>
-      {!row.answer && (
+      {row.answer === null && (
         <>
           <button type="button" aria-label="Delete" title={deleteRefused ?? undefined} className={ICON_BUTTON} disabled={inFlight || deleteRefused !== null} onClick={() => void run(row.key, () => acts.remove(row))}>
             <BinGlyph />

@@ -13,7 +13,7 @@ import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixt
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
 import { isPersistentRow, rowsOf, turnRows, withAllExpanded, withQueueTail } from './derive';
-import { NOTICE } from './copy';
+import { dividerCopy, NOTICE } from './copy';
 import { rowId, turnId } from './keys';
 import { applyEvents, createState, type TranscriptState } from './reduce';
 import type { Row } from './rows';
@@ -159,9 +159,9 @@ describe('metadata before an arrival', () => {
 });
 
 describe('what stays through a fold (Interfaces D)', () => {
-  // an answer stays until U1b fills the question's row with it (the architect's ruling of 2026-11-13): the to-human
-  // report never shows a question without its answer
-  it('a task’s end with an outcome, a scheduled fire and an answer stay; a notice with no outcome, the wake and every message fold', () => {
+  // UX wave U1b (decision 9, U3a's hand-over): the question's own row carries the answer now, so the answer's line folds
+  // with the turn it reached the agent in; it is still derived there
+  it('a task’s end with an outcome and a scheduled fire stay; an answer, a notice with no outcome, the wake and every message fold', () => {
     const b = builder();
     engineTurn(b);
     carry(b, 'n1', [task()]);
@@ -177,9 +177,27 @@ describe('what stays through a fold (Interfaces D)', () => {
     b.text('m1', 0, 'Done.');
     endEngine(b);
     const folded = shown(rowsOf(reduce(b.events)));
-    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'divider', 'notice:task:failed', 'notice:schedule:null', 'notice:answer:null', 'assistant_text']);
+    expect(folded.map((row) => (row.kind === 'notice' ? `notice:${row.class}:${row.outcome}` : row.kind))).toEqual(['notice:task:completed', 'divider', 'notice:task:failed', 'notice:schedule:null', 'assistant_text']);
     const all = shown(expanded(b.events));
-    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['divider', 'cell', 'notice:task', 'notice:wake', 'agent_message', 'agent_message']);
+    expect(all.filter((row) => !isPersistentRow(row)).map((row) => (row.kind === 'notice' ? `notice:${row.class}` : row.kind))).toEqual(['divider', 'cell', 'notice:task', 'notice:answer', 'notice:wake', 'agent_message', 'agent_message']);
+  });
+
+  // UX wave U1b (decision 9): the notice stays the head row a turn's `opener` is read from, so a turn the answer opened
+  // still reads as the person's, "Worked for"
+  it('an answer that opened a turn of work folds with it, and the turn still reads Worked for', () => {
+    const b = builder();
+    engineTurn(b);
+    carry(b, 'a1', [{ class: 'answer', tool: 'sminos', call: 'tu-ask', summary: 'The user answered: "Pick one?"="the first"', answers: null, dismissed: false }]);
+    b.toolUse('t1', 'Bash', { command: 'ls' });
+    b.result('t1', 'a');
+    b.text('m1', 0, 'Going with the first.');
+    endEngine(b);
+    const folded = shown(rowsOf(reduce(b.events)));
+    expect(kinds(folded)).toEqual(['divider', 'assistant_text']);
+    expect(of(shown(expanded(b.events)), 'notice').map((row) => row.class)).toEqual(['answer']);
+    const line = divider(folded);
+    expect(line.opener?.class).toBe('answer');
+    expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toMatch(/^Worked for /);
   });
 
   it('leaves a subagent’s started and finished rows as they were (l2-transcript-14)', () => {

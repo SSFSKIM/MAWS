@@ -6,7 +6,7 @@
 // `/<name> ` for the engine to parse from the prompt; an unavailable row stays put.
 import type { Editor, Range } from '@tiptap/core';
 import { useLayoutEffect, useMemo, useRef } from 'react';
-import { useRemoteUnavailable } from '../../lane-b/remote-unavailable';
+import { useForkUnavailable } from '../../lane-b/remote-unavailable';
 import { slashItems, type SlashItem, type SlashOrigin } from './items';
 import { Listbox, useListKeys, type PopupItem, type PopupProps } from './popup';
 import { paletteRows, rememberChosen } from './rank';
@@ -128,8 +128,9 @@ function Detail({ item, rowId }: { item: SlashItem; rowId: string }) {
 
 export function SlashPalette(props: PopupProps) {
   const { appSessionId, catalog, widgets, openWidget } = props.ctx;
-  // decision 18: `/fork` on another machine, greyed with U9's sentence while it cannot fork there
-  const forkRefused = useRemoteUnavailable(appSessionId, 'session.fork');
+  // decision 18: `/fork` on another machine, greyed with U9's sentence while it cannot fork there, and with the turn's
+  // words while a turn runs there (U4b, decision 11: the session menu's Fork reads the same)
+  const forkRefused = useForkUnavailable(appSessionId);
   const all = useMemo(() => slashItems(catalog, widgets, forkRefused === null ? {} : { fork: forkRefused }), [catalog, widgets, forkRefused]);
   const rows = useMemo(() => paletteRows(props.query, all).map((item) => rowOf(item, (name) => openWidget(name, ''))), [all, props.query, openWidget]);
   const { active, setActive, choose } = useListKeys(props, rows);

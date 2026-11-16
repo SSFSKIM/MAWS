@@ -9,6 +9,7 @@ import type { SendContent } from '@shared/engine/session-state-store';
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
+import { SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { DRAFT_CLAIM, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft } from '@shared/ipc/schema/session';
 import { Db } from '../../../../services/index/db';
 import { DraftStore } from '../../../../services/index/drafts';
@@ -31,7 +32,7 @@ import { attachmentsOf, type ComposerDoc } from '../editor/doc';
 import { draftOf } from '../editor/drafts';
 import { STACK_WORDS } from './stack';
 import { deleteRefusal, refusalsNow, takeBackRefusal } from './stack-acts';
-import { attachTakeBackBox, carryForward, readRecord, resetTakeBack, retryTakeBackLoad, SETTLE_RETRY_MS, stageMark, storeRefusesStage, TAKE_BACK_WORDS, takeBack, takingBack, WITHDRAW_WAIT_MS, type TakeBackBox, type TakeBackDeps } from './take-back';
+import { attachTakeBackBox, carryForward, readRecord, recordSaysRead, resetTakeBack, retryTakeBackLoad, SETTLE_RETRY_MS, stageMark, storeRefusesStage, TAKE_BACK_WORDS, takeBack, takingBack, WITHDRAW_WAIT_MS, type TakeBackBox, type TakeBackDeps } from './take-back';
 
 const APP = 'app-take' as AppSessionId;
 const U1 = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -68,6 +69,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
   let claimAnswer: string | null = null; // the claim answered with these words instead of by the store
   let settlesFailing = 0; // the next settling saves fail (the services do not answer)
   let readsFailing: false | 'timeout' | 'not-offered' = false; // a read of what is kept fails, or is not offered
+  let recordsFailing = 0; // the next reads of the record fail (the link is down, the call refused)
 
   const invoke = async (name: string, input: Record<string, unknown>) => {
     if (name === 'session.drafts.set') {
@@ -98,6 +100,10 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     }
     if (name === 'session.promptHistory') {
       log.push('record');
+      if (recordsFailing > 0) {
+        recordsFailing -= 1;
+        return { ok: false, error: { code: 'host_unavailable', message: 'the record could not be read' } };
+      }
       return { ok: true, value: over.history?.() ?? { events: [...events], complete: true } };
     }
     throw new Error(`unscripted ${name}`);
@@ -153,6 +159,7 @@ CREATE TABLE drafts (app_session_id TEXT PRIMARY KEY REFERENCES sessions(app_id)
     answerClaim: (words: string | null) => void (claimAnswer = words),
     failSettles: (count: number) => void (settlesFailing = count),
     failReads: (on: boolean | 'not-offered') => void (readsFailing = on === true ? 'timeout' : on),
+    failRecords: (count: number) => void (recordsFailing = count),
     /** The engine host's queue as the window's store lists it. */
     listed(queue: Partial<SessionQueue> = {}) {
       const steersNow = [...steers].map((messageUuid) => ({ messageUuid, content: TEXT, createdAt: SINCE }));
@@ -184,9 +191,9 @@ function box(free = true) {
 }
 
 const textOf = (doc: ComposerDoc | null | undefined): string => JSON.stringify(doc ?? null).match(/"text":"([^"]*)"/)?.[1] ?? '';
-const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE, answer: false, grant: null });
-const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE, answer: false, grant: null });
-const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE, answer: false, grant: null });
+const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE, answer: null, grant: null });
+const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE, answer: null, grant: null });
+const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE, answer: null, grant: null });
 const stageOf = (ref: MessageUuid, at = '2026-09-29T10:01:00.000Z') =>
   draftOf({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: TEXT }] }], attrs: { takeBack: { ref, kind: 'steer', since: SINCE } } }, at, { whole: true })!;
 const notice = () => useComposerStore.getState().stackNotices.get(APP)?.text ?? null;
@@ -853,5 +860,229 @@ describe('a message the record keeps listed', () => {
     expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
     expect(stageMark(w.store.get(APP))).toBeNull();
     expect(b.state.held.at(-1)).toBe(false);
+  });
+});
+
+// UX wave U4b (decision 12; Acceptance 14), on every route that has rows: a record that could not be asked (its call
+// failed: the link is down, the call was refused) is no answer. Nothing is loaded and nothing is settled; the stage stays
+// stored and the box held, and the record alone is asked again after the loop's wait, or, for a session over the link,
+// as soon as its machine's link opens again. Only a record that answers and cannot say loads the message under the line.
+describe('a record that could not be asked', () => {
+  const started = (w: ReturnType<typeof world>) => w.events.push({ kind: 'command.lifecycle', commandUuid: U1, state: 'started' } as unknown as PromptHistoryEvent);
+  const counted = (w: ReturnType<typeof world>, what: string) => w.log.filter((step) => step === what).length;
+
+  it('loads nothing and settles nothing while the call fails: the stage stays stored, the box held, and the record alone is asked again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdWithdrawals(true); // the withdrawal's answer never comes
+    w.failRecords(3);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    const still = () => {
+      expect(b.state.loaded).toEqual([]);
+      expect(stageMark(w.store.get(APP))).not.toBeNull();
+      expect(b.state.held.at(-1)).toBe(true);
+      expect(takingBack(APP)).toBe(true);
+      expect(notice()).toBeNull();
+      expect(counted(w, 'settle')).toBe(0);
+    };
+    expect(w.log).toEqual(['claim', 'cancel', 'record']);
+    still();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS); // the loop's wait, one second
+    expect(w.log).toEqual(['claim', 'cancel', 'record', 'record']);
+    still();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 2); // doubling
+    expect(w.log).toEqual(['claim', 'cancel', 'record', 'record', 'record']);
+    still();
+    // the engine took the message cancelled meanwhile: the record now answers, gone
+    w.steers.delete(U1);
+    w.row('cancel', null, U1);
+    w.listed();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 4);
+    await run;
+    expect(counted(w, 'cancel')).toBe(1); // asked again with no second withdrawal first
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(notice()).toBeNull(); // gone: no line
+    expect(stageMark(w.store.get(APP))).toBeNull();
+    expect(w.log.at(-1)).toBe('settle');
+  });
+
+  it('then the record answers: listed, the withdrawal is tried again and nothing had been loaded meanwhile', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdWithdrawals(true);
+    w.failRecords(1);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    w.holdWithdrawals(false);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS); // asked again: listed
+    expect(w.log).toEqual(['claim', 'cancel', 'record', 'record']);
+    expect(b.state.loaded).toEqual([]);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS); // the loop's wait for a name still listed, then the withdrawal
+    await run;
+    expect(w.log).toEqual(['claim', 'cancel', 'record', 'record', 'cancel', 'settle']);
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(notice()).toBeNull();
+  });
+
+  it('then the record answers: read, the agent having taken the message between the two reads, the stage is cleared and the box never held it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdWithdrawals(true);
+    w.failRecords(1);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    w.steers.delete(U1); // the agent took it
+    started(w);
+    w.listed();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS);
+    await run;
+    expect(b.state.loaded).toEqual([]);
+    expect(w.store.get(APP)).toBeNull();
+    expect(notice()).toBe(STACK_WORDS.readAlready);
+    expect(counted(w, 'cancel')).toBe(1);
+  });
+
+  it('a record that answers incomplete, with the call working, loads the message under the line that it may have been read', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world({ history: () => ({ events: [], complete: false }) });
+    w.steers.add(U1);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdWithdrawals(true);
+    w.failRecords(1);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    expect(b.state.loaded).toEqual([]);
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS);
+    await run;
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+    expect(notice()).toBe(TAKE_BACK_WORDS.mayHaveRead);
+  });
+
+  it('after a load, however often the settle is asked again, the record is not asked again', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    w.listed();
+    const b = box();
+    attachTakeBackBox(APP, b.api);
+    w.holdWithdrawals(true);
+    w.failRecords(1);
+    w.failSettles(4);
+    const run = takeBack(APP, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    w.steers.delete(U1);
+    w.row('cancel', null, U1);
+    w.listed();
+    await vi.advanceTimersByTimeAsync(SETTLE_RETRY_MS * 64);
+    await run;
+    expect(counted(w, 'settle')).toBeGreaterThan(1);
+    expect(counted(w, 'record')).toBe(2); // the failed read and the one that answered, none after the load
+  });
+});
+
+describe('a record that could not be asked, for a session over the link', () => {
+  const R = addressOf(OTHER_MACHINE, 'app-take' as AppSessionId);
+  const roster = (generation: number, capabilities?: string[]) =>
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-11-13T10:00:00.000Z', generation, carrier: 'relay', ...(capabilities !== undefined && { capabilities }) }]);
+  beforeEach(() => {
+    window.maws = preloadOf(fakeClient());
+    resetReaderRows();
+    resetRemoteDrafts();
+    resetRemoteLaneBStore();
+    roster(1, [SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY]);
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-take'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => {
+    useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    resetReaderRows();
+    resetRemoteDrafts();
+  });
+
+  it('asks again as soon as its machine’s link opens again, before the loop’s wait', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout'] });
+    const w = world();
+    w.steers.add(U1);
+    useQueueStore.setState((s) => ({ bySession: new Map(s.bySession).set(R, { entries: [], paused: false, pauseReason: null, steers: [{ messageUuid: U1, content: TEXT, createdAt: SINCE }], withdrawn: [], loaded: true }) }));
+    const b = box();
+    attachTakeBackBox(R, b.api);
+    w.holdWithdrawals(true);
+    w.failRecords(1);
+    const run = takeBack(R, next(U1), w.deps);
+    await vi.advanceTimersByTimeAsync(WITHDRAW_WAIT_MS);
+    expect(w.log.filter((step) => step === 'record')).toHaveLength(1);
+    w.steers.delete(U1);
+    w.row('cancel', null, U1);
+    roster(2, [SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY]); // the link opens again
+    await vi.advanceTimersByTimeAsync(0);
+    await run;
+    expect(w.log.filter((step) => step === 'record')).toHaveLength(2);
+    expect(b.state.loaded.map(textOf)).toEqual([TEXT]);
+  });
+});
+
+// UX wave U4b (decision 10): over the link a machine whose endpoint lists no `rl2.session-acts` runs services that do not
+// know the claim (the draft store learnt it after U9's landing), so Edit and ↑ are closed for its sessions from the first
+// draw, with no claim sent; a machine whose capabilities are not yet known is judged by the claim's answer, as before.
+describe('storeRefusesStage over the link', () => {
+  const R = addressOf(OTHER_MACHINE, 'app-take' as AppSessionId);
+  const roster = (capabilities?: string[], state: 'up' | 'connecting' = 'up') =>
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state, since: '2026-11-13T10:00:00.000Z', generation: 1, carrier: 'relay', ...(capabilities !== undefined && { capabilities }) }]);
+  beforeEach(() => {
+    window.maws = preloadOf(fakeClient());
+    resetRemoteLaneBStore();
+    useSessions.setState({ listed: new Map([[R, { ...remoteRow(OTHER_MACHINE, 'app-take'), appId: R }]]), listedMachines: new Set([OTHER_MACHINE]) });
+  });
+  afterEach(() => useSessions.setState({ listed: new Map(), listedMachines: new Set() }));
+
+  it('answers the machine’s sentence where its known capabilities lack `rl2.session-acts`, and refuses Edit on every row', () => {
+    roster(['rl2.executor.machine']); // build F's
+    expect(storeRefusesStage(R)).toBe(TAKE_BACK_WORDS.needsNewer('mini'));
+    expect(takeBackRefusal(refusalsNow(R), after('q-1'))).toBe(TAKE_BACK_WORDS.needsNewer('mini'));
+    expect(takeBackRefusal(refusalsNow(R), held('q-1'))).toBe(TAKE_BACK_WORDS.needsNewer('mini'));
+    expect(deleteRefusal(refusalsNow(R), after('q-1'))).toBeNull();
+    roster(['rl2.executor.machine', SESSION_ACTS_CAPABILITY]); // build G's
+    expect(storeRefusesStage(R)).toBeNull();
+  });
+
+  it('answers null while the machine’s capabilities are not known, and the first press then goes by the claim’s answer', async () => {
+    roster(undefined, 'connecting');
+    expect(storeRefusesStage(R)).toBeNull();
+    const w = world();
+    w.answerClaim(STALE_DRAFT_WORDS);
+    w.steers.add(U1);
+    attachTakeBackBox(R, box().api);
+    await takeBack(R, after('q-1'), w.deps);
+    expect(w.log).toEqual(['claim']);
+    expect(storeRefusesStage(R)).toBe(TAKE_BACK_WORDS.needsNewer('mini'));
+  });
+});
+
+// UX wave U4b (decision 13; Interfaces E): what a Delete shows is read from the record by the take-back's own reader
+describe('recordSaysRead', () => {
+  it('answers true only where the record says the agent read the message, and false where it could not be asked', async () => {
+    const asked = (answer: unknown) => ({ ...fakeClient().client, invoke: vi.fn(async () => answer) }) as unknown as MawsBridge;
+    const STARTED = { kind: 'command.lifecycle', commandUuid: U1, state: 'started' };
+    expect(await recordSaysRead(asked({ ok: true, value: { events: [STARTED], complete: true } }), APP, SINCE, U1)).toBe(true);
+    expect(await recordSaysRead(asked({ ok: true, value: { events: [], complete: true } }), APP, SINCE, U1)).toBe(false);
+    expect(await recordSaysRead(asked({ ok: true, value: { events: [{ ...STARTED, commandUuid: U2 }], complete: true } }), APP, SINCE, U1)).toBe(false);
+    expect(await recordSaysRead(asked({ ok: false, error: { code: 'host_unavailable', message: 'mini is offline' } }), APP, SINCE, U1)).toBe(false);
+    const client = asked({ ok: true, value: { events: [STARTED], complete: true } });
+    await recordSaysRead(client, APP, SINCE, U1);
+    expect(client.invoke).toHaveBeenCalledWith('session.promptHistory', { appSessionId: APP, since: SINCE });
   });
 });

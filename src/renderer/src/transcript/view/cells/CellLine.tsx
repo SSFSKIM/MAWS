@@ -3,14 +3,15 @@
 // `data-status`, so the line's text is the label alone. A standalone denied cell is itself focusable (tabindex -1,
 // scroll-margin) so the divider's count can land on it.
 import { createContext, useContext, type ReactNode } from 'react';
+import { selectWaitingByCall, useAttention } from '../../../stores/attention'; // UX wave U1b
 import { useTranscriptStore } from '../../../stores/transcript';
 import { DisclosureBody } from '../../../ui/disclosure';
-import { baseName, descriptionLabel, SHELL_CELL } from '../../model/copy';
+import { baseName, descriptionLabel, SHELL_CELL, waitingLabel } from '../../model/copy';
 import { blockedLabel, shellToolOf } from '../../model/cells';
 import { blockedStates, hiddenTurnsOf, isBlockedCell, lineNamesWhole, readsApproved, withoutRefusalText, type BlockedState } from '../../model/blocked'; // UX wave U1c
 import { shortCommand } from '../../model/short-command';
 import type { Cell, TurnId } from '../../model/rows';
-import { useTranscriptContext } from '../context';
+import { useRowSession, useTranscriptContext } from '../context';
 import { Chevron, CodeText, LineCounts } from '../rows/parts';
 import { CellDetailView } from './CellDetail';
 
@@ -70,6 +71,19 @@ export function CellLabel({ cell }: { cell: Cell }) {
   return <CodeText text={label} />;
 }
 
+// UX wave U1b (Interfaces §D "A call that waits"; the architect's ruling A3): a call the session's list names with a
+// permission prompt, whose delivery is not closed as answered elsewhere (decision 8a), reads "Waiting for approval: …"
+// as its run's line does, its glyph and label in the warning tone (transcript.css, `data-waiting`), with no line counts.
+// The session is the row's (a subagent's transcript reads its parent's list); a transcript with no session reads none.
+function useWaitsForApproval(cell: Cell): boolean {
+  const session = useRowSession();
+  return useAttention((state) => {
+    if (session === null || cell.toolUseId === null) return false;
+    const item = selectWaitingByCall(state, session).get(cell.toolUseId);
+    return item?.kind === 'permission' && state.deliveries.get(item.id)?.phase !== 'closed';
+  });
+}
+
 // UX wave U1c (Design 3; Interfaces §D): what the rule says of a blocked call's row, read from the store's rows (before
 // any projection, so a fold changes nothing it answers); undefined at once for every other cell
 function useBlockedState(storeKey: string, cell: Cell): BlockedState | undefined {
@@ -84,25 +98,27 @@ export function CellLine({ cell: model, turnId, focusable = false, renderDetail,
   const { storeKey, variant, actions } = useTranscriptContext();
   const blocked = useBlockedState(storeKey, model);
   const cell = blocked === undefined ? model : { ...model, label: blockedLabel(model, blocked) }; // UX wave U1c: "again", "· approved"
+  const waiting = useWaitsForApproval(cell);
   // UX wave U1c (Design 6; Interfaces §D): "Approve and retry" under a blocked row that does not read approved, in a
   // session's own transcript only (a subagent's grant never reaches the subagent: ruling J), where the mount supplies it;
   // the line wraps to hold the subject whole where it names it, else the control draws the subject itself
   const offered = blocked !== undefined && !readsApproved(blocked) && variant === 'session' && actions.renderBlockedCall !== undefined ? blocked : null;
   const onLine = offered !== null && lineNamesWhole(model, offered.call);
   const opened = withoutRefusalText(model); // UX wave U1c (M2 fix 1): an opened blocked row draws no refusal text as output
-  const counts = cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
+  const counts = !waiting && cell.detail.kind === 'edit' && !asLabelled(cell) ? EDIT_COUNTS.exec(cell.label) : null;
   return (
     <div
       className="transcript-cell"
       data-cell-id={cell.id}
       data-status={cell.status}
+      data-waiting={waiting ? '' : undefined}
       data-expanded={cell.expanded ? '' : undefined}
       data-names-whole={onLine ? '' : undefined}
       tabIndex={focusable ? -1 : undefined}
     >
       <button type="button" className="transcript-cell-line" title={cell.paths.length > 0 ? cell.paths.join('\n') : undefined} aria-expanded={cell.expanded} onClick={onToggle ?? (() => useTranscriptStore.getState().toggleCell(storeKey, cell.id))}>
         <span className="transcript-cell-label">
-          <CellLabel cell={cell} />
+          {waiting ? <CodeText text={waitingLabel(cell)} /> : <CellLabel cell={cell} />}
           {cell.error !== undefined && <>{' '}<span className="transcript-cell-reason">{cell.error}</span></>}
         </span>
         {counts && <LineCounts added={Number(counts[1])} removed={Number(counts[2])} />}

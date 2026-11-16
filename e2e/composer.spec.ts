@@ -21,9 +21,12 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
 import { consentMessage } from '../src/shared/engine/arrival';
-import { blockedTurnJournal, invoke, launchReady, promoteNowJournal, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { blockedTurnJournal, invoke, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
+import { askSteerText } from '../src/shared/maws/ask';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { ALLOW_ONCE_KEY, answerByKey, pastGrace, watchPrompts } from './support/request-keys';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -793,23 +796,25 @@ test('U4a, Send now: on a next-step row it writes the engine’s send-now reques
   expect(editor.consoleErrors()).toEqual([]);
 });
 
-// Send now on a row that waits after the turn (⌘Enter during a turn) is the queue's promote at `now` (decision 15), over
-// the engine's own answers to it (`promoteNowJournal`, `uxwave/u4p3-promote-late-1`): the replay holds at the recorded
-// `now` frame until the host writes it.
-test('U4a, Send now: on an after-the-turn row it promotes the message at priority now and pauses nothing; the turn ends for the message', async ({ editor }) => {
+// Send now on a row that waits after the turn (⌘Enter during a turn) while a turn runs is M3's conditional step (UX wave
+// U4b, decision 15; the Decision Log's line on the first Mac run): the queue's promote at `next`, and then the engine's
+// send-now request for the uuid it answered, over the engine's own answers (`sendNowAfterJournal`, `uxwave/u4b-two-1`,
+// early in the shell call with a message already waiting): the replay holds at each recorded write until the host
+// writes it, and holds the request to the promoted message's uuid.
+test('U4b, Send now: on an after-the-turn row while a turn runs it goes at the next step and then is sent now with the message waiting there, and pauses nothing; the turn ends for the message', async ({ editor }) => {
   const { page } = editor;
-  const id = 'u4a-send-now-after';
+  const id = 'u4b-send-now-after';
   await openComposerPage(page);
-  await launchReady(page, id, promoteNowJournal(scratch, id));
+  await launchReady(page, id, sendNowAfterJournal(scratch, id));
   await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
   await messageIn(page, 0).click();
   await page.keyboard.type('Run the long command in the foreground.');
-  await page.keyboard.press('Enter'); // seq 12; its Bash call then runs, a task from 37
+  await page.keyboard.press('Enter'); // seq 12; its Bash call then runs (32)
   await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   await expect.poll(async () => (await statusOf(page, id)).turn).not.toBeNull();
   const steered = 'Reply with one word at the next step.';
   await page.keyboard.type(steered);
-  await page.keyboard.press('Enter'); // at the next step (39)
+  await page.keyboard.press('Enter'); // at the next step (37)
   await expect(messageIn(page, 0), 'the box is cleared by the send before the next words are typed').toHaveText('');
   const later = 'Reply with another word now.';
   await page.keyboard.type(later);
@@ -819,27 +824,31 @@ test('U4a, Send now: on an after-the-turn row it promotes the message at priorit
   await expect(after).toContainText(later);
   await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === steered)?.priority).toBe('next');
   expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'kept for after the turn, not written').toBe(false);
-  const queued = (await queueOf(page, id)).entries.filter((e) => e.state === 'queued');
-  expect(queued).toHaveLength(1);
   const sendNow = after.getByRole('button', { name: 'Send now' });
   await expect(sendNow).toBeEnabled();
-  await expect(sendNow).toHaveAttribute('title', 'Sends this now; what the agent is running keeps running');
+  await expect(sendNow, 'the message goes with the one waiting at the next step').toHaveAttribute('title', 'Sends the 2 waiting messages now; what the agent is running keeps running');
   await clickRevealed(after, sendNow);
 
-  // the queue's promote at `now` (42): the message written at priority now, no send-now request, nothing held or paused
-  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === later)?.priority).toBe('now');
+  // the promote at `next` (40), then the request naming the promoted message (41); no frame at `now` for it, nothing
+  // held or paused
+  const interrupts = async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+  await expect.poll(async () => (await interrupts()).length).toBe(1);
   const frames = await outFrames(page, id);
-  expect(frames.some((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt'), 'a promote, not the send-now request').toBe(false);
+  const promoted = frames.findIndex((f) => f.type === 'user' && f.message?.content === later);
+  expect(frames[promoted]?.priority, 'the promote at the next step').toBe('next');
+  expect(frames.findIndex((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt'), 'the request after the promote’s frame').toBeGreaterThan(promoted);
+  expect((await interrupts())[0]!.request).toEqual({ subtype: 'interrupt', send_now: true, message_uuid: frames[promoted]?.uuid });
+  expect(frames.filter((f) => f.type === 'user' && f.message?.content === later).map((f) => f.priority), 'written once, at the next step, never at `now`').toEqual(['next']);
   expect(frames.some((f) => f.request?.subtype === 'cancel_async_message'), 'Send now holds nothing').toBe(false);
   expect((await queueOf(page, id)).paused).toBe(false);
-  expect((await queueOf(page, id)).entries.some((e) => e.queueId === queued[0]!.queueId && e.state === 'queued'), 'the entry left the queue').toBe(false);
+  expect((await queueOf(page, id)).entries.filter((e) => e.state === 'queued'), 'the entry left the queue').toEqual([]);
 
-  // the command moved (46) and the turn cut (`aborted_tools`, 49): its line reads "Ended for your message"; the promoted
-  // message runs as its own turn
+  // the command moved (46) and the turn cut (`aborted_tools`, 50): its line reads "Ended for your message"; both messages
+  // started (53, 54) and their rows leave
   const transcript = transcriptOf(page, 0);
   await expect(transcript).toContainText('Ended for your message after');
   await expect(transcript).not.toContainText('You stopped after');
-  await expect(transcript).toContainText(later);
+  await expect(list.locator('li')).toHaveCount(0);
   expect((await queueOf(page, id)).paused).toBe(false);
   expect(editor.consoleErrors()).toEqual([]);
 });
@@ -912,6 +921,56 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
   const released = async () => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.priority === undefined && (f.message?.content === first || f.message?.content === second)).map((f) => f.message?.content);
   await expect.poll(released).toEqual([first, second]); // the oldest at once (seq 199), the next when its turn ends
   await expect(list).toHaveCount(0);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 1 and 3): a question
+// the agent asked without waiting, answered while a turn runs, waits in the stack as what it is. The envelope MAWS sends
+// the model for one invented question is handed to the running turn through `session.steer`, as the answered sheet hands
+// it (the replay matches a user write by its type, not its text, so `steerStopJournal`'s steer at seq 146 takes it). The
+// window holds no row of the ask, so the row's title is the answer's own copy of the question. It offers Send now alone;
+// ↑ in the empty box skips it and walks the history; after the square's Stop it reads the same, marked Held.
+const ASKED: AskQuestion = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+const ANSWERED: AskAnswer = { id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] };
+const ANSWER_ROW = `Answer to ${ASKED.question}: Grid`; // Interfaces A: `answer(title, words)`, the title the answer's own question here
+
+test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers Send now alone, ↑ walks the history past it, and after Stop it reads the same, Held', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u4b-answer';
+  await countRunning(page, id, steerStopJournal(scratch, id));
+  const list = stackOf(page, 0);
+  const envelope = askSteerText('u4b-ask-1', [ASKED], [ANSWERED]);
+  value(await invoke(page, 'session.steer', { appSessionId: id as never, content: envelope, priority: 'next' }));
+
+  const row = list.locator('li[data-queue-state="next"]');
+  await expect(row.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
+  await expect(row.locator('[data-row-text]'), 'the whole line in its hover title').toHaveAttribute('title', ANSWER_ROW);
+  await expect(row.locator('[data-mark]')).toHaveText('Next step');
+  await expect(list, 'not the envelope’s opening words').not.toContainText('[MAWS ask');
+  await expect(row.getByRole('button', { name: 'Send now' })).toHaveCount(1);
+  await expect(row.getByRole('button', { name: 'Delete' }), 'an answer is not deleted or edited from the stack').toHaveCount(0);
+  await expect(row.getByRole('button', { name: 'More' })).toHaveCount(0);
+  await expect.poll(async () => (await outFrames(page, id)).find((f) => f.type === 'user' && f.message?.content === envelope)?.priority).toBe('next');
+
+  // ↑ in the empty box takes nothing back: the answer is skipped and the history walks to the session's prompt
+  await expect(messageIn(page, 0)).toHaveText('');
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0), 'the history’s newest entry, the running turn’s prompt').toHaveText(COUNT);
+  await expect(row.locator('[data-row-text]'), 'the answer still waits').toHaveText(ANSWER_ROW);
+  await page.keyboard.press('ArrowDown'); // back to the empty draft the walk began from
+  await expect(messageIn(page, 0)).toHaveText('');
+  expect((await outFrames(page, id)).some((f) => f.request?.subtype === 'cancel_async_message'), 'nothing was taken back').toBe(false);
+
+  // the square: the answer is held into MAWS's paused queue before the interrupt, and reads the same, marked Held
+  await expect(control(page, 0)).toHaveAttribute('data-submit-state', 'stop');
+  await control(page, 0).click();
+  await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
+  const held = list.locator('li[data-queue-state="held"]');
+  await expect(held.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
+  await expect(held.locator('[data-mark]')).toHaveText('Held');
+  await expect(held.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
+  expect((await queueOf(page, id)).paused).toBe(true);
   expect(editor.consoleErrors()).toEqual([]);
 });
 
@@ -1578,5 +1637,127 @@ test('plugin mode drawings stay inside a split composer while short labels remai
       await testInfo.attach(`plugin-mode-${index}-${width}x820`, { body: await toolbar.screenshot(), contentType: 'image/png' });
     }
   }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1b: the composer beside a waiting prompt ----------------------------------------------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Proof 1, `e2e:composer`; acceptance 1 and 2.)
+// The recorded permission round trip (`permission-roundtrip`, held at its answer, seq 50) in the session's transcript above
+// its composer: the prompt stands at the transcript's end and the composer is never replaced. ⌘Enter with a draft is the
+// composer's (§F: the claim yields to a draft) and keeps the message for after the turn, which writes nothing while the
+// turn runs, so the replay still holds at the answer; the message is taken back (↑, which needs the session's record:
+// launched under the scratch home's indexed session) and the box emptied, and ⌘Enter from the empty box then allows the
+// prompt, the one write the replay waits on.
+const PERMISSION_FIXTURE = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
+function firstRecordedPrompt(fixture: string): string {
+  for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
+    if (!line) continue;
+    const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
+    if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;
+  }
+  throw new Error(`${fixture} records no prompt`);
+}
+
+test('U1b, a prompt waits at the transcript’s end while the editor takes text: ⌘Enter with a draft queues it and leaves the prompt, with none it allows', async ({ editor }) => {
+  const { page } = editor;
+  await openComposerPage(page);
+  await watchPrompts(page);
+  let id = '';
+  await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
+  await launchReady(page, id, PERMISSION_FIXTURE);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(firstRecordedPrompt(PERMISSION_FIXTURE));
+  await page.keyboard.press('Enter');
+  const card = pane(page, 0).locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+  const allow = card.getByRole('button', { name: 'Allow once', exact: true });
+  await expect(allow, 'the prompt stands at the transcript’s end').toBeVisible();
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /).first(), 'the call says it waits').toBeVisible();
+  await expect(messageIn(page, 0), 'the composer is not replaced').toBeVisible();
+  await expect(messageIn(page, 0), 'nothing took the focus from the editor').toBeFocused();
+  await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
+  await expect(pane(page, 0).getByText('Composer paused')).toHaveCount(0);
+
+  // a draft: ⌘Enter is the composer's, kept for after the turn; the prompt, armed, still waits and nothing is written
+  await pastGrace(page, card);
+  const later = 'Then list the tags as well.';
+  await page.keyboard.type(later);
+  await page.keyboard.press(ALLOW_ONCE_KEY);
+  await expect(messageIn(page, 0), 'the box is cleared by the queue').toHaveText('');
+  await expect(stackOf(page, 0).locator('li[data-queue-state="after"]')).toContainText(later);
+  await page.waitForTimeout(300);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_response'), 'the prompt is not answered').toEqual([]);
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'the queued message is not written while the turn runs').toBe(false);
+  await expect(allow).toBeEnabled();
+
+  // taken back and emptied, so the turn's end releases nothing the replay did not record
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0)).toHaveText(later);
+  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'true');
+  await expect(stackOf(page, 0)).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await expect(messageIn(page, 0)).toHaveText('');
+
+  // none: ⌘Enter from the empty box allows the prompt, and the editor keeps the keyboard
+  await answerByKey(page, {
+    focus: messageIn(page, 0),
+    control: allow,
+    key: ALLOW_ONCE_KEY,
+    answered: async () => (await outFrames(page, id)).some((f) => f.type === 'control_response'),
+    what: id,
+  });
+  await expect(card).toHaveCount(0);
+  await expect(messageIn(page, 0)).toBeFocused();
+  await expect.poll(async () => (await statusOf(page, id)).turn, { message: 'the allowed command ran and the turn ended' }).toBeNull();
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U1b (acceptance 1's "Stop withdraws the prompt and its card leaves"; decision 22): the main loop's prompt waits
+// at the transcript's end and Stop is pressed. Over the engine's own frames (`stopPendingJournal`,
+// `uxwave/u1b-intpend-main-r1`): the replay holds at the recorded interrupt until the plain stop writes it, then plays
+// the engine's `control_cancel_request` for the request and the turn's end. The card leaves with no answer written: the
+// broker retires the item only on that cancel (broker.test.ts, probe 8), and a subagent's prompt, which gets none, stays
+// (prompt-keys.test.tsx).
+test('U1b, Stop while the main loop’s prompt waits: the interrupt is written, the engine cancels the request, and the card leaves unanswered', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u1b-stop-pending';
+  await openComposerPage(page);
+  await launchReady(page, id, stopPendingJournal(scratch, id));
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('Run the one shell command.');
+  await page.keyboard.press('Enter'); // seq 18; its Bash call then asks (39)
+  const card = pane(page, 0).locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+  await expect(card.getByRole('button', { name: 'Allow once', exact: true }), 'the prompt stands at the transcript’s end').toBeVisible();
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /).first()).toBeVisible();
+  await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
+  const ofSession = (appSessionId: string) => appSessionId === id || appSessionId.endsWith(`/${id}`); // bare, or addressed
+  const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((item) => ofSession(item.appSessionId) && (item.state === 'pending' || item.state === 'delivered'));
+  await expect.poll(async () => (await listed()).length, { message: 'the session’s one request is listed' }).toBe(1);
+
+  await control(page, 0).click();
+  const interrupts = async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+  await expect.poll(async () => (await interrupts()).length).toBe(1);
+  expect((await interrupts())[0]!.request, 'the plain stop’s interrupt, as recorded').toEqual({ subtype: 'interrupt', reason: 'user-cancel', cancel_queued: false });
+
+  // the engine's cancel names the request the card stood for; the card leaves, nothing answered it, and nothing is listed
+  const inbound = async () =>
+    readFileSync((await statusOf(page, id)).journalPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; request_id?: string; request?: { subtype?: string } } })
+      .filter((row) => row.direction === 'in')
+      .map((row) => row.frame);
+  await expect.poll(async () => (await inbound()).some((f) => f.type === 'control_cancel_request'), { message: 'the engine’s cancel arrived' }).toBe(true);
+  const asked = (await inbound()).find((f) => f.type === 'control_request' && f.request?.subtype === 'can_use_tool')!;
+  expect((await inbound()).filter((f) => f.type === 'control_cancel_request').map((f) => f.request_id)).toEqual([asked.request_id]);
+  await expect(card, 'the card leaves on the cancel').toHaveCount(0);
+  await expect(pane(page, 0).locator('[data-request-end]')).toHaveCount(0);
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /)).toHaveCount(0);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_response'), 'no answer was written for it').toEqual([]);
+  await expect.poll(async () => (await listed()).length, { message: 'nothing waits' }).toBe(0);
+  await expect.poll(async () => (await statusOf(page, id)).turn, { message: 'the turn ended' }).toBeNull();
+  await expect(messageIn(page, 0), 'the composer stays').toBeVisible();
   expect(editor.consoleErrors()).toEqual([]);
 });

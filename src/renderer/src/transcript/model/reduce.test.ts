@@ -928,15 +928,16 @@ describe('revisable log', () => {
 });
 
 describe('requests', () => {
-  it('a pending question is a slot, and the answer replaces it with the historical row at the same position', () => {
+  // UX wave U1b (§B, rules 1 and 3): a pending question's row is derived while it waits, and no row is made for its request
+  it('a pending question has its row while it waits, and the answer fills that row in place', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('q1', 'AskUserQuestion', { questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A' }, { label: 'B' }], multiSelect: false }] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A', description: null, preview: null }, { label: 'B', description: null, preview: null }], multiSelect: false }] });
     let state = reduce(b.events);
     let list = rowsOf(withAllExpanded(state));
-    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'request_slot']);
-    expect(find(list, 'request_slot')).toMatchObject({ id: rowId.slot(request('r1')), requestKind: 'question', toolName: 'AskUserQuestion' });
+    expect(kinds(list)).toEqual(['time', 'user', 'divider', 'question']);
+    expect(find(list, 'question')).toMatchObject({ id: rowId.question(tool('q1')), answers: null });
     const answered = b.emit('question.answered', { requestId: request('r1'), toolUseId: tool('q1'), answers: { 'Which?': 'A' } });
     state = applyEvents(state, [answered]);
     list = rowsOf(withAllExpanded(state));

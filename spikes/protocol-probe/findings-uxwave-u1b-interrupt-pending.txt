@@ -1,0 +1,103 @@
+UX wave, landing U1b, probe 8: Stop while a permission request is pending, engine 2.1.322
+(U1b, requests drawn in the transcript: its acceptance "Stop withdraws the prompt and its card leaves"; asked by the
+architect 2026-11-15; VM dc-uxwave5-26dc, branch ux-wave/U1b-probes, cut from origin/master)
+
+Verdict.
+  - THE MAIN LOOP'S REQUEST (3 of 3, the same order each time): Stop cancels it. The frame that tells the window the
+    request is gone is `control_cancel_request {request_id: <the can_use_tool request's id>}`. It arrives 4 to 23 ms
+    after the interrupt is written, and in all three runs BEFORE the interrupt's own answer ({still_queued: []}),
+    which comes 0 to 2 ms later.
+    Then, in order:
+      - session_state_changed `running` (it was `requires_action` from the request)
+      - the tool's `user` tool_result, is_error true: "The user doesn't want to proceed with this tool use. The tool
+        use was rejected (eg. if it was a file edit, the new_string was NOT written to the file). STOP what you are
+        doing and wait for the user to tell you how to proceed."
+      - a `user` text "[Request interrupted by user for tool use]"
+      - `result` {subtype: "error_during_execution", is_error: true, stop_reason: "tool_use"}
+      - command_lifecycle `cancelled`
+      - session_state_changed `idle`
+    No system/status frame marks the cancel (the turn's only status is `requesting` at its start).
+  - The cancelled request answered late (an allow, 8 s after the cancel) is IGNORED: no frame of any kind comes back,
+    nothing runs (the marker file is absent, 3 of 3), and the session stays idle. An answer the engine accepts is
+    echoed back on the wire as an inbound `control_response` with the same request_id (seen in every child run
+    below). A cancelled request's late answer gets no echo.
+  - The next prompt answers normally (3 of 3: result success, end_turn). The model sees the interrupted call as
+    rejected ("No, the command was rejected before it ran, so `uxw-ran-main.txt` was not created.").
+  - A SUBAGENT'S REQUEST (4 of 4): Stop does NOT withdraw it. In this launch the engine starts every Agent call as a
+    background task ("Async agent launched successfully"), even when asked with run_in_background false. So the
+    child's `can_use_tool` (it carries `agent_id`) outlives the main turn:
+      - Interrupted while the main turn was still open (2 runs, interrupt 2 ms after the request): the main turn
+        ends with "[Request interrupted by user]" and error_during_execution, but the child's request gets no
+        control_cancel_request.
+      - Interrupted after the main turn had ended (2 runs, 2 s): the interrupt only answers {still_queued: []}.
+    In all 4 the request stayed live. The late allow was accepted: it was echoed, the child's Bash ran (the marker
+    file was created), the child finished (task_notification completed), and the main loop took a new turn to
+    report it.
+  So for U1b: the card of a main-loop request leaves on `control_cancel_request` with its request_id, which Stop
+  provokes at once. A child's card must NOT be withdrawn on Stop: its request stays answerable, and answering it
+  still runs the tool. Only something that stops the child (its task) can withdraw it, and that was not probed here.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md). Scenario
+scenarios/pass3/uxwave-u1b-interrupt-pending.mjs. The launch is MAWS's (uxwave-common-arrivals.mjs: its flags,
+environment and initialize) with `--permission-mode default`. The scenario holds the `can_use_tool` request
+unanswered (`uxw_held` note), waits UXW_DELAY ms (2000 by default), and sends Stop's interrupt as
+src/engine-host/session.ts `interrupt` sends it: control_request {subtype: "interrupt", reason: "user-cancel",
+cancel_queued: false}. It waits for the turn's result and idles, then (b) answers the held request with
+{behavior: "allow", updatedInput: <the input>} and looks for the marker file in the scratch work folder, then (c)
+sends "Without using any tool: did the command you were asked to run earlier run? Reply in one short sentence."
+The command is `touch uxw-ran-<case>.txt`, which leaves a file only if it ran. UXW_CASE=main has the model call Bash
+itself; UXW_CASE=child has it call the Agent tool, whose agent calls Bash. Each step is noted as `uxw_case` with its
+wire frames, file rows, any subagent file rows, and whether the marker exists.
+Fixtures (fixtures/uxwave/):
+  - u1b-intpend-main-r1, -r2, -r3 (.jsonl, .transcript.jsonl)
+  - u1b-intpend-child-r1 to -r4 (.jsonl, .transcript.jsonl, and -sub-agent-<id>.transcript.jsonl, the child's own
+    file). r2 and r3 used UXW_DELAY=0 (interrupt 2 ms after the request, the main turn still open); r1 and r4 used
+    2000 (after the main turn ended).
+  The case was rerun because the order of the cancel against the interrupt's answer, and the child's relation to
+  the main turn, could depend on timing. The main case's spread: the cancel came 4 to 23 ms after the interrupt
+  and always first.
+Spend: US$0.017 in all.
+The fixture check first: no master fixture has Stop's interrupt while a can_use_tool request is unanswered. Five have
+the send-now interrupt ({subtype: "interrupt", send_now: true, message_uuid}) in that state: uxwave/u4p2-k-perm-1, -2,
+-3 and u4p1-d-seeded-1, -2. They show the same control_cancel_request (k-perm-1 seq 45, d-seeded-1 seq 43), followed
+by `result success, stop_reason "tool_use"` and the delivered message's turn.
+
+Observed (u1b-intpend-main-r1 seq; r2 and r3 the same seqs, times in brackets).
+  36 assistant tool_use Bash {command: "touch uxw-ran-main.txt"} toolu_01Dj…
+  38 session_state_changed requires_action; 39 control_request can_use_tool, request_id e7113175…, tool_use_id the same
+  43 out interrupt {reason: "user-cancel", cancel_queued: false}                        16:19:16.128
+  44 control_cancel_request {request_id: e7113175…}                                     +23 ms [r2 +6, r3 +4]
+  45 control_response to the interrupt {still_queued: []}                               +23 ms [r2 seq 45, r3 45]
+  47 session_state_changed running; 48 user tool_result is_error true (the text above); 49 user "[Request
+     interrupted by user for tool use]"; 50 result error_during_execution, is_error true, stop_reason tool_use;
+     51 command_lifecycle cancelled; 52 session_state_changed idle
+  54 out the late allow for e7113175…: nothing follows for 11 s; the marker is absent.
+  56 to 75 the next prompt: requesting, its replay, the answer, result success end_turn.
+  File (u1b-intpend-main-r1.transcript.jsonl): 24 assistant tool_use; 25 user tool_result is_error true (the same
+  text), toolUseResult "User rejected tool use"; 27 user "[Request interrupted by user for tool use]"; nothing
+  written for the late allow; 33 the next prompt, 39 its answer.
+Observed, child (u1b-intpend-child-r2, the main turn still open at the interrupt):
+  45 assistant tool_use Agent (run_in_background false asked); 47 background_tasks_changed, 48 task_started; 49 the
+  Agent's tool_result "Async agent launched successfully. …"; 55 the child's tool_use Bash (parent_tool_use_id the
+  Agent call); 57 session_state_changed requires_action; 58 can_use_tool {request_id 0d3754a8…, agent_id
+  aa2011f8…, tool_use_id the child's}; 61 interrupt; 62 its answer {still_queued: []}; 64 user "[Request interrupted
+  by user]"; 68 result error_during_execution. There is no control_cancel_request.
+  71 out the late allow; 72 IN control_response with the same request_id and response (the engine's echo); 73
+  running; 74 the child's tool_result "(Bash completed with no output)", is_error false; 77 task_notification
+  completed; 89 result success "DONE" (the main loop's turn on the notification). The marker exists. The child's own
+  file holds its tool_use and its successful tool_result.
+  child-r3: the same order (interrupt at seq 61, no cancel, the late allow echoed at 72, ran).
+  child-r1 and -r4: the main turn had ended ("DONE", result success) before the interrupt. The interrupt answers
+  {still_queued: []}, and nothing else happens until the late allow, which is echoed and runs.
+  (c) in the child runs: the next prompt answers normally; the model says the subagent reported DONE but that it
+  did not check the file.
+
+Inference, in U1b's terms.
+  - "Stop withdraws the prompt and its card leaves" holds for a request of the main loop, keyed on
+    control_cancel_request's request_id. That frame comes before the interrupt's answer, so the card can leave on
+    the frame itself without waiting for the result.
+  - For a child's request (agent_id set) Stop withdraws nothing. The card must stay, and an answer to it still runs
+    the tool. Acceptance should exclude children, or tie a child's card to the child's own end (its
+    task_notification or task_updated), not to Stop.
+  - A late answer to a cancelled request is harmless and silent. A window that wants confirmation of an answer can
+    read the engine's echoed control_response, which comes only for an accepted answer.

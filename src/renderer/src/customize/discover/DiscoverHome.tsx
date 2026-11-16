@@ -4,16 +4,21 @@
 // added), one shelf per seed source with more than one item, up to four category shelves, then All with its sort
 // control. Community items are on no shelf, only in All and search. A shelf's See all opens the grid filtered to that
 // shelf, its chip removable.
-import type { CatalogItem, CatalogShelf, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
+// All (UX wave U11c M4, docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §F): the Plugins home's Featured and
+// a shelf per kind, Plugins, Skills, Connectors (main's; no community item on them), with no grid under them; a shelf's
+// See all chooses its kind in Show. A shelf's cards are its kind's (a Skills card names its skills and asks as one).
+import type { CatalogItem, CatalogKindTab, CatalogShelf, CatalogSort, CatalogTab } from '@shared/ipc/schema/catalog';
 import { IconButton, SortIcon } from '../../app/IconButton';
 import { SECONDARY } from '../../sessions/ui';
+import { useLayout } from '../../stores/layout';
 import { Choice } from '../../widgets/plugins/LibraryHeader';
 import { OperationLine } from '../../widgets/plugins/manage';
+import { ItemImage } from '../image/ItemImage';
+import { catalogSeedOf } from '../image/tile';
 import { catalogKey } from './add';
 import { AddButton, InstalledMark, TrustLabel } from './CatalogCard';
-import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
-import { CardPlaceholders, QueryGrid, Shelf, ShelfHeading } from './DiscoverGrid';
+import { CardPlaceholders, KindLines, QueryGrid, Shelf, ShelfHeading } from './DiscoverGrid';
 import { addable, componentsWords, metricWords } from './present';
 import { useCatalogHome } from './read';
 import { queryOf, setChoices, useDiscoverStore } from './store';
@@ -21,7 +26,7 @@ import { queryOf, setChoices, useDiscoverStore } from './store';
 type Tab = CatalogTab; // P4-AGG M4: Connectors too
 const SORTS: readonly CatalogSort[] = ['installs', 'updated', 'name'];
 
-function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(item: CatalogItem): void }) {
+function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: CatalogKindTab; onOpen(item: CatalogItem): void }) {
   const metric = metricWords(item);
   return (
     <section
@@ -49,7 +54,7 @@ function Featured({ item, tab, onOpen }: { item: CatalogItem; tab: Tab; onOpen(i
         </div>
       </div>
       <span className="relative hidden @md/customize:block">
-        <CatalogIcon item={item} size="lg" />
+        <ItemImage kind={item.kind} seed={catalogSeedOf(item)} iconUrl={item.iconUrl} size="detail" />
       </span>
     </section>
   );
@@ -73,11 +78,11 @@ export function SortControl({ tab }: { tab: Tab }) {
     </span>
   );
 }
-export function DiscoverHome({ tab, cwd, onOpen }: { tab: Tab; cwd: string | null; onOpen(item: CatalogItem): void }) {
+const KIND_OF_SHELF: Readonly<Record<string, CatalogKindTab>> = { 'kind:plugins': 'plugins', 'kind:skills': 'skills', 'kind:connectors': 'connectors' };
+
+export function DiscoverHome({ tab, cwd, onOpen }: { tab: Tab; cwd: string | null; onOpen(item: CatalogItem, as?: CatalogKindTab): void }) {
   const home = useCatalogHome(tab, cwd);
   const choices = useDiscoverStore((s) => s[tab]);
-  const seeAll = (shelf: CatalogShelf) =>
-    shelf.kind === 'category' ? setChoices(tab, { category: { value: shelf.key.slice('category:'.length), title: shelf.title }, source: null }) : setChoices(tab, { source: { key: shelf.key, title: shelf.title }, category: null });
   if (!home.data)
     return home.isError ? (
       <p role="alert" className="m-0 flex flex-wrap items-baseline gap-2 text-ui-sm text-danger">
@@ -90,6 +95,33 @@ export function DiscoverHome({ tab, cwd, onOpen }: { tab: Tab; cwd: string | nul
       <CardPlaceholders n={6} />
     );
   const { featured, shelves } = home.data;
+  if (tab === 'all')
+    return (
+      <div data-discover-home className="flex flex-col gap-6">
+        {featured && <Featured item={featured} tab="plugins" onOpen={(item) => onOpen(item, 'plugins')} />}
+        {shelves.map((shelf) => {
+          const kind = KIND_OF_SHELF[shelf.key];
+          // a kind with nothing at all (no copy of the directory's servers) draws no shelf; one whose cards all stand on
+          // Plugins' keeps its heading and See all
+          if (kind === undefined || shelf.total === 0) return null;
+          return (
+            <KindLines key={shelf.key} tab={kind}>
+              <Shelf
+                shelfKey={shelf.key}
+                title={shelf.title}
+                items={shelf.items}
+                total={shelf.total}
+                tab={kind}
+                onOpen={(item) => onOpen(item, kind)}
+                onSeeAll={() => useLayout.getState().openDestination({ kind: 'customize', view: 'discover', show: kind })}
+              />
+            </KindLines>
+          );
+        })}
+      </div>
+    );
+  const seeAll = (shelf: CatalogShelf) =>
+    shelf.kind === 'category' ? setChoices(tab, { category: { value: shelf.key.slice('category:'.length), title: shelf.title }, source: null }) : setChoices(tab, { source: { key: shelf.key, title: shelf.title }, category: null });
   return (
     <div data-discover-home className="flex flex-col gap-6">
       {featured && <Featured item={featured} tab={tab} onOpen={onOpen} />}

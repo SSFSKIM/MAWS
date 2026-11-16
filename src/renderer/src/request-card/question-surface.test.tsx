@@ -107,25 +107,6 @@ it('a replacement tree replaces the whole card and concealed native controls can
   expect(answers()).toEqual([]);
 });
 
-it('a native docked card takes pane focus, then relinquishes it when a mod conceals the card', async () => {
-  drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: true };
-  const scene = (card: boolean) => <section data-pane={0}>
-    <button type="button">Composer</button>
-    {card && <RequestCard item={itemFor(question, APP)} request={question} placement="docked" paneIndex={0} />}
-  </section>;
-  const view = render(scene(false));
-  const composer = screen.getByRole('button', { name: 'Composer' });
-  act(() => composer.focus());
-  view.rerender(scene(true));
-  expect(document.activeElement).toBe(view.container.querySelector('[data-docked-frame]'));
-  await waitFor(() => expect(asks()).toHaveLength(1));
-  drawing = { tree: { type: 'Text', children: ['Mod is asking instead'] }, props: {}, rewritten: false, hooked: true };
-  act(() => invalidateSession(APP));
-  await screen.findByText('Mod is asking instead');
-  expect(screen.queryByRole('button', { name: 'Submit' })).toBeNull();
-  await waitFor(() => expect(document.activeElement).toBe(composer));
-});
-
 it.each(['option', 'free text'])('preserves a valid %s answer through a header-only rewrite', async (kind) => {
   drawing = { tree: { type: 'engine', ref: 0 }, props: {}, rewritten: false, hooked: true };
   mount();

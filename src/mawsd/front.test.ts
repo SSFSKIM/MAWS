@@ -461,6 +461,28 @@ describe('the services front', () => {
     served.close();
     expect(changed).toBe(2); // the app's connection ended (the other sent none)
   });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8, §B Wiring): the bundle
+  // each attached app told in its machine.client, kept per connection, which the files service never writes
+  it('keeps the bundle each connection’s machine.client told, and answers those of the connections that live', async () => {
+    const { served, client } = front({ isApp: () => true });
+    const app = connection();
+    const appRuntime = served.runtimeFor({ appPid: 1, capabilities: [MACHINE_SPINE_CAPABILITY] });
+    appRuntime.serve(app.port);
+    const dev = client();
+    const older = client();
+    expect(served.appBundles()).toEqual([]);
+    expect(await app.request('machine.client', { browserSocket: null, bundle: '/Applications/MAWS.app' })).toMatchObject({ ok: true });
+    expect(await dev.request('machine.client', { browserSocket: null, bundle: '/work/build/MAWS Dev.app' })).toMatchObject({ ok: true });
+    expect(await older.request('machine.client', { browserSocket: null })).toMatchObject({ ok: true }); // an app of an earlier build tells none
+    expect([...served.appBundles()].sort()).toEqual(['/Applications/MAWS.app', '/work/build/MAWS Dev.app']);
+    expect(await dev.request('machine.client', { browserSocket: null, bundle: null })).toMatchObject({ ok: true });
+    expect(served.appBundles()).toEqual(['/Applications/MAWS.app']);
+    app.close();
+    appRuntime.detach(); // the socket server's end of the connection
+    expect(served.appBundles()).toEqual([]);
+    served.close();
+  });
 });
 
 // P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): a tab engine's browser work, bound to

@@ -17,7 +17,7 @@ import { Sheet, SheetForm } from '../sessions/Sheet';
 import { DANGER, FIELD, PRIMARY, SECONDARY } from '../sessions/ui';
 import { deleteArtifact, duplicateArtifact, moveArtifactToSpace, openArtifactTab, renameArtifact, setArtifactPinned } from './actions';
 import { DIALOG_COPY as D, ROW_COPY as R } from './copy';
-import { exportArtifact, saveArtifactCopy, useExportFormats } from './export';
+import { exportArtifact, saveArtifactCopy, savesCopy, useExportFormats } from './export';
 import { SEND_TO_COPY, SERVICE } from '../delivery/copy'; // P4-B5
 import { openSendTo } from '../delivery/store'; // P4-B5
 import { VIEWERS_COPY } from '../tools/artifacts/viewers/copy';
@@ -96,10 +96,10 @@ function RowMenuItems({ M, row }: { M: Menu; row: LibraryRow }) {
   );
 }
 
-// M5b: Export ›, its formats and a File artifact's Save a copy…; nothing when the kind has neither.
+// M5b: Export ›, its formats and a File artifact's or (U10b) an html page's Save a copy…; nothing when the kind has neither.
 function ExportItems({ M, row }: { M: Menu; row: LibraryRow }) {
   const formats = useExportFormats(row.kind);
-  const copies = row.kind === 'file';
+  const copies = savesCopy(row.kind);
   if (formats.length === 0 && !copies) return null;
   return (
     <M.Sub>

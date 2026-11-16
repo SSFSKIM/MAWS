@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 // The Diff tab draws what the machine answered: its changes against the base, that there are none, or — when the machine
 // could not take the diff — why, never an empty "No changes against" with no base.
-import { cleanup, render, screen } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterEach, expect, it, vi } from 'vitest';
 import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 import { createDiffView, DiffPane } from './DiffPane';
@@ -34,4 +34,39 @@ it('says there are no changes against a base it names', () => {
   const diff = pane({ base: 'main', text: '' });
   expect(diff.querySelector('[data-review-empty]')!.textContent).toBe('No changes against main');
   expect(diff.querySelector('[data-review-footer]')!.textContent).toBe('Working tree · Since main');
+});
+
+// The pane's own words and its one-file walk (its view state is its own since MAWS's Review became a stack): the header's
+// totals since the base, each file's header with its kind, and Previous file and Next file moving through the list.
+it('heads the diff with its totals since the base and walks its files one at a time with Previous file and Next file', () => {
+  const text = [
+    'diff --git a/src/harbour.ts b/src/harbour.ts',
+    'index 1..2 100644',
+    '--- a/src/harbour.ts',
+    '+++ b/src/harbour.ts',
+    '@@ -1,2 +1,2 @@',
+    '-const berths = 4;',
+    '+const berths = 6;',
+    ' export { berths };',
+    'diff --git a/src/tide.ts b/src/tide.ts',
+    'new file mode 100644',
+    'index 0000000..3b18e51',
+    '--- /dev/null',
+    '+++ b/src/tide.ts',
+    '@@ -0,0 +1 @@',
+    '+export const tide = 2;',
+    '',
+  ].join('\n');
+  const diff = pane({ base: 'main', text });
+  const fileHeader = () => diff.querySelector('[data-review-file-header]')!.textContent;
+  const previous = () => screen.getByRole('button', { name: 'Previous file' }) as HTMLButtonElement;
+  const next = () => screen.getByRole('button', { name: 'Next file' }) as HTMLButtonElement;
+  expect(diff.querySelector('[data-review-header]')!.textContent).toBe('2 files changed · +2 −1 · Since main');
+  expect(fileHeader()).toBe('src/harbour.ts · Modified');
+  expect([previous().disabled, next().disabled, previous().title, next().title]).toEqual([true, false, 'Previous file', 'Next file']);
+  fireEvent.click(next());
+  expect(fileHeader()).toBe('src/tide.ts · Added');
+  expect([previous().disabled, next().disabled]).toEqual([false, true]);
+  fireEvent.click(previous());
+  expect(fileHeader()).toBe('src/harbour.ts · Modified');
 });

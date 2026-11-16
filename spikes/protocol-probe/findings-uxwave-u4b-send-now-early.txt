@@ -1,0 +1,149 @@
+UX wave U4b: Send now on an after-the-turn row early in a shell call, written as a promote at `next` followed at once by
+`interrupt {send_now: true, message_uuid}` for that message, on engine 2.1.322, on MAWS's own wire and environment (U4b's
+execution document, docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md on ux-wave/U4b, "Probes" and
+"Reported to the architect" 8; the earlier passes findings-uxwave-u4-send-now.txt and -cases.txt; recorded 2026-11-15)
+
+Question. A turn runs a foreground shell command; the app writes a user frame at priority `next` for a message M (as
+queue.ts promote() writes it with priority next) and, at once after it, the request naming M. (i) Does the request wait
+for the command to become a task and move it, and is M moved in, in every run of five, at 1.5 s into the call (not yet a
+task) and at 10 s (long a task)? When is M read relative to the command's end? (ii) With another next-step message P
+already waiting, are P and M joined into one delivery, and in which order? (iii) What is answered when the request comes
+before the engine has queued M: the two writes with no gap (the pair as built), and the request written first? (iv) What
+is answered when M has already been read?
+
+Verdict.
+(i) Yes, 10/10 (pair 5/5 at 1.5 s, pair-late 5/5 at 10 s): `{still_queued: [M], send_now: "delivering"}` 4 to 12 ms after
+    the request, the command moved and kept running, M read about 26 s (early) or 19 s (late) before the command's own
+    end. The engine queued M before it answered in every run (M's `queued` lifecycle precedes the answer). What follows
+    the move depends on the timing, and the late timing differs from the recorded engine fact:
+    - At 1.5 s (5/5), the answer comes before the call is a task. The engine waits: the call's task_started at 2.94 to
+      2.97 s into the call, the move (task_updated is_backgrounded) 0.16 to 0.20 s after it, so 1.61 to 1.63 s after
+      the answer. Then, 0.84 to 0.88 s after the move, the cut: the "moved ... so that a message that arrived ... can
+      reach you" tool result (backgroundedToDeliverMessage true), result success / aborted_tools, the prompt
+      `cancelled`, and M `started` 7 to 17 ms after that result, as the next turn (3.98 to 4.02 s into the call). As
+      u4p2-a-* recorded for a message queued 0.5 s before the request.
+    - At 10 s (5/5), the call long a task: moved 3 to 6 ms after the answer; 0.89 to 1.00 s later the "moved" tool
+      result, and M is read IN THE SAME TURN: no `result` between, M's replay and `started` right after the tool
+      result, the status `requesting` frame naming both the prompt and M, the turn's one result `completed` after M's
+      lifecycle `completed`, the prompt `completed` (not `cancelled`). In the transcript file M is a queue `remove` and
+      a `queued_command` attachment, with no user line under M's uuid.
+    So the pair can be relied on to deliver M now at both timings, with the running command moved, never killed. What
+    cannot be relied on is how the turn reads afterwards: a cut turn and M as a turn of its own early, M folded into
+    the running turn late (see "Where the engine differs").
+(ii) Joined only early. P (written at `next` 0.5 s before) and M go together in 6/6 (two 3/3, two-late 3/3), P first
+    then M, both `started` at consecutive seqs, whichever was named (M here). At 1.5 s (3/3) they are one user message
+    under M's uuid holding P's text, a newline, then M's text (M's replay frame; P's replay holds only its own text; one
+    user line in the transcript under M's uuid, none under P's), the next turn after the cut, as u4p2-two-* and
+    u4p3-end*. At 10 s (3/3) they are not one message: each has its own replay with its own text, both read in the
+    running turn at the tool boundary (requesting names the prompt, P and M), two `queued_command` attachments in the
+    transcript and no user line under either uuid. Order P, M in every run.
+(iii) No gap (the pair as built): never `nothing_waiting` (19/19 frame-first pairs across every case of this probe): the
+    engine queued M 2 to 22 ms after the frame and before answering, and answered `delivering`. Request first (reqfirst 3/3):
+    `{still_queued: [], send_now: "nothing_waiting"}` 3 to 5 ms after the request, written before M's frame was even
+    read; M's `queued` came 2 to 4 ms after the answer; nothing was moved or cut; the command ran to its own end in the
+    foreground (30 s) and M was read at that tool boundary, in the same turn, after the command's output. So the order
+    of the two writes is load-bearing: the frame must go first.
+(iv) After M has been read (read 3/3, three presses each): `{still_queued: [], send_now: "nothing_waiting"}` at M's
+    `started` (+0 to 2 ms after it), at the first assistant frame of M's turn, and 0.5 s after M's turn's result (9/9).
+    No press did anything: no move, no cut, no state change; M's turn ran to its own result.
+
+Plainly: the pair (frame at `next`, then the request, in that order) delivers the message now in every run recorded
+here (19/19 pairs whose request followed the frame, read included), and joins it with what already waits at the next
+step, the waiting one first. No run said otherwise. Two things the design must take as they are: the request must not
+precede the frame (reqfirst: `nothing_waiting`, the message then waits for the command's end), and the turn's shape
+after the move depends on whether the call is already a task when the request arrives (cut and next turn before; same
+turn, and not joined into one message, after). The design's condition "(i) holds, (ii) is yes and (iii) is never
+`nothing_waiting`" holds for the order frame-then-request; (ii) is yes in delivery (both go at once, in order) but the
+"as one user message" reading holds only for the early timing.
+
+Method. Scenario scenarios/pass3/uxwave-u4b-send-now-early.mjs, on the second and third passes' launch exactly (launch
+module uxwave-common-send-permission.mjs: MAWS's flags, setting sources user,project,local, no --strict-mcp-config, mode
+auto, the five environment keys of launch.ts buildEnvironment with CLAUDE_CODE_EMIT_SESSION_STATE_EVENTS=1), one case per
+process (`-e UXW_CASE=<case> -e UXW_RUN=<n>`), each launched by spikes/protocol-probe/vm-run.sh on a devcloud VM (Linux),
+never on the MacBook; vm-check.mjs's claims held before the first probe (2.1.322, routed, built-in plugins only, no MCP
+server, Monitor, only the control CLAUDE.md; no desk member before or after). Every system/init reads
+claude_code_version "2.1.322"; model haiku (claude-haiku-5-5) through the gateway (spawn row routed: true), seeded
+feature cache.
+- Each run: the prompt "Run this exact shell command with the Bash tool, in the foreground ...: node wait.cjs <tag> 30"
+  as a `now` frame; time zero is the waiter's pid file (the command running), polled every 20 ms.
+- pair / pair-late: at 1.5 s / 10 s, M ("Reply with the single word PINEAPPLE, then carry on with what you were
+  doing.") as `{type: "user", uuid, message, parent_tool_use_id: null, origin: {kind: "human"}, priority: "next"}`
+  and `{subtype: "interrupt", send_now: true, message_uuid: M}` written in the same tick, the frame first (no gap: the
+  host's promote awaits only the frame's flush before its sendNow; one tick is the tighter case).
+- two / two-late: P ("... MANGO ...") at `next` 0.5 s earlier, its `queued` awaited; then the pair for M.
+- reqfirst: at 1.5 s the request naming M, then M's frame, same tick.
+- read: the pair at 1.5 s; then the request naming M again at M's `started`, at the first main-lane assistant frame
+  after it, and 0.5 s after the following main-lane result.
+- Each run ends when every message has started, the command has ended and the wire has been quiet 12 s (at most 90 s).
+  The uxw_final row lists answers (with request and answer seqs), results, lifecycles, task frames, requesting frames
+  and string replays; uxw_transcript reduces the engine's transcript file as the earlier passes do.
+Fixtures: fixtures/uxwave/u4b-<case>-<n>.jsonl, seq numbers below are theirs; times are ms after the waiter started
+(the uxw_ready row). Runs: pair 5, pair-late 5, two 3, two-late 3, reqfirst 3, read 3; every process exited 0.
+
+Observations (request seq, M queued, answer, task_started, move, first result, M started, the command's end).
+(i) u4b-pair-1: request 37 @1504 (frame 36), queued 39 @1509, answer 40 @1512 delivering, task_started 42 @2959, moved
+    44 @3136, "moved" tool result 45, result 46 @4009 success / aborted_tools, prompt cancelled 47, M started 48 @4019,
+    replay 52, M's turn result 176 completed, M completed 177, STATE idle 178, the command's task_notification 180
+    @30120, then STATE running 182 and an engine-own turn (result 241).
+    pair-2: 38 @1503, 40 @1509, 41 @1515, 43 @2951, 45 @3146, 47 @3986, M started 49 @3997, end 214 @30101.
+    pair-3: 38 @1502, 40 @1505, 41 @1508, 43 @2940, 45 @3122, 47 @3969, 49 @3976, end 208 @30103.
+    pair-4: 38 @1501, 40 @1504, 41 @1507, 43 @2963, 45 @3122, 47 @3986, 49 @3994, end 193 @30126.
+    pair-5: 38 @1505, 40 @1507, 41 @1509, 43 @2951, 45 @3121, 47 @3996, 49 @4013, end 191 @30079.
+    u4b-pair-late-1: task_started 37 @2958; request 39 @10001, queued 41 @10004, answer 42 @10007 delivering, moved 45
+    @10012, "moved" tool result 46 @11014, M replay 47, started 48 @11064, requesting [prompt, M] 49; M completed 140,
+    the turn's result 141 @14245 success / completed, prompt completed 142; command end 145 @30138, then an
+    engine-own turn. pair-late-2: 39 @10001, 41 @10008, 42 @10008, moved 45 @10011, 46, M started 48 @10948,
+    requesting 49, result 191 completed, end 195 @30142. pair-late-3: 39, 41, 42 @10010, 45 @10013, 48 @11024, result
+    168, end 172. pair-late-4: 39, 41, 42 @10010, 45 @10015, 48 @11019, result 195, end 199. pair-late-5: 39, 41, 42
+    @10016, 45 @10022, 48 @10994, result 147, end 151. No result between the request and M's start in any late run.
+(ii) u4b-two-1: P written 37 @1000, queued 39; pair 40/41, M queued 43, answer 44 @1513 {still_queued: [P, M],
+    delivering}; task_started 46, moved 48 @3166, result 50 aborted_tools, prompt cancelled 51, P's replay 52 (its own
+    text), P started 53, M started 54, requesting [P, M] 57, M's replay 58 holding P's text, a newline and M's text.
+    two-2: 44 delivering [P, M], 48, 50, 52 / 53 / 54, 57, 58. two-3: 44, 48, 50, 52 / 53 / 54, 56, 58.
+    Transcript (two-*): one user line under M's uuid with both texts; P's uuid has no line.
+    u4b-two-late-1: P 38 @9502, queued 40; pair 41/42, M queued 44, answer 45 @10030 [P, M] delivering, moved 48 @10067,
+    "moved" tool result 49, P's replay 50 and M's replay 51 (each its own text), P started 52, M started 53, requesting
+    [prompt, P, M] 54, one result 170 completed. two-late-2: 45, 48, 49, 50 / 51, 52 / 53, 54, result 151. two-late-3:
+    46, 49, 50, 51 / 52, 53 / 54, 55, result 161. Transcript (two-late-*): two queue `remove` lines and two
+    `queued_command` attachments, no user line under P or M.
+    In two-1 the model ran a short shell call of its own in M's turn (seqs 150 to 156, "sleep 5; cat ..." of the moved
+    command's output); the waiter itself ended at 204 @30122.
+(iii) u4b-reqfirst-1: request 37 @1501, M's frame 38 @1502, answer 40 @1504 {still_queued: [], nothing_waiting}, M
+    queued 42 @1506; task_started 43, never moved; task_notification 45 @30100, the command's own output as the tool
+    result 46, M's replay 47 and started 48 @30136 in the same turn (requesting [prompt, M] 49), one result 135
+    completed. reqfirst-2: 37, 38, 40 @1508 nothing_waiting, 42, 45 @30105, 48 @30156, result 116. reqfirst-3: 38, 39,
+    41 @1509, 43, 46 @30117, 49 @30159, result 152.
+(iv) u4b-read-1: the pair answered delivering (40), M started 48; presses 49 -> 50, 112 -> 124, 126 -> 127, each
+    nothing_waiting; M's turn result 121 completed. read-2: 50 -> 51, 88 -> 120, 190 -> 191 (turn result 187).
+    read-3: 49 -> 50, 108 -> 137, 195 -> 196 (turn result 192). Each is "request -> answer".
+
+Where the engine differs from the document.
+1. "Engine facts", row 1 (`interrupt { send_now: true, message_uuid }` behind a running shell command "... ends the turn
+   `aborted_tools`; the message is the next turn"): only when the request arrives before the call is a task (the first
+   ~3 s; u4p2-a-* and u4p1-a-* were all written then). Once the call is a task (pair-late 5/5, two-late 3/3), the command
+   is moved within milliseconds and the message is read in the same turn: no `aborted_tools` result, the prompt
+   `completed`, one result for the whole turn. This is a property of the request, not of the pair: nothing in the late
+   runs depends on M having been written a tick before. Inference, not checked in the source: the deferred move that
+   waits for the task ends the turn to deliver, the immediate one lets the message fold in at the tool boundary, as the
+   first pass's background_tasks retry did (findings-uxwave-u4-send-now.txt (e)).
+2. "Engine facts", row 4 ("every message waiting at the next step goes with the one named, as one user message"): all
+   go, in order, at both timings; "as one user message" holds only early (two-*). Late (two-late-*) each is its own
+   replay and its own queued_command attachment.
+3. The document's (iii) asks whether the request can meet a message not yet queued: with the frame first, never
+   (19/19); with the request first, always `nothing_waiting` (3/3), and the message then waits for the command's own
+   end rather than going now.
+
+Bearing on other parts of the spec.
+- Whatever reads a Send now's end as "Ended for your message" from a cut turn (the first pass's verdict (a), Interfaces
+  B of U4a) meets no cut turn when the call is already a task: the end is an ordinary `completed`, and the message's
+  turn is the same turn. The rule "a row leaves at its own `started`" draws the right stack at both timings.
+- An after-the-turn row sent by this pair goes together with every next-step row already waiting, P first: the child's
+  cell "that message alone goes now" would become "it goes now, with what waits at the next step, after them".
+- The second and third presses (read) are harmless: a double click on Send now after delivery answers
+  `nothing_waiting`, which the stack shows today as "The agent has already read this message" (Reported 11).
+- The moved command's completion starts an engine-own turn in every run (as the earlier passes found).
+
+Not run. A gap between the frame and the request longer than one tick (the product's await of the frame's flush is
+shorter than any timing seen here; with the frame first, the engine had already queued M by its answer in 19/19). The
+request first at the late timing. A call other than a shell command. The direct route (it does not authenticate on
+this VM, VM.md). Model spend: under US$0.07 over the 22 runs (haiku; the largest total_cost_usd of any run 0.0031).

@@ -5,7 +5,10 @@
 // (a light fold of the events a test emits), `deliver`'s high-water mark per writer, and the launch fence. It runs no
 // mod: a command is answered by its op's script (default ok), and the events a test emits stand for the mod's. The
 // permission mode the session last reported (sminos 1.27.14) is set by the test, as the mod's hooks would observe it,
-// and carried by `read status` and each heartbeat the test asks for, as the mod carries it.
+// and carried by `read status` and each heartbeat the test asks for, as the mod carries it. The session's subagents
+// (UX wave U8d M2) are the `agent` events a test emits, folded into the snapshot's `agents` as the child folds them (every
+// key but `type`, `phase` and `n`; `running` until a stop), in the shape the bridge was recorded sending
+// (spikes/protocol-probe/fixtures/uxwave/u8d-p2-*.terminal.json, key `bridge`).
 import { chmodSync, mkdirSync, realpathSync, renameSync, rmSync, statSync } from 'node:fs';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import { join } from 'node:path';
@@ -36,7 +39,11 @@ export interface FakeBridgeOptions {
   lane?: 'match' | 'mismatch' | 'unresolved';
   readyWaitMs?: number; // how long GET /events waits for readiness before its 503 (the child's SMINOS_BRIDGE_READY_WAIT)
   sessionInfo?: Record<string, unknown>;
+  reportsAgents?: boolean; // false: a bridge older than its agent reports, whose snapshot carries no `agents`
 }
+
+// An agent's spawn as the bridge reports it (P2): every key present, null where the engine gave none.
+export type FakeAgentSpawn = { agentId: string; toolUseId: string; parentAgentId?: string | null; subagentType?: string; description?: string; name?: string | null; background?: boolean; model?: string | null };
 
 export interface FakeBridge {
   readonly socket: string;
@@ -52,6 +59,9 @@ export interface FakeBridge {
   setStatus(patch: Partial<Pick<FakeBridgeOptions, 'launch' | 'capabilities' | 'lane'>>): void;
   setMode(mode: FakeMode | null): void; // the mode the session last reported; null: none yet (a new process)
   heartbeat(): void; // one heartbeat as the mod posts it every 5 s: the main loop's turn, and the mode while one is reported
+  agentSpawned(spawn: FakeAgentSpawn): void; // an `agent` event, phase spawn
+  agentStopped(agentId: string, stop?: { agentType?: string; status?: string }): void; // phase stop; a background agent's carries `status`
+  resyncAgents(agents: Record<string, unknown>[]): void; // the mod's resync: the child's agents replaced, every stream ended
   subscribers(): number;
   reset(): void; // ends every stream (a module reload)
   close(): Promise<void>; // the socket goes; probes then fail
@@ -124,6 +134,7 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
   const settled = new Map<string, Record<string, unknown>>();
   const turns = new Map<string, Record<string, unknown>>();
   const streaming = new Map<string, Record<string, unknown>>();
+  let agents = new Map<string, Record<string, unknown>>();
   const marks = new Map<string, number>();
   let override: Record<string, unknown> | null = null;
   let catalog: Record<string, unknown> | null = null;
@@ -171,11 +182,14 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
     else if (type === 'catalog') {
       catalog = omit(e, 'type', 'n');
     } else if (type === 'usage') usage = { ...e };
+    else if (type === 'agent' && typeof e.agentId === 'string') {
+      agents.set(e.agentId, { ...(agents.get(e.agentId) ?? { agentId: e.agentId }), ...omit(e, 'type', 'phase', 'n'), running: phase !== 'stop' });
+    }
   };
 
   const snapshot = () => ({
     type: 'snapshot', session, protocol: 1, pid: options.pid ?? 4242, sessionInfo,
-    turns: [...turns.values()], streaming: [...streaming.values()], agents: [], usage, override, capabilities,
+    turns: [...turns.values()], streaming: [...streaming.values()], ...(options.reportsAgents !== false && { agents: [...agents.values()] }), usage, override, capabilities,
     ...(catalog !== null && { catalog }), cut: { main: null }, namedBlocks: true,
     pending: [...pending.values()], settled: [...settled.values()],
   });
@@ -416,6 +430,16 @@ export async function startFakeBridge(options: FakeBridgeOptions): Promise<FakeB
     heartbeat() {
       const mainTurn = [...turns.values()].find((t) => (t.agentId ?? null) === null)?.turnId ?? null;
       emit({ type: 'heartbeat', state: { mainTurn, isStreaming: streaming.size > 0, tools: [], ...modeFields() } });
+    },
+    agentSpawned(spawn) {
+      emit({ type: 'agent', phase: 'spawn', parentAgentId: null, subagentType: 'general-purpose', description: '', name: null, background: true, model: 'claude-haiku-4-5', ...spawn });
+    },
+    agentStopped(agentId, stop = {}) {
+      emit({ type: 'agent', phase: 'stop', agentId, agentType: stop.agentType ?? 'general-purpose', ...(stop.status !== undefined && { status: stop.status }) });
+    },
+    resyncAgents(next) {
+      agents = new Map(next.map((a) => [String(a.agentId), { ...a }]));
+      for (const sub of [...subscribers]) sub.end();
     },
     subscribers: () => subscribers.size,
     reset() {

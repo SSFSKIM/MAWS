@@ -16,7 +16,7 @@ import { PanelHeader, StripControls } from './PanelHeader';
 import { ensureShownInstances, isRestoredLog, pruneRestoredLogs, setMountedHost, usePanelHost } from './host';
 import type { PanelHostProps } from './host-slot';
 // Summary cards live over main; the panel never reserves a summary column.
-import { TabStrip } from './TabStrip';
+import { LowerGroupDrop, TabStrip } from './TabStrip';
 import { ToolBody } from './ToolBody';
 
 export const PANEL_BODY_ID = 'panel-host-body';
@@ -89,6 +89,7 @@ export function PanelHost({ appSessionId, tabs, activeTabId, onChange, onToggleP
           </section>,
         ];
       })}
+      {drawn.length === 1 && <LowerGroupDrop appSessionId={appSessionId} />}{/* UX wave U6b-1 (M4): while a side tab drags */}
     </div>
   );
 }

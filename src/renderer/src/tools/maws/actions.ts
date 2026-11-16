@@ -12,7 +12,6 @@ import { openSessionFile } from '../../lane-b/open-copy';
 import { panelHost, usePanelHost } from '../../panel/host';
 import type { AskRowData, TranscriptActions } from '../../transcript';
 import { VIEWER_COPY } from '../code/copy';
-import { settleWaitingAsks } from './ask/connect';
 
 // The Question sheet's params (M4's tool reads them).
 export interface AskSheetParams {
@@ -24,7 +23,6 @@ export function mawsTranscriptActionsOver(client: MawsBridge): Pick<TranscriptAc
   return {
     openAsk(appSessionId, ask) {
       if (!usePanelHost.getState().tools.has(ASK_SHEET_TOOL_ID)) return;
-      settleWaitingAsks(appSessionId); // M4b: the person chose this ask; a deferred open must not re-target it
       panelHost.addTool<AskSheetParams>(ASK_SHEET_TOOL_ID, { appSessionId, params: { askId: ask.askId, historical: ask }, activate: true });
     },
     async openDelivered(appSessionId, path) {

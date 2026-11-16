@@ -8,6 +8,7 @@ export const grades = {
   'artifacts.create': 'manage',
   'artifacts.update': 'manage',
   'artifacts.delete': 'manage',
+  'artifacts.undelete': 'manage', // UX wave U10b
   'artifacts.duplicate': 'manage',
   'artifacts.search': 'view',
   'artifacts.versions': 'view',

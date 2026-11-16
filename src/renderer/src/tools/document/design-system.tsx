@@ -7,7 +7,8 @@
 // token it reads, the app's look (a scope with no system has no style either, D's ruling). The page carries `.ds-doc`
 // and the scope wraps it (Decision Log 22); the document's own `meta.dsOverrides` go to the scope as its overrides.
 import { createContext, useContext, useSyncExternalStore, type ComponentType, type ReactNode } from 'react';
-import { dsOverrides, type TokenOverrides } from '@artifacts/document/meta';
+import { docPage, dsOverrides, type DocPage, type TokenOverrides } from '@artifacts/document/meta';
+import type { DesignSystemExport } from '@artifacts/document/export/design-system';
 import { onUpdate, type Doc } from '@artifacts/yjs';
 
 export type DesignSystemRef = { id: string; versionSeq?: number };
@@ -29,6 +30,13 @@ export interface DocumentDesignSystem {
    * (`useSystemFor`), since D's follows the owner's defaults, the house system and the live systems.
    */
   systemFor(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem;
+  /**
+   * UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): D's export helpers bound to a
+   * system, as main's export binds the system governing a document, so the Export menu reads the document's page as the
+   * export does (./page.ts); null while they are not known (none given, still loading). A hook, as `systemFor` is;
+   * without it the window never knows a system's page.
+   */
+  exportSystemOf?(system: GoverningSystem | null): DesignSystemExport | null;
 }
 
 let provided: DocumentDesignSystem | null = null;
@@ -51,6 +59,12 @@ export const documentDesignSystem = (): DocumentDesignSystem | null => provided;
 export function useSystemFor(artifact: { designSystemId?: string; spaceId?: string }): GoverningSystem | null {
   const system = provided;
   return system ? system.systemFor(artifact) : null;
+}
+
+/** UX wave U10b: the provided `exportSystemOf`, a hook called in the body's render; null while nothing provides it. */
+export function useExportSystem(system: GoverningSystem | null): DesignSystemExport | null {
+  const exportSystemOf = provided?.exportSystemOf;
+  return exportSystemOf ? exportSystemOf(system) : null;
 }
 
 interface PageSystem {
@@ -92,4 +106,22 @@ export const useDocumentOverrides = (doc: Doc): TokenOverrides =>
   useSyncExternalStore(
     (listener) => onUpdate(doc, () => listener()),
     () => overridesOf(doc),
+  );
+
+// UX wave U10b (§B.5): the document's page and its overrides, followed as they change (the same object while they stay);
+// before the replica opens, none.
+const NO_SETTING: { page: DocPage; overrides: TokenOverrides } = { page: {}, overrides: {} };
+const settings = new WeakMap<Doc, { key: string; value: { page: DocPage; overrides: TokenOverrides } }>();
+function pageSettingOf(doc: Doc): { page: DocPage; overrides: TokenOverrides } {
+  const value = { page: docPage(doc), overrides: dsOverrides(doc) };
+  const key = JSON.stringify(value);
+  const held = settings.get(doc);
+  if (held?.key === key) return held.value;
+  settings.set(doc, { key, value });
+  return value;
+}
+export const useDocumentPageSetting = (doc: Doc | null): { page: DocPage; overrides: TokenOverrides } =>
+  useSyncExternalStore(
+    (listener) => (doc ? onUpdate(doc, () => listener()) : () => {}),
+    () => (doc ? pageSettingOf(doc) : NO_SETTING),
   );

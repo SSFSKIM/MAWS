@@ -4,7 +4,7 @@
 // which say whose version a click keeps: Keep mine (the library's accept: the original takes mine's lines, the document
 // is untouched) and Take theirs (its reject: the document's chunk reverts to theirs). Loaded with CodeView, never in the
 // main chunk; the colours are code-theme.ts's, from tokens.
-import { getChunks, goToNextChunk, goToPreviousChunk, unifiedMergeView } from '@codemirror/merge';
+import { getChunks, getOriginalDoc, goToNextChunk, goToPreviousChunk, unifiedMergeView } from '@codemirror/merge';
 import { Compartment, Facet, type EditorState, type Extension } from '@codemirror/state';
 import type { EditorView } from '@codemirror/view';
 import { EDITOR_COPY } from '../copy';
@@ -33,6 +33,18 @@ export function mergeView(theirs: { text: string; hash: string }): Extension {
     mergedHash.of(theirs.hash),
     unifiedMergeView({ original: theirs.text, mergeControls: control, highlightChanges: true, gutter: true, collapseUnchanged: { margin: 3, minSize: 4 } }),
   ];
+}
+
+// A state left behind keeps its chunks' widgets as the view that drew them built them: `@codemirror/merge` caches each
+// deletion widget's DOM, and its controls act on that view, destroyed since (the Mac run's second failure: Take theirs
+// after a move changed nothing). A view that takes the state over draws the merge view anew, from the original as it now
+// is (the chunks kept so far are in it), so its controls act on this view.
+export function redrawMergeView(view: EditorView): void {
+  const hash = mergedWith(view.state);
+  if (hash === null) return;
+  const text = getOriginalDoc(view.state).toString();
+  view.dispatch({ effects: merging.reconfigure([]) });
+  view.dispatch({ effects: merging.reconfigure(mergeView({ text, hash })) });
 }
 
 // How many chunks differ from the disk's version; null while no merge view is open.

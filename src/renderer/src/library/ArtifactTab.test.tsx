@@ -21,8 +21,10 @@ import { allTabs } from '../stores/layout-model';
 import { installFakeMain, ok } from '../test-support/code';
 import { resetShellStores } from '../test-support/shell-stores';
 import { openArtifactTab } from './actions';
-import { registerArtifactTabs } from './ArtifactTab';
+import { artifactReplaceVerdict, registerArtifactTabs } from './ArtifactTab';
 import { connectLibrary, resetLibrary } from './store';
+import { noteDeletedReplica, resetDeletedReplicas } from '../artifacts/deleted-replicas'; // UX wave U10b
+import { deferred } from '../test-support/code'; // UX wave U10b
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -54,6 +56,8 @@ function row(over: Partial<LibraryRow> = {}): LibraryRow {
 // (`artifacts.get`, asked when the index has none); `markViewed` recorded.
 let current: LibraryRow | null;
 let onHost: ArtifactRow | null | 'refused';
+let onHostDeleted: { title: string; kind: 'document'; undoable: boolean } | undefined; // UX wave U10b: `artifacts.get`'s word on a deleted artifact
+let onUndelete: () => Promise<unknown> | unknown; // UX wave U10b
 const hostRow = (over: Partial<ArtifactRow> = {}): ArtifactRow => {
   const { lastEditor: _e, lastEditedAt: _t, sessions: _s, ...entity } = row();
   void [_e, _t, _s];
@@ -77,7 +81,11 @@ beforeEach(() => {
   resetLibrary();
   current = row();
   onHost = null;
+  onHostDeleted = undefined;
+  onUndelete = () => ok();
   main = installFakeMain((name) => {
+    if (name === 'artifacts.undelete') return onUndelete() as never;
+    if (name === 'artifacts.get' && onHostDeleted !== undefined) return ok({ artifact: null, deleted: onHostDeleted });
     if (name === 'library.get') return ok({ row: current });
     if (name === 'artifacts.get') return onHost === 'refused' ? { ok: false, error: { code: 'host_unavailable', message: 'the engine host is restarting' } } : ok({ artifact: onHost });
     if (name === 'artifacts.markViewed') return ok();
@@ -338,6 +346,109 @@ describe('an artifact in a main tab', () => {
     expect(await screen.findByText('Couldn’t read this artifact: index unavailable')).toBeTruthy();
     refuse = false;
     act(() => screen.getByRole('button', { name: 'Try again' }).click());
+    expect(await screen.findByText(/main editor for/)).toBeTruthy();
+  });
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5): an editor open on an artifact an
+// agent deletes stays mounted under a notice with the transcript row's Undo; its kind takes no edit meanwhile (the
+// replica's read-only wait, artifacts/host.test.ts). Undo restores it in place, the same editor state. A delete Undo
+// cannot take back shows today's notice.
+describe('an artifact an agent deleted while it is open', () => {
+  const DELETED_BY_AGENT = 'An agent deleted this artifact. It takes no edits until it is restored.';
+  const UNSENT = 'An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.';
+  afterEach(() => resetDeletedReplicas());
+  async function deletedWhileOpen() {
+    const editor = testEditor();
+    registerArtifactEditor('document', editor);
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    await screen.findByText(/main editor for/);
+    current = null;
+    onHostDeleted = { title: 'Launch notes', kind: 'document', undoable: true };
+    await changed();
+    await screen.findByText(DELETED_BY_AGENT);
+    return editor;
+  }
+  const notice = () => document.querySelector<HTMLElement>('[data-artifact-deleted]');
+
+  // Fix wave 4 (the panel's P1): the header says read-only, yet the replica keeps an edit the fence refused; a session
+  // opened over the tab must not replace it (replacing skips the close guard)
+  it('keeps its tab from being replaced while the parked replica holds an edit the host never acknowledged', async () => {
+    await deletedWhileOpen();
+    const ref = allTabs(useLayout.getState().main).find((tab) => tab.kind === 'artifact')!;
+    expect(artifactReplaceVerdict(ref)).toBeNull(); // the header says nothing unsaved (a parked replica's says read-only), nothing kept: replaceable
+    act(() => noteDeletedReplica({}, A, 1));
+    expect(artifactReplaceVerdict(ref)).toEqual({ keep: expect.stringContaining('has unsaved changes') });
+  });
+
+  it('keeps the editor on screen under the notice; Undo restores it in place with the same state, and the notice goes', async () => {
+    const editor = await deletedWhileOpen();
+    expect(screen.getByText(/main editor for/), 'still mounted').toBeTruthy();
+    expect(notice()!.getAttribute('data-artifact-deleted')).toBe(A);
+    expect(editor.dispose).not.toHaveBeenCalled();
+    const undoing = deferred<unknown>();
+    onUndelete = () => undoing.promise;
+    const undo = within(notice()!).getByRole<HTMLButtonElement>('button', { name: 'Undo' });
+    act(() => undo.click());
+    act(() => undo.click());
+    expect(main.callsOf('artifacts.undelete')).toEqual([{ artifactId: A }]); // held open: a second press sends nothing
+    expect(undo.disabled).toBe(true);
+    current = row();
+    await act(async () => undoing.resolve(ok()));
+    await changed();
+    await waitFor(() => expect(notice()).toBeNull());
+    expect(screen.getByText(/main editor for/)).toBeTruthy();
+    expect(editor.createState, 'the same editor state').toHaveBeenCalledTimes(1);
+    expect(editor.dispose).not.toHaveBeenCalled();
+  });
+
+  it('says the last edit is not saved while the editor’s replica holds one the host never acknowledged', async () => {
+    await deletedWhileOpen();
+    const replica = {};
+    act(() => noteDeletedReplica(replica, A, 1));
+    expect(notice()!.textContent).toContain(UNSENT);
+    act(() => noteDeletedReplica(replica, A, null));
+    expect(notice()!.textContent).toContain(DELETED_BY_AGENT);
+  });
+
+  it('an Undo refused here leaves "Not restored: <the store’s sentence>" under the notice, and Undo enabled again', async () => {
+    await deletedWhileOpen();
+    onUndelete = () => ({ ok: false, error: { code: 'invalid_input', message: 'this artifact was deleted in the Library, not by an agent', issues: { reason: 'invalid', data: {} } } });
+    const undo = within(notice()!).getByRole<HTMLButtonElement>('button', { name: 'Undo' });
+    await act(async () => undo.click());
+    expect(notice()!.querySelector('[data-artifact-line]')!.textContent).toBe('Not restored: this artifact was deleted in the Library, not by an agent');
+    expect(undo.disabled).toBe(false);
+    expect(screen.getByText(/main editor for/)).toBeTruthy();
+  });
+
+  it('a delete Undo cannot take back (the person’s, in the Library) shows today’s notice, and the editor goes', async () => {
+    const editor = testEditor();
+    registerArtifactEditor('document', editor);
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    await screen.findByText(/main editor for/);
+    current = null;
+    onHostDeleted = { title: 'Launch notes', kind: 'document', undoable: false };
+    await changed();
+    expect(await screen.findByText(LIBRARY_GONE)).toBeTruthy();
+    expect(screen.queryByText(DELETED_BY_AGENT)).toBeNull();
+    expect(editor.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it('opened with no editor held (a tab restored while the artifact is deleted), the notice and Undo stand alone, and the editor mounts once restored', async () => {
+    const editor = testEditor();
+    registerArtifactEditor('document', editor);
+    current = null;
+    onHostDeleted = { title: 'Launch notes', kind: 'document', undoable: true };
+    render(<Shell />);
+    act(() => openArtifactTab(A));
+    await screen.findByText(DELETED_BY_AGENT);
+    expect(screen.queryByText(/main editor for/)).toBeNull();
+    expect(headerTitle()).toBe('Launch notes');
+    current = row();
+    await act(async () => within(notice()!).getByRole('button', { name: 'Undo' }).click());
+    await changed();
     expect(await screen.findByText(/main editor for/)).toBeTruthy();
   });
 });

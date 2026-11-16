@@ -63,6 +63,19 @@ async function opened() {
 }
 
 describe('a design tab’s state', () => {
+  // UX wave U10b fix wave 5 (the panel's P1): the deck's guard, inherited, asks for an edit a parked replica keeps
+  it('its close guard asks at once for a read-only replica holding an edit the host never acknowledged, and keeps the tab when declined', async () => {
+    const handle = handleOf();
+    vi.spyOn(handle, 'state').mockReturnValue({ phase: 'off', synced: false, unsaved: 1, revision: 1, integrated: 0, readOnly: true });
+    const host = { open: vi.fn(async () => handle), assetUrl: () => '', identity: () => ({ actor: { kind: 'human' }, name: 'You', color: '--author-2' }) } as unknown as ArtifactHost;
+    const confirmDiscard = vi.fn(async () => false);
+    const state = new DesignTabState({ artifactId: 'design-1', kind: 'design', surface: 'main' }, { host, log: () => {}, confirmDiscard, saveWaitMs: 30 });
+    await vi.waitFor(() => expect(state.snapshot().session).not.toBeNull());
+    await expect(state.closeGuard()).resolves.toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledTimes(1);
+    state.dispose();
+  });
+
   it('fits every board when the header asks, waiting for the body’s room when none is measured', async () => {
     const { state } = await opened();
     state.fitAll();

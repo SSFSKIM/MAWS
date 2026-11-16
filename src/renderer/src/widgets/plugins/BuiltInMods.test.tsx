@@ -37,6 +37,9 @@ describe('the built-in mods section', () => {
     expect(within(section()).getByRole('heading').textContent).toBe('MAWS mods · Built in1');
     const row = within(section()).getByRole('listitem');
     expect(row.getAttribute('data-mod-row')).toBe('maws.to-human');
+    // UX wave U11c M1: its image is the mod's letter tile, by its registry name
+    const image = row.querySelector('[data-item-image]')!;
+    expect([image.getAttribute('data-item-image'), image.getAttribute('data-item-kind'), image.getAttribute('data-tile-colour'), image.textContent]).toEqual(['tile', 'mod', '5', 'T']);
     expect(row.textContent).toContain('To-human');
     expect(row.textContent).toContain('Built in');
     expect(row.textContent).toContain('Version 1');

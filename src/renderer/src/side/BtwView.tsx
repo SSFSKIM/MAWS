@@ -31,9 +31,17 @@ const SHOWN = 50; // the most recent exchanges kept on screen
 
 // Asking, listing and the field of one session's side questions: the view's and the card's alike. `log` is for the
 // scroller, kept at its newest exchange; `field` for the textarea, which takes the keyboard when the session's side-question
-// field is asked for it (a pick of `/btw` from the palette). `kept`: the field's text held outside the component (the
-// card's, in its store, so a fold loses nothing); the component's own state otherwise.
-type Kept = { question: string; setQuestion(next: string | ((current: string) => string)): void };
+// field is asked for it (a pick of `/btw` from the palette). `kept`: the field's text, the start in flight and its refusal
+// held outside the component (the card's, in its store, so a fold or a move loses none of them: UX wave U4b, decision 4);
+// the component's own state otherwise (the view under a side thread).
+type Kept = {
+  question: string;
+  setQuestion(next: string | ((current: string) => string)): void;
+  starting: boolean;
+  setStarting(on: boolean): void;
+  refusal: string | null;
+  setRefusal(words: string | null): void;
+};
 export function useSideAsk(parent: AppSessionId, kept?: Kept) {
   const log = useRef<HTMLDivElement>(null);
   const field = useRef<HTMLTextAreaElement>(null);
@@ -52,8 +60,12 @@ export function useSideAsk(parent: AppSessionId, kept?: Kept) {
   const [ownQuestion, setOwnQuestion] = useState('');
   const question = kept?.question ?? ownQuestion;
   const setQuestion = kept?.setQuestion ?? setOwnQuestion;
-  const [refusal, setRefusal] = useState<string | null>(null);
-  const [starting, setStarting] = useState(false); // P2-A: this view's own start in flight
+  const [ownRefusal, setOwnRefusal] = useState<string | null>(null);
+  const [ownStarting, setOwnStarting] = useState(false); // P2-A: this view's own start in flight
+  const refusal = kept === undefined ? ownRefusal : kept.refusal;
+  const setRefusal = kept?.setRefusal ?? setOwnRefusal;
+  const starting = kept === undefined ? ownStarting : kept.starting;
+  const setStarting = kept?.setStarting ?? setOwnStarting;
   // P5 O7 M8: an older machine with no side-question row greys Ask and Retry with its name (lane-b/remote-unavailable.ts)
   const askUnavailable = useRemoteUnavailable(parent, 'session.sideQuestion');
   const blocked = askUnavailable ?? (ready ? null : driven?.available === false ? driven.reason : sideBlock(availability, holder));

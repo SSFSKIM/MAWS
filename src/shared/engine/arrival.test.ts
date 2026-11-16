@@ -4,9 +4,10 @@
 // read whole, in order, through `readNext`, and the table names every frame or row that yields an arrival: one it does
 // not name yields none.
 import { describe, expect, it } from 'vitest';
-import { askSteerText } from '@shared/maws/ask';
+import { framePasted } from '@shared/composer/pasted-content';
+import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, nothingOpen, personsGrants, readAnswerEnvelope, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, nothingOpen, personsGrants, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -617,5 +618,124 @@ describe('readNext and turnOriginOf', () => {
       ).map((arrival) => [arrival.class, turnOriginOf(arrival)]),
     );
     expect(origins).toEqual({ own: 'human', consent: 'human', peer: 'peer', subagent: 'engine', task: 'engine', schedule: 'engine', answer: 'engine', command: 'engine', wake: 'engine' });
+  });
+});
+
+// UX wave U4b (the Decision Log's line on the architect's medium review, form (b), step 1): the engine writes several
+// waiting messages as one, in order, one newline between them, under the last one's uuid (U4a's decision 32 c), so an
+// answer waiting beside a person's prompt arrives inside one text. The reader finds each envelope at a line that opens
+// with its tag, as the shortest slice `parseAskSteer` reads whole that ends the text or a line, and gives the rest.
+describe('the answer envelopes inside a joined text', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const THEME = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice' as const, options: [{ label: 'Light' }, { label: 'Dark' }] };
+  const FOLDER = { id: 'q3', question: 'Where should it go?', header: 'Folder', modality: 'folder' as const };
+  const A1 = askSteerText('ask-1', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  const A2 = askSteerText('ask-2', [THEME], [{ id: 'q2', question: THEME.question, status: 'answered', value: ['Dark'] }]);
+  const read = (text: string) => parseAskSteer(text)!;
+  const joined = (...members: string[]) => members.join('\n');
+
+  it('an envelope first, then a prompt', () => {
+    expect(readAnswerEnvelopes(joined(A1, 'Also fix the footer.'))).toEqual({ envelopes: [read(A1)], rest: 'Also fix the footer.' });
+  });
+
+  it('a prompt, then an envelope last', () => {
+    expect(readAnswerEnvelopes(joined('Also fix the footer.', A1))).toEqual({ envelopes: [read(A1)], rest: 'Also fix the footer.' });
+  });
+
+  it('an envelope between two prompts: the rest is the two, one newline between', () => {
+    expect(readAnswerEnvelopes(joined('First this.', A1, 'Then that.'))).toEqual({ envelopes: [read(A1)], rest: 'First this.\nThen that.' });
+  });
+
+  it('two envelopes, in order, alone and around a prompt', () => {
+    expect(readAnswerEnvelopes(joined(A1, A2))).toEqual({ envelopes: [read(A1), read(A2)], rest: '' });
+    expect(readAnswerEnvelopes(joined(A1, 'In between.', A2))).toEqual({ envelopes: [read(A1), read(A2)], rest: 'In between.' });
+  });
+
+  it('a multi-line answer with a note', () => {
+    const answers = [
+      { id: 'q1', question: LAYOUT.question, status: 'answered' as const, value: ['Grid'], note: 'wide screens first' },
+      { id: 'q3', question: FOLDER.question, status: 'answered' as const, value: ['/work/site/pages', '/work/site/parts'] },
+    ];
+    const envelope = askSteerText('ask-3', [LAYOUT, FOLDER], answers);
+    expect(envelope.split('\n').length).toBeGreaterThan(6);
+    expect(readAnswerEnvelopes(joined('Before.', envelope, 'After.'))).toEqual({ envelopes: [read(envelope)], rest: 'Before.\nAfter.' });
+  });
+
+  it('a prompt that ends in a fenced block of its own after an envelope: the shortest slice, so the prompt is not swallowed', () => {
+    const prompt = `Compare it with this:\n\`\`\`json\n${JSON.stringify(read(A1).result)}\n\`\`\``; // a block that would also read as ask-1's
+    expect(parseAskSteer(joined(A1, prompt))?.askId).toBe('ask-1'); // the longest slice parses too
+    expect(readAnswerEnvelopes(joined(A1, prompt))).toEqual({ envelopes: [read(A1)], rest: prompt });
+  });
+
+  it('a malformed envelope stays text', () => {
+    const broken = A1.replace('"answered"', '"answred"');
+    expect(parseAskSteer(broken)).toBeNull();
+    expect(readAnswerEnvelopes(joined(broken, 'Also fix the footer.'))).toEqual({ envelopes: [], rest: joined(broken, 'Also fix the footer.') });
+  });
+
+  // the task review (Decision Log): `parseAskSteer` pairs the first tag with the last result block, so a slice runs only
+  // to the line before the next tag line, or a malformed member would swallow the words and the envelope after it
+  it('a malformed envelope, then words, then a valid one for the same ask: the valid one alone, the first two the rest', () => {
+    const broken = A1.replace('"answered"', '"answred"');
+    const words = 'Do not lose these words.';
+    expect(readAnswerEnvelopes(joined(broken, words, A1))).toEqual({ envelopes: [read(A1)], rest: joined(broken, words) });
+  });
+
+  it('a valid multi-line envelope followed directly by a second envelope: both found, the rest empty', () => {
+    const multi = askSteerText('ask-3', [LAYOUT, FOLDER], [
+      { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'], note: 'wide screens first' },
+      { id: 'q3', question: FOLDER.question, status: 'answered', value: ['/work/site/pages', '/work/site/parts'] },
+    ]);
+    expect(readAnswerEnvelopes(joined(multi, A2))).toEqual({ envelopes: [read(multi), read(A2)], rest: '' });
+  });
+
+  it('a plain prompt with the tag mid-line stays text', () => {
+    const text = `Please read ${A1}`;
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
+  });
+
+  it('a text that is all envelope: the envelope, and an empty rest, as today', () => {
+    expect(readAnswerEnvelopes(A1)).toEqual({ envelopes: [read(A1)], rest: '' });
+    expect(readAnswerEnvelope(A1)).not.toBeNull();
+    expect(readAnswerEnvelopes('Just a prompt.')).toEqual({ envelopes: [], rest: 'Just a prompt.' });
+  });
+});
+
+// The architect's review of the joined answer (the Decision Log), finding 1: a pasted segment's body is data. No line
+// inside one opens or ends an envelope, so an envelope pasted as a log stays in the segment, whole.
+describe('the answer envelopes inside a joined text: a pasted segment is data', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const A1 = askSteerText('ask-1', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+
+  it('a prompt with a pasted segment whose body is a valid envelope: nothing read, the text whole', () => {
+    const text = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
+  });
+
+  it('the same prompt joined with a real envelope after it: the real one alone is read, the segment stays whole', () => {
+    const prompt = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
+    expect(readAnswerEnvelopes(`${prompt}\n${A1}`)).toEqual({ envelopes: [parseAskSteer(A1)!], rest: prompt });
+  });
+});
+
+// Finding 3: a member opens, and bounds the one before it, only at the whole first line the writer emits. The model's
+// question is written verbatim and may hold a line that begins with the tag.
+describe('the answer envelopes inside a joined text: the member boundary is the writer\'s whole first line', () => {
+  const TAGGED = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice' as const, options: [{ label: 'Hash' }, { label: 'Star' }] };
+  const envelope = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+
+  it('a question whose second line begins with the tag: its envelope alone is read', () => {
+    expect(envelope.split('\n')[2]).toMatch(/^\[MAWS ask /);
+    expect(readAnswerEnvelopes(envelope)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '' });
+  });
+
+  it('and joined with a prompt, before or after it', () => {
+    expect(readAnswerEnvelopes(`${envelope}\nAlso fix the footer.`)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: 'Also fix the footer.' });
+    expect(readAnswerEnvelopes(`Also fix the footer.\n${envelope}`)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: 'Also fix the footer.' });
+  });
+
+  it('a line that begins with the tag but is not the writer\'s first line opens nothing: it stays text', () => {
+    const text = `[MAWS ask ask-1] is how the answers start\n${envelope}`;
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '[MAWS ask ask-1] is how the answers start' });
   });
 });

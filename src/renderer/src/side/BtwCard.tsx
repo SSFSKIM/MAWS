@@ -8,7 +8,12 @@
 // transcript's foot, which clears the jump-to-latest control, 12 px from the right, 320 px wide or the pane less 24 px,
 // up to 360 px tall); the compact pill, which draws no transcript, in the flow above its composer (`flow`). It draws
 // nothing while its session's card is closed. Its state is the window's (side/store.ts, `useBtwCards`), never stored.
-// U4b registers it at the card column's foot.
+// UX wave U4b (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 4 and 5, Interfaces
+// B): while the card column is drawn for the session the card is the column's foot (`BtwCardFoot`, registered in the
+// column's slot), at the column's bottom, as wide as the cards and in their surface, and the corner draws nothing; where
+// the column is not drawn for it, the corner draws it as before. One function says which (`useBtwPlace`), so the card is
+// drawn once. A move between the two is a remount, as a fold is: what it must keep (the field's text, the start in flight
+// and its refusal, the promotion in flight) is the store's.
 import { useEffect } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SideExchange } from '@shared/side/question';
@@ -23,19 +28,41 @@ import { visibleSessions } from '../session/visibility';
 import { useFloatingCard } from '../shell/floating';
 import { useLayout } from '../stores/layout';
 import { useSessions } from '../stores/sessions';
-import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, refreshSide, setBtwQuestion, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
+import { btwCardOf, btwUnseen, closeBtwCard, foldBtwCard, markBtwSeen, openBtwCard, refreshSide, setBtwQuestion, setBtwRefusal, setBtwStarting, sideChildrenShown, sidePaneOf, useBtwCards, useSidePane, waitingSince } from './store';
+import { useBtwPlace } from './btw-place';
 
 const COPY = SIDE_COPY.btw;
-export type BtwCardPlacement = 'corner' | 'flow';
+export type BtwCardPlacement = 'corner' | 'flow' | 'foot';
 
 // Above the transcript and its jump-to-latest control (z-index 1), below menus, dialogs and toasts (their own layers).
 const CORNER = 'absolute right-3 bottom-[56px] z-10';
 const SURFACE = 'border border-border-strong bg-bg-overlay text-fg shadow-float';
+// At the column's foot the open card is one of the cards: their surface (panel/summary/FloatingCard.tsx).
+const CARD_SURFACE = 'border border-border bg-bg-raised text-fg shadow-strip';
 
 export function BtwCard({ appSessionId, placement = 'corner' }: { appSessionId: AppSessionId; placement?: BtwCardPlacement }) {
   const view = useBtwCards((s) => btwCardOf(s, appSessionId).view);
   if (view === 'closed') return null;
-  return view === 'folded' ? <FoldedChip parent={appSessionId} placement={placement} /> : <OpenCard parent={appSessionId} placement={placement} />;
+  // the compact pane's card is drawn wherever that pane is, as before; the corner's and the foot's ask where the card is
+  return placement === 'flow' ? <CardOrChip parent={appSessionId} placement={placement} folded={view === 'folded'} /> : <Placed parent={appSessionId} placement={placement} folded={view === 'folded'} />;
+}
+
+/** The card column's foot (`Slots['sessionCardFoot']`): the session's card while its place is the foot. */
+export function BtwCardFoot({ appSessionId }: { appSessionId: AppSessionId }) {
+  return <BtwCard appSessionId={appSessionId} placement="foot" />;
+}
+
+// The corner draws the card while its place is the pane; the foot while it is the foot, in a wrapper at the column's
+// bottom (`mt-auto` in the column's full-height wrapper), inset as the cards are and clear of the last one.
+function Placed({ parent, placement, folded }: { parent: AppSessionId; placement: 'corner' | 'foot'; folded: boolean }) {
+  const place = useBtwPlace(parent);
+  if ((place === 'foot') !== (placement === 'foot')) return null;
+  const card = <CardOrChip parent={parent} placement={placement} folded={folded} />;
+  return placement === 'foot' ? <div className="mt-auto flex shrink-0 flex-col px-1 pt-0.5 pb-1">{card}</div> : card;
+}
+
+function CardOrChip({ parent, placement, folded }: { parent: AppSessionId; placement: BtwCardPlacement; folded: boolean }) {
+  return folded ? <FoldedChip parent={parent} placement={placement} /> : <OpenCard parent={parent} placement={placement} />;
 }
 
 // The waiting line, in the transcript's words without the effort (`liveThinkingLabel`, which ends with the time), counting
@@ -68,16 +95,30 @@ function useOnScreen(parent: AppSessionId, placement: BtwCardPlacement): boolean
 
 function OpenCard({ parent, placement }: { parent: AppSessionId; placement: BtwCardPlacement }) {
   const question = useBtwCards((s) => btwCardOf(s, parent).question);
-  const side = useSideAsk(parent, { question, setQuestion: (next) => setBtwQuestion(parent, next) });
+  const starting = useBtwCards((s) => btwCardOf(s, parent).starting);
+  const refused = useBtwCards((s) => btwCardOf(s, parent).refusal);
+  const side = useSideAsk(parent, {
+    question,
+    setQuestion: (next) => setBtwQuestion(parent, next),
+    starting,
+    setStarting: (on) => setBtwStarting(parent, on),
+    refusal: refused,
+    setRefusal: (words) => setBtwRefusal(parent, words),
+  });
   const exchanges = useSidePane((s) => sidePaneOf(s, parent).exchanges);
   const onScreen = useOnScreen(parent, placement);
   useEffect(() => {
     if (onScreen) markBtwSeen(parent, exchanges ?? []); // open on screen: every settled one is seen
   }, [parent, exchanges, onScreen]);
   const { log, field, shown, setQuestion, canAsk, note, refusal } = side;
-  const box = placement === 'corner' ? `${CORNER} w-[320px] max-w-[calc(100%-24px)] max-h-[min(360px,calc(100%-68px))]` : 'w-full max-h-[360px]';
+  const box =
+    placement === 'corner'
+      ? `${CORNER} w-[320px] max-w-[calc(100%-24px)] max-h-[min(360px,calc(100%-68px))] rounded-lg ${SURFACE}`
+      : placement === 'foot'
+        ? `w-full max-h-[min(360px,50vh)] rounded-md ${CARD_SURFACE}`
+        : `w-full max-h-[360px] rounded-lg ${SURFACE}`;
   return (
-    <section data-btw-card={placement} aria-label={COPY.card} className={`${box} flex min-h-0 flex-col overflow-hidden rounded-lg ${SURFACE} text-ui`}>
+    <section data-btw-card={placement} aria-label={COPY.card} className={`${box} flex min-h-0 flex-col overflow-hidden text-ui`}>
       <header className="flex h-9 shrink-0 items-center gap-0.5 border-b border-border pr-1 pl-3">
         <h2 className="m-0 min-w-0 flex-1 truncate text-ui font-semibold">{COPY.card}</h2>
         <IconButton label={COPY.fold} onClick={() => foldBtwCard(parent)}>

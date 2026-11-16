@@ -273,7 +273,9 @@ export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedb
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
 export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
-export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped' } as const;
+// UX wave U1b (decision 10): `dismissed`, every line of a question dismissed or declined whole; `skipped` stays an ask's
+// line for a question passed over.
+export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped', dismissed: 'Dismissed' } as const;
 
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 
@@ -428,9 +430,10 @@ export const RECEIPT = {
 export const ASK = {
   title: 'Questions', // the capsule's heading when the ask has no title
   count: (n: number) => `Asked ${plural(n, 'question')}`,
-  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended' },
+  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended', dismissed: 'Dismissed' /* UX wave U1b: answered, every answer skipped */ },
   withdrawn: 'Cancelled, the turn was interrupted', // a cancelled ask whose call the engine withdrew (`cancelReason: 'withdrawn'`)
   open: 'Open',
+  openBeside: 'Open beside', // UX wave U1b: the capsule's button while its form stands in the row
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
   decideForMe: 'Decide for me',
@@ -439,10 +442,15 @@ export const ASK = {
 
 // The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
 // error, a withdrawn one its interrupt wording, every other its state's.
-export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; error: string | null; cancelReason: string | null }): string {
+// UX wave U1b: an answered ask every one of whose answers was skipped was dismissed, and says so (its lines read Skipped).
+export function askStateCopy(row: { state: Exclude<keyof typeof ASK.state, 'dismissed'> | 'error'; error: string | null; cancelReason: string | null; answers?: readonly AskAnswer[] | null }): string {
   if (row.state === 'error') return row.error ?? '';
+  if (row.state === 'answered' && row.answers != null && row.answers.length > 0 && row.answers.every((answer) => answer.status === 'skipped')) return ASK.state.dismissed;
   return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
 }
+
+/** A question's title as its ask's capsule shows it: the header, else the question. */
+export const askQuestionTitle = (question: { header?: string; question: string }): string => question.header ?? question.question;
 
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
 // `<name> (<directory>)` for a repository, a design system by its name or the build request (P3-D), or the two
@@ -542,20 +550,42 @@ export const ARTIFACT = {
   neverAnswered: (name: string) => `Registering artifact ${name} was never answered`, // E11
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
+  // UX wave U10b (M5, §C.4): an agent's delete
+  deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
+  neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`, // E11 (fix wave 1): the family's form, its turn closed first
+  couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`,
 } as const;
+
+// UX wave U10b (M5, §C.4; R2, R3): the reason a refused delete's row gives the person, by the refusal's `why`. The agent's
+// sentence names the tool and "the user"; the row never does. A `why` this table lacks (a newer machine's) is drawn as
+// the refusal reader leaves the agent's sentence.
+const DELETE_REASONS: Readonly<Record<string, string>> = {
+  byUser: 'you made it. Delete it from the Library if you no longer need it.',
+  edited: 'you have edited it. Delete it from the Library if you no longer need it.',
+  otherSession: 'another session made it. Delete it from the Library if you no longer need it.',
+  unknown: 'MAWS cannot tell that only agents have written to it. Delete it from the Library if you no longer need it.',
+  designSystemInUse: 'it still styles other artifacts. Move them to another design system first.',
+};
 
 // The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead (P3-A: or the
 // refusal's machine-readable JSON). The human reads the reason alone, as the artifact cells show theirs.
 const refusalForHuman = (error: string) =>
   error
-    .replace(/^artifact_(create|update|publish): /, '')
+    .replace(/^artifact_(create|update|publish|delete): /, '') // UX wave U10b: the delete's prefix too
     .replace(/ \{"reason":.*\}$/, '')
     .replace(/; use artifact_(create|update|publish)$/, '');
 
 // The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
 // E11), else the version it registered (without a version when the result named none).
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true }): string {
+// UX wave U10b (M5, §C.4): a delete's heading is "Deleting <title>…" until its answer, then "Deleted <title>", or its refusal
+// in the person's words (never answered, E11, when its turn closed first). Whether the artifact is live again ("Restored <title>") is read by the row's view, not here.
+export function artifactHeading(row: { action: 'create' | 'update' | 'delete'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true; why?: string }): string {
   const name = row.title ?? row.artifactId;
+  if (row.action === 'delete') {
+    if (row.error !== null) return ARTIFACT.couldNotDelete(name, (row.why !== undefined ? DELETE_REASONS[row.why] : undefined) ?? refusalForHuman(row.error));
+    if (row.neverAnswered) return ARTIFACT.neverAnsweredDelete(name);
+    return row.answered ? ARTIFACT.deleted(name) : ARTIFACT.deleting(name);
+  }
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
   if (row.neverAnswered) return ARTIFACT.neverAnswered(name);
   if (row.version === null && !row.answered) return ARTIFACT.registering(name);

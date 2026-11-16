@@ -1,10 +1,12 @@
 // C7's mockup checklist (C7 execution document, M6 and Acceptance item 4): screenshots of the composer and its request
 // and status-line surfaces in the light and dark themes, against mockups 04 and 05 as redrawn to the frame anatomy,
-// saved under docs/doperpowers/plans/shots/c7-*.png for the review. The live frame, the docked approvals and the
+// saved under docs/doperpowers/plans/shots/c7-*.png for the review. The live frame, the approvals and the
 // popovers are taken in the product shell over C3's replay (a scratch transcript under the launch's own
 // CLAUDE_CONFIG_DIR, the committed ClaudeUsage fixture moved to now); the unstarted frame and the slash palette on the
 // harness pages (the stub of C10's intent inside C5's own session pane; a stub widget registered as C11 will). Nothing
-// here asserts a look: it drives each state to where the mockup shows it and photographs it. Run on purpose only:
+// here asserts a look: it drives each state to where the mockup shows it and photographs it. UX wave U1b: an approval no
+// longer takes the composer's place; it is the card at the transcript's end, the composer free under it, and the shots
+// of the approvals photograph that. Run on purpose only:
 //   MAWS_HARNESS=1 pnpm exec electron-vite build && MAWS_C7_SHOTS=1 MAWS_ENGINE_REPLAY=1 pnpm exec playwright test e2e/c7-shots.spec.ts
 import { isolatedGitEnv } from '../test/support/git-env';
 import { execFileSync } from 'node:child_process';
@@ -17,6 +19,7 @@ import type { EditorHarnessApi } from '../src/renderer/src/harness/composer/edit
 import { addressed } from './support/address';
 import { invoke, launchReady, turnsJournal, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT } from './support/launch';
+import { END_ROW } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 
 test.skip(process.env.MAWS_C7_SHOTS !== '1', 'the mockup screenshots run only under MAWS_C7_SHOTS=1');
@@ -113,7 +116,7 @@ async function shoot(page: Page, name: string, harness = false) {
   await setTheme(page, 'light', harness);
 }
 
-test('the shell: the frame docked under a live transcript, the docked approvals, the usage and context popovers', async () => {
+test('the shell: the frame docked under a live transcript, the approvals at its end, the usage and context popovers', async () => {
   test.setTimeout(180_000);
   const maws = await launchMaws({ env: { MAWS_HARNESS: '0', MAWS_ENGINE_REPLAY: '1', CLAUDE_CONFIG_DIR: config, MAWS_CLAUDE_USAGE_DIR: usage } });
   const { page } = maws;
@@ -163,20 +166,22 @@ test('the shell: the frame docked under a live transcript, the docked approvals,
     }
     await setTheme(page, 'light', false);
 
-    // 04 vignette 2, as U1a §D redrew it: the docked approval's three buttons, each with its key (pass2/grant-reapply-start,
-    // no ask rule, the engine's local-rule suggestion: Deny, Always allow in the project, Allow once)
+    // 04 vignette 2, as U1a §D redrew it and U1b placed it: the approval's three buttons, each with its key, in the card at
+    // the transcript's end with the composer free under it (pass2/grant-reapply-start, no ask rule, the engine's
+    // local-rule suggestion: Deny, Always allow in the project, Allow once)
     await open(approval);
     await launchReady(page, approval, GRANT, { cwd: repo });
     value(await invoke(page, 'session.send', { appSessionId: approval as never, content: firstPrompt(GRANT) })); // as recorded (the replay holds at it)
-    const approvalFrame = pane.getByRole('group', { name: 'Approval needed' });
+    const approvalFrame = pane.locator(END_ROW).getByRole('group', { name: 'Approval needed' });
     await expect(approvalFrame).toBeVisible({ timeout: 20_000 });
     await expect(approvalFrame.getByRole('button', { name: 'Allow once', exact: true }).locator('kbd')).toBeVisible();
+    await expect(message, 'the composer stands free under the request').toBeVisible();
     await shoot(page, 'approval-buttons-keys');
 
     // 04 vignette 3, as U1a §I redrew it: the edit-approval variant as a diff against the file (a synthetic Edit request)
     await open(edit);
     await launchReady(page, edit, editJournal(), { cwd: repo });
-    const editFrame = pane.getByRole('group', { name: 'Approval needed' });
+    const editFrame = pane.locator(END_ROW).getByRole('group', { name: 'Approval needed' });
     await expect(editFrame).toBeVisible({ timeout: 20_000 });
     await expect(editFrame.locator('[data-proposed-diff]'), 'the diff, once the file is read').toBeVisible();
     await shoot(page, 'edit-approval');

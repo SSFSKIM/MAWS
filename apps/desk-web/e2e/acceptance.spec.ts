@@ -1,8 +1,9 @@
 // DC9's acceptance (the composite's DC9.G1–G4, the plan's M6), in a real browser against DC3's fake machine replaying
 // the `session-view` recording as a DC8 producer (`fake-machine.ts`, `producer: 'dc8'`): the clauses the milestones'
-// suites proved on `two-subagents`, on DC6's recorded plane, or not yet at all. The report over the recording's marked
-// and unmarked turns, its questions, the toggle and back, a reload; a marked answer streaming into its folded turn with
-// its record's running dots, settling with no double, and the turn reading finished once its `turn_duration` is in;
+// suites proved on `two-subagents`, on DC6's recorded plane, or not yet at all. The report over the recording's turns
+// (UX wave U2b: each stretch of work between the rows the person reads folded to one record line), its questions, the
+// toggle and back, a reload; a marked answer streaming as its message with the running turn's line working, settling
+// with no double, and the turn reading finished once its `turn_duration` is in;
 // history paged to the first row across a compaction, live and after the session ended; the tail's send cases, each
 // framed row drawn without its frame line and a peer's labelled with who sent it; a desk Interrupt's rows, in both of
 // the bridge's shapes, drawing no bubble and ending the turn; a notification's landing on a `<message>`; the column's
@@ -29,7 +30,8 @@ const SHOTS = process.env.DESK_SHOTS;
 const BRIDGE = { kind: 'plugin', name: 'doperpowers', asUser: true };
 
 const streamingRows = (scope: Locator) => scope.locator('[data-row-id^="desk-stream:"]');
-const records = (scope: Locator) => scope.locator('[data-row-id^="owner-record:"]');
+const records = (scope: Locator) => scope.locator('[data-row-id^="record-fold:"]'); // a stretch's record line, closed or open
+const workingLine = (scope: Locator) => scope.locator('[data-kind="divider"]').filter({ hasText: /Working/ }); // the running turn's line
 const occurrences = (scope: Locator, text: string) => scope.evaluate((el, t) => (el.textContent ?? '').split(t).length - 1, text);
 const toggle = (page: Page, view: 'Report' | 'Transcript') => page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: view });
 const tailSends = (view: Locator) => view.getByTestId('tail-send');
@@ -116,23 +118,24 @@ const isAnswerChunk = (uuid: string, recording: Recording) => {
 };
 const isRow = (uuid: string) => (s: Step) => s.k === 'row' && s.row.uuid === uuid;
 
-test("G1: the report over the session's rows — marked turns folded to one record each, unmarked ones whole, its questions — the toggle to the transcript and back, a reload; the column's tabs", async ({ page, hub }) => {
+test("G1: the report over the session's rows — each stretch of work between the rows the person reads folded to one record line, the messages and questions in view — the toggle to the transcript and back, a reload; the column's tabs", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   fm.step(endOf(fm.recording)); // every row in, the session idle and still running
   await revealEarlier(view, view.locator('.owner-message-ink').filter({ hasText: ANSWER }));
   await expect(view.locator('.owner-message-ink').filter({ hasText: ANSWER })).toBeVisible();
   await expect(page.getByTestId('session-status')).toHaveText('');
   await expect(toggle(page, 'Report')).toHaveAttribute('aria-pressed', 'true');
-  // The unmarked last turn draws whole: its prompt and its answer, at the end.
+  // UX wave U2b: the session holds messages, so the unmarked last turn's answer (one to three hundred, a word a line)
+  // folds behind its record line too; its prompt stays.
   await expect(view).toContainText('Count from one to three hundred');
-  await expect(view).toContainText('three hundred');
-  // The marked answer's turn: one record, its work folded (its Bash call), its questions in view.
-  const record = records(view).filter({ hasText: /Working record · \d+ tool calls?/ });
+  await expect(view).not.toContainText('forty-nine');
+  // The marked answer's turn: its work folded (its Bash call) behind a record line, its questions in view.
   await scrollUntil(view, view.getByText('Color→blue'), -1);
-  await expect(record.last()).toBeVisible();
+  await expect(records(view).first()).toHaveText('› working record');
   await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   await scrollUntil(view, view.locator(`[data-row-id^="question:${ASK_CALL}"]`), -1); // the ask mod's async question, a question row
-  // Older turns: a marked one (part 23) is its message ink over a closed record, an unmarked one (part 24) whole.
+  // Older turns: a marked one (part 23) is its message after one closed record line, its Read call behind it; an
+  // unmarked one (part 24) is one closed record line after its prompt, its Read call and its answer behind it.
   await scrollUntil(view, view.getByText('Read notes part 23 and tell me what it says.'), -1);
   const part23 = view.locator('.owner-message-ink').filter({ hasText: 'Part 23 is forty numbered lines' });
   await expect(part23).toBeVisible();
@@ -142,11 +145,12 @@ test("G1: the report over the session's rows — marked turns folded to one reco
     return ids;
   };
   const turn23 = await between('Read notes part 23 and tell me what it says.', 'Read notes part 24 and tell me what it says.');
-  expect(turn23.filter((id) => id.startsWith('owner-record:'))).toHaveLength(1);
-  await scrollUntil(view, view.getByText('Part 24 is forty numbered lines'), 1);
-  const turn24 = await between('Read notes part 24 and tell me what it says.', 'Part 24 is forty numbered lines');
-  expect(turn24.some((id) => id.startsWith('owner-record:'))).toBe(false); // unmarked: no record, its Read call drawn
-  expect(turn24.length).toBeGreaterThan(0);
+  expect(turn23.filter((id) => id.startsWith('record-fold:'))).toHaveLength(1);
+  const NEXT_PROMPT = 'Do these four steps in order, and nothing else.';
+  await scrollUntil(view, view.getByText(NEXT_PROMPT, { exact: false }), 1);
+  const turn24 = await between('Read notes part 24 and tell me what it says.', NEXT_PROMPT);
+  expect(turn24.filter((id) => id.startsWith('record-fold:closed:'))).toHaveLength(1); // unmarked: its whole turn one record
+  await expect(view).not.toContainText('Part 24 is forty numbered lines');
 
   // The column: Subagents, Jobs, Diff, Info; no Transcript tab.
   const depth = page.getByTestId('depth');
@@ -177,7 +181,7 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   await toggle(page, 'Transcript').click();
   await expect(toggle(page, 'Transcript')).toHaveAttribute('aria-pressed', 'true');
   const transcript = await allTranscriptRowIds(view, firstRow);
-  expect(transcript.filter((id) => id.startsWith('owner-record:'))).toEqual([]);
+  expect(transcript.filter((id) => id.startsWith('record-fold:'))).toEqual([]);
   expect(transcript.filter((id) => id.startsWith('divider:')).length).toBeGreaterThan(report.filter((id) => id.startsWith('divider:')).length);
   await expect(records(view)).toHaveCount(0);
   await expect(view.locator('[data-row-id^="divider:"]').first()).toBeVisible();
@@ -192,23 +196,26 @@ test("G1: the report over the session's rows — marked turns folded to one reco
   expect(await allTranscriptRowIds(view, firstRow, 15_000)).toEqual(report);
 });
 
-test('G1: a marked answer streams per block into its folded turn, its record working; it settles with no double; its turn_duration reads the turn finished', async ({ page, hub }) => {
+test("G1: a marked answer streams per block as its message, the work before it folded and the running turn's line working; it settles with no double; its turn_duration reads the turn finished", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
   const recording = fm.recording;
   const uuid = answerRow(recording);
   fm.step(recording.steps.findIndex(isAnswerChunk(uuid, recording)) - fm.played); // up to the answer's first chunk
   await expect(view).toContainText('Color→blue');
-  await expect(view).toContainText("Wrote 'blue' to recorded.txt in the current directory"); // nothing marked yet: the turn draws whole, its Bash call too
+  // UX wave U2b: the session already holds the older turns' messages, so the running turn's work is folded before its
+  // answer starts, its Bash call too
+  await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
 
   for (let i = 0; i < 40 && !(await streamingRows(view).allTextContents()).join('').includes(ANSWER); i++) {
     fm.step(1);
     await page.waitForTimeout(20);
   }
-  // Native MAWS already folds an open mark, but UX1-C leaves its unfinished text literal and without ink.
-  await expect(streamingRows(view).last()).toContainText(`<message>${ANSWER}`);
-  await expect(streamingRows(view).last().locator('.owner-message-ink')).toHaveCount(0);
+  // A message still streaming is drawn as the message it is, under its label and ` …`, its open mark out of sight.
+  await expect(streamingRows(view).last()).not.toContainText('<message>');
+  await expect(streamingRows(view).last().locator('.owner-message-ink')).toContainText(ANSWER);
+  await expect(streamingRows(view).last().locator('.owner-message-label')).toHaveText('● message …');
   await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
-  await expect(workingDots(records(view))).toHaveCount(1);
+  await expect(workingLine(view)).toHaveCount(1);
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
   const lastText = recording.steps.findLastIndex((s) => s.k === 'chunk' && s.turnId === answerBlock.body.turnId && s.step === answerBlock.body.step && s.chunk.index === answerBlock.body.index && s.chunk.kind === 'text');
@@ -217,11 +224,12 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   await expect(live.locator('.owner-message-ink')).toContainText(ANSWER);
   await expect(live).not.toContainText('<message>');
   await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory"); // folded into its record while the mark streams
-  await expect(workingDots(records(view))).toHaveCount(1); // the record says it works
+  await expect(workingLine(view)).toHaveCount(1); // the running turn's line says it works
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // and its row is not written yet
 
-  // Unmarked text streaming later in the marked turn (a block after the answer, in the same response) stays inside the
-  // closed record; opened, the record shows it. The response's step-end drops it, as no row was written for it.
+  // Unmarked text streaming later in the marked turn (a block after the answer, in the same response) folds: the record
+  // line after the answer holds it; opened, the record shows it. The response's step-end drops it, as no row was
+  // written for it.
   const named = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (named.k !== 'block-row') throw new Error('no block-row');
   // The answer's last text chunk (the response's `stop` chunk comes after its block-row, and is then behind the aside's).
@@ -232,16 +240,18 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   const ASIDE = 'An unmarked aside, still streaming.';
   fm.depth.apply({ ...chunk, chunkIndex: chunk.chunkIndex + 1, chunk: { kind: 'text', index: Number(chunk.chunk.index) + 1, text: ASIDE } });
   await page.waitForTimeout(300);
-  await expect(view).not.toContainText(ASIDE); // folded: the record below proves it arrived
-  const working = records(view).filter({ has: page.locator('.transcript-working-dots') });
-  const workingId = await working.getAttribute('data-row-id');
-  expect(workingId).not.toBeNull();
-  const disclosure = view.locator(`[data-row-id="${workingId}"] .transcript-disclosure`);
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
+  await expect(view).not.toContainText(ASIDE); // folded: the record line below proves it arrived
+  const asideRecord = records(view).last(); // the stretch after the answer, the aside its only row
+  const closedId = await asideRecord.getAttribute('data-row-id');
+  expect(closedId).toMatch(/^record-fold:closed:/);
+  const stretch = closedId!.slice('record-fold:closed:'.length);
+  await asideRecord.getByRole('button').click();
+  const opened = view.locator(`[data-row-id="record-fold:open:${stretch}"] button`);
+  await expect(opened).toHaveAttribute('aria-expanded', 'true');
+  await expect(opened).toHaveText('‹ fold to report');
   await expect(view).toContainText(ASIDE);
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
+  await opened.click();
+  await expect(view.locator(`[data-row-id="record-fold:closed:${stretch}"] button`)).toHaveAttribute('aria-expanded', 'false');
   await expect(view).not.toContainText(ASIDE);
 
   // Settled: the row replaces the live text, drawn once. Then the engine's turn_duration closes the turn.
@@ -252,7 +262,8 @@ test('G1: a marked answer streams per block into its folded turn, its record wor
   await expect(streamingRows(view)).toHaveCount(0);
   await expect.poll(() => occurrences(view, ANSWER)).toBe(1);
   await expect(view).not.toContainText(ASIDE);
-  // Finished: no working dots anywhere (the record's, the jump control's), and the transcript's divider is not "Working".
+  // Finished: no running turn's line, no working dots (the jump control's), and the transcript's divider is not "Working".
+  await expect(workingLine(view)).toHaveCount(0);
   await expect(workingDots(view)).toHaveCount(0);
   await toggle(page, 'Transcript').click();
   await scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
@@ -333,6 +344,9 @@ for (const ended of [false, true]) {
 
 test("G1: a send stays at the tail until its own framed row: delivered before its row, two identical sends each taking their own, an earlier typed prompt never taken, one refused after a delay, one whose row never comes before the session ends; a framed row draws without its frame line, a peer's as a message line naming who sent it", async ({ page, hub }) => {
   const { fm, view } = await openSession(page, hub);
+  // UX wave U2b: the scene reads every row the session draws, in the full transcript, where nothing is folded; in the
+  // report a message between agents folds with the work around it (the execution document, §B, `agent_message`).
+  await toggle(page, 'Transcript').click();
   const idle = fm.recording.steps.findIndex((s, i) => i > 0 && s.k === 'presence' && s.at > 18_000 && (s.record as { status?: string } | null)?.status === 'idle');
   fm.step(idle + 1);
   const last = fm.recording.rows.main.at(-1)!;
