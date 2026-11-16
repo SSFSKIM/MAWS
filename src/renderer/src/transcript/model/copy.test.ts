@@ -104,6 +104,12 @@ describe('cell lines', () => {
     expect(cellLabel({ kind: 'denied', subject: 'git push', disposition: 'denied', denialKind: 'permission-rule', reason: null })).toBe('Denied: `git push`');
     expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: 'destructive' })).toBe('Auto mode blocked: `rm -rf` · destructive');
     expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-parsing-error', reason: 'x' })).toBe('Auto mode blocked: `rm -rf` · review unreadable');
+    // UX wave U1c (Interfaces §A): a blocked row's "again" and "· approved", for a call auto mode blocked alone
+    expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: null })).toBe('Auto mode blocked: `rm -rf`');
+    expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: null, approved: true })).toBe('Auto mode blocked: `rm -rf` · approved');
+    expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: null, again: true })).toBe('Auto mode blocked again: `rm -rf`');
+    expect(cellLabel({ kind: 'denied', subject: 'rm -rf', disposition: 'auto_denied', denialKind: 'automode-blocked', reason: 'destructive', again: true, approved: true })).toBe('Auto mode blocked again: `rm -rf` · destructive · approved');
+    expect(cellLabel({ kind: 'denied', subject: 'git push', disposition: 'denied', denialKind: 'permission-rule', reason: null, again: true, approved: true })).toBe('Denied: `git push`');
     expect(cellLabel({ kind: 'denied', subject: 'ls', disposition: 'stopped', denialKind: 'user-rejected', reason: 'x' })).toBe('Stopped: `ls`');
     expect(cellLabel({ kind: 'denied', subject: 'ls', disposition: 'stopped', denialKind: 'automode-unavailable', reason: 'x' })).toBe('Stopped: `ls` · auto mode unavailable');
   });
@@ -126,6 +132,7 @@ describe('cell lines', () => {
     expect(cellLabel({ kind: 'generic', toolName: 'ToolSearch', category: 'skills', detail: '2' })).toBe('Loaded 2 tools');
     expect(cellLabel({ kind: 'generic', toolName: 'Grep', category: 'exploration', detail: 'TODO', scope: 'src' })).toBe('Searched for `TODO` in src');
     expect(cellLabel({ kind: 'generic', toolName: 'WebFetch', category: 'web', detail: 'example.com' })).toBe('Fetched example.com');
+    expect(cellLabel({ kind: 'generic', toolName: 'mcp__web__fetch', category: 'web', detail: 'example.com' })).toBe('Fetched example.com'); // UX wave U3b, M5: the web plugin's fetch, before the MCP form
     expect(cellLabel({ kind: 'generic', toolName: 'WebSearch', category: 'web', detail: 'q' })).toBe('Searched the web for q');
     expect(cellLabel({ kind: 'generic', toolName: 'EnterPlanMode', category: 'other' })).toBe('Entered plan mode');
     expect(cellLabel({ kind: 'generic', toolName: 'EnterWorktree', category: 'other', detail: '/tmp/wt' })).toBe('Entered worktree /tmp/wt');
@@ -190,6 +197,9 @@ describe('subagent and boundary copy', () => {
     expect(subagentSentence(['A'], 'finished')).toBe('A finished');
     expect(subagentSentence(['A', 'B'], 'finished_with_errors')).toBe('A and B finished with errors');
     expect(subagentSentence(['A'], 'stopped')).toBe('A was stopped');
+    // UX wave U3b, M5 (decision 19): agents that ended with their session's process, in U8's words for the same fact
+    expect(subagentSentence(['A'], 'exited')).toBe('A ended with the session');
+    expect(subagentSentence(['A', 'B', 'C', 'D', 'E'], 'exited')).toBe('A, B and 3 more ended with the session');
     expect(subagentSentence(['A'], 'working')).toBe('A started working');
   });
 

@@ -4,8 +4,12 @@
 // sources, newest first: this session's own human prompts from the transcript (a `peer` turn's opening message is not
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
 // display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
-// the search's matching and keys. Pure.
+// the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run; the medium review's form (b), step 1):
+// MAWS's answer envelope is never a prompt to recall. An answer waiting at the next step is a row of the running turn,
+// alone or joined by the engine with the person's own waiting messages: ↑ and the search recall a row's text as the
+// transcript drew it, the person's words without the envelopes, and walk past a row that held nothing else. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { readAnswerEnvelopes } from '@shared/engine/arrival';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -63,6 +67,18 @@ const entryKey = (e: HistoryEntry) =>
       .map(([, c]) => c.content),
   );
 
+// A row that is MAWS's answer envelopes alone, its text as the transcript keeps it whole (`userTextOf`), with no
+// attachment; a row with attachments recalls as it draws (an orphan envelope's raw text beside an image, the task
+// review of the fix wave), and so does a row of attachments alone. The transcript read the envelopes once and the row's text is what that read left as
+// the person's words, so this read decides only whether to skip the row: the recall is the row's text as drawn, and
+// never the rest of a second read, where fragments the first read left as text could pair (the architect's review of the
+// joined answer, finding 4).
+function allAnswer(row: UserRow): boolean {
+  if (row.attachments.length > 0) return false;
+  const { envelopes, rest } = readAnswerEnvelopes(row.text);
+  return envelopes.length > 0 && rest === '';
+}
+
 // The recallable entries, oldest first (navigation starts from the end): earlier history, then this session's prompts.
 export function recallEntries(rows: readonly Row[], activity: readonly TurnActivity[], listed: readonly HistoryEntry[]): Recall[] {
   const human = new Set(activity.filter((turn) => turn.origin === 'human').map((turn) => turn.turnId));
@@ -71,6 +87,7 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
   let last: string | null = null;
   for (const row of rows) {
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
+    if (allAnswer(row)) continue; // an answer is not a prompt (U4b)
     const prefill = rowPrefill(row);
     const key = prefillKey(prefill);
     if (key === last) continue;

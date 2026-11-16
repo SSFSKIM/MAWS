@@ -40,3 +40,18 @@ it("writes a finished agent's age in English, as the stream beside it does", () 
   const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
   expect([line('a1'), line('a2'), line('a3')]).toEqual(['finished · 3m ago · read it', 'finished with errors · 2h ago', 'stopped · 1d ago']);
 });
+
+// Card C1, the owner's answer (the UX wave's U8d, Decision Log 16 and 17): an agent another machine reports exited with
+// no record of how (its bridge's word, or its starter's end) reads "ended"; one whose session's process went reads
+// "ended with the session". Neither has a time of its own.
+it('reads ended for an agent exited on its bridge’s word or its starter’s end, and ended with the session for one whose session went', () => {
+  const exited = (agentId: string, evidence: 'bridge' | 'parent' | 'session'): SubagentMeta =>
+    ({ agentId, meta: { agentType: 'general-purpose', description: `agent ${agentId}`, toolUseId: `toolu_${agentId}`, spawnDepth: 1 }, status: 'exited', evidence }) as SubagentMeta;
+  const metas = [exited('b1', 'bridge'), exited('p1', 'parent'), exited('s1', 'session')];
+  setAgentsClock(NOW);
+  const { container } = render(
+    <SubagentTree tasks={withStatuses(taskGraphOf(metas, []), metas)} view={{ ...INITIAL_TREE_VIEW, expanded: { agents: true, done: true, disk: true } }} onView={() => {}} onOpen={() => {}} statusesKnown />,
+  );
+  const line = (agentId: string) => container.querySelector(`[data-agent-row="${agentId}"] [data-part="line"]`)?.textContent;
+  expect([line('b1'), line('p1'), line('s1')]).toEqual(['ended', 'ended', 'ended with the session']);
+});

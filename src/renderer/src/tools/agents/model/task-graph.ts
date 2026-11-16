@@ -4,6 +4,7 @@
 // the same graph object when nothing changed, so selectors memoise on it and tests assert identity. Wire facts and
 // disk facts are kept apart: the disk half fills what the wire did not give and never overwrites a wire fact.
 import type { EngineSessionStatus } from '@shared/engine/status';
+import type { StatusEvidence } from 'desk-hub/protocol';
 import type { SessionEvent } from '@shared/graph/events';
 import { toolUseOf, type AgentId, type TaskId, type ToolUseId } from '@shared/graph/ids';
 import type { SubagentEntry, WorkflowRun } from '@shared/ipc/schema/fs';
@@ -58,6 +59,9 @@ export interface TaskNode {
   agent: AgentFacts | null; // agents only
   workflow: WorkflowFacts | null; // workflows only
   provenance: { wire: boolean; disk: boolean; snapshot: boolean };
+  // UX wave U8d, card C1: what an `exited` status DX4 laid rests on (`withStatuses`, lane-a/agents/task-feed.ts); absent on
+  // every other node, and on an exit this app's own reads gave
+  evidence?: StatusEvidence;
 }
 
 // order: first seen. byToolUse: every tool-use id that started a task (a resumed agent keeps both of its own). issuer:

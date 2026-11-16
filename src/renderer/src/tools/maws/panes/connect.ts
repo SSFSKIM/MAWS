@@ -1,6 +1,8 @@
 // E1 (M3): the window side of `show_pane`'s pane bridge (residue 3: an IPC event, never an X1 event, so a reload or a
 // disk replay re-opens nothing). On `maws.pane.show` a window that knows the session opens what `PANES` names and
-// answers `maws.pane.answer` with what it opened: the `file` pane as a main tab at the line, any other pane as its panel
+// answers `maws.pane.answer` with what it opened: the `file` pane where `openFile` puts it (UX wave U6b-1, R2: beside the
+// chat, answered in the `panel-tool` form with Files and the file's name; the `main-tab` form when a main tab already
+// shows it; before the layout is read, once it is read, with the tab that then holds it), any other pane as its panel
 // tool with the params residue 10 gives it (Review on the uncommitted changes at the named file, the Terminal as is, a
 // sibling's tool with the model's target). A pane whose tool this build has not registered is answered with the host's
 // own "not available" text, so the model reads the same words whichever side refused. A window that does not know the
@@ -26,17 +28,16 @@
 import { validateBrowserUrl } from '@shared/browser/url'; // E4a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
-import { tabId } from '@shared/ipc/schema/layout';
 import type { MawsPaneAnswerResult, MawsPaneShow } from '@shared/ipc/schema/maws';
 import { PANES, type Pane } from '@shared/maws/panes';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { ipc } from '../../../ipc/client';
-import { machineFor } from '../../../ipc/machine';
 import { panelHost, shownSession } from '../../../panel/host';
 import type { PanelTool } from '../../../panel/tool';
 import { quietly, useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
-import { normalizeLexically, openFile } from '../../code/open-file';
+import { FILES_TOOL_ID } from '../../code/files/tabs';
+import { normalizeLexically, openFileWhenRead, type NotOpened, type Opened } from '../../code/open-file';
 
 // What each panel tool is opened with (residue 10).
 function paramsOf(pane: Exclude<Pane, 'file'>, target: string | null): Record<string, string> {
@@ -61,15 +62,27 @@ export function showPane({ appSessionId, requestId, pane, target, line }: MawsPa
   const where = PANES[pane];
   if ('mainTab' in where || pane === 'file') {
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
-    quietly(() => openFile(appSessionId, target, line));
-    const path = normalizeLexically(target);
-    return { ok: true, opened: { kind: 'main-tab', tabId: tabId({ kind: 'file', path, line, appSessionId, machine: machineFor(appSessionId) }), path, line } };
+    return showFile(appSessionId, target, line);
   }
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
   if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target, client); // E4a; U12a: client
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true, asked: 'agent' });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
+}
+
+// UX wave U6b-1 (R2, Decision 10): the file where `openFile` puts it, the answer naming the tab that holds it. Before the
+// layout is read the open waits for it, once per request: a session the read keeps no list for is answered as a pane
+// this window cannot show, and a wait that runs out with its own text, nothing opening then or later.
+function showFile(appSessionId: AppSessionId, target: string, line: number | null): Promise<MawsPaneAnswerResult> {
+  const path = normalizeLexically(target);
+  const answer = (opened: Opened | NotOpened): MawsPaneAnswerResult => {
+    if (opened === 'unknown-session') return { ok: false, error: TOOL_ERRORS.paneUnavailable('file') };
+    if (opened === 'not-ready') return { ok: false, error: TOOL_ERRORS.paneNotReady };
+    if (opened.surface === 'main') return { ok: true, opened: { kind: 'main-tab', tabId: opened.tabId, path, line } };
+    return { ok: true, opened: { kind: 'panel-tool', toolId: FILES_TOOL_ID, tabId: opened.tabId, title: path.slice(path.lastIndexOf('/') + 1) } };
+  };
+  return openFileWhenRead(appSessionId, path, line, { asked: 'agent' }).then(answer);
 }
 
 export function connectPaneShows(client: MawsBridge = ipc): () => void {

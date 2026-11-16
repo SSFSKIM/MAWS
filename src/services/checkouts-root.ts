@@ -11,6 +11,7 @@ import type { ServicesBus } from '@shared/spine/bus';
 import type { SpineView } from '@shared/spine/view';
 import { fileAdmission } from './files/admission';
 import { allowlistOf } from './files/allowlist';
+import type { FileGrants } from './files/grants';
 import { createNamedPaths } from './files/named';
 import { registerFilesHandlers } from './files/register';
 import type { FilesService } from './files/service';
@@ -36,6 +37,12 @@ export interface CheckoutsDeps {
   // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, decision 13): where a session's transcript
   // is now, asked at every search; null when the session has none (or the index is not read)
   transcript: (appSessionId: AppSessionId) => Promise<string | null>;
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B, Wiring): the grants of chosen
+  // files (<profile>/sessions/file-grants.json; null in a run refused the spine, where nothing is chosen), whether the
+  // session's agent sent a file, and MAWS's own folders, which no write of files reaches
+  grants: FileGrants | null;
+  sent: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
+  own: () => readonly string[];
 }
 
 export interface CheckoutsRoot extends Settling {
@@ -43,7 +50,7 @@ export interface CheckoutsRoot extends Settling {
   stop(): void;
 }
 
-export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript }: CheckoutsDeps): CheckoutsRoot {
+export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRoots, transcript, grants, sent, own }: CheckoutsDeps): CheckoutsRoot {
   // The read-only git service (C4 M6): git.* for any directory in a repository, and git.changed for watched roots
   const git = new GitService({ emit: (change) => void bus.emit('git.changed', change), log: (line) => console.log(line) }); // P5 O3-E: [git] lines in mawsd's log
   registerGitHandlers(git, bus);
@@ -67,6 +74,9 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
     port: clientPort, // files.openExternal; E1: files.reveal
     admitted: fileAdmission(view),
     named: createNamedPaths({ transcript }).names,
+    ...(grants === null ? {} : { grants }), // U6e
+    sent,
+    own,
     upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: uploadLog }) : undefined,
     readUploads: createUploadReader({ sessions: view }), // P5 O7 M8: a remote send's uploads, read for the endpoint
   });

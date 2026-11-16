@@ -5,7 +5,9 @@
 import { act, cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
+import { useViewer, type ViewerEntry } from '../tools/code/viewer/viewer-store';
 import { A, probeTool, ref, resetPanelStores, type ProbeState } from '../test-support/panel';
 import type { PanelTool } from './tool';
 import { installResizeObserver } from '../test-support/resize';
@@ -221,5 +223,142 @@ describe('a strip too narrow for its tabs (decision 5)', () => {
     act(() => shownClose.focus()); // the tab in view never folds: its glyph keeps the keyboard
     narrowTo(150);
     expect(document.activeElement).toBe(shownClose);
+  });
+});
+
+// UX wave U6b-1 (M2): a file's side tab carries the unsaved mark a main file tab carries, read from the viewer's entry
+// under the file's key.
+describe('a file’s unsaved mark', () => {
+  afterEach(() => useViewer.getState().reset());
+
+  it('shows the dot and data-dirty on a side tab whose file has unsaved edits, and on no other tab', () => {
+    register(probeTool('files').tool, probeTool('review', { multiInstance: false }).tool);
+    const app = ref('files:aaaa0001');
+    const lib = ref('files:aaaa0002');
+    const review = ref('review:aaaa0003');
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: [app, lib, review], activeTabId: app.id }]]),
+      panelParams: { [app.id]: { file: '/r/app.ts', line: null }, [lib.id]: { file: '/r/lib.ts', line: null, preview: true } },
+      panelSurfaces: { version: 2, stacks: { [A]: [app.id] }, pinnedTools: [], contexts: {} },
+    });
+    const entries = (dirty: boolean) => new Map([
+      [`file:${TEST_MACHINE}:/r/app.ts`, { dirty } as ViewerEntry],
+      [`file:${TEST_MACHINE}:/r/lib.ts`, { dirty: false } as ViewerEntry],
+    ]);
+    useViewer.setState({ entries: entries(true) });
+    render(<Strip />);
+    const tabOf = (id: string) => document.querySelector(`[data-tab-id="${id}"]`) as HTMLElement;
+    expect(tabOf(app.id).getAttribute('data-dirty')).toBe('true');
+    expect(within(tabOf(app.id)).getByRole('img', { name: 'Unsaved changes' }).textContent).toBe('•');
+    for (const other of [lib.id, review.id]) {
+      expect(tabOf(other).hasAttribute('data-dirty')).toBe(false);
+      expect(within(tabOf(other)).queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
+    }
+    act(() => useViewer.setState({ entries: entries(false) })); // saved
+    expect(tabOf(app.id).hasAttribute('data-dirty')).toBe(false);
+    expect(within(tabOf(app.id)).queryByRole('img', { name: 'Unsaved changes' })).toBeNull();
+  });
+});
+
+// UX wave U6b-1 (M4; U8b's §C.3, "What U6b's reveal must cover"): the selected tab of a strip that scrolls is brought into
+// view, the nearest way, whether the host selected it, a click did, or an opener added it; the strip itself scrolls, and
+// nothing else (`keymap/shell-navigation.test.tsx` holds the F6 stop).
+describe('the selected tab kept in view', () => {
+  // Tabs of 100 px in a row 150 px wide that scrolls: tab i spans i × 100 − scroll to i × 100 + 100 − scroll.
+  function scrolling(room = 150) {
+    let scroll = 0;
+    const rect = (left: number, width: number) => ({ left, right: left + width, width, top: 0, bottom: 28, height: 28, x: left, y: 0, toJSON: () => ({}) }) as DOMRect;
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      if (this.getAttribute('role') === 'tablist') return rect(0, room);
+      if (this.dataset.tabId === undefined) return rect(0, 0);
+      return rect([...this.parentElement!.children].indexOf(this) * 100 - scroll, 100);
+    });
+    return {
+      install: () => Object.defineProperty(screen.getByRole('tablist'), 'scrollLeft', { configurable: true, get: () => scroll, set: (value: number) => void (scroll = value) }),
+      get scroll() {
+        return scroll;
+      },
+      set scroll(value: number) {
+        scroll = value;
+      },
+    };
+  }
+  const ids = ['t:aaaa0001', 't:aaaa0002', 't:aaaa0003', 't:aaaa0004', 't:aaaa0005', 't:aaaa0006'];
+  const seed = () => {
+    register(probeTool('t', { title: 'Tee' }).tool);
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: ids.map((id) => ref(id)), activeTabId: ids[0] }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: [ids[0]] }, pinnedTools: [], contexts: {} },
+    });
+  };
+
+  it('a tab the host selects is scrolled into view, rightwards and leftwards, the nearest way', () => {
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    expect(strip.scroll).toBe(0);
+    act(() => panelHost.selectTab(ids[5]));
+    expect(strip.scroll).toBe(450); // its right edge at the strip's
+    act(() => panelHost.selectTab(ids[1]));
+    expect(strip.scroll).toBe(100); // its left edge at the strip's
+    act(() => panelHost.selectTab(ids[2]));
+    expect(strip.scroll).toBe(150);
+    act(() => panelHost.selectTab(ids[2]));
+    expect(strip.scroll).toBe(150); // in view already: nothing moves
+  });
+
+  it('a tab chosen by a click is scrolled into view', async () => {
+    const user = userEvent.setup();
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    await user.click(within(screen.getByRole('tablist')).getAllByRole('tab')[1]); // cut by the strip's right edge
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual([ids[1]]);
+    expect(strip.scroll).toBe(50);
+  });
+
+  it('a tab an opener adds is in view as it is drawn', () => {
+    seed();
+    const strip = scrolling();
+    render(<Strip />);
+    strip.install();
+    act(() => void panelHost.addTool('t', { appSessionId: A }));
+    expect(strip.scroll).toBe(550); // the seventh tab
+  });
+});
+
+// UX wave U6e (decision 11; Decision Log 14 (b)): a side tab that holds a file has the file's full path as its tooltip,
+// drawn whole or as its icon alone; a tab of another tool keeps today's (its name, as an icon only).
+describe('a file’s tooltip (U6e)', () => {
+  it('is the full path on a Files tab that holds a file, whole and as its icon; another tab keeps today’s', () => {
+    register(probeTool('files').tool, probeTool('t', { title: 'Tee' }).tool);
+    const app = ref('files:aaaa0001');
+    const ids = ['t:aaaa0002', 't:aaaa0003', 't:aaaa0004', 't:aaaa0005', 't:aaaa0006'];
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: [...ids.map((id) => ref(id)), app], activeTabId: ids[0] }]]),
+      panelParams: { [app.id]: { file: '/elsewhere/notes/plans/todo.txt', line: null } },
+      panelSurfaces: { version: 2, stacks: { [A]: [ids[0]] }, pinnedTools: [], contexts: {} },
+    });
+    let room = 2000;
+    const { resize } = installResizeObserver();
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'tablist' ? room : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.tabId === undefined) return 0;
+      return this.dataset.tabShape === 'icon' ? ICON_TAB_PX : 100;
+    });
+    render(<Strip />);
+    const button = (id: string) => within(document.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!).getByRole('tab');
+    expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('whole');
+    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(button(ids[1]).hasAttribute('title')).toBe(false);
+    room = 590;
+    act(() => resize(screen.getByRole('tablist'), { width: room, height: 28 }));
+    expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('icon');
+    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(button(app.id).getAttribute('aria-label')).toBe('todo.txt');
   });
 });

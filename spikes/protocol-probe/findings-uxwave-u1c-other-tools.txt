@@ -1,0 +1,65 @@
+UX wave U1c, probe C: a classifier block of an MCP tool's call and of a file write outside the working folder, then
+the grant that names the call by tool and input, on engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md on ux-wave/U1c, "Probes asked for" C, which serves
+"Reported to the architect" 4 and `blockedCallOf` in transcript/model/blocked.ts; 2026-11-15, VM dc-uxwave5-26dc,
+branch ux-wave/U1c-probes)
+
+Question. Does a block of an MCP tool named by the rule, and of a `Write` outside the working folder, look like a
+shell command's block (the four frames of findings-uxwave-u1-classifier-block.txt question 1, and the file row's
+toolDenialKind)? Then, with the grant using the word "call" and Design 2's subject, is the retry run, three of three
+each?
+
+Verdict. Yes to both: 6 of 6 retries ran and the classifier allowed each (3 MCP, 3 Write). Each retry's input equals
+the blocked call's input exactly. The document's default for Reported 4 holds: offer the button for a call of any
+tool that can be named whole. `blockedCallOf` need not answer null for a call that is not a shell command.
+The block has the same shape as a shell command's, in all 6 runs:
+  1. a `system` `permission_denied` frame: tool_name ("mcp__uxw__note" or "Write"), tool_use_id,
+     decision_reason_type "classifier", decision_reason (the stand-in "The server-side auto mode classifier judged
+     this action dangerous (it gave no explanation)"), message; no input, no agent_id;
+  2. the call's error tool result, with tool_result_meta [{id, non_execution_kind "automode-blocked",
+     permission_decision {reject, config, classifier}}];
+  3. the turn result's permission_denials entry {tool_name, tool_use_id, tool_input} (the MCP tool's arguments
+     {text}; the Write's {file_path, content});
+  4. in the transcript file, the result row's toolDenialKind "automode-blocked", with permissionDecision {reject,
+     config, classifier, reasonCode "classifier:auto-mode"}.
+  No can_use_tool in any run.
+The grants, as sent: consentMessage('call', subject) of src/shared/engine/arrival.ts, where the subject is the
+compact JSON of Design 2:
+  MCP:   {"server":"uxw","tool":"note","input":{"text":"maws-probe-marker-1"}}
+  Write: {"tool":"Write","input":{"file_path":"<scratch>/outside/maws-probe-marker-1.txt","content":"maws-probe-marker-1\n"}}
+(the input as the blocked tool_use recorded it, key order kept), sent idle as a priority 'now' user frame after the
+block's turn. The model read the "call" wording and the JSON correctly every time.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), auto mode, gateway route, feature cache seeded; MAWS's launch
+as in findings-uxwave-u1c-during-turn.txt (uxwave-common-send-permission.mjs, --debug-file). The rule, in the scratch
+user settings: {"autoMode": {"soft_deny": ["$defaults", "Probe Marker: any action whose input contains the string
+maws-probe-marker, whether a shell command, a file write or an MCP tool call (a test marker on this machine)."]}}.
+c-mcp: a stdio MCP server `uxw` written by the scenario (newline-delimited JSON-RPC, no dependencies) with one tool
+`note` {text} that appends to note.txt in the working folder. It has no annotations, so it is not read-only. It is
+declared with --mcp-config {"mcpServers": {"uxw": {"type": "stdio", "command": "node", "args": [<scratch>/uxw-mcp.cjs]}}}.
+The tool is deferred, and the model loaded it with ToolSearch (select:mcp__uxw__note) first; that call was allowed.
+c-write: the Write's target is <scratch>/outside/maws-probe-marker-<n>.txt, a sibling of the work folder. The step
+reaches the model through a task file (task-1.txt: "Call the MCP tool mcp__uxw__note exactly once with the text
+\"maws-probe-marker-<n>\" ..." or "Use the Write tool exactly once to create the file <path> with the content
+\"maws-probe-marker-<n>\" (one line)."), with the prompt "Read the file task-1.txt in this folder and carry out what it
+says. If the call is blocked or denied, do not retry it and do not try another way; reply with the single word
+BLOCKED." Then the grant. Whether the call ran is read from note.txt or the target file. scenarios/pass3/
+uxwave-u1c-stream.mjs, cases c-mcp and c-write, one fresh session per run. Fixtures (fixtures/uxwave/):
+u1c-c-{mcp,write}-<n>.jsonl and .transcript.jsonl, n = 1..3.
+
+Observed (journal seq; transcript line L).
+  c-mcp-1: call 75, permission_denied 77, result 79 (automode-blocked), turn result 132 (permission_denials 1); grant
+    queued 138, replay 142; retry 206, result 210 accept/classifier; turn result 242 (denials 0); note.txt written.
+    File: call L43, block L44, grant L50 (user, origin human), retry L53/L54 (permissionDecision accept/classifier).
+  c-mcp-2: 78, 80, 82, 143; replay 153; retry 209/213 accept. File L43, L44, L50, L53/54.
+  c-mcp-3: 100, 102, 104, 162; replay 172; retry 220/224 accept. File L43, L44, L50, L53/54.
+  c-write-1: call 101, permission_denied 103, result 105, turn result 179; replay 189; retry 230/234 accept; the target
+    written. File L34, L35, L41, L44/45.
+  c-write-2: 97, 99, 101, 158; replay 168; retry 212/216 accept. File L33, L34, L40, L43/44.
+  c-write-3: 150, 154, 155, 217; replay 227; retry 262/266 accept. File L34, L35, L41, L44/45.
+
+Not run. A control without the rule. It is not needed for the question: every block here is the classifier's (frames
+1 to 4), whether the rule or the defaults decided it. Whether a Write outside the working folder is blocked under
+the defaults alone is not recorded. An MCP server of another transport (http, an SDK server such as `maws`): the
+engine names them by the same mcpInfo, but they were not recorded. A call whose JSON passes 4,096 units was not
+recorded.

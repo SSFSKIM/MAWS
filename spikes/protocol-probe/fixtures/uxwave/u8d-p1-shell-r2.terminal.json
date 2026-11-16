@@ -1,0 +1,587 @@
+{
+ "provenance": {
+  "plan": "docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md",
+  "section": "Probes to arrange",
+  "case": "p1-shell",
+  "stale": false,
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "model": "haiku",
+  "launch": "interactive engine in tmux (vm-run.sh term's launch), --model haiku",
+  "route": "gateway (vm-run.sh loopback forward)",
+  "startedAt": "2026-11-15T11:00:31.516Z",
+  "timeUnit": "ms since startedAt; file lines seen by a 100 ms poll"
+ },
+ "failure": null,
+ "agents": [],
+ "timeline": [
+  {
+   "ms": 52,
+   "cause": "engine started",
+   "args": [
+    "--model",
+    "haiku",
+    "--session-id",
+    "<session>"
+   ],
+   "env": []
+  },
+  {
+   "ms": 5338,
+   "file": "main",
+   "line": 1,
+   "type": "mode"
+  },
+  {
+   "ms": 5338,
+   "file": "main",
+   "line": 2,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 5338,
+   "file": "main",
+   "line": 3,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 5439,
+   "file": "main",
+   "line": 4,
+   "type": "file-history-snapshot"
+  },
+  {
+   "ms": 5439,
+   "file": "main",
+   "line": 5,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "typed",
+   "turnOrigin": "human",
+   "origin": "human",
+   "text": "Run this command with the Bash tool, each with run_in_background true: `python3 uxw8d_wait.py 300` with description \"uxw shell S1\". Then reply with only the word STARTED and do nothing else.",
+   "timestamp": "2026-11-15T11:00:36.630Z"
+  },
+  {
+   "ms": 5439,
+   "file": "main",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "environment",
+   "timestamp": "2026-11-15T11:00:36.628Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "model",
+   "timestamp": "2026-11-15T11:00:36.628Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T11:00:36.628Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 9,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "agent_listing_delta",
+   "timestamp": "2026-11-15T11:00:36.628Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T11:00:36.629Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 11,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T11:00:36.687Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 12,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "date",
+   "timestamp": "2026-11-15T11:00:36.688Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 13,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T11:00:36.693Z"
+  },
+  {
+   "ms": 5441,
+   "file": "main",
+   "line": 14,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:00:36.695Z"
+  },
+  {
+   "ms": 5442,
+   "file": "main",
+   "line": 15,
+   "type": "api-request-shape",
+   "timestamp": "2026-11-15T11:00:36.833Z"
+  },
+  {
+   "ms": 5442,
+   "file": "main",
+   "line": 16,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 5443,
+   "file": "main",
+   "line": 17,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 5443,
+   "file": "main",
+   "line": 18,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:00:36.833Z"
+  },
+  {
+   "ms": 5541,
+   "file": "main",
+   "line": 19,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 5541,
+   "file": "main",
+   "line": 20,
+   "type": "mode"
+  },
+  {
+   "ms": 5541,
+   "file": "main",
+   "line": 21,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 5541,
+   "file": "main",
+   "line": 22,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 6248,
+   "file": "main",
+   "line": 23,
+   "type": "ai-title"
+  },
+  {
+   "ms": 7873,
+   "file": "main",
+   "line": 24,
+   "type": "tools-used"
+  },
+  {
+   "ms": 7873,
+   "file": "main",
+   "line": 25,
+   "type": "assistant",
+   "isSidechain": false,
+   "toolUses": [
+    {
+     "id": "toolu_01XfG3cvq5nPJGFaLqYjpeGX",
+     "name": "Bash",
+     "bg": true,
+     "description": "uxw shell S1"
+    }
+   ],
+   "timestamp": "2026-11-15T11:00:38.207Z"
+  },
+  {
+   "ms": 7874,
+   "file": "main",
+   "line": 26,
+   "type": "user",
+   "isSidechain": false,
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_01XfG3cvq5nPJGFaLqYjpeGX",
+     "is_error": false
+    }
+   ],
+   "toolUseResult": {
+    "backgroundTaskId": "b3zho3ffs"
+   },
+   "timestamp": "2026-11-15T11:00:39.052Z"
+  },
+  {
+   "ms": 7874,
+   "file": "main",
+   "line": 27,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T11:00:39.061Z"
+  },
+  {
+   "ms": 7878,
+   "file": "main",
+   "line": 28,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 7878,
+   "file": "main",
+   "line": 29,
+   "type": "ai-title"
+  },
+  {
+   "ms": 7878,
+   "file": "main",
+   "line": 30,
+   "type": "mode"
+  },
+  {
+   "ms": 7878,
+   "file": "main",
+   "line": 31,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 7878,
+   "file": "main",
+   "line": 32,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 7979,
+   "file": "main",
+   "line": 33,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:00:39.316Z"
+  },
+  {
+   "ms": 8055,
+   "cause": "the background shells run",
+   "shells": [
+    "b3zho3ffs"
+   ]
+  },
+  {
+   "ms": 9387,
+   "file": "main",
+   "line": 34,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:00:40.503Z"
+  },
+  {
+   "ms": 9387,
+   "file": "main",
+   "line": 35,
+   "type": "system",
+   "subtype": "turn_duration",
+   "isMeta": false,
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:00:40.691Z"
+  },
+  {
+   "ms": 13094,
+   "cause": "SIGTERM to the engine",
+   "pid": "<engine>"
+  },
+  {
+   "ms": 13134,
+   "file": "main",
+   "line": 36,
+   "type": "cost-state"
+  },
+  {
+   "ms": 13134,
+   "file": "main",
+   "line": 37,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 13134,
+   "file": "main",
+   "line": 38,
+   "type": "cost-state"
+  },
+  {
+   "ms": 13337,
+   "file": "main",
+   "line": 39,
+   "type": "queue-operation",
+   "operation": "enqueue",
+   "taskIds": [
+    "b3zho3ffs"
+   ],
+   "statuses": [
+    "killed"
+   ],
+   "summaries": [
+    "Background command \\\"uxw shell S1\\\" was stopped"
+   ],
+   "timestamp": "2026-11-15T11:00:44.658Z"
+  },
+  {
+   "ms": 13654,
+   "cause": "engine gone"
+  },
+  {
+   "ms": 18710,
+   "cause": "engine started",
+   "args": [
+    "--model",
+    "haiku",
+    "--resume",
+    "<session>"
+   ],
+   "env": []
+  },
+  {
+   "ms": 19439,
+   "file": "main",
+   "line": 40,
+   "type": "tools-used"
+  },
+  {
+   "ms": 20251,
+   "file": "main",
+   "line": 41,
+   "type": "queue-operation",
+   "operation": "enqueue",
+   "taskIds": [
+    "b3zho3ffs"
+   ],
+   "statuses": [
+    "stopped"
+   ],
+   "summaries": [
+    "Background shell command didn't finish before the previous session ended"
+   ],
+   "timestamp": "2026-11-15T11:00:51.224Z"
+  },
+  {
+   "ms": 20251,
+   "file": "main",
+   "line": 42,
+   "type": "queue-operation",
+   "operation": "dequeue",
+   "timestamp": "2026-11-15T11:00:51.320Z"
+  },
+  {
+   "ms": 20453,
+   "file": "main",
+   "line": 43,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "system",
+   "origin": "task-notification",
+   "taskIds": [
+    "b3zho3ffs"
+   ],
+   "statuses": [
+    "stopped"
+   ],
+   "summaries": [
+    "Background shell command didn't finish before the previous session ended"
+   ],
+   "text": "<task-notification>\n<task-id>b3zho3ffs</task-id>\n<tool-use-id>toolu_01XfG3cvq5nPJGFaLqYjpeGX</tool-use-id>\n<status>stopped</status>\n<summary>Background shell command didn't finish before the previous ",
+   "timestamp": "2026-11-15T11:00:51.329Z"
+  },
+  {
+   "ms": 98012,
+   "file": "main",
+   "line": 44,
+   "type": "file-history-snapshot"
+  },
+  {
+   "ms": 98013,
+   "file": "main",
+   "line": 45,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "typed",
+   "turnOrigin": "human",
+   "origin": "human",
+   "text": "Reply with only the word AFTER.",
+   "timestamp": "2026-11-15T11:02:09.369Z"
+  },
+  {
+   "ms": 98212,
+   "file": "main",
+   "line": 46,
+   "type": "api-request-blob",
+   "taskIds": [
+    "b3zho3ffs"
+   ],
+   "statuses": [
+    "stopped"
+   ],
+   "summaries": [
+    "Background shell command didn't finish before the previous session ended"
+   ]
+  },
+  {
+   "ms": 98213,
+   "file": "main",
+   "line": 47,
+   "type": "api-request",
+   "timestamp": "2026-11-15T11:02:09.533Z"
+  },
+  {
+   "ms": 99622,
+   "file": "main",
+   "line": 48,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:02:10.838Z"
+  },
+  {
+   "ms": 99622,
+   "file": "main",
+   "line": 49,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:02:10.860Z"
+  },
+  {
+   "ms": 99622,
+   "file": "main",
+   "line": 50,
+   "type": "system",
+   "subtype": "turn_duration",
+   "isMeta": false,
+   "isSidechain": false,
+   "timestamp": "2026-11-15T11:02:10.908Z"
+  },
+  {
+   "ms": 103824,
+   "cause": "the terminal closed: tmux kill-server (SIGHUP to the engine)",
+   "pid": "<engine>"
+  },
+  {
+   "ms": 103849,
+   "file": "main",
+   "line": 51,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 103849,
+   "file": "main",
+   "line": 52,
+   "type": "cost-state"
+  },
+  {
+   "ms": 104136,
+   "cause": "engine gone"
+  }
+ ],
+ "metas": {},
+ "snapshots": [
+  {
+   "label": "ready",
+   "ms": 4592,
+   "lines": {},
+   "metas": {}
+  },
+  {
+   "label": "before",
+   "ms": 13079,
+   "lines": {
+    "main": 35
+   },
+   "metas": {}
+  },
+  {
+   "label": "ended",
+   "ms": 18666,
+   "lines": {
+    "main": 39
+   },
+   "metas": {}
+  },
+  {
+   "label": "ready",
+   "ms": 22236,
+   "lines": {
+    "main": 43
+   },
+   "metas": {}
+  },
+  {
+   "label": "after-resume",
+   "ms": 97374,
+   "lines": {
+    "main": 43
+   },
+   "metas": {}
+  },
+  {
+   "label": "after-prompt",
+   "ms": 103813,
+   "lines": {
+    "main": 50
+   },
+   "metas": {}
+  }
+ ],
+ "panes": [
+  {
+   "label": "ready",
+   "ms": 4592,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-1IS7uG/work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ Try \"how do I log an error?\"\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+  },
+  {
+   "label": "before",
+   "ms": 13079,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-1IS7uG/work\n\n\n❯ Run this command with the Bash tool, each with run_in_background true: python3 uxw8d_wait.py 300 with description \"uxw shell S1\". Then reply with only the\n  word STARTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Churned for 4s · done 3:00 AM · 1 shell still running\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                             tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ check the output\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on · 1 shell · ↓ to manage\n"
+  },
+  {
+   "label": "ended",
+   "ms": 18666,
+   "pane": ""
+  },
+  {
+   "label": "ready",
+   "ms": 22236,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-1IS7uG/work\n\n\n❯ Run this command with the Bash tool, each with run_in_background true: python3 uxw8d_wait.py 300 with description \"uxw shell S1\". Then reply with only the\n  word STARTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Churned for 4s · done 3:00 AM\n\n● Background shell command didn't finish before the previous session ended\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+  },
+  {
+   "label": "after-resume",
+   "ms": 97374,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-1IS7uG/work\n\n\n❯ Run this command with the Bash tool, each with run_in_background true: python3 uxw8d_wait.py 300 with description \"uxw shell S1\". Then reply with only the\n  word STARTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Churned for 4s · done 3:00 AM\n\n● Background shell command didn't finish before the previous session ended\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n"
+  },
+  {
+   "label": "after-prompt",
+   "ms": 103813,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-1IS7uG/work\n\n\n❯ Run this command with the Bash tool, each with run_in_background true: python3 uxw8d_wait.py 300 with description \"uxw shell S1\". Then reply with only the\n  word STARTED and do nothing else.\n\n  Ran 1 shell command\n\n● STARTED\n\n✻ Churned for 4s · done 3:00 AM\n\n● Background shell command didn't finish before the previous session ended\n\n❯ Reply with only the word AFTER.\n\n● AFTER\n\n✻ Cogitated for 1s · done 3:02 AM\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle)\n"
+  }
+ ]
+}

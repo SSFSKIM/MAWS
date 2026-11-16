@@ -80,6 +80,7 @@ function edit(op: EditOp): void {
 const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
   'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther',
   'shortcuts.open', 'palette.open',
+  'file.open', // UX wave U6e (decision 13): the chosen file opens beside the chat, so a browser page does not keep the keyboard
 ]);
 
 function dispatchAction(id: ActionId, arg: number | null, emit: Emit, menuWindow?: BaseWindow): void {

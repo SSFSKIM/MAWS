@@ -236,7 +236,18 @@ describe('ipc schema validates both directions', () => {
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write']);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.grant' /* UX wave U6e */, 'files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
+      // UX wave U6e: the grant is main's alone; the outside save is bridged, and takes files.write's input and the real path
+      expect(MAIN_ONLY_COMMANDS).toContain('files.grant');
+      expect(MAIN_ONLY_COMMANDS).not.toContain('files.writeOutside');
+      const save = { appSessionId: 'a', path: '/w/notes.md', content: 'x', expectedHash: 'a'.repeat(64) };
+      expect(validateCommandInput('files.writeOutside', { ...save, real: '/w/notes.md' }).ok).toBe(true);
+      expect(validateCommandInput('files.writeOutside', save).ok).toBe(false);
+      expect(validateCommandInput('files.write', { ...save, real: '/w/notes.md' }).ok).toBe(false);
+      expect(validateCommandOutput('files.grant', { status: 'granted', path: '/w/notes.md' }).ok).toBe(true);
+      expect(validateCommandOutput('files.grant', { status: 'refused', reason: 'not-a-file' }).ok).toBe(true);
+      expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, agent: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readResolved', { path: '/w/notes.md', agent: true }).ok).toBe(false);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
@@ -1916,7 +1927,19 @@ describe('ipc schema validates both directions', () => {
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
       expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
-      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete', 'spaces.instructions', 'spaces.setInstructions']);
+    });
+
+    // UX wave U10b (M9, §E.1): a Space's instructions, two engine-host commands beside the Space and not in it, the text
+    // at most 8,000 characters; '' removes it
+    it('reads and writes a Space’s instructions by two engine-host commands, the text at most 8,000 characters', () => {
+      expect([spaces.commands['spaces.instructions'].owner, spaces.commands['spaces.setInstructions'].owner]).toEqual(['engine-host', 'engine-host']);
+      expect(validateCommandInput('spaces.instructions', {}).ok).toBe(true);
+      expect(validateCommandInput('spaces.instructions', { spaceId: id }).ok).toBe(false);
+      expect(validateCommandOutput('spaces.instructions', { instructions: [{ spaceId: id, text: 'Use metres.', at: 1 }] }).ok).toBe(true);
+      for (const text of ['', 'Use metres.', 'x'.repeat(8000)]) expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text }).ok).toBe(true);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'x'.repeat(8001) }).ok).toBe(false);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'Use metres.', name: 'Work' }).ok).toBe(false);
     });
 
     // P3-A M7: the export service (main's `artifacts.export`, the host's bridge `maws.artifact.export`/`exported`) and an

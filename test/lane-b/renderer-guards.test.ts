@@ -54,12 +54,6 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   // the composer's extras, behind the composer's own reads of the helper
   'composer/modes/bash.ts': { commands: ['session.bash'], guard: 'only through composer/editor/submit.ts’ dispatchByMode, behind composer/Composer.tsx’s read of the helper (button and Enter)' },
   'composer/modes/memory.ts': { commands: ['session.memoryAppend'], guard: 'as composer/modes/bash.ts' },
-  // UX wave U4a: a waiting message's Send now, behind the stack's own read of the helper
-  'session/controls/types.ts': { commands: ['session.steer.sendNow'], guard: 'the port’s type (QueueControls.sendNow); its one caller is as session/controls/lane-b.ts’ entry says' },
-  'session/controls/lane-b.ts': {
-    commands: ['session.steer.sendNow'],
-    guard: 'QueueControls.sendNow, called only by composer/queue/stack-acts.ts’ sendNow, which composer/queue/QueueList.tsx’s Send now and composer/Composer.tsx’s Esc reach only past the stack’s refusals (useRefusals, refusalsNow), which read the helper',
-  },
   'composer/frame/bindings.ts': { commands: ['session.applyFlagSettings'], guard: 'liveBindings serve this Mac’s sessions; a session on another machine takes remoteBindings or lane A’s controls, which refuse the added directories (session/controls/lane-b.ts, lane-a.ts)' },
   'customize/connectors/sign-in.ts': {
     commands: ['connectors.signInDynamicServer'],
@@ -82,7 +76,11 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['files.openExternal'],
     guard: 'issued only when machineFor(appSessionId) is this Mac’s (the named open of UX wave U6c); a session on another machine opens through lane-b/open-copy.ts’ openSessionFile, under that module’s entry',
   },
-  'test-support/code-disk.ts': { commands: ['files.openExternal'], guard: 'a test double of main’s files commands for component tests: answers the command, issues none (UX wave U6c)' },
+  'tools/code/viewer/viewer-store.ts': {
+    commands: ['files.writeOutside'],
+    guard: 'sent only for an entry with a pin, which only a read answered with `outside` sets; a session on another machine is read without `named` and never answered `outside`, so its save is files.write (UX wave U6e, §D)',
+  },
+  'test-support/code-disk.ts': { commands: ['files.openExternal', 'files.writeOutside'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e)' },
   // reported: issued for a session on another machine with no guard
   'lane-b/open-copy.ts': {
     commands: ['files.openExternal'],
@@ -94,7 +92,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   },
   'engine-surface/asks.ts': { commands: ['session.ui.answer'], reported: 'an automatic answer to a mod’s ask, with no control, sent for every session’s plugin.ask, another machine’s included (engine-surface/)' },
   'owner/report/answering.ts': {
-    commands: ['ownerChannel.answered', 'ownerChannel.markRead', 'ownerChannel.cancel'],
+    commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
     reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
   },
   'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },

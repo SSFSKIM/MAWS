@@ -26,6 +26,8 @@ export interface VariantProps<K extends SessionEvent['kind']> {
   // `what` names the answer, for a body hosted outside the card; the card draws nothing of it (UX wave U1's UC-1: a sent
   // card stands as it was, disabled, until its item leaves the list). `delivered` runs after a delivered answer.
   submit(answer: RequestAnswer, what: string, delivered?: () => void): void;
+  // Called from a layout effect, so the keys a body has are said in the commit that draws its buttons (the branch
+  // review's ruling of 2026-11-15 UTC: no painted frame shows a prompt's buttons without its chords taken).
   bindKeys(keys: CardKeys): void;
   // P5 O9 M6: whether the session's controls port carries this answer (`answerCapability`), and why not; an option it
   // can't carry is drawn disabled in place with its reason, never sent, and no key answers it. Absent (a body hosted

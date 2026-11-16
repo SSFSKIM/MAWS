@@ -135,7 +135,15 @@ test('older rows page in when the reader reaches the top, and the reader stays w
   await midAnswer(player, depth, 'Both sub');
   player.holdRows = true;
   // A fresh load: a snapshot of the newest rows only. (A reconnect would not do: it keeps every row drawn before it.)
+  // UX wave U2b (the architect's ruling of 2026-11-15): the scene measures the list's geometry, so it reads the full
+  // transcript, where nothing folds, chosen before the fresh snapshot lands; the folded view's paging has its own scene
+  // (`session-view.spec.ts`, "in the to-human view, older rows page in…").
+  player.holdSubscriptions = true;
   await page.reload();
+  await page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' }).click();
+  await expect(page.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'true');
+  await expect.poll(() => player.releaseSubscriptions()).toBe(1);
+  player.holdSubscriptions = false;
   await expect.poll(() => player.subscriptions()).toBe(2);
   await expect(streamingRows(depth).last()).toContainText('Both sub');
   await expect(depth).not.toContainText('Think briefly first');
@@ -153,8 +161,9 @@ test('older rows page in when the reader reaches the top, and the reader stays w
     .toBe(true);
   await expect.poll(() => hub.up.filter((u) => u.frame.t === 'rows').length).toBe(1); // the reader reached the top
   // The reader's anchor: the first drawn row whose id outlives the rebuild (a turn's time and divider rows are keyed
-  // by the turn, which the older page can re-identify once it holds the turn's prompt).
-  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"]):not([data-row-id^="owner-record:"])').first().getAttribute('data-row-id'))!;
+  // by the turn, which the older page can re-identify once it holds the turn's prompt; UX wave U2b: a stretch's record
+  // line is keyed by the stretch's first row, which an older page can move up).
+  const anchorId = (await depth.locator('[data-row-id]:not([data-row-id^="time:"]):not([data-row-id^="divider:"]):not([data-row-id^="record-fold:"])').first().getAttribute('data-row-id'))!;
   // Live chunks while the page is on its way, drawn before the reader's place is taken.
   const streamed = (await streamingRows(depth).last().textContent()) ?? '';
   player.advance(3);

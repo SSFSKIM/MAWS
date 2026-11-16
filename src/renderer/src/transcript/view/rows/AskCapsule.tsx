@@ -2,9 +2,12 @@
 // ask's title (else "Questions"), how many questions it asked and its state; one button opens the Question sheet with
 // the capsule's own data (residue 14), so an answered ask reopens read-only after a reload or in a disk-only session.
 // Once answered it lists one line per question, "header (or question) → answer", as the question row does. It stays in
-// view when its turn folds (isPersistentRow).
+// view when its turn folds (isPersistentRow). UX wave U1b (Interfaces §D, "A waiting row"): while its ask waits, the
+// capsule's top line stays, its button reads Open beside (the sheet, with the same form and draft), and the form stands
+// under the line.
+import type { ReactNode } from 'react';
 import type { AskQuestion } from '@shared/maws/tools';
-import { ASK, askAnswerCopy, askStateCopy } from '../../model/copy';
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy } from '../../model/copy';
 import type { AskRowData, Row } from '../../model/rows';
 import { useActions, useRowSession } from '../context';
 import { QuestionIcon } from './icons';
@@ -20,7 +23,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
   const answer = row.answers?.find((candidate) => candidate.id === question.id);
   return (
     <li className="transcript-question-line" data-ask-answer="" title={question.question}>
-      <span className="transcript-question-label">{question.header ?? question.question}</span>
+      <span className="transcript-question-label">{askQuestionTitle(question)}</span>
       <span className="transcript-question-arrow" aria-hidden="true">
         →
       </span>
@@ -31,7 +34,7 @@ function AnswerLine({ question, row }: { question: AskQuestion; row: AskRow }) {
   );
 }
 
-export function AskCapsule({ row }: { row: AskRow }) {
+export function AskCapsule({ row, form = null }: { row: AskRow; form?: ReactNode }) {
   const actions = useActions();
   const appSessionId = useRowSession();
   const chip = askStateCopy(row);
@@ -45,10 +48,11 @@ export function AskCapsule({ row }: { row: AskRow }) {
           {chip}
         </span>
         <button type="button" className="transcript-ask-open" disabled={appSessionId === null} onClick={() => appSessionId && actions.openAsk(appSessionId, askRowData(row))}>
-          {row.state === 'answered' ? ASK.viewAnswers : ASK.open}
+          {form !== null ? ASK.openBeside : row.state === 'answered' ? ASK.viewAnswers : ASK.open}
         </button>
       </div>
-      {row.state === 'answered' && (
+      {form !== null && <div className="transcript-ask-form">{form}</div>}
+      {form === null && row.state === 'answered' && (
         <ul className="transcript-question-lines">
           {row.questions.map((question) => (
             <AnswerLine key={question.id} question={question} row={row} />

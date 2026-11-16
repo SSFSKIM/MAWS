@@ -328,6 +328,8 @@ No new packages. zod 4's `z.toJSONSchema` for the `tools/list` schemas (already 
 - `connectAsks` opens the sheet (`activate: false` is not enough: `addTool` with the shown session as target never changes the main view) only when the asking session is the shown session; otherwise it records the ask as waiting and opens the sheet when that session becomes shown with the ask still pending (the layout store's shown session; the sheet's own store knows pendency). An async ask follows the same shown-session rule for its sheet but creates no attention item.
 - Copy: the card's heading reads the ask's title, else "Questions from the agent"; its line "N questions · Open the Question sheet".
 
+Amended 2026-11-15 (the owner's observation O-36 and answer of 2026-11-12): the Question sheet opens only when the person opens it; an ask's form is drawn in the row of its call.
+
 **What it does not touch.** The sheet's modalities and answers (M4), the capsule (M3), the host's ask lifecycle beyond publication (M2), the e2e group (M5 adds the attention and shown-session cases).
 
 **What it proves.** The architect's rulings (1) and (2); G3's "needs you" visibility. Tests pin: a blocking `ask` yields a `question` attention item with the ask's summary and the item retires at answer and at cancel; an async ask yields none; `session.pendingRequest(requestId)` answers the `maws.ask.opened` event; the card renders the title and count and its button calls `openAsk`; `connectAsks` opens the sheet for the shown session, defers for another, and opens when that session becomes shown while pending; never calls `layout.openSession`.

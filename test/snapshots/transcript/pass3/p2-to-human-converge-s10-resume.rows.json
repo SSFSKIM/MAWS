@@ -35,6 +35,7 @@
     "at": "2026-10-09T07:13:05.629Z",
     "id": "local:03a9d808-5dce-40ab-8d97-fd8acc641b1f",
     "kind": "local_command",
+    "lone": true,
     "messageUuid": "03a9d808-5dce-40ab-8d97-fd8acc641b1f",
     "text": "Compacted",
     "turnId": "turn:f9c7422d-7cf3-456d-a17c-f19119a76ee2"

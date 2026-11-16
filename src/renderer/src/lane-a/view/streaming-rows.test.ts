@@ -2,7 +2,8 @@
 import { parse } from '@shared/owner/to-human-parser';
 import { act, cleanup } from '@testing-library/react';
 import { afterEach, describe, expect, it } from 'vitest';
-import { liveMarkedRowIds, reportRows } from '../../owner/report/project';
+import { liveMarkedRowIds, liveMarksOf, mirrorRows } from '../../owner/view/mirror';
+import { viewRowsOf } from '../../owner/view/test-support';
 import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import { api, builder } from '../../transcript/model/test-events';
 import { renderRow, rowOf, storeWith } from '../../transcript/view/rows/test-support';
@@ -61,7 +62,7 @@ describe('the streaming rows', () => {
     it.each([
       ['unfinished', '<message>\nBoth subagents rep', false],
       ['closed', '<message>\nReady.\n\n- **notes.md:** checked.\n- **words.txt:** checked.\n</message>', true],
-    ] as const)('renders %s authored text unchanged, with the same ink and open-mark fold', async (_name, text, closed) => {
+    ] as const)('renders %s authored text alike on both routes, with the same ink and open-mark fold', async (_name, text, closed) => {
       const b = builder();
       b.turn('u1');
       b.toolUse('t1', 'Bash', { command: 'ls' });
@@ -69,7 +70,7 @@ describe('the streaming rows', () => {
       b.emit('assistant.block.delta', { apiMessageId: api('m1'), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
       const store = await storeWith(b.events);
       storeKeys.push(store.key);
-      useTranscriptStore.getState().setOwnerLane(store.key, true);
+      useTranscriptStore.getState().setToHumanView(store.key, { lane: true, tailMessage: false });
       useTranscriptStore.getState().setView(store.key, mode);
       const entry = useTranscriptStore.getState().entries[store.key];
       const native = rowOf(entry.rows, 'assistant_text');
@@ -79,30 +80,32 @@ describe('the streaming rows', () => {
       expect(desk.markdown).toBe(text);
       expect(desk.live).toBe(native.live);
 
-      const visible = (rows: typeof entry.rows) => mode === 'report' ? reportRows(rows, entry.state, entry.state.ui, liveMarkedRowIds(entry.state)) : rows;
-      const nativeRows = visible(entry.rows);
-      const deskRows = visible([...entry.rows.filter((row) => row.id !== native.id), desk]);
+      // UX wave U2b: the store's own block and the desk's carry the same open mark, so the view is in force by either
+      expect(entry.state.ui.noTurnFold).toBe(true);
+      const visible = (rows: typeof entry.rows, outside: typeof entry.rows) => mode === 'report' ? mirrorRows(rows, entry.state.ui, liveMarksOf(liveMarkedRowIds(entry.state), outside)) : rows;
+      const nativeRows = visible(entry.rows, []);
+      const deskRows = visible([...entry.rows.filter((row) => row.id !== native.id), desk], [desk]);
       expect(deskRows.map((row) => row.kind)).toEqual(nativeRows.map((row) => row.kind));
       expect(deskRows).toContain(desk);
       expect(nativeRows).toContain(native);
       if (mode === 'report') {
-        expect(nativeRows.find((row) => row.kind === 'owner_record')).toMatchObject({ open: false, working: true });
-        expect(deskRows.find((row) => row.kind === 'owner_record')).toMatchObject({ open: false, working: true });
+        expect(nativeRows.find((row) => row.kind === 'record_fold')).toMatchObject({ open: false });
+        expect(deskRows.find((row) => row.kind === 'record_fold')).toMatchObject({ open: false });
       } else {
-        expect(deskRows.some((row) => row.kind === 'owner_record')).toBe(false);
+        expect(deskRows.some((row) => row.kind === 'record_fold')).toBe(false);
       }
 
       const nativeView = renderRow(native, { storeKey: store.key });
       const deskView = renderRow(desk, { storeKey: store.key });
       expect(deskView.container.textContent).toBe(nativeView.container.textContent);
       for (const { container } of [nativeView, deskView]) {
-        expect(container.querySelector('.owner-message-ink') !== null).toBe(closed);
+        expect(container.querySelector('.owner-message-ink')).not.toBeNull(); // UX wave U2b (M2): an open message streams under its label
         if (closed) {
           expect(container.textContent).not.toContain('<message>');
           expect([...container.querySelectorAll('li')].map((node) => node.textContent?.trim())).toEqual(['notes.md: checked.', 'words.txt: checked.']);
           expect([...container.querySelectorAll('[data-streamdown="strong"]')].map((node) => node.textContent)).toEqual(['notes.md:', 'words.txt:']);
         } else {
-          expect(container.textContent).toBe('<message>\nBoth subagents rep');
+          expect(container.textContent).toBe('● message …Both subagents rep');
         }
       }
     });
@@ -116,17 +119,18 @@ describe('the streaming rows', () => {
     delta('<message>Open');
     const store = await storeWith(b.events);
     storeKeys.push(store.key);
+    useTranscriptStore.getState().setToHumanView(store.key, { lane: true, tailMessage: false });
     const before = useTranscriptStore.getState().entries[store.key];
     const native = rowOf(before.rows, 'assistant_text');
-    expect(reportRows(before.rows, before.state, before.state.ui, liveMarkedRowIds(before.state)).some((row) => row.kind === 'owner_record')).toBe(true);
+    expect(before.state.ui.noTurnFold).toBe(true);
+    expect(viewRowsOf(before).some((row) => row.kind === 'record_fold')).toBe(true);
 
     act(() => store.push([delta('</insight>')])); // a crossing tag invalidates the open mark
     const after = useTranscriptStore.getState().entries[store.key];
-    expect(rowOf(after.rows, 'assistant_text')).toBe(native);
-    expect(native.markdown).toBe('<message>Open');
     expect(liveBuffer(after, native)).toBe('<message>Open</insight>');
     expect(liveMarkedRowIds(after.state)).toBe('');
-    expect(reportRows(after.rows, after.state, after.state.ui, liveMarkedRowIds(after.state)).some((row) => row.kind === 'owner_record')).toBe(false);
+    expect(after.state.ui.noTurnFold).toBe(false); // no message after all: the view is out of force
+    expect(viewRowsOf(after).some((row) => row.kind === 'record_fold')).toBe(false);
     expect(renderRow(native, { storeKey: store.key }).container.textContent).toBe('<message>Open</insight>');
   });
 

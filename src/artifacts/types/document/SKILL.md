@@ -31,7 +31,7 @@ A comment the user sends you arrives as a message beginning `Comment on "<title>
 
 ## Working with a design system
 
-A document is drawn in its governing design system: its fonts, colours, spacing and page size come from the system, in the editor and in every export. Do not style through the content: write structure (headings, lists, tables, callouts with a tone, highlights) and let the system draw it. When `artifact_create` returned a `designSystem` guide, follow its voice, wording and structure rules in what you write.
+A document is drawn in its governing design system: its fonts, colours, spacing and page size come from the system, in the editor and in every export. To fit a page, set the document's page with `set_page` and check the PDF's `pages`. Do not style through the content: write structure (headings, lists, tables, callouts with a tone, highlights) and let the system draw it. When `artifact_create` returned a `designSystem` guide, follow its voice, wording and structure rules in what you write.
 
 ## Before you finish
 

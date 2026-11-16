@@ -29,7 +29,8 @@ export const TRANSFER_COPY = {
   openInSplit: 'Open in split',
   grip: 'Drag to move to a tab',
   // the refusals
-  notArtifact: 'Only an artifact moves to the panel',
+  notArtifact: 'Only an artifact or a file moves beside the chat', // UX wave U6b-1
+  noSession: 'Open this file from a session to show it beside the chat', // UX wave U6b-1: a main file tab with no session the window knows
   noPanel: 'No session’s panel to show it in',
   noProjectSession: 'Open a session in this project to show it beside the chat',
   loading: 'Loading…',

@@ -1,0 +1,636 @@
+{
+ "provenance": {
+  "plan": "docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md",
+  "section": "Probes to arrange",
+  "case": "p3-term",
+  "stale": false,
+  "engine": "/opt/maws-probe/engines/2.1.322",
+  "engineVersion": "2.1.322",
+  "model": "haiku",
+  "launch": "interactive engine in tmux (vm-run.sh term's launch), --model haiku",
+  "route": "gateway (vm-run.sh loopback forward)",
+  "startedAt": "2026-11-15T10:55:38.058Z",
+  "timeUnit": "ms since startedAt; file lines seen by a 100 ms poll"
+ },
+ "waitersBefore": 2,
+ "waitersAfter": 0,
+ "failure": null,
+ "agents": [
+  {
+   "id": "af0d31a9adb9b71dc",
+   "description": "uxw slow A"
+  }
+ ],
+ "timeline": [
+  {
+   "ms": 40,
+   "cause": "engine started",
+   "args": [
+    "--model",
+    "haiku",
+    "--session-id",
+    "<session>"
+   ],
+   "env": []
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 1,
+   "type": "mode"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 2,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 3,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 4,
+   "type": "file-history-snapshot"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 5,
+   "type": "user",
+   "isSidechain": false,
+   "promptSource": "typed",
+   "turnOrigin": "human",
+   "origin": "human",
+   "text": "Call the Agent tool once, with subagent_type \"general-purpose\", run_in_background true, description \"uxw slow A\" and prompt \"Run exactly `python3 uxw8d_wait.py 100` with the Bash tool in the foregroun",
+   "timestamp": "2026-11-15T10:55:42.106Z"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "environment",
+   "timestamp": "2026-11-15T10:55:42.103Z"
+  },
+  {
+   "ms": 4550,
+   "file": "main",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "model",
+   "timestamp": "2026-11-15T10:55:42.104Z"
+  },
+  {
+   "ms": 4551,
+   "file": "main",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T10:55:42.104Z"
+  },
+  {
+   "ms": 4551,
+   "file": "main",
+   "line": 9,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "agent_listing_delta",
+   "timestamp": "2026-11-15T10:55:42.104Z"
+  },
+  {
+   "ms": 4552,
+   "file": "main",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T10:55:42.104Z"
+  },
+  {
+   "ms": 4552,
+   "file": "main",
+   "line": 11,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T10:55:42.174Z"
+  },
+  {
+   "ms": 4552,
+   "file": "main",
+   "line": 12,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "date",
+   "timestamp": "2026-11-15T10:55:42.175Z"
+  },
+  {
+   "ms": 4552,
+   "file": "main",
+   "line": 13,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T10:55:42.183Z"
+  },
+  {
+   "ms": 4552,
+   "file": "main",
+   "line": 14,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T10:55:42.189Z"
+  },
+  {
+   "ms": 4565,
+   "file": "main",
+   "line": 15,
+   "type": "api-request-shape",
+   "timestamp": "2026-11-15T10:55:42.475Z"
+  },
+  {
+   "ms": 4566,
+   "file": "main",
+   "line": 16,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 4566,
+   "file": "main",
+   "line": 17,
+   "type": "api-request-blob"
+  },
+  {
+   "ms": 4566,
+   "file": "main",
+   "line": 18,
+   "type": "api-request",
+   "timestamp": "2026-11-15T10:55:42.475Z"
+  },
+  {
+   "ms": 4650,
+   "file": "main",
+   "line": 19,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 4651,
+   "file": "main",
+   "line": 20,
+   "type": "mode"
+  },
+  {
+   "ms": 4651,
+   "file": "main",
+   "line": 21,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 4651,
+   "file": "main",
+   "line": 22,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 6059,
+   "file": "subagents/agent-af0d31a9adb9b71dc.meta.json.tmp.51b10cb1",
+   "other": "appeared"
+  },
+  {
+   "ms": 6160,
+   "file": "main",
+   "line": 23,
+   "type": "tools-used"
+  },
+  {
+   "ms": 6160,
+   "file": "main",
+   "line": 24,
+   "type": "assistant",
+   "isSidechain": false,
+   "toolUses": [
+    {
+     "id": "toolu_012CwqzExgfooAmW2aZGhkCN",
+     "name": "Agent",
+     "bg": "true",
+     "description": "uxw slow A"
+    }
+   ],
+   "timestamp": "2026-11-15T10:55:43.760Z"
+  },
+  {
+   "ms": 6160,
+   "file": "main",
+   "line": 25,
+   "type": "user",
+   "isSidechain": false,
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_012CwqzExgfooAmW2aZGhkCN",
+     "is_error": null
+    }
+   ],
+   "toolUseResult": {
+    "status": "async_launched",
+    "agentId": "af0d31a9adb9b71dc",
+    "isAsync": true
+   },
+   "timestamp": "2026-11-15T10:55:44.020Z"
+  },
+  {
+   "ms": 6161,
+   "file": "main",
+   "line": 26,
+   "type": "attachment",
+   "isSidechain": false,
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T10:55:44.079Z"
+  },
+  {
+   "ms": 6161,
+   "file": "subagents/agent-af0d31a9adb9b71dc.meta.json",
+   "meta": "written",
+   "version": 1
+  },
+  {
+   "ms": 6262,
+   "file": "main",
+   "line": 27,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 6262,
+   "file": "main",
+   "line": 28,
+   "type": "mode"
+  },
+  {
+   "ms": 6262,
+   "file": "main",
+   "line": 29,
+   "type": "permission-mode"
+  },
+  {
+   "ms": 6262,
+   "file": "main",
+   "line": 30,
+   "type": "atis-latch"
+  },
+  {
+   "ms": 6262,
+   "file": "main",
+   "line": 31,
+   "type": "ai-title"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 1,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "text": "Run exactly `python3 uxw8d_wait.py 100` with the Bash tool in the foreground (run_in_background false, timeout 600000), then reply with only the word DONE.",
+   "timestamp": "2026-11-15T10:55:43.998Z"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 2,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "deferred_tools_delta",
+   "timestamp": "2026-11-15T10:55:44.025Z"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 3,
+   "type": "user",
+   "isMeta": true,
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "text": "<system-reminder>\nYour final report is delivered through SubagentHandback: when your work is complete, call SubagentHandback({message: <your full report>}). The call ends your run, so make it your las",
+   "timestamp": "2026-11-15T10:55:44.026Z"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 4,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "environment",
+   "timestamp": "2026-11-15T10:55:44.031Z"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 5,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "model",
+   "timestamp": "2026-11-15T10:55:44.031Z"
+  },
+  {
+   "ms": 6262,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 6,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "skill_listing",
+   "timestamp": "2026-11-15T10:55:44.036Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 7,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "session_context",
+   "timestamp": "2026-11-15T10:55:44.194Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 8,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "date",
+   "timestamp": "2026-11-15T10:55:44.194Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 9,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "remote_session_change",
+   "timestamp": "2026-11-15T10:55:44.203Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 10,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T10:55:44.209Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 11,
+   "type": "api-request-shape",
+   "agentId": "af0d31a9adb9b71dc",
+   "timestamp": "2026-11-15T10:55:44.260Z"
+  },
+  {
+   "ms": 6263,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 12,
+   "type": "api-request-blob",
+   "agentId": "af0d31a9adb9b71dc"
+  },
+  {
+   "ms": 6264,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 13,
+   "type": "api-request-blob",
+   "agentId": "af0d31a9adb9b71dc"
+  },
+  {
+   "ms": 6264,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 14,
+   "type": "api-request",
+   "agentId": "af0d31a9adb9b71dc",
+   "timestamp": "2026-11-15T10:55:44.260Z"
+  },
+  {
+   "ms": 6465,
+   "file": "main",
+   "line": 32,
+   "type": "api-request",
+   "timestamp": "2026-11-15T10:55:44.329Z"
+  },
+  {
+   "ms": 7379,
+   "file": "main",
+   "line": 33,
+   "type": "assistant",
+   "isSidechain": false,
+   "timestamp": "2026-11-15T10:55:45.148Z"
+  },
+  {
+   "ms": 7379,
+   "file": "main",
+   "line": 34,
+   "type": "system",
+   "subtype": "turn_duration",
+   "isMeta": false,
+   "isSidechain": false,
+   "timestamp": "2026-11-15T10:55:45.193Z"
+  },
+  {
+   "ms": 7782,
+   "file": "main",
+   "line": 35,
+   "type": "tools-used"
+  },
+  {
+   "ms": 7782,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 15,
+   "type": "assistant",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "timestamp": "2026-11-15T10:55:45.208Z"
+  },
+  {
+   "ms": 7782,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 16,
+   "type": "assistant",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "toolUses": [
+    {
+     "id": "toolu_01RVnFZVGY6TfBtEzhHP5JHA",
+     "name": "Bash",
+     "bg": false,
+     "description": "Run uxw8d_wait.py with argument 100 in foreground"
+    }
+   ],
+   "timestamp": "2026-11-15T10:55:45.542Z"
+  },
+  {
+   "ms": 8007,
+   "cause": "agent A runs its command",
+   "agent": "af0d31a9adb9b71dc"
+  },
+  {
+   "ms": 14110,
+   "cause": "SIGTERM to the engine",
+   "pid": "<engine>"
+  },
+  {
+   "ms": 14214,
+   "file": "main",
+   "line": 36,
+   "type": "cost-state"
+  },
+  {
+   "ms": 14214,
+   "file": "main",
+   "line": 37,
+   "type": "last-prompt"
+  },
+  {
+   "ms": 14214,
+   "file": "main",
+   "line": 38,
+   "type": "cost-state"
+  },
+  {
+   "ms": 14327,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 17,
+   "type": "user",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "toolResults": [
+    {
+     "tool_use_id": "toolu_01RVnFZVGY6TfBtEzhHP5JHA",
+     "is_error": true
+    }
+   ],
+   "toolUseResult": "Error: Exit code 137",
+   "timestamp": "2026-11-15T10:55:52.227Z"
+  },
+  {
+   "ms": 14327,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 18,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "prompt_snapshot",
+   "timestamp": "2026-11-15T10:55:52.232Z"
+  },
+  {
+   "ms": 14328,
+   "file": "subagents/agent-af0d31a9adb9b71dc.jsonl",
+   "line": 19,
+   "type": "attachment",
+   "isSidechain": true,
+   "agentId": "af0d31a9adb9b71dc",
+   "attachment": "agent_listing_delta",
+   "timestamp": "2026-11-15T10:55:52.238Z"
+  },
+  {
+   "ms": 14786,
+   "cause": "engine gone"
+  }
+ ],
+ "metas": {
+  "subagents/agent-af0d31a9adb9b71dc.meta.json": [
+   {
+    "ms": 6161,
+    "meta": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "launchedWithDefaults": true,
+     "description": "uxw slow A",
+     "toolUseId": "toolu_012CwqzExgfooAmW2aZGhkCN",
+     "spawnDepth": 1,
+     "requestShape": "background",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  ]
+ },
+ "snapshots": [
+  {
+   "label": "ready",
+   "ms": 3563,
+   "lines": {},
+   "metas": {}
+  },
+  {
+   "label": "before",
+   "ms": 14026,
+   "lines": {
+    "main": 35,
+    "subagents/agent-af0d31a9adb9b71dc.jsonl": 16
+   },
+   "metas": {
+    "subagents/agent-af0d31a9adb9b71dc.meta.json": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "launchedWithDefaults": true,
+     "description": "uxw slow A",
+     "toolUseId": "toolu_012CwqzExgfooAmW2aZGhkCN",
+     "spawnDepth": 1,
+     "requestShape": "background",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  },
+  {
+   "label": "after",
+   "ms": 24803,
+   "lines": {
+    "main": 38,
+    "subagents/agent-af0d31a9adb9b71dc.jsonl": 19
+   },
+   "metas": {
+    "subagents/agent-af0d31a9adb9b71dc.meta.json": {
+     "agentType": "general-purpose",
+     "isBuiltIn": true,
+     "launchedWithDefaults": true,
+     "description": "uxw slow A",
+     "toolUseId": "toolu_012CwqzExgfooAmW2aZGhkCN",
+     "spawnDepth": 1,
+     "requestShape": "background",
+     "requestNonInteractive": true,
+     "pickedEffortModel": "claude-haiku-5-5"
+    }
+   }
+  }
+ ],
+ "panes": [
+  {
+   "label": "ready",
+   "ms": 3563,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-dWPkT6/work\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                                                                                                            ◐ medium · /effort\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ Try \"refactor <filepath>\"\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ← for agents\n"
+  },
+  {
+   "label": "before",
+   "ms": 14026,
+   "pane": "\n ▐▛███▛█   Claude Code v2.1.322\n▝▜██████▀  Haiku 5.5 · API Usage Billing\n ▝▝   ▝▝   /tmp/u8d-dWPkT6/work\n\n\n❯ Call the Agent tool once, with subagent_type \"general-purpose\", run_in_background true, description \"uxw slow A\" and prompt \"Run exactly python3\n  uxw8d_wait.py 100 with the Bash tool in the foreground (run_in_background false, timeout 600000), then reply with only the word DONE.\". After the calls\n  return, reply with only the word LAUNCHED and do nothing else; do not wait for the agents.\n\n● Agent(uxw slow A)\n  ⎿  Backgrounded agent (↓ to manage · ctrl+o to expand)\n\n● LAUNCHED\n\n✻ Waiting for 1 background agent to finish\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n                                                             tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll\n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n❯ \n────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────\n  ⏵⏵ auto mode on (shift+tab to cycle) · ↓ to manage\n\n  ● main\n  ◯ general-purpose  uxw slow A                                                                                                            7s · ↓ 19.0k tokens\n"
+  },
+  {
+   "label": "after",
+   "ms": 24803,
+   "pane": ""
+  }
+ ]
+}

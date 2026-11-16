@@ -36,7 +36,7 @@ export function Pill({ appSessionId, placement }: { appSessionId: AppSessionId; 
       aria-label="Show session card"
       title={unread ? `${title} · Unread` : title}
       data-floating-pill={placement}
-      onClick={openCard}
+      onClick={() => openCard()}
       className={`inline-flex items-center gap-2 bg-bg-raised px-3 text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2 ${place}`}
     >
       <span className="max-w-[220px] truncate">{title}</span>

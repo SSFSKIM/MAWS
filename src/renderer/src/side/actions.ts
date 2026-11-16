@@ -9,10 +9,11 @@
 // a session on another machine; the window no longer calls `side.sendToMain`. A card's send is its pass's (`sendPass`):
 // every comment with text, as one message, one flight, settled by §D's table.
 import type { Anchor, AnchorScreenshot } from '@shared/anchor/anchor';
-import { commentsMessage, promotionMessage } from '@shared/anchor/message';
+import { commentsMessage, promotionMessage, quotedComment /* UX wave U5b */ } from '@shared/anchor/message';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { DeliveryKey } from '@shared/ipc/schema/lane-a';
+import { SIDE_QUESTION_CAP } from '@shared/ipc/schema/side'; // UX wave U5b: a comment's text cap
 import type { FirstMessage } from '@shared/sessions/intent';
 import { ipc } from '../ipc/client';
 import { isRemoteLaneA } from '../lane-a/remote-session';
@@ -22,7 +23,7 @@ import { adoptFork, titleOf } from '../sessions/record-ops';
 import { displayTitle, listedTitle } from '../sessions/title';
 import { toast } from '../stores/notices';
 import { useSessions, type SessionsState } from '../stores/sessions';
-import { editComment, enterThread, flightRefused, flightSettlements, flightState, flightWent, launchFlight, notePlace, passHost, toastPending, type Flight } from './card/store';
+import { editComment, enterThread, flightRefused, flightSettlements, flightState, flightWent, launchFlight, notePlace, passHost, toastPending, type Flight, type PassComment } from './card/store';
 import { SIDE_COPY } from './copy';
 import { promotable, setSideView, sidePaneOf, useSidePane, type SideView } from './store';
 
@@ -201,22 +202,39 @@ export function tellWhere(place: string | undefined, thread: string | undefined,
  * revealed in the parent's Side pane. Refused, they stand again with the reason: in the card on one of them, else in a
  * card the mounted host of the pass opens on the newest, else in a toast. A pass that ended meanwhile hears nothing of
  * a send that went (the transcript has it); its refusal is the toast.
+ *
+ * UX wave U5b (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §B; decisions 3 and 5): each
+ * comment's words go as `quotedComment` makes them, its line quoted above them; and a side thread from a Review pass
+ * never becomes the card, which sits in a row of a diff that re-reads: the card closes and the thread opens in the Side
+ * pane.
  */
 export async function sendPass(pass: string, client: MawsBridge = ipc): Promise<void> {
   const flight = launchFlight(pass);
   if (flight === null) return;
   const settlements = flightSettlements(flight);
-  const comments = flight.comments.map(({ anchor, text, screenshot }) => ({ anchor, text: text.trim(), screenshot }));
+  const comments = flight.comments.map((comment) => ({ anchor: comment.anchor, text: wordsAsSent(comment), screenshot: comment.screenshot }));
   const outcome = await sendComments(flight.appSessionId, comments, flight.toMain, { reveal: () => revealsThread(flight) }, client);
   for (const settle of settlements) settle(outcome.ok);
   land(flight, outcome);
 }
 
+// UX wave U5b (fix 1): a comment's words with its line quoted, as far as the commands' cap on a comment's text allows
+// (SIDE_QUESTION_CAP), so a comment whose words alone fit is never refused for its quote. What does not fit is left
+// out, the span first, then the caption; the words go as typed.
+function wordsAsSent({ anchor, quote, text }: PassComment): string {
+  const words = text.trim();
+  const quoted = quotedComment(anchor, quote ?? null, words);
+  if (quoted.length <= SIDE_QUESTION_CAP) return quoted;
+  const captioned = quotedComment(anchor, null, words);
+  return captioned.length <= SIDE_QUESTION_CAP ? captioned : words;
+}
+
 // A side thread the flight opened is revealed in the parent's pane unless a card on one of its comments becomes it; a
-// pass that ended hears nothing.
+// pass that ended hears nothing. UX wave U5b: a Review card never becomes the thread.
+const becomesThread = (flight: Flight) => flight.host !== 'review';
 function revealsThread(flight: Flight): boolean {
   const { alive, card } = flightState(flight);
-  return alive && card === null;
+  return alive && (card === null || !becomesThread(flight));
 }
 
 function land(flight: Flight, outcome: SendOutcome): void {
@@ -230,8 +248,9 @@ function land(flight: Flight, outcome: SendOutcome): void {
     return;
   }
   if (outcome.to === 'thread') {
-    flightWent(flight, true);
-    if (card !== null) enterThread(card.serial, outcome.child, flight.comments.map((comment) => comment.text.trim()).join('\n\n'));
+    const into = becomesThread(flight) ? card : null; // the card that becomes the thread, if any
+    flightWent(flight, into !== null);
+    if (into !== null) enterThread(into.serial, outcome.child, flight.comments.map((comment) => comment.text.trim()).join('\n\n'));
     return;
   }
   if (alive) {

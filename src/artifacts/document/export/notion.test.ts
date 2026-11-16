@@ -283,6 +283,7 @@ describe('exportNotionMarkdown', () => {
       ],
       threads: [],
       overrides: {},
+      page: {},
     };
     expect(exportNotionMarkdown(source)).toBe(String.raw`# First \*tab\*` + '\nOne\n# Untitled\nTwo\n');
     expect(exportNotionMarkdown(source, { tab: 'b' })).toBe('Two\n');

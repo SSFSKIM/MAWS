@@ -20,6 +20,7 @@ import { clickRevealed } from './support/hover'; // UX wave U7: the row's own Hi
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { scratchProject } from './support/maws-tools'; // P5 O6 M2: the upgrade scene's indexed sessions
 import { slashPaletteMovesNothing } from './support/palette-geometry';
+import { END_ROW } from './support/request-keys'; // UX wave U1b
 import { closeProject, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
 import { activeMainTab, backToTabs, mainTabById, mainTabs, openAppDestination, openSettings, openSurface, pageRegion, pageTitle, settingsDialog, sidebarFooter, surfaceRow as shellSurfaceRow, usageRing } from './support/shell';
 
@@ -36,7 +37,8 @@ const SHELL_ENV = {
 const CHARTER = 'app-9a1d4262';
 const FIX = 'Fix sidebar drag';
 // A session with a transcript and no request at launch (its read-only request comes at 3000 on the manual clock), so its
-// composer is drawn: FIX's permission is pending from launch and docked in its composer's place, which hides the draft.
+// composer is drawn (chosen while FIX's permission, pending from launch, took its composer's place; since UX wave U1b a
+// request never does, and the choice stays).
 const CHARTER_TITLE = 'Charter + research';
 const SIP = 'Sidebar interaction pass';
 const QUOTA = 'Quota reset recovery';
@@ -689,7 +691,7 @@ test('Settings is a dialog', async () => {
   try {
     const { app, page } = maws;
     await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
-    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
+    // the premise: a session whose composer is drawn (CHARTER_TITLE, above)
     await (await sidebarRow(page, CHARTER_TITLE)).click();
     await expect.poll(() => tabLabels(page, 'Open tabs')).toEqual([CHARTER_TITLE]);
     const main = page.locator('[data-region="main"]');
@@ -776,7 +778,7 @@ test('a page beside the sidebar', async () => {
     const files = panel.locator('[data-surface="files"]');
     const bar = page.getByRole('banner');
     const region = pageRegion(page);
-    // the premise: a session whose composer is drawn (FIX's docked permission hides FIX's draft; first Mac run)
+    // the premise: a session whose composer is drawn (CHARTER_TITLE, above)
     await (await sidebarRow(page, CHARTER_TITLE)).click();
     await expect.poll(labels).toEqual([CHARTER_TITLE]);
 
@@ -1322,9 +1324,14 @@ async function firstInstance(maws: MawsLaunch, testInfo: TestInfo): Promise<Save
     // hydrates to nothing; one the relay sent on to the engine host stays reading (or fails)
     await expect(panel.locator('.transcript[data-hydration="ready"]'), 'the stub answered the history read').toHaveCount(1);
     await expect(panel.getByText('Couldn’t load this conversation')).toHaveCount(0);
-    await expect(panel.getByText('Approval needed')).toBeVisible();
-    await expect(panel.getByTestId('request-input')).toHaveText('git log --oneline');
-    await expect(panel.locator('[data-composer-frame]')).toBeAttached(); // C7: the composer fills its slot; its frame waits behind the docked card
+    // UX wave U1b: the request is the card at the transcript's end (the stub's history is empty: no call's row), the
+    // composer stands under it the whole time, and ⌘⇧J puts the keyboard on the request's row
+    const request = panel.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+    await expect(request).toBeVisible();
+    await expect(request.getByTestId('request-input')).toHaveText('git log --oneline');
+    await expect(panel.locator('[data-composer-frame]'), 'the composer beside the request, never behind it').toBeVisible();
+    await expect(panel.getByRole('textbox', { name: 'Message' })).toBeVisible();
+    await expect(panel.locator(END_ROW), 'the keyboard on the request’s row').toBeFocused();
     await expect(panel.getByRole('group', { name: 'Session status' })).toHaveCount(0); // W2: nothing sits under the composer
 
     await menu(app, 'theme.light');

@@ -138,6 +138,7 @@ export const ARTIFACT_OP_COMMANDS = [
   'artifacts.copyAsset',
   'artifacts.rereadDatasetFile',
   'artifacts.create',
+  'artifacts.undelete', // UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.3)
 ] as const;
 export const HostArtifactOpInputSchema = z.strictObject({
   opId: OpIdSchema,

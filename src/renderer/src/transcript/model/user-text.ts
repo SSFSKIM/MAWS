@@ -14,6 +14,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import type { ContentBlock } from '@shared/graph/events';
 import { linkedReadOf } from '@shared/maws/linked-read'; // P4-A3
+import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b
 import type { AnchorFrame, Attachment, UserComment } from './rows';
 
 const utf8Length = (text: string) => new TextEncoder().encode(text).length;
@@ -105,6 +106,14 @@ function attachmentOf(block: ContentBlock, index: number): Attachment | null {
   return null;
 }
 
+// UX wave U4b (the joined answer, step 2; the engine joins an answer envelope with the prompts waiting beside it, one
+// newline between): a text that holds the person's words beside envelopes is those words; one that is all envelope stays
+// whole, as before (derive draws no bubble for it where its capsule took the answers, and its raw text where none did).
+function ownWords(text: string): string {
+  const { envelopes, rest } = readAnswerEnvelopes(text);
+  return envelopes.length > 0 && rest !== '' ? rest : text;
+}
+
 export function userTextOf(content: string | ContentBlock[]): UserText {
   const texts: string[] = [];
   const attachments: Attachment[] = [];
@@ -121,7 +130,7 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
       }
     });
   }
-  const joined = texts.join('\n\n');
+  const joined = ownWords(texts.join('\n\n'));
   const read = joined.includes('<maws_anchor') ? readAnchoredMessage(joined) : null; // E3: the framing is MAWS's, not the human's words
   // UX wave U5a: several comments are their texts, a blank line between (what find and the fold measure), as typed in the card
   const several = read !== null && read.comments.length > 1 ? read.comments : null;
@@ -168,6 +177,15 @@ export function localCommandOutput(content: string | ContentBlock[]): string | n
 }
 
 export const isLocalCommand = (origin: string | null, content: string | ContentBlock[]) => origin === 'local-command' || localCommandOutput(content) !== null;
+
+// UX wave U3b (decisions 3 and 5): a bubble's text read as a slash command's line, `/<command> <args>`, as the person
+// typed it on the live wire (`/cost`) or as `userTextOf` writes the engine's record of one from a file (`/usage`). Null
+// for any other text. What says a command's output has a bubble of its command (`lone`), and what names the command for
+// an output whose event names no run (the mod's site, `commandInput`).
+export function commandLineOf(text: string): { command: string; args: string } | null {
+  const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(text);
+  return match === null ? null : { command: match[1]!, args: match[2] ?? '' };
+}
 
 // E11's sitting (owner-notes 00-consolidated-plan §2.3; narrows W1): a local-command echo that only confirms a setting
 // change draws nothing, since its chip already shows the change. Matched on whole lines in the engine's own words

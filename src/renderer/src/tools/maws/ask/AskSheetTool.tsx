@@ -1,8 +1,9 @@
 // The Question sheet (E1 execution document, Interfaces "The renderer" and M4; P1 spec §3 A, P-13): the X5 tool that
 // shows a session's asks. One tab per session (single-instance, never pinned, not offered from "+"), re-targeted by
-// `open` for each new ask (`connect.ts`) and for a capsule's *Open* or *View answers* (`openAsk`, residue 14). Its state
-// is the session alone; the asks, the drafts and the selection are the session's store (`store.ts`), which outlives
-// the tab, so a closed and reopened sheet still holds its half-filled answers.
+// `open` when the person opens it: a capsule's *Open*, *Open beside* or *View answers*, or a card's button (`openAsk`,
+// residue 14); an ask that arrives opens nothing (UX wave U1b, M6). Its state is the session alone; the asks, the
+// drafts and the selection are the session's store (`store.ts`), which outlives the tab, so a closed and reopened
+// sheet still holds its half-filled answers.
 //
 // Shown: a pending ask as a form (one section per question, a sticky Submit bar); a cancelled ask with its notice and
 // nothing to submit; a capsule's ask the store does not hold, read-only from the capsule's data; or the resting state.

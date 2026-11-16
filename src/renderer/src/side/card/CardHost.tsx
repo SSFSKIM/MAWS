@@ -37,13 +37,20 @@
 // unmounting leaves its card (the comment stays in its pass) rather than closing it. With no card of its own open and no
 // line to draw, a pass of its subject that holds comments is a chip, "N unsent comments", which opens the card on the
 // newest: in the strip, in the margin's entry, at the top right of an HTML page, at the passage over a document.
+//
+// UX wave U5b (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §B; decision 4): `inline`, the
+// card in flow in a row the surface gives it (Review's, under the commented line). The host is mounted once by the
+// surface, for as long as the surface is, where its chip and its place line belong (Review's toolbar), and draws them
+// there; the card is drawn through a portal into `row`, at its usual width or the row's (`inlineCard`), and with `row`
+// null no card is drawn and the comment stays in its pass. Nothing is located or pinned.
 import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import type { CardRect } from '../../tools/code/anchor/anchor';
 import { hostedInSidePane, useSidePane } from '../store';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
 import { CommentCard } from './CommentCard';
-import { caretOf, cardPosition, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax, type CardPin, type CardStyle } from './placement';
+import { caretOf, cardPosition, inlineCard /* UX wave U5b */, marginCard /* P4-B1 */, pinOf, placeCard, stripCard, stripMax, type CardPin, type CardStyle } from './placement';
 import { cardHostEntry, claimCard, closeCard, composingOf, editComment, leaveCard, placeNoteOf, registerCardHost, unsentOf, useCommentCard, type CardHostKind, type CardHostMode, type OpenCard, type PassComment, type PlaceNote, targetOf } from './store';
 import { QUIET } from '../../sessions/ui'; // UX wave U5a
 import { sameKey, useLaneA } from '../../stores/lane-a';
@@ -72,7 +79,7 @@ export interface CardFrame {
   // UX wave U5a end
 }
 
-type Layout = 'anchored' | 'docked' | 'margin'; // P4-B1: margin
+type Layout = 'anchored' | 'docked' | 'margin' /* P4-B1 */ | 'inline' /* UX wave U5b */;
 
 interface Props {
   hostId: string;
@@ -84,20 +91,22 @@ interface Props {
   visible: boolean; // the host is on screen (the panel tool's `ctx.visible`, a main tab's active state)
   restoreFocus?(): void; // after Close, Escape or a send dismissed this host's card: the producer's control
   subject: string; // UX wave U5a: what the host shows, whose passes it draws (an artifact's id, a browser tab's id)
+  row?: HTMLElement | null; // UX wave U5b: layout 'inline', the element the surface gives the card; null, none
 }
 
 // A comment of a pass as the frame's card callbacks take it: the card it would be (its anchor and target).
 const cardOfComment = (card: OpenCard | null, comment: PassComment, host: CardHostKind, hostId: string): OpenCard =>
   card !== null && composingOf(card)?.comment.id === comment.id ? card : { serial: 0, parent: '' as OpenCard['parent'], anchor: comment.anchor, host, hostId, claimMode: null, openedAt: 0, target: targetOf(comment.anchor), rect: comment.rect, phase: { kind: 'composing', pass: '', comment: comment.id } };
 
-export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, visible, restoreFocus, subject }: Props) {
+export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, visible, restoreFocus, subject, row = null }: Props) {
   const open = useCommentCard((s) => s.open);
   const ref = useRef<HTMLDivElement>(null);
   const [box, setBox] = useState({ width: 0, height: 0 });
 
   useLayoutEffect(() => {
-    // docked, the strip's own height is the card's: the room it may take is the column's (P2-E2)
-    const el = layout === 'docked' ? (ref.current?.parentElement ?? null) : ref.current;
+    // docked, the strip's own height is the card's: the room it may take is the column's (P2-E2); inline, the room is the
+    // row's (UX wave U5b)
+    const el = layout === 'docked' ? (ref.current?.parentElement ?? null) : layout === 'inline' ? row : ref.current;
     if (!el) return;
     // P4-B1: in the margin, the width is the entry's (this block's) and the height the page's scroll box's
     const tall = layout === 'margin' ? (el.closest<HTMLElement>('.ds-doc') ?? el) : el;
@@ -107,7 +116,7 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     observer?.observe(el);
     if (tall !== el) observer?.observe(tall); // P4-B1
     return () => observer?.disconnect();
-  }, [layout]);
+  }, [layout, row]);
 
   const drawnInSidePane = useSidePane((s) => open !== null && open.phase.kind === 'thread' && hostedInSidePane(open.phase.child, s));
   const claimable =
@@ -166,7 +175,7 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
   }, [shownCard, hostId]);
   const rect = useLocated(card, frame, box, layout);
   const pin = rect ? pinOf(rect, frame) : null;
-  const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : placeCard(box, pin);
+  const style = layout === 'docked' ? stripCard(box) : layout === 'margin' ? marginCard(box) /* P4-B1 */ : layout === 'inline' ? inlineCard(box) /* UX wave U5b */ : placeCard(box, pin);
   // UX wave U5a: the place's note, drawn while no card of this host's is open; over a document where its card last was
   // pinned (kept from the renders that drew it, React's pattern for information from earlier renders)
   const note = useCommentCard((s) => placeNoteOf(s.notes, host, subject));
@@ -189,6 +198,15 @@ export function CommentCardHost({ hostId, host, mode, layout, accepts, frame, vi
     },
     ...(restoreFocus && { restoreFocus }),
   });
+  if (layout === 'inline') {
+    return (
+      <div ref={ref} data-card-host={host} data-card-inline="" className="contents">
+        {card && row && createPortal(<CommentCard key={card.serial} card={card} style={style} pinned={false} {...cardProps(card)} />, row)}
+        {placeNote && <PlaceLine note={placeNote} className="" />}
+        {chip && <UnsentChip count={chip.count} onOpen={openChip} className="" />}
+      </div>
+    );
+  }
   if (layout === 'margin') {
     return (
       <div ref={ref} data-card-host={host} data-card-margin="" className="relative">

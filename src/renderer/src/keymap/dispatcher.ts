@@ -49,7 +49,7 @@ export const BUTTON_LIKE_INPUTS: ReadonlySet<string> = new Set(['button', 'submi
 // A Radix menu, dialog or popover while open (their content carries the role and `data-state="open"`). A sidebar row's
 // hover card is not one: it opens under the pointer without taking focus (W5 puts one on every row), and a key from
 // inside it lands on a button, which the pane scope refuses anyway.
-const OPEN_OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]:not([data-hover-card])`).join(', ');
+export const OPEN_OVERLAY = ['menu', 'dialog', 'alertdialog'].map((role) => `[role="${role}"][data-state="open"]:not([data-hover-card])`).join(', '); // UX wave U1b: a prompt's guard reads it (§F)
 
 function isTextEntry(element: Element): boolean {
   if (element instanceof HTMLInputElement) return !BUTTON_LIKE_INPUTS.has(element.type);
@@ -60,15 +60,29 @@ function isTextEntry(element: Element): boolean {
 const isButtonOrLink = (element: Element) =>
   element.closest('button, a[href], [role="button"], [role="link"]') !== null || (element instanceof HTMLInputElement && BUTTON_LIKE_INPUTS.has(element.type));
 
-// Why a key may not reach a binding of this scope at all, before any binding is looked at.
-function refused(event: KeyboardEvent, scope: ActionSpec['scope'], target: Element): boolean {
+// Why a key may not reach a binding of this scope at all, before any binding is looked at. UX wave U1b (§F): a binding
+// that claims the press is asked past these, and only these.
+function refusedForEvery(event: KeyboardEvent, scope: ActionSpec['scope']): boolean {
   if (event.isComposing) return true;
   // Old persisted overrides must not turn ordinary typing into an app-wide action either.
   if (scope === 'app') return !event.metaKey && !event.ctrlKey && !event.altKey && event.key.length === 1;
-  if (document.querySelector(OPEN_OVERLAY) !== null) return true;
+  return document.querySelector(OPEN_OVERLAY) !== null;
+}
+
+// Why a key may not reach a binding of this scope by containment: the key belongs to what holds it.
+function refusedByTarget(scope: ActionSpec['scope'], target: Element): boolean {
+  if (scope === 'app') return false;
   if (scope === 'composer') return target.closest('[data-key-sink="composer"]') === null;
   // Pane scope: Enter and Escape answer requests, so they come only from the card or pane that holds focus itself.
   return isTextEntry(target) || target.closest('[data-key-sink]') !== null || isButtonOrLink(target);
+}
+
+// UX wave U1b (§F): of the bindings that say at the press whether the key is theirs, the later registration that claims
+// it; `within` and the target's refusal are not read for them.
+function claimant(id: ActionId, event: KeyboardEvent): ChordBinding | null {
+  let best: ChordBinding | null = null;
+  for (const binding of bindingsOf(id)) if (binding.claims?.(event) === true && (best === null || binding.order > best.order)) best = binding;
+  return best;
 }
 
 // Among the bindings whose element contains both the target and the focused element, the innermost; of two on one
@@ -78,6 +92,7 @@ function owner(id: ActionId, target: Element, table: ActionTable): ChordBinding 
   const focused = document.activeElement;
   let best: ChordBinding | null = null;
   for (const binding of bindingsOf(id)) {
+    if (binding.claims !== undefined) continue; // U1b: it says itself whether the key is its own (`claimant`)
     const element = binding.within?.current ?? null;
     if (scope !== 'app' && (element === null || !element.contains(target) || focused === null || !element.contains(focused))) continue;
     const bestElement = best?.within?.current ?? null;
@@ -158,8 +173,9 @@ export function dispatchKey(event: KeyboardEvent, keymap: KeymapOverrides, table
     if (accelerator === null) continue;
     const chord = parseChord(accelerator);
     if (!matchesChord(event, chord)) continue;
-    if (refused(event, table[id].scope, target)) continue;
-    const binding = owner(id, target, table);
+    const scope = table[id].scope;
+    if (refusedForEvery(event, scope)) continue;
+    const binding = claimant(id, event) ?? (refusedByTarget(scope, target) ? null : owner(id, target, table));
     if (!binding) continue;
     event.preventDefault();
     // UX wave U1a (§D, decision 17): a binding that answers a request acts on a fresh press only, so a chord held through
