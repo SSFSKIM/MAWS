@@ -1710,7 +1710,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     resetDiffTabs();
     useViewer.getState().reset();
     useBranchReads.getState().reset();
-    current = reviewMain({ status: FEATURE });
+    current = reviewMain({ status: FEATURE, uncommitted: { patch: APP_PATCH, files: APP_FILES } }); // git.diff's answer where the reads are not served
     main().state.branch = () => branchAnswer();
     main().state.since = (input) =>
       ok(input.against === 'HEAD' ? { patch: APP_PATCH, files: APP_FILES, untracked: UNTRACKED } : { patch: COMMITTED + APP_PATCH, files: [COMMITTED_FILE, ...APP_FILES], untracked: UNTRACKED });
@@ -1857,13 +1857,14 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
     expect(main().callsOf('git.commitDiff')).toHaveLength(1); // one read in all
 
+    const THIRD_SHA = 'cc33dd44ee55ff6600778899aabbccddeeff0011';
     const late = deferred<ReturnType<typeof ok>>();
-    main().state.commits = (input) => (input.commit === SHA ? late.promise : commitAnswer(OTHER_SHA, true, { subject: 'Name the berth columns' }));
-    act(() => useReview.getState().reset()); // the first commit read again, and held open
+    main().state.commits = (input) => (input.commit === THIRD_SHA ? late.promise : commitAnswer(OTHER_SHA, true, { subject: 'Name the berth columns' }));
+    openCommitted(THIRD_SHA); // its read held open
     await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(2));
     openCommitted(OTHER_SHA);
     await waitFor(() => expect(chipOf('commit')?.textContent).toBe('Commit aa11bb2'));
-    late.resolve(commitAnswer(SHA, true, { subject: 'A late answer' }));
+    late.resolve(commitAnswer(THIRD_SHA, true, { subject: 'A late answer' }));
     await waitFor(() => expect(footer()).toBe('Commit aa11bb2 · Name the berth columns'));
     expect(chips().filter((c) => c[0] === 'commit')).toEqual([['commit', false, 'true', 'Name the berth columns']]);
   });
