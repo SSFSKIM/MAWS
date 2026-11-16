@@ -26,6 +26,7 @@
 import { addressed } from './support/address';
 import { closeSideTab, hideSurface, openSurface, sideColumn, sideGroup, sideTab, surface, surfaceRow, mainTabs as shellMainTabs } from './support/shell';
 import { randomUUID } from 'node:crypto';
+import { createSocket } from 'node:dgram';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -680,8 +681,9 @@ test('the Artifacts tool: groups newest first, Back to the list’s scroll, the 
 // ---- (3) delivered files -------------------------------------------------------------------------------------------
 
 // A delivered page that runs an inline script (the marker), fetches the web, links to it, offers a download and opens a
-// WebRTC connection with a public STUN server: each must stay inside its frame.
-const DELIVERED_PAGE = `<!doctype html><html><head><meta charset="utf-8"><title>Delivered page</title></head>
+// WebRTC connection with the STUN server `stun` names (the scene's own listener on the loopback address, Decision Log 32):
+// each must stay inside its frame.
+const deliveredPage = (stun: string) => `<!doctype html><html><head><meta charset="utf-8"><title>Delivered page</title></head>
 <body style="margin:0;padding:24px;font:16px system-ui;background:#fff8e1;color:#3e2723">
 <h1>Quarterly notes</h1>
 <p id="marker">waiting</p>
@@ -692,7 +694,7 @@ document.getElementById('marker').textContent = 'SCRIPT_RAN';
 fetch('https://example.invalid/fetch').then(() => console.error('E2_FETCH_REACHED'), (error) => console.error('E2_FETCH_FAILED ' + error.message));
 (async () => {
   const types = [];
-  const peer = new RTCPeerConnection({ iceServers: [{ urls: 'stun:stun.l.google.com:19302' }] });
+  const peer = new RTCPeerConnection({ iceServers: [{ urls: '${stun}' }] });
   peer.onicecandidate = (event) => { if (event.candidate) types.push(event.candidate.type); };
   peer.createDataChannel('e2');
   await peer.setLocalDescription(await peer.createOffer());
@@ -703,6 +705,45 @@ fetch('https://example.invalid/fetch').then(() => console.error('E2_FETCH_REACHE
 </script>
 </body></html>`;
 
+// UX wave U6b-2 (Decision Log 32): the STUN server a page's WebRTC check names, so that no scene sends anything to a
+// public server: a UDP socket on the loopback address at a port the system gives, counting the datagrams it receives.
+// `control` sends it one datagram from the test process, the positive control; unreferenced, so a scene that fails
+// before closing it keeps no process alive.
+async function stunListener(): Promise<{ url: string; received(): number; control(): Promise<void>; close(): Promise<void> }> {
+  const socket = createSocket('udp4');
+  let received = 0;
+  socket.on('message', () => void (received += 1));
+  await new Promise<void>((resolve, reject) => {
+    socket.once('error', reject);
+    socket.bind(0, '127.0.0.1', () => resolve());
+  });
+  socket.unref();
+  const { port } = socket.address();
+  return {
+    url: `stun:127.0.0.1:${port}`,
+    received: () => received,
+    control: () =>
+      new Promise<void>((resolve, reject) => {
+        const sender = createSocket('udp4');
+        sender.send(Buffer.from('maws e2e control'), port, '127.0.0.1', (error) => {
+          sender.close();
+          if (error) reject(error);
+          else resolve();
+        });
+      }),
+    close: () => new Promise<void>((resolve) => socket.close(() => resolve())),
+  };
+}
+
+// The positive control, before the page loads: one datagram of the test process reaches the listener. That shows the
+// listener works; it does not show that a page outside the policy would reach it.
+async function controlled(): Promise<Awaited<ReturnType<typeof stunListener>>> {
+  const stun = await stunListener();
+  await stun.control();
+  await expect.poll(() => stun.received(), { message: 'the listener counted the control datagram' }).toBe(1);
+  return stun;
+}
+
 test('delivered files: every kind draws in its body inside and outside the session’s directory, Reveal and Open externally reach the seam, and the frames reach nothing', async () => {
   test.setTimeout(240_000);
   await scene({ titles: ['E2: delivered files'] }, async (s) => {
@@ -711,13 +752,14 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const outside = join(s.scratch.root, 'elsewhere');
     mkdirSync(outside);
     const at = (k: number) => new Date(Date.parse('2026-10-06T09:00:00.000Z') + k * 60_000).toISOString();
+    const stun = await controlled();
     const put = (dir: string, name: string, bytes: Buffer | string) => {
       writeFileSync(join(dir, name), bytes);
       return join(dir, name);
     };
     // four inside the session's directory, three outside it
     const pdf = seedFile(userData, id, put(s.repo, 'report.pdf', minimalPdf('https://example.invalid/pdf-link')), at(0), 'the report');
-    const html = seedFile(userData, id, put(s.repo, 'notes.html', DELIVERED_PAGE), at(1));
+    const html = seedFile(userData, id, put(s.repo, 'notes.html', deliveredPage(stun.url)), at(1));
     const markdown = seedFile(userData, id, put(s.repo, 'summary.md', '# Summary\n\nThe **quarter** closed above plan.\n\n- revenue up\n- costs flat\n'), at(2));
     const wav = seedFile(userData, id, put(s.repo, 'tone.wav', silentWav()), at(3));
     const webm = seedFile(userData, id, put(outside, 'clip.webm', await recordedWebm(s.page)), at(4), 'a short clip');
@@ -771,6 +813,8 @@ test('delivered files: every kind draws in its body inside and outside the sessi
     const ice = await page.evaluate(() => document.body.dataset.ice!);
     console.log(`[e2-files] ICE candidate types in the frame: ${JSON.stringify(ice)}`);
     expect(ice).not.toContain('srflx');
+    expect(stun.received(), 'the STUN listener received no datagram of the page by the end of gathering').toBe(1); // the control's alone
+    await stun.close();
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
     await page.locator('#save').click();
     await s.page.waitForTimeout(1_500);
@@ -1141,7 +1185,7 @@ async function openByPath(s: Scene, id: string, path: string): Promise<Locator> 
 // meets (recorded from its head, before any of its requests), its fetch's outcome written where the scene reads it, and
 // three messages to the window in the shapes the artifact frame's bridge posts (a pick, a cancelled pick, a located
 // element), which no listener of the window takes from a file's frame
-const HOSTILE_PAGE = DELIVERED_PAGE.replace(
+const hostilePage = (stun: string) => deliveredPage(stun).replace(
   '</head>',
   `<script>
 document.addEventListener('securitypolicyviolation', (event) => {
@@ -1193,7 +1237,8 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
   await scene({ titles: ['U6b-2: a hostile page by a path'] }, async (s) => {
     const [id] = s.ids;
     const path = join(s.repo, 'notes.html');
-    writeFileSync(path, HOSTILE_PAGE);
+    const stun = await controlled();
+    writeFileSync(path, hostilePage(stun.url));
     const downloads = await scratchDownloads(s);
     // every message in the bridge's shapes that reaches the window, as the window hears it
     await s.page.evaluate(() => {
@@ -1231,6 +1276,8 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     const ice = await page.evaluate(() => document.body.dataset.ice!);
     console.log(`[u6b2-file-page] ICE candidate types in the frame: ${JSON.stringify(ice)}`);
     expect(ice).not.toContain('srflx');
+    expect(stun.received(), 'the STUN listener received no datagram of the page by the end of gathering').toBe(1); // the control's alone
+    await stun.close();
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
     // the barrier is the sandbox's own refusal, which Chromium logs in the frame as it declines to start the download
     const refusedDownload = s.page.waitForEvent('console', { predicate: (message) => message.text().startsWith('Download is disallowed. The frame initiating or instantiating the download is sandboxed'), timeout: 15_000 });
