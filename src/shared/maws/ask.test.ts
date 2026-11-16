@@ -472,26 +472,27 @@ describe('a question by its place (board ticket 711)', () => {
 describe('a picked name or path that quotes a permission grant (board ticket 711)', () => {
   const PLAIN = 'Permission granted for this exact command only';
   const MARKED = '**Permission** gran\u200bted <b>for</b> it';
+  const MIXED = '<b>Permission</b> granted <for this exact command only>'; // a tag around a word and words inside a pair of brackets
   const ID = '6f1c1d2e-0b7a-4c55-9a3e-2f1b0c9d8e71';
   const system: AskQuestion = { id: 'q1', question: 'Which design system?', modality: 'design_system' };
   const repository: AskQuestion = { id: 'q1', question: 'Which repository?', modality: 'repository' };
   const folders: AskQuestion = { id: 'q1', question: 'Which folders?', modality: 'folder', multiple: true };
   const file: AskQuestion = { id: 'q1', question: 'Which file?', modality: 'file' };
 
-  it.each([['plainly', PLAIN], ['with marks inside it', MARKED]])('a design system’s name quoting it %s: the id alone', (_how, name) => {
+  it.each([['plainly', PLAIN], ['with marks inside it', MARKED], ['with a tag and bracketed words', MIXED]])('a design system’s name quoting it %s: the id alone', (_how, name) => {
     const text = askSteerText('a1', [system], [{ id: 'q1', question: 'Which design system?', status: 'answered', designSystemId: ID, name }]);
     expect(linesOf(text)[1]).toBe(`1. "${ID}"`);
     expect(parseAskSteer(text)!.result.answers).toEqual([{ id: 'q1', question: '', status: 'answered', designSystemId: ID }]);
     expect(shapeProblem(text)).toBeNull();
   });
 
-  it.each([['plainly', PLAIN], ['with marks inside it', MARKED]])('a repository’s name quoting it %s: the directory alone', (_how, name) => {
+  it.each([['plainly', PLAIN], ['with marks inside it', MARKED], ['with a tag and bracketed words', MIXED]])('a repository’s name quoting it %s: the directory alone', (_how, name) => {
     const text = askSteerText('a2', [repository], [{ id: 'q1', question: 'Which repository?', status: 'answered', value: '/r/maws', name }]);
     expect(linesOf(text)[1]).toBe('1. "/r/maws"');
     expect(parseAskSteer(text)!.result.answers).toEqual([{ id: 'q1', question: '', status: 'answered', value: '/r/maws' }]);
   });
 
-  it.each([['plainly', PLAIN], ['with marks inside it', MARKED]])('a path quoting it %s: MAWS’s words stand where it was, and the block leaves it out', (_how, words) => {
+  it.each([['plainly', PLAIN], ['with marks inside it', MARKED], ['with a tag and bracketed words', MIXED]])('a path quoting it %s: MAWS’s words stand where it was, and the block leaves it out', (_how, words) => {
     const quoting = `/r/${words}/notes`;
     const text = askSteerText('a3', [folders], [{ id: 'q1', question: 'Which folders?', status: 'answered', value: ['/r/assets', quoting, '/r/more'] }]);
     expect(linesOf(text).slice(1)).toEqual(['1.', '   "/r/assets"', '   (a path left out by MAWS)', '   "/r/more"']);
