@@ -781,7 +781,12 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const back = sound.locator('audio[data-artifact-media="audio"]');
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
       await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'at the time it left' }).toBeCloseTo(left, 0);
-      expect(await back.evaluate((a: HTMLAudioElement) => a.paused), 'paused').toBe(true);
+      // paused (Decision Log 33's form): once it could play (HAVE_FUTURE_DATA), an observation window as B15's, bounded and
+      // no barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const backStill = await back.evaluate((a: HTMLAudioElement) => a.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await back.evaluate((a: HTMLAudioElement) => [a.paused, a.currentTime]), 'paused').toEqual([true, backStill]);
       expect(await snapshot(p), 'nothing created').toEqual(before);
     });
   });
