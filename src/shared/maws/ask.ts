@@ -4,6 +4,7 @@
 // carries the AskResult in a fenced JSON block, so a session read from the engine's transcript (no host journal) still
 // finds the answers (`parseAskSteer`).
 import * as z from 'zod';
+import { quotesGrant } from '../engine/arrival'; // board ticket 711 (a cycle: arrival.ts imports this module; read at call time)
 import { RequestIdSchema, ToolUseIdSchema } from '../graph/ids';
 import { askQuestionId, AskQuestionSchema, AskResultSchema, type AskAnswer, type AskQuestion, type AskResult } from './tools';
 
@@ -118,16 +119,34 @@ function picksOf(question: AskQuestion, values: readonly string[]): string[] {
   });
 }
 
-// The fields an answer carries beyond its id, question and status, in the schema's order: each the person's (a value
-// typed or chosen from the machine, a pick written by its place, a note) or MAWS's own (`create`)
+// The fields an answer carries beyond its id, question and status, in the schema's order: each the person's or MAWS's
+// own (`create`). What the person typed (a text answer, what was typed under Other, a note) is their own words and is
+// written as it is. A name or a path the person picked (a design system's name, an artifact's title; a repository's
+// name; a file's, a folder's or a repository's path) may have been written by a model with tools, as an option's label
+// is, and there is no place to write instead: one that quotes the grant (quotesGrant) is left out (`kept`). A choice's
+// picks are written by their place.
 const CARRIED = ['value', 'otherText', 'name', 'designSystemId', 'create', 'note'] as const;
+const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood
+const isPath = (question: AskQuestion) => question.modality === 'file' || question.modality === 'folder' || question.modality === 'repository';
+
+// The answer with every picked name and path that quotes the grant left out
+function kept(question: AskQuestion, answer: AskAnswer): AskAnswer {
+  const out = { ...answer };
+  if (out.name !== undefined && quotesGrant(out.name)) delete out.name;
+  if (isPath(question) && out.value !== undefined) {
+    if (Array.isArray(out.value)) out.value = out.value.filter((path) => !quotesGrant(path));
+    else if (quotesGrant(out.value)) delete out.value;
+  }
+  return out;
+}
 
 // An answer as the steer's block carries it, built field by field (nothing copied that is not named here): its
 // question named by its place, `q<n>` (the id askQuestionId gives a question with none of the model's: a question's id
 // is the model's own words, up to 64 characters), its question empty, and a choice's picks by their place, as a list
 // (the shape the sheet sends) whether its value came as a list or as one string (which the schema admits; an earlier
 // build's reader takes either shape)
-function steeredAnswer(question: AskQuestion, place: number, answer: AskAnswer): AskAnswer {
+function steeredAnswer(question: AskQuestion, place: number, given: AskAnswer): AskAnswer {
+  const answer = kept(question, given);
   const steered: AskAnswer = { id: `q${place + 1}`, question: '', status: answer.status };
   for (const field of CARRIED) if (answer[field] !== undefined) Object.assign(steered, { [field]: answer[field] });
   if (question.modality === 'choice' && answer.value !== undefined) steered.value = picksOf(question, Array.isArray(answer.value) ? answer.value : [answer.value]);
@@ -137,12 +156,14 @@ function steeredAnswer(question: AskQuestion, place: number, answer: AskAnswer):
 // One answer as the steer's line reads it: the picks by their place (and what was typed under Other), the text, the
 // paths one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design
 // system's `<name> (<id>)` (P3-D), each value a JSON string; or MAWS's own words: the build request and the two
-// non-answers. `answer` is the steered one (steeredAnswer).
-function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
+// non-answers, and MAWS's words where a path that quotes the grant stood. `answer` is the steered one (steeredAnswer),
+// `given` the one the person gave, whose paths say where one was left out.
+function answerText(question: AskQuestion, answer: AskAnswer | undefined, given: AskAnswer | undefined): string {
   if (answer === undefined || answer.status === 'skipped') return 'skipped';
   if (answer.status === 'decide_for_me') return 'decide for me';
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
-  const quoted = values.map((value) => JSON.stringify(value)).join(', ');
+  const paths = given?.value === undefined ? [] : Array.isArray(given.value) ? given.value : [given.value];
+  const path = (value: string) => (quotesGrant(value) ? LEFT_OUT : JSON.stringify(value));
   switch (question.modality) {
     case 'choice':
       return [values.join(', '), answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
@@ -150,9 +171,11 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
       return JSON.stringify(values.join('\n'));
     case 'file':
     case 'folder':
-      return values.map((path) => `\n   ${JSON.stringify(path)}`).join('');
-    case 'repository':
-      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${quoted})` : quoted;
+      return paths.map((value) => `\n   ${path(value)}`).join('');
+    case 'repository': {
+      const directory = paths.map(path).join(', ');
+      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${directory})` : directory;
+    }
     case 'design_system': { // P3-D
       if (answer.create === true) return 'build a new one with me';
       const id = JSON.stringify(answer.designSystemId ?? '');
@@ -180,9 +203,10 @@ export function askSteerText(askId: string, questions: readonly AskQuestion[], a
     return place === undefined ? [] : [steeredAnswer(questions[place]!, place, answer)];
   });
   const byPlace = new Map(steered.map((answer) => [answer.id, answer]));
+  const givenAt = new Map(answers.map((answer) => [places.get(answer.id), answer]));
   const lines = questions.map((question, index) => {
     const answer = byPlace.get(`q${index + 1}`);
-    const text = answerText(question, answer);
+    const text = answerText(question, answer, givenAt.get(index));
     const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
     return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });

@@ -8,7 +8,7 @@
 // P2-C3 (the P2 spec's Decision Log 35): a subagent's ask is held as a blocking one whatever its `blocking` said, since
 // an async ask's answers travel as a steer into the main conversation, which never asked, while the subagent never hears
 // them; its call returns the answers, and its attention item is a `question`.
-import { GRANT_OPENING } from '@shared/engine/arrival';
+import { quotesGrant } from '@shared/engine/arrival';
 import type { PendingAsk } from '@shared/maws/ask';
 import { withQuestionIds } from '@shared/maws/ask';
 import { parseToolArguments, TOOL_ERRORS, type AskResult } from '@shared/maws/tools';
@@ -22,15 +22,11 @@ export class AskAnswerMismatch extends Error {
 
 // Board ticket 711: an ask may not quote a permission grant. The engine's auto-mode classifier reads the conversation,
 // the model's own ask call among it, so an ask whose strings hold the grant's opening (GRANT_OPENING, the consent
-// sentence's own) is refused whole, whichever string holds it. Both sides are read through one function, `folded`:
-// Unicode compatibility folding (NFKC: full-width letters, the no-break space), case folding, HTML tags removed, then
-// letters and digits alone (Markdown's emphasis, code and strike marks, white space, zero-width characters and every
-// other mark go). What it does not claim: a paraphrase of the grant, or letters of another script that look alike. The
-// steer's writer is the boundary (askSteerText writes no text the model wrote); this guard is the second layer.
-const folded = (text: string): string => text.normalize('NFKC').toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}]/gu, '');
-const GRANT = folded(GRANT_OPENING);
-const quotesGrant = (value: unknown): boolean =>
-  typeof value === 'string' ? folded(value).includes(GRANT) : typeof value === 'object' && value !== null && Object.values(value).some(quotesGrant);
+// sentence's own) is refused whole, whichever string holds it, by the one test of a string (quotesGrant, beside
+// GRANT_OPENING, which says how it reads a string and what it does not claim). The steer's writer is the boundary
+// (askSteerText writes no text the model wrote); this guard is the second layer.
+const anyQuotesGrant = (value: unknown): boolean =>
+  typeof value === 'string' ? quotesGrant(value) : typeof value === 'object' && value !== null && Object.values(value).some(anyQuotesGrant);
 
 // The ask a call's arguments open (its parse error's text when they do not parse, or the refusal of an ask that quotes a
 // grant): the one place an ask's arguments are admitted, a blocking or an async one, and where P5 O16 M3's adopter
@@ -38,7 +34,7 @@ const quotesGrant = (value: unknown): boolean =>
 export function pendingAskOf(args: unknown, ctx: { toolUseId: PendingAsk['toolUseId']; requestId: PendingAsk['requestId']; fromSubagent: boolean }, openedAt: string): PendingAsk | string {
   const parsed = parseToolArguments('ask', args);
   if (!parsed.ok) return parsed.error;
-  if (quotesGrant(parsed.data)) return TOOL_ERRORS.askQuotesGrant;
+  if (anyQuotesGrant(parsed.data)) return TOOL_ERRORS.askQuotesGrant;
   const { title, context, questions } = parsed.data;
   return {
     askId: ctx.toolUseId ?? ctx.requestId, toolUseId: ctx.toolUseId, requestId: ctx.requestId, blocking: (parsed.data.blocking ?? true) || ctx.fromSubagent,
