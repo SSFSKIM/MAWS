@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { appendFileSync, existsSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { GitStatusSchema, type GitChanged } from '@shared/ipc/schema/git';
 import { GitFixture, runGit } from '../../../test/support/git-fixture';
@@ -652,7 +652,7 @@ describe('the three reads', () => {
 
     // Review fix 1: a path is a literal pathspec after `--`, never an option; a file named like the commit's whole id
     // leaves the revisions revisions; a path outside the repository reads nothing outside it
-    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and nothing outside the repository', async () => {
+    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and answers nothing for a path outside the repository', async () => {
       const parent = initial;
       await repo.write('--output=x', 'option-shaped\n');
       await repo.write('-p', 'dash p\n');
@@ -668,7 +668,13 @@ describe('the three reads', () => {
       expect(existsSync(repo.path('x'))).toBe(false); // no `--output` was obeyed
       const whole = await service.commitDiff({ directory: repo.root, commit: odd });
       expect(whole.files.map((f) => f.path).sort()).toEqual(['--output=x', '-p', parent].sort());
-      await expect(service.commitDiff({ directory: repo.root, commit: odd, path: '../outside.txt' })).rejects.toThrow(/outside repository/);
+      // `:(top,literal)../…` names no path of the repository: git answers nothing (a file of that name beside it unread)
+      writeFileSync(join(repo.root, '..', `${basename(repo.root)}-outside.txt`), 'outside\n');
+      try {
+        expect(await service.commitDiff({ directory: repo.root, commit: odd, path: `../${basename(repo.root)}-outside.txt` })).toMatchObject({ patch: '', files: [] });
+      } finally {
+        rmSync(join(repo.root, '..', `${basename(repo.root)}-outside.txt`), { force: true });
+      }
     });
 
     it('reads a SHA-256 repository\'s root commit and the commit after it', async () => {
@@ -693,7 +699,7 @@ describe('the three reads', () => {
 
   describe('git.changesSince', () => {
     // Review fix 1, the same three for the working-tree read
-    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and nothing outside the repository', async () => {
+    it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and answers nothing for a path outside the repository', async () => {
       await repo.write('--output=x', 'option-shaped\n');
       await repo.write('-p', 'dash p\n');
       await repo.git('add', '--', '--output=x', '-p');
@@ -710,7 +716,12 @@ describe('the three reads', () => {
       const whole = await service.changesSince({ directory: repo.root, against });
       expect(whole.files.map((f) => f.path).sort()).toEqual(['--output=x', '-p'].sort());
       expect(whole.untracked).toEqual([{ path: against, insertions: 1, binary: false }]);
-      await expect(service.changesSince({ directory: repo.root, against, path: '../outside.txt' })).rejects.toThrow(/outside repository/);
+      writeFileSync(join(repo.root, '..', `${basename(repo.root)}-outside.txt`), 'outside\n');
+      try {
+        expect(await service.changesSince({ directory: repo.root, against, path: `../${basename(repo.root)}-outside.txt` })).toEqual({ patch: '', files: [], untracked: [] });
+      } finally {
+        rmSync(join(repo.root, '..', `${basename(repo.root)}-outside.txt`), { force: true });
+      }
     });
 
     it('against HEAD answers what git.diff\'s all scope answers for the same tree', async () => {
