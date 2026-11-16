@@ -534,7 +534,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
   });
 
   it('on another machine signed out: Sign in by the shell right, the second line without it, and neither while the rights are not known', async () => {
-    const signedOut = scmStatusOf({ gh: { state: 'unauthenticated', detail: 'gh auth status: not logged in' } });
+    const signedOut = scmStatusOf({ gh: { state: 'unauthenticated', path: '/usr/local/bin/gh', version: '2.97.0', detail: 'gh auth status: not logged in' } });
     main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', gh: signedOut.gh, error: 'gh_unauthenticated' }));
     const lines = () => [...part('pr')!.querySelectorAll('[data-scm-pr-line]')].map(text);
     servesRemote({ rights: ['spawn', 'shell'] });
