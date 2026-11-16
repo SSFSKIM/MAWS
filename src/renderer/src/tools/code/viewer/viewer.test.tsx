@@ -985,6 +985,39 @@ describe('a file from outside the folders edits and saves (U6e)', () => {
     expect(shown()).toMatchObject({ dirty: false, saving: false, saveError: null });
   });
 
+  // UX wave U6b-2 at the chain merge (the architect's ruling): the path says where Save writes only for a file whose body
+  // can be saved, the code view's text. A file drawn in a frame, or as an image, has no Save, so its path is the plain one;
+  // the outside mark stays as it is.
+  it('a framed outside file with a pin shows its plain path, its outside mark as it is, and no Save sentence', async () => {
+    const PDF_OUT = '/elsewhere/ledger.pdf';
+    disk({ [PDF_OUT]: '%PDF-1.4 invented\n' }, { names: [PDF_OUT] });
+    show(PDF_OUT);
+    await waitFor(() => expect(shown(PDF_OUT)).toMatchObject({ kind: 'frame', named: true, locked: null, pin: PDF_OUT, frame: { status: 'ready' } }));
+    expect(lead().textContent).toBe(PDF_OUT);
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(PDF_OUT);
+    expect(lead().hasAttribute('aria-description')).toBe(false);
+  });
+
+  it('an image outside the folders with a pin shows its plain path and no Save sentence', async () => {
+    const PNG_OUT = '/elsewhere/chart.png';
+    disk({ [PNG_OUT]: 'invented image bytes' }, { names: [PNG_OUT] });
+    show(PNG_OUT);
+    await waitFor(() => expect(shown(PNG_OUT)).toMatchObject({ kind: 'image', named: true, locked: null, pin: PNG_OUT }));
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(PNG_OUT);
+    expect(lead().hasAttribute('aria-description')).toBe(false);
+  });
+
+  it('an editable outside file’s path says where Save writes, in its title and its description', async () => {
+    disk({ [OUT]: 'one\n' }, { names: [OUT] });
+    show();
+    await editable();
+    expect(lead().getAttribute('data-outside')).toBe('writable');
+    expect(lead().getAttribute('title')).toBe(`Save writes to ${OUT}`);
+    expect(lead().getAttribute('aria-description')).toBe(`Save writes to ${OUT}`);
+  });
+
   it('a chosen and a sent file save the same way; a file inside the folders keeps its tooltip and today’s files.write', async () => {
     const main = disk({ [OUT]: 'chosen\n', '/elsewhere/sent.txt': 'sent\n', '/r/app.ts': 'inside\n' }, { sent: ['/elsewhere/sent.txt'] });
     main.grant(MAIN_A, OUT);
