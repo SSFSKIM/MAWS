@@ -65,7 +65,8 @@ export interface ReviewStore {
   retryFailed(target: DiffTarget): void; // UX wave U5b-2 (§G): the target's read, or its files' own reads, that failed
   checkMembership(target: DiffTarget): void; // UX wave U5b-2 (§G): a commit's `onHead` asked again, with `patch: false`
   // Decision Log 49: the tab's listed commit (`tab`, the tab's own object), held from its first read (`read`: it may be
-  // asked now) until the tab's selection names another commit or none (`target` null), or the tab closes (`releaseTab`)
+  // asked now) until the tab's selection names another commit or none (`target` null), or the tab closes (`releaseTab`);
+  // asked again where held (the tab drawn again, the reads served again), it asks what of the commit failed
   keepCommit(tab: object, target: DiffTarget | null, read: boolean): void;
   commitHead(tab: object, head: string | null): void; // the status's head as the tab saw it: a move asks one membership check
   releaseTab(tab: object): void; // the tab closed
@@ -188,7 +189,9 @@ export function createReviewStore(
           kept.delete(tab); // the selection changed: what the tab loaded for the other commit goes
           was.release();
         }
-        if (target === null || !read || kept.has(tab)) return;
+        if (target === null || !read) return;
+        // the tab drawn again, or able to read again, with its commit held: what of it failed is asked again (§G)
+        if (kept.has(tab)) return void heldDiffs.retryFailed(target);
         kept.set(tab, { key: keys.diff(target), target, release: get().hold(target), head: null });
       },
 
