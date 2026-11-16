@@ -6,7 +6,7 @@
 
 MAWS puts more words on screen than the owner reads. Many explain how the app or the engine works, repeat what the place already says, or name the normal state. The owner's judgment, from daily use and from comparing with Claude Desktop: the window should say less and stay as easy to find one's way in.
 
-After this work a person sees, at rest, the words that tell them where they are, what is waiting and what could have failed, and little else. A finished turn reads "3s · Ran an agent". A settings row is its label and its control; its explanation opens in the row when the row is pointed at or focused. A plugin row is the plugin's name. A panel heading with a count reads "Agents 2". What was cut is not lost: explanations and secondary facts wait for the pointer or keyboard focus in the place they describe, and every control keeps its accessible name.
+After this work a person sees, at rest, the words that tell them where they are, what is waiting and what could have failed, and little else. A finished turn reads "3s · Ran an agent". A settings row is its label and its control; its explanation opens in the row when the row is pointed at or focused. A plugin row is the plugin's name, its author and its version; its description opens in the row when it is pointed at. A panel heading with a count reads "Agents 2". What was cut is not lost: explanations and secondary facts wait for the pointer or keyboard focus in the place they describe, and every control keeps its accessible name.
 
 How to see it working: open the build beside today's build on the same fixtures and go through the scenes of "Acceptance". The owner judges by pictures of the real app, before and after, not by lists; that is how every decision here was made and how the build is accepted.
 
@@ -20,6 +20,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-16) This document and its tables.
 - [ ] The UX wave lands (board #573).
 - [x] (2026-11-16) Board #720 registered, blocked by #573.
+- [x] (2026-11-16) The owner's answer on plugin rows; nothing is open with the owner.
 - [ ] M0: the list re-read against master as the wave left it.
 - [ ] M1 to M5: the cut built area by area, each with pictures and the owner's call.
 - [ ] Retrospective.
@@ -34,7 +35,7 @@ The work closes when all of these hold on one build.
    - the Agents card reads "Agents" and a bare count, and a running agent's row keeps its second line ("Working", or what it is doing);
    - the chip under the message box reads the model and the effort, "Sonnet 5 High";
    - a Settings row shows its label and control; pointing at it, or moving keyboard focus into it, shows its note in the row;
-   - a plugin row in Customize is its name; pointing at it or focusing inside it shows its author and description in the row (see "Open with the owner");
+   - a plugin row in Customize is its name, "by <author>" and its version; pointing at it or focusing inside it shows its description in the row;
    - the document editor's header ends with "All changes saved" after a save;
    - the Projects page has its title, each project's folder path under its name and a "Hide from sidebar" button, and has no sentence at its top.
 2. **Every changed surface has a picture pair the owner has called.** For each surface a milestone changes, a before and an after picture of the real app on the same fixture exist, and the owner has either called the after good or named what comes back, and that is built. This binds hardest for the items whose basis is `pattern` (see "How firm each decision is"): the owner has never seen them, and in the two rounds the owner brought back about one in four, then one in six, of what was shown.
@@ -92,7 +93,8 @@ The owner's own additions and the cases where the pattern alone would have gone 
 | Connectors dialog | Keeps "MCP servers" beside its title. | P559 |
 | Messages to you | The fold above a message is not reworded to an invented count ("2 steps"): at the pin it keeps "Working record · N tool calls · N messages". The UX wave replaces that row; see "Meeting the UX wave". The Settings row for the view explains itself on pointing, with both sentences. | P509, G27 |
 | Projects page | Keeps its title in the title bar, the folder path under each name and the "Hide from sidebar" button. Its top sentence goes and its group headings shorten ("In sidebar"). | W6, W131, W132, W129, W130 |
-| Plugin, skill and mod rows | Name at rest; description in the row on pointing or focus. | G216, G218, G225, G248, P683 |
+| Plugin rows | Name, "by <author>" and the version at rest; the description, with the date, in the row on pointing or focus. The owner's answer of 2026-11-16: the author and the version matter. No picture shows this form (the pictures had the name alone), so its picture pair is owed like a `pattern` row's. | G216, G218 |
+| Skill and mod rows | Name at rest (a skill's plugin badge with it); description in the row on pointing or focus. | G225, G248, P683 |
 | Editors | "All changes saved" stays in the header. Version history keeps "Export" on every version. The design inspector keeps its board heading, its "Board" section and "Board name". The design system's Type table keeps "Deck (shown at half size)". | G369, G536, G571 |
 | Failed page in the browser | Keeps its tips. | T417, T418 |
 | Paused queue | Keeps why it paused. | C72 |
@@ -104,8 +106,8 @@ Every row of the tables has a basis. A builder treats them differently.
 | Basis | Count | What it means | What the builder owes |
 |---|---|---|---|
 | `seen` | 186 | The owner saw the surface with this cut in a picture and left it. | Build it as the row's After states; the picture is not needed. |
-| `brought back` | 63 | The owner saw it cut and asked for it back: 59 stay as today, 4 come back in a changed form. | Leave it, or build the changed form the row states. |
-| `ruled` | 7 | The owner stated it in words. | Build it as stated. |
+| `brought back` | 61 | The owner saw it cut and asked for it back: 59 stay as today, 2 come back in a changed form. | Leave it, or build the changed form the row states. |
+| `ruled` | 9 | The owner stated it in words. | Build it as stated. |
 | `pattern` | 622 | Decided by the five rules; the owner has not seen it. 546 are cuts, 16 rewordings, 60 stay. | Build it, then show the owner the before and after (Acceptance 2). Expect some to come back. |
 | `unseen` | 93 | The pattern did not settle it and no picture reached it. Stays as today. | Leave it. If a later picture reaches it, ask. |
 | `consent` | 33 | Text of a consent, permission or destructive step. Never a candidate. | Leave it. |
@@ -149,7 +151,7 @@ The cut was decided on `2c7044231`. By the time it is built, the UX wave (board 
   - **Source control (T371, T379 to T405, P228 to P250).** U5 makes Source control a page to read with no action in it (its S2: no text field, no checkbox, no action element). The rows about Push, Open PR, the group actions, the commit form and the Output are moot where U5 removed their surface.
   - **The Artifacts card (T562).** U8 removes it from the column; the row is moot.
   - **The library's make-new strip (G291).** U10's l6-artifacts-08 redraws "Make something new" as four cards that ask, in place of a card per kind with "New" and "Ask Claude". The `stays` row is the wave's to change.
-  - **Customize (G216, G225, G248).** U11's combined list mixes plugins, skills, connectors and mods in one list with a kind word on each row and a Show control (`src/renderer/src/customize/copy.ts`, added after the pin). "Name alone at rest" then means the name and its kind word: the kind is how mixed rows are told apart (rule 5).
+  - **Customize (G216, G225, G248).** U11's combined list mixes plugins, skills, connectors and mods in one list with a kind word on each row and a Show control (`src/renderer/src/customize/copy.ts`, added after the pin). A row's resting text there is its name and its kind word, with the author and version on a plugin's row: the kind is how mixed rows are told apart (rule 5).
   - **The model menu (C40, C42).** U11b removes the "Default" row and writes the default on a pick, so the line under "Default" and "For this session only" need no work.
   - **Requests (the question and approval card rows).** U1b draws requests in the transcript; the rows are read against that drawing.
 - **The wave adds text, in new files too.** Every string added after the pin is outside the tables, and some are in modules that did not exist at the pin, so no row's Source leads to them. M0 lists them from the whole diff of the renderer and the artifact editors between the pin and master, and applies the pattern; all of them are `pattern` rows.
@@ -226,10 +228,6 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - **The owner's calls**, both rounds, as written.
 - **The inventory**: all 2,019 items with both readings where two readers met, and the 23 rules.
 
-## Open with the owner
-
-- **Plugin rows.** In round one the owner asked for the name alone with the description on pointing, and in round two called both plugin pictures good; round two's list also marks the line for that change "bring back". The tables carry the round-one reading (G216, G218). Asked on 2026-11-16; the answer goes to the Decision Log.
-
 ## Surprises & Discoveries
 
 - **A list of proposals cannot be judged.** The owner could not rule on "remove X" lines and said a ruling made that way might be wrong. Every later step used pictures of the real app. The same will hold for the `pattern` rows.
@@ -247,6 +245,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - 2026-11-16. **Items no picture reached and the pattern did not settle stay as today** (93). Alternative rejected: applying each one's lean; 82 leaned to cut, with nothing to check them against.
 - 2026-11-16. **`pattern` cuts are built, then shown.** They are not held back for a third round first, because the surfaces will have changed under the wave and pictures taken now would be of the wrong app.
 - 2026-11-16. **After the review of this document.** Six rows corrected in `items.json`: T205 from cut to stays (rule 5 and U8's O-09); G615 from cut to reword (rule 3: an empty panel says what to do); C106 from reword to stays (the × it described is #705's); G13 to G15 rewritten to the in-row note the owner saw, where they had described the first pass's floating card. P509 is recorded as moot after U2b (the wave's uncounted fold stands; alternative rejected: a count added by MAWS over the mod's line, against wave law 2). The scene manifest and the rig's spec were brought into the repository so that acceptance does not depend on material outside it. Totals after the corrections: 732 cut, 22 reworded, 306 stay.
+- 2026-11-16. **Plugin rows: name, author and version at rest; description on pointing.** The owner's answer to the one line where the two rounds disagreed (round one asked for the name alone; round two's list marked the change "bring back" while both pictures were called good). Alternatives the owner was shown and did not take: the name alone, and everything as today. The date goes with the description: the owner named the author and the version as what matters, not the date.
 - 2026-11-16. **Verification.** This document: one adversarial review of its buildability. The build: the rung the taking session names per milestone, and the owner's call on every picture pair.
 
 ## Outcomes & Retrospective
