@@ -105,6 +105,7 @@ function resultBlock(text: string): string | null {
 // questions and their options in its own call.
 
 const OPTION = /^option ([1-9]\d*)$/;
+const PLACE = /^q([1-9]\d*)$/;
 
 // A choice's picks as the steer writes them: `option <k>`, k the 1-based place of the picked label among the question's
 // options (the first, where two options share a label). A value that is none of its labels is not written at all: the
@@ -117,11 +118,18 @@ function picksOf(question: AskQuestion, values: readonly string[]): string[] {
   });
 }
 
-// An answer as the steer's block carries it: its question empty, and a choice's picks by their place, as a list (the
-// shape the sheet sends) whether its value came as a list or as one string (which the schema admits); an earlier
-// build's reader takes either shape
-function steeredAnswer(question: AskQuestion, answer: AskAnswer): AskAnswer {
-  const steered = { ...answer, question: '' };
+// The fields an answer carries beyond its id, question and status, in the schema's order: each the person's (a value
+// typed or chosen from the machine, a pick written by its place, a note) or MAWS's own (`create`)
+const CARRIED = ['value', 'otherText', 'name', 'designSystemId', 'create', 'note'] as const;
+
+// An answer as the steer's block carries it, built field by field (nothing copied that is not named here): its
+// question named by its place, `q<n>` (the id askQuestionId gives a question with none of the model's: a question's id
+// is the model's own words, up to 64 characters), its question empty, and a choice's picks by their place, as a list
+// (the shape the sheet sends) whether its value came as a list or as one string (which the schema admits; an earlier
+// build's reader takes either shape)
+function steeredAnswer(question: AskQuestion, place: number, answer: AskAnswer): AskAnswer {
+  const steered: AskAnswer = { id: `q${place + 1}`, question: '', status: answer.status };
+  for (const field of CARRIED) if (answer[field] !== undefined) Object.assign(steered, { [field]: answer[field] });
   if (question.modality === 'choice' && answer.value !== undefined) steered.value = picksOf(question, Array.isArray(answer.value) ? answer.value : [answer.value]);
   return steered;
 }
@@ -160,19 +168,20 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
 // the builds before it join an answer to its question by (the capsule's AnswerLine, the read-only sheet's
 // QuestionSection, the transcript's markdown); its `question` is written as the empty string (AskAnswerSchema, as the
 // earlier builds have it, requires the key, and a block they could not parse would draw the envelope as raw text), and
-// a choice's `value` holds the picks by their place. No reader takes a question's words from a steer: they come from
-// the ask's call, by the question's id, and so do the labels (askAnswersFromSteer).
+// a choice's `value` holds the picks by their place, and its `id` is the question's place, `q<n>`. No reader takes a
+// question's words from a steer: they come from the ask's call, joined by the place, and so do the labels and the
+// question's own id (askAnswersFromSteer).
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
-  const asked = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
+  const places = new Map(questions.map((question, index) => [askQuestionId(question, index), index]));
   // an answer that names no question of the ask is not written: nothing says what its value is (the host refuses one,
   // askAnswersProblem; the writer does not lean on that)
   const steered = answers.flatMap((answer) => {
-    const question = asked.get(answer.id);
-    return question === undefined ? [] : [steeredAnswer(question, answer)];
+    const place = places.get(answer.id);
+    return place === undefined ? [] : [steeredAnswer(questions[place]!, place, answer)];
   });
-  const byId = new Map(steered.map((answer) => [answer.id, answer]));
+  const byPlace = new Map(steered.map((answer) => [answer.id, answer]));
   const lines = questions.map((question, index) => {
-    const answer = byId.get(askQuestionId(question, index));
+    const answer = byPlace.get(`q${index + 1}`);
     const text = answerText(question, answer);
     const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
     return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
@@ -181,19 +190,24 @@ export function askSteerText(askId: string, questions: readonly AskQuestion[], a
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
 }
 
-// The answers a steer carried, read with the ask's questions in hand (ids filled or by position): a new-form choice
-// answer's `option <k>` back to its question's k-th label, so a reader draws the label the person picked. An answer is
-// of the new form when its `question` is empty (an earlier build's always holds the question's words, which the schema
-// makes non-empty), and that alone is touched: an earlier build's envelope, a value that names no option of the call,
-// and every other modality come back as they are. A reader with no call in hand shows `option <k>`.
+// The answers a steer carried, read with the ask's questions in hand: each new-form answer joined to its question by
+// the place its id names (`q<n>`) and handed on with that question's own id (askQuestionId), so every reader that joins
+// by id is unchanged, and a choice's `option <k>` back to the question's k-th label, so a reader draws the label the
+// person picked. An envelope is of the new form when every answer's `question` is empty (an earlier build's holds the
+// question's words, which its sheet always writes); any other is an earlier build's, and comes back as it is. A
+// new-form id of no place form, or of a place the ask has not, joins nothing and is left out rather than drawn against
+// a wrong question; a value that names no option of the call stays as written. A reader with no call in hand shows the
+// block as it is: `q<n>` and `option <k>`.
 export function askAnswersFromSteer(questions: readonly AskQuestion[], answers: AskAnswer[]): AskAnswer[] {
-  if (!answers.some((answer) => answer.question === '')) return answers;
-  const asked = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
-  return answers.map((answer) => {
-    const question = asked.get(answer.id);
-    if (answer.question !== '' || question?.modality !== 'choice' || !Array.isArray(answer.value)) return answer;
+  if (answers.length === 0 || !answers.every((answer) => answer.question === '')) return answers;
+  return answers.flatMap((answer) => {
+    const place = Number(PLACE.exec(answer.id)?.[1] ?? 0) - 1;
+    const question = questions[place];
+    if (place < 0 || question === undefined) return [];
+    const joined = { ...answer, id: askQuestionId(question, place) };
+    if (question.modality !== 'choice' || !Array.isArray(answer.value)) return [joined];
     const labels = (question.options ?? []).map((option) => option.label);
-    return { ...answer, value: answer.value.map((value) => labels[Number(OPTION.exec(value)?.[1] ?? 0) - 1] ?? value) };
+    return [{ ...joined, value: answer.value.map((value) => labels[Number(OPTION.exec(value)?.[1] ?? 0) - 1] ?? value) }];
   });
 }
 

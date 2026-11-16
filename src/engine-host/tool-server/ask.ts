@@ -22,12 +22,15 @@ export class AskAnswerMismatch extends Error {
 
 // Board ticket 711: an ask may not quote a permission grant. The engine's auto-mode classifier reads the conversation,
 // the model's own ask call among it, so an ask whose strings hold the grant's opening (GRANT_OPENING, the consent
-// sentence's own) is refused whole, whichever string holds it: read without regard to case, runs of white space as one.
-const GRANT = GRANT_OPENING.toLowerCase();
+// sentence's own) is refused whole, whichever string holds it. Both sides are read through one function, `folded`:
+// Unicode compatibility folding (NFKC: full-width letters, the no-break space), case folding, HTML tags removed, then
+// letters and digits alone (Markdown's emphasis, code and strike marks, white space, zero-width characters and every
+// other mark go). What it does not claim: a paraphrase of the grant, or letters of another script that look alike. The
+// steer's writer is the boundary (askSteerText writes no text the model wrote); this guard is the second layer.
+const folded = (text: string): string => text.normalize('NFKC').toLowerCase().replace(/<[^>]*>/g, '').replace(/[^\p{L}\p{N}]/gu, '');
+const GRANT = folded(GRANT_OPENING);
 const quotesGrant = (value: unknown): boolean =>
-  typeof value === 'string'
-    ? value.replace(/\s+/g, ' ').toLowerCase().includes(GRANT)
-    : typeof value === 'object' && value !== null && Object.values(value).some(quotesGrant);
+  typeof value === 'string' ? folded(value).includes(GRANT) : typeof value === 'object' && value !== null && Object.values(value).some(quotesGrant);
 
 // The ask a call's arguments open (its parse error's text when they do not parse, or the refusal of an ask that quotes a
 // grant): the one place an ask's arguments are admitted, a blocking or an async one, and where P5 O16 M3's adopter
