@@ -22,6 +22,7 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { useLayout } from '../stores/layout';
 import { resetRemoteSpawn, useRemoteSpawn } from '../sessions/remote-spawn';
 import { putIntent, intent, resetSetupStore } from '../test-support/setup-intents';
+import { pluginScene, type PluginScene } from '../test-support/plugin-connectors';
 import { registerFocusTarget, resetComposerStore } from '../stores/composer';
 import { useMachines } from '../stores/machines';
 import { useSettings } from '../stores/settings';
@@ -109,7 +110,7 @@ describe('the Connectors dialog before the first message', () => {
   it('lists one row per configured name with its scope in Customize’s words, and no switch, Reconnect or Sign in', async () => {
     mount(McpWidget);
     const list = await screen.findByRole('list', { name: 'Connectors' });
-    expect(lead()).toBe('Configured for Atlas. Connection state, and connectors from plugins, show once the chat starts.');
+    expect(lead()).toBe('Configured for Atlas. Connection state shows once the chat starts.');
     const rows = within(list).getAllByRole('listitem');
     expect(rows.map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files']);
     expect(rows.map((row) => row.querySelector('[data-connector-state]')?.textContent)).toEqual(['user scope', 'local scope']);
@@ -135,7 +136,7 @@ describe('the Connectors dialog before the first message', () => {
     putIntent(intent({ appSessionId: ID, projectId: null, location: { kind: 'directory', path: '/Users/someone/scratch' } }));
     mount(McpWidget);
     expect(await screen.findByText('No connectors')).toBeTruthy();
-    expect(lead()).toBe('Configured for ~/scratch. Connection state, and connectors from plugins, show once the chat starts.');
+    expect(lead()).toBe('Configured for ~/scratch. Connection state shows once the chat starts.');
   });
 
   it('shows a failed read in its words with Retry in the list’s place', async () => {
@@ -150,6 +151,62 @@ describe('the Connectors dialog before the first message', () => {
     fail = false;
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     expect(await screen.findByRole('list', { name: 'Connectors' })).toBeTruthy();
+  });
+});
+
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M3, "Before a chat starts"; H8): the
+// two lists hold the folder's configured connectors, then its plugins' connectors without one the engine drops for a
+// configured server's address and one of a plugin the launch profile turns off, each "from <plugin>". The plugins'
+// rows are the engine host's own reader's over a scratch config home of invented plugins.
+describe('a plugin’s connectors before the first message (UX wave U11h)', () => {
+  let scene: PluginScene;
+  beforeEach(async () => {
+    scene = await pluginScene(
+      [
+        { key: 'tide-tables@harbour-market', manifest: 'mani-tides', servers: { 'tides-http': { type: 'http', url: 'https://tides.example.com/mcp' } } },
+        { key: 'echo@harbour-market', manifest: 'mani-echo', servers: { echo: { type: 'http', url: 'https://anchor.example.com/mcp' } } }, // the engine drops it: anchor has its address
+        { key: 'dim@harbour-market', manifest: 'mani-dim', servers: { dim: { type: 'http', url: 'https://dim.example.com/mcp' } } }, // the launch profile turns it off
+      ],
+      { configured: { anchor: { type: 'http', url: 'https://anchor.example.com/mcp' } } },
+    );
+    expect(scene.inventory.pluginServers!.find((row) => row.server === 'echo')!.sameAddressAs).toBe('anchor');
+    inventories.set(ATLAS, { ...ATLAS_INVENTORY, pluginServers: scene.inventory.pluginServers, plugins: scene.inventory.plugins });
+  });
+  afterEach(() => scene.done());
+  const openConnectors = async () => {
+    const user = userEvent.setup();
+    render(<QueryClientProvider client={client()}><PlusMenu appSessionId={ID} cwd={ATLAS} editor={{ current: null }} /></QueryClientProvider>);
+    await user.click(screen.getByRole('button', { name: 'Add files, photos or commands' }));
+    act(() => screen.getByRole('menuitem', { name: 'Connectors' }).focus());
+    await user.keyboard('{ArrowRight}');
+  };
+  const menuRows = () => screen.getAllByRole('menuitem').map((item) => item.textContent).filter((text) => /scope$|^[a-z-]+from /.test(text ?? ''));
+
+  it('the submenu lists them after the configured ones, each from its plugin, without one the engine drops and one the launch profile turns off', async () => {
+    profileOff(['dim@harbour-market']);
+    await openConnectors();
+    await waitFor(() => expect(menuRows()).toEqual(['notionuser scope', 'fileslocal scope', 'tides-httpfrom tide-tables']));
+  });
+
+  it('the dialog lists them likewise, a row opening onto its declaring file, under the line’s new words', async () => {
+    profileOff(['dim@harbour-market']);
+    mount(McpWidget);
+    const list = await screen.findByRole('list', { name: 'Connectors' });
+    expect(lead()).toBe('Configured for Atlas. Connection state shows once the chat starts.');
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files', 'tides-http']));
+    const rows = within(list).getAllByRole('listitem');
+    expect(rows.map((row) => row.querySelector('[data-connector-state]')?.textContent)).toEqual(['user scope', 'local scope', 'from tide-tables']);
+    fireEvent.click(rows[2]!.querySelector('button[aria-expanded]')!);
+    expect(rows[2]!.textContent).toContain('.mcp.json');
+    expect(within(list).queryByRole('button', { name: /Reconnect|Sign in/ })).toBeNull();
+  });
+
+  it('lists no plugin’s connector until the launch profile is read', async () => {
+    mount(McpWidget);
+    const list = await screen.findByRole('list', { name: 'Connectors' });
+    expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files']);
+    act(() => profileOff([]));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files', 'tides-http', 'dim']));
   });
 });
 
