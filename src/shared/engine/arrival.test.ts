@@ -3,6 +3,8 @@
 // wherever they hold the carrier, and written by hand with invented content where none does. Each recorded session is
 // read whole, in order, through `readNext`, and the table names every frame or row that yields an arrival: one it does
 // not name yields none.
+import { readdirSync, readFileSync, statSync } from 'node:fs';
+import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
@@ -403,6 +405,21 @@ describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => 
   it('opens with GRANT_OPENING, the one definition the ask tool’s guard reads', () => {
     expect(GRANT_OPENING).toBe('Permission granted for ');
     for (const kind of ['command', 'call'] as const) expect(consentMessage(kind, 'x').startsWith(GRANT_OPENING)).toBe(true);
+  });
+
+  // the cascade merge of U4b into U1c (2026-11-16): the opening is written once, in grant.ts; every other source file of
+  // src (the reader's grantHead among them) reads the constant, so no second literal can drift from the one the ask
+  // tool's guard and the steer's writer read
+  it('is written once in src, in grant.ts: no other source file holds the opening’s words', () => {
+    const root = resolve(__dirname, '../..');
+    const sources = (dir: string): string[] =>
+      readdirSync(dir).flatMap((name) => {
+        const path = join(dir, name);
+        if (statSync(path).isDirectory()) return sources(path);
+        return /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name) ? [path] : [];
+      });
+    const holding = sources(root).filter((path) => readFileSync(path, 'utf8').includes(GRANT_OPENING.trimEnd()));
+    expect(holding.map((path) => relative(root, path))).toEqual([join('shared', 'engine', 'grant.ts')]);
   });
 
   // addition B (2026-11-16): the one test of one string, which the ask tool's guard and the steer's writer both call
