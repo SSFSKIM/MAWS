@@ -180,10 +180,12 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
 
 // A plugin's row whose revision changed (the plugin's key, installation, name, transport or address moved) drops the
 // ended record it was showing (§E): the record was for what the row declared then. Only a change this row saw, and only a
-// record started from it, so another row of the same engine name, and the session's dialog, keep theirs.
+// record started from it, so another row of the same engine name, and the session's dialog, keep theirs. A revision not
+// known (main's answer for a re-read still out) is no change: the record waits for the next answer.
 function useForgottenOnRevision(kept: Omit<SignInServer, 'machine'> | null, machine: SignInServer['machine'], revision: string | null, latest: SignInRecord | null): void {
   const seen = useRef(revision);
   useEffect(() => {
+    if (revision === null) return;
     const before = seen.current;
     seen.current = revision;
     if (kept === null || before === null || before === revision || latest === null) return;
