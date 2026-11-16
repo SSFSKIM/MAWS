@@ -18,7 +18,7 @@
 import type { SendContent } from '@shared/engine/session-state-store';
 import { readConsents } from '@shared/engine/arrival'; // U1c
 import { messageText } from '@shared/engine/peer-envelope';
-import { answerEnvelopeOf } from '@shared/engine/persons-message';
+import { answerEnvelopeOf, personsParts } from '@shared/engine/persons-message';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { AskQuestion } from '@shared/maws/tools';
@@ -101,10 +101,13 @@ function waitingAnswer(content: SendContent, questions: Read['questions']): stri
 // UX wave U1c: the call a message's content grants, when its whole text is exactly one grant sentence. Decision Log 44: a
 // row is a grant's only when the sentence is everything the message holds; a message with any block that is not text (an
 // image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview. Decision Log 53: read
-// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`
+// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`. Ticket 704:
+// what the message holds is the person's part, as the split reads it (`personsParts`), MAWS's answer envelopes beside it
+// being answers of their own, as the transcript reads the message once the engine has it
 const grantOf = (content: SendContent): BlockedCall | null => {
-  if (typeof content !== 'string' && !(content as readonly ContentBlock[]).every((block) => block.type === 'text')) return null;
-  const grants = readConsents(messageText(content as string | ContentBlock[]));
+  const own = personsParts(content as string | ContentBlock[]).own;
+  if (own === null || (typeof own !== 'string' && !own.every((block) => block.type === 'text'))) return null;
+  const grants = readConsents(messageText(own));
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
 

@@ -246,14 +246,32 @@ export function personsGrants(text: string): Consent[] {
 }
 
 /**
- * The lines of a text with MAWS's answer envelopes taken out (`readAnswerEnvelopes`'s rest), each marked when it starts
- * inside a pasted segment. The person's words are the lines not marked; joined back, every line is the rest.
+ * The lines of a text with MAWS's answer envelopes taken out as the split takes them (`envelopesOut`'s rest), each marked
+ * when it starts inside a pasted segment. The person's words are the lines not marked; joined back, every line is the rest.
  */
 export function ownLines(text: string): { line: string; pasted: boolean }[] {
-  const { rest } = readAnswerEnvelopes(text);
+  const { rest } = envelopesOut(text);
   const lines = rest.split('\n');
   const pasted = pastedLines(rest, lines);
   return lines.map((line, i) => ({ line, pasted: pasted[i]! }));
+}
+
+/**
+ * A person's text with MAWS's answer envelopes taken out as the split takes them (ticket 704, decision 17): read again
+ * until a reading takes nothing out, so where one envelope's lines stand around another whole envelope, both go; the
+ * envelopes in the order they were taken, reading by reading, each with what was read of it. The split's own reading of
+ * a text (`readOut`, persons-message.ts) is this loop; that module imports this one and never the reverse, so it is
+ * written in both, and `persons-message.test.ts` holds the grant readers to the split's reading.
+ */
+function envelopesOut(text: string): { members: { text: string; read: AskSteer }[]; rest: string } {
+  const members: { text: string; read: AskSteer }[] = [];
+  let rest = text;
+  for (;;) {
+    const read = envelopeSlices(rest, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+    if (read.members.length === 0) return { members, rest };
+    members.push(...read.members);
+    rest = read.rest;
+  }
 }
 
 // Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame,
@@ -325,11 +343,11 @@ function personsPrompt(row: Json, text: string): Arrival[] {
   return personsText(text);
 }
 
-// One answer per envelope the text holds (rule 3; ticket 704, decision 12), its summary the envelope's own text, as a
-// lone envelope's is; then the grants in the person's own words (U1c), never on an envelope's lines: a text that is one
-// envelope is no grant, nor are its lines.
+// One answer per envelope the text holds, as the split takes them (rule 3; ticket 704, decisions 12 and 17), its summary
+// the envelope's own text, as a lone envelope's is; then the grants in the person's own words (U1c), never on an
+// envelope's lines: a text that is one envelope is no grant, nor are its lines.
 function personsText(text: string): Arrival[] {
-  const answers = envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer).members.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
+  const answers = envelopesOut(text).members.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
   return [...answers, ...personsGrants(text)];
 }
 
