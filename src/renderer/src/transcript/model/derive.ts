@@ -1715,10 +1715,14 @@ export function turnCommandLine(turn: TurnState): { command: string; args: strin
 
 // UX wave U3b (Interfaces B; the branch panel's finding 2): a command's output stands alone unless the row drawn directly
 // before it is its command's bubble (`bubble`, null where the turn's opening message is no command), read on the turn's
-// drawn rows: a typed /compact draws its bubble, the compaction's boundary, then its output, which stands alone.
+// drawn rows: a typed /compact draws its bubble, the compaction's boundary, then its output, which stands alone. The
+// turn's own line counts as the bubble's: it stands under the bubble while the command runs or after it was stopped, and
+// the output under it is still the command's (no name drawn, then taken away when the turn ends).
 function markLoneOutputs(rows: Row[], bubble: RowOf<'user'> | null): void {
   rows.forEach((row, i) => {
-    if (row.kind === 'local_command' && (bubble === null || rows[i - 1] !== bubble)) rows[i] = { ...row, lone: true };
+    if (row.kind !== 'local_command') return;
+    const before = rows[i - 1]?.kind === 'divider' ? rows[i - 2] : rows[i - 1];
+    if (bubble === null || before !== bubble) rows[i] = { ...row, lone: true };
   });
 }
 

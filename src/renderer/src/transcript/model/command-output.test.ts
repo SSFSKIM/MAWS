@@ -143,11 +143,12 @@ describe('a command output’s row', () => {
   // live route a typed /compact draws its bubble, the compaction's boundary, then its output, which therefore stands alone.
   describe('separated from its bubble by a row its own turn draws (the branch panel’s finding 2)', () => {
     const live = (name: string) => applyEvents(createState(null, null), journalToEvents(loadUxwaveJournal(name)));
-    /** The drawn rows from each /compact bubble on, up to the next bubble: the bubble, what stands between, its output. */
+    /** The drawn rows from each /compact bubble to its output: the bubble, what stands between, the output. */
     const compactions = (drawn: Row[]) => drawn.flatMap((row, i) => {
       if (row.kind !== 'user' || row.text !== '/compact') return [];
+      const output = drawn.findIndex((later, j) => j > i && later.kind === 'local_command');
       const next = drawn.findIndex((later, j) => j > i && later.kind === 'user');
-      return [drawn.slice(i, next < 0 ? undefined : next).filter((later) => later.kind !== 'time')];
+      return output < 0 || (next >= 0 && next < output) ? [] : [drawn.slice(i, output + 1).filter((later) => later.kind !== 'time')];
     });
     const shape = (rows: Row[]) => rows.map((row) => (row.kind === 'local_command' ? `output ${row.text.split('\n')[0]}${row.lone ? ' lone' : ''}` : row.kind === 'boundary' ? `boundary ${row.boundaryKind}` : row.kind));
 
@@ -169,6 +170,16 @@ describe('a command output’s row', () => {
     it('u3-commands-r1, live: a /compact with nothing to compact keeps its output directly under its bubble', () => {
       const unseparated = compactions(rowsOf(live('u3-commands-r1'))).filter((rows) => !rows.some((row) => row.kind === 'boundary'));
       expect(unseparated.map(shape)).toContainEqual(['user', 'output Error: No messages to compact']);
+    });
+
+    // Decided with the fix: the turn's own line is the bubble's, so an output under a command's running (or stopped)
+    // turn line is not drawn alone, and its name does not come and go as the turn ends.
+    it('an output under its command’s own turn line, while the command runs, is not alone', () => {
+      const b = builder();
+      b.turn('u1', '/usage');
+      output(b, 'o1', '<local-command-stdout>Total cost: $0.03</local-command-stdout>', commandEntry({ run: USAGE, plain: false })); // no turn.ended yet
+      const drawn = rowsOf(applyEvents(createState(null, null), b.events)).filter((row) => row.kind !== 'time');
+      expect(shape(drawn)).toEqual(['user', 'divider', 'output Total cost: $0.03']);
     });
 
     it('a separated output that carries a run keeps its standalone prefix when drawn and when copied', () => {
