@@ -578,7 +578,8 @@ describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
 
   it('writes `commit` as the tag’s last attribute, and a tag without it as before', () => {
     expect(anchorTag(onNew)).toBe(`<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@${SHA}" path="src/berth-csv.ts" line="32" side="new" commit="${SHA}"/>`);
-    const { commit: _commit, ...without } = onNew;
+    const without: Anchor = { ...onNew };
+    delete without.commit;
     expect(anchorTag(without)).toBe('<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c" path="src/berth-csv.ts" line="32" side="new"/>');
     expect(anchorTag(fileLine)).toBe('<maws_anchor kind="file-line" label="src/x.ts:42" locator="/abs/src/x.ts#L42" path="/abs/src/x.ts" line="42"/>');
   });

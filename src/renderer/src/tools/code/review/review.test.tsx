@@ -552,7 +552,7 @@ describe('review store', () => {
   const commitTarget = (sha = SHA): DiffTarget => ({ machine: TEST_MACHINE, directory: DIR, scope: 'commit', read: 'git.commitDiff', against: sha });
 
   it('reads the working tree against HEAD or a merge base with git.changesSince, a new file’s count kept by its path, each against its own target', async () => {
-    const main = installFakeMain((name, input) => (name === 'git.changesSince' ? ok({ patch: APP_PATCH, files: APP_FILES, untracked: [{ path: 'notes.md', insertions: 12, binary: false }] }) : ok()));
+    const main = installFakeMain((name) => (name === 'git.changesSince' ? ok({ patch: APP_PATCH, files: APP_FILES, untracked: [{ path: 'notes.md', insertions: 12, binary: false }] }) : ok()));
     const store = createReviewStore(createClient(() => main.bridge));
     const head: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD' };
     const since: DiffTarget = { machine: TEST_MACHINE, directory: DIR, scope: 'branch', read: 'git.changesSince', against: MERGE_BASE };

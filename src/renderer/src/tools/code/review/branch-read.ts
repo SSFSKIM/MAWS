@@ -27,7 +27,7 @@ export interface BranchReadTarget {
 
 export interface BranchRead {
   answer: GitBranchCommits | null; // the last answer, kept through a failure and while no holder is in view
-  failure: Omit<DiffError, 'status'> | null; // the last ask failed: its message, and its code and refusal's word (`readFailure`)
+  failure: DiffError | null; // the last ask failed: its message, and its code and refusal's word (`readFailure`)
 }
 
 export interface BranchReadsStore {
@@ -66,7 +66,7 @@ export function createBranchReads(client: MawsBridge): UseBoundStore<StoreApi<Br
       const result = await settled(client.invoke('git.branchCommits', { directory, limit: BRANCH_READ_LIMIT }, pathTarget(machine, session)));
       h.reading = false;
       const last = get().reads.get(key);
-      const next: BranchRead = result.ok ? { answer: result.value, failure: null } : { answer: last?.answer ?? null, failure: withoutStatus(failedWith(result.error)) };
+      const next: BranchRead = result.ok ? { answer: result.value, failure: null } : { answer: last?.answer ?? null, failure: failedWith(result.error) };
       set((s) => ({ reads: mapWith(s.reads, key, next) }));
       if (held.get(key) !== h) return; // no holder in view now: the answer stays, nothing more is asked
       if (h.again) {
@@ -117,7 +117,5 @@ export function createBranchReads(client: MawsBridge): UseBoundStore<StoreApi<Br
     };
   });
 }
-
-const withoutStatus = ({ status: _status, ...rest }: DiffError): Omit<DiffError, 'status'> => rest;
 
 export const useBranchReads = createBranchReads(ipc);

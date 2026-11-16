@@ -25,7 +25,12 @@ describe('the branch read (UX wave U5b-2)', () => {
   it('holds the first ask open; two git.changed with reason head make exactly one more ask; a failure keeps the last answer', async () => {
     const held = [deferred<ReturnType<typeof ok>>(), deferred<ReturnType<typeof ok>>(), deferred<ReturnType<typeof ok>>()];
     let asked = 0;
-    const main = installFakeMain((name) => (name === 'git.branchCommits' ? held[asked++]!.promise : ok()));
+    const main = installFakeMain((name) => {
+      if (name !== 'git.branchCommits') return ok();
+      const next = held[asked]!;
+      asked += 1;
+      return next.promise;
+    });
     const offEvents = connectPanelEvents(createClient(() => main.bridge));
     const off = useBranchReads.getState().hold(TARGET);
     await vi.waitFor(() => expect(main.callsOf('git.branchCommits')).toEqual([{ directory: '/repo', limit: 50 }]));
@@ -37,7 +42,7 @@ describe('the branch read (UX wave U5b-2)', () => {
     expect(branchReadOf(useBranchReads.getState(), TEST_MACHINE, '/repo')).toEqual({ answer: answer(), failure: null });
     held[1]!.resolve({ ok: false, error: { code: 'host_unavailable', message: 'the link dropped' } } as never);
     await vi.waitFor(() => expect(branchReadOf(useBranchReads.getState(), TEST_MACHINE, '/repo')?.failure).not.toBeNull());
-    expect(branchReadOf(useBranchReads.getState(), TEST_MACHINE, '/repo')).toEqual({ answer: answer(), failure: { message: 'the link dropped', code: 'host_unavailable' } });
+    expect(branchReadOf(useBranchReads.getState(), TEST_MACHINE, '/repo')).toEqual({ answer: answer(), failure: { status: 'error', message: 'the link dropped', code: 'host_unavailable' } });
     expect(main.callsOf('git.branchCommits')).toHaveLength(2); // exactly one more for the two moves
     main.emit('git.changed', { repoRoot: '/repo', status: STATUS, reason: 'worktree' });
     await new Promise((resolve) => setTimeout(resolve, 0));
