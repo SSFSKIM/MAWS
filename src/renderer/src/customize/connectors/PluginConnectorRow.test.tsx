@@ -242,6 +242,32 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'admitted', entry: { revision: revisionOf(scene) } }]));
   });
 
+  it('a session that lists the name but loaded no plugin that owns it reads that line, with no Sign in; among sessions it comes after another version and before no plugins reported', async () => {
+    const scene = await sceneOf([TIDES]);
+    const absent = holding('absent', '/elsewhere', [loaded('tide-chart@far-harbour', 'mani-other')]);
+    const ABSENT = 'That session loaded no plugin that supplies this connector.';
+    sessions(absent);
+    mount();
+    let row = await rowOf('tides-http');
+    await reads(row, ABSENT);
+    expect(signIn(row)).toBeNull();
+    cleanup();
+    // with the attached session, which lists the server in its mcp_status and has reported no plugins: absent's line
+    live.set('attached', [served(NAME, TIDES_URL)]);
+    sessions(reportingStatus('attached', scene.cwd, { plugins: null }), absent);
+    mount();
+    row = await rowOf('tides-http');
+    await waitFor(() => expect(asked('session.mcpStatus')).toContainEqual({ appSessionId: 'attached' }));
+    await reads(row, ABSENT);
+    cleanup();
+    // with a session that loaded another version of the plugin: that line first
+    sessions(holding('older', '/elsewhere', [loaded(KEY, MANIFEST, '0.9.0')]), absent);
+    mount();
+    row = await rowOf('tides-http');
+    await reads(row, 'That session loaded another version of this plugin. Start a new session, then sign in.');
+    expect(signIn(row)).toBeNull();
+  });
+
   it('held open: while the plugin list is out no Sign in is offered, the admitted session’s state in the dialog’s words and the key’s own name after from; when it answers enabled, Sign in appears with the plugin’s own name', async () => {
     await sceneOf([TIDES]);
     let answer!: (value: unknown) => void;
@@ -340,6 +366,8 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'second', entry: { revision: revisionOf(scene) } }]));
     changed('starting'); // main says it before the receipt
     await act(async () => receipt());
+    await reads(row, 'Starting sign-in…'); // replayed once the receipt binds it
+    expect(within(row).getByRole('button', { name: 'Cancel' })).toBeTruthy();
     changed('waiting_callback');
     chooseShow('All');
     let shown = await rowOf('tides-http');
@@ -438,6 +466,30 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     });
   });
 
+  it('a retained success, and a retained failure, are dropped when the connector becomes a local command: no sign-in words, the local command’s state', async () => {
+    for (const ending of ['done', 'failed'] as const) {
+      const scene = await sceneOf([TIDES]);
+      sessions(holding('admitted', '/elsewhere'));
+      mount();
+      const row = await rowOf('tides-http');
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer').length).toBeGreaterThan(0));
+      if (ending === 'done') changed('done', { where: 'here' });
+      else changed('failed', { reason: 'denied' });
+      await reads(row, ending === 'done' ? 'Signed in · connected here' : 'Sign-in didn’t finish: the sign-in was declined');
+      // the same plugin's server of that name is now a local command: no address, so the engine host answers no revision
+      answered = await scene.reread({ plugins: [{ ...TIDES, servers: { 'tides-http': { command: 'tides-local' } } }] });
+      expect(answered.postures.plugins.find((p) => p.server === 'tides-http')!.revision).toBeNull();
+      act(() => sessions(reportingStatus('admitted', '/elsewhere', { plugins: [loaded(KEY, MANIFEST)], servers: [[NAME, 'connected']] })));
+      await readAgain();
+      await waitFor(() => expect(row.textContent).toContain('· stdio'));
+      await reads(row, 'Connected'); // row 5: the admitted session's status in the dialog's words
+      expect(row.textContent).not.toMatch(/Sign/);
+      cleanup();
+      resetSignIns();
+    }
+  });
+
   it('the services’ refusals read after Sign-in didn’t finish; a refused invoke reads the transport’s words', async () => {
     await sceneOf([TIDES]);
     sessions(holding('admitted', '/elsewhere'));
@@ -456,12 +508,15 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       act(() => heard({ opId: `op-${op}`, name: NAME, state: 'failed', reason: 'other_entry', message, where: null }));
       await reads(row, `Sign-in didn’t finish: ${message}`);
     }
+    const refused = 'No handler for connectors.signInDynamicServer in this build';
     backend.script('connectors.signInDynamicServer', () => {
-      throw new WidgetBackendError({ code: 'unknown_command', message: 'connectors.signInDynamicServer' });
+      op += 1;
+      throw new WidgetBackendError({ code: 'unknown_command', message: refused });
     });
-    fireEvent.click(within(row).getByRole('button', { name: SIGN_IN }));
-    await waitFor(() => expect(stateOf(row)).toMatch(/^Sign-in didn’t finish: /));
-    expect(stateOf(row)).not.toContain('other_entry');
+    fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+    await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(op));
+    expect(op).toBe(5); // a fifth invocation, refused
+    await reads(row, `Sign-in didn’t finish: ${refused} · showing the last value it reported`);
   });
 
   it('a local command’s row reads an admitted session’s status in the dialog’s words, never a sign-in word, and nothing with no admitted session', async () => {
