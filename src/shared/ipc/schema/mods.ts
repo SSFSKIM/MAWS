@@ -18,4 +18,8 @@ export const commands = {
   'mods.setFoldSummaries': { input: z.strictObject({ on: z.boolean() }), output: z.void(), owner: 'machine' }, // U2b
 } as const satisfies Record<`mods.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
-export const events = {} as const satisfies Record<`mods.${string}`, z.ZodType>;
+// UX wave U2b (panel finding 3, the coordinator's ruling): the machine's summaries switch was written (`mods.setFoldSummaries`).
+// Empty: `mods.list` stays the one source of the value, which every mounted mods list reads again.
+export const events = {
+  'mods.foldSummariesChanged': z.strictObject({}),
+} as const satisfies Record<`mods.${string}`, z.ZodType>;

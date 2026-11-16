@@ -9,7 +9,8 @@
 // P5 O7 M8: the mods a session on another machine runs are that machine's (`mods.list` is declared not offered there,
 // lane-b/remote-unavailable.ts): nothing is asked, and the section says why.
 // UX wave U2b (M7; the execution document, §M, "The switch"): the summaries' switch, this machine's one fact, written by
-// `mods.setFoldSummaries`; one write at a time, a refused one kept as the others are, the rows read again after it.
+// `mods.setFoldSummaries`; one write at a time, a refused one kept as the others are, the rows read again after it, and
+// on main's word that it was written (`mods.foldSummariesChanged`, panel finding 3), by this list or any other.
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -52,6 +53,7 @@ export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBr
   useEffect(() => {
     const offs = [
       client.on('settings.changed', again),
+      client.on('mods.foldSummariesChanged', again), // UX wave U2b (panel finding 3): the machine's switch, written by any list
       client.on('ownerChannel.changed', (event) => event.appSessionId === appSessionId && again()),
     ];
     return () => offs.forEach((off) => off());

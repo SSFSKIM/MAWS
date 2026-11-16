@@ -44,6 +44,7 @@ export interface OwnerChannelDeps {
   onStreaming: (listener: () => void) => () => void; // the engine host's: once per connection, after its resync
   streaming: () => boolean;
   emit: OwnerChannelServiceDeps['emit'];
+  foldSummariesChanged: () => void; // UX wave U2b (panel finding 3): `mods.foldSummariesChanged`, after the switch's write
   onSettings: (listener: () => void) => () => void;
   // M4 end
   modRoute?: boolean; // UX wave U2b, the tests' seam: the cutover's switch (TO_HUMAN_MOD_ROUTE)
@@ -168,7 +169,10 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     setSessionOverride(mods, { appSessionId: appSessionId as AppSessionId, id, value });
     service.laneChanged(appSessionId as AppSessionId); // M4: presentation and items follow at once
   });
-  deps.register('mods.setFoldSummaries', ({ on }) => setFoldSummaries(mods, { on })); // U2b: the next launches carry it
+  deps.register('mods.setFoldSummaries', ({ on }) => {
+    setFoldSummaries(mods, { on }); // U2b: the next launches carry it
+    deps.foldSummariesChanged(); // panel finding 3: every mounted mods list reads the machine's switch again
+  });
   const settledReads = async () => {
     while (reads.size > 0) await Promise.allSettled([...reads]);
     await whoDraws.settled();

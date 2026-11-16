@@ -3,4 +3,4 @@
 // added there adds its name here.
 export const commands = ['mods.list', 'mods.setSessionOverride', 'mods.setFoldSummaries'] as const;
 
-export const events = [] as const;
+export const events = ['mods.foldSummariesChanged'] as const;

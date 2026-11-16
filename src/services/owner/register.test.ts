@@ -34,6 +34,7 @@ describe('startOwnerChannel', () => {
   const streamings = new Set<() => void>();
   const settingsListeners = new Set<() => void>();
   const emitted: unknown[] = [];
+  let summariesSaid: { summaries: boolean }[] = []; // panel finding 3: the switch's value as each word that it changed found it
   beforeEach(() => {
     root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-owner-register-')));
     dir = tempDir();
@@ -47,6 +48,7 @@ describe('startOwnerChannel', () => {
     hostStates.clear();
     streamings.clear();
     settingsListeners.clear();
+    summariesSaid = [];
   });
   afterEach(() => {
     index.close();
@@ -73,6 +75,7 @@ describe('startOwnerChannel', () => {
       streaming: () => true,
       emit: (_name, payload) => void emitted.push(payload),
       onSettings: (listener) => (settingsListeners.add(listener), () => void settingsListeners.delete(listener)),
+      foldSummariesChanged: () => void summariesSaid.push({ summaries: index.ownerChannel.foldSummaries() }),
     });
 
   // P4-R7z: the to-human plugin's style (it declares 6, its message tool), the one that carries the lane
@@ -227,6 +230,15 @@ describe('startOwnerChannel', () => {
       expect(await handlers.get('mods.list')!({ appSessionId: a })).toMatchObject([{ summaries: false }]);
       await handlers.get('mods.setFoldSummaries')!({ on: true });
       expect(await handlers.get('mods.list')!({})).toMatchObject([{ summaries: true }]);
+    });
+
+    // Panel finding 3 (the coordinator's ruling): each write is said once, after it, so the lists that read again on
+    // `mods.foldSummariesChanged` read what it wrote
+    it('says each write of the switch once, after the write', async () => {
+      start();
+      await handlers.get('mods.setFoldSummaries')!({ on: false });
+      await handlers.get('mods.setFoldSummaries')!({ on: true });
+      expect(summariesSaid).toEqual([{ summaries: false }, { summaries: true }]);
     });
   });
 });

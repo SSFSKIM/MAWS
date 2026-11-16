@@ -83,6 +83,7 @@ describe('the daemon stops between the send and the bind', () => {
       streaming: () => true,
       emit: (_name, payload) => void emitted.push(payload as { appSessionId: string; state: OwnerChannelState }),
       onSettings: () => () => {},
+      foldSummariesChanged: () => {},
       modRoute: true, // the cutover's switch, injected
     });
     channels.push(channel);
