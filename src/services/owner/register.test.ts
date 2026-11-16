@@ -101,7 +101,7 @@ describe('startOwnerChannel', () => {
     const decision = (desired: typeof SUPPLEMENTED | 'off') => ({
       appSessionId: a, kind: 'resume' as const, laneOn: true, override: 'inherit' as const, desired, recorded: 'unrecorded' as const, appended: desired !== 'off', snapshotOff: false, offUnavailable: false,
       applied: desired, style: desired === 'off' ? 'default' : 'doperpowers:to-human', decidedBy: desired === 'off' ? 'default' : 'doperpowers:to-human', styleUnresolved: null,
-      advertised: desired === 'off' ? null : 8, plugin: true, reserved: false, summariesOff: false, // U2b
+      advertised: desired === 'off' ? null : (8 as const), plugin: true, reserved: false, summariesOff: false, // U2b
     });
     launches.launched(decision('off'), { launchId: 'l1', at: '2026-10-09T09:00:00.000Z' });
     const block = {

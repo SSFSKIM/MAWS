@@ -376,15 +376,15 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     describe('§G with the mod route on', () => {
       beforeEach(() => launchesWith({ modRoute: true }));
       it.each([
-        ['the lane off, no applicable installation', () => (appEnabled = false), null, false],
-        ['the lane off, an applicable installation whose hooks load (older)', () => ((appEnabled = false), style(configHome)), null, true],
-        ['the lane off, an applicable installation whose hooks load (newer)', () => ((appEnabled = false), installToHumanPlugin(configHome, { declares: true })), null, true],
-        ['a style that carries no tool, an installation whose hooks load', () => style(configHome, 4), null, true],
-        ['the lane on, an older installation', () => style(configHome), 8, true],
-        ['the lane on, an installation with a higher version and no declaration', () => installToHumanPlugin(configHome, { version: '9.9.9' }), 8, true],
-        ['the lane on, a newer installation', () => installToHumanPlugin(configHome, { declares: true }), 9, true],
-        ['the lane on, two installations of which one lacks the declaration', () => (installToHumanPlugin(configHome, { declares: true }), secondInstallation(false)), 8, true],
-        ['the lane on, two declaring installations', () => (installToHumanPlugin(configHome, { declares: true }), secondInstallation(true)), 9, true],
+        ['the lane off, no applicable installation', (): void => { appEnabled = false; }, null, false],
+        ['the lane off, an applicable installation whose hooks load (older)', (): void => { appEnabled = false; style(configHome); }, null, true],
+        ['the lane off, an applicable installation whose hooks load (newer)', (): void => { appEnabled = false; installToHumanPlugin(configHome, { declares: true }); }, null, true],
+        ['a style that carries no tool, an installation whose hooks load', (): void => { style(configHome, 4); }, null, true],
+        ['the lane on, an older installation', (): void => { style(configHome); }, 8, true],
+        ['the lane on, an installation with a higher version and no declaration', (): void => { installToHumanPlugin(configHome, { version: '9.9.9' }); }, 8, true],
+        ['the lane on, a newer installation', (): void => { installToHumanPlugin(configHome, { declares: true }); }, 9, true],
+        ['the lane on, two installations of which one lacks the declaration', (): void => { installToHumanPlugin(configHome, { declares: true }); secondInstallation(false); }, 8, true],
+        ['the lane on, two declaring installations', (): void => { installToHumanPlugin(configHome, { declares: true }); secondInstallation(true); }, 9, true],
       ] as const)('%s: advertises %s; the reservation finds the plugin: %s', async (_, given, number, plugin) => {
         given();
         const { spec: decided, record: decision } = await decide();
@@ -479,7 +479,14 @@ describe('ownerChannelLaunch over a scratch config home', () => {
     it('reads the switch once, when the launch is decided: a write while it is decided is the next launch’s', async () => {
       let release: (declares: boolean) => void = () => {};
       let reading = 0;
-      launchesWith({ readDeclaration: () => ((reading += 1), new Promise<boolean>((resolve) => (release = resolve))) });
+      launchesWith({
+        readDeclaration: (): Promise<boolean> => {
+          reading += 1;
+          return new Promise<boolean>((resolve) => {
+            release = resolve;
+          });
+        },
+      });
       installToHumanPlugin(configHome, { declares: true });
       const deciding = decide();
       await vi.waitFor(() => expect(reading).toBe(1), { timeout: 2_000, interval: 5 });
