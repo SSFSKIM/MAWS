@@ -1454,3 +1454,33 @@ describe('the line of a turn an answer opened', () => {
     expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');
   });
 });
+
+// UX wave U2b (decision 8): while the to-human view is in force (`noTurnFold`) no turn folds: a closed turn derives
+// open, its line folds nothing, and setting or clearing the flag derives every turn once.
+describe('no turn fold while the view is in force', () => {
+  it('a closed turn derives open under the flag, folded again without it, each change one derivation per turn', () => {
+    const b = builder();
+    for (const u of ['u1', 'u2']) {
+      b.turn(u);
+      b.toolUse(`t-${u}`, 'Bash', { command: 'ls' });
+      b.result(`t-${u}`, 'ok', { structured: BASH_RESULT('ok') });
+      b.text(`a-${u}`, 0, 'Done.');
+      b.end([u]);
+    }
+    const state = reduce(b.events);
+    expect(rowsOf(state).filter((row) => row.kind === 'divider').map((row) => row.kind === 'divider' && row.expanded)).toEqual([false, false]);
+    const flip = (from: typeof state, flag: boolean) => withUi(from, { ...from.ui, noTurnFold: flag, version: from.ui.version + 1, global: from.ui.global + 1 });
+    let derived = turnDerivations.count;
+    const open = flip(state, true);
+    const rowsOpen = rowsOf(open);
+    expect(turnDerivations.count - derived).toBe(2);
+    expect(rowsOpen.filter((row) => row.kind === 'divider').map((row) => row.kind === 'divider' && row.expanded)).toEqual([true, true]);
+    expect(rowsOpen.filter((row) => row.kind === 'cell')).toHaveLength(2);
+    derived = turnDerivations.count;
+    expect(rowsOf(open)).toBe(rowsOpen); // nothing changed: nothing derives
+    expect(turnDerivations.count - derived).toBe(0);
+    const closed = flip(open, false);
+    expect(rowsOf(closed).filter((row) => row.kind === 'cell')).toHaveLength(0);
+    expect(turnDerivations.count - derived).toBe(2);
+  });
+});

@@ -82,6 +82,7 @@ import { heldModel, useModelRequests } from '../widgets/model'; // P2-F S chip (
 import { locationPath, useSetupIntent, type SetupIntentHook } from './setup-intent';
 import { isBusy, PLACEHOLDER_BOTH, PLACEHOLDER_ENTER, submitState } from './submit/submit-state';
 import { SubmitControl } from './submit/SubmitControl';
+import { ViewSwitch } from '../owner/view/Switch'; // UX wave U2b
 
 // P5 O7 M4: a New chat tab back on this Mac with files dropped for another machine, which have no path here.
 export const FILES_FOR_ANOTHER_MACHINE = (names: readonly string[]): string => `${names.join(', ')} can go only to another machine; remove ${names.length === 1 ? 'it' : 'them'}, or choose that machine again`;
@@ -584,6 +585,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
       {swap.notice && <RequestCard key={swap.notice.id} item={swap.notice} request={null} placement="docked" paneIndex={paneIndex} />}
       {/* R2: a plugin's band above the frame, only while a plugin draws one */}
       {!unstarted && <PluginBand appSessionId={appSessionId} working={working} />}
+      {/* UX wave U2b: the to-human view's switch, after the band, only while MAWS draws the view in force */}
+      {!unstarted && <ViewSwitch appSessionId={appSessionId} />}
       {/* E9: the dictation notice is the toolbar's; while a card hides the toolbar it shows here */}
       {docked && <DictationNotice appSessionId={appSessionId} client={client} />}
       <Frame

@@ -189,6 +189,37 @@ it.each([false, true])('does not derive large folded history during live token b
   expect(derivations).toBe(0);
 });
 
+// UX wave U2b (decision 8): the rule's other half. With the lane on, the session's first message (here a mark streaming
+// in the running turn) puts the view in force and every turn derives once, open; no token batch after it derives any.
+it('derives every turn once when the first mark streams in under the lane, and none for the token batches after it', async () => {
+  const b = builder();
+  for (let turn = 0; turn < 6; turn++) {
+    b.turn(`old-${turn}`);
+    for (let n = 0; n < 20; n++) {
+      b.text(`text-${turn}-${n}`, 0, `Commentary ${n}`);
+      b.toolUse(`tool-${turn}-${n}`, 'Bash', { command: 'pwd' });
+      b.result(`tool-${turn}-${n}`, '/tmp');
+    }
+    b.text(`answer-${turn}`, 0, 'Answer'); b.end([`old-${turn}`]);
+  }
+  b.turn('live');
+  const delta = (text: string) => b.emit('assistant.block.delta', { apiMessageId: api('live'), blockIndex: 0, blockType: 'text', textDelta: text, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
+  delta('Looking. ');
+  const store = await sessionStoreWith(b.events.slice());
+  const fake = fakeClient(); window.maws = preloadOf(fake); useSessions.setState({ engine: new Map() });
+  useTranscriptStore.getState().setToHumanView(store.key, { lane: true, tailMessage: false });
+  const view = render(<Transcript storeKey={store.key} />);
+  const turns = useTranscriptStore.getState().entries[store.key].state.order.length;
+  let before = turnDerivations.count;
+  act(() => store.push([delta('<message>Found')]));
+  expect(useTranscriptStore.getState().entries[store.key].state.ui.noTurnFold).toBe(true);
+  expect(turnDerivations.count - before).toBe(turns);
+  before = turnDerivations.count;
+  for (let n = 0; n < 20; n++) act(() => store.push([delta(' next')]));
+  expect(turnDerivations.count - before).toBe(0);
+  view.unmount();
+});
+
 it.each(['session', 'child'] as const)('R4 presents detached marked commentary outside the fold (%s), preserving surrounding text in the same flow', async (variant) => {
   const b = builder(); b.turn('u'); b.text('first', 0, 'Working notes.\n<to-human>Report.</to-human>');
   b.toolUse('t', 'Bash', { command: 'pwd' }); b.result('t', '/tmp');

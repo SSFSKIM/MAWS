@@ -412,8 +412,7 @@ test('a profile with X12 records and an index at version 9 launches into a libra
 
       // the transcript's delivery row, naming the X12 record, opens the File artifact the record became
       await show(second, here);
-      const toggle = second.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true });
-      if (await toggle.isVisible()) await toggle.click(); // P2-C Design §7: a lane-on pane opens on its Report
+      // UX wave U2b: a delivery row stays in sight in the to-human view and in the full transcript alike
       const name = second.pane.locator('[data-delivery] button.transcript-delivery-open');
       await expect(name).toHaveText('hello.txt', { timeout: 15_000 });
       await name.click();

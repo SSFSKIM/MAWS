@@ -9,7 +9,7 @@
 import type { AppSessionId } from '@shared/graph/ids';
 import type { ModRow } from '@shared/mods/registry';
 import { Segment } from '../../settings-tab/parts';
-import { REPORT } from '../../owner/report/copy';
+import { REPORT } from '../../owner/view/copy'; // UX wave U2b: the view's words
 import { ItemImage } from '../../customize/image/ItemImage';
 import { KindWord } from '../../customize/KindWord';
 import { LIBRARY as L } from '../copy';

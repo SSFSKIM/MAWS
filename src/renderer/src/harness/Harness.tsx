@@ -208,7 +208,7 @@ export function Harness() {
       </div>
       {session ? (
         <div className="flex min-h-0 flex-1">
-          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} />
+          <Transcript key={session.id} source={session.source} variant="session" actions={actions} rewind={rewind} renderRequest={cards ? exampleRequestCard : undefined} handle={listRef} className="min-w-0 flex-1" effort={effort} ownerLane={session.ownerLane} />
           {child && (
             <section className="flex w-[44%] min-w-0 flex-col border-l border-border" aria-label="Child transcript" data-harness-child="">
               <div className="flex items-center justify-between border-b border-border bg-bg-raised px-3 py-1 text-ui-sm text-fg-muted">

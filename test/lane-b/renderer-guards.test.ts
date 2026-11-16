@@ -98,7 +98,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   },
   'engine-surface/asks.ts': { commands: ['session.ui.answer'], reported: 'an automatic answer to a mod’s ask, with no control, sent for every session’s plugin.ask, another machine’s included (engine-surface/)' },
   'owner/report/answering.ts': {
-    commands: ['ownerChannel.answered', 'ownerChannel.markRead', 'ownerChannel.cancel'],
+    commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
     reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
   },
   'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },

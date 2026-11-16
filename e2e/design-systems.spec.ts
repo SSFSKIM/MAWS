@@ -674,7 +674,8 @@ test('the agent asks for a design system: the sheet lists the systems with their
     ];
     await show(s, id);
     await replayJournal(s, id, designSystemAskJournal(s.scratch.root, answers));
-    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+    // UX wave U2b: the recording holds no message, so no to-human view is in force (the plain transcript, no switch)
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
     await allowNext(s, id); // mcp__maws__ask
 
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');

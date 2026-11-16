@@ -7,7 +7,7 @@
 import { cleanup, screen } from '@testing-library/react';
 import type { JsonObject, SessionBodies } from 'desk-hub/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
-import { reportRows } from '../../owner/report/project';
+import { viewRowsOf } from '../../owner/view/test-support';
 import { createTranscriptStore } from '../../stores/transcript';
 import type { Row } from '../../transcript/model/rows';
 import { renderRow } from '../../transcript/view/rows/test-support';
@@ -25,8 +25,11 @@ type User = Extract<Row, { kind: 'user' }>;
 async function drawn(rows: JsonObject[], off: JsonObject[] = []) {
   const store = createTranscriptStore();
   await store.getState().attach('fresh', freshSource(rows, SESSION, subagentLookupOf([]), null, new Set(off.map((row) => row.uuid as string))), { agentId: null as never });
+  // the session view: the same rows on a key whose lane is on (UX wave U2b)
+  await store.getState().attach('view', freshSource(rows, SESSION, subagentLookupOf([]), null, new Set(off.map((row) => row.uuid as string))), { agentId: null as never });
+  store.getState().setToHumanView('view', { lane: true, tailMessage: false });
   const entry = store.getState().entries.fresh;
-  return { rows: entry.rows, report: reportRows(entry.rows, entry.state, {}), entry };
+  return { rows: entry.rows, report: viewRowsOf(store.getState().entries.view), entry };
 }
 const bubbles = (rows: Row[]) => rows.flatMap((row) => (row.kind === 'user' ? [row.text] : []));
 const user = (rows: Row[], text: string) => rows.find((row): row is User => row.kind === 'user' && row.text === text);

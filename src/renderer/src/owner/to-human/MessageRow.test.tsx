@@ -26,17 +26,17 @@ function draw(context: Partial<TranscriptContextValue>, lanes: Record<string, bo
   return render(<TranscriptProvider value={value}><ToHumanMessageRow row={ROW} /></TranscriptProvider>).container;
 }
 describe('ToHumanMessageRow', () => {
-  it.each([true, false])('draws unboxed message ink with the lane %s, preserving Markdown and call identity', (lane) => {
+  it.each([true, false])('draws the message as the mod does with the lane %s, preserving Markdown and call identity', (lane) => {
     const container = draw({}, { [KEY]: lane });
-    expect(container.textContent).toBe('Stage 1 is done: 37 labels missing.');
+    expect(container.textContent).toBe('● messageStage 1 is done: 37 labels missing.'); // UX wave U2b: its label, then its body
     expect(container.querySelector('.owner-message-ink [data-streamdown="strong"]')?.textContent).toBe('37');
     expect(container.querySelector('[data-to-human-call]')?.getAttribute('data-to-human-call')).toBe('c1');
     expect(container.querySelector('[data-owner-card], [data-owner-report]')).toBeNull();
   });
 
-  it.each([{ presentation: 'local' }, { variant: 'child' }, { storeKey: '' }] as const)('uses the same unboxed fallback for %j', (context) => {
+  it.each([{ presentation: 'local' }, { variant: 'child' }, { storeKey: '' }] as const)('uses the same drawing for %j', (context) => {
     const container = draw(context, { [KEY]: true });
-    expect(container.querySelector('.owner-message-ink')?.textContent).toBe('Stage 1 is done: 37 labels missing.');
+    expect(container.querySelector('.owner-message-ink')?.textContent).toBe('● messageStage 1 is done: 37 labels missing.');
     expect(container.querySelector('[data-owner-card], [data-owner-report]')).toBeNull();
   });
 });
@@ -59,7 +59,7 @@ describe('a message tool’s call in a mounted transcript', () => {
   let keys = 0;
   async function mounted(events: SessionEvent[], ownerLane: boolean) {
     const source: TranscriptSource = { key: `message-row-${++keys}`, subscribe: () => () => {}, snapshot: () => Promise.resolve(events) };
-    render(<Transcript source={source} variant="session" ownerLane={ownerLane} />);
+    render(<Transcript source={source} variant="session" ownerLane={ownerLane} browserActivity={false} /* no browser of its own to list */ />);
     await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
     await act(() => Promise.resolve());
   }
@@ -75,37 +75,37 @@ describe('a message tool’s call in a mounted transcript', () => {
     return b.events;
   }
 
-  it('the report draws unboxed message ink at level 0, and down to the work rows never as an MCP row', async () => {
+  it('the to-human view draws the message in sight and the command after it under one record, never as an MCP row', async () => {
     await mounted(turn(), true);
     const cards = () => [...document.querySelectorAll('[data-kind="to_human"] .owner-message-ink')].map((element) => element.textContent);
     const cells = () => [...document.querySelectorAll('[data-kind="cell"] [data-cell-id]')].map((element) => element.getAttribute('data-cell-id'));
-    await waitFor(() => expect(cards()).toEqual(['Stage 1 is done.']));
-    const record = screen.getByRole('button', { name: 'Working record · 1 tool call' }); // the call is the message, not one of the calls
+    await waitFor(() => expect(cards()).toEqual(['● messageStage 1 is done.']));
+    const record = screen.getByRole('button', { name: '› working record' }); // the call is the message, not one of the calls
     expect(record.getAttribute('aria-expanded')).toBe('false');
     expect(cells()).toEqual([]);
     expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
 
-    // The record opens directly onto the command, without a second turn-level disclosure or an MCP cell for the ink.
+    // The record opens directly onto the command, the turn's line in its place with no fold of its own.
     fireEvent.click(record);
     await waitFor(() => expect(cells()).toEqual(['cell:t1']));
-    expect(record.getAttribute('aria-expanded')).toBe('true');
-    expect(record.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15): the turn's line
-    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
-    expect(document.querySelector('[data-kind="divider"]')).toBeNull();
-    expect(cards()).toEqual(['Stage 1 is done.']);
-    expect(document.querySelector('[data-kind="to_human"] [data-to-human-call="c1"]')).not.toBeNull();
+    const fold = screen.getByRole('button', { name: '‹ fold to report' });
+    expect(fold.getAttribute('aria-expanded')).toBe('true');
+    expect(document.querySelector('[data-kind="divider"] .transcript-turn-line')?.textContent).toMatch(/^Worked for .* · Ran a command$/); // UX wave U2 (O-15)
+    expect(document.querySelector('[data-kind="divider"] .transcript-disclosure')).toBeNull();
+    expect(document.querySelectorAll('[data-kind="record_fold"]')).toHaveLength(1);
+    expect(cards()).toEqual(['● messageStage 1 is done.']);
 
-    fireEvent.click(record);
+    fireEvent.click(fold);
     await waitFor(() => expect(cells()).toEqual([]));
-    expect(record.getAttribute('aria-expanded')).toBe('false');
-    expect(record.textContent).toBe('Working record · 1 tool call');
-    expect(cards()).toEqual(['Stage 1 is done.']);
+    expect(screen.getByRole('button', { name: '› working record' }).getAttribute('aria-expanded')).toBe('false');
+    expect(document.querySelector('[data-kind="divider"]')).toBeNull(); // a closed turn's line shows only with a record of it open
+    expect(cards()).toEqual(['● messageStage 1 is done.']);
   });
 
   it('with the lane off, the message stays in view as a span with its turn folded, as the `<message>` span after it does', async () => {
     await mounted(turn(), false);
     const spans = () => [...document.querySelectorAll('.owner-message-ink')].map((element) => element.textContent);
-    await waitFor(() => expect(spans()).toEqual(['Stage 1 is done.', 'Both stages ran.']));
+    await waitFor(() => expect(spans()).toEqual(['● messageStage 1 is done.', '● messageBoth stages ran.']));
     expect(document.querySelectorAll('[data-kind="cell"]')).toHaveLength(0); // the work folded: the command's cell is out of view
     expect(document.querySelector('[data-owner-card]')).toBeNull();
   });

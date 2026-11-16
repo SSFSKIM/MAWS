@@ -219,6 +219,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Work divider */
 .transcript-divider { display: flex; align-items: center; gap: 7px; padding: 2px 0 14px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-divider::after { content: ''; flex: 1; height: 1px; margin-left: 6px; background: var(--border); }
+/* UX wave U2b (ruling 3, item vii): a turn's line where no turn folds, set as its disclosure is, its chevron's slot empty */
+.transcript-turn-line { display: inline-flex; align-items: center; gap: 7px; padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-divider-count { flex: none; color: var(--danger); text-decoration: underline; text-underline-offset: 2px; }
 .transcript-divider-summary { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); color: var(--fg-muted); }
 .transcript-divider-summary:hover { color: var(--fg); background: var(--bg-hover); }

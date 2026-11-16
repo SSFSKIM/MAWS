@@ -27,6 +27,9 @@ import { chunksSettled } from '../lazy'; // the U4a landing's unit shard
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
+import { viewLaneOf } from './TranscriptSlot'; // UX wave U2b
+import { resetOwnerChannelStore, useOwnerChannelStore } from '../../stores/owner-channel'; // UX wave U2b
+import { useSettings } from '../../stores/settings'; // UX wave U2b
 import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board 525
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures'; // UX wave U4a
 import { journalToEvents } from '../dev/journal'; // UX wave U4a
@@ -910,3 +913,66 @@ describe('who wrote a prompt there', () => {
   });
 });
 
+
+// UX wave U2b (M2; card 4, "This app's switch"): the lane the to-human view follows, from one of three sources: the
+// session's owner channel when it answers; for a session on another machine, whose channel cannot be read over the
+// machine link, this app's own switch (`mods.toHuman.enabled`); else off.
+describe('the lane of the to-human view', () => {
+  const lane = { on: true, override: 'inherit', applied: 'maws-contract', pending: null, mismatch: null } as const;
+  const channel = (on: boolean) => ({ appSessionId: 'x' as AppSessionId, lane: { ...lane, on }, marks: [] });
+  it.each([
+    ['the channel answers on', channel(true), false, false, true],
+    ['the channel answers off, whatever the app’s switch', channel(false), true, true, false],
+    ['another machine, the app’s switch on', null, true, true, true],
+    ['another machine, the app’s switch off', null, true, false, false],
+    ['this machine, the channel not answered', null, false, true, false],
+  ] as const)('%s', (_name, owner, elsewhere, appSwitch, on) => {
+    expect(viewLaneOf(owner, elsewhere, appSwitch)).toBe(on);
+  });
+
+  afterEach(() => {
+    resetOwnerChannelStore();
+    useSettings.setState({ state: null });
+    useSessions.setState({ listed: new Map() });
+  });
+  const turn = () => {
+    const b = builder();
+    b.turn('u1', 'Count the lines');
+    b.text('m1', 0, '<message>Two lines.</message>');
+    b.end(['u1']);
+    return b.events;
+  };
+  const answering = (answers: Record<string, unknown>) => {
+    const invoke = vi.fn((name: string) => Promise.resolve(name in answers ? { ok: true, value: answers[name] } : { ok: false, error: { code: 'unavailable', message: 'not yet' } }));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+  };
+  const base = { 'session.appEvents': { events: [] }, 'session.queue.list': { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] } };
+  const settings = (enabled: boolean) => useSettings.setState({ state: { settings: { mods: { toHuman: { enabled } } } } as never });
+
+  it('a session on another machine, whose channel is refused, follows this app’s switch', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-lane' as AppSessionId);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-lane'), appId: REMOTE }]]) });
+    answering({ ...base, 'session.events': { events: turn(), lastSeq: 3, complete: true } });
+    settings(true);
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    await settle();
+    expect(useTranscriptStore.getState().entries[REMOTE]?.state.ui.ownerLane).toBe(true);
+    act(() => settings(false));
+    await settle();
+    expect(useTranscriptStore.getState().entries[REMOTE]?.state.ui.ownerLane).toBe(false);
+  });
+
+  it('a session on this machine follows its channel, and is off while the channel has not answered', async () => {
+    const LOCAL = at('app-lane-here' as AppSessionId);
+    answering({ ...base, 'session.events': { events: turn(), lastSeq: 3, complete: true } });
+    settings(true);
+    render(<TranscriptSlot appSessionId={LOCAL} />);
+    await settle();
+    expect(useTranscriptStore.getState().entries[LOCAL]?.phase).toBe('live');
+    expect(useTranscriptStore.getState().entries[LOCAL]!.state.ui.ownerLane ?? false).toBe(false); // the app's switch is not this session's lane
+    act(() => useOwnerChannelStore.setState({ bySession: new Map([[LOCAL, { ...channel(true), appSessionId: LOCAL }]]) }));
+    await settle();
+    expect(useTranscriptStore.getState().entries[LOCAL]?.state.ui.ownerLane).toBe(true);
+  });
+});
