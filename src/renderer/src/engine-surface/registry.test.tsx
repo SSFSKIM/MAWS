@@ -229,6 +229,9 @@ describe('the second command, and the re-ask after a reload (M5)', () => {
     render(<Line client={fake.client} />);
     invalidate(fake);
     expect(fake.invoked('session.ui.renderSite')).toHaveLength(2);
+    // the remount's ask was made before the invalidation: its answer is set aside and the site asks once more
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['stale'] }, props: {}, rewritten: false, hooked: true }));
+    expect(fake.pending('session.ui.renderSite')).toBe(1);
     await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['successor'] }, props: {}, rewritten: false, hooked: true }));
     expect(screen.getByTestId('u1~turn').textContent).toBe('successor');
   });
