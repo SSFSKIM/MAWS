@@ -28,7 +28,7 @@ import { forgetKeptOperations } from '../../widgets/plugins/operation';
 import { useReadLoads } from '../../widgets/read';
 import { useCustomizeProject } from '../open';
 import { useCustomizePage, useOpenRequest } from '../page';
-import { heard, resetSignIns, useSignIns } from './sign-in';
+import { heard, resetSignIns, startSignInDynamic, useSignIns } from './sign-in';
 
 const P = at('project-tides' as ProjectId);
 const KEY = 'tide-tables@harbour-market';
@@ -523,6 +523,34 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
       await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'attached', entry: { revision: revisionOf(scene) } }]));
     });
+
+    // The architect's ruling on the fix wave's review (2026-11-16, UTC): an answer asked before the session's report moved
+    // does not stand as its list; a read is asked after the move, and until it answers the newer report's list is read.
+    it('a status read in flight across a reload that adds the connector never stands: the reload’s list is read until the read asked after it answers', async () => {
+      const scene = await sceneOf([TIDES]);
+      const before = reportingStatus('attached', scene.cwd, { plugins: [], servers: [] });
+      sessions(before);
+      live.set('attached', []);
+      mount();
+      const row = await rowOf('tides-http');
+      await reads(row, 'Sign in needed');
+      await waitFor(() => expect(row.querySelector('[data-sign-in-needs-session]')).not.toBeNull());
+      const answers: ((answer: unknown) => void)[] = [];
+      backend.script('session.mcpStatus', () => new Promise((resolve) => answers.push(resolve)));
+      act(() => sessions({ ...before, engineState: 'running' })); // the session moves: its status is read again
+      await waitFor(() => expect(answers).toHaveLength(1));
+      // while that read is out, a plugin's install reloads the session and its report lists the connector
+      act(() => sessions({ ...reportingStatus('attached', scene.cwd, { plugins: [], servers: [], reloaded: { plugins: [loaded(KEY, MANIFEST)], servers: [[NAME, 'needs-auth']] } }), engineState: 'running' }));
+      expect(await within(row).findByRole('button', { name: SIGN_IN })).toBeTruthy();
+      await act(async () => answers[0]!({ mcpServers: [] })); // the read asked before the reload answers after it, without the connector
+      await act(async () => {});
+      expect(within(row).queryByRole('button', { name: SIGN_IN })).not.toBeNull();
+      expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+      await waitFor(() => expect(answers.length).toBeGreaterThan(1)); // asked again after the reload
+      await act(async () => answers.at(-1)!({ mcpServers: [served(NAME, TIDES_URL)] }));
+      fireEvent.click(within(row).getByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'attached', entry: { revision: revisionOf(scene) } }]));
+    });
   });
 
   // Finding 2: a success is overtaken by a later report, from the session it came through, that the server needs a sign-in
@@ -616,6 +644,65 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       await reads(row, 'Sign in needed');
       expect(row.querySelector('[data-sign-in-needs-session]')?.textContent).toBe('Open a session, then sign in');
       expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+
+    // The architect's ruling on the fix wave's review (2026-11-16, UTC): the binding names the operation the row's own press
+    // started, and ends with it where the sign-in events are heard, whether or not a row is drawn
+    async function endedAwayThenAnother(change: Partial<ScenePlugin>): Promise<HTMLElement> {
+      const scene = await sceneOf([TIDES]);
+      const admitted = holding('admitted', '/elsewhere');
+      sessions(admitted);
+      mount();
+      const row = await rowOf('tides-http');
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(1));
+      changed('waiting_callback');
+      await reads(row, 'Finish signing in in your browser…');
+      cleanup(); // Customize is left while the sign-in runs
+      changed('done', { where: 'here' }); // and it ends with no row drawn
+      answered = await scene.reread({ plugins: [{ ...TIDES, ...change }] });
+      // another sign-in to the same engine name, from the session's dialog (no revision, no fingerprint)
+      backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-2' }));
+      await act(() => startSignInDynamic({ name: NAME }, null, admitted.appSessionId));
+      act(() => heard({ opId: 'op-2', name: NAME, state: 'waiting_callback', reason: null, message: null, where: null }));
+      mount();
+      return rowOf('tides-http');
+    }
+
+    it('it ends while no row is drawn and another sign-in of the name runs: the returning row, its name unread, shows neither its step nor Cancel', async () => {
+      const row = await endedAwayThenAnother({ manifest: null });
+      await reads(row, 'Its plugin’s name can’t be read, so it can’t be matched to a session.');
+      expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+
+    it('it ends while no row is drawn and another sign-in of the name runs: the returning row, renamed, shows neither its step nor Cancel', async () => {
+      const row = await endedAwayThenAnother({ manifest: 'mani-tides-renamed' });
+      await reads(row, 'Sign in needed');
+      expect(row.querySelector('[data-sign-in-needs-session]')?.textContent).toBe('Open a session, then sign in');
+      expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+
+    it('a second press on the row binds it again: that operation’s step and Cancel stay across a rename, and Cancel reaches it', async () => {
+      const scene = await sceneOf([TIDES]);
+      sessions(holding('admitted', '/elsewhere'));
+      mount();
+      const row = await rowOf('tides-http');
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(1));
+      changed('waiting_callback');
+      await reads(row, 'Finish signing in in your browser…');
+      backend.script('connectors.signInDynamicServer', () => ({ opId: 'op-2' }));
+      fireEvent.click(within(row).getByRole('button', { name: SIGN_IN })); // a second press: main cancels the first
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(2));
+      act(() => heard({ opId: 'op-2', name: NAME, state: 'waiting_browser', reason: null, message: null, where: null }));
+      await reads(row, 'Opening your browser…');
+      const postureReads = asked('catalog.postures').length;
+      answered = await scene.reread({ plugins: [{ ...TIDES, manifest: 'mani-tides-renamed' }] });
+      await readAgain();
+      await waitFor(() => expect(asked('catalog.postures').length).toBeGreaterThan(postureReads));
+      await reads(row, 'Opening your browser…');
+      fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(asked('connectors.signInCancel').at(-1)).toEqual({ opId: 'op-2' }));
     });
   });
 
