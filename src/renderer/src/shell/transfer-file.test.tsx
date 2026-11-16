@@ -344,6 +344,7 @@ describe('a named video or sound moved between the side column and the main area
     const first = player('panel')!;
     Object.defineProperty(first, 'currentTime', { value: 7.5, writable: true, configurable: true });
     fireEvent.timeUpdate(first);
+    console.log('DEBUG after timeupdate', existingViewState(KEY(path))?.mediaAt, first.currentTime, region('panel').querySelectorAll(`[data-artifact-media]`).length);
 
     // The moved tab as the person sees it: the player, at the position it left, and nothing in its place.
     const seesTheSameFile = (name: 'main' | 'panel') => {
@@ -353,6 +354,7 @@ describe('a named video or sound moved between the side column and the main area
       expect(within(viewer).queryByText('Loading'), name).toBeNull();
       const element = player(name)!;
       expect(element, name).not.toBeNull();
+      console.log('DEBUG seeing', name, existingViewState(KEY(path))?.mediaAt, useViewer.getState().entries.get(KEY(path))?.frame);
       Object.defineProperty(element, 'currentTime', { value: 0, writable: true, configurable: true });
       Object.defineProperties(element, { videoWidth: { value: 160, configurable: true }, videoHeight: { value: 120, configurable: true } });
       fireEvent.loadedMetadata(element);
