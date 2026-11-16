@@ -723,3 +723,46 @@ describe('made by hand: the reader’s reading past the bound (A)', () => {
     expect(slices(INNER, opening, PASTED_BLOCK, block).members.map((member) => member.text)).toEqual([INNER]);
   });
 });
+
+// The architect's ruling of 2026-11-16 on the cascade reviews, A3: a bound on the work of the reading past the bound,
+// pinned by a count. It runs one search to the text's end per opening line for each envelope it takes, so it runs only
+// where the text holds at most eight opening lines outside a pasted segment (`PAST_THE_BOUND_OPENINGS`, in
+// envelopeSlices); a text with more is left as it is, and the grant readers fail closed on it (A2).
+
+describe('made by hand: the reading past the bound has a bounded work (A3)', () => {
+  const GRANT = consentMessage('command', 'make deploy');
+  const row = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000711', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const loop = (text: string) => takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, parseAskSteer));
+  const innerIds = (count: number) => Array.from({ length: count }, (_, i) => `toolu_inner${i + 1}`);
+  const openingLines = (text: string) => text.split('\n').filter((line) => /^\[MAWS ask \S+\] The user answered the questions you asked:$/.test(line)).length;
+
+  it('eight opening lines: the brief’s envelope is read past the bound; one pasted opening line more counts for nothing', () => {
+    const atCap = innerOpeningEnvelope('toolu_A', GRANT, innerIds(7));
+    expect(openingLines(atCap)).toBe(8);
+    expect(loop(atCap)).toEqual({ own: '', envelopes: [{ text: atCap, read: parseAskSteer(atCap) }] });
+    const pasted = joinedText(framePasted('a1b2', askSteerOpening('toolu_pasted')), atCap);
+    expect(loop(pasted)).toEqual({ own: framePasted('a1b2', askSteerOpening('toolu_pasted')), envelopes: [{ text: atCap, read: parseAskSteer(atCap) }] });
+  });
+
+  it('nine opening lines: the reading past the bound does not run, the text stays as it is, and it yields no grant', () => {
+    const overCap = innerOpeningEnvelope('toolu_A', GRANT, innerIds(8));
+    expect(openingLines(overCap)).toBe(9);
+    expect(overCap.split('\n')).toContain(GRANT);
+    for (const text of [overCap, joinedText('Keep these notes.', overCap)]) {
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+      expect(personsGrants(text)).toEqual([]);
+      expect(readArrivals(row(text)).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    }
+  });
+
+  it.each([300])('%i opening lines, each followed by a block’s close that reads nothing: the check of a whole slice runs once per opening line', (count) => {
+    const text = Array.from({ length: count }, (_, i) => `${askSteerOpening(`toolu_${i}`)}\n\`\`\``).join('\n');
+    let calls = 0;
+    const refusing = () => {
+      calls += 1;
+      return null;
+    };
+    expect(envelopeSlices(text, askSteerOpening, PASTED_BLOCK, refusing)).toEqual({ members: [], rest: text });
+    expect(calls).toBe(count);
+  });
+});
