@@ -62,6 +62,20 @@ describe('htmlContentType', () => {
     expect(htmlContentType(bytes('<head><!-- closed only by -> <meta charset="windows-1252"></head><p>plain</p>'))).toBe(UTF8);
   });
 
+  // The coordinator's finding A (Decision Log 31): another tag is read whole, its attributes as the prescan reads them, so a
+  // `<!--` or a `<meta` inside a quoted value is neither a comment nor a declaration.
+  it('a comment opener inside another tag’s quoted value opens no comment, and a meta after it declares a charset', () => {
+    expect(htmlContentType(bytes('<html data-marker="<!--"><head><meta charset="windows-1252"></head><p>plain</p>'))).toBe(BARE);
+    expect(htmlContentType(bytes("<html data-marker='<!--'><head><meta charset=\"windows-1252\"></head><p>plain</p>"))).toBe(BARE);
+    expect(htmlContentType(bytes('<head><body title="x > <!-- y"><meta charset="windows-1252"><p>plain</p>'))).toBe(BARE); // a `>` inside the quoted value
+    expect(htmlContentType(bytes('<?xml version="1.0" note="<!--"?><head><meta charset="windows-1252"></head><p>plain</p>'))).toBe(BARE); // `<?` skips to its `>`
+  });
+
+  it('a meta inside another tag’s quoted value is no declaration', () => {
+    expect(htmlContentType(bytes('<head><div title="<meta charset=windows-1252>"></div></head><p>Déjà vu</p>'))).toBe(UTF8);
+    expect(htmlContentType(bytes("<head><a href='x' title='a > <meta charset=euc-kr>'>x</a></head><p>회의</p>"))).toBe(UTF8);
+  });
+
   it('a byte that is not valid UTF-8 leaves the type as it is', () => {
     const latin1 = new Uint8Array(Buffer.from('<p>caf\xe9 cr\xe8me</p>', 'latin1'));
     expect(htmlContentType(latin1)).toBe(BARE);
