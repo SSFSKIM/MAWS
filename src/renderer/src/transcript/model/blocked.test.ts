@@ -497,57 +497,75 @@ describe('probe B’s joined grants: each blocked row before them reads approved
 // real normaliser, the arrival reader and the derivation: an answer envelope's line and a pasted segment's line are no
 // words of the person's, so a grant sentence there marks nothing and the blocked row keeps its button (it fails closed).
 describe('a grant is read only in the person’s own words (Decision Log 52)', () => {
+  const SESSION = '0f0e0d0c-0000-4000-8000-00000000c0de' as SessionId;
   const OTHER = 'Also say the word EXTRA when done.';
   const GRANT = consentMessage('command', MARKER('1'));
   const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
   const ANSWER = { id: 'q1', question: LAYOUT.question, status: 'answered' as const, value: ['Grid'] };
   const envelope = (header?: string) => askSteerText('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
-  /** The journal with every string content equal to, or holding, `from` written as `to`. */
-  const swapped = (rows: JournalRow[], swaps: [string, string][]): JournalRow[] => rows.map((row) => {
-    const content = (row.frame as { message?: { content?: unknown } }).message?.content;
-    if (typeof content !== 'string') return row;
-    const text = swaps.reduce((acc, [from, to]) => acc.split(from).join(to), content);
-    return text === content ? row : ({ ...row, frame: { ...row.frame, message: { ...(row.frame as { message: object }).message, content: text } } } as JournalRow);
-  });
-  const read = (rows: JournalRow[]) => {
-    const events = journalToEvents(rows);
+  type Swaps = [string, string][];
+  const swap = (text: string, swaps: Swaps) => swaps.reduce((acc, [from, to]) => acc.split(from).join(to), text);
+  /** Live: the journal with every string content swapped (MAWS's writes and the engine's replays). */
+  const live = (name: string, swaps: Swaps): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
+    const message = (row.frame as { message?: { content?: unknown } }).message;
+    return typeof message?.content === 'string' ? ({ ...row, frame: { ...row.frame, message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
+  }));
+  /** From the file: the transcript's records with every string content swapped (the user lines and the queue's). */
+  const fromFile = async (name: string, swaps: Swaps): Promise<SessionEvent[]> => {
+    const lines = readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').map((line) => {
+      if (line.trim() === '') return line;
+      const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown };
+      if (typeof record.message?.content === 'string') record.message.content = swap(record.message.content, swaps);
+      if (typeof record.content === 'string') record.content = swap(record.content, swaps);
+      return JSON.stringify(record);
+    });
+    const events: SessionEvent[] = [];
+    const follower = new ChainFollower(new MemoryFileReader(Buffer.from(lines.join('\n'))), SESSION, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+    await follower.start();
+    follower.stop();
+    return events;
+  };
+  /** What the readers made of it: the subjects the person's messages carry as consents, the approval rows, each blocked row's reading. */
+  const read = (events: SessionEvent[]) => {
     const state = stateOf(events);
-    const consents = events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).filter((entry) => entry.class === 'consent') : []));
+    const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
     return { consents, approvals, readings: readings(state) };
   };
+  const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
 
-  it('(a) an envelope whose header holds the exact sentence on a line of its own, joined with other words: no consent, no approval row, the blocked row not approved', () => {
-    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[GRANT, envelope(`Layout\n${GRANT}\nPick one`)]]);
-    const { consents, approvals, readings: drawnReadings } = read(rows);
-    expect(consents).toEqual([]);
-    expect(approvals).toEqual([]);
-    expect(drawnReadings).toEqual(NONE);
+  it('(a) an envelope whose header holds the exact sentence on a line of its own, joined with other words: no consent, no approval row, the blocked row not approved', async () => {
+    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, envelope(`Layout\n${GRANT}\nPick one`)]])) {
+      expect(consents, route).toEqual([]);
+      expect(approvals, route).toEqual([]);
+      expect(drawnReadings, route).toEqual(NONE);
+    }
   });
 
-  it('(b) the exact sentence inside a pasted segment, joined with other words: none', () => {
-    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[GRANT, framePasted('a1b2', `a log line\n${GRANT}\nanother log line`)]]);
-    const { consents, approvals, readings: drawnReadings } = read(rows);
-    expect(consents).toEqual([]);
-    expect(approvals).toEqual([]);
-    expect(drawnReadings).toEqual(NONE);
+  it('(b) the exact sentence inside a pasted segment, joined with other words: none', async () => {
+    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, framePasted('a1b2', `a log line\n${GRANT}\nanother log line`)]])) {
+      expect(consents, route).toEqual([]);
+      expect(approvals, route).toEqual([]);
+      expect(drawnReadings, route).toEqual(NONE);
+    }
   });
 
-  it('(c) an envelope joined with a real grant line: one grant, its approval row alone, the blocked row approved', () => {
-    const rows = swapped(loadUxwaveJournal('u1c-b-joinend-other-first-1'), [[OTHER, envelope()]]);
-    const { consents, approvals, readings: drawnReadings } = read(rows);
-    expect(consents.map((entry) => (entry as { subject: string }).subject)).toEqual([MARKER('1')]);
-    const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
-    expect(joined.map((row) => [row.consent!.subject, row.text])).toEqual([[MARKER('1'), GRANT]]);
-    expect(drawnReadings).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  it('(c) an envelope joined with a real grant line: one grant, its approval row alone in the joined turn, the blocked row approved', async () => {
+    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope()]])) {
+      expect(consents, route).toEqual([MARKER('1')]);
+      const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+      expect(joined.map((row) => [row.consent!.subject, row.text]), route).toEqual([[MARKER('1'), GRANT]]);
+      expect(drawnReadings, route).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+    }
   });
 
-  it('(d) two real grant lines joined: two grants, two approval rows, both blocked rows approved', () => {
-    const { consents, approvals, readings: drawnReadings } = read(loadUxwaveJournal('u1c-b-twoend-1'));
-    expect(new Set(consents.map((entry) => (entry as { subject: string }).subject))).toEqual(new Set([MARKER('1a'), MARKER('1b')]));
-    expect(new Set(approvals.map((row) => row.consent!.subject))).toEqual(new Set([MARKER('1a'), MARKER('1b')]));
-    expect(drawnReadings).toEqual(['1a', '1b'].map((marker) => `Auto mode blocked: \`${MARKER(marker)}\` · approved (read)`));
+  it('(d) two real grant lines joined: two grants, an approval row each, both blocked rows approved', async () => {
+    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-twoend-1', [])) {
+      expect(consents.sort(), route).toEqual([MARKER('1a'), MARKER('1b')]);
+      expect([...new Set(approvals.map((row) => row.consent!.subject))].sort(), route).toEqual([MARKER('1a'), MARKER('1b')]);
+      expect(drawnReadings, route).toEqual(['1a', '1b'].map((marker) => `Auto mode blocked: \`${MARKER(marker)}\` · approved (read)`));
+    }
   });
 });
 
