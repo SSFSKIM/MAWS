@@ -508,7 +508,7 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   /** Live: the journal with every string content swapped (MAWS's writes and the engine's replays). */
   const live = (name: string, swaps: Swaps): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
     const message = (row.frame as { message?: { content?: unknown } }).message;
-    return typeof message?.content === 'string' ? ({ ...row, frame: { ...row.frame, message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
+    return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
   }));
   /** From the file: the transcript's records with every string content swapped (the user lines and the queue's). */
   const fromFile = async (name: string, swaps: Swaps): Promise<SessionEvent[]> => {
