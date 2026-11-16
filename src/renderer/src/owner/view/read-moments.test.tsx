@@ -15,7 +15,10 @@ import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
+const environment = globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean };
+const actEnvironment = environment.IS_REACT_ACT_ENVIRONMENT;
 beforeAll(() => {
+  environment.IS_REACT_ACT_ENVIRONMENT = true; // the pushes are wrapped in act()
   Object.defineProperty(HTMLElement.prototype, 'offsetHeight', {
     configurable: true,
     get(this: HTMLElement) {
@@ -25,7 +28,10 @@ beforeAll(() => {
     },
   });
 });
-afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
+afterAll(() => {
+  Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight);
+  environment.IS_REACT_ACT_ENVIRONMENT = actEnvironment;
+});
 afterEach(() => {
   cleanup();
   resetSurfaceRegistry();
@@ -55,14 +61,18 @@ const call = (b: ReturnType<typeof builder>, id: string, description: string) =>
  * A closed turn with its message (so the view is in force), then a turn still running: a call, then (by default) a
  * message, so its stretch has closed; then whatever `next` adds, pushed as one batch once the view is drawn.
  */
-async function mounted(next: (b: ReturnType<typeof builder>) => void, opening: (b: ReturnType<typeof builder>) => void = (b) => b.text('ma', 0, '<message>Read the first notes.</message>')) {
+async function mounted(
+  next: (b: ReturnType<typeof builder>) => void,
+  opening: (b: ReturnType<typeof builder>) => void = (b) => b.text('ma', 0, '<message>Read the first notes.</message>'),
+  { firstCall = true }: { firstCall?: boolean } = {},
+) {
   const b = builder();
   b.turn('u0', 'Find the notes');
   call(b, 't0', 'Find the notes');
   b.text('m0', 0, '<message>Found the notes.</message>');
   b.end(['u0']);
   b.turn('u1', 'Tidy the notes');
-  call(b, 'ta', 'Read the first notes');
+  if (firstCall) call(b, 'ta', 'Read the first notes');
   opening(b);
   const history = [...b.events];
   next(b);
@@ -104,6 +114,11 @@ describe('a round of reads at each close of a stretch and each end of a turn, in
 
   it('a batch that ends the turn alone starts one round', async () => {
     const rounds = await mounted((b) => b.end(['u1']));
+    expect(rounds()).toBe(1);
+  });
+
+  it('a turn of text alone, which draws no turn line, starts a round when it ends', async () => {
+    const rounds = await mounted((b) => b.end(['u1']), (b) => b.text('na', 0, 'Checking the notes first.'), { firstCall: false });
     expect(rounds()).toBe(1);
   });
 
