@@ -214,6 +214,19 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, context: 21 }).ok).toBe(false);
     });
 
+    // UX wave U5b-2 (the branch read's one snapshot, Decision Log 52): a count is of commits, so none is below 0; an answer
+    // with a negative one is refused at the schema, whichever count it is
+    it('refuses a branch read whose count of commits is negative', () => {
+      const answer = (counts: { all: number; notPushed: number | null; pushed: number | null } | null, behind: number | null) => validateCommandOutput('git.branchCommits', { base: null, upstream: null, commits: [], counts, behind }).ok;
+      expect(answer({ all: 3, notPushed: 1, pushed: 2 }, 0)).toBe(true);
+      expect(answer({ all: 0, notPushed: 0, pushed: 0 }, null)).toBe(true);
+      expect(answer({ all: 3, notPushed: null, pushed: null }, null)).toBe(true);
+      expect(answer({ all: -1, notPushed: 0, pushed: 0 }, 0), 'all').toBe(false);
+      expect(answer({ all: 1, notPushed: 2, pushed: -1 }, 0), 'pushed').toBe(false);
+      expect(answer({ all: 1, notPushed: -1, pushed: 2 }, 0), 'notPushed').toBe(false);
+      expect(answer({ all: 1, notPushed: 1, pushed: 0 }, -1), 'behind').toBe(false);
+    });
+
     // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
     it('accepts the E6 untracked scope on git.diff', () => {
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'untracked', path: 'new.txt' }).ok).toBe(true);

@@ -1,6 +1,8 @@
 // Whether this Mac's machine serves the git reads (UX wave U5b-2, M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md
 // §D, "This Mac's daemon"): its daemon may be of an older build than the window, so the local machine lists
 // `rl2.git-reads` by its daemon's welcome, as another machine lists it in its handshake, beside the project acts.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { GIT_READS_CAPABILITY } from '@shared/ipc/schema/git';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
@@ -35,6 +37,13 @@ describe('this Mac’s machine and the git reads', () => {
   it('takes the reads’ minor no later than the wire this build speaks, so its own daemon lists them', () => {
     expect(GIT_READS_MINOR).toBeLessThanOrEqual(WIRE_MINOR);
     expect(localGitReads(peer(WIRE_MINOR))).toEqual([GIT_READS_CAPABILITY]);
+  });
+
+  // The constant is spelled by hand beside the wire's minor, which moves when the landing's minor is taken again: the
+  // wire's history note names the minor the reads came at, and the constant is that one
+  it('is the minor the wire’s history names for the reads', () => {
+    const minorLine = readFileSync(join(__dirname, '../../shared/ipc/wire.ts'), 'utf8').split('\n').find((line) => line.startsWith('export const WIRE_MINOR'));
+    expect(minorLine?.match(/git\.branchCommits[^;()]*\((\d+)\)/)?.[1]).toBe(String(GIT_READS_MINOR));
   });
 
   it('reads the attached daemon, and hears its state', () => {

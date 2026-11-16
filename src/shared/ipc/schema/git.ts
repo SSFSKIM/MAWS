@@ -104,8 +104,8 @@ export const GitBranchCommitsSchema = z.strictObject({
   base: z.strictObject({ ref: z.string(), mergeBase: z.string() }).nullable(), // the default-branch rule; null when none is found
   upstream: z.string().nullable(), // as git.status names it
   commits: z.array(GitBranchCommitSchema), // <mergeBase>..HEAD, newest first, at most `limit`; with no base, the newest of HEAD
-  counts: z.strictObject({ all: z.number().int(), notPushed: z.number().int().nullable(), pushed: z.number().int().nullable() }).nullable(), // of the whole range, whatever `limit` cut
-  behind: z.number().int().nullable(), // commits the base ref holds that HEAD does not
+  counts: z.strictObject({ all: z.number().int().nonnegative(), notPushed: z.number().int().nonnegative().nullable(), pushed: z.number().int().nonnegative().nullable() }).nullable(), // of the whole range, whatever `limit` cut; a count is never below 0 (Decision Log 52)
+  behind: z.number().int().nonnegative().nullable(), // commits the base ref holds that HEAD does not
 });
 export type GitBranchCommits = z.infer<typeof GitBranchCommitsSchema>;
 

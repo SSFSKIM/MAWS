@@ -9,8 +9,8 @@
 import { GIT_READS_CAPABILITY } from '@shared/ipc/schema/git';
 import type { WirePeer } from '@shared/ipc/wire';
 
-/** The wire minor whose daemon serves the three reads; provisional with the wire's stand-in minor, retaken at the chain merge. */
-export const GIT_READS_MINOR = 52;
+/** The wire minor whose daemon serves the three reads (src/shared/ipc/wire.ts's 54). */
+export const GIT_READS_MINOR = 54;
 
 /** What the connection manager reads as a machine's capabilities (`localCapabilities`). */
 export type CapabilitySource = { read(): readonly string[] | null; onChange(listener: () => void): () => void };
