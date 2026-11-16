@@ -1,10 +1,9 @@
-// The held-diff cache Review's store and Source control's share (P4 W2-B, tracker 2026-10-06 E6 · C8c: each carried a
-// copy). One `git.diff` per key however many surfaces hold it, ref-counted: the first hold reads, the last release
-// forgets the diff and its files. One read in flight per key: a re-read asked meanwhile runs once it answers. A new
-// status re-reads trailing, HELD_DIFF_REFRESH_MS after the last. The whole patch is kept split per file within
-// REVIEW_SCOPE_BYTES_CAP; past it only the list, each file fetched on its own and dropped when the scope re-reads.
-// Each store brings its key shape and its `git.diff` input; Source control adds the hook that drops an answer one of
-// its mutations overtook (E11).
+// The held-diff cache of Review's store (P4 W2-B, tracker 2026-10-06 E6 · C8c: Review and the acting Source control
+// pane each carried a copy, until the pane left in UX wave U5b-2). One `git.diff` per key however many surfaces hold it,
+// ref-counted: the first hold reads, the last release forgets the diff and its files. One read in flight per key: a
+// re-read asked meanwhile runs once it answers. A new status re-reads trailing, HELD_DIFF_REFRESH_MS after the last. The
+// whole patch is kept split per file within REVIEW_SCOPE_BYTES_CAP; past it only the list, each file fetched on its own
+// and dropped when the scope re-reads. The store brings its key shape and its `git.diff` input.
 //
 // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §E and §G): a target may be read
 // with another command than `git.diff` (the working-tree read, a commit's diff; `read`), whose answer carries the new
@@ -60,9 +59,6 @@ export interface HeldDiffSpec<T> {
   read?(target: T, path?: string): DiffRead;
   // UX wave U5b-2 (decision 17): a target whose answer is kept once it answered: `reread` and `refresh` leave it
   kept?(target: T): boolean;
-  // Asked as a read goes out; the check it returns is asked when the answer lands with the hold still current, and true
-  // drops the answer: the diff and its files keep what they showed, and a re-read asked meanwhile still runs.
-  overtaken?(target: T): () => boolean;
 }
 
 export interface HeldDiffs<T> {
@@ -148,19 +144,16 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
       return;
     }
     h.reading = true;
-    const overtaken = spec.overtaken?.(h.target);
     const result = await settled(invokeRead(client, readOf(h.target), pathTarget(h.target.machine, h.target.session)));
     h.reading = false;
     if (held.get(key) !== h) return; // released meanwhile
     if (result.ok) h.answered = true;
     h.failed = !result.ok;
-    if (!overtaken?.()) {
-      const next: ScopeDiff = result.ok ? answered(result.value) : failedWith(result.error);
-      const ofKey = fileOf(key);
-      set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, ofKey) }));
-      for (const k of [...fileLoads.keys()]) if (ofKey(k)) fileLoads.delete(k);
-      for (const k of [...failedFiles.keys()]) if (ofKey(k)) failedFiles.delete(k);
-    }
+    const next: ScopeDiff = result.ok ? answered(result.value) : failedWith(result.error);
+    const ofKey = fileOf(key);
+    set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, ofKey) }));
+    for (const k of [...fileLoads.keys()]) if (ofKey(k)) fileLoads.delete(k);
+    for (const k of [...failedFiles.keys()]) if (ofKey(k)) failedFiles.delete(k);
     if (h.again) {
       h.again = false;
       if (!(keeps(h) && h.answered)) void read(key);

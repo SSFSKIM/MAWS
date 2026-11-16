@@ -134,14 +134,14 @@ describe('the page (S1, S2)', () => {
     expect(main.callsOf('git.branchCommits')).toEqual([{ directory: DIR, limit: 50 }]);
   });
 
-  it('holds no text field, no checkbox and no element marked data-scm-action', async () => {
+  it('holds no text field and no checkbox (the acting pane’s markers are held out of the source by test/source-control-reads-only.test.ts)', async () => {
     serves();
     main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', pr: prOf({ checks: { summary: 'pass', items: [{ name: 'build', bucket: 'pass', state: 'SUCCESS', link: null, workflow: null }] } }) }));
     mount();
     await waitFor(() => expect(screen.queryByRole('button', { name: '1 passed' })).toBeTruthy());
     expect(screen.queryAllByRole('textbox')).toEqual([]);
     expect(screen.queryAllByRole('checkbox')).toEqual([]);
-    expect(document.querySelectorAll('[data-scm-action], [data-scm-row], input, textarea, select')).toHaveLength(0);
+    expect(document.querySelectorAll('input, textarea, select')).toHaveLength(0);
     expect(screen.getAllByRole('button').every((button) => button.tagName === 'BUTTON')).toBe(true);
   });
 

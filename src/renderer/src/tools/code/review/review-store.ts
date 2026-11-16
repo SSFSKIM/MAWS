@@ -2,8 +2,7 @@
 // (directory, scope, read) however many surfaces hold it (the panel's Review and a diff tab over the same scope share it),
 // re-read 250 ms after the last new status C8a's git store takes for the directory (its `git.changed`), one read in
 // flight per key; a scope past REVIEW_SCOPE_BYTES_CAP keeps its file list and fetches one file at a time. Last turn
-// reads no git: its files come from the transcript store. The held scopes are the cache Source control's store shares
-// (./held-diffs, P4 W2-B).
+// reads no git: its files come from the transcript store. The held scopes are kept in ./held-diffs (P4 W2-B).
 //
 // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §E and §G): which read a scope
 // takes. Where the machine serves the reads (`servesReads`), Uncommitted is the working tree against HEAD and This branch

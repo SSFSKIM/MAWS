@@ -58,8 +58,9 @@ describe('the source control tool’s registration', () => {
     await user.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: 'Source control' }));
     await waitFor(() => expect(rows()).toBe(8));
     expect(main.callsOf('git.watch')).toContainEqual({ directory: DIR });
-    expect(document.querySelectorAll('[data-scm-row], [data-scm-group], [data-scm-action]')).toHaveLength(0); // the acting pane is not mounted
-    expect(main.callsOf('scm.remote.last')).toEqual([]);
+    // only the page's reads are asked of the scm service: nothing of the acting pane runs (its markers and commands are
+    // held out of the source by test/source-control-reads-only.test.ts)
+    expect(main.calls.map((call) => call.name).filter((name) => name.startsWith('scm.') && name !== 'scm.status' && name !== 'scm.pr.state')).toEqual([]);
   });
 
   it('closes without asking', async () => {

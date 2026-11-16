@@ -89,7 +89,7 @@ import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
 // E6 start
-import { connectScmRunEnds, registerScmTool } from './tools/scm';
+import { registerScmTool } from './tools/scm';
 // E6 end
 // E3 start
 import { CommentComposerHost } from './side/CommentComposer';
@@ -294,8 +294,6 @@ export function App() {
   useEffect(() => {
     registerScmTool();
   }, []);
-  // and a run's end reads every PR state again, whether or not a Source control body is mounted
-  useEffect(() => connectScmRunEnds(), []);
   // E6 end
   // E3 start: side threads (E3 execution document, M3): the Side pane, registered once and never unregistered (C8a's
   // rule above); the comment composer in E5's seam and the transcript's summary-row Open

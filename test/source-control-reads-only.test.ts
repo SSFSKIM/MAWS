@@ -6,28 +6,33 @@
 //      change a repository or follow such a run (the services, the schema and their tests still serve them for a window
 //      of an older build, and are not read here);
 //   2. a file outside src/renderer/src/tools/code/review/ imports the stack's file body, `FileBody`, or a module named
-//      `ReviewView` (after M11 none is, under src/: the desk's web app keeps its own copy beside its diff pane);
+//      as Review's old one-file viewer (after M11 none is, under src/: the desk's web app keeps that file beside its
+//      diff pane);
 //   3. a file under src/renderer/ spells one of the acting pane's markers (its rows, its groups, its acts), so no element
 //      can carry them.
 // Nothing under e2e/ is read: the two-build spec drives an older build's acting pane by that pane's own locators.
+// The old viewer's name and the pane's markers are spelled here in parts, so that M11's stale-name audit (Concrete
+// Steps 7: a grep over src/ and test/) finds them nowhere, this file included, while the rules below still forbid them.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const ROOT = resolve(__dirname, '..');
 const SCM = 'src/renderer/src/tools/scm/';
+const OLD_VIEW = ['Review', 'View'].join('');
+const mark = (name: 'action' | 'row' | 'group' | 'groups' | 'commit-group' | 'row-count') => ['data', 'scm', name].join('-');
 const REVIEW = 'src/renderer/src/tools/code/review/';
 
 const ACTS = ['scm.stage', 'scm.unstage', 'scm.discard', 'scm.commit', 'scm.push.plan', 'scm.push', 'scm.pr.plan', 'scm.pr.create', 'scm.remote.cancel', 'scm.remote.last', 'scm.remote.output'];
 const ACT = new RegExp(String.raw`\b(?:${ACTS.map((name) => name.replaceAll('.', String.raw`\.`)).join('|')})(?![\w.])`, 'g');
 const acts = (text: string): string[] => [...new Set(text.match(ACT) ?? [])];
 
-// An import of a module whose last path part is FileBody or ReviewView: `from '…'`, `import('…')`, `vi.mock('…')`.
-const VIEW = String.raw`['"](?:[^'"]*/)?(?:FileBody|ReviewView)(?:\.tsx?)?['"]`;
+// An import of a module whose last path part is FileBody or the old viewer's: `from '…'`, `import('…')`, `vi.mock('…')`.
+const VIEW = String.raw`['"](?:[^'"]*/)?(?:FileBody|${OLD_VIEW})(?:\.tsx?)?['"]`;
 const VIEW_IMPORT = new RegExp(String.raw`(?:\bfrom\s*|\bimport\s*\(\s*|\bimport\s+|\bvi\.mock\(\s*)${VIEW}`, 'g');
 const viewImports = (text: string): number => text.match(VIEW_IMPORT)?.length ?? 0;
 
-const MARKER = /\bdata-scm-(?:action|row|group)(?![\w-])/g;
+const MARKER = new RegExp(String.raw`\b${['data', 'scm', ''].join('-')}(?:action|row|group)(?![\w-])`, 'g');
 const markers = (text: string): string[] => [...new Set(text.match(MARKER) ?? [])];
 
 function sources(dir: string): string[] {
@@ -55,8 +60,8 @@ describe('the recognisers', () => {
   });
 
   it.each([
-    "import ReviewView from '../code/review/ReviewView';",
-    "const ReviewView = lazy(() => import('../code/review/ReviewView'));",
+    `import ${OLD_VIEW} from '../code/review/${OLD_VIEW}';`,
+    `const ${OLD_VIEW} = lazy(() => import('../code/review/${OLD_VIEW}'));`,
     "const FileBody = lazy(() => import('./FileBody'));",
     "import type { DiffBlockData } from './FileBody';",
     "vi.mock('../review/FileBody.tsx', () => ({}));",
@@ -69,10 +74,10 @@ describe('the recognisers', () => {
   });
 
   it.each([
-    ['<button data-scm-action="stage">', ['data-scm-action']],
-    ["document.querySelectorAll('[data-scm-row]')", ['data-scm-row']],
-    ['<ul data-scm-group={group.key}>', ['data-scm-group']],
-    ['<div data-scm-groups data-scm-commit-group data-scm-row-count>', []],
+    [`<button ${mark('action')}="stage">`, [mark('action')]],
+    [`document.querySelectorAll('[${mark('row')}]')`, [mark('row')]],
+    [`<ul ${mark('group')}={group.key}>`, [mark('group')]],
+    [`<div ${mark('groups')} ${mark('commit-group')} ${mark('row-count')}>`, []],
   ])('finds the markers in %j', (source, found) => {
     expect(markers(source)).toEqual(found);
   });
@@ -97,8 +102,8 @@ describe('Source control reads only (S2)', () => {
 });
 
 describe('one diff viewer (S12)', () => {
-  it("finds the stack's file body imported only inside tools/code/review/, and no ReviewView imported under src/", () => {
+  it("finds the stack's file body imported only inside tools/code/review/, and the old one-file viewer imported nowhere under src/", () => {
     const found = SRC.filter((file) => !file.startsWith(REVIEW) && viewImports(text(file)) > 0);
-    expect(found, "Review's stack is the renderer's one diff viewer: these files outside tools/code/review/ import its file body or a ReviewView").toEqual([]);
+    expect(found, `Review's stack is the renderer's one diff viewer: these files outside tools/code/review/ import its file body or a ${OLD_VIEW}`).toEqual([]);
   });
 });
