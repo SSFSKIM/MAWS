@@ -47,7 +47,9 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/main/attention/actions.ts': { kind: 'typed', verbs: { command: 1 }, field: 'a notification’s reply field (`reply`)' },
   // MAWS's forms
   'src/renderer/src/owner/report/answering.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [{ form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK) }] },
-  'src/renderer/src/side/actions.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [ANCHORED] },
+  // the comments sent to the main conversation, and a thread's first message (`adoptFork`, which a session's start intent
+  // carries to services/sessions/setup.ts)
+  'src/renderer/src/side/actions.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [ANCHORED, PROMOTION] },
   'src/services/side/send-to-main.ts': { kind: 'maws', verbs: { command: 2 }, forms: [ANCHORED] },
   'src/renderer/src/tools/agents/relay-store.ts': { kind: 'maws', verbs: { steer: 2 }, forms: [{ form: 'a relay to an agent or a peer (`relayText`)', reader: 'RELAY_CONTINUE', sample: () => relayText({ agentId: 'a1b2' as AgentId, name: null }, `Read ${LINK}`) }] },
   'src/renderer/src/session/controls/lane-b.ts': { kind: 'maws', verbs: { command: 2, seam: 2, port: 1 }, forms: [{ form: 'Compact with instructions (`compact`: `/compact <instructions>`)', reader: 'TYPED_COMMAND (ruling C)', sample: () => `/compact keep ${LINK}` }], carries: 'the port of lane B: its send and its queue edit carry its callers’ content' },
