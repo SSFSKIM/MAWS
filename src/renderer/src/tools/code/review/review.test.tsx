@@ -23,6 +23,7 @@ import { FloatingSummary } from '../../../panel/summary/Summary';
 import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
+import { useMachines } from '../../../stores/machines'; // UX wave U5b-2: a machine that serves the reads
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { installResizeObserver } from '../../../test-support/resize';
 import { fakeStackLayout } from '../../../test-support/review-layout';
@@ -572,7 +573,16 @@ interface ReviewMainOptions {
 }
 function reviewMain(options: ReviewMainOptions = {}) {
   // `diff`: a test's own answer to a `git.diff` (a held one), else undefined for the scripted answers below
-  const state: { status: GitStatus; uncommitted: DiffAnswer; perFile: Record<string, DiffAnswer>; diff?: (input: Record<string, unknown>) => Promise<ReturnType<typeof ok>> | undefined } = {
+  // UX wave U5b-2: the three reads, answered where a case scripts them (`branch`, `since`, `commits`)
+  const state: {
+    status: GitStatus;
+    uncommitted: DiffAnswer;
+    perFile: Record<string, DiffAnswer>;
+    diff?: (input: Record<string, unknown>) => Promise<ReturnType<typeof ok>> | undefined;
+    branch?: () => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+    since?: (input: Record<string, unknown>) => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+    commits?: (input: Record<string, unknown>) => ReturnType<typeof ok> | Promise<ReturnType<typeof ok>>;
+  } = {
     perFile: {},
     status: options.status ?? DIRTY,
     uncommitted: options.uncommitted ?? {
@@ -594,6 +604,12 @@ function reviewMain(options: ReviewMainOptions = {}) {
         return ok({ value: null });
       case 'fs.workflows':
         return ok({ runs: [] });
+      case 'git.branchCommits':
+        return state.branch?.() ?? ok();
+      case 'git.changesSince':
+        return state.since?.(input) ?? ok();
+      case 'git.commitDiff':
+        return state.commits?.(input) ?? ok();
       case 'git.worktree.branch': // C10: the main worktree is on main
         return ok({ repoRoot: input.repoRoot, branch: input.branch, head: state.status.head, checkedOutAt: input.branch === 'main' ? '/repo' : null, base: 'main', ahead: 0, merged: true });
       default:
@@ -1535,6 +1551,80 @@ describe('review tool', () => {
     fireEvent.click(line);
     await waitFor(() => expect(header()).toBe('3 files changed · +3 −0'));
     expect(paths()).toEqual(['src/app.ts', 'src/staged.ts', 'scratch.txt']);
+  });
+});
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, M9; §E): "This branch" is the
+// working tree against the merge base with the repository's default branch, for every session, and a new file's lines are
+// counted, in its header and in the totals. The machine serves the reads (its `capabilities` list `rl2.git-reads`).
+describe('This branch and the new files counted (UX wave U5b-2)', () => {
+  const offs: (() => void)[] = [];
+  const MERGE_BASE = '9d0c1b2a39485766a5b4c3d2e1f0a9b8c7d6e5f4';
+  const FEATURE = statusOf({
+    branch: 'feature/x',
+    upstream: 'origin/feature/x',
+    dirty: true,
+    files: [
+      { path: 'src/app.ts', oldPath: null, index: '.', worktree: 'M', untracked: false },
+      { path: 'notes/berths.md', oldPath: null, index: '?', worktree: '?', untracked: true },
+    ],
+  });
+  const COMMITTED = ['diff --git a/src/committed.ts b/src/committed.ts', 'index 5..6 100644', '--- a/src/committed.ts', '+++ b/src/committed.ts', '@@ -1,2 +1,3 @@', ' one', '+two', ' three', ''].join('\n');
+  const COMMITTED_FILE = { path: 'src/committed.ts', oldPath: null, insertions: 1, deletions: 0, binary: false };
+  const UNTRACKED = [{ path: 'notes/berths.md', insertions: 12, binary: false }];
+  const branchAnswer = (over: Record<string, unknown> = {}) =>
+    ok({ base: { ref: 'origin/main', mergeBase: MERGE_BASE }, upstream: 'origin/feature/x', commits: [], counts: { all: 1, notPushed: 1, pushed: 0 }, behind: 0, ...over });
+  const serveReads = (capabilities: string[] = ['rl2.git-reads']) =>
+    useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:00:00.000Z', generation: 0, capabilities }]);
+
+  beforeAll(async () => {
+    await import('./FileBody');
+  });
+  beforeEach(() => {
+    resetPanelStores();
+    useReview.getState().reset();
+    resetDiffTabs();
+    useViewer.getState().reset();
+    current = reviewMain({ status: FEATURE });
+    main().state.branch = () => branchAnswer();
+    main().state.since = (input) =>
+      ok(input.against === 'HEAD' ? { patch: APP_PATCH, files: APP_FILES, untracked: UNTRACKED } : { patch: COMMITTED + APP_PATCH, files: [COMMITTED_FILE, ...APP_FILES], untracked: UNTRACKED });
+    useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/repo' })) }));
+    offs.push(connectPanelEvents(), registerPanelTool(reviewTool), registerPanelTool(filesTool));
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('shows a new file of twelve lines as "+12" beside "Untracked", and counts it in the totals, in Uncommitted and in This branch', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: 'HEAD' });
+    expect(badgeOf('notes/berths.md')).toBe('Untracked');
+    expect(countsOf('notes/berths.md')).toBe('+12');
+    expect(header()).toBe('2 files changed · +14 −0');
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    expect(countsOf('notes/berths.md')).toBe('+12');
+    expect(header()).toBe('3 files changed · +15 −0');
+  });
+
+  it('for a session in the main checkout on a feature branch: This branch is enabled, measured against the merge base with the default branch, and its footer reads "feature/x · Since origin/main"', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(chipOf('branch')?.disabled).toBe(false));
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    expect(main().callsOf('git.changesSince')).toContainEqual({ directory: '/repo', against: MERGE_BASE });
+    expect(main().callsOf('git.worktree.branch')).toEqual([]);
+    expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']); // a committed change, an uncommitted edit and a new file
   });
 });
 

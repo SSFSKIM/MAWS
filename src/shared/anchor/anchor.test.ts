@@ -1,5 +1,7 @@
 // X10's schema: E5's file-line anchor and E6's pr-line shape are members; the security caps and the one-line rule hold.
 import { describe, expect, it } from 'vitest';
+import * as z from 'zod';
+import { lineageAnchor, withoutScreenshot } from './content'; // UX wave U5b-2
 import { AnchorBoxSchema /* E4d */, anchorField, AnchorSchema, AnchorScreenshotSchema, type Anchor, type FileLineAnchor } from './anchor';
 
 const fileLine: FileLineAnchor = { kind: 'file-line', locator: '/r/src/app.ts#L7', label: 'app.ts:7', path: '/r/src/app.ts', line: 7 }; // E5's fileLineAnchor('/r/src/app.ts', 7)
@@ -136,3 +138,35 @@ describe('artifact-comment (P3-B)', () => {
   });
 });
 // P3-B end
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A and §K; decision 25): what a
+// side thread's lineage keeps of its first comment's anchor. Both builds that bind hold an anchor to a strict schema
+// with no `commit`, so a commit's anchor goes there without it, and without its repository-relative `path`; every other
+// anchor goes as `withoutScreenshot` makes it.
+describe('lineageAnchor (UX wave U5b-2)', () => {
+  // The anchor schema's keys as build 2c7044231 has them (`git show 2c7044231:src/shared/anchor/anchor.ts`), held here
+  const KEYS_2C7044231 = ['kind', 'locator', 'label', 'pageUrl', 'path', 'line', 'screenshot', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box', 'artifactId', 'threadId', 'artifactKind', 'artifactTarget'] as const;
+  const Older = z.strictObject(AnchorSchema.pick(Object.fromEntries(KEYS_2C7044231.map((key) => [key, true])) as Record<(typeof KEYS_2C7044231)[number], true>).shape);
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+  const onCommit: Anchor = { kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', path: 'src/berth-csv.ts', line: 32, side: 'old', commit: SHA, screenshot: { path: '/u/shot.png', width: 2, height: 2 } };
+
+  it('drops `commit`, `path` and the screenshot of a commit’s anchor; what is left parses under 2c7044231’s keys', () => {
+    expect(Older.safeParse(withoutScreenshot(onCommit)).success).toBe(false); // the first message's form keeps the commit
+    const kept = lineageAnchor(onCommit);
+    expect(kept).toEqual({ kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', line: 32, side: 'old' });
+    expect(Older.parse(kept)).toEqual(kept);
+  });
+
+  it('is withoutScreenshot of any other anchor, to the key: a file line keeps its path', () => {
+    const others: Anchor[] = [
+      { ...fileLine, screenshot: { path: '/u/shot.png', width: 2, height: 2 } },
+      { ...fileLine, side: 'old' },
+      { kind: 'pr-line', locator: 'https://github.com/o/r/pull/9/files#diff-abc', label: 'app.ts:12', pageUrl: 'https://github.com/o/r/pull/9/files', path: 'src/app.ts', line: 12, side: 'new', prNumber: 9 },
+      { kind: 'none', locator: 'btw', label: 'Side question' },
+    ];
+    for (const anchor of others) {
+      expect(lineageAnchor(anchor)).toStrictEqual(withoutScreenshot(anchor));
+      expect(Object.keys(lineageAnchor(anchor))).toEqual(Object.keys(withoutScreenshot(anchor)));
+    }
+  });
+});

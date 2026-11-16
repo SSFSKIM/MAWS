@@ -560,3 +560,54 @@ describe('a quoted line (UX wave U5b)', () => {
   });
 });
 // UX wave U5b end
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §A, M9): a comment on
+// a line of one commit's diff names that commit, in its lead and as its tag's last attribute; a tag without it is
+// written as before, to the byte.
+describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+  const SHA256 = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081';
+  const onNew: Anchor = { kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', path: 'src/berth-csv.ts', line: 32, side: 'new', commit: SHA };
+  const onOld: Anchor = { ...onNew, side: 'old' };
+
+  it('leads with the path in that commit, the line, the side and the full hash; the old side names the first parent of the commit', () => {
+    expect(anchorLead(onNew, false)).toBe(`Comment on "berth-csv.ts:32 · 3f9a1c2" (file src/berth-csv.ts, line 32, new side, commit ${SHA}):`);
+    expect(anchorLead(onOld, false)).toBe(`Comment on "berth-csv.ts:32 · 3f9a1c2" (file src/berth-csv.ts, line 32, old side, the first parent of commit ${SHA}):`);
+    expect(anchorLead({ ...onNew, commit: SHA256 }, false)).toContain(`commit ${SHA256})`);
+  });
+
+  it('writes `commit` as the tag’s last attribute, and a tag without it as before', () => {
+    expect(anchorTag(onNew)).toBe(`<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@${SHA}" path="src/berth-csv.ts" line="32" side="new" commit="${SHA}"/>`);
+    const { commit: _commit, ...without } = onNew;
+    expect(anchorTag(without)).toBe('<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c" path="src/berth-csv.ts" line="32" side="new"/>');
+    expect(anchorTag(fileLine)).toBe('<maws_anchor kind="file-line" label="src/x.ts:42" locator="/abs/src/x.ts#L42" path="/abs/src/x.ts" line="42"/>');
+  });
+
+  it('round-trips one comment and a message of two through readAnchoredMessage, each keeping its own hash', () => {
+    for (const destination of ['main', 'thread'] as const) {
+      const message = anchoredMessage({ anchor: onOld, text: 'Why was this guard dropped?', destination, screenshot: false });
+      expect(one(message)).toEqual({ anchor: onOld, text: 'Why was this guard dropped?', destination });
+    }
+    const other = { ...onNew, commit: '0000000000000000000000000000000000000abc', label: 'berth-csv.ts:32 · 0000000', locator: 'src/berth-csv.ts#L32@0000000000000000000000000000000000000abc' };
+    const two: MessageComment[] = [
+      { anchor: onNew, text: 'First.', screenshot: false },
+      { anchor: other, text: 'Second.', screenshot: false },
+    ];
+    expect(readAnchoredMessage(commentsMessage(two, 'main'))).toEqual({ comments: two, destination: 'main' });
+  });
+
+  it('quotes the line without "Before the change:" on a commit’s old side: the lead says the side', () => {
+    expect(quotedComment(onOld, 'return value;', 'Why?')).toBe('`return value;`\nWhy?');
+    expect(quotedComment(onNew, 'return quoted(value);', 'Why?')).toBe('`return quoted(value);`\nWhy?');
+    expect(quotedComment(onOld, null, 'Why?')).toBe('Why?');
+  });
+
+  it('refuses a commit that is not a whole lower-case object id', () => {
+    expect(AnchorSchema.safeParse(onNew).success).toBe(true);
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA256 }).success).toBe(true);
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA.slice(1) }).success).toBe(false); // 39 characters
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA.replace('f', 'F') }).success).toBe(false); // an upper-case letter
+    expect(AnchorSchema.safeParse({ ...onNew, commit: 'HEAD' }).success).toBe(false);
+  });
+});
+// UX wave U5b-2 end
