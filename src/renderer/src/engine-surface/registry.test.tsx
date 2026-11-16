@@ -215,6 +215,19 @@ describe('the second command, and the re-ask after a reload (M5)', () => {
     expect(fake.pending('session.ui.renderSite')).toBe(2);
   });
 
+  // Fix wave 1 (review Important 2): a session already running when the window opened is read into the sessions store
+  // from `engine.sessions` (`applyStatuses`), no `session.status` event among it. Its first reload is still a reload.
+  it('a session hydrated from the snapshot alone: its first reload, which pushes nothing, re-asks the mounted sites', async () => {
+    act(() => useSessions.getState().applyStatuses([{ ...status(ID), uiSurface: { clientId: 'maws-main' }, pluginsObservedAt: '2026-11-16T10:00:00.000Z' }], TEST_MACHINE));
+    render(<Line client={fake.client} />);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['before'] }, props: {}, rewritten: false, hooked: true }));
+    expect(fake.pending('session.ui.renderSite')).toBe(0);
+    observed('2026-11-16T10:05:00.000Z'); // the reload: a status with the plugins observed anew, and no invalidation
+    expect(fake.pending('session.ui.renderSite')).toBe(1);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['after'] }, props: {}, rewritten: false, hooked: true }));
+    expect(screen.getByTestId('u1~turn').textContent).toBe('after');
+  });
+
   it('a status whose plugins were observed anew re-asks the mounted sites; the same report asks nothing', async () => {
     observed('2026-11-16T10:00:00.000Z');
     render(<Line client={fake.client} />);

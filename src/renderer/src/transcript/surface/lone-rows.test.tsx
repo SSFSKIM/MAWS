@@ -195,7 +195,8 @@ describe('what stands under a row the mod draws', () => {
     act(() => invalidateSession(s.id));
     await waitFor(() => expect(inSight(view.container).trim()).not.toBe(''));
     expect(asks().map((ask) => ask.instanceId).every((id) => !id.includes(activity.id))).toBe(true);
-    expect(new Set(asks().map((ask) => `${ask.component} ${ask.instanceId}`))).toEqual(new Set([`${call.kind === 'group' ? 'ToolGroup group:t1' : 'ToolUse t1'}`]));
+    // a call the live derivation draws as a run asks its run's site, closed too (§E, a call's ask never changes kind)
+    expect(new Set(asks().map((ask) => `${ask.component} ${ask.instanceId}`))).toEqual(new Set(['ToolGroup group:t1']));
     publishFollows('t', null);
   });
 });

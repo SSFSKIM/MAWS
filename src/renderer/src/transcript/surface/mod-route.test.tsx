@@ -12,13 +12,14 @@ import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { RenderAnswer } from '@shared/engine/surface';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, ToolUseId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { status } from '../../../../../test/support/builders';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { at } from '../../../../../test/support/machine';
 import { connectEngineSurface } from '../../engine-surface/site';
 import { hookKey, invalidateSession, resetSurfaceRegistry, useSurfaceAnswers } from '../../engine-surface/registry';
+import { useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
 import { useTranscriptStore } from '../../stores/transcript';
 import { installFakeMain, ok } from '../../test-support/code';
@@ -69,6 +70,7 @@ afterEach(() => {
   vi.useRealTimers();
   for (const key of Object.keys(useTranscriptStore.getState().entries)) useTranscriptStore.getState().drop(key);
   useSessions.setState({ engine: new Map() });
+  useAttention.setState({ receipts: new Map() });
   resetSurfaceRegistry();
   delete (window as { maws?: unknown }).maws;
 });
@@ -153,7 +155,7 @@ describe('where the mod draws, over the seeded session the probe resumed (u2b-mo
   });
 
   // Reported point 21: the ask tool's call is the AskUserQuestion site's, under the call's id, and never a ToolUse ask
-  it('a question of the sminos ask tool asks AskUserQuestion under its call’s id, no ToolUse, and draws MAWS’s QuestionRow', async () => {
+  it('a question of the sminos ask tool asks AskUserQuestion under its call’s id, no ToolUse, and draws MAWS’s QuestionRow (no receipt staged)', async () => {
     attach();
     reply = (ask) => answerOf(rows9, ['seed rows'], ask);
     await mount(await seedEvents());
@@ -163,6 +165,48 @@ describe('where the mod draws, over the seeded session the probe resumed (u2b-mo
     expect(question.querySelector('[data-question]')!.getAttribute('title')).toBe(SEED_TEXT.question); // MAWS's QuestionRow
     expect(inSight(question)).toMatch(/^Archive→/);
     expect(question.querySelector('[data-plugin-drawn]')).toBeNull();
+  });
+});
+
+// Reported point 21 with R13: the question's row carries its receipt, so its answer's notice, a delivery the mod folds
+// (check 1's C5: a `UserMessage` of origin `plugin` anchored after the question heads a record line of its own), is no
+// second statement of the answer; the row is the one statement, outside the folded record
+describe('the ask tool’s question with its receipt (point 21, R13)', () => {
+  const rows9 = recordedAsks('u2b-mod-rows');
+  const QUESTION = 'Which archive should the notes go to?';
+  it('asks AskUserQuestion under its call’s id and no ToolUse; MAWS’s QuestionRow draws the receipt; the answer is stated once, outside the folded record', async () => {
+    const b = builder();
+    b.turn('u1', 'Sort the notes');
+    b.text('m0', 0, '<message>Sorting.</message>');
+    b.toolUse('q5', 'mcp__sminos__AskUserQuestion', { questions: [{ question: QUESTION, header: 'Archive', multiSelect: false, options: [{ label: 'Old', description: 'The old archive' }, { label: 'New', description: 'A new archive' }] }], async: true });
+    b.result('q5', 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.');
+    const summary = `Your questions have been answered: "${QUESTION}"="Old".`;
+    b.emit('user.message', { messageUuid: 'd1' as never, content: summary, isReplay: true, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [{ class: 'answer', tool: 'sminos', call: 'q5', summary, answers: null, dismissed: false }] });
+    b.toolUse('t2', 'Bash', { command: 'mv notes archive/old' });
+    b.result('t2', 'ok');
+    b.text('m1', 0, '<message>Moved to the old archive.</message>');
+    b.end(['u1']);
+    attach();
+    // the receipt, where QuestionRow reads it (the attention store's, as the card's follower writes it)
+    useAttention.setState((s) => ({ receipts: new Map([...s.receipts, [KEY, new Map([['q5' as ToolUseId, { answers: { [QUESTION]: 'Old' } }]])]]) }));
+    const folded = rows9.find((ask) => ask.label.startsWith('folded: C5 answer notice'))!.answer; // the mod's answer to the notice
+    reply = (ask) => (ask.component === 'UserMessage' && (ask.props.origin as { kind?: string } | undefined)?.kind === 'plugin' ? { ...folded, props: ask.props } : ENGINE(ask.props));
+    await mount(b.events);
+    const question = rowsOf().find((row): row is Extract<Row, { kind: 'question' }> => row.kind === 'question')!;
+    const notice = rowsOf().find((row): row is Extract<Row, { kind: 'notice' }> => row.kind === 'notice' && row.class === 'answer')!;
+    expect(notice).toBeDefined();
+    await waitFor(() => expect(asksOf(question.toolUseId).length).toBeGreaterThan(0));
+    expect(asksOf(question.toolUseId).map((ask) => ask.component)).toEqual(['AskUserQuestion']);
+    expect(asks().some((ask) => ask.component === 'ToolUse' && ask.instanceId === question.toolUseId)).toBe(false);
+    const drawn = slotOf(question)!;
+    expect(drawn.querySelector('[data-question]')!.getAttribute('title')).toBe(QUESTION);
+    expect(drawn.querySelector('[data-answer]')!.textContent).toBe('Old'); // the receipt, drawn
+    expect(drawn.querySelector('[data-answer="none"]')).toBeNull();
+    // the notice asked as the delivery the mod folds, and folded: it heads a record line, the answer nowhere in it
+    await waitFor(() => expect(seen(notice)).toBe('› working record'));
+    expect(asks().find((ask) => ask.instanceId.endsWith(`~${notice.id}`))!.props.origin).toEqual({ kind: 'plugin', name: 'sminos' });
+    // the answer stated once in sight, by the question's row
+    expect(sight().filter((row) => row.text !== null && /\bOld\b/.test(row.text)).map((row) => row.kind)).toEqual(['question']);
   });
 });
 

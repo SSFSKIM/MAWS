@@ -685,19 +685,21 @@ describe('the rows the to-human view folds each ask a site of their own (M5)', (
     expect(valid('UserMessage', input)).toBe(true);
   });
 
-  it('a scheduled trigger and the bridge’s wake ask under their own origins, the wake’s plugin named', () => {
-    for (const [arrival, origin] of [[{ class: 'schedule', prompt: 'tidy' }, { kind: 'scheduled-trigger' }], [{ class: 'wake' }, { kind: 'plugin', name: 'sminos' }]] as const) {
-      const b = builder();
-      b.turn('u1');
-      b.text('m', 0, 'Waiting.');
-      b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: true, isSynthetic: true, origin: arrival.class === 'wake' ? 'plugin' : 'scheduled-trigger', bash: null, arrival: [arrival as ArrivalEntry] });
-      const { rows, turn } = setup(b);
-      const notice = rows.find((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
-      if (notice === undefined) continue; // the class draws no notice row on this route
-      const input = arrivalInput(notice, turn, closed);
-      expect(input?.props.origin, arrival.class).toEqual(origin);
-      expect(valid('UserMessage', input), arrival.class).toBe(true);
-    }
+  // Each class's notice exists on this route (the case asserts it, and skips none)
+  it.each([
+    ['a scheduled trigger', { class: 'schedule', prompt: 'tidy' }, 'scheduled-trigger', { kind: 'scheduled-trigger' }],
+    ['the bridge’s wake', { class: 'wake' }, 'plugin', { kind: 'plugin', name: 'sminos' }],
+  ] as const)('%s asks under its own origin, the wake’s plugin named', (_name, arrival, carrierOrigin, origin) => {
+    const b = builder();
+    b.turn('u1');
+    b.text('m', 0, 'Waiting.');
+    b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: true, isSynthetic: true, origin: carrierOrigin, bash: null, arrival: [arrival as ArrivalEntry] });
+    const { rows, turn } = setup(b);
+    const notice = rows.find((r): r is Extract<Row, { kind: 'notice' }> => r.kind === 'notice');
+    expect(notice, arrival.class).toBeDefined();
+    const input = arrivalInput(notice!, turn, closed);
+    expect(input?.props.origin).toEqual(origin);
+    expect(valid('UserMessage', input)).toBe(true);
   });
 
   it('the session’s own sends ask no arrival', () => {

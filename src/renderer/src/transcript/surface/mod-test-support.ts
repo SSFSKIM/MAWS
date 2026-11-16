@@ -47,12 +47,12 @@ const CALLS: Record<CallKey, { tool: string; input: Record<string, unknown>; out
   },
 };
 
-/** The seed's transcript file, record by record as `seedRows` writes it. */
-export function seedTranscript(): string {
+// A transcript file's writer, as `seedRows` writes one: each record a second after the last, chained by `parentUuid`.
+function transcriptWriter(sessionId: string) {
   let t = Date.parse('2026-11-15T10:00:00.000Z');
   let parent: string | null = null;
   const rows: Record<string, unknown>[] = [];
-  const base = () => ({ parentUuid: parent, isSidechain: false, userType: 'external', entrypoint: 'sdk-ts', cwd: '/work', sessionId: SEED_SESSION, version: '2.1.322', gitBranch: 'master' });
+  const base = () => ({ parentUuid: parent, isSidechain: false, userType: 'external', entrypoint: 'sdk-ts', cwd: '/work', sessionId, version: '2.1.322', gitBranch: 'master' });
   const push = (row: Record<string, unknown> & { uuid: string }) => {
     t += 1000;
     rows.push({ ...row, timestamp: new Date(t).toISOString() });
@@ -68,11 +68,17 @@ export function seedTranscript(): string {
       uuid,
     });
   };
+  return { user, asst, setMsg: (n: number) => void (msg = n), text: () => rows.map((row) => `${JSON.stringify(row)}\n`).join('') };
+}
+
+/** The seed's transcript file, record by record as `seedRows` writes it. */
+export function seedTranscript(): string {
+  const { user, asst, setMsg, text } = transcriptWriter(SEED_SESSION);
   const call = (uuid: string, k: CallKey, opts: { id?: number; index?: number } = {}) => asst(uuid, { type: 'tool_use', id: SEED[k], name: CALLS[k].tool, input: CALLS[k].input }, { stop: 'tool_use', ...opts });
   const result = (uuid: string, k: CallKey, source: string) => user(uuid, [{ tool_use_id: SEED[k], type: 'tool_result', content: CALLS[k].out }], { toolUseResult: CALLS[k].out, sourceToolAssistantUUID: source });
   user(SEED.u1, SEED_TEXT.prompt, { origin: { kind: 'human' }, promptSource: 'sdk' });
   asst(SEED.a1, { type: 'thinking', thinking: SEED_TEXT.thought, signature: 'seed' }, { id: 1, index: 0, stop: 'tool_use' });
-  msg = 1;
+  setMsg(1);
   call(SEED.a2, 't1', { id: 1, index: 1 });
   result(SEED.r1, 't1', SEED.a2);
   call(SEED.a3, 't2');
@@ -91,13 +97,24 @@ export function seedTranscript(): string {
   result(SEED.r5, 't5', SEED.a8);
   user(SEED.u4, SEED_TEXT.answerDelivery, { origin: { kind: 'plugin', name: 'sminos' }, promptSource: 'system' });
   asst(SEED.a9, { type: 'text', text: SEED_TEXT.final });
-  return rows.map((row) => `${JSON.stringify(row)}\n`).join('');
+  return text();
 }
 
-/** The seed's events by the file route: the chain follower over the transcript, as `session.events` answers for it. */
-export async function seedEvents(): Promise<SessionEvent[]> {
+/** A session of one closed turn in the file the engine writes: a prompt, one call (`ONE_CALL`) and its result, a message. */
+export const ONE_CALL = 'toolu_01SeedOneCall0000000001';
+export function oneCallTranscript(tool = 'Bash', input: Record<string, unknown> = { command: 'ls notes', description: 'List the notes' }): string {
+  const { user, asst, text } = transcriptWriter(SEED_SESSION);
+  user(SEED.u1, 'List the invented notes.', { origin: { kind: 'human' }, promptSource: 'sdk' });
+  asst(SEED.a2, { type: 'tool_use', id: ONE_CALL, name: tool, input }, { stop: 'tool_use' });
+  user(SEED.r1, [{ tool_use_id: ONE_CALL, type: 'tool_result', content: 'alpha.txt' }], { toolUseResult: 'alpha.txt', sourceToolAssistantUUID: SEED.a2 });
+  asst(SEED.a9, { type: 'text', text: '<message>One note.</message>' });
+  return text();
+}
+
+/** A transcript's events by the file route (the seed's unless given): the chain follower over its bytes, as `session.events` answers for it. */
+export async function seedEvents(transcript = seedTranscript()): Promise<SessionEvent[]> {
   const events: SessionEvent[] = [];
-  const follower = new ChainFollower(new MemoryFileReader(seedTranscript()), SEED_SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
+  const follower = new ChainFollower(new MemoryFileReader(transcript), SEED_SESSION as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
   await follower.start();
   follower.stop();
   return events;
