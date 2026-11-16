@@ -14,7 +14,8 @@
 // The branch's max panel (the document's Decision Log 49 and 50): a read may be refused for now (`may`: the machine does
 // not serve the command at present); the refusal asks nothing and changes nothing drawn, and the read is owed until
 // `resume` finds it allowed. A target held by several holders is read for the earliest still holding it, so a holder
-// that left does not go on addressing its reads (its session, gone with it, would be named on another machine's reads).
+// that left does not go on addressing its reads (its session, gone with it, would be named on another machine's reads):
+// every read, asked now, again, on a retry or replayed as owed, takes the holder there at that moment (Decision Log 54).
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import type { GitChangesSinceInput, GitCommit, GitCommitDiffInput, GitDiff, GitDiffFile, GitDiffInput, GitUntrackedCount } from '@shared/ipc/schema/git';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -80,6 +81,9 @@ export interface HeldDiffs<T> {
   // again; its machine heard again); a target, or a file, that answered is not asked
   retryFailed(target: T): void;
   resume(): void; // Decision Log 49: every read `may` refused, of a target still held, asked now where it allows it
+  // Decision Log 54: the target a read of the diff keyed `key` is addressed by now (the earliest holder still holding it),
+  // for a read made beside the cache (a commit's membership check); null when none holds it
+  holderAt(key: string): T | null;
   clear(): void; // forgets every hold and file load; the store's reset empties its maps
 }
 
@@ -279,6 +283,10 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
         if (h.owed) void read(key);
         for (const [fileKey, owed] of [...owedFiles]) if (fileOf(key)(fileKey)) loadFile(h.target, owed.path, owed.read);
       }
+    },
+
+    holderAt(key) {
+      return held.get(key)?.target ?? null;
     },
 
     clear() {

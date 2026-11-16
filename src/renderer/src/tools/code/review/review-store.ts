@@ -18,6 +18,12 @@
 // stays drawn, and a read owed meanwhile is asked once they are served again. A disconnect leaves a drawn surface's
 // scopes on the reads they were made with.
 //
+// Who a read names (Decision Log 54): every read the store asks, now, later or again (a scope's, a file's, a retry, a
+// membership check, one owed and replayed), is addressed by a holder that is there when it is asked, never by the
+// requester as it was. What a tab keeps goes when the tab closes, its selection changes or its session's record is gone
+// (the store follows the sessions store, since no surface is drawn for a session without one); a tab retargeted to
+// another session on the same commit keeps the loaded answer and rebinds its hold.
+//
 // The status and the watch that keeps it current are C8a's `useGit`; the surfaces hold its watch while mounted.
 import { useEffect, useMemo, useState } from 'react';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
@@ -30,6 +36,7 @@ import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
 import { useMachines } from '../../../stores/machines';
+import { useSessions } from '../../../stores/sessions';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
 import { branchReadOf, useBranchReads } from './branch-read';
@@ -95,9 +102,11 @@ function readOf(t: DiffTarget, path?: string): DiffRead {
 
 export function createReviewStore(
   client: MawsBridge,
-  options: { git?: typeof useGit; machines?: typeof useMachines } = {},
+  options: { git?: typeof useGit; machines?: typeof useMachines; sessions?: typeof useSessions } = {},
 ): UseBoundStore<StoreApi<ReviewStore>> {
-  const { machines } = options;
+  const { machines, sessions } = options;
+  // Decision Log 54: a target's session is there while the sessions store holds its record (always, without that store)
+  const present = (t: DiffTarget): boolean => sessions === undefined || t.session === undefined || sessions.getState().records.has(t.session);
   // Decision Log 49: the three reads are asked only of a machine that serves them now (`git.diff` always); without the
   // machines store (a test's own store) every read may be asked
   const may = (t: DiffTarget): boolean => machines === undefined || t.read === 'git.diff' || servesReads(t.machine, machines.getState().machines) === true;
@@ -105,15 +114,19 @@ export function createReviewStore(
     // a commit's diff is kept (decision 17): read once, and asked again only where it failed
     const heldDiffs = createHeldDiffs(client, set, { keys, input: diffInput, read: readOf, kept: (t) => t.read === 'git.commitDiff', may });
     const checking = new Map<string, { again: boolean }>(); // a membership check in flight, by the commit's diffKey
-    const owedChecks = new Map<string, DiffTarget>(); // Decision Log 49: a membership check `may` refused, by the commit's diffKey
+    const owedChecks = new Set<string>(); // Decision Log 49: a membership check `may` refused, by the commit's diffKey
     const kept = new Map<object, { key: string; target: DiffTarget; release: () => void; head: string | null }>(); // by tab
     // M9 fix 2 (Decision Log 38, 2): a commit's membership belongs to the holds that asked it: the last release forgets it
     // and drops a check still out, as it forgets the diff, so the next full read's `onHead` stands until HEAD moves again
     const commitHolds = new Map<string, number>();
+    let epoch = 0; // bumped by `reset`: a release made before it touches nothing a hold after it made
 
-    const check = async (target: DiffTarget): Promise<void> => {
-      const key = keys.diff(target);
-      if (!may(target)) return void owedChecks.set(key, target);
+    // Decision Log 54: a membership check is addressed by a holder of the commit there when it is asked (now, again after
+    // the one in flight, or owed and replayed); with none left, nothing is asked
+    const check = async (key: string): Promise<void> => {
+      const holder = heldDiffs.holderAt(key);
+      if (holder === null || holder.against === null) return void owedChecks.delete(key);
+      if (!may(holder)) return void owedChecks.add(key);
       owedChecks.delete(key);
       const inFlight = checking.get(key);
       if (inFlight) {
@@ -122,18 +135,30 @@ export function createReviewStore(
       }
       const mine = { again: false };
       checking.set(key, mine);
-      const result = await settled(client.invoke('git.commitDiff', { directory: target.directory, commit: target.against!, patch: false }, pathTarget(target.machine, target.session)));
-      if (checking.get(key) !== mine) return; // reset meanwhile
+      const result = await settled(client.invoke('git.commitDiff', { directory: holder.directory, commit: holder.against, patch: false }, pathTarget(holder.machine, holder.session)));
+      if (checking.get(key) !== mine) return; // reset, or the commit let go, meanwhile
       checking.delete(key);
       if (result.ok) set((s) => ({ onHead: mapWith(s.onHead, key, result.value.onHead) }));
-      if (mine.again) void check(target);
+      if (mine.again) void check(key);
     };
 
     // The reads served again (Decision Log 49): what was refused meanwhile is asked
     machines?.subscribe((state, prev) => {
       if (state.machines === prev.machines) return;
       heldDiffs.resume();
-      for (const target of [...owedChecks.values()]) if (may(target)) void check(target);
+      for (const key of [...owedChecks]) void check(key);
+    });
+
+    // Decision Log 54: a tab whose session's record is gone lets go of what it keeps
+    const letGo = (tab: object) => {
+      const was = kept.get(tab);
+      if (!was) return;
+      kept.delete(tab);
+      was.release();
+    };
+    sessions?.subscribe((state, prev) => {
+      if (state.records === prev.records) return;
+      for (const [tab, entry] of [...kept]) if (!present(entry.target)) letGo(tab);
     });
 
     return {
@@ -146,11 +171,13 @@ export function createReviewStore(
         if (target.read !== 'git.commitDiff') return release;
         const key = keys.diff(target);
         commitHolds.set(key, (commitHolds.get(key) ?? 0) + 1);
+        const born = epoch;
         let released = false;
         return () => {
           if (released) return;
           released = true;
           release();
+          if (born !== epoch) return; // made before a reset: the counts are a later hold's
           const left = (commitHolds.get(key) ?? 1) - 1;
           if (left > 0) return void commitHolds.set(key, left);
           commitHolds.delete(key);
@@ -180,19 +207,27 @@ export function createReviewStore(
       retryFailed: heldDiffs.retryFailed,
 
       checkMembership(target) {
-        if (target.read === 'git.commitDiff' && target.against !== null) void check(target);
+        if (target.read === 'git.commitDiff' && target.against !== null) void check(keys.diff(target));
       },
 
       keepCommit(tab, target, read) {
         const was = kept.get(tab);
-        if (was && (target === null || was.key !== keys.diff(target))) {
-          kept.delete(tab); // the selection changed: what the tab loaded for the other commit goes
-          was.release();
+        // the selection changed (what the tab loaded for the other commit goes), or names a session that is gone
+        if (was && (target === null || was.key !== keys.diff(target) || !present(target))) letGo(tab);
+        if (target === null || !present(target)) return;
+        const held = kept.get(tab);
+        if (held) {
+          // Decision Log 54: the tab retargeted to another session on the same commit keeps the loaded answer, its hold
+          // rebound to that session (the new hold taken first, so the entry is never left without one)
+          if (held.target.session !== target.session) {
+            kept.set(tab, { ...held, target, release: get().hold(target) });
+            held.release();
+          }
+          // the tab drawn again, or able to read again, with its commit held: what of it failed is asked again (§G)
+          if (read) heldDiffs.retryFailed(target);
+          return;
         }
-        if (target === null || !read) return;
-        // the tab drawn again, or able to read again, with its commit held: what of it failed is asked again (§G)
-        if (kept.has(tab)) return void heldDiffs.retryFailed(target);
-        kept.set(tab, { key: keys.diff(target), target, release: get().hold(target), head: null });
+        if (read) kept.set(tab, { key: keys.diff(target), target, release: get().hold(target), head: null });
       },
 
       commitHead(tab, head) {
@@ -203,14 +238,10 @@ export function createReviewStore(
         if (before !== null && before !== head) get().checkMembership(entry.target);
       },
 
-      releaseTab(tab) {
-        const was = kept.get(tab);
-        if (!was) return;
-        kept.delete(tab);
-        was.release();
-      },
+      releaseTab: letGo,
 
       reset() {
+        epoch += 1;
         heldDiffs.clear();
         checking.clear();
         owedChecks.clear();
@@ -226,7 +257,7 @@ export function createReviewStore(
   return store;
 }
 
-export const useReview = createReviewStore(ipc, { git: useGit, machines: useMachines });
+export const useReview = createReviewStore(ipc, { git: useGit, machines: useMachines, sessions: useSessions });
 
 // ---- what a Review surface shows for a session's directory and a scope ----------------------------------------------
 
