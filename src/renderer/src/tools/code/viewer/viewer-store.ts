@@ -299,9 +299,11 @@ export function createViewerStore(client: MawsBridge) {
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const used = new Map<string, number>();
   const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
-  // UX wave U6b-2: each framed entry's ask in flight, from a counter that only grows, and whether a read landed while it
-  // was out (one more ask after its answer)
-  const asks = new Map<string, { id: number; again: boolean }>();
+  // UX wave U6b-2: each key's ask in flight, from a counter that only grows; whether a read landed while it was out (one
+  // more ask after its answer); and whether what asked has given its frame up (`obsolete`: the answer is released on
+  // arrival). The slot is held until the answer comes, whatever happened to the entry meanwhile, so a key never has two
+  // asks in flight (decision 5), across a kind change, a refusal or a replaced entry alike.
+  const asks = new Map<string, { id: number; again: boolean; obsolete: boolean }>();
   let lastAsk = 0;
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
@@ -330,10 +332,15 @@ export function createViewerStore(client: MawsBridge) {
     const release = (token: string | null) => {
       if (token !== null) void settled(client.invoke('layout.releaseFrame', { token }));
     };
-    // The entry's frame is given up: its token released, and its ask in flight, if any, left to be released on arrival.
+    // The entry's frame is given up: its token released, and its ask in flight, if any, made obsolete (its answer released
+    // on arrival), its slot kept until then.
     const dropFrame = (tabId: string) => {
       release(heldToken(get().entries.get(tabId)?.frame ?? null));
-      asks.delete(tabId);
+      const out = asks.get(tabId);
+      if (out) {
+        out.obsolete = true;
+        out.again = false;
+      }
     };
 
     const remove = (tabId: string) => {
@@ -441,26 +448,32 @@ export function createViewerStore(client: MawsBridge) {
     const ask = (tabId: string) => {
       const entry = get().entries.get(tabId);
       if (!entry || entry.kind !== 'frame' || entry.appSessionId === null) return;
+      const shown = entry.frame?.status === 'ready' ? entry.frame : entry.frame?.status === 'asking' ? entry.frame.shown : null;
       const out = asks.get(tabId);
       if (out) {
+        // behind the ask in flight, an obsolete one's included: the entry shows that it asks, and asks on its answer
         out.again = true;
+        if (entry.frame?.status !== 'asking') patch(tabId, { frame: { status: 'asking', shown } });
         return;
       }
       const id = ++lastAsk;
-      asks.set(tabId, { id, again: false });
-      patch(tabId, { frame: { status: 'asking', shown: entry.frame?.status === 'ready' ? entry.frame : null } });
+      asks.set(tabId, { id, again: false, obsolete: false });
+      patch(tabId, { frame: { status: 'asking', shown } });
       void settled(client.invoke('layout.frameFile', frameAsk(entry))).then((answer) => answered(tabId, id, answer));
     };
 
-    // Events A+, A0 and A×, in one synchronous step: only the entry's latest ask lands (an entry removed or replaced
-    // dropped it, so its token is released here); the token drawn before is released after the new frame is in place.
+    // Events A+, A0 and A×, in one synchronous step: the answer frees its key's slot; it lands only when nothing gave the
+    // frame up meanwhile (an entry removed, replaced, refused or no longer framed made it obsolete, so its token is
+    // released here, and an ask queued behind it goes now); the token drawn before is released after the new frame is in
+    // place.
     const answered = (tabId: string, id: number, answer: CommandResult<'layout.frameFile'>) => {
       const out = asks.get(tabId);
-      if (out?.id !== id) {
+      if (out?.id === id) asks.delete(tabId);
+      if (out?.id !== id || out.obsolete) {
         if (answer.ok && answer.value.status === 'ready') release(answer.value.token);
+        if (out?.id === id && out.again) ask(tabId);
         return;
       }
-      asks.delete(tabId);
       const before = heldToken(get().entries.get(tabId)?.frame ?? null);
       if (!answer.ok) {
         release(before);
@@ -900,7 +913,7 @@ export function createViewerStore(client: MawsBridge) {
 
       reset() {
         for (const entry of get().entries.values()) release(heldToken(entry.frame)); // UX wave U6b-2 (M5, decision 10)
-        asks.clear();
+        for (const out of asks.values()) Object.assign(out, { obsolete: true, again: false }); // answered, then released
         for (const hold of holds.values()) hold.release();
         holds.clear();
         generations.clear();
