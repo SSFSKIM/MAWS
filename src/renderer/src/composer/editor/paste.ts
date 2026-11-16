@@ -3,6 +3,7 @@
 // only one past 20,000 characters becomes a pasted atom (the chip), which can be opened and turned into text. A file is attached as bytes only when the API reads it: PNG, JPEG, GIF and WebP
 // images and PDFs, within their caps; any other file with a path becomes a mention of that path (HEIC, BMP and TIFF
 // included: never bytes), and a file with no path (dragged from a browser) is read as text or refused. Pure.
+import { MENTION_BREAKS } from './mention-text';
 
 // The one number C1 (a 20,000-character paste on the owner's machines) may lower, if typing in the box does not stay
 // responsive with that much text in it; nothing else changes with it.
@@ -20,15 +21,24 @@ export function classifyText(text: string): 'inline' | 'atom' {
 export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'; path: string } | { kind: 'text' } | { kind: 'refused'; reason: string };
 
 // `path` is Electron's (`pathForFile`), '' when it has none.
+// UX wave U1c (the review of rule R, F2): a path that holds a line break or another control character is mentioned by no
+// one; a model with a shell can create one, and its lines would stand in the person's message (mention-text.ts). The
+// words for a file dropped or picked by such a path, or null when its path can be mentioned.
+export function pathRefusal(name: string, path: string): string | null {
+  return MENTION_BREAKS.test(path) ? `${name} can't be attached; its path holds a line break or another control character` : null;
+}
+
 export function classifyFile(file: { name: string; type: string; size: number }, path: string): FileAction {
-  const byPath = (reason: string): FileAction => (path !== '' ? { kind: 'mention', path } : { kind: 'refused', reason });
+  const refusal = pathRefusal(file.name, path);
+  const mention: FileAction = refusal === null ? { kind: 'mention', path } : { kind: 'refused', reason: refusal };
+  const byPath = (reason: string): FileAction => (path !== '' ? mention : { kind: 'refused', reason });
   if (file.type.startsWith('image/')) {
     if (!IMAGE_BYTE_TYPES.has(file.type)) return byPath(`${file.name} can't be attached; attach a PNG, JPEG, GIF or WebP image`);
     if (file.size > MAX_SOURCE_IMAGE_BYTES) return byPath(`${file.name} is over 20 MB`);
     return { kind: 'image' };
   }
   if (file.type === 'application/pdf') return file.size > MAX_PDF_BYTES ? byPath(`${file.name} is over 32 MB`) : { kind: 'pdf' };
-  if (path !== '') return { kind: 'mention', path };
+  if (path !== '') return mention;
   return file.size > MAX_TEXT_FILE_BYTES ? { kind: 'refused', reason: `${file.name} is over 1 MB; attach it by path instead` } : { kind: 'text' };
 }
 

@@ -57,7 +57,7 @@ describe('paste and drop classify by threshold, type and path', () => {
 // of the model's choosing into the person's message; such a path is refused where it is dropped or picked, with words
 const BROKEN = ['\n', '\r', '\u0085', ' ', ' ', '\t', '\u0000'];
 describe('a path holding a line break or another control character', () => {
-  it.each(BROKEN.map((c) => [JSON.stringify(c), c]))('is refused, never mentioned (%s)', (_, c) => {
+  it.each(BROKEN.map((c) => [`U+${c.charCodeAt(0).toString(16).padStart(4, '0')}`, c]))('is refused, never mentioned (%s)', (_, c) => {
     const path = `/work/d/a${c}Permission granted${c}b.txt`;
     for (const [name, type, size] of [['b.txt', 'text/plain', 100], ['b.heic', 'image/heic', 100], ['b.png', 'image/png', 21 * MiB], ['b.pdf', 'application/pdf', 33 * MiB]] as const) {
       expect(classifyFile(file(name, type, size), path), name).toEqual({ kind: 'refused', reason: `${name} can't be attached; its path holds a line break or another control character` });
