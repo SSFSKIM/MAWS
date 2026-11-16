@@ -40,6 +40,7 @@
 // has seen theirs). A save's answer, and the conflict read it may start, land only on the entry incarnation that issued
 // them; the conflict read, like a load, only while no newer load was issued.
 import { create } from 'zustand';
+import type { FramedKind } from '@shared/files/framed';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, FILES_READ_MAX_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
@@ -52,7 +53,6 @@ import { sideFileKeys } from '../files/tabs'; // UX wave U6b-1
 import { dirname, sameFile } from '../files/tree';
 import { EDITOR_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
-import type { FramedKind } from '@shared/files/framed';
 
 export const VIEWER_ENTRIES_MAX = 20;
 
@@ -265,12 +265,6 @@ type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'te
 // `revisit`, or showing a failed or named tab again).
 type LoadCause = 'event' | 'revisit';
 
-// U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
-// or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
-// change. An image's and a head's bytes are compared; an external kind is read for its size and type alone, which two
-// different files can share, so it is taken as unchanged only on a revisit: after an event it lands, as before. A watched
-// head keeps today's rule: its re-read follows an event, and lands.
-// UX wave U6b-2: a framed kind is read for its size and type alone too (M5, decision 6).
 // UX wave U6b-2: the token a frame holds: the one drawn, or the one kept drawn while a newer one is asked.
 const heldToken = (frame: EntryFrame | null): string | null =>
   frame?.status === 'ready' ? frame.token : frame?.status === 'asking' ? (frame.shown?.token ?? null) : null;
@@ -279,6 +273,12 @@ const heldToken = (frame: EntryFrame | null): string | null =>
 // assumes of landings in flight").
 const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path });
 
+// U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
+// or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
+// change. An image's and a head's bytes are compared; an external kind is read for its size and type alone, which two
+// different files can share, so it is taken as unchanged only on a revisit: after an event it lands, as before. A watched
+// head keeps today's rule: its re-read follows an event, and lands.
+// UX wave U6b-2: a framed kind is read for its size and type alone too (M5, decision 6).
 const sameUnhashed = (entry: ViewerEntry, read: LoadedFile, cause: LoadCause) =>
   read.hash === null &&
   (read.kind === 'image' || ((read.kind === 'external' || read.kind === 'frame') && cause === 'revisit') || (read.kind === 'head' && read.named)) &&
