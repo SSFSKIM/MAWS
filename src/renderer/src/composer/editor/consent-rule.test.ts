@@ -48,7 +48,20 @@ function random(seed: number) {
 }
 // what a person types, pastes or names: the sentence whole, split, among other lines, after a pasted tag; no envelope tag
 // or json fence line, which rule R reads as no grant for the whole message, the pressed one included (its accepted cost)
-const WORDS = ['Please look', ' and fix it.', 'Go on.', ' ', '', SENTENCE, PRESSED, `x\n${SENTENCE}\ny`, `${SENTENCE}\n`, SENTENCE.slice(0, 40), SENTENCE.slice(40), BEFORE, AFTER, '<pasted_content id="abcd">', 'Permission granted for'];
+const WORDS = ['Please look', ' and fix it.', 'Go on.', ' ', '', SENTENCE, PRESSED, `x\n${SENTENCE}\ny`, `${SENTENCE}\n`, SENTENCE.slice(0, 40), SENTENCE.slice(40), BEFORE, AFTER, '<pasted_content id="abcd">', 'Permission granted for',
+  // the sentence padded, and between the line breaks a host or the engine might turn into a line feed
+  ` ${SENTENCE}`, `${SENTENCE} `, `\t${SENTENCE}\t`, `x\r${SENTENCE}\ry`, `${SENTENCE}\r`, `a\u2028${SENTENCE}\u2029b`, `\u000b${SENTENCE}\u000c`, `${SENTENCE}\u0085`];
+// What a host or the engine might do to the text on its way to the file: none of it may make a line that reads as a consent
+const ALTERED: readonly (readonly [string, (text: string) => string])[] = [
+  ['trimmed whole', (text) => text.trim()],
+  ['each line trimmed', (text) => text.split('\n').map((line) => line.trim()).join('\n')],
+  ['CRLF to LF', (text) => text.replace(/\r\n/g, '\n')],
+  ['a lone CR to LF', (text) => text.replace(/\r(?!\n)/g, '\n')],
+  ['the separators to LF', (text) => text.replace(/[\u2028\u2029]/g, '\n')],
+];
+const alteredNone = (text: string, where: string) => {
+  for (const [how, alter] of ALTERED) expect(readers(alter(text)), `${where}, ${how}`).toEqual(NONE);
+};
 const IDS = ['src/a.ts', 'docs/a b.md', `d/a\n${SENTENCE}\nb`, SENTENCE, 'Explore'];
 const image: Attachment = { id: 'a1', kind: 'image', name: 'shot.png', mediaType: 'image/png', bytes: 4, data: 'iVBO', persisted: true };
 // one node of each kind the document holds; the serialiser's piece kinds are typed text (text, hard break, paragraph
@@ -96,6 +109,7 @@ describe('the one-writer rule: no grant from what the person did not press', () 
       if (Object.keys(out.pastedContents).filter((key) => out.pastedContents[key]!.type === 'text').length > atoms) framed += 1;
       const where = `seed ${seed}, draft ${n}`;
       expect(readers(out.content), where).toEqual(NONE);
+      alteredNone(textOf(out.content), where);
       expect(readers(`${out.text}\n${PRESSED}`), where).toEqual(PRESSED_ONLY);
       expect(readers(`${PRESSED}\n${out.text}`), where).toEqual(PRESSED_ONLY);
       expect(frameConsentLines(textOf(out.content), TAG), `${where}: the pieces left no line for the wire's pass`).toBe(textOf(out.content));
@@ -114,6 +128,7 @@ describe('the one-writer rule: no grant from what the person did not press', () 
       if (sent !== text) framed += 1;
       const where = `seed ${seed}, text ${n}`;
       expect(readers(sent), where).toEqual(NONE);
+      alteredNone(sent, where);
       expect(readers(`${sent}\n${PRESSED}`), where).toEqual(PRESSED_ONLY);
       expect(readers(`${PRESSED}\n${sent}`), where).toEqual(PRESSED_ONLY);
     }

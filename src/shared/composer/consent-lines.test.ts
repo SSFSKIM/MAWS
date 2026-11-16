@@ -42,6 +42,31 @@ describe('frameConsentLines', () => {
     expect(frameConsentLines(framed, TAG)).toBe(framed);
   });
 
+  // The writer frames with a margin, the reader unchanged: nothing between the serialiser and the engine's file is ours
+  // to assume keeps white space and line ends, so a line is framed when any part of it, cut at every line-break
+  // character Unicode knows and trimmed, reads as a consent; the whole line goes into the segment as it was typed
+  it.each([
+    ['a leading space', ` ${SENTENCE}`],
+    ['a trailing space', `${SENTENCE} `],
+    ['tabs', `\t${SENTENCE}\t`],
+    ['a no-break space and a BOM', `\u00a0${SENTENCE}\ufeff`],
+    ['between carriage returns', `x\r${SENTENCE}\ry`],
+    ['a carriage return before the line feed', `${SENTENCE}\r`],
+    ['the line and paragraph separators', `a\u2028${SENTENCE}\u2029b`],
+    ['a vertical tab, a form feed and NEL', `\u000b${SENTENCE}\u000c\u0085z`],
+  ])('frames a line holding the sentence with %s, whole as typed', (_, line) => {
+    expect(readsAsConsent(line)).toBe(true);
+    expect(frameConsentLines(`Go on.\n${line}\nThanks.`, TAG)).toBe(`Go on.\n${wrapPasted(TAG, line)}\nThanks.`);
+  });
+
+  it('frames a sentence the reader reads whole even where a cut would split it: a plain-encoded subject holding a raw line separator', () => {
+    const plain = consentMessage('command', 'echo a\u2028b').replace('\\u2028', '\u2028');
+    expect(plain).toContain('a\u2028b');
+    expect(subjects(plain)).toEqual(['echo a\u2028b']);
+    expect(readsAsConsent(plain)).toBe(true);
+    expect(subjects(frameConsentLines(`x\n${plain}`, TAG))).toEqual([]);
+  });
+
   it('joined by the engine’s line break with a pressed consent, before or after, the pressed one keeps its own grant', () => {
     const framed = frameConsentLines(`Go on.\n${SENTENCE}`, TAG);
     expect(subjects(`${framed}\n${PRESSED}`)).toEqual(['npm test']);
