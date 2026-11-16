@@ -927,13 +927,15 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
 // the agent asked without waiting, answered while a turn runs, waits in the stack as what it is. The envelope MAWS sends
 // the model for one invented question is handed to the running turn through `session.steer`, as the answered sheet hands
 // it (the replay matches a user write by its type, not its text, so `steerStopJournal`'s steer at seq 146 takes it). The
-// window holds no row of the ask, so the row's title is the answer's own copy of the question. It offers Send now alone;
-// ↑ in the empty box skips it and walks the history; after the square's Stop it reads the same, marked Held.
+// window holds no row of the ask, and the envelope's form since board ticket 711 holds no text the model wrote (each
+// question by its place, a pick by `option <k>`), so the row has no title and reads the bare words, the pick by its
+// place, as every reader without the ask's call reads it. It offers Send now alone; ↑ in the empty box skips it and
+// walks the history; after the square's Stop it reads the same, marked Held.
 const ASKED: AskQuestion = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
 const ANSWERED: AskAnswer = { id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] };
-const ANSWER_ROW = `Answer to ${ASKED.question}: Grid`; // Interfaces A: `answer(title, words)`, the title the answer's own question here
+const ANSWER_ROW = 'Answer: option 1'; // Interfaces A: `answerBare(words)`, no ask's questions in hand (board ticket 711)
 
-test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers Send now alone, ↑ walks the history past it, and after Stop it reads the same, Held', async ({ editor }) => {
+test('U4b, a waiting answer: the stack’s row reads “Answer: …”, offers Send now alone, ↑ walks the history past it, and after Stop it reads the same, Held', async ({ editor }) => {
   const { page } = editor;
   const id = 'u4b-answer';
   await countRunning(page, id, steerStopJournal(scratch, id));
