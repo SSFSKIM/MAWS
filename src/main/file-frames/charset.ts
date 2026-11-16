@@ -35,10 +35,14 @@ function declaresCharset(head: Uint8Array): boolean {
   return false;
 }
 
-// The meta start tags of the head in order, comments skipped as the HTML standard's encoding prescan skips them: a comment
-// runs from `<!--` to the first `>` preceded by `--` after its `<` (the two dashes may be the opening's, so `<!-->` is a
-// whole comment), and one never closed runs to the head's end. A meta tag is read whole, so a `<!--` inside its quoted
-// value opens no comment.
+// The meta start tags of the head in order, read as the HTML standard's encoding prescan walks the bytes (Decision Log 31):
+// - a comment runs from `<!--` to the first `>` preceded by `--` after its `<` (the two dashes may be the opening's, so
+//   `<!-->` is a whole comment), and one never closed runs to the head's end;
+// - a meta tag is read whole;
+// - any other tag (`<` or `</`, then an ASCII letter) is read to its first space or `>`, then attribute by attribute, a
+//   quoted value whole, so a `<!--` or a `<meta` inside a value is neither a comment nor a tag;
+// - `<!`, `</` or `<?` followed by anything else runs to the next `>`.
+// Wherever the head ends inside one of these, the scan ends.
 function* metaTags(text: string): Generator<string> {
   for (let at = text.indexOf('<'); at !== -1; at = text.indexOf('<', at)) {
     if (text.startsWith('<!--', at)) {
@@ -49,8 +53,63 @@ function* metaTags(text: string): Generator<string> {
     }
     META.lastIndex = at;
     const tag = META.exec(text);
-    at = tag === null ? at + 1 : META.lastIndex;
-    if (tag !== null) yield tag[0];
+    if (tag !== null) {
+      at = META.lastIndex;
+      yield tag[0];
+      continue;
+    }
+    const next = text[at + 1];
+    const letter = next === '/' ? at + 2 : at + 1;
+    if (isAsciiLetter(text[letter])) at = pastTag(text, letter);
+    else if (next === '!' || next === '/' || next === '?') at = text.indexOf('>', at + 1) + 1;
+    else at += 1;
+    if (at <= 0) return; // the head ended inside the tag
+  }
+}
+
+const isSpace = (c: string | undefined) => c === '\t' || c === '\n' || c === '\f' || c === '\r' || c === ' ';
+const isAsciiLetter = (c: string | undefined) => c !== undefined && ((c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z'));
+
+// Past a tag that is not `meta`, from its name's first letter, as the prescan's "get an attribute" reads it: to the first
+// space or `>`, then attributes until there is none; the place after its `>`, or 0 where the head ends first.
+function pastTag(text: string, from: number): number {
+  let at = from;
+  while (at < text.length && !isSpace(text[at]) && text[at] !== '>') at += 1;
+  for (;;) {
+    const got = pastAttribute(text, at);
+    if (got === null) return 0;
+    if (!got.attribute) return got.at + 1;
+    at = got.at;
+  }
+}
+
+// One attribute, read and passed over: where the scan stands after it, and whether there was one (none at the tag's `>`);
+// null where the head ends inside it.
+function pastAttribute(text: string, from: number): { at: number; attribute: boolean } | null {
+  let at = from;
+  while (isSpace(text[at]) || text[at] === '/') at += 1;
+  if (at >= text.length) return null;
+  if (text[at] === '>') return { at, attribute: false };
+  // the name: a first byte of any kind (an `=` among them), then up to `=`, a space, `/` or `>`
+  for (at += 1; ; at += 1) {
+    if (at >= text.length) return null;
+    if (text[at] === '=' || isSpace(text[at])) break;
+    if (text[at] === '/' || text[at] === '>') return { at, attribute: true };
+  }
+  while (isSpace(text[at])) at += 1;
+  if (at >= text.length) return null;
+  if (text[at] !== '=') return { at, attribute: true };
+  for (at += 1; isSpace(text[at]); ) at += 1;
+  if (at >= text.length) return null;
+  const quote = text[at];
+  if (quote === '"' || quote === "'") {
+    const close = text.indexOf(quote, at + 1);
+    return close === -1 ? null : { at: close + 1, attribute: true };
+  }
+  if (quote === '>') return { at, attribute: true };
+  for (at += 1; ; at += 1) {
+    if (at >= text.length) return null;
+    if (isSpace(text[at]) || text[at] === '>') return { at, attribute: true };
   }
 }
 
