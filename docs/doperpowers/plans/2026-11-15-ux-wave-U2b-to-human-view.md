@@ -1216,7 +1216,7 @@ Counted from the code at `3f2c4fca1` (files named in each milestone, the tests t
 | M4 | 46 | +1,950 −80 | the decision's pure functions, the declaration's reader, the reservation, the status's subscription, one command through the host, one wire minor; for the summary, the reader of the mod's file, two commands, the switch's key and its value in a launch |
 | M5 | 24 | +1,250 −100 | the surface rows and their inputs, the reveal, the cutover's switch |
 | M7 | 30 | +1,200 −30 | the label's rule and the one lookup rule, the shared table's copy and its test, what a window last read and its rounds, the row's label, the mods list's switch |
-| M6 | 12 | +900 −60 | scenes (the trial, two cross-build, the summary's and the switch's), the record's second line |
+| M6 | 12 | +900 −60 | scenes (the trial, four cross-build since the I4 ruling, the summary's and the switch's), the record's second line |
 | **the second pull request** | **about 110** | **about 5,600** | |
 | P (doperpowers), as built at `e511aad9` | 17 | +1,371 −112 | the gate, the declaration, the placement, the turn line's rule, the tracker's gate, the value that turns summaries off, the file's contract (replacement, merge, shape 2), the lookup's one change and its table of cases, their tests, the check script, the sentences |
 
