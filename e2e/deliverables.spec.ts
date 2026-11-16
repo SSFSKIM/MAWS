@@ -961,18 +961,48 @@ async function mountFrames(page: Page, items: Array<{ id: string; kind: FramedKi
   }, items);
 }
 
-/** The elements gone, a media element's load ended first so it asks for nothing more. */
-async function unmountFrames(page: Page, ids: string[]): Promise<void> {
-  await page.evaluate((list) => {
+/**
+ * The elements' request producers settled, by state, then the elements gone: each frame navigated to `about:blank` and
+ * the blank page seen in it (the document that asked is torn down, its loads ended), each media element's source dropped
+ * and its network state empty (it asks for nothing more).
+ */
+async function settleFrames(page: Page, ids: string[]): Promise<void> {
+  await page.evaluate(async (list) => {
+    const settled: Array<Promise<void>> = [];
     for (const id of list) {
       const element = document.getElementById(id);
       if (element instanceof HTMLMediaElement) {
         element.pause();
         element.removeAttribute('src');
         element.load();
+        settled.push(
+          new Promise<void>((resolve) => {
+            const check = () => (element.networkState === HTMLMediaElement.NETWORK_EMPTY ? resolve() : requestAnimationFrame(check));
+            check();
+          }),
+        );
+      } else if (element instanceof HTMLIFrameElement) {
+        // unsandboxed, the blank page is the app page's own origin, so its address is readable once it has replaced the
+        // framed document (a load the framed document itself fires first is not taken for it)
+        settled.push(
+          new Promise<void>((resolve) => {
+            const blank = () => {
+              try {
+                return element.contentWindow?.location.href === 'about:blank';
+              } catch {
+                return false;
+              }
+            };
+            const loaded = () => (blank() ? resolve() : element.addEventListener('load', loaded, { once: true }));
+            element.addEventListener('load', loaded, { once: true });
+          }),
+        );
+        element.removeAttribute('sandbox');
+        element.setAttribute('src', 'about:blank');
       }
-      element?.remove();
     }
+    await Promise.all(settled);
+    for (const id of list) document.getElementById(id)?.remove();
   }, ids);
 }
 
@@ -1001,6 +1031,23 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     }
     const owner = String(await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.id));
     const lines = () => frameLines(seamLines(s));
+    const tokenRoots = kinds.map((kind) => urls[kind].slice(0, urls[kind].indexOf('/', 'maws-artifact://'.length) + 1)); // `maws-artifact://<token>/`
+    const onToken = (line: FrameLine) => tokenRoots.some((root) => line.url.startsWith(root));
+
+    // A completion boundary in the seam log: a request main makes for a name under a live token, which the request filter
+    // cancels (no web contents asked) and records through the same ordered writer as every decision and entry. Once its
+    // line is in the log, so is every line written before it; the answer is the log's length through that line, and a
+    // record read up to it is complete.
+    let marks = 0;
+    const mark = async (): Promise<number> => {
+      const url = `${tokenRoots[0]}u6b2-mark-${++marks}`;
+      await s.maws.app.evaluate(async ({ session }, target) => session.defaultSession.fetch(target).then(() => undefined, () => undefined), url);
+      let at = -1;
+      await expect.poll(() => (at = seamLines(s).findIndex((line) => line.startsWith('frame-decision ') && line.endsWith(` ${url}`))), { message: `the boundary ${marks} reached the log` }).toBeGreaterThanOrEqual(0);
+      expect(seamLines(s)[at], 'the boundary’s request is cancelled').toBe(`frame-decision cancel none GET ${url}`);
+      return at + 1;
+    };
+    const record = (from: number, to: number) => frameLines(seamLines(s).slice(from, to));
 
     // the owning window: each kind mounted; the video and the sound seeked to a time not yet loaded
     const mounted = kinds.map((kind) => ({ id: `u6b2-${kind}`, kind, url: urls[kind] }));
@@ -1017,44 +1064,57 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     await expect.poll(() => walkFrame(lines(), urls.video).ranges.some((range) => range.startsWith('bytes=')), { message: 'the video asked a range' }).toBe(true);
     await expect.poll(() => walkFrame(lines(), urls.audio).ranges.some((range) => /^bytes=[1-9]\d*-/.test(range)), { message: 'the sound’s seek asked a range past its start' }).toBe(true);
     await expect.poll(() => s.page.locator('#u6b2-audio').evaluate((element: HTMLMediaElement) => element.seeking)).toBe(false);
+    await settleFrames(s.page, mounted.map((m) => m.id));
+    const ownerEnd = await mark();
     for (const kind of kinds) {
-      const walked = walkFrame(lines(), urls[kind]);
+      const walked = walkFrame(record(0, ownerEnd), urls[kind]);
       console.log(`[u6b2-record] ${kind}: entries ${walked.entries}, ranges ${walked.ranges.join(', ')}, passed for ${walked.passedFor.join(',')} (owner ${owner})`);
       expect(walked.entries, kind).toBeGreaterThan(0);
-      expect(walked.unmatched, `${kind}: an entry with no passed decision before it`).toBe(0);
-      expect(walked.passedFor, `${kind}: every passed decision names the owning window`).toEqual([owner]);
     }
-    await unmountFrames(s.page, mounted.map((m) => m.id));
 
     // a second app window told every URL: its requests are cancelled with its own id, and none reaches the responder
     const [second, windowId] = await Promise.all([s.maws.app.waitForEvent('window'), s.maws.app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow())]);
     await second.waitForLoadState('domcontentloaded');
     const asker = String(await s.maws.app.evaluate(({ BrowserWindow }, ref) => BrowserWindow.fromId(ref)!.webContents.id, windowId));
     expect(asker).not.toBe(owner);
-    let from = seamLines(s).length;
-    await mountFrames(second, kinds.map((kind) => ({ id: `u6b2-other-${kind}`, kind, url: urls[kind] })));
-    const since = () => frameLines(seamLines(s).slice(from));
+    const secondStart = ownerEnd;
+    const others = kinds.map((kind) => ({ id: `u6b2-other-${kind}`, kind, url: urls[kind] }));
+    await mountFrames(second, others);
     for (const kind of kinds) {
-      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === asker), { message: `${kind}: the second window’s request cancelled` }).toBe(true);
+      await expect.poll(() => frameLines(seamLines(s).slice(secondStart)).some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === asker), { message: `${kind}: the second window’s request cancelled` }).toBe(true);
     }
-    let after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
-    expect(after.filter((line) => line.kind === 'entry'), 'no entry for the second window').toEqual([]);
-    expect(after.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass for the second window').toEqual([]);
+    await settleFrames(second, others.map((m) => m.id));
+    const secondEnd = await mark();
+    let phase = record(secondStart, secondEnd).filter(onToken);
+    expect(phase.filter((line) => line.kind === 'entry'), 'no entry while the second window asked').toEqual([]);
+    expect(phase.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass while the second window asked').toEqual([]);
 
     // the capture partition: a request for each live token is cancelled there too, and none reaches a responder
-    from = seamLines(s).length;
+    const captureStart = secondEnd;
     const fromCapture = await s.maws.app.evaluate(
       async ({ session }, list) => Promise.all(list.map((url) => session.fromPartition('maws-capture').fetch(url).then((answer) => `answered ${answer.status}`, () => 'refused'))), // CAPTURE_PARTITION, src/render/capture.ts
       kinds.map((kind) => urls[kind]),
     );
     console.log(`[u6b2-record] the capture partition answered ${fromCapture.join(', ')}`);
+    const captureEnd = await mark(); // every fetch above has answered, so the partition asks nothing more
+    phase = record(captureStart, captureEnd).filter(onToken);
     for (const kind of kinds) {
-      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === 'none'), { message: `${kind}: the capture partition’s request cancelled` }).toBe(true);
+      expect(phase.some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === 'none'), `${kind}: the capture partition’s request cancelled`).toBe(true);
     }
-    after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
-    expect(after.filter((line) => line.kind === 'entry'), 'no entry for the capture partition').toEqual([]);
-    expect(after.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass on the capture partition').toEqual([]);
+    expect(phase.filter((line) => line.kind === 'entry'), 'no entry for the capture partition').toEqual([]);
+    expect(phase.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass on the capture partition').toEqual([]);
     expect(fromCapture.filter((answer) => answer === 'answered 200' || answer === 'answered 206')).toEqual([]);
+
+    // the whole completed record, from the scene's start to the last boundary: for each URL and method, its entries never
+    // outnumber the passed decisions before them, every pass names the owning window, and nothing under a token's root
+    // other than the four URLs reached a responder
+    const whole = record(0, captureEnd);
+    for (const kind of kinds) {
+      const walked = walkFrame(whole, urls[kind]);
+      expect(walked.unmatched, `${kind}: an entry with no passed decision before it`).toBe(0);
+      expect(walked.passedFor, `${kind}: every passed decision names the owning window`).toEqual([owner]);
+    }
+    expect(whole.filter((line) => onToken(line) && !kinds.some((kind) => line.url === urls[kind]) && (line.kind === 'entry' || line.answer === 'pass')), 'no boundary request passed or answered').toEqual([]);
   });
 });
 
