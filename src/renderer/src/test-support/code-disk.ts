@@ -50,7 +50,8 @@ export interface DiskOptions {
 
 export function installDisk(files: Record<string, DiskFile>, options: DiskOptions = {}) {
   const outside = new Set(options.outside ?? []);
-  const isOutside = (path: string) => [...outside].some((folder) => path === folder || path.startsWith(`${folder}/`));
+  // a call with no path (the Files tree's listing of the roots) is of no folder
+  const isOutside = (path: string | undefined) => path !== undefined && [...outside].some((folder) => path === folder || path.startsWith(`${folder}/`));
   const held = new Map<CommandName, ReturnType<typeof deferred<void>>[]>();
   const issued: string[] = []; // UX wave U6b-2: every token `layout.frameFile` answered, in order
   const frameFile = (input: { appSessionId: string; path: string }) => {
