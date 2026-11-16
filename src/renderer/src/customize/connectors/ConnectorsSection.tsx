@@ -19,8 +19,8 @@
 // configured rows, each with §E's facts: this Mac's ready sessions with what each reported (its servers and when, its plugin
 // list and when), the attached session's own status read, the plugin list (null until it has answered), the plugins the
 // inventory keeps for the folder, and main's posture and revision for the row.
-import { useEffect, useMemo, type ReactNode } from 'react';
-import type { EngineSessionStatus } from '@shared/engine/status';
+import { useQueryClient } from '@tanstack/react-query';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
@@ -32,7 +32,7 @@ import { Gone, useManage, type Manage } from '../../widgets/plugins/manage';
 import { displayNameOf } from '../../widgets/plugins/library';
 import { factsOf } from '../../widgets/plugins/operation';
 import type { PluginsLibraryReads } from '../../widgets/PluginsWidget';
-import { MOVES_READS, useEngineRead } from '../../widgets/read';
+import { engineReadKey, useEngineRead } from '../../widgets/read';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import type { Inventory } from '../inventory';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
@@ -45,8 +45,6 @@ import { connectorRows, connectorRowsMatching, type ConnectorRowModel } from './
 import { useSignIns } from './sign-in';
 
 const DIRECTORY_SERVERS = 'directory:servers';
-// what moves the attached session's status read: what moves any read, and a new report of its servers
-const SERVERS_REPORTED = (status: EngineSessionStatus): string => `${MOVES_READS(status)}|${status.pluginsObservedAt ?? ''}`;
 
 /** What the plugin list says of each plugin, by its key (the name its row shows, whether it is enabled here); null until
  * it has answered, and while its latest read has failed (U11h: Sign in waits for it, §E "While the plugin list is
@@ -158,16 +156,16 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
-  // U11h: read again whenever the attached session's init or a reload reports its servers anew (`pluginsObservedAt`), as
-  // well as when it moves (a reload after a plugin change moves nothing else), so its answer is never older than its seed
-  const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null, refreshOn: SERVERS_REPORTED });
+  const readInput = useMemo(() => ({ appSessionId: attached ?? ('' as AppSessionId) }), [attached]);
+  const read = useEngineRead('session.mcpStatus', readInput, { enabled: attached !== null });
   // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine's
   // init frame's, which a session started with no message has not sent (P7 run 43386195217); for the attached session
   // the page's own mcp_status read says it too. A ready session that is not the attached one and has had no first turn
   // is still not found (ticket 619). U11h (the branch panel's ruling of 2026-11-16): a session's servers are its latest
   // report, whole: the attached session's answer, once it exists, replaces its seed, so a server the answer omits is not
-  // read from the seed.
-  const attachedServers = read.data?.mcpServers;
+  // read from the seed. An answer asked before the session's latest report does not stand (`useAnsweredAfterReport`).
+  const current = useAnsweredAfterReport(readInput, attached === null ? null : (engine.get(attached)?.pluginsObservedAt ?? null));
+  const attachedServers = current ? read.data?.mcpServers : undefined;
   const attachedReadAt = read.readAt;
   const local = useMemo(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine), [engine]);
   // each session's servers as it last reported them, and when they were observed (ms; null: never)
@@ -233,4 +231,24 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
       iconUrl: posture?.iconUrl ?? null,
     };
   };
+}
+
+// U11h (the architect's ruling on the fix wave's review, 2026-11-16): whether the attached session's status answer in
+// hand was asked after the session last reported its servers (`reportedAt`, its `pluginsObservedAt`: an init's or a
+// reload's). When the report moves, the read in flight is cancelled and asked again, and until an answer to a read asked
+// after the move arrives, the answer in hand does not stand and the report's own list is the session's. The shared read
+// hook's way of joining a read in flight is left as it is for its other readers.
+function useAnsweredAfterReport(input: { appSessionId: AppSessionId }, reportedAt: string | null): boolean {
+  const client = useQueryClient();
+  const key = useMemo(() => engineReadKey('session.mcpStatus', input), [input]);
+  // the report the answers are judged against, and how many answers the read had when it moved (null: those in hand stand)
+  const [asked, setAsked] = useState({ key, reportedAt, after: null as number | null });
+  if (asked.key !== key) setAsked({ key, reportedAt, after: null }); // another session's read
+  const moved = asked.key === key && asked.reportedAt !== reportedAt;
+  useEffect(() => {
+    if (!moved) return;
+    setAsked({ key, reportedAt, after: client.getQueryState(key)?.dataUpdateCount ?? 0 });
+    void client.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: true });
+  }, [moved, key, reportedAt, client]);
+  return !moved && asked.key === key && (asked.after === null || (client.getQueryState(key)?.dataUpdateCount ?? 0) > asked.after);
 }
