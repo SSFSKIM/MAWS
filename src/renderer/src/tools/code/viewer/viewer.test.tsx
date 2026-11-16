@@ -1690,17 +1690,19 @@ describe('a framed file (UX wave U6b-2)', () => {
   });
 
   // UX wave U6e arrived with the chain ("What this document assumes of landings in flight"): a tab that holds the agent's
-  // mark reads with `agent`, so its frame is asked with it too, at `frameAsk`; a person's tab asks without it.
+  // mark reads with `agent`, so its frame is asked with it too, at `frameAsk`; a person's tab asks without it. A named file
+  // (outside the folders) is read again when the mark changes (U6e's `readUnderMark`), so its frame is asked again under it.
   it('a tab that holds the agent’s mark asks its frame with agent, and a person’s tab asks without it', async () => {
-    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
-    act(() => void openFile(A, PDF, null, { main: true }));
-    const { rerender } = render(<FileViewer tab={fileTab(PDF)} agent />);
-    await waitFor(() => expect(entry()?.frame?.status).toBe('ready'));
-    expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: PDF, named: true, agent: true })]);
-    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: PDF, agent: true }]);
-    rerender(<FileViewer tab={fileTab(PDF)} />); // the person's open removes the mark, and the file is read again under it
+    const main = installDisk({ [NAMED]: '%PDF-1.4 invented\n' }, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === MAIN_A && path === NAMED });
+    act(() => void openFile(A, NAMED, null, { main: true }));
+    const { rerender } = render(<FileViewer tab={fileTab(NAMED)} agent />);
+    await waitFor(() => expect(entry(NAMED)?.frame?.status).toBe('ready'));
+    expect(main.callsOf('files.read')).toEqual([expect.objectContaining({ path: NAMED, named: true, agent: true })]);
+    expect(main.callsOf('layout.frameFile')).toEqual([{ appSessionId: MAIN_A, path: NAMED, agent: true }]);
+    rerender(<FileViewer tab={fileTab(NAMED)} />); // the person's open removes the mark, and the file is read again under it
     await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
-    expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: MAIN_A, path: PDF });
+    expect(main.callsOf('files.read').at(-1)).not.toHaveProperty('agent');
+    expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: MAIN_A, path: NAMED });
   });
 
   it('the bar’s Open externally of a drawn file the agent’s tab holds passes agent', async () => {
