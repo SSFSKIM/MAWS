@@ -6,6 +6,8 @@
 // answer, while held. With no holder in view nothing is asked and the last answer is kept. One ask in flight per key, also
 // across a gap in view: an ask meanwhile, or a holder back in view, makes one more when it answers (M9 fix 2). A failure
 // keeps the last answer and says which kind it was (`readFailure` over it, §H); the next event, or Retry, asks again.
+// The read is addressed by the earliest holder still in view (the branch's max panel, the document's Decision Log 50): a
+// holder that leaves takes its directory and its session with it, which may be gone.
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -45,8 +47,8 @@ export const branchReadOf = (s: Pick<BranchReadsStore, 'reads'>, machine: Machin
 // that comes back meanwhile joins that ask (one more when it answers) rather than starting a second one; a reset drops
 // every entry, and an ask whose entry is gone publishes nothing.
 interface Entry {
-  target: BranchReadTarget;
-  count: number; // holders in view
+  target: BranchReadTarget; // the earliest holder's still in view: what the read is addressed by
+  holders: { target: BranchReadTarget }[]; // in view, in the order they came
   reading: boolean;
   again: boolean;
   timer: ReturnType<typeof setTimeout> | null;
@@ -58,7 +60,7 @@ export function createBranchReads(client: MawsBridge): UseBoundStore<StoreApi<Br
   return create<BranchReadsStore>()((set, get) => {
     const ask = async (key: string): Promise<void> => {
       const h = entries.get(key);
-      if (!h || h.count === 0) return;
+      if (!h || h.holders.length === 0) return;
       if (h.reading) {
         h.again = true;
         return;
@@ -73,7 +75,7 @@ export function createBranchReads(client: MawsBridge): UseBoundStore<StoreApi<Br
       const last = get().reads.get(key);
       const next: BranchRead = result.ok ? { answer: result.value, failure: null } : { answer: last?.answer ?? null, failure: failedWith(result.error) };
       set((s) => ({ reads: mapWith(s.reads, key, next) }));
-      if (h.count === 0) {
+      if (h.holders.length === 0) {
         entries.delete(key); // no holder in view now: the answer stays, nothing more is asked
         return;
       }
@@ -95,19 +97,23 @@ export function createBranchReads(client: MawsBridge): UseBoundStore<StoreApi<Br
         const key = branchReadKey(target.machine, target.repoRoot);
         let h = entries.get(key);
         if (!h) {
-          h = { target, count: 0, reading: false, again: false, timer: null };
+          h = { target, holders: [], reading: false, again: false, timer: null };
           entries.set(key, h);
         }
-        if (h.count === 0) h.target = target; // the holder coming into view addresses the read
-        h.count += 1;
+        const holder = { target };
+        h.holders.push(holder);
+        h.target = h.holders[0].target;
         void ask(key);
         const mine = h;
         let released = false;
         return () => {
           if (released) return;
           released = true;
-          mine.count -= 1;
-          if (mine.count > 0) return;
+          mine.holders.splice(mine.holders.indexOf(holder), 1);
+          if (mine.holders.length > 0) {
+            mine.target = mine.holders[0].target; // addressed by a holder still in view
+            return;
+          }
           if (mine.timer !== null) clearTimeout(mine.timer);
           mine.timer = null;
           mine.again = false;
