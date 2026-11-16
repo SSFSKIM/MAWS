@@ -59,7 +59,7 @@ export function aboveLastCompaction(rows: readonly Row[], index: number): boolea
  * the owner's next turn-opening prompt, or null under the list's last answer). Rows not in the map get none.
  *
  * For each turn-opening prompt, and for the list's end, the last answer drawn before it and after the prompt before,
- * unless a running turn (its turn line or its report record working, or a row of it live) has a row from that answer on. Fork is off where the
+ * unless a running turn (its turn line working, or a row of it live) has a row from that answer on. Fork is off where the
  * next prompt has no message id, and where it lies above the list's last compaction boundary: so the answer directly above
  * that boundary keeps Fork only against a typed `/compact` bubble (`aboveLastCompaction`'s one exception); the prompt that
  * set off an automatic compaction is written before it, and the answer before that prompt draws none (ruled, M3-4).
@@ -71,10 +71,12 @@ export function answerActionsOf(allRows: readonly Row[], discarded: readonly Tur
   const gone = new Set(discarded);
   const rows = gone.size === 0 ? allRows : allRows.filter((row) => row.turnId === null || !gone.has(row.turnId));
   const running = new Set<TurnId>();
-  // a turn runs while its turn line says working, a row of it is live, or (the branch panel's finding 5) the report
-  // projection's record in its line's place says working: on every projection, an answer of a turn not ended gets none
+  // a turn runs while its turn line says working or a row of it is live: on every projection, an answer of a turn not
+  // ended gets none (the branch panel's finding 5). U2b's to-human view always draws the running turn's line, beside the
+  // record line that covers its place, and each record line (`record_fold`) carries a turn of what it folds, so a record
+  // line of a running turn holds an answer back as the turn's other rows do.
   for (const row of rows) {
-    if (row.turnId !== null && ((row.kind === 'divider' && row.state === 'working') || (row.kind === 'owner_record' && row.working) || ('live' in row && row.live))) running.add(row.turnId);
+    if (row.turnId !== null && ((row.kind === 'divider' && row.state === 'working') || ('live' in row && row.live))) running.add(row.turnId);
   }
   const runsFrom = (from: number, to: number) => rows.slice(from, to).some((row) => row.turnId !== null && running.has(row.turnId));
   const placed: { at: number; next: number }[] = []; // the answer's index, its next prompt's (rows.length: the list's end)
