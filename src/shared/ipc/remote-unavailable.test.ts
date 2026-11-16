@@ -13,7 +13,7 @@ const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fie
 describe('the acts the wave offers', () => {
   it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
     const built = ['session.archive', 'session.update', 'session.rename', 'session.list', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.fork'] as const;
-    expect(Object.keys(REMOTE_NEEDS).sort()).toEqual([...built, 'session.steer.sendNow'].sort());
+    expect(Object.keys(REMOTE_NEEDS).filter((command) => command !== 'artifacts.undelete').sort()).toEqual([...built, 'session.steer.sendNow'].sort()); // U10b's own, below
     for (const command of built) {
       expect(REMOTE_NEEDS[command], command).toBe('rl2.session-acts');
       expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
@@ -118,6 +118,32 @@ describe('disabledWords: before the act', () => {
 
   it('leaves the removed phase to main', () => {
     expect(disabledWords('session.rename', at({ phase: 'removed', capabilities: null }))).toBeNull();
+  });
+});
+
+// UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.3): Undo of an agent's delete, an
+// act on the artifact the machine's owners alone may make, behind a capability of its own.
+describe('the undelete over the link', () => {
+  const STANDS: RemoteStanding = { ...UP, capabilities: ['rl2.artifacts', 'rl2.artifact-undelete'] };
+  it('needs `rl2.artifact-undelete`, and is worded restore and restored', () => {
+    expect(REMOTE_NEEDS['artifacts.undelete']).toBe('rl2.artifact-undelete');
+    expect(REMOTE_UNAVAILABLE['artifacts.undelete']).toBeUndefined();
+    expect(ACT_WORDS['artifacts.undelete']).toEqual({ act: 'restore', done: 'restored' });
+  });
+
+  it('is disabled for a machine without the capability, while it is offline, and for a member who does not own it', () => {
+    expect(disabledWords('artifacts.undelete', STANDS)).toBeNull();
+    expect(disabledWords('artifacts.undelete', { ...STANDS, owner: null })).toBeNull(); // not known: the machine decides
+    expect(disabledWords('artifacts.undelete', { ...STANDS, capabilities: ['rl2.artifacts'] })).toBe('Can’t restore on Loft yet. Update MAWS on Loft and try again.');
+    expect(disabledWords('artifacts.undelete', { ...STANDS, phase: 'offline', capabilities: null })).toBe('Restore is unavailable while Loft is offline.');
+    expect(disabledWords('artifacts.undelete', { ...STANDS, owner: false })).toBe('Only Loft’s owners can restore an artifact there.');
+    expect(disabledWords('artifacts.undelete', { ...STANDS, owner: false, capabilities: ['rl2.artifacts'] })).toBe('Can’t restore on Loft yet. Update MAWS on Loft and try again.');
+  });
+
+  it('ends without its effect in the act’s words', () => {
+    expect(refusalWords('artifacts.undelete', M, 'offline')).toBe('Not restored: Loft is offline');
+    expect(refusalWords('artifacts.undelete', M, 'owners-only')).toBe('Not restored: only Loft’s owners can');
+    expect(failureWords('artifacts.undelete', 'this artifact was deleted in the Library, not by an agent')).toBe('Not restored: this artifact was deleted in the Library, not by an agent');
   });
 });
 

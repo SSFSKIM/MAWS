@@ -17,10 +17,27 @@ export function configurationFingerprint(key: Buffer = randomBytes(32)): Fingerp
   return ({ transport, url }) => (url === null ? null : createHmac('sha256', key).update(`${transport}\u0000${url}`).digest('hex').slice(0, 32));
 }
 
-export function posturesOf(endpoints: readonly CustomizationEndpoint[], routes: readonly ConnectorRoute[], fingerprint: Fingerprint): Posture[] {
+/** A directory record as the postures read it: its route, and its icon where `catalog.icon` can answer one. */
+export interface ListedConnector {
+  route: ConnectorRoute;
+  iconUrl: string | null;
+}
+
+export function posturesOf(endpoints: readonly CustomizationEndpoint[], listed: readonly ListedConnector[], fingerprint: Fingerprint): Posture[] {
   return endpoints.map((endpoint) => {
-    const found = new Set(routes.filter((route) => endpointMatches(endpoint.url, route)).map((route) => route.authPosture));
-    // UX wave U11a M8 (§A): the engine host's revision of the configuration, which a press from the row sends back
-    return { name: endpoint.name, scope: endpoint.scope, path: endpoint.path, authPosture: found.size === 1 ? [...found][0]! : null, fingerprint: fingerprint(endpoint), revision: endpoint.revision ?? null };
+    const matched = listed.filter(({ route }) => endpointMatches(endpoint.url, route));
+    const found = new Set(matched.map(({ route }) => route.authPosture));
+    // UX wave U11a M8 (§A): the engine host's revision of the configuration, which a press from the row sends back.
+    // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): the icon of the one record the
+    // endpoint matches; none for several, which would say a record that may not be this server's
+    return {
+      name: endpoint.name,
+      scope: endpoint.scope,
+      path: endpoint.path,
+      authPosture: found.size === 1 ? [...found][0]! : null,
+      fingerprint: fingerprint(endpoint),
+      revision: endpoint.revision ?? null,
+      iconUrl: matched.length === 1 ? matched[0]!.iconUrl : null,
+    };
   });
 }

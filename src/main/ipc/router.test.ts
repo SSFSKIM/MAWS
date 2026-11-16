@@ -2,7 +2,7 @@ import { EventEmitter } from 'node:events';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import type { MachineRef } from '@shared/machine/ref';
-import type { HostDispatch, MainContext, RemoteDispatch } from './router';
+import type { CommandGuard, HostDispatch, MainContext, RemoteDispatch } from './router';
 
 const LOCAL = 'LocalMachineRef0000000' as MachineRef;
 const OTHER = 'OtherMachineRef0000000' as MachineRef;
@@ -432,6 +432,43 @@ describe('main ipc router', () => {
     await expect(invoke(appWindow(DEV_URL), 'settings.get')).resolves.toMatchObject({ error: { code: 'forbidden_sender' } });
   });
 
+  // UX wave U6e: the origin test moved to ./app-origin.ts, which the guard's predicate shares; the sender check answers each
+  // kind of address exactly as before the move, an address that does not parse included
+  it('answers the origin test as before: the built app’s file: page, the dev origin, another origin and an address that does not parse', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const BUILT = 'file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html';
+    const table: [appUrl: string, frameUrl: string, accepted: boolean][] = [
+      [BUILT, BUILT, true],
+      [BUILT, 'file:///Applications/MAWS.app/Contents/Resources/app.asar/out/renderer/index.html#/settings', true],
+      [BUILT, DEV_URL, false],
+      [BUILT, 'not an address', false],
+      [DEV_URL, DEV_URL, true],
+      [DEV_URL, 'http://localhost:5173/index.html?session=1', true],
+      [DEV_URL, 'https://evil.example/', false],
+      [DEV_URL, 'http://localhost:5174/', false],
+      [DEV_URL, 'not an address', false],
+      [DEV_URL, '', false],
+    ];
+    for (const [appUrl, frameUrl, accepted] of table) {
+      await load(appUrl);
+      router.registerMainHandler('settings.get', () => LIGHT);
+      const answer = await invoke(appWindow(frameUrl), 'settings.get');
+      expect(answer, `${frameUrl} under ${appUrl}`).toEqual(accepted ? { ok: true, value: LIGHT } : { ok: false, error: { code: 'forbidden_sender', message: 'settings.get may only be invoked by the app window' } });
+    }
+    // a top frame whose URL cannot be read answers as an address that does not parse did, under either app URL
+    for (const appUrl of [BUILT, DEV_URL]) {
+      await load(appUrl);
+      router.registerMainHandler('settings.get', () => LIGHT);
+      const event = appWindow(appUrl);
+      Object.defineProperty(event.senderFrame, 'url', {
+        get() {
+          throw new Error('Render frame was disposed before WebFrameMain could be accessed');
+        },
+      });
+      await expect(invoke(event, 'settings.get'), `a throwing URL under ${appUrl}`).resolves.toEqual({ ok: false, error: { code: 'forbidden_sender', message: 'settings.get may only be invoked by the app window' } });
+    }
+  });
+
   it('answers host-owned commands with host_unavailable when no supervisor is passed', async () => {
     await expect(invoke(appWindow(), 'engine.ping')).resolves.toMatchObject({
       ok: false,
@@ -761,5 +798,123 @@ describe('main ipc router', () => {
     }
     expect(dispatch).not.toHaveBeenCalled();
     for (const spy of logged) spy.mockRestore();
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 9 and §C; R2): a guard
+  // runs after the input is validated and before anything else, for every way a command enters, and its refusal is the
+  // route's answer: before the branch to another machine, the hooks, an interceptor and every owner
+  describe('guardCommand', () => {
+    const ART = '11111111-1111-4111-8111-111111111111';
+    const LEASE = '66666666-6666-4666-8666-666666666666';
+    const REFUSED = { code: 'forbidden_sender', message: 'refused by the guard' } as const;
+
+    it('runs for the named commands alone, with the validated input and the context; its refusal is the answer, nothing refused continues', async () => {
+      const open = vi.fn(() => ({ leaseId: LEASE }));
+      const close = vi.fn(() => ({ closed: true }));
+      router.registerMachineHandler('connectors.open', open);
+      router.registerMachineHandler('connectors.close', close);
+      let refuse = true;
+      const guard = vi.fn(() => (refuse ? REFUSED : undefined));
+      router.guardCommand(['connectors.open'], guard);
+      const event = appWindow();
+      await expect(invoke(event, 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: false, error: REFUSED });
+      expect(guard).toHaveBeenCalledWith('connectors.open', { artifactId: ART }, { client: expect.objectContaining({ id: `page:${event.sender.id}.1` }), target: LOCAL });
+      expect(open).not.toHaveBeenCalled();
+      await expect(invoke(event, 'connectors.open', { artifactId: 'not an id' })).resolves.toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+      expect(guard).toHaveBeenCalledOnce(); // an invalid input never reaches it
+      await expect(invoke(event, 'connectors.close', { leaseId: LEASE })).resolves.toEqual({ ok: true, value: { closed: true } });
+      expect(guard).toHaveBeenCalledOnce(); // not named
+      refuse = false;
+      await expect(invoke(event, 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: true, value: { leaseId: LEASE } });
+    });
+
+    it('stands before the branch to another machine: the connection manager is not called, nor a client command refused for it', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: { sessions: [], revision: 7 } }));
+      await load(DEV_URL, undefined, remote);
+      const guard = vi.fn((_name: unknown, _input: unknown, context: MainContext) => (context.target === OTHER ? REFUSED : undefined));
+      router.guardCommand(['session.list', 'attention.pendingNavigate'], guard);
+      await expect(invoke(appWindow(), 'session.list', {}, OTHER)).resolves.toEqual({ ok: false, error: REFUSED });
+      await expect(invoke(appWindow(), 'session.list', {}, { machine: OTHER, session: 'app-1' })).resolves.toEqual({ ok: false, error: REFUSED });
+      await expect(invoke(appWindow(), 'attention.pendingNavigate', undefined, OTHER)).resolves.toEqual({ ok: false, error: REFUSED });
+      expect(remote).not.toHaveBeenCalled();
+      expect(guard).toHaveBeenCalledTimes(3);
+    });
+
+    it('stands before a hook and an interceptor of the same name and before the machine host; its disposer removes it', async () => {
+      const dispatchToHost = vi.fn<HostDispatch>(async () => ({ ok: true, value: { leaseId: LEASE } }));
+      vi.resetModules();
+      electron.handlers.clear();
+      router = await import('./router');
+      router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost, machine: { kind: 'host' } });
+      const hook = vi.fn(async () => undefined);
+      router.beforeCommand(['connectors.open'], hook);
+      const dispose = router.guardCommand(['connectors.open'], () => REFUSED);
+      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: false, error: REFUSED });
+      expect(hook).not.toHaveBeenCalled();
+      expect(dispatchToHost).not.toHaveBeenCalled();
+      const intercepted = vi.fn(() => ({ leaseId: LEASE }));
+      const stopIntercepting = router.interceptCommand('connectors.open', intercepted);
+      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: false, error: REFUSED });
+      expect(intercepted).not.toHaveBeenCalled();
+      stopIntercepting();
+      dispose();
+      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: true, value: { leaseId: LEASE } });
+      expect(hook).toHaveBeenCalledOnce();
+      expect(dispatchToHost).toHaveBeenCalledOnce();
+    });
+
+    it('holds for dispatchLocal and invokeOwn as for a page', async () => {
+      const { mainClient } = await import('./clients');
+      const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
+      const list = vi.fn(() => ({ sessions: [], revision: 3 }));
+      router.registerMachineHandler('session.list', list);
+      const guard = vi.fn<CommandGuard>(() => REFUSED);
+      router.guardCommand(['session.list'], guard);
+      await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
+      await expect(router.invokeOwn('session.list', {}, { client: mainClient, target: LOCAL })).resolves.toEqual({ ok: false, error: REFUSED });
+      await expect(router.dispatchLocal('session.list', {}, { client: remoteClient, target: OTHER })).resolves.toEqual({ ok: false, error: REFUSED });
+      expect(guard.mock.calls.map(([, , context]) => [context.client.id, context.target])).toEqual([
+        ['remote:1/page:3.1', LOCAL], ['main', LOCAL], ['remote:1/page:3.1', OTHER],
+      ]);
+      expect(list).not.toHaveBeenCalled();
+    });
+
+    it('asks every guard of a name in order until one refuses, and each disposer removes its own alone', async () => {
+      router.registerMachineHandler('connectors.open', () => ({ leaseId: LEASE }));
+      const first = vi.fn(() => undefined);
+      const disposeFirst = router.guardCommand(['connectors.open'], first);
+      const second = vi.fn(() => REFUSED);
+      const disposeSecond = router.guardCommand(['connectors.open'], second);
+      const third = vi.fn(() => undefined);
+      router.guardCommand(['connectors.open'], third);
+      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: false, error: REFUSED });
+      expect([first, second, third].map((guard) => guard.mock.calls.length)).toEqual([1, 1, 0]);
+      disposeSecond();
+      await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART })).resolves.toEqual({ ok: true, value: { leaseId: LEASE } });
+      disposeFirst();
+      await invoke(appWindow(), 'connectors.open', { artifactId: ART });
+      expect([first, second, third].map((guard) => guard.mock.calls.length)).toEqual([2, 1, 2]);
+    });
+
+    it('answers any throw of a guard as internal, logged, forwarding nothing: a plain error and both typed failures alike', async () => {
+      const error = vi.spyOn(console, 'error').mockImplementation(() => {});
+      const { HostCommandError } = await import('@shared/host/runtime');
+      const open = vi.fn(() => ({ leaseId: LEASE }));
+      router.registerMachineHandler('connectors.open', open);
+      const throws: unknown[] = [
+        new Error('the guard broke'),
+        new router.CommandFailure({ code: 'host_unavailable', message: 'the guard broke' }),
+        new HostCommandError({ code: 'timeout', message: 'the guard broke' }),
+      ];
+      for (const thrown of throws) {
+        const dispose = router.guardCommand(['connectors.open'], () => {
+          throw thrown;
+        });
+        await expect(invoke(appWindow(), 'connectors.open', { artifactId: ART }), String(thrown)).resolves.toEqual({ ok: false, error: { code: 'internal', message: 'the guard broke' } });
+        dispose();
+      }
+      expect(open).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledTimes(3);
+    });
   });
 });

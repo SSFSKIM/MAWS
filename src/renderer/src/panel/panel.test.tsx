@@ -5,9 +5,13 @@ import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { storedLayout, useLayout } from '../stores/layout';
 import { A, B, mainShowing, panelOf, pinIds, probeTool, ref, resetPanelStores, TestHost, type ProbeState } from '../test-support/panel';
+import { COPY } from './copy';
 import { connectPanelHost, panelHost, registerPanelTool } from './host';
 import { sideGroups, surfaceTabs } from './surface-model';
 import { SurfaceRow } from './SurfaceRow';
+import { PANEL_TAB_DRAG_TYPE } from '../shell/transfer';
+import { TRANSFER_COPY } from '../tools/artifacts/copy';
+import { drag, transfer } from '../test-support/drag';
 import type { PanelTool } from './tool';
 
 const offs: (() => void)[] = [];
@@ -449,5 +453,171 @@ describe('the keyboard after a tab moves between groups', () => {
     await act(() => new Promise((resolve) => setTimeout(resolve, 0)));
     expect(screen.queryByRole('menu')).toBeNull();
     expect(document.activeElement).toBe(tabIn('upper', 'Terminal'));
+  });
+});
+
+// UX wave U6b-1 (M4; U8's O-36, "A second group, on demand": the drag comes with U6b): any side tab drags; onto the other
+// group's strip it joins that group, onto the lower part of a one-group column that has another tab it makes the second
+// group, and either way it is kept (a preview file tab no longer the preview). A drag whose tab goes ends (sequence 7).
+describe('a side tab dragged between the groups', () => {
+  const group = (name: 'upper' | 'lower') => document.querySelector<HTMLElement>(`section[data-side-group="${name}"]`);
+  const stripOf = (name: 'upper' | 'lower') => group(name)!.querySelector<HTMLElement>('[data-side-strip]')!;
+  const tabElement = (id: string) => document.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!;
+  const lowerTarget = () => document.querySelector<HTMLElement>('[data-side-lower-drop]');
+  const groupsOf = () => {
+    const groups = sideGroups(useLayout.getState(), A);
+    return [groups.upper.tabs.map((tab) => tab.id), groups.lower?.tabs.map((tab) => tab.id) ?? null, groups.lower?.shown?.id ?? null];
+  };
+  const add = (toolId: string, params?: unknown) => {
+    let id = '';
+    act(() => void (id = panelHost.addTool(toolId, { appSessionId: A, params })));
+    return id;
+  };
+  beforeEach(() => register(probeTool('review', { title: 'Review', multiInstance: false }).tool, probeTool('terminal', { title: 'Terminal' }).tool, probeTool('files', { title: 'Files' }).tool));
+
+  it('every tab drags, its tool and tab as the payload', () => {
+    renderHost();
+    const terminal = add('terminal');
+    expect(tabElement(terminal).getAttribute('draggable')).toBe('true');
+    const dt = transfer();
+    drag('dragStart', tabElement(terminal), dt);
+    expect(JSON.parse(dt.getData(PANEL_TAB_DRAG_TYPE))).toEqual({ toolId: 'terminal', tabId: terminal });
+    expect(useLayout.getState().dragging).toEqual({ source: 'panel', tabId: terminal, toolId: 'terminal' });
+    drag('dragEnd', tabElement(terminal), dt);
+    expect(useLayout.getState().dragging).toBeNull();
+  });
+
+  it('onto the other group’s strip it joins that group, in view there, and a preview file tab is kept; its own strip takes no drop', () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    const terminal = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower'));
+    expect(groupsOf()).toEqual([[review, file], [terminal], terminal]);
+    const dt = transfer();
+    drag('dragStart', tabElement(file), dt);
+    expect(drag('dragOver', stripOf('upper'), dt)).toBe(false);
+    expect(drag('dragOver', stripOf('lower'), dt)).toBe(true);
+    expect(dt.dropEffect).toBe('move');
+    drag('drop', stripOf('lower'), dt);
+    expect(groupsOf()).toEqual([[review], [file, terminal], file]);
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+    expect(useLayout.getState().dragging).toBeNull();
+  });
+
+  // The branch review's fifth finding: the menu's move keeps a preview file tab, as the drag does (Decision 6).
+  it('by its menu’s Move below a preview file tab joins the other group and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()).toEqual([[review], [file], file]);
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
+  // The medium review of finding 5: the upper group's only tab moved below joins both groups into the upper one; the move
+  // was made, so the tab is kept though it lands in the upper group.
+  it('by its menu’s Move below the upper group’s only tab, a preview file tab, joins the groups into one and is kept', async () => {
+    renderHost();
+    const review = add('review');
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    act(() => useLayout.getState().moveSurfaceTab(A, review, 'lower'));
+    expect(groupsOf()).toEqual([[file], [review], review]);
+    fireEvent.contextMenu(tabElement(file));
+    fireEvent.click(within(await screen.findByRole('menu')).getByRole('menuitem', { name: COPY.moveBelow }));
+    expect(groupsOf()[1]).toBeNull();
+    expect(useLayout.getState().panelParams[file]).toEqual({ file: '/r/a.ts', line: null });
+  });
+
+  // The Mac run's first failure: a tree-only Files tab given a file by its params (the preview's reuse) is a tab that
+  // moves to the main area from then on, its menu offering it (the compiled project: no read memoized on the tab alone).
+  it('a tree-only Files tab given a file through its params offers Move to main area in its menu', async () => {
+    renderHost();
+    const file = add('files');
+    act(() => useLayout.getState().setPanelParams(file, { file: '/r/a.ts', line: null, preview: true }));
+    fireEvent.contextMenu(tabElement(file));
+    expect(within(await screen.findByRole('menu')).getByRole('menuitem', { name: TRANSFER_COPY.moveToMain })).toBeTruthy();
+  });
+
+  it('onto the lower part of a one-group column it makes the second group; the target shows only while a side tab drags', () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    expect(lowerTarget()).toBeNull();
+    const dt = transfer();
+    drag('dragStart', tabElement(terminal), dt);
+    const target = lowerTarget()!.querySelector<HTMLElement>('[data-drop-overlay]')!;
+    expect(drag('dragEnter', target, dt)).toBe(true);
+    expect(drag('dragOver', target, dt)).toBe(true);
+    drag('drop', target, dt);
+    expect(groupsOf()).toEqual([[review], [terminal], terminal]);
+    expect(lowerTarget()).toBeNull();
+    expect(useLayout.getState().dragging).toBeNull();
+  });
+
+  it('offers no lower target for a group’s only tab, nor once there are two groups', () => {
+    renderHost();
+    const review = add('review');
+    drag('dragStart', tabElement(review), transfer());
+    expect(lowerTarget()).toBeNull();
+    drag('dragEnd', tabElement(review), transfer());
+    const terminal = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower'));
+    drag('dragStart', tabElement(review), transfer());
+    expect(lowerTarget()).toBeNull();
+  });
+
+  it('a tab closed mid-drag ends the drag; the target goes, and a drop on the other strip then moves nothing', async () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    const other = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, other, 'lower'));
+    const dt = transfer();
+    drag('dragStart', tabElement(terminal), dt);
+    await act(() => panelHost.closeTab(terminal));
+    expect(useLayout.getState().dragging).toBeNull();
+    expect(drag('dragOver', stripOf('lower'), dt)).toBe(false);
+    drag('drop', stripOf('lower'), dt);
+    expect(groupsOf()).toEqual([[review], [other], other]);
+  });
+  // M4's fix wave (finding 4): a strip's highlight lasts no longer than a drag it would take.
+  const highlightIn = (name: 'upper' | 'lower') => within(stripOf(name)).queryByText(name === 'lower' ? COPY.moveBelow : COPY.moveAbove);
+
+  it('a strip’s highlight goes when the dragged tab is removed mid-drag, and the next drag does not bring it back', async () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    const other = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, other, 'lower'));
+    const dt = transfer();
+    drag('dragStart', tabElement(terminal), dt);
+    expect(drag('dragEnter', stripOf('lower'), dt)).toBe(true);
+    expect(highlightIn('lower')).not.toBeNull();
+    await act(() => panelHost.closeTab(terminal));
+    expect(highlightIn('lower')).toBeNull();
+    drag('dragStart', tabElement(review), transfer()); // a drag the lower strip would take, not over it
+    expect(highlightIn('lower')).toBeNull();
+  });
+
+  it('a strip’s highlight goes when the drag ends elsewhere, and the next drag does not bring it back', () => {
+    renderHost();
+    const review = add('review');
+    const terminal = add('terminal');
+    act(() => useLayout.getState().moveSurfaceTab(A, terminal, 'lower'));
+    const dt = transfer();
+    drag('dragStart', tabElement(review), dt);
+    expect(drag('dragEnter', stripOf('lower'), dt)).toBe(true);
+    expect(highlightIn('lower')).not.toBeNull();
+    drag('drop', document.body, dt); // dropped outside every target: the window's listener ends the drag
+    drag('dragEnd', tabElement(review), dt);
+    expect(useLayout.getState().dragging).toBeNull();
+    expect(highlightIn('lower')).toBeNull();
+    drag('dragStart', tabElement(review), transfer());
+    expect(highlightIn('lower')).toBeNull();
   });
 });

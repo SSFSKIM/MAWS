@@ -4,7 +4,8 @@
 // not, so a record that spells the repository in another case still names the same root. A root that does not
 // resolve is dropped, never replaced by the record's string: a session with no resolvable root reads nothing from its
 // folders. What `files.*` reads beyond the allowlist, one file and never its folder (a file the session's deliverables
-// name; UX wave U6c, a file its transcript links), the service decides after these roots (`precheck`, ./service.ts).
+// name; UX wave U6c, a file its transcript links; UX wave U6e, a file the person chose or the agent sent, which
+// `files.writeOutside` also saves), the service decides after these roots (`precheck`, ./service.ts).
 // 2026-11-06 (the home-root rule, src/shared/machine/machine-home.ts): for a remote caller (`HandlerContext.remote`, the
 // endpoint's requests), a root whose realpath is the machine's home or an ancestor of it (`/`, `/Users`) is no root, since
 // it would reach the whole home tree (a chat in the home has it as its directory); this machine's own clients read every

@@ -212,7 +212,9 @@ test.describe('the #panel harness: the agent tools', () => {
     h.expectQuietConsole();
   });
 
-  test("a child's permission renders inline", async ({ maws }) => {
+  // UX wave U1b: a request makes no row; the child's prompt is the card at its own transcript's end (the drill-in lists
+  // the requests that carry its agent's id), and its call's row, or its run's line, says it waits.
+  test("a child's permission renders at its transcript's end", async ({ maws }) => {
     const h = await Harness.open(maws);
     await h.load('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
     for (const count of PANEL_CHILD_TAIL.batches) await h.release(count);
@@ -221,9 +223,11 @@ test.describe('the #panel harness: the agent tools', () => {
     expect((await h.subagents())!.agents.find((row) => row.agentId === FIRST.agentId)!.line, 'the row says it, in place of its state').toBe('Approval needed');
     await h.agents('clickRow', FIRST.agentId);
     await expect.poll(async () => (await h.drillIn())?.requestCards).toBe(1);
-    const card = h.region.locator('[data-view="agent"] [data-request-card]');
+    const card = h.region.locator('[data-view="agent"] [data-request-end] [data-request-card]');
+    await expect(card, 'at the child transcript’s end, a group named for its kind').toHaveAttribute('aria-label', 'Approval needed');
     await expect(card.getByRole('button', { name: 'Deny', exact: true })).toBeVisible();
     await expect(card.getByRole('button', { name: 'Allow once', exact: true })).toBeVisible();
+    await expect(h.region.locator('[data-view="agent"]').getByText('Waiting for approval: pnpm test').first(), 'the call’s row, or its run’s line, says it waits').toBeVisible();
     h.expectQuietConsole();
   });
 

@@ -394,6 +394,9 @@ export const OFFERS: Offers = {
     'artifacts.copyAsset': artifact('act'),
     'artifacts.rereadDatasetFile': artifact('act'),
     'artifacts.create': artifact('act'),
+    // The UX wave (U10b, M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.3): the undo of an agent's
+    // delete, the machine's owners' alone (nobody else can be placed on a deleted artifact), behind `rl2.artifact-undelete`
+    'artifacts.undelete': { ...artifact('act'), owners: true },
     // The library's listing, each row kept for a caller who views its artifact (calls.ts, the `each-session` shape over
     // each row's own sessions; whole for a machine owner), and its Spaces (names and counts), at `list`.
     'library.list': eachSession,

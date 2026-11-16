@@ -1,64 +1,16 @@
-// What takes the composer's place (C7 execution document, M4 decisions and "Placements"): the oldest card another child
-// docked (C10's trust and relay-down cards) first, then the session's oldest open answerable request (the five kinds,
-// each once its request is read, so the frame hides in the same commit the card's frame mounts and takes focus; a
-// dialog only when its payload reads as one of the two declared kinds, so an undeclared or invalid one never swaps the
-// editor out). The oldest open item that is actionable but not answerable here (an undeclared dialog, a request main
-// no longer holds, an error, an interruption, auto mode unavailable) shows as a notice above the frame instead. E1 M4b:
-// a blocking `maws` ask (a question item read as `maws.ask.opened`) is answered in the Question sheet, not here, so it
-// is a notice too and the editor stays. P2-C (2026-10-10): a question an agent left or a must-read is neither: its card
-// stands in the session's transcript. UX wave U1a (Reported 1, §C): a terminal session's asynchronous question (an
-// `async_input` item with a request id and no anchor, its request read as a question) docks until U1b gives it its row;
-// MAWS's non-blocking ask, the same kind read as `maws.ask.opened`, still docks nothing. Pure.
+// What the composer shows above itself (C7 execution document, M4 "Placements"; UX wave U1b decision 14): the session's
+// oldest waiting notice that names no request (an error not seen yet, an interruption, auto mode unavailable). A request
+// is drawn in the session's transcript, in its call's row or at the transcript's end, never here and never in the
+// editor's place; so is an undeclared dialog or a request whose read failed, with the card's own words. An owner-channel
+// question and a must-read stand in the transcript too (P2-C). Pure.
 import type { AttentionItem } from '@shared/graph/attention';
-import type { SessionEvent } from '@shared/graph/events';
-import type { AttentionId } from '@shared/graph/ids';
 import { isActionable, waits } from '@shared/attention/kinds';
-import { declaredDialog } from '../../request-card/variants/dialog-kinds';
 
-export interface Swap {
-  item: AttentionItem | null; // the request that docks (when no foreign card does)
-  notice: AttentionItem | null; // shown above the frame, never in its place
-  waiting: number; // how many more answerable requests wait behind the docked one
-  unread: AttentionItem[]; // requests not read yet (the composer reads them; a dialog's decides whether it is declared)
-}
-
-const REQUEST_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['permission', 'question', 'plan', 'elicitation']); // and dialogs, by their kind
-// An `async_input` item that stands for a request (no mark anchor): read, so a terminal's asynchronous question can dock.
-const asyncRequest = (item: AttentionItem) => item.kind === 'async_input' && item.anchor === undefined && item.request.requestId !== null;
+const TRANSCRIPT_KINDS: ReadonlySet<AttentionItem['kind']> = new Set(['async_input', 'essential_unread']);
 const at = (item: AttentionItem) => Date.parse(item.createdAt);
-const byAge = (a: AttentionItem, b: AttentionItem) => at(a) - at(b);
 
-export function swapOf(items: readonly AttentionItem[], requests: ReadonlyMap<AttentionId, SessionEvent | null>): Swap {
+export function noticeOf(items: readonly AttentionItem[]): AttentionItem | null {
   // the owner's ruling (2026-10-30): an error seen or dismissed is retired, so only an unseen one is a notice here
-  const open = items.filter(waits).sort(byAge); // UC-1: an answered request docks nowhere
-  const unread: AttentionItem[] = [];
-  const answerable: AttentionItem[] = [];
-  const notices: AttentionItem[] = [];
-  for (const item of open) {
-    const asks = item.kind === 'dialog' || REQUEST_KINDS.has(item.kind) || asyncRequest(item);
-    const request = asks ? requests.get(item.id) : null;
-    if (request === undefined) {
-      // not read yet: it docks once it is, so the frame hides in the same commit the card's frame mounts (and takes focus)
-      unread.push(item);
-      continue;
-    }
-    if (item.kind === 'async_input') {
-      if (request?.kind === 'question.requested') answerable.push(item); // U1a: a terminal's asynchronous question
-      continue; // P2-C: the session's own card in its transcript carries the rest
-    }
-    if (asks && request === null) {
-      // main's broker no longer holds it, or its read failed twice (the store's `unreadable`): the card can only show its
-      // notice (with the failure), so it never takes the editor's place
-      notices.push(item);
-      continue;
-    }
-    if (item.kind === 'essential_unread') continue; // P2-C: the session's own card in its transcript carries it
-    if (request?.kind === 'maws.ask.opened') notices.push(item);
-    else if (item.kind === 'dialog') {
-      const declared = request?.kind === 'dialog.requested' && declaredDialog(request.dialogKind, request.payload).ok;
-      (declared ? answerable : notices).push(item);
-    } else if (REQUEST_KINDS.has(item.kind)) answerable.push(item);
-    else if (isActionable(item)) notices.push(item);
-  }
-  return { item: answerable[0] ?? null, notice: notices[0] ?? null, waiting: Math.max(0, answerable.length - 1), unread };
+  const notices = items.filter((item) => waits(item) && isActionable(item) && item.request.requestId === null && !TRANSCRIPT_KINDS.has(item.kind));
+  return notices.sort((a, b) => at(a) - at(b))[0] ?? null;
 }

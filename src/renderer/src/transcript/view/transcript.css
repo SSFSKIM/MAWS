@@ -219,6 +219,8 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 /* Work divider */
 .transcript-divider { display: flex; align-items: center; gap: 7px; padding: 2px 0 14px; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-divider::after { content: ''; flex: 1; height: 1px; margin-left: 6px; background: var(--border); }
+/* UX wave U2b (ruling 3, item vii): a turn's line where no turn folds, set as its disclosure is, its chevron's slot empty */
+.transcript-turn-line { display: inline-flex; align-items: center; gap: 7px; padding: 3px 0; color: var(--fg-muted); font-size: var(--text-ui-sm); }
 .transcript-divider-count { flex: none; color: var(--danger); text-decoration: underline; text-underline-offset: 2px; }
 .transcript-divider-summary { display: inline-flex; align-items: center; justify-content: center; width: 20px; height: 20px; border-radius: var(--radius-sm); color: var(--fg-muted); }
 .transcript-divider-summary:hover { color: var(--fg); background: var(--bg-hover); }
@@ -422,9 +424,14 @@ button.transcript-glyph-overflow:hover { color: var(--fg); background: var(--bg-
 /* W4: the answered question as one compact widget, a line per question (Claude Desktop's 480 px receipt) */
 .transcript-question { width: fit-content; min-width: 200px; max-width: min(480px, 100%); margin: 4px 0 10px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-raised); font-size: var(--text-ui); }
 .transcript-question-lines { display: grid; gap: 2px; margin: 0; padding: 6px 12px; list-style: none; }
-.transcript-question-line { display: flex; align-items: baseline; gap: 6px; min-width: 0; line-height: 1.5; }
-.transcript-question-label { flex: none; max-width: 45%; overflow: hidden; color: var(--fg); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
-.transcript-question-arrow { flex: none; color: var(--fg-faint); }
+/* UX wave U1b (the architect's ruling A2): a header is cut only when header and answer together exceed the widget's
+   widest allowed width. The widget is as wide as its lines up to that width; past it the header and the answer share
+   the line half and half, and whichever needs less keeps its whole width, the other taking the rest (the answer
+   wraps, the header ends in an ellipsis). A percentage cap on the header read against the widget's own fitted width,
+   and so cut a short header beside a short answer such as Dismissed. */
+.transcript-question-line { display: grid; grid-template-columns: minmax(0, max-content) max-content minmax(0, max-content); align-items: baseline; column-gap: 6px; min-width: 0; line-height: 1.5; }
+.transcript-question-label { min-width: 0; overflow: hidden; color: var(--fg); font-weight: 500; white-space: nowrap; text-overflow: ellipsis; }
+.transcript-question-arrow { color: var(--fg-faint); }
 .transcript-question-answer { min-width: 0; color: var(--fg-muted); overflow-wrap: anywhere; }
 .transcript-question-answer[data-answer="none"] { color: var(--fg-faint); }
 
@@ -608,6 +615,16 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-artifact[data-artifact-state="error"] .transcript-artifact-top strong { color: var(--danger); }
 .transcript-artifact-actions { display: inline-flex; align-items: center; gap: 10px; margin-left: auto; }
 .transcript-artifact-actions .transcript-quiet-button { margin-top: 0; }
+/* UX wave U10b (M5, §C.4; R1, R4, R5): a delete's row. A long heading wraps beside the icon in the room left; Undo and
+   Open keep their place at the row's end, pressed areas at least 24 px tall; a line under the heading says why Undo is
+   disabled, or what an Undo that ended without its effect said. */
+.transcript-artifact[data-artifact-action="delete"] .transcript-artifact-top { flex-wrap: nowrap; align-items: flex-start; }
+.transcript-artifact[data-artifact-action="delete"] .transcript-artifact-top strong { flex: 1 1 auto; line-height: 24px; }
+.transcript-artifact[data-artifact-action="delete"] .transcript-artifact-top > svg { flex: none; margin-top: 4px; }
+.transcript-artifact[data-artifact-action="delete"] .transcript-artifact-actions .transcript-quiet-button { min-height: 24px; padding: 0 4px; }
+.transcript-artifact[data-artifact-action="delete"] .transcript-artifact-actions .transcript-quiet-button:disabled { color: var(--fg-faint); cursor: default; }
+.transcript-artifact-line { margin: -4px 12px 8px; color: var(--fg-muted); font-size: var(--text-ui-sm); overflow-wrap: anywhere; }
+.transcript-artifact-line[data-tone="danger"] { color: var(--danger); }
 .transcript-delivery-open { padding: 0; border: 0; background: none; font: inherit; text-align: left; cursor: pointer; }
 .transcript-delivery-open:hover:not(:disabled) { text-decoration: underline; }
 .transcript-delivery-open:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: var(--radius-sm); }
@@ -634,3 +651,17 @@ button.transcript-line-words:focus-visible { outline-width: 2px; outline-style: 
 .transcript-restore-dialog ul { max-height: 30vh; overflow: auto; overflow-wrap: anywhere; padding-left: 20px; font-family: var(--font-mono); }
 .transcript-restore-actions { display: flex; justify-content: flex-end; gap: 8px; }
 .transcript-restore-dialog button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+/* UX wave U1b start (Interfaces §D "A call that waits"; the architect's ruling A3): a call waiting for the person's
+   permission draws the waiting glyph in place of its status mark, and its glyph and label in the warning tone, as its
+   run's line does. The form of a waiting row, and the capsule's form under its top line. */
+.transcript-cell[data-waiting] > .transcript-cell-line { color: var(--warning); }
+.transcript-cell[data-waiting] > .transcript-cell-line::before { content: '◐'; width: 12px; height: auto; border: 0; border-radius: 0; animation: none; color: var(--warning); }
+.transcript-waiting-form { margin: 4px 0 10px; }
+.transcript-ask-form { padding: 8px 12px; border-top: 1px solid var(--border); }
+/* M5 (Interfaces §D, the jump button; the architect's ruling A1): while a waiting request is out of view the round button
+   becomes the pill "Needs your input". It keeps the round button's right edge, bottom and height and grows to the left,
+   so it may stand over the right end of the text column; its mark is the waiting glyph in the warning tone. */
+.transcript-jump[data-state="input"] { width: auto; gap: 6px; padding: 0 12px; border-radius: 16px; color: var(--fg); font-size: var(--text-ui-sm); white-space: nowrap; }
+.transcript-jump-mark { color: var(--warning); }
+/* UX wave U1b end */

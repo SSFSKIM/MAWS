@@ -12,7 +12,7 @@ import { openArtifactTab } from './actions';
 import { LIBRARY_PAGE as P } from './copy';
 import { MakeSomethingNew } from './MakeSomethingNew';
 import { Row } from './Row';
-import { SpaceMenu } from './SpaceDialogs';
+import { SpaceInstructionsMark, SpaceMenu } from './SpaceDialogs';
 import { showSpace } from './view';
 
 export type Line =
@@ -47,6 +47,7 @@ function GroupHeading({ title, space }: { title: string; space?: LibrarySpace })
           {P.linkedTo(space.linkedDir)}
         </span>
       )}
+      <SpaceInstructionsMark space={space} />
       <SpaceMenu space={space} />
     </div>
   );

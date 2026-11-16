@@ -101,7 +101,7 @@ beforeEach(() => {
       const revision = (input.revision as number | undefined) ?? 9;
       return ok({ revision, kind: row.kind, name: names[revision], path: `/store/${revision}/${names[revision]}` });
     }
-    if (name === 'library.exportFormats') return ok({ formats: input.kind === 'html' ? ['pdf', 'png'] : [] });
+    if (name === 'library.exportFormats') return ok({ formats: input.kind === 'html' ? ['pdf', 'png', 'html'] : [] }); // U10b: main serves html/html
     if (name === 'files.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true });
     if (name === 'library.read') return ok({ encoding: 'utf8', content: 'month,amount\n', bytes: 13, offset: 0, length: 13, truncated: false, mime: 'text/csv', hash: 'a'.repeat(64), utf8: true }); // M6b fix wave 2
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
@@ -155,9 +155,13 @@ describe('the HTML viewer', () => {
     expect(screen.queryByRole('combobox', { name: 'Version' })).toBeNull();
   });
 
-  it('registers its header: the title, read-only, Comment and the actions, and the Export menu of the kind’s formats', async () => {
+  // UX wave U10b (l6-artifacts-18, H9): an html page's Export menu ends in Save a copy…, never an HTML row beside it
+  it('registers its header: the title, read-only, Comment and the actions, and the Export menu of the kind’s formats and Save a copy…', async () => {
     mount('html');
-    await waitFor(() => expect(header().exports?.map((e) => e.label)).toEqual(['PDF', 'PNG']));
+    await waitFor(() => expect(header().exports?.map((e) => e.label)).toEqual(['PDF', 'PNG', 'Save a copy…']));
+    await waitFor(() => expect(header().exports?.at(-1)?.disabled).toBe(false));
+    act(() => header().exports!.at(-1)!.onSelect());
+    await waitFor(() => expect(main.callsOf('library.saveAs')).toEqual([{ artifactId: ID, source: { content: { revision: 9 } } }]));
     await waitFor(() => expect(actionLabels()).toEqual(['Comment', 'Reload', 'Open externally', 'Reveal in Finder', 'Send to…' /* P4-B5 */]));
     expect(header()).toMatchObject({ title: 'Dashboard', saved: 'readonly' });
   });

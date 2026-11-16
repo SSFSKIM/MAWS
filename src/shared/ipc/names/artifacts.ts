@@ -2,7 +2,9 @@
 // exactly the keys of `../schema/artifacts.ts`, pinned at compile time in `../schema.ts` and per namespace in
 // `../schema.test.ts`.
 export const commands = [
-  'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete', 'artifacts.duplicate',
+  'artifacts.list', 'artifacts.get', 'artifacts.create', 'artifacts.update', 'artifacts.delete',
+  'artifacts.undelete', // UX wave U10b: the undo of an agent's delete, after the delete as in the schema
+  'artifacts.duplicate',
   'artifacts.search', 'artifacts.versions', 'artifacts.saveVersion', 'artifacts.nameVersion', 'artifacts.restore', 'artifacts.markViewed',
   'artifacts.pruneVersions', 'artifacts.versionState', 'artifacts.attributions',
   'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', // P3-A M8

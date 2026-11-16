@@ -181,6 +181,14 @@ export function myItems(identities: readonly PluginIdentity[], view: { search: s
   return GROUP_ORDER.map((group) => ({ group, rows: rows.filter((i) => i.group === group).sort(byUpdated) })).filter(({ group, rows }) => rows.length > 0 || (group === 'here' && !narrowed));
 }
 
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §E): Customize's My items, All lists the
+// plugins with an installation here or at user scope (every identity in a group) through My items' search, by the name
+// their row shows; the library's Show and Sort do not apply there.
+export const pluginsOfAll = (identities: readonly PluginIdentity[], search: string): PluginIdentity[] => {
+  const needle = search.trim().toLowerCase();
+  return identities.filter((i) => i.group !== null && matches(i, needle)).sort(byName);
+};
+
 export type LoadedOnly = { name: string; source: string; kind: 'builtin' | 'folder' | 'other' };
 
 // Loaded plugins that are no identity of the list: the engine's own (`@builtin`), a folder's (a skills directory, a

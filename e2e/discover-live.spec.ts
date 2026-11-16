@@ -22,7 +22,8 @@ import type { CatalogItem, CatalogTab } from '../src/shared/ipc/schema/catalog';
 import { invoke, value } from './support/c7-replay';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { REAL_ENGINE_VERSION } from './support/real-engine';
-import { openAppDestination, pageRegion } from './support/shell';
+import { openAppDestination } from './support/shell';
+import { chooseCustomize, customizePage } from './support/customize';
 
 test.skip(process.env.MAWS_LIVE_SMOKE !== '1', 'the Discover live smoke runs under pnpm e2e:discover-live (MAWS_LIVE_SMOKE=1)');
 
@@ -41,16 +42,15 @@ function engineCli(launch: MawsLaunch, args: string[]): string {
   return execFileSync('/usr/bin/env', ['-i', `HOME=${engine.scratch.home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS });
 }
 
-// UX wave U7b (O-40): Customize is a page beside the sidebar, not a main tab; its library is found in the page's region.
-const library = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
+// UX wave U7b (O-40): Customize is a page beside the sidebar, not a main tab. UX wave U11c: a kind's Discover is reached
+// by the head's view and Show, and My items' rows are found in the page (support/customize.ts).
 const pane = (page: Page, tab = 'plugins') => page.locator(`[data-discover="${tab}"]`);
 const results = (page: Page, tab = 'plugins') => pane(page, tab).locator('[data-catalog-results]').last();
 const sheet = (page: Page, action: string) => page.locator(`[data-plugins-sheet="${action}"]`);
 
 async function openDiscover(page: Page, tab: 'Plugins' | 'Connectors'): Promise<void> {
-  await openAppDestination(page, 'Customize');
-  await page.getByRole('tab', { name: tab, exact: true }).click();
-  await page.getByRole('tabpanel', { name: tab }).getByRole('radio', { name: 'Discover' }).click();
+  await openAppDestination(page, 'Customize'); // My items, All
+  await chooseCustomize(page, { view: 'Discover', show: tab });
   await expect(pane(page, tab.toLowerCase())).toBeVisible();
 }
 
@@ -161,7 +161,7 @@ test('live: the real sources counted twice; a directory plugin installed and uni
 
     await card.locator('[data-card-open]').focus(); // installed here: the card opens it in My items
     await page.keyboard.press('Enter');
-    const w = library(page);
+    const w = customizePage(page); // My items, Plugins
     const where: Locator = w.locator(`[data-plugin-detail="${DIRECTORY_ID}"], [data-plugins-section="my-items"] [data-plugin-row="${DIRECTORY_ID}"]`).first();
     await expect(where).toBeVisible({ timeout: 60_000 });
     await where.getByRole('button', { name: /^More actions for / }).first().click();
@@ -173,7 +173,7 @@ test('live: the real sources counted twice; a directory plugin installed and uni
     await expect(w.locator(`[data-plugins-section="my-items"] [data-plugin-row="${DIRECTORY_ID}"]`)).toHaveCount(0, { timeout: 60_000 });
   });
 
-  await test.step('Linear: added from Connectors › Discover, removed from My items; no sign-in', async () => {
+  await test.step('Linear: added from Discover › Connectors, removed from My items; no sign-in', async () => {
     const configFile = join(maws!.realEngine!.scratch.configDir, '.claude.json');
     const userServers = () => (JSON.parse(readFileSync(configFile, 'utf8')) as { mcpServers?: Record<string, { type?: string; url?: string }> }).mcpServers ?? {};
     await openDiscover(page, 'Connectors');
@@ -184,9 +184,8 @@ test('live: the real sources counted twice; a directory plugin installed and uni
     await add.getByRole('button', { name: 'Add', exact: true }).click();
     await expect(add).toBeHidden();
     await expect.poll(() => userServers().linear, { timeout: CLI_MS }).toEqual({ type: 'http', url: 'https://mcp.linear.app/mcp' });
-    const panel = page.getByRole('tabpanel', { name: 'Connectors' });
-    await panel.getByRole('radio', { name: 'My items' }).click();
-    const row = panel.locator('[data-connector="linear"]');
+    await chooseCustomize(page, { view: 'My items' }); // Show kept: Connectors
+    const row = customizePage(page).locator('[data-connector="linear"]');
     await row.getByRole('button', { name: 'Remove linear' }).click();
     const remove = sheet(page, 'mcp-remove');
     await remove.getByRole('checkbox').check();

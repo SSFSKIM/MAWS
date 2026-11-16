@@ -1,7 +1,7 @@
 // X3 identifiers (C6 execution document, "X3 — identifiers and classification"): every row and cell id is a
 // deterministic function of X1 identifiers, never a position, so a re-derived turn yields the same ids and the
 // virtualiser keeps its anchor and the reader's expansion state.
-import type { ApiMessageId, EventId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, ApiMessageId, AppSessionId, EventId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
 import type { CellId, RowId, TurnId } from './rows';
 
 const row = (id: string) => id as RowId;
@@ -62,7 +62,9 @@ export const rowId = {
   // E4c end
   // E13: a browser activity standing alone, keyed by the number the window gave it on arrival
   browserActivity: (seq: number) => row(`browser-activity:${seq}`),
-  ownerRecord: (turn: TurnId) => row(`owner-record:${turn}`), // P2-C (2026-10-09): a marked turn's working record in the report view
+  // UX wave U2b (Interfaces §C): a stretch's line in the to-human view where MAWS draws it, closed (`› working record`)
+  // or open (`‹ fold to report`, under its last row): two rows, so each keeps its own place in the list
+  recordFold: (stretch: string, open: boolean) => row(`record-fold:${open ? 'open' : 'closed'}:${stretch}`),
 };
 
 export const cellId = {
@@ -70,3 +72,23 @@ export const cellId = {
   thinking: (apiMessageId: ApiMessageId, blockIndex: number) => cell(`cell:think:${blockIdentity(apiMessageId, blockIndex)}`),
   reads: (firstToolUse: ToolUseId) => cell(`cell:reads:${firstToolUse}`),
 };
+
+// UX wave U1b (Interfaces §C, decision 1): the transcript's end row, one per transcript, whose id is constant so the
+// virtual list keeps its measured height; its request id names the transcript it ends, for the host seam's renderer.
+// The prefix is no request id the engine (a UUID) or a bridge (a tool-use id) makes, and the parts are URI-encoded, so
+// a session id and an agent id of any text round-trip and the one `/` reads unambiguously.
+export const END_ROW = row('request-end');
+const END_PREFIX = 'maws-transcript-end:';
+export function endRequestId(appSessionId: AppSessionId, agentId: AgentId | null): RequestId {
+  return `${END_PREFIX}${encodeURIComponent(appSessionId)}${agentId === null ? '' : `/${encodeURIComponent(agentId)}`}` as RequestId;
+}
+export function endRequestOf(requestId: RequestId): { appSessionId: AppSessionId; agentId: AgentId | null } | null {
+  if (!requestId.startsWith(END_PREFIX)) return null;
+  const [session, agent, ...rest] = requestId.slice(END_PREFIX.length).split('/');
+  if (session === '' || rest.length > 0) return null;
+  try {
+    return { appSessionId: decodeURIComponent(session) as AppSessionId, agentId: agent === undefined ? null : (decodeURIComponent(agent) as AgentId) };
+  } catch {
+    return null; // a malformed escape: no id this module made
+  }
+}

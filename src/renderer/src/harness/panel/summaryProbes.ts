@@ -91,6 +91,7 @@ export const summaryProbes: Pick<PanelHarnessApi, 'setSession' | 'setStatus' | '
     // Nothing released at construction (a fixture's own stream point would reach the player's key alone): the seek
     // below decides what is history.
     const session = new HarnessSession({ ...events, streamFrom: null }, 0);
+    session.owner = key; // UX wave U1b: its children's keys name the fake session, whose waiting requests they list
     const sessionSource: TranscriptSource = { ...session.source, key }; // E7 (M7)
     sessionSources.set(session, sessionSource);
     loaded.set(key, session);

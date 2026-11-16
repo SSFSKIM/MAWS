@@ -1633,7 +1633,7 @@ describe('the sidebar under a page', () => {
     const strip = useLayout.getState().main;
     const current = (name: string) => screen.getByRole('button', { name }).getAttribute('aria-current');
     fireEvent.click(screen.getByRole('button', { name: 'Customize' }));
-    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'plugins' });
+    expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'mine', show: 'all' }); // UX wave U11c: no kind asked, All
     expect(current('Customize')).toBe('page');
     fireEvent.click(screen.getByRole('button', { name: 'Projects' }));
     expect(useLayout.getState().destination).toEqual({ kind: 'projects' });

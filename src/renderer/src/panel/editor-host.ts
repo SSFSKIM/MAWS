@@ -16,7 +16,9 @@ export type SavedState = 'saved' | 'saving' | 'unsaved' | 'reconnecting' | 'read
 // P4-B5: `pinned`, drawn in the row beside the first three rather than counted among them (the header's Send to); folded
 // into "More actions" only under the narrow header, as every action is.
 export interface EditorHostAction { id: string; label: string; icon?: ComponentType<{ className?: string }>; onSelect(): void; disabled?: boolean; pressed?: boolean; pinned?: boolean }
-export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string }
+// UX wave U10b (§B.5 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `checked`, an entry drawn as a
+// checkbox item (a document's page: Letter, A4, Compact) after the menu's other rows and a separator.
+export interface EditorHostExport { id: string; label: string; onSelect(): void; disabled?: boolean; children?: readonly EditorHostExport[]; description?: string; checked?: boolean }
 export interface EditorHostRegistration {
   title: string;
   /** An editor-owned toolbar can host the saved state/actions and region controls instead of a duplicate metadata row. */

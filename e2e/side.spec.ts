@@ -11,16 +11,16 @@
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { anchoredMessage } from '../src/shared/anchor/message';
+import { anchoredMessage, commentsMessage, quotedComment } from '../src/shared/anchor/message';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { addressed, localRef } from './support/address';
 import { bareOf } from '../src/shared/machine/address';
 import { collectBestEffortEvidence } from './support/best-effort-evidence';
 import { StoreFixture } from '../test/support/store-fixture';
-import { menu, otherThemeColours } from './support/code-product';
+import { expectToolbarAsDrawn, menu, otherThemeColours } from './support/code-product';
 import { clickRevealed } from './support/hover';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // Decision Log 67: fresh artifacts follow the seeded defaults.
@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { hideSurfaces, mainTabById, openArtifactInPanel, openSurface, sessionCards, surface, surfaceRow } from './support/shell';
+import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sessionCards, sideColumn, sideTab, surface, surfaceRow } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -237,7 +237,9 @@ async function showSession(page: Page, id: string): Promise<void> {
   await expect(mainTabById(page, `session:${await addressed(page, id)}`)).toHaveAttribute('aria-selected', 'true');
 }
 
-// Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer.
+// Files in the panel, the repository expanded down to `relative`, and its tab opened; answers the viewer. UX wave U6b-1
+// (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens beside the chat,
+// as a tab of Files in the side column, which `showFileTab` brings back into view where another tab took its place.
 async function openFile(page: Page, repo: ScratchRepo, relative: string): Promise<Locator> {
   await openSurface(page, 'Files');
   const files = surface(page, 'files');
@@ -250,9 +252,17 @@ async function openFile(page: Page, repo: ScratchRepo, relative: string): Promis
     await expect(row(at)).toHaveAttribute('aria-expanded', 'true');
   }
   await row(repo.path(relative)).click();
+  await expect(sideColumn(page).locator(`[data-file-viewer][data-path="${repo.path(relative)}"]`), `${relative} beside the chat`).toBeVisible();
   const viewer = page.locator(`[data-file-viewer][data-path="${repo.path(relative)}"]`);
   await expect(viewer.locator('.cm-line').first()).toBeVisible();
   return viewer;
+}
+
+// The file's side tab brought into view, in the place of the tab its group showed (the Side pane, after a thread opens).
+async function showFileTab(page: Page, name: string): Promise<void> {
+  const tab = sideTab(sideColumn(page), name);
+  await tab.click();
+  await expect(tab).toHaveAttribute('aria-selected', 'true');
 }
 
 // The comment mark of `line` (shown while its gutter is hovered), clicked; answers E3's sheet.
@@ -305,6 +315,47 @@ async function projectRows(page: Page, parent: string): Promise<{ id: string; le
   const project = sidebarOf(page).locator('[data-kind="project"]').filter({ has: page.locator(`[data-menu="session:${await addressed(page, parent)}"]`) });
   const rows = await project.locator('[role="treeitem"][data-menu^="session:"]').evaluateAll((rows) => rows.map((r) => ({ id: r.getAttribute('data-menu')!.slice('session:'.length), level: r.getAttribute('aria-level') })));
   return rows.map((row) => ({ ...row, id: bareOf(row.id) })); // the rows name addresses; the callers, the raw bridge's bare ids
+}
+
+// ---- UX wave U5b (M6): comments on lines in Review ----------------------------------------------------------------------
+// docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, A6: the agent's change over two files of the
+// scratch repository (src/app.ts's line 3 rewritten; src/total.ts two lines added), commented on in Review's stack.
+
+const TOTAL = 'src/total.ts';
+const TOTAL_TEXT = 'export function sumOf(items: { price: number }[]): number {\n  return items.reduce((sum, item) => sum + item.price, 0);\n}\n';
+const OLD_TOTAL_LINE = APP_TEXT.split('\n')[2]!; // app.ts's line 3 as committed, removed by the change
+const NEW_TOTAL_LINE = 'export const total = sumOf(items);'; // and as the change has it
+const ROUNDING_LINE = 'export const rounding = 2;'; // total.ts's line 4, added
+const CURRENCY_LINE = "export const currency = 'EUR';"; // total.ts's line 5, added, then rewritten
+const CURRENCY_LINE_LATER = "export const currency = 'USD';";
+const COMMENT_REMOVED = 'Why was the reduce dropped here?';
+const COMMENT_ADDED = 'Should rounding come from the settings?';
+const COMMENT_LEFT = 'Is the currency fixed for every market?';
+const COMMENT_THREAD = 'Is sumOf safe for an empty list?';
+const REVIEW_REPLY = 'Read both comments: the reduce moved into sumOf, and rounding will come from the settings.';
+const REVIEW_THREAD_REPLY = 'sumOf returns 0 for an empty list, as reduce does with its seed.';
+const LINE_LEFT_DIFF = 'The line this comment was on is no longer in this diff.'; // REVIEW_COPY.lineLeftDiff
+
+// The anchor Review makes for a line (`reviewLineAnchor`): the absolute path and the line, `side: 'old'` for a removed one.
+const reviewAnchor = (repo: ScratchRepo, path: string, line: number, side: 'old' | 'new') => ({
+  kind: 'file-line' as const,
+  locator: `${repo.path(path)}#L${line}`,
+  label: `${basename(path)}:${line}`,
+  path: repo.path(path),
+  line,
+  ...(side === 'old' && { side: 'old' as const }),
+});
+
+// The add button the diff library draws on a line of Review while the line is hovered, pressed (the library acts on the
+// press); answers the comment card it opens under the line.
+async function commentOnLine(review: Locator, path: string, side: 'old' | 'new', line: number): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-${side}-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator(`[data-add-widget="${side}"] button`));
+  const card = review.getByRole('dialog', { name: `Comment on ${basename(path)}:${line}` });
+  await expect(card).toBeVisible();
+  return card;
 }
 
 test.describe('side threads, Send to main and /btw (E3)', () => {
@@ -414,9 +465,15 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect.poll(() => projectRows(page, parent)).toEqual([{ id: parent, level: '2' }, { id: child, level: '3' }]);
     await expect((await sidebarRow(page, { appSessionId: child })).getByTestId('row-nested')).toHaveText('↳');
 
-    // the head's label opens the file at the line, in the parent's context
+    // the head's label opens the file at the line, in the parent's context: beside the parent's chat (UX wave U6b-1), its
+    // side tab in view in the thread's place, the parent's tab still in front and no main file tab
+    const strip = await mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
     await threadPane.getByRole('button', { name: 'Open app.ts:3' }).click();
-    await expect(mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`)).toHaveAttribute('aria-selected', 'true');
+    await expect(sideTab(sideColumn(page), 'app.ts')).toHaveAttribute('aria-selected', 'true');
+    await expect(sideColumn(page).locator(`[data-files-tab][data-file="${repo.path(APP)}"] [data-file-viewer][data-path="${repo.path(APP)}"]`)).toBeVisible();
+    await expect(mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`), 'no main file tab').toHaveCount(0);
+    await expect(mainTabById(page, `session:${await addressed(page, parent)}`)).toHaveAttribute('aria-selected', 'true');
+    expect(await mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? '')), 'the main strip as it was').toEqual(strip);
     expect(maws.consoleErrors()).toEqual([]);
   });
 
@@ -526,7 +583,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     value(await invoke(page, 'session.send', { appSessionId: parent as never, content: slowPrompt }));
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { message: 'the slow turn is running' }).not.toBeNull();
     const steerComment = 'While you are in there, check line 7 too.';
-    await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+    await showFileTab(page, 'app.ts'); // beside the parent's chat (UX wave U6b-1)
     const busySheet = await commentOn(page, viewer, 7);
     await busySheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await expect(busySheet.locator('label:has([data-send-to-main])'), 'the composer’s words for a steer').toHaveAttribute('title', 'Sends at the next step');
@@ -816,9 +873,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
       card.permission(prompt, 'Bash', { command: 'echo themed', description: 'Print a word' });
       return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [CHILD_REPLY]).write(dir, 'thread'), card.write(dir, 'card')];
     });
-    const { page, maws, repo, parent } = c;
+    const { page, maws, parent } = c;
     const { child, viewer } = await openThreadFromGutter(c);
-    // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row
+    // a comment to main, so the parent's transcript holds an anchored prompt beside the thread's row; the file's tab is
+    // beside the chat, where the Side pane took its place (UX wave U6b-1)
+    await showFileTab(page, 'app.ts');
     const sheet = await commentOn(page, viewer, 3);
     await sheet.getByRole('checkbox', { name: 'Send to main' }).check();
     await sheet.getByRole('textbox', { name: 'Comment' }).fill('Is the recompute intended?');
@@ -847,16 +906,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
         if (dir !== null) await target.screenshot({ path: join(dir, `${name}.png`) });
       };
 
-      // the sheet, over the file's tab
-      await mainTabById(page, `file:${await localRef(page)}:${repo.path(APP)}`).click();
+      // the sheet, over the file's tab (beside the chat: UX wave U6b-1)
+      await showFileTab(page, 'app.ts');
       const open = await commentOn(page, viewer, 3);
       await open.getByRole('textbox', { name: 'Comment' }).fill(COMMENT);
       await shoot(open, 'comment-sheet');
       await open.getByRole('button', { name: 'Cancel' }).click();
       await expect(open).toHaveCount(0);
 
-      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar
+      // the parent: its transcript, the pane on its thread, the side chat card, the sidebar; the Side pane back in view in
+      // the file's place
       await showSession(page, parent);
+      await sideTab(sideColumn(page), /^Side\b/).click();
       await panel.locator(`[data-side-chip="${await addressed(page, child)}"]`).click();
       await expect(panel.locator(`[data-side-thread-view="${await addressed(page, child)}"]`).getByText(CHILD_REPLY)).toBeVisible();
       await shoot(panel, 'side-pane-thread');
@@ -877,7 +938,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await shootCard(maws, viewerBox, 'card-composing');
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
-    await expect(card.locator('[data-request-card]')).toContainText('echo themed', { timeout: 20_000 });
+    await expect(card.locator('[data-request-end] [data-request-card]'), 'at the thread transcript’s end (UX wave U1b)').toContainText('echo themed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // the strip's words on one line at the card's width, its two buttons wrapping under them rather than squeezing them
     const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
@@ -970,8 +1031,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const allowed = () => journal(maws, child).filter((r) => r.direction === 'out' && r.frame.type === 'control_response').length;
 
     // the first request: C7's inline card (the transcript's, named by its heading) inside the card's box, the strip above
-    // Reply naming it
-    const request = card.locator('[data-request-card]');
+    // Reply naming it. UX wave U1b: a permission is the card at the end of the thread's transcript
+    const request = card.locator('[data-request-end] [data-request-card]');
     await expect(request).toBeVisible({ timeout: 20_000 });
     await expect(request.getByRole('heading', { name: 'Run a command' }), 'the loaded card says what is asked (U1a §D)').toBeVisible({ timeout: 20_000 });
     await expect(request).toContainText('echo first-step');
@@ -994,9 +1055,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await strip.getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo second-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo second-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(allowed).toBe(2);
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     expect(writtenUsers(maws, parent)).toHaveLength(1);
@@ -1028,9 +1089,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo the-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo the-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
 
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
@@ -1086,7 +1147,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
     // strip, then Allow there
-    const request = card.locator('[data-request-card]');
+    const request = card.locator('[data-request-end] [data-request-card]'); // UX wave U1b: at the thread transcript's end
     await expect(request.getByRole('button', { name: 'Allow once', exact: true }), 'the loaded permission card').toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks
@@ -1150,6 +1211,104 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(surface(page, 'side'), 'no Side surface').toHaveCount(0);
     expect(writtenUsers(maws, parent), 'the main conversation received nothing').toHaveLength(1);
     await shootCard(maws, viewer, 'card-thread-updated');
+    expect(maws.consoleErrors()).toEqual([]);
+  });
+  test('13. a line comment in Review: two comments on two files, one on a removed line, go to main as one message quoting each line; a draft whose line the agent rewrites is listed under the toolbar; an unticked comment opens its thread in the Side pane', async () => {
+    test.setTimeout(150_000);
+    const c = await begin((cwd, dir) => {
+      const parent = parentJournal(cwd);
+      parent.turn(REVIEW_REPLY); // the two comments, sent to main as one message
+      return [parent.write(dir, 'parent'), threadJournal(CHILD, cwd, 'app.ts:3', [REVIEW_THREAD_REPLY]).write(dir, 'thread')];
+    });
+    const { page, maws, repo, parent } = c;
+    await repo.fixture.write(TOTAL, TOTAL_TEXT);
+    await repo.git('add', TOTAL);
+    await repo.git('commit', '-q', '-m', 'total');
+    writeFileSync(repo.path(APP), APP_TEXT.replace(OLD_TOTAL_LINE, NEW_TOTAL_LINE));
+    writeFileSync(repo.path(TOTAL), `${TOTAL_TEXT}${ROUNDING_LINE}\n${CURRENCY_LINE}\n`);
+    await openSurface(page, 'Review');
+    const review = surface(page, 'review').locator('[data-review]');
+    await expect(review.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    for (const path of [APP, TOTAL]) await expect(review.locator(`[data-review-file="${path}"] [data-review-body] table`).first()).toBeVisible({ timeout: 20_000 });
+
+    // a draft on a line the agent then rewrites: kept in the pass, it leaves its line for the row under the toolbar, says
+    // so, and opens there (D11)
+    const draft = await commentOnLine(review, TOTAL, 'new', 5);
+    await expect(draft.getByRole('checkbox', { name: 'Send to main' }), 'Review asks for main').toBeChecked();
+    await draft.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_LEFT);
+    await draft.getByRole('textbox', { name: 'Comment' }).press('Escape');
+    await expect(review.locator('[data-comment-card]'), 'Escape keeps the draft and closes the card').toHaveCount(0);
+    await expect(review.locator(`[data-review-file="${TOTAL}"] [data-review-unsent-comment]`), 'the draft under its line').toHaveText(COMMENT_LEFT);
+    writeFileSync(repo.path(TOTAL), `${TOTAL_TEXT}${ROUNDING_LINE}\n${CURRENCY_LINE_LATER}\n`);
+    const unplaced = review.locator('[data-review-unplaced]');
+    await expect(unplaced.locator('[data-review-unplaced-words="line-left"]')).toHaveText(LINE_LEFT_DIFF, { timeout: 20_000 });
+    await expect(review.locator('[data-review-unsent-comment]'), 'under no line').toHaveCount(0);
+    // the toolbar as drawn with the row, and the row under it (measured)
+    await expectToolbarAsDrawn(review, 'the toolbar over the row of comments it cannot place');
+    const [bar, row] = [await review.locator('[data-review-toolbar]').boundingBox(), await unplaced.boundingBox()];
+    expect(row!.y, 'the row under the toolbar').toBeGreaterThanOrEqual(bar!.y + bar!.height - 0.5);
+    await unplaced.locator('[data-review-unplaced-edit]').click();
+    const away = unplaced.getByRole('dialog', { name: `Comment on ${basename(TOTAL)}:5` });
+    await expect(away.getByRole('textbox', { name: 'Comment' }), 'its words, in the card under the toolbar').toHaveValue(COMMENT_LEFT);
+    await away.getByRole('button', { name: 'Close', exact: true }).click(); // Close discards
+    await expect(unplaced, 'with its last comment the row goes').toHaveCount(0);
+
+    // two comments on two files, the first on the removed line: "Send 2 comments" sends one message to main, each comment
+    // its lead, its quoted line (the removed one under "Before the change:") and its words
+    const first = await commentOnLine(review, APP, 'old', 3);
+    await first.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_REMOVED);
+    const second = await commentOnLine(review, TOTAL, 'new', 4);
+    await second.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_ADDED);
+    await expect(review.locator(`[data-review-file="${APP}"] [data-review-unsent-comment]`), 'the other comment, a row under its line').toHaveText(COMMENT_REMOVED);
+    await second.getByRole('button', { name: 'Send 2 comments', exact: true }).click();
+    await expect.poll(() => writtenUsers(maws, parent).length, { timeout: 20_000 }).toBe(2);
+    const removed = reviewAnchor(repo, APP, 3, 'old');
+    const added = reviewAnchor(repo, TOTAL, 4, 'new');
+    expect(writtenUsers(maws, parent)[1]!.frame.message!.content).toEqual([
+      {
+        type: 'text',
+        text: commentsMessage(
+          [
+            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED), screenshot: false },
+            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED), screenshot: false },
+          ],
+          'main',
+        ),
+      },
+    ]);
+    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED)).toBe(`Before the change:\n\`${OLD_TOTAL_LINE}\`\n${COMMENT_REMOVED}`);
+    // the transcript: one message, two chips, the two quoted lines as code, the removed one under its caption
+    const main = mainRegion(page);
+    await expect(main.getByText(REVIEW_REPLY)).toBeVisible({ timeout: 20_000 });
+    const bubble = main.locator('[data-bubble]').filter({ hasText: COMMENT_REMOVED });
+    await expect(bubble, 'one message').toHaveCount(1);
+    await expect(bubble).toContainText(COMMENT_ADDED);
+    await expect(bubble.locator('[data-chip="anchor"]')).toHaveText(['app.ts:3', 'total.ts:4']);
+    await expect(bubble.locator('code')).toHaveText([OLD_TOTAL_LINE, ROUNDING_LINE]);
+    await expect(bubble, 'the removed line under its caption').toContainText(/Before the change:\s*export const total = items\.reduce/);
+    await expect(main.getByText('2 comments, in the order made:', { exact: false }), 'no framing line drawn').toHaveCount(0);
+    await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { timeout: 20_000 }).toBeNull();
+
+    // one comment with "Send to main" unticked: its side thread opens in the Side pane, in Review's place
+    const third = await commentOnLine(review, APP, 'new', 3);
+    const toMain = third.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain).toBeChecked();
+    await toMain.uncheck();
+    await third.getByRole('textbox', { name: 'Comment' }).fill(COMMENT_THREAD);
+    await third.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent, 'comment');
+    const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane, 'the Side pane opens on the new thread').toBeVisible({ timeout: 20_000 });
+    await expect(surface(page, 'review'), 'in Review’s place').toHaveCount(0);
+    await expect(pane.getByText(REVIEW_THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
+    await expect(pane.locator('[data-chip="anchor"]')).toHaveText('app.ts:3');
+    const threaded = reviewAnchor(repo, APP, 3, 'new');
+    const record = value(await invoke(page, 'session.get', { appSessionId: child as never }));
+    expect(record?.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: PARENT, anchor: threaded, openedBy: 'comment' });
+    expect(writtenUsers(maws, child).map((r) => r.frame.message!.content)).toEqual([
+      [{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD), screenshot: false }], 'thread') }],
+    ]);
+    expect(writtenUsers(maws, parent), 'the main conversation received the one message').toHaveLength(2);
     expect(maws.consoleErrors()).toEqual([]);
   });
 });

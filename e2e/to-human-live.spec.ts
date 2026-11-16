@@ -11,7 +11,7 @@
 // spec's Decision Log 31, `<message>` the one mark and questions through `mcp__maws__ask`; the four marks' cards,
 // notifications and Needs you are the replay e2e's, e2e/to-human.spec.ts): (1) the clean home, no output style: a new
 // session on Haiku asked for a plan as a message and one question it asks without waiting, then a foreground sleep;
-// the ask answered from its sheet while the sleep runs, delivered once the engine starts it, the composer's draft
+// the ask answered in its capsule's row while the sleep runs, delivered once the engine starts it, the composer's draft
 // untouched; the record row's two levels. (2) A relaunch: the states restored silently, nothing notified. (3) A
 // resume: the contract passed again, the snapshot reused (no second one), the agent naming its one mark. (4) The lane
 // off for the session (the /plugins row): the resume passes `--system-prompt-snapshot off` and no contract or variable,
@@ -20,7 +20,7 @@
 // scratch home's user) with `outputStyle: "doperpowers:to-human"`. P2-C2 (2026-10-13; the P2 spec's Decision Log 31):
 // the owner's style now declares the message-tool contract (4 at doperpowers 7.149.0), so a new session appends MAWS's
 // supplement, never the contract, the variable is set and the mod's own band stays away; the agent sends a `<message>`
-// and asks through `mcp__maws__ask` without blocking, answered from its sheet (the full flow of the four marks ran once,
+// and asks through `mcp__maws__ask` without blocking, answered in its capsule's row (the full flow of the four marks ran once,
 // in the clean home); with the lane off for it, the recorded supplement is dropped, the variable is unset and the mod
 // draws its band. A failed step stops the steps after it.
 //
@@ -327,9 +327,10 @@ function askWrites(id: string, askId: string): { uuid: string; text: string; at:
     .filter((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && textOf((r.frame as Frame).message?.content).includes(askId))
     .map((r) => ({ uuid: (r.frame as Frame).uuid!, text: textOf((r.frame as Frame).message?.content), at: r.at }));
 }
-// The first question of an ask's sheet answered: its first option, or the text when it has none.
-async function answerSheet(sheet: Locator): Promise<string> {
-  const first = sheet.locator('section[data-question-id]').first();
+// The first question of an ask's form answered (UX wave U1b: the form in its capsule's row, the sheet's own sections):
+// its first option, or the text when it has none.
+async function answerForm(form: Locator): Promise<string> {
+  const first = form.locator('section[data-question-id]').first();
   const radios = first.getByRole('radio');
   if ((await radios.count()) > 0) {
     await radios.first().click();
@@ -568,9 +569,9 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       line(`G1 new: spawn has --append-system-prompt once (contract ${TO_HUMAN_CONTRACT_VERSION}, byte for byte); no --system-prompt-snapshot; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} in --settings env and logged by the SessionStart probe; ${decisionWords(row)}`);
     });
 
-    // P2-C2: under contract 5 a question is MAWS's ask, not a mark. Answered from its sheet while the sleep runs, the
+    // P2-C2: under contract 5 a question is MAWS's ask, not a mark. Answered in its capsule's row while the sleep runs, the
     // answer goes to the engine as a steer and is delivered when the engine starts it; the composer's draft is untouched.
-    await step('g4-ask', 'G4 and G6: the agent’s non-blocking mcp__maws__ask waits as a notified async_input item, answered from its sheet while the agent runs; delivered when the engine starts it, the item retired', async () => {
+    await step('g4-ask', 'G4 and G6: the agent’s non-blocking mcp__maws__ask waits as a notified async_input item, answered in its capsule’s row while the agent runs; delivered when the engine starts it, the item retired', async () => {
       const capsule = pane(page).locator('section.transcript-ask').first();
       await expect(capsule).toHaveAttribute('data-ask-state', 'asked', { timeout: 240_000 });
       const askId = (await capsule.getAttribute('data-ask-id')) ?? '';
@@ -582,14 +583,16 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const [item] = await askItem();
       await expect.poll(async () => (await notified(page, s1)).filter((n) => n.attentionId === item!.id).length, { timeout: 30_000, message: 'the item notified' }).toBe(1);
       const note = (await notified(page, s1)).find((n) => n.attentionId === item!.id)!;
-      const sheet = page.locator(`[data-ask-sheet][data-ask-id="${askId}"]`);
-      await expect(sheet).toBeVisible({ timeout: 30_000 });
+      // UX wave U1b (O-17): the form stands in the capsule's row; no sheet opens by itself
+      const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+      await expect(form).toHaveAttribute('data-hover-ask', askId, { timeout: 30_000 });
+      await expect(page.locator('[data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
       await composer(page).click();
       await page.keyboard.insertText(DRAFT);
-      const answer = await answerSheet(sheet);
+      const answer = await answerForm(form);
       await shot('01-ask');
       const running = (await status(page, s1)).turn !== null;
-      await sheet.getByRole('button', { name: /^Submit/ }).click();
+      await form.getByRole('button', { name: /^Submit/ }).click();
       const submittedAt = new Date().toISOString();
       await expect(capsule).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
       await expect.poll(async () => (await askItem()).length, { timeout: 30_000, message: 'the item retired at the answer' }).toBe(0);
@@ -606,7 +609,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       expect(running, 'Submit landed while the turn ran').toBe(true);
       expect(askWrites(s1, askId), 'the answer written once').toHaveLength(1);
       line(`G6 ask: an async_input item "${item!.summary.slice(0, 60)}" anchored to the ask's request, attention.notified (${note.delivery}) with the window unfocused, retired at the answer`);
-      line(`G4 ask mid-turn: mcp__maws__ask blocking false; the sheet answered "${answer}" while the sleep ran; written once as ${write!.uuid}, the engine's started at ${started}; composer draft unchanged`);
+      line(`G4 ask mid-turn: mcp__maws__ask blocking false; the row's form answered "${answer}" while the sleep ran; written once as ${write!.uuid}, the engine's started at ${started}; composer draft unchanged`);
       await composer(page).click();
       await page.keyboard.press('Meta+A');
       await page.keyboard.press('Backspace');
@@ -757,7 +760,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       const row = await decision(s2, spawn.launchId);
       await expect.poll(async () => (s2Engine = (await status(page, s2)).engineSessionId ?? ''), { timeout: 60_000 }).not.toBe('');
       const probe = await probed(s2Engine, spawn.at);
-      await settleTurn(page, s2, prompts); // the agent's async ask waits on the sheet until style-answer: counted in pendingRequests
+      await settleTurn(page, s2, prompts); // the agent's async ask waits in its row until style-answer: counted in pendingRequests
       const observed = await observedStyle(s2);
       const s = await status(page, s2);
       const cards = await pane(page).locator('[data-owner-card="to-human"]').count(); // a <message> reads as the message card
@@ -792,26 +795,27 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       line(`style arm: doperpowers ${entry?.version} installed for the scratch home's user from a local marketplace, outputStyle ${STYLE} (declares ${plugin.contractKey}: ${plugin.shape}); --append-system-prompt once, the supplement byte for byte, no contract; ${decisionWords(row)} (engine reports ${observed.observed_style}); ${snap.supplements.length} snapshot(s), each with the supplement once; ${NATIVE_TO_HUMAN_ENV}=${ADVERTISED} logged; ${cards} message card(s); ${asks.length} mcp__maws__ask call(s), blocking false; system/init's asks ${JSON.stringify(initAskTools)}, neither AskUserQuestion nor mcp__doperpowers__AskUserQuestion among ${tools.length} tools; the mod's band absent (deferred)`);
     });
 
-    // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered from its sheet while the
+    // P2-C2: the owner's style asks through a tool, so the question is MAWS's ask, answered in its capsule's row while the
     // doperpowers mod is active; its answer reaches the agent as the user message naming the ask. (The four marks' cards,
     // Reply, attention and restart ran in the clean home.)
-    await step('style-answer', 'style arm: the agent’s non-blocking mcp__maws__ask answered from its sheet with the doperpowers mod active; the agent replies', async () => {
-      // every ask the turn left waiting, answered through its own sheet (a model may ask twice)
+    await step('style-answer', 'style arm: the agent’s non-blocking mcp__maws__ask answered in its capsule’s row with the doperpowers mod active; the agent replies', async () => {
+      // every ask the turn left waiting, answered through its own form in its capsule's row (a model may ask twice)
       const capsules = pane(page).locator('section.transcript-ask[data-ask-state="asked"]');
       await expect(capsules.first()).toBeVisible({ timeout: 30_000 });
       const waiting = await capsules.count();
       const prompts = written(s2);
       const askIds: string[] = [];
       const answers: string[] = [];
-      // the sheet shows one ask at a time (the latest first, then the next): answer whichever it shows
+      // the first capsule still asking, each in turn (an answered one leaves the selector)
       for (let k = 0; k < waiting; k += 1) {
-        const sheet = page.locator('[data-ask-sheet][data-ask-id]').first();
-        await expect(sheet).toBeVisible({ timeout: 30_000 });
-        const askId = (await sheet.getAttribute('data-ask-id')) ?? '';
+        const capsule = capsules.first();
+        const askId = (await capsule.getAttribute('data-ask-id')) ?? '';
+        const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+        await expect(form).toHaveAttribute('data-hover-ask', askId, { timeout: 30_000 });
         askIds.push(askId);
-        answers.push(await answerSheet(sheet));
+        answers.push(await answerForm(form));
         await shot('08-style-ask');
-        await sheet.getByRole('button', { name: /^Submit/ }).click();
+        await form.getByRole('button', { name: /^Submit/ }).click();
         await expect(pane(page).locator(`section.transcript-ask[data-ask-id="${askId}"]`)).toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 });
       }
       await settle(page, s2, prompts);
@@ -822,7 +826,7 @@ test('P2-C live: to-human end to end on the installed engine, in a scratch home'
       await shot('09-style-answer');
       expect(delivered.map((d) => d.length), 'each answer reached the engine once, as a user message naming its ask').toEqual(askIds.map(() => 1));
       expect(reply.length).toBeGreaterThan(0);
-      line(`style answer: with the mod active, ${askIds.length} mcp__maws__ask sheet(s) answered ${JSON.stringify(answers)}; each capsule Answered; each answer written once naming its ask; the agent replied`);
+      line(`style answer: with the mod active, ${askIds.length} mcp__maws__ask form(s) answered ${JSON.stringify(answers)}; each capsule Answered; each answer written once naming its ask; the agent replied`);
     });
 
     await step('style-off', 'style arm, lane off: the variable unset; the mod draws its own to-human band', async () => {

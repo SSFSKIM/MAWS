@@ -63,10 +63,13 @@ export const useSessionCreatorRegistered = (): boolean => creators.useEnabled('c
 // after that tab, unselected, and its composer takes the keyboard when the person selects it. UX wave U7b (M5, decision 11):
 // what the person looks at is compared (the store's `placeOf`), so a chat that arrives after a page or the Settings dialog opened is
 // added unselected and takes neither away.
-export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string } = {}): Promise<AppSessionId | null> {
+// UX wave U10b (M8, ruled 2026-11-15): `front`, the place in front when the person pressed, for a caller that waited
+// before calling (the Library's card, on a Space's folder); it stands in for the read at the call.
+export type ViewedPlace = ReturnType<typeof viewedPlace>;
+export async function createSession(projectId: ProjectId | null, opts: { pane?: 0 | 1 | 'focused'; location?: Location; registry?: string; front?: ViewedPlace } = {}): Promise<AppSessionId | null> {
   const creator = creators.get('create') as SessionCreator | undefined;
   if (!creator) return null; // C12
-  const front = viewedPlace(useLayout.getState());
+  const front = opts.front ?? viewedPlace(useLayout.getState());
   let appSessionId: AppSessionId | null;
   try {
     appSessionId = await (opts.location ? creator(projectId, opts.location) : creator(projectId));

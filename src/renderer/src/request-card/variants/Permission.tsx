@@ -2,7 +2,9 @@
 // decision reason, and three buttons drawn from the scopes the request offers (`scopeOptions`): Deny (Esc, its menu
 // holding "Deny and stop the turn"), the most lasting scope by name (⇧⌘↩) and Allow once (⌘↩), with "Allow for this
 // session" as the one entry of a menu on Allow once when the project rule takes the third place. "Deny… with a reason"
-// opens the reason box, whose own ⌘↩ sends. A key acts once the prompt has been drawn for 400 ms; each key is printed on
+// opens the reason box, whose own ⌘↩ sends. A key acts once the prompt has been drawn for 400 ms (UX wave U1b M4: at a
+// transcript's end, once the card's guard is armed, `guarded`, the guard seeing the row of buttons the body marks
+// `data-decision-buttons`); each key is printed on
 // its button (the row's effective chord) and a button whose key is not bound prints none. Under the quick-approval
 // policy: `button_only` (`default_to_no`) binds no allow key; `none` (`requires_user_interaction`) draws no allow button.
 // P5 O9 M6: each button, and each menu entry, is drawn disabled in place with its reason where the session's port can't
@@ -10,8 +12,9 @@
 // UX wave U1a (M4, §I): a file change's preview is its diff against the file as read (`proposed`, which the card reads
 // and hands here, since its first line says "Create" or "Edit" by it), or the input alone until and unless one is drawn.
 import { DropdownMenu } from 'radix-ui';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { effectiveChord, type ActionId } from '@shared/keymap/actions';
+import { useAttention } from '../../stores/attention';
 import { useSessions } from '../../stores/sessions';
 import { useSettings } from '../../stores/settings';
 import { toAnswer } from '../answers';
@@ -31,7 +34,7 @@ const KEY_GRACE_MS = 400;
 const MENU = 'z-50 rounded-md border border-border-strong bg-bg-overlay p-1 text-ui text-fg';
 const MENU_ITEM = 'cursor-default rounded-sm px-2.5 py-1 outline-none data-[disabled]:text-fg-faint data-[highlighted]:bg-bg-hover';
 
-export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE }: VariantProps<'permission.requested'> & { proposed?: Proposed }) {
+export function PermissionBody({ item, request, busy, submit, bindKeys, capability = carried, proposed = INPUT_ALONE, guarded = false }: VariantProps<'permission.requested'> & { proposed?: Proposed; guarded?: boolean }) {
   const project = useSessions((s) => {
     const record = s.records.get(item.appSessionId);
     return record?.projectId ? (s.projects.get(record.projectId) ?? null) : null;
@@ -43,8 +46,18 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const local = options.find((o) => o.scope === 'local_settings') ?? null;
   const lasting = local ?? session; // the third button: the most lasting scope the request offers
   const entry = local !== null ? session : null; // the menu on Allow once, when the project rule takes the third place
-  const [reasoning, setReasoning] = useState(false);
-  const [message, setMessage] = useState('');
+  // UX wave U1b (the branch review): the reason for denying is the request's, kept in the window's memory while it waits,
+  // so the card swapped for another request and back keeps it; the box opened by a press here takes the keyboard, and
+  // one drawn open again does not
+  const typed = useAttention((s) => s.textDrafts.get(item.id));
+  const reasoning = typed !== undefined;
+  const message = typed ?? '';
+  const setMessage = (text: string) => useAttention.getState().setTextDraft(item.id, text);
+  const [openedHere, setOpenedHere] = useState(false);
+  const openReason = () => {
+    setMessage('');
+    setOpenedHere(true);
+  };
 
   // Armed once the prompt has been drawn for KEY_GRACE_MS; until then a key is taken by its binding and answers nothing.
   const armed = useRef(false);
@@ -69,9 +82,12 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
   const declineKey = keyed('request.decline', !denyGate.disabled, () => deny('deny'));
   const onceKey = keyed('request.allowOnce', policy === 'full' && !onceGate.disabled, () => allow('once'));
   const lastingKey = lasting === null ? null : keyed('request.allowLasting', policy === 'full' && lastingGate?.disabled === false, () => allow(lasting.scope));
-  const whenArmed = (run: (() => void) | null) => run && (() => void (armed.current && run()));
+  const whenArmed = (run: (() => void) | null) => run && (() => void ((guarded || armed.current) && run()));
 
-  useEffect(() => {
+  // Said in the commit that draws the buttons (the branch review's ruling of 2026-11-15 UTC): no painted frame shows them
+  // with the keys the card binds from this unsaid, so a press at the first paint is the prompt's to take, never the
+  // composer's.
+  useLayoutEffect(() => {
     bindKeys({ accept: null, decline: whenArmed(declineKey), allowOnce: whenArmed(onceKey), allowLasting: whenArmed(lastingKey), digit: null });
   });
 
@@ -88,13 +104,13 @@ export function PermissionBody({ item, request, busy, submit, bindKeys, capabili
       )}
       {reasoning && (
         <div className="flex flex-col gap-1.5">
-          <CardTextarea label="Reason for denying" value={message} onChange={setMessage} onSubmit={() => deny('deny', message)} autoFocus disabled={busy} />
+          <CardTextarea label="Reason for denying" value={message} onChange={setMessage} onSubmit={() => deny('deny', message)} autoFocus={openedHere} disabled={busy} />
           <Muted>⌘Enter sends the deny with this reason</Muted>
         </div>
       )}
-      <Controls>
+      <Controls decisions>
         {!reasoning && (
-          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={() => setReasoning(true)} className="mr-auto border-transparent text-fg-muted">
+          <CardButton disabled={busy || denyGate.disabled} title={denyGate.title} onClick={openReason} className="mr-auto border-transparent text-fg-muted">
             Deny… with a reason
           </CardButton>
         )}

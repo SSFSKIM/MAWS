@@ -359,7 +359,7 @@ describe('the fallback toast', () => {
     useLayout.getState().setPanel({ maximized: false, collapsed: false });
     useLayout.getState().openTab({ kind: 'file', path: '/p/a.ts', line: null, appSessionId: fix.appSessionId, machine: TEST_MACHINE });
     notify(engineAsk);
-    notify(mawsAsk); // its originating event read as `maws.ask.opened`, as swapOf reads it
+    notify(mawsAsk); // its originating event read as `maws.ask.opened`
     expect(useNotices.getState().notices.map((n) => n.id)).toEqual([`attention:${engineAsk.id}`]);
   });
 

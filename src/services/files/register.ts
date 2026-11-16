@@ -11,7 +11,8 @@ import type { ClientId, ClientRef, HandlerContext } from '@shared/ipc/client';
 import type { FilesChanged, FilesReadUploadsInput, FilesReadUploadsOutput, FilesUploadInput, FilesUploadOutput } from '@shared/ipc/schema/files';
 import type { ServicesBus } from '@shared/spine/bus';
 import type { AllowlistRecord } from './allowlist';
-import { createFilesService, type FilesService } from './service';
+import type { Naming } from './named';
+import { createFilesService, type FilesService, type FilesServiceOptions } from './service';
 import { UPLOAD_READS_UNAVAILABLE, UPLOADS_UNAVAILABLE } from './upload';
 
 export interface FilesHandlerDeps {
@@ -23,7 +24,11 @@ export interface FilesHandlerDeps {
   homes?: () => readonly string[]; // 2026-11-06: the machine's homes as the home-root rule reads them (a suite's fake one)
   upload?: (input: FilesUploadInput) => Promise<FilesUploadOutput>; // P5 O3-E M3 (./upload.ts); none: every upload refused
   readUploads?: (input: FilesReadUploadsInput) => Promise<FilesReadUploadsOutput>; // P5 O7 M8 (./upload.ts); none: every read refused
-  named?: (appSessionId: AppSessionId, path: string, signal?: AbortSignal) => Promise<boolean>; // U6c: whether the transcript names the path (./named.ts); none: nothing admitted by name
+  named?: (appSessionId: AppSessionId, path: string, signal?: AbortSignal) => Promise<Naming>; // U6c: whether the transcript names the path (./named.ts); none: nothing admitted by name
+  // UX wave U6e (§B): the grants of chosen files, the agent's deliveries, MAWS's own folders (./service.ts)
+  grants?: FilesServiceOptions['grants'];
+  sent?: FilesServiceOptions['sent'];
+  own?: FilesServiceOptions['own'];
 }
 
 // The service, plus the live clients it follows (for tests and diagnostics: an ended client leaves no entry behind).
@@ -66,6 +71,10 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
   register('files.list', ({ appSessionId, path }, context?: HandlerContext) => files.list({ appSessionId: session(appSessionId), path }, remote(context)));
   register('files.read', (input, context?: HandlerContext) => files.read({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(input.named, context)));
   register('files.write', (input, context?: HandlerContext) => files.write({ ...input, appSessionId: session(input.appSessionId) }, remote(context))); // E5
+  // UX wave U6e (§B, Wiring): the save outside the folders asks by name, so it waits for the transcript as long as its
+  // client lives; the grant is main's alone (main-only), refused for a caller from another machine
+  register('files.writeOutside', (input, context?: HandlerContext) => files.writeOutside({ ...input, appSessionId: session(input.appSessionId) }, remote(context), endOf(true, context)));
+  register('files.grant', ({ appSessionId, path }, context?: HandlerContext) => files.grant(session(appSessionId), path, remote(context)));
   register('files.watch', async ({ appSessionId, path }, context: HandlerContext) => {
     const { client } = context;
     follow(client);
@@ -73,8 +82,8 @@ export function registerFilesHandlers(records: (appSessionId: AppSessionId) => A
     if (!followed.has(client.id)) await files.unwatch(session(appSessionId), path, client.id); // released while in flight
   });
   register('files.unwatch', ({ appSessionId, path }, { client }) => files.unwatch(session(appSessionId), path, client.id));
-  register('files.openExternal', ({ appSessionId, path, named }, context: HandlerContext) =>
-    files.openExternal(session(appSessionId), path, context.client, { named, remote: remote(context), signal: endOf(named, context) }), // U6c
+  register('files.openExternal', ({ appSessionId, path, named, agent }, context: HandlerContext) =>
+    files.openExternal(session(appSessionId), path, context.client, { named, agent, remote: remote(context), signal: endOf(named, context) }), // U6c; U6e: `agent`
   );
   register('files.reveal', ({ appSessionId, path }, { client }) => files.reveal(session(appSessionId), path, client)); // E1
   // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach, main-only, a path main resolved read with files.read's rules

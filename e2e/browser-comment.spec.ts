@@ -700,7 +700,7 @@ test('2. a pick sent to main writes [image, anchored text] whose tag round-trips
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator(`[data-side-thread-view="${await addressed(s.page, child)}"]`);
       await expect(pane, 'the Side pane opens on the thread').toBeVisible();
-      const request = pane.getByRole('group', { name: 'Approval needed' });
+      const request = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: at the thread view's end
       await expect(request).toContainText('echo the-count');
       await request.getByRole('button', { name: 'Allow once', exact: true }).click();
       await expect(pane.getByText(THREAD_REPLY)).toBeVisible({ timeout: 20_000 });
@@ -775,7 +775,8 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await expect(card).toHaveCount(0);
       const pane = s.panel.locator('[data-side-thread-view]');
       await expect(pane, 'the Side pane draws the thread').toBeVisible();
-      await expect(pane.getByRole('group', { name: 'Approval needed' })).toContainText('echo the-count');
+      const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: at the thread view's end
+      await expect(atEnd).toContainText('echo the-count');
       await expectOnPane(s, t.tabId, paneIn(main), 'main');
 
       // Show in browser: the card under the main tab's page draws the thread, with no caret; the Side pane steps aside
@@ -796,7 +797,7 @@ test('2b. a page thread in the Side pane re-docks into the card under the pane s
       await pane.getByRole('button', { name: 'Show here' }).click();
       await expect(card).toHaveCount(0);
       await expect(main.locator('[data-card-dock]')).toHaveJSProperty('offsetHeight', 0);
-      await expect(pane.getByRole('group', { name: 'Approval needed' })).toContainText('echo the-count');
+      await expect(atEnd).toContainText('echo the-count');
       await expect(pane.locator('header').getByRole('button', { name: 'Show in browser' })).toBeVisible();
       await expectOnPane(s, t.tabId, paneIn(main), 'main');
     },

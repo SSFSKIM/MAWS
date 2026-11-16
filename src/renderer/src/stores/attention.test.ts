@@ -1,12 +1,15 @@
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import type { RequestAnswer } from '@shared/engine/answers';
+import type { AttentionItem } from '@shared/graph/attention';
+import type { CommandResult } from '@shared/ipc/schema';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf } from '@shared/machine/address';
 import { item, record, remoteRow } from '../../../../test/support/builders';
 import { ev } from '../../../../test/support/events';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { swapOf } from '../composer/docked/swap';
-import { createAttentionStore, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall } from './attention';
+import { resetShellStores } from '../test-support/shell-stores';
+import { ANSWERED_ELSEWHERE, connectAnswers, createAttentionStore, NOT_PENDING_MS, REQUEST_RETRY_MS, selectGreyedNeedsYou, selectNeedsYou, selectPendingOf, selectWaitingAgents, selectWaitingByCall, selectWaitingForms, selectWaitingRequests, useAttention } from './attention';
 
 const M = TEST_MACHINE; // the store reads no machine from ids, so the one-machine cases keep bare ids
 
@@ -210,7 +213,7 @@ describe('the originating request of an item, fetched once', () => {
     vi.useRealTimers();
   });
 
-  it('a read that fails twice is cached as unreadable, so the docked swap shows it as a notice instead of waiting', async () => {
+  it('a read that fails twice is cached as unreadable, so its card says so instead of waiting', async () => {
     vi.useFakeTimers();
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
     const store = createAttentionStore();
@@ -223,7 +226,6 @@ describe('the originating request of an item, fetched once', () => {
     await load;
     expect(store.getState().requests.get(older.id)).toBeNull();
     expect(store.getState().unreadable.get(older.id)).toBe('still no host');
-    expect(swapOf([older], store.getState().requests)).toMatchObject({ item: null, notice: older, unread: [] });
     await store.getState().loadRequest(fake.client, older); // asks nothing more
     expect(fake.invoked('attention.request')).toHaveLength(2);
     warn.mockRestore();
@@ -376,5 +378,308 @@ describe('attention partitions its snapshots by machine', () => {
     expect(store.getState().bySession.get(onB('s9'))).toEqual([onBItem]);
     expect(store.getState().bySession.get(onB('s8'))).toEqual([]);
     expect(store.getState().pendingReplacements).toBeNull();
+  });
+});
+
+// UX wave U1b (Interfaces §A): the session's waiting requests and the calls its transcript marks, each by the shared
+// rule and the same object until the session's list changes.
+describe('the list a transcript draws', () => {
+  const form = item('s1', 'question', '2026-09-28T09:00:00Z', { id: 'att-form' as never, request: { requestId: 'req-f' as never, toolUseId: 'toolu_f' as never, taskId: null, agentId: null } });
+  const prompt = item('s1', 'permission', '2026-09-28T08:00:00Z', { id: 'att-prompt' as never, request: { requestId: 'req-p' as never, toolUseId: 'toolu_p' as never, taskId: null, agentId: null } });
+  const answered = item('s1', 'question', '2026-09-28T07:00:00Z', { id: 'att-done' as never, state: 'delivered', request: { requestId: 'req-d' as never, toolUseId: 'toolu_d' as never, taskId: null, agentId: null } });
+
+  it('selects the waiting requests oldest first and the calls of the forms among them, memoised per list', () => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot([form, prompt, answered], M);
+    const requests = selectWaitingRequests(store.getState(), S);
+    const forms = selectWaitingForms(store.getState(), S);
+    expect(requests.map((i) => i.id)).toEqual(['att-prompt', 'att-form']);
+    expect([...forms]).toEqual(['toolu_f']);
+    expect(selectWaitingRequests(store.getState(), S)).toBe(requests);
+    expect(selectWaitingForms(store.getState(), S)).toBe(forms);
+    store.getState().applyChanged({ appSessionId: S, items: [prompt] }, M);
+    expect(selectWaitingForms(store.getState(), S).size).toBe(0);
+    expect(selectWaitingRequests(store.getState(), 'nobody' as AppSessionId)).toEqual([]);
+  });
+});
+
+// UX wave U1b (Interfaces §G, decisions 8 and 21): what is known of a question's answer before the transcript's own row
+// carries it, by the addressed session together with the call.
+describe('a question’s receipt', () => {
+  const call = 'toolu_r' as never;
+
+  it('is kept per session and call; a settlement never replaces an answer or a dismissal, an answer replaces a settlement', () => {
+    const store = createAttentionStore();
+    const receipt = () => store.getState().receipts.get(S)?.get(call);
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    expect(receipt()).toEqual({ settled: 'Answered in the terminal' });
+    store.getState().recordReceipt(S, call, { answers: { 'Which file?': 'a.ts' } });
+    expect(receipt()).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    store.getState().recordReceipt(S, call, { settled: 'Answered elsewhere' });
+    expect(receipt()).toEqual({ answers: { 'Which file?': 'a.ts' } });
+    store.getState().recordReceipt(S, 'toolu_x' as never, { dismissed: true });
+    store.getState().recordReceipt(S, 'toolu_x' as never, { settled: 'Answered in the terminal' });
+    expect(store.getState().receipts.get(S)?.get('toolu_x' as never)).toEqual({ dismissed: true });
+  });
+
+  it('writing what is held already changes nothing', () => {
+    const store = createAttentionStore();
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    const held = store.getState().receipts;
+    store.getState().recordReceipt(S, call, { settled: 'Answered in the terminal' });
+    expect(store.getState().receipts).toBe(held);
+  });
+
+  // The ruling of 2026-11-15 on M1's D-2: a receipt lasts until the row carries its own answers or the session leaves,
+  // so a machine's feed snapshot that drops a session's emptied list leaves its receipts; the session's leaving drops them
+  it('stands through a snapshot that drops its session’s list; the session’s leaving drops its own alone', () => {
+    const store = createAttentionStore();
+    const T = addressOf(OTHER_MACHINE, 'eng-t' as AppSessionId);
+    const kept = addressOf(TEST_MACHINE, 'eng-t' as AppSessionId);
+    const asked = item(T, 'question', '2026-09-28T09:00:00Z', { id: addressOf(OTHER_MACHINE, 'lane-a:eng-t:toolu_r') as never });
+    store.getState().applyMirrored({ appSessionId: T, items: [asked] }, OTHER_MACHINE);
+    store.getState().recordReceipt(T, call, { answers: { q: 'a' } });
+    store.getState().recordReceipt(kept, call, { answers: { q: 'b' } }); // one engine session and call id on another machine
+    store.getState().applyMirrored({ appSessionId: T, items: [] }, OTHER_MACHINE); // answered: the list is empty
+    store.getState().applyRemote({ machine: OTHER_MACHINE, items: [], greyed: false }); // the machine's snapshot drops it
+    expect(store.getState().bySession.has(T)).toBe(false);
+    expect(store.getState().receipts.get(T)?.get(call)).toEqual({ answers: { q: 'a' } });
+    store.getState().forgetReceipts(T); // the session left
+    expect(store.getState().receipts.has(T)).toBe(false);
+    expect(store.getState().receipts.get(kept)?.get(call)).toEqual({ answers: { q: 'b' } });
+    const held = store.getState().receipts;
+    store.getState().forgetReceipts(T);
+    expect(store.getState().receipts).toBe(held);
+  });
+});
+
+// UX wave U1b (Interfaces §G "The delivery"; decision 17): a card's delivery is held by the request, under the item's id,
+// so every mounted card of the item reads one state and a card mounted again finds the one it left; the entry goes with
+// its item. The session's port is given by the card's module (`connectAnswers`); here a test's, whose writes it holds open.
+describe('a card’s delivery', () => {
+  const asked = item('s1', 'question', '2026-09-28T09:00:00Z', { id: 'att-asked' as never, request: { requestId: 'req-a' as never, toolUseId: 'toolu_a' as never, taskId: null, agentId: null } });
+  const prompt = item('s1', 'permission', '2026-09-28T09:01:00Z', { id: 'att-prompt' as never, request: { requestId: 'req-p' as never, toolUseId: 'toolu_p' as never, taskId: null, agentId: null } });
+  const ANSWERS: RequestAnswer = { kind: 'question', answers: { 'Which file?': 'a.ts' } };
+  const DENY: RequestAnswer = { kind: 'permission', decision: 'deny', message: '' };
+  type Sent = { item: AttentionItem; answer: RequestAnswer; settle: (result: CommandResult<'session.answer'>) => void };
+  let sent: Sent[] = [];
+  let terminalOnly = false;
+  let off: () => void = () => {};
+  const connect = () => {
+    sent = [];
+    terminalOnly = false;
+    off = connectAnswers({
+      send: (item, answer) => new Promise((settle) => sent.push({ item, answer, settle })),
+      terminalOnly: () => terminalOnly,
+    });
+  };
+  const outcome = (value: 'delivered' | 'not_pending' | 'write_failed', nth = 0) => sent[nth]!.settle({ ok: true, value: { outcome: value } });
+  afterEach(() => {
+    off();
+    vi.useRealTimers();
+  });
+  const listed = (...items: AttentionItem[]) => {
+    const store = createAttentionStore();
+    store.getState().applySnapshot(items, M);
+    return store;
+  };
+
+  it('is answering while the write is out, then sent until the item leaves the list, when it goes', async () => {
+    connect();
+    const store = listed(asked);
+    const answered = store.getState().deliver(asked, ANSWERS);
+    expect(store.getState().deliveries.get(asked.id)).toEqual({ phase: 'answering' });
+    outcome('delivered');
+    expect(await answered).toBe('delivered');
+    expect(store.getState().deliveries.get(asked.id)).toEqual({ phase: 'sent' });
+    store.getState().applyChanged({ appSessionId: S, items: [asked] }, M);
+    expect(store.getState().deliveries.get(asked.id)).toEqual({ phase: 'sent' }); // still listed
+    store.getState().applyChanged({ appSessionId: S, items: [] }, M);
+    expect(store.getState().deliveries.has(asked.id)).toBe(false);
+  });
+
+  it('held open: the item leaves the list while the write is out, and the entry goes with it, the receipt still written at the outcome', async () => {
+    connect();
+    const store = listed(asked);
+    const answered = store.getState().deliver(asked, ANSWERS);
+    store.getState().applyChanged({ appSessionId: S, items: [] }, M);
+    expect(store.getState().deliveries.has(asked.id)).toBe(false);
+    outcome('delivered');
+    expect(await answered).toBe('delivered');
+    expect(store.getState().deliveries.has(asked.id)).toBe(false);
+    expect(store.getState().receipts.get(S)?.get('toolu_a' as never)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+  });
+
+  it('held open: a second call for the item while one is out sends nothing, and both callers get the one outcome', async () => {
+    connect();
+    const store = listed(asked);
+    const first = store.getState().deliver(asked, ANSWERS);
+    const second = store.getState().deliver(asked, DENY);
+    expect(sent).toHaveLength(1);
+    outcome('delivered');
+    expect(await Promise.all([first, second])).toEqual(['delivered', 'delivered']);
+    expect(await store.getState().deliver(asked, DENY)).toBe('delivered'); // sent: one answer per request
+    expect(sent).toHaveLength(1);
+  });
+
+  it('a failed write keeps its answer and its detail, and the next call sends again', async () => {
+    connect();
+    const store = listed(prompt);
+    const failed = store.getState().deliver(prompt, DENY);
+    sent[0]!.settle({ ok: false, error: { code: 'internal', message: 'the link is down' } });
+    expect(await failed).toBe('write_failed');
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'failed', detail: 'the link is down', answer: DENY });
+    const retried = store.getState().deliver(prompt, DENY);
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'answering' });
+    outcome('write_failed', 1);
+    expect(await retried).toBe('write_failed');
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'failed', detail: null, answer: DENY });
+    expect(sent.map((s) => s.answer)).toEqual([DENY, DENY]);
+  });
+
+  it('answered elsewhere says so for NOT_PENDING_MS, by a timer of its own, then the card closes; one the terminal alone answers goes back to pending', async () => {
+    vi.useFakeTimers();
+    connect();
+    const store = listed(prompt);
+    const answered = store.getState().deliver(prompt, DENY);
+    outcome('not_pending');
+    expect(await answered).toBe('not_pending');
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'not_pending' });
+    vi.advanceTimersByTime(NOT_PENDING_MS - 1);
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'not_pending' });
+    vi.advanceTimersByTime(1);
+    expect(store.getState().deliveries.get(prompt.id)).toEqual({ phase: 'closed' });
+    store.getState().applyChanged({ appSessionId: S, items: [] }, M);
+    expect(store.getState().deliveries.has(prompt.id)).toBe(false);
+
+    const again = listed(prompt);
+    terminalOnly = true;
+    const refused = again.getState().deliver(prompt, DENY);
+    outcome('not_pending', 1);
+    expect(await refused).toBe('not_pending');
+    expect(again.getState().deliveries.has(prompt.id)).toBe(false);
+  });
+
+  it('writes a question’s receipt at a delivered answer, a dismissal for its decline, and nothing for another kind or another outcome', async () => {
+    connect();
+    const store = listed(asked, prompt);
+    const call = 'toolu_a' as never;
+    void store.getState().deliver(asked, DENY);
+    outcome('write_failed');
+    await vi.waitFor(() => expect(store.getState().deliveries.get(asked.id)?.phase).toBe('failed'));
+    expect(store.getState().receipts.size).toBe(0);
+    const dismissed = store.getState().deliver(asked, DENY);
+    outcome('delivered', 1);
+    await dismissed;
+    expect(store.getState().receipts.get(S)?.get(call)).toEqual({ dismissed: true });
+    const allowed = store.getState().deliver(prompt, DENY);
+    outcome('delivered', 2);
+    await allowed;
+    expect(store.getState().receipts.get(S)?.has('toolu_p' as never)).toBe(false);
+  });
+
+  // UX wave U1b M3 (decision 8a): a question answered elsewhere says so on its row past the card's two seconds
+  // Decision 8b: a plan's row keeps the known answer too
+  it('a plan answered elsewhere leaves the receipt Already answered elsewhere under its call', async () => {
+    connect();
+    const plan = item('s1', 'plan', '2026-09-28T09:02:00Z', { id: 'att-plan' as never, request: { requestId: 'req-plan' as never, toolUseId: 'toolu_plan' as never, taskId: null, agentId: null } });
+    const store = listed(plan);
+    const late = store.getState().deliver(plan, { kind: 'plan', outcome: 'implement', feedback: null } as RequestAnswer);
+    outcome('not_pending');
+    await late;
+    expect(store.getState().receipts.get(S)?.get('toolu_plan' as never)).toEqual({ settled: ANSWERED_ELSEWHERE });
+  });
+
+  it('a question answered elsewhere leaves the receipt Already answered elsewhere, which an answer or a settlement held already outranks, and a prompt none', async () => {
+    vi.useFakeTimers();
+    connect();
+    const store = listed(asked, prompt);
+    const late = store.getState().deliver(asked, ANSWERS);
+    outcome('not_pending');
+    await late;
+    expect(store.getState().receipts.get(S)?.get('toolu_a' as never)).toEqual({ settled: ANSWERED_ELSEWHERE });
+    vi.advanceTimersByTime(NOT_PENDING_MS);
+    expect(store.getState().deliveries.get(asked.id)).toEqual({ phase: 'closed' });
+    store.getState().applyChanged({ appSessionId: S, items: [prompt] }, M); // the list lets it go: the receipt stays
+    expect(store.getState().receipts.get(S)?.get('toolu_a' as never)).toEqual({ settled: ANSWERED_ELSEWHERE });
+    const prompted = store.getState().deliver(prompt, DENY);
+    outcome('not_pending', 1);
+    await prompted;
+    expect(store.getState().receipts.get(S)?.has('toolu_p' as never)).toBe(false);
+
+    const said = listed(asked);
+    said.getState().recordReceipt(S, 'toolu_a' as never, { settled: 'Answered in the terminal' }); // the follower's words first
+    const after = said.getState().deliver(asked, ANSWERS);
+    outcome('not_pending', 2);
+    await after;
+    expect(said.getState().receipts.get(S)?.get('toolu_a' as never)).toEqual({ settled: 'Answered in the terminal' });
+  });
+
+  // M2's review: the leaving is said once, at its edge; an outcome that lands after it writes no receipt for the session
+  it('an outcome that lands after its session left writes no receipt, delivered or answered elsewhere; a session not left still gets its own', async () => {
+    connect();
+    const store = listed(asked);
+    const delivered = store.getState().deliver(asked, ANSWERS);
+    store.getState().forgetReceipts(S); // the session leaves while the write is out, with no receipt held yet
+    outcome('delivered');
+    await delivered;
+    expect(store.getState().receipts.has(S)).toBe(false);
+
+    const again = listed(asked);
+    const late = again.getState().deliver(asked, ANSWERS);
+    again.getState().forgetReceipts(S);
+    outcome('not_pending', 1);
+    await late;
+    expect(again.getState().receipts.has(S)).toBe(false);
+
+    const stayed = listed(asked);
+    stayed.getState().forgetReceipts(S); // left before this answer went out: its answer is this session's again
+    const answered = stayed.getState().deliver(asked, ANSWERS);
+    outcome('delivered', 2);
+    await answered;
+    expect(stayed.getState().receipts.get(S)?.get('toolu_a' as never)).toEqual({ answers: { 'Which file?': 'a.ts' } });
+  });
+});
+
+// UX wave U1b M3 (Interfaces §G "The settling receipt"): held per session by the follower, released by its timer
+describe('a settling receipt', () => {
+  const entry = (id: string) => ({ id: id as never, call: null, agentId: null, summary: 'Bash: ls', words: 'Answered in the terminal: Allowed', until: 0 });
+  it('is held per session, once per request, and released alone; it is no waiting request', () => {
+    const store = createAttentionStore();
+    store.getState().holdSettling(S, entry('a'));
+    store.getState().holdSettling(S, entry('a'));
+    store.getState().holdSettling(S, entry('b'));
+    expect(store.getState().settling.get(S)?.map((e) => e.id)).toEqual(['a', 'b']);
+    expect(selectWaitingRequests(store.getState(), S)).toEqual([]);
+    store.getState().releaseSettling(S, 'a' as never);
+    expect(store.getState().settling.get(S)?.map((e) => e.id)).toEqual(['b']);
+    store.getState().releaseSettling(S, 'b' as never);
+    expect(store.getState().settling.has(S)).toBe(false);
+  });
+});
+
+// UX wave U1b M3 (the architect's ruling of 2026-11-15): the test reset clears the answers the app's store holds in
+// flight, so a case that leaves one out keeps no later case's answer to the same request from being sent. The two cases
+// run in this order: the first leaves its answer out, the second answers the same item.
+describe('the test reset and an answer left in flight', () => {
+  const asked = item('s1', 'question', '2026-09-28T09:00:00Z', { id: 'att-left' as never, request: { requestId: 'req-left' as never, toolUseId: 'toolu_left' as never, taskId: null, agentId: null } });
+  const ANSWERS: RequestAnswer = { kind: 'question', answers: { 'Which file?': 'a.ts' } };
+  let sent = 0;
+  let off: () => void = () => {};
+  beforeEach(() => {
+    resetShellStores();
+    sent = 0;
+    off = connectAnswers({ send: () => ((sent += 1), new Promise<never>(() => {})), terminalOnly: () => false }); // a write that never answers
+  });
+  afterEach(() => off());
+
+  it('an earlier case leaves its answer out', () => {
+    void useAttention.getState().deliver(asked, ANSWERS);
+    expect(sent).toBe(1);
+  });
+
+  it('a later case answering the same request still sends it', () => {
+    void useAttention.getState().deliver(asked, ANSWERS);
+    expect(sent).toBe(1);
   });
 });

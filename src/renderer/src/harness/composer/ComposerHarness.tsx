@@ -1,5 +1,5 @@
 // The composer and card harness page (`#composer`; C7 execution document, M2 and Acceptance item 2): two panes, each
-// showing a session's waiting request in one X4 placement (docked in the frame, in a focusable article as C5's
+// showing a session's waiting request in one X4 placement (`docked`: since UX wave U1b, its transcript's end; in a focusable article as C5's
 // Overview card holds it, in a hover card, inline), over the app's real stores and C5's real key dispatcher, with the
 // engine behind them (C3's replay under MAWS_ENGINE_REPLAY=1). Main blocks navigation, so an end-to-end test cannot
 // change the query within a launch: it launches its replay through `window.maws` and tells the page what to show
@@ -34,13 +34,14 @@ import { connectShell } from '../../ipc/events';
 import { queryClient } from '../../ipc/query';
 import { connectKeys } from '../../keymap/dispatcher';
 import { useKeyChord } from '../../keymap/useKeyChord';
-import { RequestCard } from '../../request-card';
+import { connectRequestCard, RequestCard, renderSessionRequest } from '../../request-card';
 import { ComposerColumn, SessionPane } from '../../session/SessionPane';
 import { selectPendingOf, useAttention } from '../../stores/attention';
 import { useHosts } from '../../stores/hosts';
 import { useLayout } from '../../stores/layout';
 import { useSettings } from '../../stores/settings';
-import { TranscriptSlot } from '../../transcript';
+import { Transcript, TranscriptSlot } from '../../transcript';
+import { ipcSource } from '../../transcript/source/ipc'; // UX wave U1b
 import { connectTranscript } from '../../transcript/shell';
 import { RewindWidget } from '../../widgets/RewindWidget';
 import type { CardsHarnessApi, HarnessPane, HarnessPlacement } from './api';
@@ -67,8 +68,15 @@ function useShown(appSessionId: AppSessionId): AttentionItem | null {
   return oldest(useAttention((s) => selectPendingOf(s, appSessionId)));
 }
 
+// UX wave U1b (decision 16): the `docked` placement is where the app now draws a session's request, its transcript's
+// end (and a question's form in its call's row), over the session's real transcript and the card's registered renderer.
+function TranscriptEndPane({ appSessionId }: { appSessionId: AppSessionId }) {
+  return <Transcript source={ipcSource(appSessionId)} variant="session" renderRequest={renderSessionRequest} className="h-96" />;
+}
+
 function RequestPane({ appSessionId, placement, index }: { appSessionId: AppSessionId; placement: HarnessPlacement; index: 0 | 1 }) {
   const item = useShown(appSessionId);
+  if (placement === 'docked') return <TranscriptEndPane appSessionId={appSessionId} />;
   if (!item) return <p className="m-0 text-fg-faint">No request for {bareOf(appSessionId)}</p>;
   const card = <RequestCard key={item.id} item={item} request={null} placement={placement} paneIndex={index} />;
   switch (placement) {
@@ -149,7 +157,9 @@ export function ComposerHarness() {
     // store, which App.tsx connects app-wide (connectSupervisorNotices), so a plan card reads main's host.status here too.
     // UX wave U11a M3 (e2e run 43359967651): and the transcript in its slot, as App.tsx connects it, so a `shell` pane's
     // started session draws its transcript above its composer rather than C5's "Transcript unavailable"
-    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
+    // UX wave U1b: and the request card as App.tsx connects it (the transcript's request renderer and the followers of
+    // settlements), so a composer pane's transcript and a `shell` pane draw a waiting request where the app does
+    const offs = [connectShell(), connectKeys(), connectInlineEdit(composerClient), connectTranscript(), connectRequestCard(), registerSlashWidget('rewind', { title: 'Rewind', component: RewindWidget }), useSettings.getState().connect(), useHosts.getState().connect()];
     window.__maws_cards = {
       // Committed before the call returns: rendered later, the previous placement's card would still be in the page for
       // a test's next step to find (a docked card answering for the inline one it moved to).

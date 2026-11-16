@@ -96,8 +96,8 @@ export const RowSchema = z.discriminatedUnion('kind', [
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
   }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()), clock: z.literal('wall').optional() }),
-  z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),
-  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */ }),
+  z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()), waiting: z.literal(true).optional() /* UX wave U1b */ }),
+  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */, waiting: z.literal(true).optional(), dismissed: z.literal(true).optional() /* UX wave U1b */ }),
   z.strictObject({
     ...base, kind: z.literal('request_slot'), requestId: z.string(), toolUseId: nullable(z.string()), requestKind: z.enum(['permission', 'question', 'plan', 'dialog', 'elicitation']), toolName: nullable(z.string()), requestedAt: z.string(),
   }),
@@ -119,6 +119,7 @@ export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({
     ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),
     state: z.enum(['pending', 'asked', 'answered', 'cancelled', 'error']), answers: nullable(z.array(AskAnswerSchema)), error: nullable(z.string()), cancelReason: nullable(AskCancelReasonSchema),
+    waiting: z.literal(true).optional(), // UX wave U1b
   }),
   z.strictObject({
     ...base, kind: z.literal('delivery'), toolUseId: z.string(), files: z.array(z.strictObject({ path: z.string(), name: z.string(), id: nullable(z.string()) })), caption: nullable(z.string()),
@@ -140,8 +141,9 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E7 end
   // E2 start
   z.strictObject({
-    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update']), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
+    ...base, kind: z.literal('artifact'), toolUseId: z.string(), action: z.enum(['create', 'update', 'delete'] /* UX wave U10b */), artifactId: z.string(), title: nullable(z.string()), htmlPath: z.string(),
     deliverableId: nullable(z.string()), version: nullable(z.number()), error: nullable(z.string()), answered: z.boolean(), neverAnswered: z.literal(true).optional() /* E11 */,
+    why: z.string().optional() /* UX wave U10b */,
   }),
   // E2 end
   // E4c start

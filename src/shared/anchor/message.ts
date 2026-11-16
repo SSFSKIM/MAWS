@@ -249,3 +249,47 @@ function readFramed(text: string): { comments: MessageComment[]; destination: De
   return { comments, destination };
 }
 // UX wave U5a end
+
+// UX wave U5b start (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A and decision 3; M1): a
+// comment made on a line of a diff carries that line's text inside its words, so no command, schema or reader changes
+// and an older daemon cannot drop it. The quote is one inline code span on a line of its own above the words (a fence
+// is a tall block in the transcript's bubble): a run of backticks one longer than the line's longest, with one space
+// inside each end where the line begins or ends with a backtick or a space, which a CommonMark reader strips again. Its
+// backticks begin the line, so no quoted text can begin a line of the message as a tag does. A removed line is said in
+// the words, under "Before the change:", and never in the lead, so the lead and the tag stay what both older builds
+// regenerate (R6).
+export const QUOTE_MAX = 400; // UTF-16 units; a longer line is cut and ends with "…"
+export const BEFORE_THE_CHANGE = 'Before the change:';
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const QUOTE_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g; // every control character but the tab
+const BLANK_LINE = /^[ \t]*$/;
+
+// The line as one line of at most QUOTE_MAX units, or null when it is blank, which is read before the cut (a cut line
+// of spaces would hold "…"): the CR of a CRLF line's ending is no part of its text; any other line break or control
+// character is U+FFFD; a cut never halves a surrogate pair.
+function quoteLine(line: string): string | null {
+  const one = line.replace(/\r$/, '').replace(QUOTE_CONTROL, '\uFFFD');
+  if (BLANK_LINE.test(one)) return null;
+  if (one.length <= QUOTE_MAX) return one;
+  let end = QUOTE_MAX - 1;
+  const last = one.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${one.slice(0, end)}…`;
+}
+
+function codeSpan(line: string): string {
+  const longest = Math.max(0, ...(line.match(/`+/g) ?? []).map((run) => run.length));
+  const ticks = '`'.repeat(longest + 1);
+  const pad = /^[` ]|[` ]$/.test(line) ? ' ' : '';
+  return `${ticks}${pad}${line}${pad}${ticks}`;
+}
+
+/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line); unchanged when `quote` is null and the line is not a removed one. */
+export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
+  if (text.trim() === '') return text; // a comment with no words is not sent
+  const line = quote === null ? null : quoteLine(quote);
+  const parts = [...(anchor.kind === 'file-line' && anchor.side === 'old' ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
+  return parts.join('\n');
+}
+// UX wave U5b end

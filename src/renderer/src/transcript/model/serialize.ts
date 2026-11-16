@@ -46,7 +46,7 @@ function partOf(row: Row): string | null {
     case 'agent_message': return messagePart(row); // E7: the body or report under the line when it shows more
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
-    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.answers !== null && Object.keys(row.answers).length === 0 ? QUESTION.skipped : '—')}`).join('\n'); // an empty answer map: skipped (a plain deny)
+    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.dismissed === true || (row.answers !== null && Object.keys(row.answers).length === 0) ? QUESTION.dismissed : '—')}`).join('\n'); // UX wave U1b (decision 10): dismissed, or declined whole (a plain deny's empty map)
     case 'request_slot': return `*${requestSlotPlaceholder(row.toolName ?? row.requestKind)}*`;
     case 'error': return `*${row.text}*`;
     case 'boundary': return `---\n*${row.text}*`;
@@ -63,7 +63,7 @@ function partOf(row: Row): string | null {
     case 'artifact': return `**${artifactHeading(row)}**`; // E2
     case 'browser_action': return browserActionPart(row); // E4c
     case 'browser_activity': return `- ${browserActivityLine(row.activity)}`; // E13
-    case 'owner_record': return null; // P2-C (2026-10-09): the report view's own row; the copy is the transcript's
+    case 'record_fold': return null; // UX wave U2b: the to-human view's own line; the copy is the transcript's
     case 'to_human': return `<message>${row.text}</message>`; // P4-R7: as the span it stands in for copies, verbatim
   }
 }

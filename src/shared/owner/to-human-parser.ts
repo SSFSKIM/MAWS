@@ -101,12 +101,17 @@ export const insideCode = (regions: readonly CodeRegion[]) => (offset: number): 
 
 const STREAMING_TAGS = ['to-human', 'essential', 'need-input', 'insight', 'choice'].flatMap((name) => [`<${name}>`, `</${name}>`]).concat('<choice recommended>');
 
-/** Display only, while a block streams: its final unclosed marks read as open, and a tag still arriving is dropped. */
-export function parseLive(text: string): Part[] {
+/** A streaming block's text without a tag still arriving at its end (`parseLive`'s reading of it). */
+export function arrived(text: string): string {
   const tail = text.lastIndexOf('<');
   const suffix = tail === -1 ? '' : text.slice(tail);
   const arriving = suffix !== '' && STREAMING_TAGS.some((tag) => tag.length > suffix.length && tag.startsWith(suffix)) && !insideCode(codeRegions(text))(tail);
-  return partsOf(arriving ? text.slice(0, tail) : text, true);
+  return arriving ? text.slice(0, tail) : text;
+}
+
+/** Display only, while a block streams: its final unclosed marks read as open, and a tag still arriving is dropped. */
+export function parseLive(text: string): Part[] {
+  return partsOf(arrived(text), true);
 }
 
 export function parse(text: string): Part[] {
@@ -114,11 +119,12 @@ export function parse(text: string): Part[] {
 }
 
 // The mark tags outside one reading's code regions and which of them pair; `balanced` when every one does (a streaming
-// block's marks still open at its end counting as paired).
-function readingOf(text: string, regions: readonly CodeRegion[], live: boolean) {
+// block's marks still open at its end counting as paired). `literal`: a tag the caller reads as text (the renderer's
+// backslash-escaped tag), which neither pairs nor unbalances.
+function readingOf(text: string, regions: readonly CodeRegion[], live: boolean, literal?: (at: number) => boolean) {
   const inCode = insideCode(regions);
   // `<message>` (contract 2) is the to-human kind under its new name; it pairs only with its own closer.
-  const tokens = [...text.matchAll(/<(\/?)(message|to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index));
+  const tokens = [...text.matchAll(/<(\/?)(message|to-human|essential|need-input|insight)>/g)].filter((token) => !inCode(token.index) && !literal?.(token.index));
   const stack: number[] = [];
   const paired = new Set<number>();
   for (let i = 0; i < tokens.length; i++) {
@@ -133,6 +139,33 @@ function readingOf(text: string, regions: readonly CodeRegion[], live: boolean) 
   // parseLive: a streaming block's marks still open at its end read as open.
   if (live) for (const open of stack) paired.add(open);
   return { inCode, tokens, paired, balanced: paired.size === tokens.length };
+}
+
+/** A mark tag as a reading takes it: where it stands in the text, and whether it opens or closes which mark. */
+export interface MarkTag { index: number; length: number; close: boolean; name: string }
+
+// A tag after an odd run of backslashes: Markdown shows it as text, so the renderer reads it as text (UX wave U2b).
+const escaped = (text: string) => (at: number): boolean => {
+  let backslashes = 0;
+  for (let i = at - 1; i >= 0 && text[i] === '\\'; i--) backslashes++;
+  return backslashes % 2 === 1;
+};
+
+/**
+ * The mark tags this grammar reads as tags, in order (UX wave U2b, the one reading of a text's marks,
+ * `src/shared/owner/marked.ts`): the ones `parse` pairs (or, `live`, `parseLive`, a block's marks still open at its end
+ * included and a tag still arriving left out), under the same strict-then-glued choice of code regions, and, with
+ * `escapes`, none after a backslash. Every other tag is text.
+ */
+export function markTagsOf(text: string, { live = false, escapes = false }: { live?: boolean; escapes?: boolean } = {}): MarkTag[] {
+  const read = live ? arrived(text) : text;
+  const literal = escapes ? escaped(read) : undefined;
+  let reading = readingOf(read, codeRegions(read), live, literal);
+  if (!reading.balanced) {
+    const glued = readingOf(read, regionsOf(read, GLUED), live, literal);
+    if (glued.balanced) reading = glued;
+  }
+  return reading.tokens.flatMap((token, i) => (reading.paired.has(i) ? [{ index: token.index, length: token[0].length, close: token[1] === '/', name: token[2] }] : []));
 }
 
 function partsOf(text: string, live: boolean): Part[] {

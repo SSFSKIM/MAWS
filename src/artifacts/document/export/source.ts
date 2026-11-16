@@ -1,14 +1,15 @@
 // What a document export reads (D12 of docs/doperpowers/plans/2026-10-12-p3-b-documents.md): a document's state (the
 // live doc or a version's) as plain values: its tabs in order with their bodies as ProseMirror docs of the one schema,
-// its threads (DOCX writes them as Word comments) and its token overrides (`meta.dsOverrides`). The exporters are pure
-// functions of this, so M8's registrations in A's export service, the editor's Export menu and `artifact_export` all
-// call them the same way, from main or the renderer.
+// its threads (DOCX writes them as Word comments), its token overrides (`meta.dsOverrides`) and, since UX wave U10b, its
+// page (`meta.page`: the size it prints on and its density; §B.4 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md).
+// The exporters are pure functions of this, so M8's registrations in A's export service, the editor's Export menu and
+// `artifact_export` all call them the same way, from main or the renderer.
 import type { Node as PMNode } from '@tiptap/pm/model';
 import type { Actor } from '@shared/artifacts/actor';
 import { actorDisplay } from '@shared/artifacts/actor';
 import type { Doc } from '../../yjs';
 import { ynodeToPmnode } from '../../yjs/prosemirror';
-import { dsOverrides, type TokenOverrides } from '../meta';
+import { docPage, dsOverrides, type DocPage, type TokenOverrides } from '../meta';
 import { schemaFor } from '../schema';
 import { listTabs, tabBody } from '../tabs';
 import { listThreads, type Thread } from '../threads';
@@ -25,6 +26,8 @@ export interface ExportSource {
   tabs: ExportTab[];
   threads: Thread[];
   overrides: TokenOverrides;
+  /** The document's page: its size, under the call's (`ExportOptions.pageSize`), and its density. */
+  page: DocPage;
 }
 
 /** A document's state as an export reads it. */
@@ -34,7 +37,7 @@ export function exportSource(doc: Doc, title: string): ExportSource {
     const body = tabBody(doc, id);
     return body ? [{ id, title: tabTitle, body: ynodeToPmnode(body, schema) }] : [];
   });
-  return { title, tabs, threads: listThreads(doc), overrides: dsOverrides(doc) };
+  return { title, tabs, threads: listThreads(doc), overrides: dsOverrides(doc), page: docPage(doc) };
 }
 
 /** An image the export embeds: its bytes and MIME type, or null when it cannot be had (shown by its alt text); a rejection fails the export. */
@@ -46,7 +49,7 @@ export interface ExportOptions<T = LocalTokens> {
   tab?: string;
   /** The governing system's export helpers (X28); the house system when absent. */
   system?: DesignSystemExport<T>;
-  /** Letter or A4 (Decision Log 43); the system's page size, else Letter, when absent. */
+  /** Letter or A4 (Decision Log 43); else the document's page size, else the system's, else Letter (UX wave U10b). */
   pageSize?: PageSize;
   // P3-E start (E2 M5; E's Decision Logs 15, 24 and 32): a kind's drawing of a `chart` block, prepared before the export
   // runs (synchronous, as `ImageLoader`'s work is preloaded); undefined keeps the labelled placeholder
