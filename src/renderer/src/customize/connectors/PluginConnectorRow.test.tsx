@@ -104,8 +104,9 @@ const mount = (show: 'connectors' | 'all' = 'connectors') => {
   client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   return mountCustomize({ view: 'mine', show }, client);
 };
-/** Every read the page holds made again, as after a change of what is installed. */
-const readAgain = () => act(() => client.invalidateQueries());
+/** The inventory and the plugin list read again, as after a change of what is installed (the postures follow the
+ * inventory's answer). */
+const readAgain = () => act(() => Promise.all([client.invalidateQueries({ queryKey: ['maws', 'customization.inventory'] }), client.invalidateQueries({ queryKey: ['maws', 'plugins.list'] })]).then(() => undefined));
 const header = () => document.querySelector<HTMLElement>('[data-customize-header]')!;
 const chooseShow = (name: 'All' | 'Connectors') => fireEvent.click(within(within(header()).getByRole('radiogroup', { name: 'Show' })).getByRole('radio', { name }));
 const search = (text: string) => fireEvent.change(within(header()).getByRole('searchbox', { name: /^Search / }), { target: { value: text } });
@@ -146,7 +147,7 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     expect(signIn(row)).toBeNull();
     fireEvent.click(within(main).getByRole('button', { name: 'from Tide tables' }));
     expect(useLayout.getState().destination).toMatchObject({ kind: 'customize', view: 'mine', show: 'plugins' });
-    expect(useOpenRequest.getState().request).toMatchObject({ pluginId: KEY, show: 'plugins' });
+    await waitFor(() => expect(document.querySelector(`[data-plugin-detail="${KEY}"]`)).not.toBeNull()); // its detail, once My items lists it
   });
 
   it('under All carries the word Connector and stands among the configured rows by the name it shows', async () => {
@@ -194,7 +195,7 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     mount();
     for (const plugin of [KEY, CHART]) {
       const row = await rowOf('tides-http', plugin);
-      await reads(row, COLLISION('Tide tables, Tide chart'));
+      await reads(row, COLLISION('Tide chart, Tide tables')); // in the inventory's order of its plugins
       expect(signIn(row)).toBeNull();
     }
   });
@@ -206,7 +207,7 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     pluginList = () => ({ plugins: [listed(ALPHA), listed(ALPHA_BETA)] });
     mount();
     const row = await rowOf('beta:gamma', ALPHA);
-    await reads(row, COLLISION('Alpha tides, Alpha beta'));
+    await reads(row, COLLISION('Alpha beta, Alpha tides'));
     expect(within(row).queryByRole('button', { name: 'Sign in to beta:gamma' })).toBeNull();
     // the second plugin turned off here: one possible owner is left, and the line goes
     pluginList = () => ({ plugins: [listed(ALPHA), listed(ALPHA_BETA, { enabled: false })] });
@@ -372,8 +373,9 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       sessions(holding('admitted', '/elsewhere'));
       mount();
       const row = await rowOf('tides-http');
+      const before = asked('connectors.signInDynamicServer').length;
       fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
-      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(1));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(before + 1));
       return { row, scene };
     }
     const collisionArrives = () => act(() => sessions(holding('admitted', '/elsewhere', [loaded(KEY, MANIFEST), loaded('tide-chart@far-harbour', MANIFEST)])));

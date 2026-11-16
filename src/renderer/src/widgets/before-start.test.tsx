@@ -206,7 +206,7 @@ describe('a plugin’s connectors before the first message (UX wave U11h)', () =
     const list = await screen.findByRole('list', { name: 'Connectors' });
     expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files']);
     act(() => profileOff([]));
-    await waitFor(() => expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files', 'tides-http', 'dim']));
+    await waitFor(() => expect(within(list).getAllByRole('listitem').map((row) => row.querySelector('[data-connector-name]')?.textContent)).toEqual(['notion', 'files', 'dim', 'tides-http'])); // the plugins' in the inventory's order
   });
 });
 
