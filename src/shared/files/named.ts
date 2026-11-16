@@ -1150,10 +1150,10 @@ const CLAIMED: readonly ((text: string, work: Work) => boolean)[] = [
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
 // person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
-// units a character in all (the readers' bounds sum to 41), the text does not count: it fails closed. The one call
-// whose work the length does not bound is the grant's test, which reads the text after compatibility folding (NFKC
-// can make one character up to 18): it is charged what it counted, against the same budget, and on a text of such
-// characters its one stretch can pass STRETCH_MAX (at most about 37 units a character: the text, then twice its fold).
+// units a character in all (the readers' bounds sum to 41), the text does not count: it fails closed. The grant's
+// test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
+// for the folded text too, decided by one fold before any reader runs; the budget follows the longer of the two, and
+// the grant's test on a counted text stays within one stretch.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
 const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
@@ -1222,10 +1222,15 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
   const first = yield* firstTextOf(content);
   if (first === null) return none;
   if (first.length > OWN_TEXT_MAX_CHARS) return { texts: [], refused: 'length' };
-  const m: Meter = { work: 0, budget: workPerChar * (first.length + OWN_WORK_FLOOR_CHARS), pause: SCAN_STEP_CHARS };
-  if (seen) seen.meter = m;
+  // the bound holds for the text as the grant's test reads it, after compatibility folding (the architect's ruling):
+  // one native call over at most OWN_TEXT_MAX_CHARS characters, decided before any reader runs
+  const folded = first.normalize('NFKC').length;
+  if (folded > OWN_TEXT_MAX_CHARS) return { texts: [], refused: 'length' };
   const n = first.length;
+  const m: Meter = { work: 0, budget: workPerChar * (Math.max(n, folded) + OWN_WORK_FLOOR_CHARS), pause: SCAN_STEP_CHARS };
+  if (seen) seen.meter = m;
   try {
+    charge(m, n + folded + 1); // the fold
     for (const claims of CLAIMED) if (yield* inOneCall(m, 3 * n + 2, (work) => claims(first, work))) return none;
     let parts = [first];
     if (yield* inOneCall(m, n + 1, (work) => holds(ANCHOR_TAG_OPENING)(first, work))) {
