@@ -17,7 +17,7 @@ import { liveBuffer, useTranscriptStore } from '../../stores/transcript';
 import { turnRows } from '../model/derive';
 import type { Row, RowId } from '../model/rows';
 import { useDisclosure, useTranscriptContext } from '../view/context';
-import { arrivalInput, assistantInput, callInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, standaloneRunInput, thinkingInput, toolInputs, turnLineInput, userInput } from './adapters';
+import { arrivalInput, asksAsRun, assistantInput, callInput, commandInput, groupInput, noticeFollows, questionInput, sentInput, standaloneRunInput, thinkingInput, toolInputs, turnLineInput, userInput } from './adapters';
 import { useTranscriptSurface } from './context';
 
 // What each mounted list says its followers follow, by the list's own prefix (`idPrefix`, unique per mounted transcript).
@@ -83,7 +83,7 @@ function useRowAsk(row: Row | undefined): Ask | null {
     case 'assistant_text': return row.cut ? null : of('AssistantMessage', assistantInput({ ...row, markdown: live ?? row.markdown }, turn, revealed));
     case 'thinking': return of('AssistantMessage', thinkingInput(row, revealed));
     case 'group': return of('ToolGroup', groupInput(row, turn, state.pending, revealed));
-    case 'cell': return row.classification.groupable ? of('ToolGroup', standaloneRunInput(row, turn, state, revealed)) : of('ToolUse', toolInputs(row, turn, revealed, state)[0]); // M5's fix wave 1: a run of one asks its run's site
+    case 'cell': return asksAsRun(row) ? of('ToolGroup', standaloneRunInput(row, turn, state, revealed)) : of('ToolUse', toolInputs(row, turn, revealed, state)[0]); // M5's fix waves 1 and 2: a run of one asks its run's site, by its tool's table row
     case 'to_human': case 'agent_list': case 'browser_action': return of('ToolUse', callInput(row, turn, revealed));
     case 'local_command': return of('CommandOutput', commandInput(row, state, revealed));
     case 'question': return row.waiting ? null : of('AskUserQuestion', questionInput(row, turn, revealed));

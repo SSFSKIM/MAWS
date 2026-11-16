@@ -4,7 +4,7 @@ import type { Cell, Row, TurnId } from '../model/rows';
 import { CellDetailView } from '../view/cells/CellDetail';
 import { CellLine } from '../view/cells/CellLine';
 import { useDisclosure } from '../view/context';
-import { resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
+import { asksAsRun, resultInput, standaloneRunInput, toolInputs, withToolProps, type ToolInput } from './adapters';
 import { useTranscriptSurface } from './context';
 
 export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = false }: { cell: Cell; turnId: TurnId | null; standalone?: boolean; focusable?: boolean }) {
@@ -12,9 +12,9 @@ export function SurfaceCellLine({ cell, turnId, standalone = false, focusable = 
   const attached = useSurfaceAttached(appSessionId);
   const hooked = useSurfaceHooked(appSessionId, 'ToolUse');
   const inputs = toolInputs(cell, turn, state?.ui.revealed, state);
-  // UX wave U2b (M5's fix wave 1, §E): a call the live derivation draws as a run asks its run's site for its row's whole
-  // life; standing alone, it is a run of one, and asks no ToolUse of its own
-  if (standalone && cell.classification.groupable) return <RunOfOne cell={cell as Extract<Row, { kind: 'cell' }>} turnId={turnId} focusable={focusable} inputs={inputs} />;
+  // UX wave U2b (M5's fix waves 1 and 2, §E): a call whose tool joins runs asks its run's site for its row's whole life;
+  // standing alone, whatever its result, it is a run of one, and asks no ToolUse of its own
+  if (standalone && asksAsRun(cell)) return <RunOfOne cell={cell as Extract<Row, { kind: 'cell' }>} turnId={turnId} focusable={focusable} inputs={inputs} />;
   // A merged read remains MAWS's one merged row unless a ToolUse hook owns the calls. When hook knowledge is not
   // available, ask each call but give only the first the merged native; a later hooked answer unfolds the calls.
   if (!inputs.length || !attached || hooked === false) return <CellLine cell={cell} turnId={turnId} focusable={focusable} renderDetail={standalone && inputs.length === 1 ? (drawn) => <ToolResult input={{ ...inputs[0], cell: drawn }} turnId={turnId} /> : undefined} />;

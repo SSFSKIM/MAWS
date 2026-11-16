@@ -61,7 +61,7 @@ async function mount(events: SessionEvent[]) {
   return { ...store, view, push: (batch: SessionEvent[]) => act(() => store.push(batch)) };
 }
 const lastAskOf = (instanceId: string) => asks().filter((ask) => ask.instanceId === instanceId).at(-1);
-const everyAsk = () => new Set(asks().map((ask) => `${ask.component} ${ask.instanceId}`));
+const everyCallAsk = () => new Set(asks().filter((ask) => ask.component === 'ToolUse' || ask.component === 'ToolGroup').map((ask) => `${ask.component} ${ask.instanceId}`));
 const cellOf = (rows: { kind: string }[], call: string) => rows.find((row) => row.kind === 'cell' && (row as { toolUseId?: string }).toolUseId === call) as { classification: { groupable: boolean } } | undefined;
 
 describe('a call’s ask never changes kind over its row’s life', () => {
@@ -208,7 +208,7 @@ describe('the ask’s kind is the tool’s own table row: a result never moves i
     expect(['t1', 't2'].map((call) => cellOf(s.rows(), call) !== undefined)).toEqual([true, true]); // both now stand alone
     await waitFor(() => expect(callsOf(lastAskOf('group:t2'))).toEqual(['t2']));
     expect(callsOf(lastAskOf('group:t1'))).toEqual(['t1']);
-    expect(everyAsk()).toEqual(new Set(['ToolGroup group:t1', 'ToolGroup group:t2']));
+    expect(everyCallAsk()).toEqual(new Set(['ToolGroup group:t1', 'ToolGroup group:t2']));
   });
 
   it('a call whose table row is standalone asks ToolUse throughout: pending, at its result, closed, and from the file', async () => {

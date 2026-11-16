@@ -6,6 +6,7 @@ import { engineQuestionsOf, type TranscriptProps, type TranscriptSite, type Turn
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
 import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
+import { tableRowOf } from '../model/classify'; // UX wave U2b (M5's fix wave 2)
 import { artifactTitlesIn, turnCommandLine, turnRows } from '../model/derive'; // UX wave U2; U3b; U2b
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
@@ -190,15 +191,19 @@ export function groupInput(row: Pick<RowOf<'group'>, 'id' | 'cells' | 'expanded'
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
-// UX wave U2b, M5's fix wave 1 (the execution document, §E "A call's ask never changes kind over its row's life"): a
-// standalone call row that the live derivation draws as a run asks the run's site, as it did while its run stood: a
-// call that joins runs (`classification.groupable`, the test groups.ts takes a call into a run by) is drawn alone only
-// once its run of one is no longer active (a turn's end, or following text), so its row asks `ToolGroup` under its
-// run's id with its calls, the run's open state its own (`expandedGroups`, under the run's row id). Read from the cell
-// alone, so a window opened later, or the file's route, asks what the live window asked. Null for a call that never
-// joins a run (it asks `ToolUse`), and where the run would ask nothing (a waiting request, the jump's target).
+// UX wave U2b, M5's fix waves 1 and 2 (the execution document, §E "A call's ask never changes kind over its row's
+// life"): a call whose tool joins runs is drawn alone only once its run of one is no longer active (a turn's end,
+// following text), or once a result has made it standalone (an image, a refusal that is not a stopped member), after it
+// was asked as a run. Its kind is its tool's own row of the classification table (`tableRowOf`), which no result moves,
+// not the cell's current `classification.groupable`, which a result does.
+export const asksAsRun = (cell: Cell): boolean => tableRowOf(cell.toolName).groupable;
+
+// Such a standalone row asks its run's site, as it did while its run stood: `ToolGroup` under its run's id with its
+// calls, the run's open state its own (`expandedGroups`, under the run's row id). Read from the cell alone, so a window
+// opened later, or the file's route, asks what the live window asked. Null for a call that never joins a run (it asks
+// `ToolUse`), and where the run would ask nothing (a waiting request, the jump's target).
 export function standaloneRunInput(cell: RowOf<'cell'>, turn: TurnState | undefined, state: TranscriptState, revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
-  if (!cell.classification.groupable) return null;
+  if (!asksAsRun(cell)) return null;
   const id = rowId.group(cell.id);
   return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) }, turn, state.pending, revealed);
 }
