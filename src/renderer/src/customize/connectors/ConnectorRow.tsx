@@ -28,7 +28,7 @@ import type { AskIn } from './manage';
 import { pluginRowViewOf, type PluginRowState } from './plugin-row';
 import { removalDirectoryOf, removeRequestOf, resultFor, shadowWords, signInViewOf, type AuthPosture, type SignInFacts, type SignInView } from './present';
 import type { ConnectorRowModel } from './rows';
-import { cancelSignIn, forgetSignIn, RUNNING, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, useSignIns, type SignInRecord, type SignInServer } from './sign-in';
+import { cancelSignIn, forgetSignIn, releaseStartedOn, RUNNING, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, startSignInFromRow, useSignIns, useStartedOn, type SignInRecord, type SignInServer } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -83,7 +83,9 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   const { shown, marks, after, second, own, target, kept, remove, runIn } = partsOf(row, cwd, plugin?.name ?? '');
   // P5 O7 M5c: the result of the machine its Sign in runs on (a session's address names it; none, this Mac)
   const machine = signInMachineOf(row.kind === 'plugin' ? (plugin?.state.signIn ?? null) : session);
-  const latest = useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null)));
+  const named = useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null)));
+  // a sign-in pressed on this row stays on it while it runs, whatever its engine name reads now (§E)
+  const latest = useRunningStartedOn(row.key) ?? named;
   // a plugin's row shows a finished result against its revision (§E, "What a retained record is kept by")
   const known = useKnownRevision(row.kind === 'plugin' ? kept : null, machine, revision, plugin?.revisionRead ?? true, latest);
   const record = resultFor(latest, row.kind === 'plugin' ? known : fingerprint);
@@ -119,7 +121,7 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
             {state?.cancel && last && <TextButton onClick={() => cancelSignIn(last.opId, record!.appSessionId)}>{C.cancel}</TextButton>}
             {pluginView !== null && row.kind === 'plugin' && row.name !== null && revision !== null && pluginView.signIn !== null && (
               // §E row 9: through the session the rule admits, with the engine's name and the revision the row was drawn with
-              <button type="button" aria-label={C.signInName(shown)} className={SECONDARY} onClick={() => void startSignInDynamic({ name: row.name!, revision }, revision, pluginView.signIn as AppSessionId)}>
+              <button type="button" aria-label={C.signInName(shown)} className={SECONDARY} onClick={() => void startSignInFromRow(row.key, { name: row.name!, revision }, revision, pluginView.signIn as AppSessionId)}>
                 {C.signIn}
               </button>
             )}
@@ -176,6 +178,20 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
       )}
     </li>
   );
+}
+
+// The record of a sign-in pressed on this row (`startSignInFromRow`) while it runs, else null (UX wave U11h, the branch
+// panel's ruling of 2026-11-16): an operation is bound to the row it was started on, so its step and Cancel stay there
+// when the row's engine name changes or can no longer be read. Once a record after the press has ended, the binding is
+// let go and the row's result is the one its name now keys, shown by today's rule (its revision).
+function useRunningStartedOn(rowKey: string): SignInRecord | null {
+  const started = useStartedOn((s) => s.rows.get(rowKey) ?? null);
+  const record = useSignIns((s) => (started === null ? null : (s.byServer.get(signInKeyOf(started.server)) ?? null)));
+  const running = record !== null && RUNNING.has(record.event.state);
+  useEffect(() => {
+    if (started !== null && !running && record !== started.before) releaseStartedOn(rowKey, started);
+  }, [rowKey, started, record, running]);
+  return running ? record : null;
 }
 
 // A plugin's row's revision as last answered: while main's answer for a re-read is out the last one stands, so a result

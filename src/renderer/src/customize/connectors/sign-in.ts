@@ -175,12 +175,42 @@ export function forgetSignIn(target: SignInServer): void {
   });
 }
 
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §E: "An operation under way shows its
+// step and Cancel, whatever the table says now"; the branch panel's ruling of 2026-11-16): the server a plugin's row
+// started a sign-in for, by the row's key, with the record that server had at the press, so the operation stays on that
+// row while it runs whatever the row's engine name reads now (its manifest unreadable, or renamed). The row lets it go
+// once a record after the press is no longer running.
+export interface StartedOn {
+  server: SignInServer;
+  before: SignInRecord | null;
+}
+export const useStartedOn = create<{ rows: ReadonlyMap<string, StartedOn> }>()(() => ({ rows: new Map() }));
+
+/** A plugin's row's press: a dynamic sign-in (`startSignInDynamic`), bound to the row it was pressed on. */
+export function startSignInFromRow(rowKey: string, server: { name: string; revision: string }, fingerprint: string | null, appSessionId: AppSessionId, bridge: MawsBridge = ipc): Promise<void> {
+  const target: SignInServer = { name: server.name, scope: 'dynamic', cwd: null, machine: machineOfSession(appSessionId) };
+  const started: StartedOn = { server: target, before: useSignIns.getState().byServer.get(signInKeyOf(target)) ?? null };
+  useStartedOn.setState(({ rows }) => ({ rows: new Map(rows).set(rowKey, started) }));
+  return startSignInDynamic(server, fingerprint, appSessionId, bridge);
+}
+
+/** The row's binding let go, unless a later press has replaced it. */
+export function releaseStartedOn(rowKey: string, started: StartedOn): void {
+  useStartedOn.setState(({ rows }) => {
+    if (rows.get(rowKey) !== started) return { rows };
+    const next = new Map(rows);
+    next.delete(rowKey);
+    return { rows: next };
+  });
+}
+
 /** Every record and binding dropped (tests). */
 export function resetSignIns(): void {
   bound.clear();
   newest.clear();
   unbound.clear();
   useSignIns.setState({ byServer: new Map() });
+  useStartedOn.setState({ rows: new Map() });
 }
 
 /** The latest sign-in of a server that is still under way, for Cancel. */
