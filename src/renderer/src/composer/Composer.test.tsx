@@ -29,7 +29,7 @@ import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
-import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { firstSendPending, queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { DRAFT_CLAIM, HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
@@ -2007,9 +2007,12 @@ describe('a lane B session on another machine', () => {
     mount([{ index: 0, id: R }]);
     let filled = false;
     act(() => void (filled = useComposerStore.getState().focusTargets.get(R)?.prompt?.fill('the plugin’s words', 'replace') ?? false));
-    expect(filled).toBe(true);
     await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 100))));
     expect(JSON.stringify(remote.invoked('session.send'))).not.toContain('the plugin’s words');
+    // the fill was refused while the document waited to go, and the document went as handed
+    expect(filled).toBe(false);
+    await waitFor(() => expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this' }]));
+    expect(firstSendPending(R)).toBe(false);
   });
 
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload

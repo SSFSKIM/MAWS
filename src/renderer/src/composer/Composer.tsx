@@ -61,7 +61,7 @@ import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
-import { SPAWN_WORDS, spawnOnMachine, spawnTargetOf, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
+import { firstSendPending, SPAWN_WORDS, spawnOnMachine, spawnTargetOf, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
@@ -290,6 +290,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           fill: (text, mode) => {
             const { docked: covered, readOnly } = promptState.current;
             if (covered || readOnly || !handle.current) return false; // a card holds the box, or it takes no typing
+            if (firstSendPending(appSessionId)) return false; // UX wave U6e: the box sends a handed document by itself
             const filled = handle.current.fill(text, mode);
             if (filled) setSuggestion(null);
             return filled;
@@ -297,6 +298,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
           suggest: (text) => {
             const { busy } = promptState.current;
             if (busy || text.trim() === '' || !(handle.current?.serialize().empty ?? false)) return false; // the box holds text, or a turn runs
+            if (firstSendPending(appSessionId)) return false; // UX wave U6e: as a fill
             setSuggestion(text);
             return true;
           },
@@ -532,7 +534,8 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   // when it can take a message: its files go up, then one message names their paths (sessions/remote-spawn.ts)
   const takesMessages = !setup && controls !== null && controls.capability('send').available;
   useEffect(() => {
-    if (takesMessages && takeFirstSend(appSessionId)) void handle.current?.restored().then(() => handle.current?.submit());
+    // UX wave U6e (board ticket 675): taken only as it goes, so a plugin's fill or suggestion is refused until then
+    if (takesMessages && firstSendPending(appSessionId)) void handle.current?.restored().then(() => takeFirstSend(appSessionId) && handle.current?.submit());
   }, [takesMessages, appSessionId]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 

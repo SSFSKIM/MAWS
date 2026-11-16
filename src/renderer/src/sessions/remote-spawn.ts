@@ -150,6 +150,15 @@ export function takeFirstSend(appSessionId: AppSessionId): boolean {
   return firstSends.delete(appSessionId);
 }
 
+/**
+ * Whether the session's composer still holds a handed document it sends with no press of the person's (UX wave U6e,
+ * board ticket 675): until it has gone, an engine plugin's fill or suggestion is refused, so a plugin's text never goes
+ * out in, or with, the person's document.
+ */
+export function firstSendPending(appSessionId: AppSessionId): boolean {
+  return firstSends.has(appSessionId);
+}
+
 // ---- the menu's machines: sessions/remote-setup.ts (P5 O7 M9: with a checkout there, to set up there, or why not) ----
 
 // ---- the spawn ---------------------------------------------------------------------------------------------------
