@@ -15,6 +15,7 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { registerAction, registerCloseGuard, registerReplaceVerdict } from '../../../keymap/actions-runtime';
 import { tabOnScreen, useLayout, type ReplaceVerdict } from '../../../stores/layout';
 import { commentOnCursorLine } from '../anchor/anchor'; // E11
+import { connectOpenFile } from '../files/open-chosen'; // UX wave U6e: File › Open File… (⌘O)
 import type { SideFilesViewer } from '../files/tabs';
 import { useViewer } from '../viewer/viewer-store';
 import { askClose } from './EditorDialogs';
@@ -33,10 +34,15 @@ const mainTabSite = (key: string): CloseSite => ({ reveal: () => useLayout.getSt
 
 // The close question, by the file's key. An answer that comes back to a place no longer holding the file (it moved
 // while the question was open) changes nothing: what holds the file now keeps it, edits and all (sequence 2).
+// UX wave U6e (the panel's finding 3): the merge view's veto guards a Save that would write the unresolved document; an
+// entry whose latest admission locks it is never saved, so its question is asked as any dirty tab's, and Don't save is
+// its way out (the question offers no Save while the lock stands: `EditorDialogs`).
+const vetoed = (entry: { theirs: { view: string } | null; locked: unknown } | undefined) => entry?.theirs?.view === 'merge' && entry.locked === null;
+
 export async function closeGuardOf(key: string, site: CloseSite = mainTabSite(key)): Promise<boolean> {
   const entry = useViewer.getState().entries.get(key);
   if (!entry?.dirty) return true;
-  if (entry.theirs?.view === 'merge') {
+  if (vetoed(entry)) {
     site.reveal();
     return false;
   }
@@ -44,7 +50,7 @@ export async function closeGuardOf(key: string, site: CloseSite = mainTabSite(ke
   if (choice === 'cancel' || !site.holds()) return false;
   // A save under way while the question was open can have settled as a conflict: the merge view's veto holds after the
   // answer too, so neither answer writes the unresolved document over the disk's change nor drops it unresolved.
-  if (useViewer.getState().entries.get(key)?.theirs?.view === 'merge') {
+  if (vetoed(useViewer.getState().entries.get(key))) {
     site.reveal();
     return false;
   }
@@ -116,6 +122,7 @@ export function registerEditor(): () => void {
     registerReplaceVerdict('file', fileReplaceVerdict), // E11 F2b
     registerAction('file.save', saveFocusedFile),
     registerAction('file.commentLine', commentOnFocusedLine),
+    connectOpenFile(),
   ];
   return () => offs.forEach((off) => off());
 }

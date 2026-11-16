@@ -16,23 +16,32 @@
 // owner's answer on card R8: in a tab too narrow for both, the button shows the tree in the file's place), and the tree's
 // state is the session's (`tree-state.ts`), so the tool's instance keeps nothing. A row's click opens the file in the
 // preview tab, a double-click keeps it, ⌘-click opens a main tab; the row of the file in view is marked.
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §D; "Reported" 1, K6, K7, K9): the
+// tree's context menu (a right-click in it, or ⇧F10 with the keyboard in it) holds the one row "Open File…", the menus'
+// component as the Files icon's menu draws it, with no chord; for a session on another machine the row is disabled and
+// names the machine (until U6f). A tab's agent's mark is handed to its file's viewer (decision 19).
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { ContextMenu } from 'radix-ui';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { Resizer } from '../../../app/Resizer';
 import { panelHost } from '../../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
+import { ipc } from '../../../ipc/client';
 import { machineFor } from '../../../ipc/machine';
+import { useMachines } from '../../../stores/machines';
+import { machineName } from '../../../stores/org-projects';
 import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
-import { FILES_COPY, REFUSAL } from '../copy';
+import { FILES_COPY, OPEN_FILE_COPY, REFUSAL } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
+import { openChosen } from './open-chosen';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
 import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
@@ -200,7 +209,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
       ) : null}
       {held ? (
         <div ref={setFileColumn} hidden={place === 'instead'} inert={place === 'instead'} className="h-full min-h-0 min-w-0 flex-1">
-          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} />
+          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} agent={held.agent === true} />
         </div>
       ) : null}
     </div>
@@ -345,10 +354,93 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
   };
 
   return (
-    <div data-tool="files" className="flex h-full min-h-0 flex-col">
-      {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-      <TreeList rows={rows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} />
-    </div>
+    <FilesMenu appSessionId={appSessionId}>
+      <div data-tool="files" className="flex h-full min-h-0 flex-col">
+        {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
+        <TreeList rows={rows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} />
+      </div>
+    </FilesMenu>
+  );
+}
+
+// UX wave U6e: the Files list's menu, in the classes of the Files icon's (`panel/SurfaceRow.tsx`, K9), at most 24rem wide
+// (K6), its least and its most width never wider than its column less 1rem (the tree can be 160 px), the column (the
+// list's own box) measured as the menu opens and its edges the menu's collision boundary (K12). ⇧F10 opens it at the
+// element that holds the keyboard, as it opens an icon's. Its one row draws no chord: no in-page menu of the app draws
+// one, and the File menu shows ⌘O (K7).
+const MENU = 'z-50 min-w-[min(12rem,calc(var(--files-menu-column,25rem)_-_1rem))] max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))] rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
+const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui leading-8 outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
+
+function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; children: ReactNode }) {
+  const list = useRef<HTMLElement>(null);
+  const [column, setColumn] = useState<{ box: Element; width: number } | null>(null);
+  // A menu that closes hands the keyboard back to where it was a task later (Radix's focus scope, in a timer). Opened
+  // again before that task runs, the menu holds the keyboard, and the late hand-back would land outside it and close it
+  // (a menu that is not modal closes when the keyboard leaves it): so while the menu is open again, nothing is handed back.
+  // The menu opened again so (a second right-click while it is open closes and opens it in one gesture) has recorded the
+  // page as where the keyboard was: so the element that held the keyboard when the menu first opened is kept, and a
+  // close with no reopen hands the keyboard back to it while it is in the page. A close by a press elsewhere leaves the
+  // keyboard where that press put it, as Radix does.
+  const open = useRef(false);
+  const owed = useRef(false); // a close whose hand-back has not run yet
+  const opener = useRef<HTMLElement | null>(null);
+  const outside = useRef(false);
+  const opened = (now: boolean) => {
+    if (now && !owed.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!now) owed.current = true;
+    open.current = now;
+    const box = list.current;
+    if (now && box) setColumn({ box, width: box.getBoundingClientRect().width });
+  };
+  const handBack = (event: Event) => {
+    const pressedElsewhere = outside.current;
+    owed.current = false;
+    outside.current = false;
+    if (open.current) event.preventDefault();
+    else if (!pressedElsewhere && opener.current?.isConnected) {
+      event.preventDefault();
+      opener.current.focus({ preventScroll: true });
+    }
+  };
+  const machine = machineFor(appSessionId);
+  const elsewhere = useMachines((s) => (machine === ipc.localMachine ? null : machineName(s.machines, machine, ipc.localMachine)));
+  const atKeyboard = (event: KeyboardEvent<HTMLElement>) => {
+    if (!event.shiftKey || event.key !== 'F10') return;
+    event.preventDefault();
+    const box = (event.target as Element).getBoundingClientRect();
+    event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
+  };
+  // Another machine (Decision Log 6: until U6f): the row disabled, its parenthesis in the muted colour, a long name cut
+  // with the whole row as its title.
+  const whole = elsewhere === null ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
+  return (
+    <ContextMenu.Root modal={false} onOpenChange={opened}>
+      <ContextMenu.Trigger ref={list} asChild onKeyDown={atKeyboard}>
+        {children}
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          data-files-menu=""
+          className={MENU}
+          collisionBoundary={column?.box}
+          collisionPadding={8}
+          onCloseAutoFocus={handBack}
+          onInteractOutside={() => void (outside.current = true)}
+          style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
+        >
+          {whole === null ? (
+            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosen(appSessionId)}>
+              {OPEN_FILE_COPY.row}
+            </ContextMenu.Item>
+          ) : (
+            <ContextMenu.Item data-open-file="" disabled title={whole} className={MENU_ROW}>
+              {OPEN_FILE_COPY.row}
+              <span className="text-fg-muted">{whole.slice(OPEN_FILE_COPY.row.length)}</span>
+            </ContextMenu.Item>
+          )}
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 

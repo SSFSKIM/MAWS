@@ -159,13 +159,17 @@ export function Tab({ tab, pane, domId, active, place = null, stop, onKeyDown }:
       id={domId}
       aria-selected={active}
       aria-label={name}
-      title={name}
+      title={tab.kind === 'file' ? tab.path : name} // UX wave U6e (decision 11; U13's): a file's tab has its full path as its tooltip
       tabIndex={stop ? 0 : -1}
       data-tab-id={tab.id}
       data-dirty={dirty ? 'true' : undefined} // E5
       draggable
       onDragStart={(event) => beginDrag(event, { source: 'main', tabId: tab.id, fromPane: pane })}
-      onClick={() => useLayout.getState().activateTab(tab.id)}
+      onClick={() => {
+        useLayout.getState().activateTab(tab.id);
+        // UX wave U6e (decision 19): the person's click on a file's tab is the person's open of the file: the agent's mark goes
+        if (tab.kind === 'file') useViewer.getState().revisit(tab.id, tab.appSessionId);
+      }}
       onMouseDown={(event) => event.button === 1 && event.preventDefault()} // no autoscroll on a middle press
       onAuxClick={onAuxClick}
       onKeyDown={onKeyDown}

@@ -69,6 +69,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.ui.answer': notYet('mod surfaces'),
   // on the asking client
   'files.openExternal': notYet('opening a file there; open a copy here instead'),
+  'files.writeOutside': notYet('saving a file outside that session’s folders'), // UX wave U6e (Decision Log 10)
   'files.reveal': notYet('showing a file in that machine’s Finder'),
   'side.screenshot.preview': notYet('screenshots'),
   // the owner channel, attention, the side thread, the mods

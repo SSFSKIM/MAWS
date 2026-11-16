@@ -85,6 +85,7 @@ export const INPUTS: Record<string, unknown> = {
   // session's, so nothing is written (the upload is refused as a value until M3, and after it for an unknown session)
   'files.upload': { appSessionId: 'x', files: [{ name: 'x', bytes: '' }] },
   'files.write': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64) },
+  'files.writeOutside': { appSessionId: 'x', path: 'x', content: '', expectedHash: '0'.repeat(64), real: 'x' }, // UX wave U6e: files.write's, with the shown real path
   'laneA.answer': { appSessionId: 'x', request: 'x', answer: { kind: 'permission', decision: 'deny' } }, // `allow` needs a scope
   'laneA.model': { appSessionId: 'x', model: 'x' }, // a model, an effort or both
   'session.drafts.set': { appSessionId: 'x', draft: null },

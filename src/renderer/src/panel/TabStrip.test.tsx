@@ -328,3 +328,37 @@ describe('the selected tab kept in view', () => {
     expect(strip.scroll).toBe(550); // the seventh tab
   });
 });
+
+// UX wave U6e (decision 11; Decision Log 14 (b)): a side tab that holds a file has the file's full path as its tooltip,
+// drawn whole or as its icon alone; a tab of another tool keeps today's (its name, as an icon only).
+describe('a file’s tooltip (U6e)', () => {
+  it('is the full path on a Files tab that holds a file, whole and as its icon; another tab keeps today’s', () => {
+    register(probeTool('files').tool, probeTool('t', { title: 'Tee' }).tool);
+    const app = ref('files:aaaa0001');
+    const ids = ['t:aaaa0002', 't:aaaa0003', 't:aaaa0004', 't:aaaa0005', 't:aaaa0006'];
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: [...ids.map((id) => ref(id)), app], activeTabId: ids[0] }]]),
+      panelParams: { [app.id]: { file: '/elsewhere/notes/plans/todo.txt', line: null } },
+      panelSurfaces: { version: 2, stacks: { [A]: [ids[0]] }, pinnedTools: [], contexts: {} },
+    });
+    let room = 2000;
+    const { resize } = installResizeObserver();
+    vi.spyOn(HTMLElement.prototype, 'clientWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      return this.getAttribute('role') === 'tablist' ? room : 0;
+    });
+    vi.spyOn(HTMLElement.prototype, 'offsetWidth', 'get').mockImplementation(function (this: HTMLElement) {
+      if (this.dataset.tabId === undefined) return 0;
+      return this.dataset.tabShape === 'icon' ? ICON_TAB_PX : 100;
+    });
+    render(<Strip />);
+    const button = (id: string) => within(document.querySelector<HTMLElement>(`[data-tab-id="${id}"]`)!).getByRole('tab');
+    expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('whole');
+    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(button(ids[1]).hasAttribute('title')).toBe(false);
+    room = 590;
+    act(() => resize(screen.getByRole('tablist'), { width: room, height: 28 }));
+    expect(document.querySelector<HTMLElement>(`[data-tab-id="${app.id}"]`)!.dataset.tabShape).toBe('icon');
+    expect(button(app.id).getAttribute('title')).toBe('/elsewhere/notes/plans/todo.txt');
+    expect(button(app.id).getAttribute('aria-label')).toBe('todo.txt');
+  });
+});

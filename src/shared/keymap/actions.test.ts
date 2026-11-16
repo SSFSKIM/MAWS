@@ -32,6 +32,8 @@ const WAVE_DEFAULTS: Record<string, string | null> = {
   'request.allowOnce': 'Cmd+Enter', 'request.allowLasting': 'Cmd+Shift+Enter', 'request.decline': 'Escape', 'request.accept': 'Enter',
   // U11
   'channel.open': null,
+  // U6e
+  'file.open': 'Cmd+O',
   // "Existing chords do not move"
   'tab.overview': 'Cmd+0', 'palette.open': 'Cmd+K', 'composer.focus': 'Cmd+L', 'composer.stop': 'Cmd+.', 'attention.next': 'Cmd+Shift+J',
   'shortcuts.open': 'Cmd+/', 'sidebar.toggle': 'Cmd+B', 'panel.toggle': 'Cmd+Shift+B', 'pane.split': 'Cmd+\\',
@@ -47,6 +49,8 @@ const LANDED = [
   'composer.modelMenu', 'composer.effortMenu', 'composer.modeMenu',
   // U4a: M6's row
   'composer.historySearch',
+  // U6e: Open File…
+  'file.open',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -198,6 +202,14 @@ describe('keymap: the table', () => {
     expect(ACTIONS['file.save']).toEqual({ title: 'Save file', chord: 'Cmd+S', sink: 'menu', menu: 'file', scope: 'app' });
   });
   // E5 end
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 13; §C): Open File…, the
+  // row before Save file, at ⌘O, which takes no rebinding while build F may run
+  it('carries file.open in the File menu at ⌘O, the row before file.save, and takes no rebinding', () => {
+    expect(ACTIONS['file.open']).toEqual({ title: 'Open File…', chord: 'Cmd+O', sink: 'menu', menu: 'file', scope: 'app' });
+    expect(ACTION_IDS.indexOf('file.open')).toBe(ACTION_IDS.indexOf('file.save') - 1);
+    expect(isRebindable('file.open')).toBe(false);
+    expect(effectiveChord('file.open', over('file.open', 'Cmd+Alt+O'))).toBe('Cmd+O'); // a stored value is never read
+  });
 });
 
 describe('keymap: the effective chord', () => {

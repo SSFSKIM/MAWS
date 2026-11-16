@@ -124,6 +124,9 @@
 // UX wave U10b-4: (space instructions, both ways), a key of the artifact store's `meta` the older builds never read, and
 // a draft's chip named for them, read across the two builds in both directions; its block is at the end of this file,
 // and its rows are in U13a's UC-14 coverage table (the table's first rows for the artifact store).
+// UX wave U6e: (an outside file, both ways) and (outside file, on the peer's daemon), a chosen file outside the session's
+// folders across build F and master at U6e's parent pin; their block is at the end of this file, and their row is in
+// U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -132,7 +135,7 @@
 // additive rule, the hello and welcome at each end's minor, the gap's `unknown_command`) are skipped, each said in the
 // report as a skipped check naming the wire (skipWireSkew), and everything else runs, the stored forms read both ways first.
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto'; // UX wave U6e: createHash, the files service's content hash
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -162,7 +165,7 @@ import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from 
 import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
 import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
-import { addressed } from './support/address'; // U13a
+import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
 import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
 import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
@@ -1815,6 +1818,12 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | `agentDraft:<id>` in `meta` (the mark), an    | `ok`; the draft this build's agent deleted is not in  | delete of the draft F's person typed in is refused |
 //   | agent's delete recorded in it, and a cleared  | F's library; F's person types in the agent's other    | (`why: 'unknown'`); the agent's delete made before |
 //   | `deletedAt`                                   | draft and F's store holds the text                    | the stay is still undone, and the store is `ok`    |
+//   | U6e: `sessions/file-grants.json`, a profile   | (an outside file, both ways), for F and for master at | the return: both files read and savable again, the |
+//   | file the peer does not know; the mark `agent` | U6e's parent pin: the peer draws its Files tree and   | one beside the chat saving once more; the grants   |
+//   | in a Files tab's params; the tab of a chosen  | the main tab's refusal, refuses no value, writes its  | file as this build left it. The mark is written    |
+//   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
+//   |                                               |                                                       | replays; both peers keep a tab's params whole      |
+//   |                                               |                                                       | (U6b-1's row)                                      |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3880,5 +3889,198 @@ test('(space instructions, both ways) the instructions this build keeps in the a
     await s.quit(back);
     said.push(`  ${here.label} again: the store ok; ${XB_RENAMED}'s text answered and marked, nothing for ${XB_SECOND} or ${XB_THIRD}; the next write kept ${XB_RENAMED}'s entry alone; the chip drawn as stored`);
     record(said);
+  });
+});
+
+// ---- UX wave U6e: a file from outside the session's folders, the two older builds (UC-14) ------------------------------
+// U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
+// build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
+// Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
+// `file` tab of U6b-1's shape. Its two peers are build F (`f1852de3a`) and master at its parent pin (`2c7044231`), told
+// apart by the peer's checked-out commit (the gate's peer is a worktree at it, .github/scripts/gate-peer.sh); each scene
+// skips, saying so, for a peer that is neither, and the runs of record are `--peer-exact f1852de3a` and `--peer-exact
+// 2c7044231`.
+//   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
+//                                         File… (the pick seam), saves one beside the chat and moves the other to the
+//                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
+//                                         could not show before (its Files surface with its tree; the main tab its
+//                                         refusal, since neither older daemon knows a grant), refuses no layout value,
+//                                         pins that tab so that it writes, and quits; the grants file's bytes are what
+//                                         they were; this build reads both files again, and the one beside the chat
+//                                         saves once more.
+//   (outside file, on the peer's daemon)  the peer's `mawsd` runs as the profile's unit, so this build's app is held on
+//                                         it (a private daemon of another build is restarted at the first status read);
+//                                         a file outside the folders the transcript links shows the peer's answer: F's
+//                                         daemon drops `named` and refuses it, master's answers `named` with no `outside`
+//                                         and the page holds it read-only; Open File… says it could not open the file and
+//                                         opens nothing, since neither knows `files.grant`; `files.writeOutside` through
+//                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
+// The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
+// (test/cross-build/files-schema.test.ts), as §A says.
+const U6E_PEERS = { f1852de3a: 'build F', '2c7044231': 'master at U6e’s parent pin' } as const;
+type U6ePeer = keyof typeof U6E_PEERS;
+function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
+  let head = '';
+  try {
+    head = execFileSync('git', ['-C', peer.root ?? REPO_ROOT, 'rev-parse', 'HEAD'], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
+  } catch {
+    // no commit to read: neither peer can be told
+  }
+  const which = (Object.keys(U6E_PEERS) as U6ePeer[]).find((sha) => head.startsWith(sha)) ?? null;
+  return { which, why: `the peer (wire ${wireOf(peer)}) is at ${head || 'a commit git cannot read'}: U6e's cross-build scenes are written for f1852de3a and 2c7044231 (--peer-exact)` };
+}
+const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
+const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
+// An agent's row that links `text`'s paths, appended to the session's transcript (U6c's form: the agent's own text)
+function appendReply(path: string, sid: string, cwd: string, text: string): void {
+  const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const message = { id: `msg_${randomUUID().slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } };
+  appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, type: 'assistant', message, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, sessionId: sid, version: '2.1.283' })}\n`);
+}
+// File › Open File… with the pick seam set to `path` (read at each pick); answers the file's viewer beside the chat
+async function chooseFile(run: Run, path: string): Promise<Locator> {
+  await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), path);
+  await menu(run.maws.app, 'file.open');
+  const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
+  await expect(viewer, `${basename(path)} chosen and beside the chat`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+  return viewer;
+}
+// The person types `text` at the document's end and saves with File › Save file; the file on disk then holds it
+async function typeAndSave(run: Run, viewer: Locator, path: string, text: string): Promise<void> {
+  const before = readFileSync(path, 'utf8');
+  await viewer.locator('.cm-content').click();
+  await run.page.keyboard.press('Meta+End');
+  await run.page.keyboard.type(text);
+  await expect(viewer).toHaveAttribute('data-dirty', 'true');
+  expect(readFileSync(path, 'utf8'), 'nothing written before Save').toBe(before);
+  await menu(run.maws.app, 'file.save');
+  await expect.poll(() => readFileSync(path, 'utf8'), { timeout: 20_000, message: `${basename(path)} saved` }).toBe(`${before}${text}`);
+  await expect(viewer).toHaveAttribute('data-dirty', 'false');
+}
+const grantsOf = (s: Scratch) => join(s.userData, 'sessions', 'file-grants.json');
+
+test('(an outside file, both ways) two files this build chose with Open File…, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the grants file as it was; this build reads both again and saves', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.setTimeout(300_000);
+  await withScratch('xb-u6e-both', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) chooses two files outside the session's folders; ${peer.label} (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}) reads the profile`];
+    const outside = join(s.root, 'outside'); // beside the repository and the profile, under neither
+    mkdirSync(outside);
+    const [beside, inMain] = [join(outside, 'beside.txt'), join(outside, 'in-main.txt')];
+    for (const path of [beside, inMain]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+
+    // this build: both chosen; the first edited and saved beside the chat, the second moved to the main area
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const machine = await localRef(run.page);
+    const mainTabId = `file:${machine}:${inMain}`;
+    await showSession(run.page, id, `session:${address}`);
+    const besideViewer = await chooseFile(run, beside);
+    await typeAndSave(run, besideViewer, beside, 'Saved by this build.');
+    const movedViewer = await chooseFile(run, inMain);
+    await movedViewer.locator('[data-move-to-main]').click();
+    await expect(mainTabById(run.page, mainTabId), 'the second chosen file a main tab, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect.poll(() => (existsSync(grantsOf(s)) ? Object.values((JSON.parse(readFileSync(grantsOf(s), 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions).flat().map((grant) => grant.real).sort() : []), { timeout: 20_000, message: 'the two choices recorded in the profile' }).toEqual([beside, inMain].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const grants = readFileSync(grantsOf(s));
+    const saved = readFileSync(beside, 'utf8');
+    said.push(`  ${here.label}: ${basename(beside)} saved beside the chat, ${basename(inMain)} a main tab; ${grants.length} bytes of grants`);
+
+    // the peer: the main tab its refusal (no older daemon knows a grant, and no transcript links the file), pinned so that
+    // it writes; under the session, its Files surface with its tree and no viewer of the file beside the chat
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await mainTabById(old.page, mainTabId).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"] [data-refusal]`), `${peer.label} refuses the chosen file it cannot know`).toContainText(FILES_REFUSED, { timeout: 20_000 });
+    await pinTab(old.page, mainTabId);
+    await expect.poll(() => pinnedIn((layoutJson(s)['main.tabs'] ?? null) as StoredSets | null), { timeout: 20_000, message: `${peer.label} writes main.tabs with its pin` }).toContain(mainTabId);
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await expect(toolBody(old.page, 'Files').getByRole('treeitem').first(), `${peer.label}'s Files surface draws its tree`).toBeVisible({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-file-viewer][data-path="${beside}"]`), `${peer.label} draws no file beside the chat`).toHaveCount(0);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(readFileSync(grantsOf(s)), `${peer.label} left the grants file as it was`).toEqual(grants);
+    expect([readFileSync(beside, 'utf8'), readFileSync(inMain, 'utf8')], `${peer.label} wrote neither file`).toEqual([saved, OUTSIDE_TEXT(basename(inMain))]);
+    said.push(`  ${peer.label}: ${basename(inMain)} refused in its main tab and pinned, its Files tree under the session, nothing refused; the grants file untouched`);
+
+    // this build again: the main tab reads the file, savable; the one beside the chat shows the saved text and saves again
+    const back = await s.launch();
+    await s.ready(back.page);
+    await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
+    const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
+    await expect(backMain, 'the main tab of the chosen file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await showSession(back.page, id, `session:${address}`);
+    await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
+    const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
+    await expect(backBeside.locator('.cm-content'), 'the saved text, beside the chat').toContainText('Saved by this build.', { timeout: 20_000 });
+    await typeAndSave(back, backBeside, beside, ' And once more after the peer.');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${basename(inMain)} savable in its main tab; ${basename(beside)} saved once more`);
+    record(said);
+  });
+});
+
+test('(outside file, on the peer’s daemon) this build’s app on the peer’s unit mawsd: a linked file outside the folders shows that daemon’s answer, Open File… says it could not open the file and opens nothing, and files.writeOutside answers unknown_command with the bytes unchanged', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u6e-unit', async (s) => {
+    const outside = join(s.root, 'outside');
+    mkdirSync(outside);
+    const [linked, chosen] = [join(outside, 'linked.txt'), join(outside, 'chosen.txt')];
+    for (const path of [linked, chosen]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}).`);
+    await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const id = await s.record(run.page);
+      await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+
+      // the link, clicked: the peer's daemon decides what the page may show
+      const chip = run.page.locator(`[data-region="main"] [data-chip="path"][title="${linked}"]`);
+      await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
+      await chip.click();
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
+      if (known.which === 'f1852de3a') {
+        await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
+      } else {
+        await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
+        await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();
+        await expect(viewer).toHaveAttribute('data-editable', 'false');
+        await expect(viewer.locator('.cm-content')).toHaveAttribute('title', 'Read-only: the file is outside the folders this session works in');
+      }
+
+      // Open File…: the grant is a command neither older daemon knows, so main answers refused and the page says so
+      await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), chosen);
+      await menu(run.maws.app, 'file.open');
+      await expect(run.page.locator('[data-toast-viewport]').getByText('MAWS could not open the file just now. Try Open File again in a moment.'), 'Open File… says it could not open the file').toBeVisible({ timeout: 20_000 });
+      await expect(run.page.locator(`[data-file-viewer][data-path="${chosen}"]`), 'and opens nothing').toHaveCount(0);
+      expect(existsSync(grantsOf(s)), 'nothing granted').toBe(false);
+
+      // the outside save through the page's bridge: a command the peer's daemon does not know, so nothing is written
+      const answer = await invoke(run.page, 'files.writeOutside', { appSessionId: id, path: linked, real: linked, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(linked)).digest('hex') });
+      expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+      expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the link: ${known.which === 'f1852de3a' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });
