@@ -86,6 +86,7 @@ describe('what a row says (rowWords)', () => {
     tabId: 'file:t:/r/tide.mov', appSessionId: LOCAL, artifact: null, path: '/r/tide.mov', status: 'ready', error: null, kind: 'frame', mime: 'video/quicktime', encoding: 'base64',
     bytes: 3 * MiB, loaded: 0, complete: true, text: '', epoch: 1, base64: null, removed: false, updated: 0, sourceView: false, line: null, pendingJump: null, loadingMore: false,
     hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 1, pending: 0, readOnly: false, named: false, frame: null,
+    locked: null, pin: null, agent: false, textEditable: false, // UX wave U6e's fields of the entry
     ...over,
   });
   const openButton = () => screen.queryByRole('button', { name: 'Open externally' });

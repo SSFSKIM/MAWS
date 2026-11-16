@@ -21,7 +21,6 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { frameToken } from '../../../test-support/code-disk';
 import { frameUrl } from '@shared/files/framed';
 import { moveFileToMain } from '../../../shell/transfer';
-import { FileViewer } from '../viewer/FileViewer';
 import { A, B, heldBridge, hydrateHeld, mainShowing, panelOf, persisted, pinIds, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { sideFilesViewer } from '../editor/register';
 import { codeTranscriptActions, openFile, resetKeptOpens } from '../open-file';
