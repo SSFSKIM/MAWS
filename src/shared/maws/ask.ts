@@ -4,7 +4,7 @@
 // carries the AskResult in a fenced JSON block, so a session read from the engine's transcript (no host journal) still
 // finds the answers (`parseAskSteer`).
 import * as z from 'zod';
-import { quotesGrant } from '../engine/arrival'; // board ticket 711 (a cycle: arrival.ts imports this module; read at call time)
+import { quotesGrant } from '../engine/grant'; // board ticket 711 (a module with no imports: the arrivals reader imports this one)
 import { RequestIdSchema, ToolUseIdSchema } from '../graph/ids';
 import { askQuestionId, AskQuestionSchema, AskResultSchema, type AskAnswer, type AskQuestion, type AskResult } from './tools';
 
