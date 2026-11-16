@@ -2658,7 +2658,9 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(report).toContainText('Concise reference style');
     await expect(report).toContainText('Friendly guide style');
     await expect(report).not.toContainText('Checked the tree first: it is clean.');
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not([data-kind="assistant_text"] > .transcript-answer-actions button)')).toHaveCount(0);
+    // UX wave U3b, statement 13: the turn's answer is this closed stretch's head, an owner prompt after it: Copy under it
+    await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await expect(pane.getByText('To you', { exact: true })).toHaveCount(0);
     const label = report.locator('.owner-message-label').first();
     await expect(label).toHaveCSS('font-weight', '600');
@@ -2711,7 +2713,9 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await closedLines.nth(1).click();
     await expect(report).toContainText('Checked the tree first: it is clean.');
     await expect(report.locator('.transcript-prose')).toHaveCount(1);
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not([data-kind="assistant_text"] > .transcript-answer-actions button)')).toHaveCount(0);
+    // its stretch opened, the head is the turn's last drawn answer block: the same action row under it (statement 13)
+    await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await pane.getByRole('button', { name: '‹ fold to report', exact: true }).click();
     await expect(report).not.toContainText('Checked the tree first: it is clean.');
     await expect(closedLines).toHaveCount(3);
