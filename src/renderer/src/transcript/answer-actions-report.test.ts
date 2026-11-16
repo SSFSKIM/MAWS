@@ -5,7 +5,7 @@
 // mirror (`owner/view/mirror.ts`); every case goes through the real derivation, then the mirror, then the placement.
 import { describe, expect, it } from 'vitest';
 import { liveMarkedRowIds, mirrorRows, stretchesOf } from '../owner/view/mirror';
-import { answerActionsOf } from './model/answer-actions';
+import { answerActionsOf, answerMarkdownOf } from './model/answer-actions';
 import { rowsOf } from './model/derive';
 import { turnId as turnIdOf } from './model/keys';
 import { applyEvents, createState, withUi, type TranscriptState } from './model/reduce';
@@ -27,6 +27,22 @@ function drawn(state: TranscriptState, open = false): Row[] {
   const rows = rowsOf(state);
   const openStretches = open ? new Set(stretchesOf(rows, liveMarkedRowIds(state)).map((stretch) => stretch.key)) : undefined;
   return mirrorRows(rows, { openStretches }, liveMarkedRowIds(state));
+}
+
+/** The session with every stretch the reader could open opened (the store's `openStretches`), as a press leaves it. */
+function opened(state: TranscriptState): TranscriptState {
+  const openStretches = new Set(stretchesOf(rowsOf(state), liveMarkedRowIds(state)).map((stretch) => stretch.key));
+  return withUi(state, { ...state.ui, openStretches, version: state.ui.version + 1, global: state.ui.global + 1 });
+}
+
+/** Where the action rows stand in what the view draws, as the view places them: by the drawn rows, told the rows
+ *  before the view's fold. Each entry: the row's markdown and what its Copy takes, read from the store at the press. */
+function placed(state: TranscriptState): { on: string; copies: string }[] {
+  const rows = mirrorRows(rowsOf(state), state.ui, liveMarkedRowIds(state));
+  return [...answerActionsOf(rows, [], rowsOf(state))].map(([id, action]) => {
+    const row = rows.find((candidate) => candidate.id === id)!;
+    return { on: row.kind === 'assistant_text' ? row.markdown : row.kind, copies: answerMarkdownOf(state, action.turnId) };
+  });
 }
 
 const T1 = turnIdOf.ofMessage(uuid('u1'));
@@ -74,5 +90,66 @@ describe('a turn that has not ended, in the to-human view (the branch panel’s 
     const runningDivider = { id: 'divider:arrival' as RowId, turnId: T2, at: AT, kind: 'divider', state: 'working' } as unknown as Row;
     expect([...answerActionsOf(rows).keys()]).toEqual(['text:m2']);
     expect([...answerActionsOf([...rows, runningDivider]).keys()]).toEqual([]);
+  });
+});
+
+// "The statements to read again", 13 (ruled F4): Copy takes the same rows in either view, every answer block of the
+// answer's turn from its complete projection, marked or not, folded or not. The action row stands under the last drawn
+// row of that turn that is one of those answer blocks or the stretch's head text; a turn that draws neither has no action
+// row until its record is opened.
+describe('an answer in the to-human view (statement 13)', () => {
+  const MARKED = '<message>All five stations are inside the limit.</message>';
+
+  it('an answer of two blocks, the second unmarked: under the marked block closed, under the second open, the same text', () => {
+    const closed = toHuman((b) => {
+      b.turn('u1', 'Check the gauges.');
+      b.toolUse('t1', 'Bash', { command: 'ls' });
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.text('m2', 0, MARKED);
+      b.text('m2', 1, 'Station four ran close to its bound.');
+      b.end(['u1']);
+    });
+    const both = `${MARKED}\n\nStation four ran close to its bound.`;
+    expect(placed(closed)).toEqual([{ on: MARKED, copies: both }]);
+    expect(placed(opened(closed))).toEqual([{ on: 'Station four ran close to its bound.', copies: both }]);
+  });
+
+  it('an answer folded whole under a stretch’s head: under the head text closed, under the answer open, the same text', () => {
+    const head = '<message>Checking the gauges now.</message>\n\nReading the log first.';
+    const closed = toHuman((b) => {
+      b.turn('u1', 'Check the gauges.');
+      b.text('m1', 0, head); // the stretch's head: words inside a message and words outside it, before the work
+      b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.text('m2', 0, 'All five stations are inside the limit.');
+      b.end(['u1']);
+    });
+    expect(drawn(closed).map((row) => (row.kind === 'assistant_text' && row.reportOnly ? 'head' : row.kind))).toEqual(['time', 'user', 'head', 'record_fold']);
+    expect(placed(closed)).toEqual([{ on: head, copies: 'All five stations are inside the limit.' }]);
+    expect(placed(opened(closed))).toEqual([{ on: 'All five stations are inside the limit.', copies: 'All five stations are inside the limit.' }]);
+  });
+
+  it('a turn that draws neither an answer block nor a head: no action row until its record is opened', () => {
+    const closed = toHuman((b) => {
+      b.turn('u1', 'Check the gauges.');
+      b.toolUse('t1', 'Bash', { command: 'ls' });
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.text('m2', 0, 'All five stations are inside the limit.');
+      b.end(['u1']);
+    });
+    expect(placed(closed)).toEqual([]);
+    expect(placed(opened(closed))).toEqual([{ on: 'All five stations are inside the limit.', copies: 'All five stations are inside the limit.' }]);
+  });
+
+  it('a head text of a turn with no answer block carries none, closed or open', () => {
+    const closed = toHuman((b) => {
+      b.turn('u1', 'Check the gauges.');
+      b.text('m1', 0, '<message>Checking the gauges now.</message>\n\nReading the log first.');
+      b.toolUse('t1', 'Bash', { command: 'ls' }, 'm1', 1);
+      b.result('t1', 'ok', { structured: BASH_RESULT('ok') });
+      b.end(['u1']);
+    });
+    expect(placed(closed)).toEqual([]);
+    expect(placed(opened(closed))).toEqual([]);
   });
 });
