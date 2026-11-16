@@ -2,7 +2,7 @@
 // launchMaws owns an isolated profile/config/shell home per case. Screenshots are report attachments, not baselines.
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { basename, join } from 'node:path';
 import { parseScenario } from '../test/support/scenario';
 import { scratchMarketplace, writePluginCliStub } from '../test/support/plugin-cli-stub';
 import { expect, type Locator, type Page, type TestInfo } from '@playwright/test';
@@ -900,7 +900,43 @@ test('Acceptance: overflowing tabs remain reachable and F6 visits cards and surf
   await composer.focus();
   await menu(maws.app, 'region.focusNext');
   await expect.poll(() => page.evaluate(() => document.activeElement?.closest('[data-panel-content]') !== null)).toBe(true);
+  // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M4; L7): ten invented files kept
+  // beside the chat, one tab each, in a column at its least width: the strip scrolls. Its selected tab, scrolled out of
+  // view, is in view again once the F6 stop lands on it.
+  const folder = mkdtempSync(join('/tmp/maws-harness/a', 'u6b-reveal-'));
+  const names = Array.from({ length: 10 }, (_, i) => `reveal-${String(i + 1).padStart(2, '0')}.txt`);
+  for (const name of names) writeFileSync(join(folder, name), `An invented file, ${name}.\n`);
+  const tree = sideColumn(page).locator('[data-files-tab] [data-files-tree]');
+  const folderRow = tree.getByRole('treeitem', { name: basename(folder), exact: true });
+  await expect(folderRow, 'the invented folder in the session’s tree').toBeVisible({ timeout: 20_000 });
+  await folderRow.click();
+  await expect(folderRow).toHaveAttribute('aria-expanded', 'true');
+  for (const name of names) {
+    await tree.getByRole('treeitem', { name, exact: true }).dblclick(); // its click opens the file beside the chat, the double-click keeps it
+    // by its folder and name: the tree's root may be the real path of /tmp (/private/tmp)
+    await expect(sideColumn(page).locator(`[data-files-tab][data-file$="/${basename(folder)}/${name}"]`), `${name} beside the chat`).toBeVisible();
+    await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), `${name} kept`).toHaveCount(0);
+  }
+  const resizer = panel(page).getByRole('separator', { name: 'Resize right panel', exact: true });
+  await resizer.focus();
+  await page.keyboard.press('Home');
+  await expect(resizer, 'the column at its least width').toHaveAttribute('aria-valuenow', '280');
+  const sideTabs = sideGroup(page, 'upper').locator('[data-side-strip] [role="tablist"]');
+  await expect.poll(() => sideTabs.evaluate((el) => el.scrollWidth - el.clientWidth), { message: 'the side strip scrolls' }).toBeGreaterThan(0);
+  const first = sideTab(sideColumn(page), names[0]!);
+  await first.click();
+  await expect(first).toHaveAttribute('aria-selected', 'true');
+  await sideTabs.evaluate((el) => void (el.scrollLeft = el.scrollWidth));
+  await expect.poll(async () => (await box(first)).x < (await box(sideTabs)).x - 1, { message: 'the selected tab scrolled out of view' }).toBe(true);
+  await composer.focus();
+  await menu(maws.app, 'region.focusNext');
+  await expect(first, 'the F6 stop lands on the strip’s selected tab').toBeFocused();
+  await expect.poll(async () => {
+    const [strip, tab] = [await box(sideTabs), await box(first)];
+    return tab.x >= strip.x - 1 && tab.x + tab.width <= strip.x + strip.width + 1;
+  }, { message: 'the selected tab in view after F6' }).toBe(true);
   await hideSurface(page, 'Files');
+  rmSync(folder, { recursive: true, force: true }); // with the column hidden, no tree or viewer of these files is drawn
 
   for (let i = 0; i < 20; i++) await menu(maws.app, 'session.new');
   await expect(page.locator('[data-chrome-tabs]').getByRole('tab')).toHaveCount(21);

@@ -29,7 +29,7 @@ export function MarkdownView({ entry }: { entry: ViewerEntry }) {
   return (
     <div ref={scroller} data-markdown-view className="h-full min-h-0 overflow-auto px-6 py-4">
       <div className="mx-auto max-w-[var(--measure)]">
-        <TranscriptActionsProvider actions={{ openFile: (path, line) => openFile(entry.appSessionId, path, line), ...(openTab && { openArtifactTab: (artifactId, location) => openTab(artifactId, location, source) }) }}>
+        <TranscriptActionsProvider actions={{ openFile: (path, line, _session, options) => void openFile(entry.appSessionId, path, line, { main: options?.main === true }), ...(openTab && { openArtifactTab: (artifactId, location) => openTab(artifactId, location, source) }) }}>
           <Markdown markdown={entry.text} live={false} />
         </TranscriptActionsProvider>
       </div>

@@ -1,18 +1,17 @@
 // Sources (C8 spec *The summary*; C8a M2): the files, web pages and MCP tools the session used, newest first, ten at
 // most, over C6's disclosure-independent turn activity for the session's transcript entry. The card never attaches a
 // source of its own (a second hydration for ten rows); a session whose transcript this page never mounted says so. A
-// file row opens a file tab (K4, C5's openTab), a web row its URL in the browser, an MCP row nothing, and says so.
+// file row opens the file (K4; beside the chat since UX wave U6b-1, through `openFile`), a web row its URL in the browser, an MCP row nothing, and says so.
 import { useMemo } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { Icon } from '../../app/IconButton';
-import { machineFor } from '../../ipc/machine';
-import { useLayout } from '../../stores/layout';
 import { useTranscriptStore } from '../../stores/transcript';
 import type { TurnActivity } from '../../transcript';
 import { SUMMARY_COPY } from '../copy';
 import { absolutePath, displayPath, sourcesOf, type Source } from './derive';
 import { openExternal } from './PushState';
 import { Section } from './Section';
+import { openFile } from '../../tools/code/open-file'; // UX wave U6b-1: beside the chat, as every open
 
 // The session's activity as C6 derives it whatever the reader disclosed; null while this page holds no entry for it.
 // Stable while no turn changed, so a disclosure change re-renders nothing that reads it.
@@ -73,7 +72,7 @@ function SourceRow({ source, appSessionId, directory }: { source: Source; appSes
         type="button"
         title={source.path}
         className={buttonClass}
-        onClick={() => useLayout.getState().openTab({ kind: 'file', path: absolutePath(source.path, directory), line: null, appSessionId, machine: machineFor(appSessionId) })}
+        onClick={() => void openFile(appSessionId, absolutePath(source.path, directory), null)}
       >
         <FileIcon />
         <span className="min-w-0 flex-1 truncate">{displayPath(source.path, directory)}</span>
