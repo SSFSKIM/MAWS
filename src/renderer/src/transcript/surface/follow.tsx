@@ -90,7 +90,7 @@ function useRowAsk(row: Row | undefined): Ask | null {
     case 'agent_message': return of('ToolUse', sentInput(row, turn, revealed)) ?? of('UserMessage', arrivalInput(row, turn, { revealed, expanded }));
     case 'notice': {
       const drawn = turn ? turnRows(state, turn.id) : undefined;
-      return noticeFollows(row, turn, revealed, drawn) !== null ? null : of('UserMessage', arrivalInput(row, turn, { revealed, expanded, drawn, state }));
+      return noticeFollows(row, turn, revealed, drawn, state) !== null ? null : of('UserMessage', arrivalInput(row, turn, { revealed, expanded, drawn, state }));
     }
     case 'divider': return state.ui.noTurnFold === true ? of('TurnDuration', turnLineInput(row, turn, revealed)) : null;
     default: return null;

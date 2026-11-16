@@ -403,12 +403,18 @@ export function sentInput(row: RowOf<'agent_message'>, turn: TurnState | undefin
  * The ask a notice follows: the engine mounts one UserMessage site per carrier (its task renderer near line 925119), so of
  * a carrier's notices the first drawn and not revealed asks, with its own line's open state, and draws the answer; each
  * other one asks nothing and follows that ask's outcome by its instance id. Null for the notice that asks, for the
- * revealed one, and for a notice whose carrier is its only notice. `drawn` as in ArrivalAsk.
+ * revealed one, and for a notice whose carrier is its only notice. `drawn` and `state` as in ArrivalAsk. UX wave U2b
+ * (panel finding 6): the id is the asking notice's own ask's (`arrivalInput` on its row, which `drawn` holds), so a
+ * carrier the engine draws through no site, which its first notice asks as its own line under an anchored id, is followed
+ * under that id; an asking notice that asks nothing (no anchor, an answer whose receipt no row carries) is followed by
+ * none, and without `drawn` its row is not in hand, so none either.
  */
-export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[]): string | null {
+export function noticeFollows(row: RowOf<'notice'>, turn: TurnState | undefined, revealed: RowId | CellId | undefined, drawn?: readonly Row[], state?: TranscriptState): string | null {
   const carried = turn === undefined || row.id === revealed ? null : noticeCarrier(row, turn);
   const asking = carried === null ? undefined : drawingOwner(carried, revealed, drawn);
-  return carried === null || asking === undefined || asking === row.id ? null : carried.carrier.messageUuid ?? asking;
+  if (carried === null || asking === undefined || asking === row.id) return null;
+  const owner = drawn?.find((r): r is RowOf<'notice'> => r.kind === 'notice' && r.id === asking);
+  return owner === undefined ? null : (arrivalInput(owner, turn, { revealed, expanded: false, drawn, state })?.instanceId ?? null);
 }
 
 // The carrier's drawing owner (the whole-branch review's finding 5): its first notice that the turn draws after its fold

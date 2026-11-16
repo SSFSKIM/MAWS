@@ -432,7 +432,7 @@ describe('the rows of what entered the session ask the engine’s sites', () => 
     const [first, next] = notices.map((row) => arrivalInput(row, turn, closed));
     expect(next).toBeNull();
     expect(first?.props.text).toBe('Background command "count files" failed with exit code 1');
-    expect(notices.map((row) => noticeFollows(row, turn, undefined))).toEqual([null, first!.instanceId]);
+    expect(notices.map((row) => noticeFollows(row, turn, undefined, rows))).toEqual([null, first!.instanceId]); // panel finding 6: the asking notice's row is read from the drawn rows
     // the revealed first asks nothing and follows nothing; the second then asks for the carrier, with the same props
     expect(notices.map((row) => noticeFollows(row, turn, notices[0]!.id))).toEqual([null, null]);
     expect(notices.map((row) => arrivalInput(row, turn, { ...closed, revealed: notices[0]!.id }))).toEqual([null, first]);

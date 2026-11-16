@@ -69,7 +69,7 @@ export function SurfaceNoticeRow({ row }: { row: Extract<Row, { kind: 'notice' }
   const [expanded] = useDisclosure(`line:${row.id}`);
   const revealed = state?.ui.revealed;
   const drawn = state && turn ? turnRows(state, turn.id) : undefined; // the turn after its fold: its notices elect the carrier's owner
-  const follows = noticeFollows(row, turn, revealed, drawn);
+  const follows = noticeFollows(row, turn, revealed, drawn, state); // panel finding 6: under the asking notice's own ask's id
   const input = arrivalInput(row, turn, { revealed, expanded, drawn, state }); // UX wave U2b: `state`, for an answer's receipt (R13)
   const instanceId = input?.instanceId ?? null;
   // The carrier's other notices follow the drawing this one applied (carrier-drawing.ts); it conceals nothing once gone.
