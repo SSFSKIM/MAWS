@@ -76,6 +76,37 @@ it('without the option, the same attached session draws its assistant text throu
   expect(assistantAsks(fake)).toHaveLength(1);
 });
 
+// UX wave U2b (panel finding 1): a message tool's message in the card's thread draws through MAWS too: its row asks the
+// surface nothing, by the same rule assistant text follows; without the option it asks `ToolUse` as before.
+async function attachedMessageCall() {
+  const b = builder();
+  b.turn('u');
+  b.toolUse('m1', 'mcp__to-human__message', { text: 'The table is sorted.' });
+  b.result('m1', 'sent');
+  b.end(['u']);
+  const store = await sessionStoreWith(b.events);
+  const id = store.key as AppSessionId;
+  const fake = fakeClient();
+  window.maws = fake.client as unknown as PreloadBridge;
+  useSessions.setState({ engine: new Map([[id, { ...status(id), uiSurface: { clientId: 'maws-main' } }]]) });
+  return { store, fake };
+}
+const toolUseAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('session.ui.render') as { component: string }[]).filter((a) => a.component === 'ToolUse');
+
+it('forced local: an attached session’s message tool row asks the surface nothing (the card draws it through MAWS)', async () => {
+  const { store, fake } = await attachedMessageCall();
+  expect(store.rows().some((r) => r.kind === 'to_human')).toBe(true);
+  render(<Transcript storeKey={store.key} presentation="local" />);
+  expect(screen.getByText('The table is sorted.')).toBeTruthy();
+  expect(toolUseAsks(fake)).toHaveLength(0);
+});
+
+it('without the option, the same attached session’s message tool row asks ToolUse, as today', async () => {
+  const { store, fake } = await attachedMessageCall();
+  render(<Transcript storeKey={store.key} />);
+  expect(toolUseAsks(fake)).toHaveLength(1);
+});
+
 it('forced local: a need-input question has no “Resume this session to answer.” line (the card’s Reply is under it)', async () => {
   const { store } = await attachedSession('<need-input>Which size?\n<choice recommended>Larger</choice>\n<choice>Same</choice></need-input>');
   render(<Transcript storeKey={store.key} presentation="local" />);
