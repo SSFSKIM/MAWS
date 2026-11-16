@@ -34,8 +34,8 @@ After the four pull requests of this landing:
 - [x] (2026-11-15) M1 — An HTML page is published from a file and exported as itself. Commits `015c2a727..a3b4f0307`, fix `d1ece68c0..e6ecbd939`; reviewed clean.
 - [x] (2026-11-15) M2 — A document's page is a setting of the document, and an export says how many pages it has. Commits `fc9c3a4be..bd926915f`, fix `214cb82c3..8cc3d3829`, fix 2 `22f636734..2804ef916`; reviewed clean.
 - [x] (2026-11-15) M3 — The person's Export menu shows the page, and the scenes of U10b-1. Commits `0cb5dec31..91703df58`, fix `80b62df63..50c3b9474`; reviewed clean. Concrete Steps 4 at `91703df58` on the build VM: `pnpm typecheck` 0, `pnpm lint` 0, the gate's script tests 588/588, `pnpm test` 40902 passed with 60 failed, every failing file either failing on master `fd73c808f` there too (`git-reads`, `portability`, the three desk-hub deploy files, `services/machine/setup`, and `src/main/org/rows.test.ts`, new to that list) or passing alone on this branch (ten files under the suite's load; `Sidebar.test.tsx`'s 5 s timeout at load average 21, green alone on master); U10b-1's acceptance `--stat` printed nothing. The scenes are written and typechecked, not run (Proof 5 to 7).
-- [ ] M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content.
-- [ ] M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2.
+- [x] (2026-11-15) M4 — The agent deletes its own draft, the delete can be undone, and a deleted artifact takes no content. Built on `ux-wave/U10b-2`, commits `298646bff..86d4342c1`, reviewed clean after one fix (the mark's durability past a prune, pinned for every breaking case). `WIRE_MINOR` 49 (`708497934`) and `RL2_PROTOCOL.minor` 15 (`8477361e4`), both provisional until the chain merge.
+- [x] (2026-11-15) M5 — The transcript's row for a delete, the editor's notice, their Undo, and the scenes of U10b-2. Built on `ux-wave/U10b-2`, commits `fdc33a815..508a54acf`, fix waves `59b94ddb1..af4db9e85`, `9db474b4d..11cab006c`, (from the Mac runs) `868bbafc3..a95266ae8`, and (from the branch panel and class 1a's probes job) `78faca59b..c597fd495` and `12bef97fe..2d0f86e9d`; reviewed clean after two fix waves (a delete never answered; the held frames' seam; two of the replica's recovery races). The scenes are written and typechecked, not run by the executor. Acceptance, against `origin/master` `fd73c808f`: `git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/artifacts/entity.ts src/endpoint/targets.ts src/shared/maws/instructions.ts` printed nothing; `git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+ *'"` printed `1`. On the VM, at `508a54acf`: `pnpm typecheck` and `pnpm lint` exit 0; `pnpm test` 40,906 passed and 55 failed. Of the failures, 42 are in the files the build brief lists (`Sidebar.test.tsx` among them, under load). The other 13 are timeouts at a load average of about 20: six of their files pass alone, and the other five time out in the same cases on master `63c97b5c0`. After the fix waves, at `11cab006c`: the renderer's artifacts, library and transcript folders and the tokens guard pass 3,129 (1 skipped); the web and node typechecks and eslint pass. At `af4db9e85`: the e2e typecheck passes, the script tests pass 588 of 588, and desk-web's typecheck, build and 794 tests pass.
 - [ ] M6 — The float has three presentations.
 - [ ] M7 — The bar and "Show chat" are drawn, and the scenes of U10b-3.
 - [x] (2026-11-15 UTC) M8 — "Make something new": four cards, More, and a design-system choice that binds. Commits `1dbcaefcb`..`642dee896`, fix waves `015228fb4`..`b9b939868` and `3451c949c`..`1444eca1a`; task review clean after two fix waves.
@@ -653,6 +653,9 @@ Tests: `test/endpoint/artifact-rows.test.ts` (the row's exact shape; the artifac
 
     deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
     couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`
+    neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`   // E11, as `neverAnswered` of create and update (ruled 2026-11-15)
+
+The heading of a delete reads its refusal first, then `neverAnsweredDelete` when its turn closed with no answer, then "Deleted" once answered, else "Deleting". A delete that was never answered offers no control.
 
 The reason the row draws, for the person, by `why`; a `why` it does not know is drawn as `refusalForHuman` leaves the agent's sentence:
 
@@ -880,7 +883,7 @@ The last milestone of each pull request runs Concrete Steps 4 and its own lines 
     git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/ipc src/shared/artifacts/entity.ts src/endpoint apps/org-protocol src/shared/maws/instructions.ts
     # U10b-2 (M5): no migration, no entity field, no change to the endpoint's target rules or to the tab's state; exactly one offer added
     git diff origin/master...HEAD --stat -- src/engine-host/documents/migrations.ts src/shared/artifacts/entity.ts src/endpoint/targets.ts src/shared/maws/instructions.ts
-    git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+  '"
+    git diff origin/master...HEAD -- src/endpoint/offers.ts | grep -c "^+ *'"
     # U10b-3 (M7): the renderer alone, and not U1's pane or the transfer
     git diff origin/master...HEAD --stat -- src/shared src/main src/engine-host src/services src/endpoint src/renderer/src/session/SessionPane.tsx src/renderer/src/shell/transfer.ts
     # U10b-4 (M11): no migration, no entity field, no offer
@@ -1087,6 +1090,18 @@ Class 1a on GitHub Actions is the gate of record for each.
 - Observation: `hr` is not in §B.4's margin rule, so a horizontal rule still prints about 8 px taller than the editor draws it.
   Evidence: M2's report.
 
+- Observation: the probe switch rewrites more than the changed tool's entry. `MAWS_WRITE_PROBE_TOOLS=1` also rewrites the instructions, `show_pane` and `message`, which the snapshot holds at older text on purpose, and the `message` hunk interleaves with a new last entry.
+  Evidence: M4's run on the VM. The generated `artifact_delete` entry was spliced alone onto the committed snapshot, and a second run of the switch showed that the committed entry equals the generated one. A later merge with U10b-1's snapshot edits re-splices that entry the same way.
+- Observation: a host op's store refusal reaches the device as `{ state: 'failed', error: { code, message } }`, not as `done` with `ok: false`. And `src/main/lane-b/remote.ts` already refuses a command listed in `REMOTE_NEEDS` as `not-offered` before it is sent to a peer that lacks the capability.
+  Evidence: `src/endpoint/actions.ts`; `test/endpoint/undelete-row.test.ts`; `src/main/lane-b/remote-artifacts.test.ts`.
+- Observation: an owner passes the endpoint's `artifact` target for an artifact that `library.entry` no longer lists, so `artifacts.get` and the undelete reach a deleted artifact without any change to `targets.ts`.
+  Evidence: `test/endpoint/undelete-row.test.ts`, which pins both.
+
+- Observation: the fence does not end connections that are already open at the delete. It refuses the next content frame, and awareness frames pass.
+  Evidence: `content` in `src/engine-host/documents/service.ts`. Hence M5's replica, which parks read-only at the `deleted` announcement.
+- Observation: the desk's web app mounts the shared transcript, so the delete's row reaches it, and its bundle grows by the modules that Undo's logic imports. Nothing in them runs at import. The `TranscriptPane` chunk is about 7 kB larger.
+  Evidence: M5's `pnpm --filter desk-web build` against master `63c97b5c0`.
+
 ## Decision Log
 
 - Decision: the verification call. This document gets an adversarial review before any executor starts, dispatched by the architect. Each of the four branches gets `doperpowers:review-code` at the rung "Size and review" names: the xhigh panel for U10b-1, U10b-2 and U10b-4, `doperpowers:reviewer-high` for U10b-3. Class 1a on GitHub Actions is the gate of record for each pull request; the cross-build runs are the ones "Proof", 7 names.
@@ -1192,6 +1207,80 @@ Execution of U10b-4 (M8 to M11), recorded by its controller as each milestone's 
 - (2026-11-15, the architect's ruling) The second paid case gains the first case's assertion that none of a person's plugins loaded into the paid session; folding the two cases' scaffolding into one helper stays a tracker row. A unit case over a real seed pins that a seeded, unedited bundled system takes the table's canvases; if it failed, the rule would not be loosened.
 - Branch review, fix wave part 2 (2026-11-15; the wave's task review), superseding two parts of the fix-wave line above: a refusal of a refresh is failed for the sheet until a later read succeeds, even after a good answer, so the sheet shows the failed read's sentence and offers no Save (the cards' chip and the mark keep the last good map); and the instructions are marked given by the answer write's own `flushed` (`OutboundWriter`'s `WriteOptions.flushed`, which runs after a successful write and before held inbound frames are released), so a pending or refused write marks nothing. A unit case over the real seed shows that all three bundled defaults, seeded unedited, take the table's canvases with the comparison unchanged. The second paid case asserts, as the first does, that none of a person's plugins loaded. The scene's per-card threshold follows the 180 px ruling (179.5 px); its one-line and wrap assertions are unchanged.
 
+M4's executor, 2026-11-15 (U10b-2, branch `ux-wave/U10b-2`), on means the document leaves open. Folded by the controller.
+
+- The three statements the mark rests on were read again on the tree U10b-2 is built on (master `63c97b5c0` merged) and hold: `artifact_updates` has two inserting statements (`appendInBatch`, `appendContentInBatch`); `pruneLog` keeps each artifact's newest row; both older builds read `meta` with `SELECT value FROM meta WHERE key = ?` only.
+- The fence is the row itself: `isDeleted` reads `deletedAt` through the batch's own connection, so it goes up at the statement that writes `deletedAt`, inside the same synchronous savepoint as the rules and on the thread that admits frames. A frame is admitted before that savepoint, and the rules read it, or refused after it. A lost batch lowers the fence through its rollback. Rejected: an in-memory set beside the row, which could drift from it.
+- The fence also refuses the host's own writes into a deleted artifact (`writeAs`, and the accept or reject of a suggestion), with `ArtifactStoreError('notFound', 'deleted: the artifact was deleted')`. §C.5 names only a content frame and a replica's open. A restore, a migration or an accept into a deleted artifact is the same hole, and "a deleted artifact takes no content, whoever deleted it" covers them.
+- A replica's open is refused in `attach`: the connection closes with the refusal's reason, and no document is opened.
+- The agent's refusal for a design system in use keeps the person's refusal JSON and adds `why: 'designSystemInUse'`, so the row reads every refusal by `why`. §C.4's table has that row with no `why` named. The person's `artifacts.delete` refusal is unchanged.
+- `deleted.by` in the mark is the calling session (`lineage[0]`), not the creator.
+- The mark is also written when a session copies or imports an artifact, since §C.1's rule is "an artifact whose `createdBy` is a session". An unreadable mark counts as no mark, and the mark is parsed loosely, so a later build's keys survive the read-modify-write.
+- `artifacts.get` answers `{ artifact: null, deleted }` for a deleted artifact. With `includeDeleted: true`, the row and `deleted` are both answered. The key is absent for a live or an unknown artifact.
+- `SUGGESTION_SUFFIX`, `suggestionKey` and `mainOf` move to `src/engine-host/documents/doc-keys.ts`, which `service.ts` re-exports, so `storage.ts` reads the document pair without a circular import.
+- Two pins outside M4's touch list gained one row each for the new last tool: `src/engine-host/session-maws.test.ts` and `src/engine-host/tool-server/documents-wired.test.ts`. Neither is another child's file.
+- The minors are commits of their own: `WIRE_MINOR` 49 is `708497934` (the number, its note, and the manifest and fingerprint as `pnpm wire:manifest` wrote them on the VM). `RL2_PROTOCOL.minor` 15 is `8477361e4`. Both are provisional until the chain merge.
+
+The architect's word of 2026-11-15 (UTC) on M4 and M5, folded by the controller.
+
+- M4's five decisions are accepted as recorded: the fence also refuses the host's own writes; the fence is the `deletedAt` row, read through the batch's connection; `why: 'designSystemInUse'` stays in the agent's refusal JSON; the mark is written for a session's copy and import; `deleted.by` is the calling session.
+- Added to M5: the cost of the fence and of the mark's upkeep is pinned by counts, not by time (`agent-draft-cost.test.ts`).
+- Added to every milestone's proof (from 2026-11-15): when a changed file is imported by another workspace package (`apps/desk-web` imports the transcript's model and view), that package's typecheck, build and test project run as the static gate runs them. The desk's web app is outside the wave: it draws as it did, and an edit there comes to the coordinator first.
+- The three differences between the drawn page 3 and the document (frames 4 and 5 showed the agent's sentence; frame 6 showed no control before the library's read; the folder has no frame of the editor's notice): the document's words govern, as built.
+- The Acceptance line that counts the offers added used `grep -c "^+  '"`. That pattern matches no line, because the table's entries are indented four spaces. It is corrected to `grep -c "^+ *'"`, which counts 1 on the built branch.
+
+M5's executor, 2026-11-15 (U10b-2), on means the document leaves open. Folded by the controller.
+
+- A test-only statement seam: `Storage.onStatement`, called at the head of the private `sql()`, null in production. The counts it pins, for one appended content row and for one incoming frame on an agent's draft, are one fence read, one mark read, one newest-sequence read and one mark write. With no mark, the newest-sequence read and the mark write are not run. `EXPLAIN QUERY PLAN` shows each read as a keyed `SEARCH`, never a `SCAN`.
+- Undo's shared logic is in a new `src/renderer/src/library/undo-delete.ts`, which the transcript row and the editor's notice both use. The row mounts Undo and Open only when the host registers `undeleteArtifact`. The desk's web app does not register it, so there the row is the icon and its heading alone ("Deleting <title>…", "Deleted <title>", "Could not delete <title>: <reason>"), with no control and no library read.
+- The notice's disabled sentence is built per machine in `undo-delete.ts`, through `disabledWords`, with the standing taken from the machines store and the link's phase. `lane-b/remote-standing.ts` is keyed by session, so it is not edited.
+- A failed Undo on another machine shows the sentence main words for it. A failed Undo here is wrapped in `ARTIFACT.notRestored`.
+- `src/renderer/src/artifacts/host.ts` is edited, outside M5's touch list (no child owns it), with a new `artifacts/deleted-replicas.ts` beside it. Without the edit the editor stays writable after an agent's delete. The fence refuses only the next frame, and main refuses the reopen as `notFound`, so the replica fails for good. With the edit, at the artifact's `deleted` announcement, or at a refused reopen when the delete is an agent's undoable one, the replica parks read-only (`DocumentState.readOnly`) and counts what is unacknowledged. At `created` it reconnects. This one change is how every kind takes no edit under the notice.
+- Every kind's body already reads `DocumentState.readOnly`: document and dashboard (`setEditable(false)`), presentation, design and design system. The html and file viewers take no edits. No kind lacked a state that takes no edit, so no body was made inert. That a read-only body still scrolls was read in the code, not run.
+- `RecordView.tsx` is not edited, because it renders `ArtifactView`, so the notice reaches the side column through `ArtifactTab`. `serialize.ts` is not edited, because it already copies `artifactHeading`. `e2e/deliverables.spec.ts` is not edited, because its replay asserts headings M5 leaves as they were.
+- With no editor held, the notice and Undo stand alone under the title, and the editor mounts once the artifact is restored.
+- The library scene cannot place a keystroke between the delete's commit and the window's word of it. So "an edit typed just before the notice is saved after Undo" is held by unit cases (`artifacts/host.test.ts`, M4's fence cases), and the scene asserts that an edit after the restore is the store's.
+- "(deleted draft, both ways)" skips only when the peer's own `src/engine-host/documents/storage.ts` holds `agentDraft`. Neither older build does, so it runs against both. It asserts the peer's `artifacts.status` with `toMatchObject({ status: 'ok' })`.
+
+The architect's rulings of 2026-11-15 (UTC) on M5's review, and M5's fix wave 1, folded by the controller.
+
+- A delete whose turn closed with no answer reads "Deleting <title> was never answered" (`ARTIFACT.neverAnsweredDelete`). That is the E11 form of the artifact family, read in `artifactHeading` after the refusal and before "Deleted"; §C.4 gains the sentence. "Stopped: <title>" was rejected: the row belongs to the artifact family and reads as its siblings do. Such a row offers no Undo, even when the artifact is in fact gone. That is a tracker row, since the Library's own restore still reaches it.
+- A delete the person denies, or that is stopped with an error result, reads "Could not delete <title>: <the engine's text>". The engine's denial carries no `why` and passes through `refusalForHuman` whole, so it can name "the user", as a denied create's row does today. §C.4's rule that the row never names the tool or "the user" holds for the delete's own refusals, the ones with a `why`.
+- The edit typed just before the notice is proved by the scene through a seam: `src/renderer/src/artifacts/held-frames.ts`, about 40 lines, renderer only. It is installed only under the existing e2e flag and inert without it, which a unit case pins. The scene holds the window's outgoing document frames, types, has the agent delete the artifact, releases the frames, reads the unsent notice, presses Undo, and finds the text in the store. The Acceptance line stands as written.
+- The replica's read of the deletion state takes a ticket. A later read, or a `created`, makes an earlier answer stale, and a stale answer decides nothing. A read that gets no answer leaves the standing unknown: the replica stays read-only with its unacknowledged edit and asks again on the reconnect backoff, at the host's next `ready`, and when the link comes up. A read the host refuses (not found, not viewable) counts as gone.
+
+- Fix wave 2 of M5 (review, 2026-11-15). A read of the deletion state that a host restart or a newer successful sync overtook decides nothing: the read ticket moves with the host's generation and with each new sync. Only two refusals of that read end the replica: `notFound` (main's answer to a member who may not view the artifact, too) and `invalid`. Every other reason in `ARTIFACT_REFUSALS`, `unavailable` and `storeTooNew` among them, means the standing is unknown, and the replica waits read-only with its edit.
+
+- Fix wave 3 of M5, from the architect's Mac runs on `508a54acf` (2026-11-15):
+  - The engine host's dashboard e2e seam serves `artifact_delete`: `DASHBOARD_SEAM_TOOLS`, test-only, with a unit case. The two-build scene's agent reaches the tool through it.
+  - The two-build scene's half under the peer calls no seam. It proves the person's edit by `artifacts.get`'s `revision` and reads the text back on this build after the refusal. A seam read runs the peer's tool path, which could write under the peer. The review read both peers' source: opening the document there records viewing metadata and may save a version, but writes no content row; neither peer's document adapter has a migration hook; this fixture triggers neither peer's repair writes. The person's typing is therefore the only content write under the peer, and it is what leaves the mark behind (`why: 'unknown'`).
+  - An existing Library scene that pinned `{ artifact: null }` for a person's delete now expects §C.5's `deleted` with `undoable: false`. No other reader of that answer under `e2e/` or `apps/desk-web` pins the old shape.
+  - The remote scene waits for B's delete before it waits for the turn's end. A launching session's status can read as a finished turn before the turn has started; the hosted run passed by timing.
+
+The architect's ruling of 2026-11-15 (UTC) on the branch panel's findings for U10b-2. The panel found one P1 and four P2 findings, all in the parked replica's recovery; the panel read the mark, the undelete and the seam and found them sound.
+
+- **A parked replica leaves parking only on a current read that answers not-deleted, issued after the deletion was observed.** The order is held by the standing read's ticket (a request number or a generation). Every recovery trigger re-reads and never clears parking on local state: `hostReady`, `retry`, `artifacts.resync` and the `created` announcement. Neither sync completion (a buffered step 2 from before the deletion included) nor a cached library row counts. `retry()` stays armed while the replica is parked. The row's and the notice's "Restored" rest on the same predicate: restoration is a current successful read, and nothing else is. One rule answers the panel's four P2 findings: a recovery open that fails while parked; a cached row read as restoration for a member whose reads are refused; an Undo lost in the remote feed's gap before `artifacts.resync`; a pre-deletion step 2 applied later.
+- **An edit the fence refused keeps its tab.** `unsaved > 0` in a parked replica makes the tab non-replaceable and sends its close through the close guard, read-only or not. Opening a session over that tab, or closing it, no longer drops the edit without a decision (the panel's P1).
+
+- The architect's ruling of 2026-11-15 (UTC) on class 1a's `probes` job at `a95266ae8`. The probe snapshot keeps `artifact_delete`: the unit test pins it to the source, and the next recording will be served it. The recordings are not made again in this landing, since a recording needs a live engine and is the architect's probe pass. `spikes/protocol-probe/fixtures.test.mjs` names, in one list beside `served4`, the tools the source gained after P4-B4's and P4-A3's recordings, each with its date and reason (today `artifact_delete`, 2026-11-15). It takes exactly those names out of the checks that compare the served list with what a recording holds. The list fails closed: each name must be absent from the recordings, so an entry cannot outlive a re-recording unnoticed. The tracker's P4-R7z row says so.
+- Fix wave 4 (2026-11-15), on a means the ruling left open: a library row whose read is refused after it was cached counts as not known, so Undo is disabled with its sentence and never shows Restored. A row whose read is still in flight keeps its last successful answer, which nothing has contradicted, so a restored row does not flicker at every `library.changed`.
+
+- Fix waves 4 and 5 of M5, from the branch panel's findings (2026-11-15).
+  - A parked replica keeps re-reading at the existing backoff's cap, locally and over the link, while its tab is held. There is one timer per replica, cleared on close, on unpark, and when the tab is disposed.
+  - A refused read's cached row stays invalid until a successful read clears the store's error.
+  - The close guards of a document, a deck and a design ask at once for a read-only replica that holds an unacknowledged edit, and a tab holding such an edit is not replaced. A dashboard uses the document's guard. The html and file viewers hold no replica edits. The design system's guard was already sound.
+
+The architect's ruling of 2026-11-15 (UTC) on fix waves 6 and 6b (the delta review's P2, and the reviews of the coalescer).
+
+- A parked replica's reads coalesce. **Once parked, no read is started while one is out, and never a read with the timer armed.** A trigger during a read (`created`, `hostReady`, `artifacts.resync`, the poll, a ticket bump from `hostGone()` or the first sync) marks "ask again" once. On settle, the first that applies decides:
+  1. a current live answer unparks;
+  2. a marked "ask again" issues one read, and a gone answer is not acted on then;
+  3. a current gone answer fails the replica;
+  4. otherwise the capped backoff is armed.
+  This replaces the wording of fix wave 6's tests, "at most one standing read in flight while parked".
+- Reads issued before the park can number more than one, during a quick delete, Undo and delete. Each decides nothing, and the last one out hands the wait on: one more ask if a trigger came meanwhile, else the backoff. The tracker has a row for it.
+- A reopen refused while the replica is parked asks through the coalescer, and `hostReady()` handles a parked replica before the guard of an open in progress. `artifacts.get` needs no bound of its own: it has a 10 s deadline here and over the link, and pending calls settle when the host disconnects or the link closes.
+
 ## Outcomes & Retrospective
 
 **U10b-1 (M1 to M3), 2026-11-15, the controller; the branch review, the Mac runs and class 1a are the architect's and will amend this.** Built: an HTML page is published from its file and exported as the same bytes, with "Save a copy…" on it; a document's page is a setting of the document (`page` on its settings node) that an agent sets with `set_page` and a person sets in the Export menu (Letter, A4, Compact, checked as in force); a PDF export answers `pages`; the exported page is spaced as the editor is. Nothing was added to `STORE_MIGRATIONS`, to a schema between processes or to the wire manifest (the acceptance `--stat` printed nothing).
@@ -1230,3 +1319,13 @@ Three entries of the canvas table (`maws/table`, `official/fact-table`, `officia
 - A milestone that awaits before calling a shared helper must check what the helper reads at its own call.
 - Component state that the document calls "the page's" needs an owner whose lifetime is the page's, not the line's.
 - A join keyed by tool-use id has to cover every create path that marks session state.
+
+**U10b-2 (M4, M5), 2026-11-15.** An agent can now delete a draft its own session made, with `artifact_delete`, only while the store's mark shows that nothing but that session's accounted writes touched the draft. The transcript reads "Deleted <title>" with Undo, and Undo works here and, for a machine's owners, over the link. A deleted artifact takes no content, whoever deleted it. An editor open on it is kept read-only under the notice and sends its unsent edit after Undo. Nothing was added to `STORE_MIGRATIONS`. The wire took minor 49 and the link minor 15, each in a commit of its own so that the chain merge can redo it.
+
+What the reviews found that the document had not said:
+- The proof that the mark outlives a pruned log had to read the committed key after the person's rows were pruned.
+- The fence alone leaves an open editor writable, so the window's replica has to wait read-only on the `deleted` announcement and reconnect at `created`. That replica's read of the deletion state then needed a ticket against restarts and newer syncs, and has to tell "not there" apart from "not answered".
+- A delete that is never answered needed the artifact family's E11 sentence.
+- The edit typed before the notice can only be proved end to end through an e2e seam that holds the document frames.
+
+Still open for this pull request: its Mac scenes, its two cross-build runs, its class 1a run and the branch's xhigh panel.

@@ -31,6 +31,9 @@ export const LIBRARY_COPY = {
   hostUnreachable: (message: string) => `Couldn’t confirm this artifact with its host: ${message}`,
   goneTitle: 'Artifact not found',
   gone: 'This artifact was deleted, or it is not in the library.',
+  // UX wave U10b (M5, §C.5): an editor open on an artifact an agent deleted, with the row's Undo
+  deletedByAgent: 'An agent deleted this artifact. It takes no edits until it is restored.',
+  deletedUnsent: 'An agent deleted this artifact. Your last edit is not saved; restoring the artifact saves it.',
   noEditor: (kind: ArtifactKind) => `No editor for ${KIND_PLURALS[kind]} yet`,
   inSpace: (name: string) => `in ${name}`,
   edited: (ago: string, by: string) => `Edited ${ago} by ${by}`,

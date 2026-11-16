@@ -101,6 +101,7 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'session.steer.cancel': SESSION_ACTS_CAPABILITY,
   'maws.pane.answer': SESSION_ACTS_CAPABILITY,
   'session.fork': SESSION_ACTS_CAPABILITY, // in place, the machine's owners' (M2)
+  'artifacts.undelete': 'rl2.artifact-undelete', // UX wave U10b (M4, §C.3): the undo of an agent's delete, the owners'
 };
 
 /**
@@ -120,6 +121,7 @@ export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>> = {
   'session.interrupt': { act: 'stop', done: 'stopped' },
   'session.send': { act: 'send', done: 'sent' },
   'session.steer': { act: 'send', done: 'sent' },
+  'artifacts.undelete': { act: 'restore', done: 'restored' }, // UX wave U10b (M4)
 };
 
 export type LinkPhase = 'up' | 'connecting' | 'reconnecting' | 'offline' | 'removed';
@@ -138,7 +140,8 @@ const capitalised = (text: string) => (text === '' ? text : `${text[0]!.toUpperC
  * UC-7.5's first table: the sentence a control issuing `command` is disabled with, or null. `label` stands for the act
  * where ACT_WORDS has no row or the control's own label differs. The first row that applies answers: the command is
  * declared; the machine's build does not list its capability; the machine is offline; its link connects or reconnects
- * (an act that `closes`); a fork by a member known not to own the machine. The `removed` phase is main's to word.
+ * (an act that `closes`); a fork, or an undelete (U10b), by a member known not to own the machine. The `removed` phase
+ * is main's to word.
  */
 export function disabledWords(command: CommandName, standing: RemoteStanding, label?: string): string | null {
   const declared = REMOTE_UNAVAILABLE[command];
@@ -152,6 +155,7 @@ export function disabledWords(command: CommandName, standing: RemoteStanding, la
   if (words?.closes === true && phase === 'connecting') return `Connecting to ${machine}…`;
   if (words?.closes === true && phase === 'reconnecting') return `Reconnecting to ${machine}…`;
   if (command === 'session.fork' && standing.owner === false) return `Only ${machine}’s owners can fork a session there.`;
+  if (command === 'artifacts.undelete' && standing.owner === false) return `Only ${machine}’s owners can restore an artifact there.`; // UX wave U10b
   return null;
 }
 

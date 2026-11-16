@@ -58,6 +58,7 @@ export const MAWS_TOOL_NAMES = [
   ...DOCUMENT_TOOL_NAMES,
   // P4-B4: the search tool (`./search-tools`: its schemas, description, limits, hints and refusals)
   ...SEARCH_TOOL_NAMES,
+  'artifact_delete', // UX wave U10b (M4): the agent's delete of its own draft, last
 ] as const;
 export type MawsToolName = (typeof MAWS_TOOL_NAMES)[number];
 export const isMawsToolName = (name: unknown): name is MawsToolName => typeof name === 'string' && (MAWS_TOOL_NAMES as readonly string[]).includes(name);
@@ -296,6 +297,8 @@ export type ArtifactPublishInput = z.infer<typeof ArtifactPublishInputSchema>;
 export const ArtifactUploadAssetInputSchema = z.strictObject({ artifact: ArtifactIdSchema, path: PathSchema, name: z.string().min(1).max(200).optional() });
 export type ArtifactUploadAssetInput = z.infer<typeof ArtifactUploadAssetInputSchema>;
 export const ArtifactListAssetsInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
+// UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.1): the artifact, by id or handle
+export const ArtifactDeleteInputSchema = z.strictObject({ artifact: ArtifactIdSchema });
 export const ARTIFACT_EXPORT_FORMATS = ['pdf', 'png', 'pngs', 'docx', 'pptx', 'md', 'html', 'claude' /* P3-D: a design system in Claude's shape */] as const;
 export type ArtifactExportFormat = (typeof ARTIFACT_EXPORT_FORMATS)[number];
 // The paper an export prints on when asked (P3-A Decision Log 42, P3-B's M8); omitted, the exporter's own default.
@@ -484,6 +487,8 @@ export const ArtifactPublishResultSchema = z.strictObject({
 export type ArtifactPublishResult = z.infer<typeof ArtifactPublishResultSchema>;
 export const ArtifactUploadAssetResultSchema = z.strictObject({ status: z.literal('uploaded'), artifactId: z.uuid(), assetId: z.string(), ref: z.string(), name: z.string(), size: z.number().int().min(0) });
 export type ArtifactUploadAssetResult = z.infer<typeof ArtifactUploadAssetResultSchema>;
+export const ArtifactDeleteResultSchema = z.strictObject({ status: z.literal('deleted'), artifactId: z.uuid(), kind: ArtifactKindSchema, title: z.string() }); // UX wave U10b
+export type ArtifactDeleteResult = z.infer<typeof ArtifactDeleteResultSchema>;
 export const ListedAssetSchema = z.strictObject({ assetId: z.string(), ref: z.string(), name: z.string(), mime: z.string(), size: z.number().int().min(0), createdAt: IsoTimeSchema });
 export const ArtifactListAssetsResultSchema = z.strictObject({ status: z.literal('listed'), artifactId: z.uuid(), assets: z.array(ListedAssetSchema) });
 export type ArtifactListAssetsResult = z.infer<typeof ArtifactListAssetsResultSchema>;
@@ -600,7 +605,15 @@ export const MAWS_TOOLS = {
   ...DOCUMENT_TOOLS,
   // P4-B4
   ...SEARCH_TOOLS,
-} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; openWorldHint: boolean }; meta?: Record<string, unknown> }>;
+  // UX wave U10b (M4; §C.1): last, as in MAWS_TOOL_NAMES; the one tool that removes what it names
+  artifact_delete: {
+    title: 'Delete artifact',
+    description:
+      "Delete a MAWS artifact this session made and no longer needs, such as an abandoned draft; without this tool, ask the user to delete it in the Library. Only an artifact that this session, or the session a side thread was opened from, created and that only agents have written to; anything else is refused with the reason. The user can undo it from the transcript. Returns the deleted artifact's id, kind and title.",
+    input: ArtifactDeleteInputSchema,
+    annotations: { readOnlyHint: false, destructiveHint: true, openWorldHint: false },
+  },
+} as const satisfies Record<MawsToolName, { title: string; description: string; input: z.ZodType; annotations: { readOnlyHint: boolean; destructiveHint?: boolean; openWorldHint: boolean }; meta?: Record<string, unknown> }>;
 
 export interface MawsToolListEntry {
   name: MawsToolName;
@@ -667,6 +680,11 @@ export const TOOL_ERRORS = {
   // P3-A (M6) start: a refusal the agent can act on, its machine-readable reason last (`artifactRefusalOf`)
   refused: (tool: ArtifactToolName, refusal: ArtifactRefusal, sentence: string) => `${tool}: ${sentence} ${JSON.stringify(refusal)}`,
   // P3-A (M6) end
+  // UX wave U10b (M4; §C.1): `artifact_delete`'s refusals, each followed by its JSON (`reason: 'invalid'` and the `why` named)
+  deleteByUser: (title: string) => `artifact_delete: "${title}" was created by the user; ask them to delete it in the Library`, // why: 'byUser'
+  deleteEdited: (title: string) => `artifact_delete: the user has edited "${title}"; ask them to delete it in the Library`, // why: 'edited'
+  deleteOtherSession: (title: string) => `artifact_delete: "${title}" was created by another session; ask the user to delete it in the Library`, // why: 'otherSession'
+  deleteUnknown: (title: string) => `artifact_delete: MAWS cannot tell that only agents have written to "${title}"; ask the user to delete it in the Library`, // why: 'unknown'
   // E4a start: a target the browser refuses (not http or https; `validateBrowserUrl`)
   navigationRefused: (target: string) => `show_pane: MAWS opens only http and https pages in its browser; refused "${target}"`,
   // E4a end

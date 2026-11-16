@@ -107,6 +107,7 @@ describe('the maws server on an EngineSession (scripted)', () => {
       ['artifact_edit', { readOnlyHint: false, openWorldHint: false, title: 'Edit document' }], ['artifact_comments', { ...MAWS_TOOL_ANNOTATIONS, title: 'List document comments' }],
       ['artifact_reply', { readOnlyHint: false, openWorldHint: false, title: 'Reply to a document comment' }], ['artifact_resolve', { readOnlyHint: false, openWorldHint: false, title: 'Resolve a document comment' }],
       ['artifact_search', { ...MAWS_TOOL_ANNOTATIONS, title: 'Search artifacts' }], // P4-B4: after B's; P4-R7z took P4-R7's message out after it
+      ['artifact_delete', { readOnlyHint: false, destructiveHint: true, openWorldHint: false, title: 'Delete artifact' }], // UX wave U10b (M4): last
     ]);
     // P4-A3's tools an edit needs are listed always loaded
     expect((list.result!.tools as { name: string; _meta?: unknown }[]).filter((t) => t._meta !== undefined)).toMatchObject(

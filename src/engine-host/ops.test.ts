@@ -321,10 +321,11 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('spaces.');
   });
 
-  it('names the thirteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
+  // UX wave U10b (M4): and the fourteenth, the undelete of an agent's delete
+  it('names the fourteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
     expect([...ARTIFACT_OP_COMMANDS].sort()).toEqual([
       'artifacts.acceptSuggestion', 'artifacts.copyAsset', 'artifacts.create', 'artifacts.delete', 'artifacts.duplicate', 'artifacts.nameVersion', 'artifacts.pruneVersions',
-      'artifacts.rejectSuggestion', 'artifacts.rereadDatasetFile', 'artifacts.restore', 'artifacts.saveVersion', 'artifacts.update', 'artifacts.uploadAsset',
+      'artifacts.rejectSuggestion', 'artifacts.rereadDatasetFile', 'artifacts.restore', 'artifacts.saveVersion', 'artifacts.undelete', 'artifacts.update', 'artifacts.uploadAsset',
     ]);
     for (const name of ARTIFACT_OP_COMMANDS) {
       expect(commands[name].owner, name).toBe('engine-host');
@@ -525,6 +526,17 @@ describe('host.artifactOp over the host’s own registration', () => {
       expect(await call('host.artifactOp', update)).toEqual(done); // the reseal is the ledger's, run nowhere
       expect(await call('artifacts.get', { artifactId: artifact.id })).toMatchObject({ artifact: { title: 'Changed here' } });
       expect(await call('host.opQuery', { opId: update.opId, opCreated: update.opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: `artifact:${artifact.id}`, name: 'artifacts.update' });
+      // UX wave U10b (M4): the undelete runs under the same ledger, and the store's refusal of an artifact no agent's
+      // delete removed (here, the Library's) comes back as the command's own answer
+      await call('artifacts.delete', { artifactId: artifact.id });
+      const undelete = { ...update, opId: 'op-real-undelete-01', target: `artifact:${artifact.id}`, name: 'artifacts.undelete', input: { artifactId: artifact.id } };
+      expect(await call('host.artifactOp', undelete)).toMatchObject({ state: 'done', result: { ok: false, error: { code: 'invalid_input', message: 'this artifact was deleted in the Library, not by an agent', issues: { reason: 'invalid' } } } });
+      const agent = { kind: 'session', appSessionId: 'app-1' as AppSessionId } as const;
+      const draft = await documents!.store.create({ kind: 'document', title: 'Draft plan' }, agent);
+      await documents!.store.writeCommitted(() => documents!.store.deleteOwnDraft(draft.id, ['app-1' as AppSessionId]));
+      const restore = { ...update, opId: 'op-real-undelete-02', target: `artifact:${draft.id}`, name: 'artifacts.undelete', input: { artifactId: draft.id } };
+      expect(await call('host.artifactOp', restore)).toMatchObject({ state: 'done', result: { ok: true } });
+      expect(await call('artifacts.get', { artifactId: draft.id })).toMatchObject({ artifact: { id: draft.id } });
     } finally {
       surface.close();
       documents?.close();
