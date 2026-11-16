@@ -31,7 +31,7 @@ How to see it working, on the wave's build: in a session whose agent changed sev
 - [ ] U5b-1: the branch review, class 1a, the Mac runs, the owner's look at the stacked Review on a real change, the pull request (the architect).
 - [x] (2026-11-15 UTC) U5b-2's pre-build pass: M7 to M11 and Interfaces §C, §D, §E, §G, §H, §K and §L read again on `70102ea83` (branch `ux-wave/U5b-2`), what moved restated in place, the remaining work sized again, five points reported to the architect at written defaults ("Statements checked again on `70102ea83`"; Decision Log 28).
 - [x] (2026-11-15 UTC) M7 — The three reads on a machine, and their cost (`7a8bfef34`..`26f4120e2`, the wire's stand-in minor in `c9f8ea734`; minor fix `126d590be`..`75d816e9a`; reviewed clean; P5: `UNTRACKED_COUNT_FILES` stays 200)
-- [ ] M8 — The reads over the machine link
+- [x] (2026-11-16 UTC) M8 — The reads over the machine link (`b606b50f7`..`3e61970f7`, the link's stand-in minor in `b606b50f7`; fix 1, the real-link cases of Decision Log 35, `c1dbfa440`; reviewed clean)
 - [ ] M9 — "This branch", new files counted, and a commit in Review
 - [ ] M10 — Source control's page
 - [ ] M11 — The acting pane leaves; U5b-2's scenes, record and acceptance
