@@ -100,13 +100,16 @@ export function seedTranscript(): string {
   return text();
 }
 
+/** The one call's result block as the file holds it: its content, whether it is an error, and the fields of its row (`toolUseResult`, a refusal's `toolDenialKind`). */
+export interface OneCallResult { content: unknown; isError?: boolean; record: Record<string, unknown> }
+
 /** A session of one closed turn in the file the engine writes: a prompt, one call (`ONE_CALL`) and its result, a message. */
 export const ONE_CALL = 'toolu_01SeedOneCall0000000001';
-export function oneCallTranscript(tool = 'Bash', input: Record<string, unknown> = { command: 'ls notes', description: 'List the notes' }): string {
+export function oneCallTranscript(tool = 'Bash', input: Record<string, unknown> = { command: 'ls notes', description: 'List the notes' }, result: OneCallResult = { content: 'alpha.txt', record: { toolUseResult: 'alpha.txt' } }): string {
   const { user, asst, text } = transcriptWriter(SEED_SESSION);
   user(SEED.u1, 'List the invented notes.', { origin: { kind: 'human' }, promptSource: 'sdk' });
   asst(SEED.a2, { type: 'tool_use', id: ONE_CALL, name: tool, input }, { stop: 'tool_use' });
-  user(SEED.r1, [{ tool_use_id: ONE_CALL, type: 'tool_result', content: 'alpha.txt' }], { toolUseResult: 'alpha.txt', sourceToolAssistantUUID: SEED.a2 });
+  user(SEED.r1, [{ tool_use_id: ONE_CALL, type: 'tool_result', content: result.content, ...(result.isError && { is_error: true }) }], { ...result.record, sourceToolAssistantUUID: SEED.a2 });
   asst(SEED.a9, { type: 'text', text: '<message>One note.</message>' });
   return text();
 }

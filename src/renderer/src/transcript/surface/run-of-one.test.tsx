@@ -17,7 +17,7 @@ import { builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { spyActions, storeWith } from '../view/rows/test-support';
-import { ONE_CALL, oneCallTranscript, recordedAsks, seedEvents } from './mod-test-support';
+import { ONE_CALL, oneCallTranscript, recordedAsks, seedEvents, type OneCallResult } from './mod-test-support';
 
 type Ask = { name: string; component: string; instanceId: string; props: Record<string, unknown> };
 const holder = vi.hoisted(() => ({ answer: null as ((name: string, input: unknown) => unknown) | null, calls: [] as { name: string; input: unknown }[] }));
@@ -61,6 +61,8 @@ async function mount(events: SessionEvent[]) {
   return { ...store, view, push: (batch: SessionEvent[]) => act(() => store.push(batch)) };
 }
 const lastAskOf = (instanceId: string) => asks().filter((ask) => ask.instanceId === instanceId).at(-1);
+const everyAsk = () => new Set(asks().map((ask) => `${ask.component} ${ask.instanceId}`));
+const cellOf = (rows: { kind: string }[], call: string) => rows.find((row) => row.kind === 'cell' && (row as { toolUseId?: string }).toolUseId === call) as { classification: { groupable: boolean } } | undefined;
 
 describe('a call’s ask never changes kind over its row’s life', () => {
   it('a run of one asks ToolGroup under its run’s id live, after its turn’s end, and after following text flushes it', async () => {
@@ -140,5 +142,93 @@ describe('a call’s ask never changes kind over its row’s life', () => {
     await waitFor(() => expect(holder.calls.some((call) => call.name === 'session.ui.press')).toBe(true));
     const press = recorded.answer.tree as unknown as { children: { children: { press?: unknown }[] }[] };
     expect(holder.calls.find((call) => call.name === 'session.ui.press')!.input).toMatchObject(press.children[0]!.children.find((child) => child.press)!.press as object);
+  });
+});
+
+// M5's fix wave 2 (§E, restated at M5's second review; the Decision Log, "the ask's kind by the tool's own table row"):
+// the kind is the tool's own row of the classification table, so a result that makes a call standalone once it arrives
+// (an image, a refusal that is not a stopped member) never moves it
+const IMAGE = [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }];
+const RESULTS: { name: string; tool: string; input: Record<string, unknown>; live: [string | Record<string, unknown>[], Record<string, unknown>]; file: OneCallResult }[] = [
+  {
+    name: 'its image result', tool: 'Read', input: { file_path: '/notes/shot.png' },
+    live: [IMAGE, { structured: { isImage: true } }],
+    file: { content: [...IMAGE, { type: 'text', text: '[Image: source: /notes/shot.png]' }], record: {} },
+  },
+  {
+    name: 'a refusal that is not a stopped member', tool: 'Bash', input: { command: 'rm notes/alpha.txt' },
+    live: ['Refused by an invented rule.', { isError: true, denial: 'permission-rule' }],
+    file: { content: 'Refused by an invented rule.', isError: true, record: { toolUseResult: 'Error: Refused by an invented rule.', toolDenialKind: 'permission-rule' } },
+  },
+];
+
+describe('the ask’s kind is the tool’s own table row: a result never moves it', () => {
+  it.each(RESULTS)('a pending single groupable call, then $name: ToolGroup under group:<call> throughout, live', async ({ tool, input, live: [content, options] }) => {
+    const b = builder();
+    b.turn('u1', 'Look at the notes');
+    b.toolUse('t1', tool, input);
+    const s = await mount([...b.events]);
+    await waitFor(() => expect(callAsks('t1')).toEqual(['ToolGroup group:t1'])); // pending: a run of one
+
+    let sent = b.events.length;
+    b.result('t1', content as never, options);
+    s.push(b.events.slice(sent));
+    expect(cellOf(s.rows(), 't1')?.classification.groupable).toBe(false); // the result made the call standalone
+    await waitFor(() => expect(asks().length).toBeGreaterThan(1));
+    expect(new Set(callAsks('t1'))).toEqual(new Set(['ToolGroup group:t1']));
+    expect(callsOf(lastAskOf('group:t1'))).toEqual(['t1']);
+
+    sent = b.events.length;
+    b.text('m1', 0, '<message>Looked.</message>');
+    b.end(['u1']);
+    s.push(b.events.slice(sent));
+    await waitFor(() => expect(asks().length).toBeGreaterThan(2));
+    expect(new Set(callAsks('t1'))).toEqual(new Set(['ToolGroup group:t1']));
+  });
+
+  it.each(RESULTS)('read from the file, a single groupable call with $name asks ToolGroup under group:<call>', async ({ tool, input, file }) => {
+    const s = await mount(await seedEvents(oneCallTranscript(tool, input, file)));
+    expect(cellOf(s.rows(), ONE_CALL)?.classification.groupable).toBe(false);
+    await waitFor(() => expect(callAsks(ONE_CALL)).toEqual([`ToolGroup group:${ONE_CALL}`]));
+    expect(callsOf(lastAskOf(`group:${ONE_CALL}`))).toEqual([ONE_CALL]);
+  });
+
+  it('a run its member’s image result splits: each former member, now alone, asks ToolGroup under group:<its call>, none ToolUse', async () => {
+    const b = builder();
+    b.turn('u1', 'Look at the notes');
+    b.toolUse('t1', 'Read', { file_path: '/notes/alpha.txt' });
+    b.result('t1', 'alpha');
+    b.toolUse('t2', 'Read', { file_path: '/notes/shot.png' });
+    const s = await mount([...b.events]);
+    await waitFor(() => expect(callsOf(lastAskOf('group:t1'))).toEqual(['t1', 't2']));
+
+    const sent = b.events.length;
+    b.result('t2', IMAGE as never, { structured: { isImage: true } });
+    s.push(b.events.slice(sent));
+    expect(['t1', 't2'].map((call) => cellOf(s.rows(), call) !== undefined)).toEqual([true, true]); // both now stand alone
+    await waitFor(() => expect(callsOf(lastAskOf('group:t2'))).toEqual(['t2']));
+    expect(callsOf(lastAskOf('group:t1'))).toEqual(['t1']);
+    expect(everyAsk()).toEqual(new Set(['ToolGroup group:t1', 'ToolGroup group:t2']));
+  });
+
+  it('a call whose table row is standalone asks ToolUse throughout: pending, at its result, closed, and from the file', async () => {
+    const b = builder();
+    b.turn('u1', 'Look at the screen');
+    b.toolUse('c1', 'mcp__cua_repl__js', { code: 'screenshot()' });
+    const s = await mount([...b.events]);
+    await waitFor(() => expect(callAsks('c1')).toEqual(['ToolUse c1']));
+    const sent = b.events.length;
+    b.result('c1', IMAGE as never, { structured: { isImage: true } });
+    b.text('m1', 0, 'Looked.');
+    b.end(['u1']);
+    s.push(b.events.slice(sent));
+    await waitFor(() => expect(asks().length).toBeGreaterThan(1));
+    expect(new Set(callAsks('c1'))).toEqual(new Set(['ToolUse c1']));
+
+    cleanup();
+    holder.calls = [];
+    resetSurfaceRegistry();
+    await mount(await seedEvents(oneCallTranscript('mcp__cua_repl__js', { code: 'screenshot()' })));
+    await waitFor(() => expect(callAsks(ONE_CALL)).toEqual([`ToolUse ${ONE_CALL}`]));
   });
 });
