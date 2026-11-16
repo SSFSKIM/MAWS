@@ -2013,6 +2013,9 @@ describe('a lane B session on another machine', () => {
     expect(filled).toBe(false);
     await waitFor(() => expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this' }]));
     expect(firstSendPending(R)).toBe(false);
+    // the send answered, so no submission of this session is left in flight for the cases after it
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
   });
 
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload
