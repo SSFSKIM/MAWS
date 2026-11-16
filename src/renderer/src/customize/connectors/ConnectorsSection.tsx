@@ -14,7 +14,11 @@
 // view and Show value are drawn and across a change of project; the head draws My items' tools, "Add custom connector…"
 // among them (U11g), and the page's search narrows the rows by their name. UX wave U11g
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §D): a custom add's line stands at the head of the
-// list while it works or after it failed; a succeeded add draws nothing there, its row being the result.
+// list while it works or after it failed; a succeeded add draws nothing there, its row being the result. UX wave U11h
+// (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M3, §E): the plugins' connectors follow the
+// configured rows, each with §E's facts: this Mac's ready sessions with what each reported (its servers, its plugin list
+// and when), the attached session's own status read, the plugin list (null until it has answered), the plugins the
+// inventory keeps for the folder, and main's posture and revision for the row.
 import { useEffect, useMemo, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
@@ -24,7 +28,9 @@ import { useSessions } from '../../stores/sessions';
 import { SECONDARY } from '../../sessions/ui';
 import { LIBRARY as L } from '../../widgets/copy';
 import { Gone, useManage, type Manage } from '../../widgets/plugins/manage';
+import { displayNameOf } from '../../widgets/plugins/library';
 import { factsOf } from '../../widgets/plugins/operation';
+import type { PluginsLibraryReads } from '../../widgets/PluginsWidget';
 import { useEngineRead } from '../../widgets/read';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import type { Inventory } from '../inventory';
@@ -32,17 +38,31 @@ import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../dis
 import { ConnectorRow, type ConnectorRowProps } from './ConnectorRow';
 import { CONNECTORS as C } from './copy';
 import { CUSTOM_ADD_KEY, type AskIn } from './manage';
+import { pluginNameShown, pluginRowStateOf, type PluginList, type ReportingSession } from './plugin-row';
 import { addLineShown, ownSignInSessionOf, shadowedBy, signInSessionOf, type HoldingSession } from './present';
 import { connectorRows, connectorRowsMatching, type ConnectorRowModel } from './rows';
 import { useSignIns } from './sign-in';
 
 const DIRECTORY_SERVERS = 'directory:servers';
 
+/** What the plugin list says of each plugin, by its key (the name its row shows, whether it is enabled here); null until
+ * it has answered, and while its latest read has failed (U11h: Sign in waits for it, §E "While the plugin list is
+ * unknown"). */
+export function usePluginList({ installed, identities }: Pick<PluginsLibraryReads, 'installed' | 'identities'>): PluginList {
+  const known = installed.data !== undefined && installed.error === null;
+  return useMemo(() => (known ? new Map(identities.map((identity) => [identity.id, { name: displayNameOf(identity.name, identity.manifest), enabled: identity.enabledHere }])) : null), [known, identities]);
+}
+
 /** My items' connectors: the inventory's state, an add's line, the configured rows, and what the attached session has live. */
-export function ConnectorsMine({ cwd, place, servers, readAt, inventoryState, attached, askIn, search, onResetSearch, live }: {
+/** What of the inventory's answer the connectors' rows are drawn from: the configured servers, the plugins' connectors
+ * and every plugin it keeps for the folder (the last two absent from an engine host of an earlier build). */
+export type ConnectorsAnswer = Pick<Inventory, 'servers' | 'pluginServers' | 'plugins'>;
+
+export function ConnectorsMine({ cwd, place, inventory, pluginList, readAt, inventoryState, attached, askIn, search, onResetSearch, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
-  servers: Inventory['servers'] | undefined; // the inventory's, once read
+  inventory: ConnectorsAnswer | undefined; // the inventory's answer, once read
+  pluginList: PluginList; // what the plugin list says of each plugin; null until it has answered
   readAt: number; // when the inventory last answered
   inventoryState: ReactNode; // reading, failed (with Retry), or the warnings
   attached: AppSessionId | null; // the page's attached session
@@ -55,7 +75,7 @@ export function ConnectorsMine({ cwd, place, servers, readAt, inventoryState, at
     <div className="min-h-0 flex-1 overflow-y-auto px-2 pb-3">
       {inventoryState}
       <Adding />
-      {servers && <Configured servers={servers} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} search={search} onResetSearch={onResetSearch} />}
+      {inventory && <Configured inventory={inventory} pluginList={pluginList} readAt={readAt} cwd={cwd} place={place} attached={attached} askIn={askIn} search={search} onResetSearch={onResetSearch} />}
       {live}
     </div>
   );
@@ -86,12 +106,12 @@ export function ConnectorsDiscover({ cwd, onOpenInstalled, onDetail, toList }: {
   return <DiscoverPane tab="connectors" cwd={cwd} onOpenInstalled={onOpenInstalled} onDetail={onDetail} toList={toList} />;
 }
 
-// The configured servers, with a removal's result kept at the head once its row has left.
-function Configured({ servers, readAt, cwd, place, attached, askIn, search, onResetSearch }: { servers: Inventory['servers']; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn; search: string; onResetSearch(): void }) {
+// The configured servers, then the plugins' connectors, with a removal's result kept at the head once its row has left.
+function Configured({ inventory, pluginList, readAt, cwd, place, attached, askIn, search, onResetSearch }: { inventory: ConnectorsAnswer; pluginList: PluginList; readAt: number; cwd: string | null; place: string | null; attached: AppSessionId | null; askIn: AskIn; search: string; onResetSearch(): void }) {
   const { ops } = useManage();
-  const rowFacts = useConnectorRowFacts({ servers, readAt, cwd, attached });
-  const rows = connectorRows({ servers });
-  const shown = connectorRowsMatching(rows, search);
+  const rowFacts = useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attached });
+  const rows = connectorRows(inventory);
+  const shown = connectorRowsMatching(rows, search, (key) => pluginNameShown(key, pluginList));
   if (rows.length === 0 && removedOf(ops, rows).length === 0) return <p className="m-0 px-2 text-ui-sm text-fg-muted">{C.none}</p>;
   return (
     <>
@@ -125,10 +145,12 @@ export function Removed({ rows }: { rows: readonly ConnectorRowModel[] }) {
   return removedOf(ops, rows).map(([key, entry]) => <Gone key={key} opKey={key} name={factsOf(entry).target} data={{ 'data-connector-gone': key }} />);
 }
 
-/** What a configured row draws beside its model, for the page's place: whether another entry shadows it, the session a
- * Sign in runs in, what the attached session has live, and main's posture for it (its sign-in posture, fingerprint,
- * revision and icon). One read of each for the list, by the Connectors list and by All alike. */
-export function useConnectorRowFacts({ servers, readAt, cwd, attached }: { servers: Inventory['servers']; readAt: number; cwd: string | null; attached: AppSessionId | null }): (row: ConnectorRowModel) => Omit<ConnectorRowProps, 'row' | 'askIn' | 'cwd' | 'place' | 'kindWord'> {
+/** What a row draws beside its model, for the page's place: whether another entry shadows it, the session a Sign in runs
+ * in, what the attached session has live, and main's posture for it (its sign-in posture, fingerprint, revision and
+ * icon); for a plugin's row, §E's table over what the sessions reported and what the plugin list says. One read of each
+ * for the list, by the Connectors list and by All alike. */
+export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attached }: { inventory: ConnectorsAnswer; pluginList: PluginList; readAt: number; cwd: string | null; attached: AppSessionId | null }): (row: ConnectorRowModel) => Omit<ConnectorRowProps, 'row' | 'askIn' | 'cwd' | 'place' | 'kindWord'> {
+  const { servers } = inventory;
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
@@ -155,7 +177,21 @@ export function useConnectorRowFacts({ servers, readAt, cwd, attached }: { serve
     return entry ? { status: entry.status, error: typeof entry.error === 'string' ? entry.error : null } : null;
   };
   const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
-  const postures = useCatalogPostures(cwd, servers, readAt).data?.servers;
+  // U11h: this Mac's ready sessions with what each reported, the attached one's own read beside its status
+  const reporting = useMemo<ReportingSession[]>(
+    () =>
+      [...engine.values()]
+        .filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine)
+        .map((status) => {
+          const listed = new Map<string, { status: string; error: string | null }>(status.mcpServers.map((server) => [server.name, { status: server.status, error: null }]));
+          if (status.appSessionId === attached) for (const server of attachedServers ?? []) listed.set(server.name, { status: server.status, error: typeof server.error === 'string' ? server.error : null });
+          return { appSessionId: status.appSessionId, cwd: status.cwd, servers: listed, plugins: status.plugins.map(({ name, source, version }) => ({ name, source, version })), pluginsObservedAt: status.pluginsObservedAt };
+        }),
+    [engine, attached, attachedServers],
+  );
+  const attachedNames = useMemo(() => (attached !== null && attachedServers ? new Set(attachedServers.map((server) => server.name)) : null), [attached, attachedServers]);
+  const postureRead = useCatalogPostures(cwd, inventory, readAt).data;
+  const postures = postureRead?.servers;
   // by the file the entry is in too: two project files may configure one name with different endpoints
   const postureOf = (row: { name: string; scope: string; path: string }) => postures?.find((p) => p.name === row.name && p.scope === row.scope && p.path === row.path) ?? null;
   // a sign-in that ended: the attached session's servers read again
@@ -165,6 +201,13 @@ export function useConnectorRowFacts({ servers, readAt, cwd, attached }: { serve
     if (ended !== '') refetch();
   }, [ended, refetch]);
   return (row) => {
+    if (row.kind === 'plugin') {
+      // by the plugin, the server and the file that declares it: main's list is row for row with the inventory's
+      const posture = postureRead?.plugins.find((p) => p.plugin === row.plugin && p.server === row.server && p.path === row.path) ?? null;
+      const facts = { sessions: reporting, attached, attachedServers: attachedNames, attachedReadAt: read.readAt, cwd, list: pluginList, kept: inventory.plugins ?? [], posture: posture?.authPosture ?? null, revision: posture?.revision ?? null };
+      const state = pluginRowStateOf(row, facts);
+      return { shadow: null, session: state.signIn, live: state.live, liveRead: state.liveRead, posture: facts.posture, fingerprint: null, revision: facts.revision, iconUrl: posture?.iconUrl ?? null, plugin: { state, name: pluginNameShown(row.plugin, pluginList) } };
+    }
     const posture = postureOf(row);
     return {
       shadow: shadowedBy(row, servers),

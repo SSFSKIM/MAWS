@@ -137,12 +137,13 @@ export function usePluginIcons(plugins: readonly { id: string; marketplace: stri
 /** P4-AGG M4: each configured server's sign-in posture, by the directory record its endpoint matches, and its
  * configuration's fingerprint (main's `catalog.postures`, from the directory copy it holds: My items never reaches the
  * network to show its list). Read again with every read of what is configured (`readAt`: an endpoint can change under
- * the same name and scope), and on `catalog.changed`. */
-export const useCatalogPostures = (cwd: string | null, servers: readonly { name: string; scope: string }[] | undefined, readAt: number) =>
+ * the same name and scope), and on `catalog.changed`. UX wave U11h: also a plugin's connector's, so read where the
+ * folder holds a configured server or a plugin's connector. */
+export const useCatalogPostures = (cwd: string | null, configured: { servers: readonly unknown[]; pluginServers?: readonly unknown[] } | undefined, readAt: number) =>
   useQuery<CommandOutput<'catalog.postures'>, IpcCommandError>({
     queryKey: [...ROOT, 'postures', { cwd, readAt }],
     queryFn: () => invoke('catalog.postures', { cwd }, LOCAL()),
-    enabled: servers !== undefined && servers.length > 0,
+    enabled: configured !== undefined && (configured.servers.length > 0 || (configured.pluginServers?.length ?? 0) > 0),
     refetchOnWindowFocus: false,
     staleTime: Infinity,
   });

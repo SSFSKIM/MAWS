@@ -3,7 +3,9 @@
 import * as z from 'zod';
 import type { CommandSpec } from './common';
 
-// A normal coverage boundary, not a configuration read failure. Shared by the cold reader and its presentation.
+// A normal coverage boundary, not a configuration read failure: a mark on the wire, which the window finds by equality
+// and words itself (customize/InventoryState.tsx; UX wave U11h, §G). Its value is kept: build F's window folds it as its
+// own constant, and this build's window words it as this text for an engine host that answers no `pluginServers`.
 export const CUSTOMIZATION_INVENTORY_COVERAGE = 'Plugin MCP servers and marketplace-only skill declarations are not inventoried; see Plugins.';
 
 const AbsolutePath = z.string().min(1).max(4096).refine((path) => path.startsWith('/') && !path.includes('\0'), 'expected an absolute path');
