@@ -860,6 +860,7 @@ describe('review store', () => {
       expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
       roster(['rl2.git-reads']);
       store.getState().checkMembership(commitOn(ONE));
+      store.getState().retryFailed(commitOn(ONE));
       store.getState().keepCommit(other, commitOn(ONE), true); // a tab for a session that is gone keeps nothing
       await tick();
       expect(main.callsOf('git.commitDiff')).toHaveLength(1);
@@ -2496,6 +2497,41 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     expect(main().targetsOf('git.commitDiff').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
     await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
     expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' })); // HEAD's move asked the branch read too
+  });
+
+  // The scopes' holds are the drawn surface's: no surface is drawn for a session without its record, and a pinned Review
+  // retargeted is drawn again for the new session, so their reads name a session that is there
+  it('a scope’s surface whose session is gone holds nothing, and asks nothing on a new status', async () => {
+    serveReads();
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    const uncommitted = { machine: TEST_MACHINE, directory: '/repo', scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD' } as const;
+    expect(diffOf(useReview.getState(), uncommitted)?.status).toBe('ok');
+    const asked = () => (['git.changesSince', 'git.diff', 'git.branchCommits'] as const).map((name) => main().callsOf(name).length);
+    const before = asked();
+    dropRecord(A);
+    await waitFor(() => expect(diffOf(useReview.getState(), uncommitted)).toBeUndefined());
+    act(() => useReview.getState().statusChanged(checkoutKey(TEST_MACHINE, '/repo')));
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await new Promise((resolve) => setTimeout(resolve, REVIEW_REFRESH_MS + 50)); // past the trailing re-read a held scope would make
+    expect(asked()).toEqual(before);
+  });
+
+  it('a pinned Review retargeted to another session reads its scope for that session from then on', async () => {
+    serveReads();
+    useSessions.setState((s) => ({ records: new Map(s.records).set(B, record(B, { directory: '/repo' })) }));
+    act(() => void panelHost.addTool('review', { appSessionId: A, pin: true, params: { scope: 'uncommitted' } }));
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    act(() => void panelHost.addTool('review', { appSessionId: B, params: { scope: 'uncommitted' } }));
+    await waitFor(() => expect(main().callsOf('git.watch').length).toBeGreaterThanOrEqual(2));
+    await waitFor(() => expect(paths()).toEqual(['src/app.ts', 'notes/berths.md']));
+    const reads = main().callsOf('git.changesSince').length;
+    act(() => useReview.getState().statusChanged(checkoutKey(TEST_MACHINE, '/repo')));
+    await waitFor(() => expect(main().callsOf('git.changesSince')).toHaveLength(reads + 1));
+    expect(main().targetsOf('git.changesSince').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
+    expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
   });
 });
 
