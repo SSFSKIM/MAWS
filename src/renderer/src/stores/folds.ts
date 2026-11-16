@@ -199,43 +199,57 @@ export function lastStretchClosed(drawn: readonly Row[]): boolean {
   return drawn.slice(at + 1).some((row) => !UNREAD.has(row.kind) && !(row.kind === 'user' && row.pending !== undefined));
 }
 
-/** The moments at which the mod asks for a summary, as the view shows them: each stretch closed, by its key; each turn ended, by its id. */
+/**
+ * The moments at which the mod asks for a summary, as the view shows them: each stretch closed, by its key; each turn
+ * closed, by its id; each turn started and still open, by its id; and whether one runs.
+ */
 export interface FoldMoments {
   closed: readonly string[];
-  ended: readonly string[];
+  ended: readonly TurnId[];
+  started: readonly TurnId[];
+  working: boolean;
 }
 
 /**
- * The stretches the drawn rows show closed (`drawn`: the mirror's output), and the turns that have ended, read from the
- * turns' own state, since a turn of text alone draws no turn line (fix wave 2). Every record line's stretch has closed
- * but the last one's, which has closed once a row the person reads stands after it (`lastStretchClosed`). A turn has
- * ended once its state is closed; while the session runs no turn (`working` false: its turn ended, or a session at
- * rest), no started turn of it is running. A prompt queued behind the running turn has its own turn, open and not yet
- * started (`accepted` false): it has not ended (fix wave 3).
+ * The stretches the drawn rows show closed (`drawn`: the mirror's output), and the turns read from their own state,
+ * since a turn of text alone draws no turn line (fix wave 2). Every record line's stretch has closed but the last one's,
+ * which has closed once a row the person reads stands after it (`lastStretchClosed`). `ended`: the turns whose state is
+ * closed. `started`: the turns open and started (`accepted`), which end, as the view tells it, once none runs; a prompt
+ * queued behind the running turn has its own turn, open and not yet started, and is in neither (fix wave 3).
  */
 export function foldMoments(drawn: readonly Row[], turns: ReadonlyMap<TurnId, TurnState> | undefined, working: boolean): FoldMoments {
   const lines = drawn.flatMap((row) => (row.kind === 'record_fold' ? [row.stretch] : []));
   const closed = lastStretchClosed(drawn) ? lines : lines.slice(0, -1);
   const ended: TurnId[] = [];
-  for (const turn of turns?.values() ?? []) if (turn.state === 'closed' || (!working && turn.accepted)) ended.push(turn.id);
-  return { closed, ended };
+  const started: TurnId[] = [];
+  for (const turn of turns?.values() ?? []) {
+    if (turn.state === 'closed') ended.push(turn.id);
+    else if (turn.accepted) started.push(turn.id);
+  }
+  return { closed, ended, started, working };
 }
 
 /**
  * Watches the moments a view shows, change by change: true when a stretch has closed or a turn has ended that had not
- * before (several in one change answer true once); the first moments it is shown are what was already so, and answer
- * false (the mount's own round reads them).
+ * before (several in one change answer true once). The first moments it is shown are what was already so, and answer
+ * false (the mount's own round reads them): its turns closed, and its started turns too while none runs. After them, a
+ * started turn has ended under "none runs" only if this watch saw it open while one ran (`ran`; fix wave 4): whether one
+ * runs can be another channel's word than the turns' state (a bridge's port, `atRest`), so a turn whose start reaches
+ * the view while the port still says none runs has not ended at its start.
  */
 export function momentWatch(): (moments: FoldMoments) => boolean {
-  let seen: { closed: Set<string>; ended: Set<string> } | null = null;
-  return ({ closed, ended }) => {
+  let seen: { closed: Set<string>; ended: Set<TurnId> } | null = null;
+  const ran = new Set<TurnId>();
+  return ({ closed, ended, started, working }) => {
+    if (working) for (const id of started) ran.add(id);
     if (seen === null) {
-      seen = { closed: new Set(closed), ended: new Set(ended) };
+      seen = { closed: new Set(closed), ended: new Set([...ended, ...(working ? [] : started)]) };
       return false;
     }
     const before = seen.closed.size + seen.ended.size;
     for (const key of closed) seen.closed.add(key);
     for (const id of ended) seen.ended.add(id);
+    if (!working) for (const id of started) if (ran.has(id)) seen.ended.add(id);
     return seen.closed.size + seen.ended.size > before;
   };
 }
