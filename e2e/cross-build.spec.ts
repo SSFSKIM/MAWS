@@ -4071,7 +4071,8 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
 // draws (`drawnBy`, an optional key an earlier build's tolerant reader drops); the launch's reservation is a column the
 // earlier builds read past (`owner_channel_sessions.advertised`), and the summaries' switch a key of the index's own
 // facts they never read (`index_meta`, `toHuman.foldSummaries`). Four scenes, each over a session whose transcript holds
-// a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts):
+// a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts), and a fifth with
+// no session, (to-human, the switch said to the peer), below them:
 //   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
 //                             window attaches and draws the mirror: the record line and the switch, no bar, and no
 //                             refusal in either log (§H, row 1);
@@ -4334,5 +4335,44 @@ test('(to-human, the peer on this daemon) the peer’s window on this build’s 
       await s.quit(run);
       record(said);
     }, { MAWS_E2E_ENGINE_BIN: stub.bin }); // the unit's engine hosts run the scene's stub
+  });
+});
+
+// UX wave U2b (panel finding 3, the coordinator's ruling): this build's owner channel says each write of the summaries'
+// switch to every client of its daemon (`mods.foldSummariesChanged`, a machine event, empty). A peer whose wire has no
+// such event is told it too: its main drops an event it does not know, says so once per name, and goes on
+// (src/shared/host/host-supervisor.ts, `isEventName`, in both peers). The peer's window on this build's unit mawsd while
+// the switch is written twice by a bare client of that daemon (the CLI's way in): the peer keeps working (its own
+// `mods.list` answers after each write) and neither end logs a refusal.
+const knowsSummariesSaid = (build: Build) => 'events.mods.foldSummariesChanged' in build.manifest.entries;
+test('(to-human, the switch said to the peer) the peer’s window on this build’s unit mawsd while the summaries’ switch is written twice: the peer drops the event it does not know, once, keeps answering, and nothing is refused', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsSummariesSaid(peer), `the peer (wire ${wireOf(peer)}) knows mods.foldSummariesChanged: it is of this landing, and the scene is about a peer that does not`);
+  test.skip(!peer.manifest.capabilities.includes('machine.spine'), `the peer (wire ${wireOf(peer)}) lists no machine.spine: it runs no owner channel on a daemon`);
+  const [crosses, why] = crossesOnMawsd(peer);
+  test.skip(!crosses, why);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-to-human-said', async (s) => {
+    await withUnit(s, here, 'xb-to-human-said', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}; the switch written twice by a bare client of the daemon`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(value(await invoke(run.page, 'mods.list', {})).length, `${peer.label} reads the mods before`).toBeGreaterThan(0);
+      const drops = () => run.output().split('\n').filter((l) => /dropped \S+'s event mods\.foldSummariesChanged: not in this build's event registry/.test(l));
+      for (const on of [false, true]) {
+        await unit.request('mods.setFoldSummaries', { on });
+        // the peer's own read after the write, over the connection the event came down first: it still answers
+        expect(value(await invoke(run.page, 'mods.list', {})).length, `${peer.label} reads the mods after the write (on: ${on})`).toBeGreaterThan(0);
+        await expect.poll(() => drops().length, { timeout: 20_000, message: `${peer.label}'s main drops the event it does not know, said once per name` }).toBe(1);
+      }
+      expect((await unit.status()).pid, 'the same daemon still serves').toBe(unit.pid);
+      expect(run.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+      expect([...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => HOST_REFUSES.test(l)), `${here.label}'s daemon refuses nothing`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  dropped by ${peer.label}: ${drops().map((l) => l.trim()).join(' | ')}; its mods.list answered after each write; nothing refused`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });
