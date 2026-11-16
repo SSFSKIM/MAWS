@@ -1044,6 +1044,48 @@ describe('a framed file (UX wave U6b-2)', () => {
     expect(main.issued).toHaveLength(2);
   });
 
+  // The task review's finding: a kind change, or a refusal, ends what the entry shows but not the ask main is answering, so
+  // the next ask waits for that answer (decision 5: one ask in flight per entry), whose token is released on arrival.
+  it('a kind change during an ask keeps one ask in flight: the next framed read waits for the first answer, whose token is released', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    const first = main.hold('layout.frameFile');
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    main.files[PDF] = { text: 'plain invented words\n', bytes: 21, mime: 'text/plain' }; // the file is a text now
+    changed(main);
+    await waitFor(() => expect(entry()).toMatchObject({ kind: 'code', frame: null }));
+    main.files[PDF] = { text: '%PDF-1.4 invented again\n', bytes: 24, mime: 'application/pdf' }; // and a PDF again
+    changed(main);
+    await waitFor(() => expect(entry()).toMatchObject({ kind: 'frame', frame: { status: 'asking', shown: null } }));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1); // the first is still out: no second
+    first.release();
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+  });
+
+  it('a read refused during an ask keeps one ask in flight: the read again waits for the first answer, whose token is released', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    offs.push(connectCodeEvents());
+    const first = main.hold('layout.frameFile');
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    main.outside.add('/r'); // the folder leaves the session's: the re-read is refused
+    changed(main);
+    await waitFor(() => expect(entry()).toMatchObject({ status: 'error', frame: null }));
+    main.outside.delete('/r');
+    act(() => useViewer.getState().revisit(FILE(PDF)));
+    await waitFor(() => expect(entry()).toMatchObject({ kind: 'frame', frame: { status: 'asking', shown: null } }));
+    await settle();
+    expect(main.callsOf('layout.frameFile')).toHaveLength(1);
+    first.release();
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+  });
+
   // Sequence 1: a token asked while the tab closes.
   it('an answer for an entry that is gone releases its token', async () => {
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });

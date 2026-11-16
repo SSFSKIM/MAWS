@@ -319,6 +319,75 @@ describe('a main file tab moves beside the chat', () => {
   });
 });
 
+// ---- a named video or sound moved (UX wave U6b-2, docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Decision
+// Log 26 c) -------------------------------------------------------------------------------------------------------------------
+// A file outside the session's folders that the transcript names is read again at every mount (U6c's `revisit`), a move's
+// included, so its move asks main for a new token. What the person sees across it is the same file at the same place:
+// held at the re-read and at the new ask, the moved tab still draws the player, never Loading, an empty body or the
+// failure body, and every element it draws starts at the position the first one left.
+
+describe('a named video or sound moved between the side column and the main area', () => {
+  const OUTSIDE = '/elsewhere';
+  const named = { video: `${OUTSIDE}/tide.webm`, audio: `${OUTSIDE}/bell.wav` } as const;
+
+  it.each(['video', 'audio'] as const)('a named %s moved to the main area and back is the same file at the same position, with no Loading, empty or failure body at any held point', async (kind) => {
+    const path = named[kind];
+    disk = installDisk({ [path]: `invented ${kind} bytes` }, { outside: [OUTSIDE], names: (appSessionId, asked) => appSessionId === 'app-a' && asked === path });
+    offs.push(connectCodeEvents());
+    renderBoth();
+    act(() => void openFile(A, path));
+    const viewerIn = (name: 'main' | 'panel') => region(name).querySelector<HTMLElement>(`[data-file-viewer][data-path="${path}"]`);
+    const player = (name: 'main' | 'panel') => viewerIn(name)?.querySelector<HTMLMediaElement>(`[data-artifact-media="${kind}"]`) ?? null;
+    await waitFor(() => expect(player('panel')).not.toBeNull());
+    expect(useViewer.getState().entries.get(KEY(path))?.named).toBe(true);
+    // the player has reached 7.5 s
+    const first = player('panel')!;
+    Object.defineProperty(first, 'currentTime', { value: 7.5, writable: true, configurable: true });
+    fireEvent.timeUpdate(first);
+
+    // The moved tab as the person sees it: the player, at the position it left, and nothing in its place.
+    const seesTheSameFile = (name: 'main' | 'panel') => {
+      const viewer = viewerIn(name)!;
+      expect(viewer.getAttribute('data-frame'), name).toBe(kind);
+      expect(viewer.querySelector('[data-frame-stopped], [data-external-row], [data-refusal]'), name).toBeNull();
+      expect(within(viewer).queryByText('Loading'), name).toBeNull();
+      const element = player(name)!;
+      expect(element, name).not.toBeNull();
+      Object.defineProperty(element, 'currentTime', { value: 0, writable: true, configurable: true });
+      Object.defineProperties(element, { videoWidth: { value: 160, configurable: true }, videoHeight: { value: 120, configurable: true } });
+      fireEvent.loadedMetadata(element);
+      expect(element.currentTime, name).toBe(7.5);
+    };
+
+    for (const [to, move] of [
+      ['main', () => moveFileToMain(sideTabOf(path)!)],
+      ['panel', () => moveFileToSide(KEY(path))],
+    ] as const) {
+      const asked = disk.callsOf('layout.frameFile').length;
+      const reads = disk.callsOf('files.read').length;
+      const read = disk.hold('files.read');
+      const ask = disk.hold('layout.frameFile');
+      act(() => void expect(move()).toBe(true));
+      // held at the revisit's re-read
+      await waitFor(() => expect(disk.callsOf('files.read')).toHaveLength(reads + 1));
+      await waitFor(() => expect(player(to)).not.toBeNull());
+      seesTheSameFile(to);
+      // held at the replacement ask
+      read.release();
+      await waitFor(() => expect(disk.callsOf('layout.frameFile')).toHaveLength(asked + 1));
+      seesTheSameFile(to);
+      // the new token drawn, from the same position
+      const before = player(to);
+      ask.release();
+      await waitFor(() => expect(player(to)).not.toBe(before));
+      seesTheSameFile(to);
+      await waitFor(() => expect(disk.released()).toEqual(disk.issued.slice(0, asked))); // the token drawn before, released after
+    }
+    expect(disk.issued).toHaveLength(3);
+    expect(disk.released()).toEqual(disk.issued.slice(0, 2));
+  });
+});
+
 // ---- Reopen closed tab (Decision 18; sequence 9) ---------------------------------------------------------------------------
 
 describe('Reopen closed tab on a file that is beside the chat', () => {

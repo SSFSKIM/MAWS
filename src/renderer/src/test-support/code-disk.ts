@@ -17,7 +17,8 @@ import { utf8Length } from '../tools/code/viewer/viewer-store';
 // A file on the fake disk: its text, and its size when the test wants it to differ from the text's UTF-8 length (a
 // file past a cap), and `utf8: false` for bytes that are not valid UTF-8 (the decoded text a lossy one; main's strict
 // decode answers false). A plain string is valid UTF-8.
-export type DiskFile = string | { text: string; bytes: number; utf8?: boolean };
+// UX wave U6b-2: `mime` for a file whose type is not its name's (a file that changed kind under the same path).
+export type DiskFile = string | { text: string; bytes: number; utf8?: boolean; mime?: string };
 
 // A stand-in for SHA-256: 64 lowercase hex characters, a function of the text alone.
 export function fakeHash(text: string): string {
@@ -54,7 +55,8 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
   const issued: string[] = []; // UX wave U6b-2: every token `layout.frameFile` answered, in order
   const frameFile = (input: { appSessionId: string; path: string }) => {
     const issue = (extra: { neighbours?: boolean } = {}) => {
-      const framed = framedKindOf(mimeOf(input.path));
+      const served = files[input.path];
+      const framed = framedKindOf((typeof served === 'object' && served.mime) || mimeOf(input.path));
       if (framed === null) return ok({ status: 'row', why: 'unframed' });
       const token = frameToken(issued.length + 1);
       issued.push(token);
@@ -64,7 +66,7 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
   };
   const textOf = (path: string) => {
     const file = files[path];
-    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true } : { utf8: true, ...file };
+    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true, mime: undefined } : { utf8: true, ...file };
   };
 
   const answer = (name: CommandName, input: Record<string, unknown>) => {
@@ -87,7 +89,7 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
       // the suites' multi-chunk files are ASCII; past the end, zero bytes (main's `Math.max(0, …)`)
       const end = Math.max(offset, Math.min(file.text.length, offset + length));
       return ok({
-        encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: mimeOf(path),
+        encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: file.mime ?? mimeOf(path),
         hash: input.hash === true ? fakeHash(file.text) : null,
         utf8: input.hash === true ? file.utf8 : null,
         ...(named ? { named: true } : {}),
