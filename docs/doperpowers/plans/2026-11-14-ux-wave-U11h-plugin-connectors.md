@@ -20,7 +20,7 @@ How to see it working: Acceptance, H1 to H10.
 - [x] (2026-11-15 (UTC)) The one pass over "Statements to check again" once U11g and U11c are on master: master `ef1d659ad` merged into this branch; K-3 to K-5, K-7 to K-9, K-11 and K-12 hold (five of them worded more exactly), K-1, K-2, K-6 and K-10 are restated and the places that rested on them corrected; "What the code says today" and each milestone's files read against the merged tree; three points handed to the architect and not decided here (under the table).
 - [x] (2026-11-15 (UTC)) The architect's rulings on those three points, written into M1, M3, §E and the checks (Decision Log; under the table).
 - [x] (2026-11-15 (UTC)) M1 — The inventory lists a plugin's connectors. Commits `1b87d0313`..`c966751a5` (the stand-in minor 49 in `c966751a5` alone), fixes `17c48cf83`..`d81aa792c`; task review clean after two fix rounds (Decision Log, "the controller, on M1's task review").
-- [ ] M2 — The rule, at three points of the operation.
+- [x] (2026-11-15 (UTC)) M2 — The rule, at three points of the operation. Commits `add32850b`..`3ded12f06`, fix `a045c6b0f`..`5a82acbe0`; task review clean after one fix round (Decision Log, "the controller, on M2's task review"); each point's named tests shown red with that point's check removed, on a scratch branch, before and after the fix.
 - [ ] M3 — The row in My items, its lines and Sign in; the coverage note; the lists before a chat starts.
 - [ ] M4 — The record, the e2e scenes written, the whole checks, the hand-back.
 - [ ] The architect's: the e2e scenes on a Mac, the branch review, class 1a, the pull request (Proof, P1 to P5).
@@ -676,6 +676,8 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
   Evidence: `addressFormOf` and `addressMatches` in `src/shared/plugins/plugin-connector.ts`; task-2 report.
 - Observation (M2): a reload's `pluginsObservedAt` is stamped with the wall clock to the millisecond, `system/init`'s with the frame's own time; a reload in the same millisecond as point 1's report would not move it. (a) still judges the list itself; noted only.
   Evidence: `applyReload` (the engine host's session status).
+- Observation (M2's fix): U11a's other presses (no entry; MAWS's own list) keep a cancel window a few microtasks wide between `ask`'s liveness check and the operation resuming on the engine's answer; the plugin press closes it (the re-check after point 3). Left as it is (law 8: those paths are unchanged); one liveness check after the answer would close it for every press. Residue.
+  Evidence: `run` in `src/services/connectors/sign-in.ts` (the post-answer guard applies when `op.kept !== null`); task-2 report, Fix 1.
 
 ## Decision Log
 
