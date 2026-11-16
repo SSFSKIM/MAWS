@@ -36,7 +36,7 @@ import type { TranscriptState } from '../model/reduce';
 import type { AppSessionId } from '@shared/graph/ids'; // E13
 import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
 import { labelsOf } from '../../owner/view/label'; // UX wave U2b (M7)
-import { lastStretchClosed } from '../../stores/folds'; // UX wave U2b (M7)
+import { foldMoments, momentWatch, type FoldMoments } from '../../stores/folds'; // UX wave U2b (M7)
 import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
 import { followsOf, publishFollows } from '../surface/follow'; // UX wave U2b (M5)
 import './transcript.css';
@@ -645,18 +645,22 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
     () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail), labels) : queued),
     [queued, mirrored, openStretches, storedMarks, tail, labels],
   );
-  // UX wave U2b (M7; §M, "The reads"): a round of reads of the mod's summaries at each close of a stretch (a row the
-  // person reads comes after the last record line) and at each end of a turn, the two moments at which the mod asks
-  const foldsMoved = summaries?.moved;
-  const closed = useMemo(() => mirrored && foldsMoved !== undefined && lastStretchClosed(merged), [mirrored, foldsMoved, merged]);
-  const was = useRef({ closed, working });
-  useEffect(() => {
-    const turned = (closed && !was.current.closed) || (!working && was.current.working);
-    was.current = { closed, working };
-    if (turned) foldsMoved?.();
-  }, [closed, working, foldsMoved]);
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
+  // UX wave U2b (M7; §M, "The reads"; the review's finding 1): a round of reads of the mod's summaries at each close of
+  // a stretch and each end of a turn, the two moments at which the mod asks, told by their own identities (a stretch
+  // newly closed, a turn newly ended), so a batch that brings several, or ends a turn and starts the next, still starts
+  // one; what the loaded view first shows is the mount's own round's to read
+  const foldsMoved = summaries?.moved;
+  const watch = useRef<((moments: FoldMoments) => boolean) | null>(null);
+  useEffect(() => {
+    if (!mirrored || !loaded || foldsMoved === undefined) {
+      watch.current = null;
+      return;
+    }
+    watch.current ??= momentWatch();
+    if (watch.current(foldMoments(queued, merged))) foldsMoved();
+  }, [mirrored, loaded, foldsMoved, queued, merged]);
   const shown = useMemo(() => {
     if (startAt === undefined) return merged;
     const start = startAt(merged, loaded);

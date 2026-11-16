@@ -197,3 +197,40 @@ export function lastStretchClosed(drawn: readonly Row[]): boolean {
   if (at < 0) return false;
   return drawn.slice(at + 1).some((row) => !UNREAD.has(row.kind) && !(row.kind === 'user' && row.pending !== undefined));
 }
+
+/** The moments at which the mod asks for a summary, as the view shows them: each stretch closed, by its key; each turn ended, by its id. */
+export interface FoldMoments {
+  closed: readonly string[];
+  ended: readonly string[];
+}
+
+/**
+ * The stretches the drawn rows show closed, and the turns the rows show ended (`rows`: the rows the mirror ran over;
+ * `drawn`: its output). Every record line's stretch has closed but the last one's, which has closed once a row the
+ * person reads stands after it (`lastStretchClosed`); a turn has ended once its line no longer reads working.
+ */
+export function foldMoments(rows: readonly Row[], drawn: readonly Row[]): FoldMoments {
+  const lines = drawn.flatMap((row) => (row.kind === 'record_fold' ? [row.stretch] : []));
+  const closed = lastStretchClosed(drawn) ? lines : lines.slice(0, -1);
+  const ended = rows.flatMap((row) => (row.kind === 'divider' && row.state !== 'working' && row.turnId !== null ? [row.turnId] : []));
+  return { closed, ended };
+}
+
+/**
+ * Watches the moments a view shows, change by change: true when a stretch has closed or a turn has ended that had not
+ * before (several in one change answer true once); the first moments it is shown are what was already so, and answer
+ * false (the mount's own round reads them).
+ */
+export function momentWatch(): (moments: FoldMoments) => boolean {
+  let seen: { closed: Set<string>; ended: Set<string> } | null = null;
+  return ({ closed, ended }) => {
+    if (seen === null) {
+      seen = { closed: new Set(closed), ended: new Set(ended) };
+      return false;
+    }
+    const before = seen.closed.size + seen.ended.size;
+    for (const key of closed) seen.closed.add(key);
+    for (const id of ended) seen.ended.add(id);
+    return seen.closed.size + seen.ended.size > before;
+  };
+}
