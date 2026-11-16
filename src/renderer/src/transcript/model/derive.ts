@@ -542,9 +542,8 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
           const at = items.findIndex((item) => item.kind === 'row' && item.row.kind === 'bash' && item.row.exitCode === null);
           if (at >= 0) items[at] = { kind: 'row', row: withBashOutput((items[at] as { row: RowOf<'bash'> }).row, event) };
         } else if (isLocalCommand(event.origin, event.content) && !event.isSynthetic) { // a synthetic one is the engine's caveat for the model (W1)
-          const row = localCommandRow(event, turn.id);
-          // UX wave U3b (Interfaces B): it stands alone unless its turn draws the bubble of a command, known once every event is seen
-          if (row) items.push({ kind: 'later', row: () => (user !== null && turnCommandLine(turn) !== null ? row : { ...row, lone: true }) });
+          const row = localCommandRow(event, turn.id); // UX wave U3b: whether it stands alone is read on the drawn rows, below
+          if (row) items.push({ kind: 'row', row });
         } else if (isInterruptionMarker(event.origin, event.content)) {
           // The engine's interrupt marker is never a bubble, whatever turn it landed in: the stopped divider says it.
         } else if (originOf(event.origin) === 'engine') {
@@ -1024,6 +1023,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
     });
   }
   rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
+  markLoneOutputs(rows, user !== null && turnCommandLine(turn) !== null ? user : null);
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
@@ -1711,6 +1711,15 @@ function cutRowOf(event: Event<'user.message'>, turnId: TurnId | null): RowOf<'a
 export function turnCommandLine(turn: TurnState): { command: string; args: string } | null {
   const opener = turn.events.find((event): event is Event<'user.message'> => event.kind === 'user.message' && !event.isSynthetic && event.origin !== 'local-command' && event.bash === null);
   return opener === undefined ? null : commandLineOf(userTextOf(opener.content).text);
+}
+
+// UX wave U3b (Interfaces B; the branch panel's finding 2): a command's output stands alone unless the row drawn directly
+// before it is its command's bubble (`bubble`, null where the turn's opening message is no command), read on the turn's
+// drawn rows: a typed /compact draws its bubble, the compaction's boundary, then its output, which stands alone.
+function markLoneOutputs(rows: Row[], bubble: RowOf<'user'> | null): void {
+  rows.forEach((row, i) => {
+    if (row.kind === 'local_command' && (bubble === null || rows[i - 1] !== bubble)) rows[i] = { ...row, lone: true };
+  });
 }
 
 // The last row a turn draws (time separators aside) is its bubble: nothing of the turn stands between it and what follows.
