@@ -922,6 +922,38 @@ describe('sending from the box', () => {
     expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['idle one', 'idle two', 'after the turn']);
   });
 
+  // UX wave U6e (board ticket 675; the architect's bound for an engine plugin's text): a plugin's fill and its
+  // suggestion only enter the draft; the person's press is what sends it
+  const promptPort = () => useComposerStore.getState().focusTargets.get(A)!.prompt!;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 50))));
+  it('a plugin’s fill enters the draft and sends nothing by itself', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    let filled = false;
+    act(() => void (filled = promptPort().fill('the plugin’s words', 'replace')));
+    expect(filled).toBe(true);
+    await settle();
+    expect(editorOf().editor.getText()).toBe('the plugin’s words');
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
+  });
+
+  it('a plugin’s suggestion that Tab takes enters the draft and sends nothing', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    let shown = false;
+    act(() => void (shown = promptPort().suggest('the plugin’s idea')));
+    expect(shown).toBe(true);
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Tab' });
+    await settle();
+    expect(editorOf().editor.getText()).toBe('the plugin’s idea');
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
+  });
+
   it('sends a draft of several lines on Enter, during a turn as at the next step', async () => {
     busy(A);
     mount([{ index: 0, id: A }]);
@@ -1964,6 +1996,20 @@ describe('a lane B session on another machine', () => {
     await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     expect(takeFirstSend(R)).toBe(false);
+  });
+
+  // UX wave U6e (board ticket 675; the check on the architect's bound for an engine plugin's fill): the first send of a
+  // spawned session goes with no press of the person's, once the handed document is restored. A plugin's fill that lands
+  // first must not go out in the document's place.
+  it('the first send of a spawned session never sends a plugin’s fill that landed before the handed document', async () => {
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], []));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    let filled = false;
+    act(() => void (filled = useComposerStore.getState().focusTargets.get(R)?.prompt?.fill('the plugin’s words', 'replace') ?? false));
+    expect(filled).toBe(true);
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 100))));
+    expect(JSON.stringify(remote.invoked('session.send'))).not.toContain('the plugin’s words');
   });
 
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload
