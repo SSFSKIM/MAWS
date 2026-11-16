@@ -117,10 +117,12 @@ function picksOf(question: AskQuestion, values: readonly string[]): string[] {
   });
 }
 
-// An answer as the steer's block carries it: its question empty, and a choice's picks by their place
-function steeredAnswer(question: AskQuestion | undefined, answer: AskAnswer): AskAnswer {
+// An answer as the steer's block carries it: its question empty, and a choice's picks by their place, as a list (the
+// shape the sheet sends) whether its value came as a list or as one string (which the schema admits); an earlier
+// build's reader takes either shape
+function steeredAnswer(question: AskQuestion, answer: AskAnswer): AskAnswer {
   const steered = { ...answer, question: '' };
-  if (question?.modality === 'choice' && Array.isArray(answer.value)) steered.value = picksOf(question, answer.value);
+  if (question.modality === 'choice' && answer.value !== undefined) steered.value = picksOf(question, Array.isArray(answer.value) ? answer.value : [answer.value]);
   return steered;
 }
 
@@ -162,7 +164,12 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
 // the ask's call, by the question's id, and so do the labels (askAnswersFromSteer).
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
   const asked = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
-  const steered = answers.map((answer) => steeredAnswer(asked.get(answer.id), answer));
+  // an answer that names no question of the ask is not written: nothing says what its value is (the host refuses one,
+  // askAnswersProblem; the writer does not lean on that)
+  const steered = answers.flatMap((answer) => {
+    const question = asked.get(answer.id);
+    return question === undefined ? [] : [steeredAnswer(question, answer)];
+  });
   const byId = new Map(steered.map((answer) => [answer.id, answer]));
   const lines = questions.map((question, index) => {
     const answer = byId.get(askQuestionId(question, index));
