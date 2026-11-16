@@ -2011,7 +2011,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await expectOneMore(app);
 
     app = readsOf('src/app.ts');
-    act(() => panelHost.showSummary());
+    act(() => void panelHost.addTool('files', { appSessionId: A })); // another tab of the panel: Review hidden, still mounted
     act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
     await expectOneMore(app);
 

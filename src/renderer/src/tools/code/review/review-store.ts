@@ -26,7 +26,7 @@ import { useGit } from '../../../stores/git';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
 import { branchReadOf, useBranchReads } from './branch-read';
-import { createHeldDiffs, diffKeys, followGitStatus, HELD_DIFF_REFRESH_MS, mapWith, settled, type DiffRead, type FileDiff, type ScopeDiff } from './held-diffs';
+import { createHeldDiffs, diffKeys, followGitStatus, HELD_DIFF_REFRESH_MS, mapWith, mapWithout, settled, type DiffRead, type FileDiff, type ScopeDiff } from './held-diffs';
 import { readFailure, useServesReads, type ReadError } from './reads';
 import { gitScopeFiles, indexDiffers, dividerOf, turnScopeFiles, type ReviewFile, type ReviewScope } from './review-model';
 
@@ -88,6 +88,9 @@ export function createReviewStore(
     // a commit's diff is kept (decision 17): read once, and asked again only where it failed
     const heldDiffs = createHeldDiffs(client, set, { keys, input: diffInput, read: readOf, kept: (t) => t.read === 'git.commitDiff' });
     const checking = new Map<string, { again: boolean }>(); // a membership check in flight, by the commit's diffKey
+    // M9 fix 2 (Decision Log 38, 2): a commit's membership belongs to the holds that asked it: the last release forgets it
+    // and drops a check still out, as it forgets the diff, so the next full read's `onHead` stands until HEAD moves again
+    const commitHolds = new Map<string, number>();
 
     const check = async (target: DiffTarget): Promise<void> => {
       const key = keys.diff(target);
@@ -110,7 +113,23 @@ export function createReviewStore(
       files: new Map(),
       onHead: new Map(),
 
-      hold: heldDiffs.hold,
+      hold(target) {
+        const release = heldDiffs.hold(target);
+        if (target.read !== 'git.commitDiff') return release;
+        const key = keys.diff(target);
+        commitHolds.set(key, (commitHolds.get(key) ?? 0) + 1);
+        let released = false;
+        return () => {
+          if (released) return;
+          released = true;
+          release();
+          const left = (commitHolds.get(key) ?? 1) - 1;
+          if (left > 0) return void commitHolds.set(key, left);
+          commitHolds.delete(key);
+          checking.delete(key); // its answer, when it comes, is dropped
+          if (get().onHead.has(key)) set((s) => ({ onHead: mapWithout(s.onHead, (k) => k === key) }));
+        };
+      },
       refresh: heldDiffs.refresh,
 
       statusChanged(checkout) {
@@ -138,6 +157,7 @@ export function createReviewStore(
       reset() {
         heldDiffs.clear();
         checking.clear();
+        commitHolds.clear();
         set({ diffs: new Map(), files: new Map(), onHead: new Map() });
       },
     };
@@ -154,16 +174,19 @@ export const useReview = createReviewStore(ipc, { git: useGit });
 
 const NOT_A_REPOSITORY = 'not a git repository'; // C4's message (src/services/git/runner.ts), as C8a's Environment reads it
 
-// Settled: known, available with its base and merge base, or unavailable with the reason (the disabled chip's tooltip; none
-// for a branch read that failed before it ever answered). UX wave U5b-2: from the branch read, where the machine serves it.
+// Settled: known, available with its base and merge base, or unavailable with the reason (the disabled chip's tooltip). UX
+// wave U5b-2: from the branch read, where the machine serves it. A branch read that failed before it ever answered leaves
+// the chip enabled, its `failure` said in the scope's body with Retry (M9 fix 2, Decision Log 38); with an answer kept, a
+// later failure changes nothing (§E).
 export type BranchAvailability =
-  | { settled: false; base: null; mergeBase: null; reason: null }
-  | { settled: true; base: string; mergeBase: string; reason: null }
-  | { settled: true; base: null; mergeBase: null; reason: string | null };
+  | { settled: false; base: null; mergeBase: null; reason: null; failure: null }
+  | { settled: true; base: string; mergeBase: string; reason: null; failure: null }
+  | { settled: true; base: null; mergeBase: null; reason: string; failure: null }
+  | { settled: true; base: null; mergeBase: null; reason: null; failure: ReadError };
 
 export type ReviewList =
   | { phase: 'pending' }
-  | { phase: 'unavailable'; message: string; retry?: true } // the whole sentence the body shows; UX wave U5b-2: with Retry (a commit's diff)
+  | { phase: 'unavailable'; message: string; retry?: () => void } // the whole sentence the body shows; UX wave U5b-2: with Retry, what it asks again (a commit's diff, a failed first branch read)
   | { phase: 'ready'; files: ReviewFile[] };
 
 // UX wave U5b-2 (§E, §G): the commit a chip is listed for, as its kept read answered (null until it did)
@@ -200,13 +223,15 @@ export function turnKeyOf(entries: TranscriptEntries, appSessionId: AppSessionId
 // "This branch" (§E): off where the machine does not serve the reads; not settled while that is unknown, or while the
 // branch read has not answered; with no default branch, off with its reason.
 function branchOf(status: GitStatus | null, serves: boolean | null, read: ReturnType<typeof branchReadOf>, machine: string | null): BranchAvailability {
-  const unsettled = { settled: false, base: null, mergeBase: null, reason: null } as const;
+  const unsettled = { settled: false, base: null, mergeBase: null, reason: null, failure: null } as const;
   if (!status || serves === null) return unsettled;
-  if (!serves) return { settled: true, base: null, mergeBase: null, reason: REVIEW_COPY.branchNeedsReads(machine) };
+  if (!serves) return { settled: true, base: null, mergeBase: null, reason: REVIEW_COPY.branchNeedsReads(machine), failure: null };
   if (!read || (read.answer === null && read.failure === null)) return unsettled;
-  if (read.answer === null) return { settled: true, base: null, mergeBase: null, reason: null };
+  if (read.answer === null) return { settled: true, base: null, mergeBase: null, reason: null, failure: read.failure! };
   const base = read.answer.base;
-  return base === null ? { settled: true, base: null, mergeBase: null, reason: REVIEW_COPY.noDefaultBranch } : { settled: true, base: base.ref, mergeBase: base.mergeBase, reason: null };
+  return base === null
+    ? { settled: true, base: null, mergeBase: null, reason: REVIEW_COPY.noDefaultBranch, failure: null }
+    : { settled: true, base: base.ref, mergeBase: base.mergeBase, reason: null, failure: null };
 }
 
 // Holds C8a's git watch on the directory, the branch read while in view, and the scope's read (and a listed commit's) while
@@ -287,18 +312,23 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
       if (gitError) return { phase: 'unavailable', message: REVIEW_COPY.unavailable(gitError) };
       return { phase: 'pending' };
     }
-    // This branch off says why; a branch read that failed before it ever answered says its failure
-    if (scope === 'branch' && branch.settled && branch.base === null) return { phase: 'unavailable', message: branch.reason ?? REVIEW_COPY.unavailable(read?.failure?.message ?? '') };
+    // This branch off says why; a branch read that failed before it ever answered says its failure in §H's words for the
+    // kind, with Retry asking the branch read again and nothing else (M9 fix 2, Decision Log 38)
+    if (scope === 'branch' && branch.settled && branch.base === null) {
+      if (branch.failure === null) return { phase: 'unavailable', message: branch.reason };
+      const failed = commitFailure(branch.failure, offline, machineWords, mark.name);
+      return { phase: 'unavailable', message: failed.message, ...(failed.retry && repoRoot !== null && { retry: () => useBranchReads.getState().retry(machine, repoRoot) }) };
+    }
     // a commit where the machine does not serve the reads (§E's last column; S20): nothing is asked
     if (scope === 'commit' && serves === false) return { phase: 'unavailable', message: REVIEW_COPY.commitNeedsReads(machineWords) };
     if (!diff || diff.status === 'loading') return { phase: 'pending' };
     if (diff.status === 'error') {
       if (scope !== 'commit') return { phase: 'unavailable', message: REVIEW_COPY.unavailable(diff.message) };
       const failed = commitFailure(diff, offline, machineWords, mark.name);
-      return { phase: 'unavailable', message: failed.message, ...(failed.retry && { retry: true as const }) };
+      return { phase: 'unavailable', message: failed.message, ...(failed.retry && target !== null && { retry: () => useReview.getState().retryFailed(target) }) };
     }
     return { phase: 'ready', files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status, untracked: diff.untracked ?? null }) };
-  }, [scope, turn, status, gitError, branch, read, serves, diff, offline, machineWords, mark.name]);
+  }, [scope, turn, status, gitError, branch, serves, diff, offline, machineWords, mark.name, machine, repoRoot, target]);
 
   const pastCap = diff?.status === 'ok' && diff.patch === null;
   return { status, gitFailed: status === null && gitError !== null, servesReads: serves, machine: machineWords, branch, staged: indexDiffers(status), target, commit: commitInfo, pastCap, list };

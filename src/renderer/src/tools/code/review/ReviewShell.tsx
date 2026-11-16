@@ -199,11 +199,11 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
       )}
       {!stacked && bare.unplaced.length > 0 ? <UnplacedComments appSessionId={appSessionId} passKey={bare.key} hostId={hostId} unplaced={bare.unplaced} opened={bare.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       {data.list.phase === 'unavailable' ? (
-        data.list.retry && target ? (
-          // UX wave U5b-2 (S22): a commit's diff that failed, with Retry in its row
+        data.list.retry ? (
+          // UX wave U5b-2 (S22; M9 fix 2): a commit's diff, or a first branch read, that failed, with Retry in its row
           <div role="status" data-review-unavailable className="flex items-start gap-2 px-3 py-2">
             <p className="m-0 min-w-0 flex-1 text-ui text-fg-muted">{data.list.message}</p>
-            <button type="button" data-review-retry className={retryButton} onClick={() => useReview.getState().retryFailed(target)}>
+            <button type="button" data-review-retry className={retryButton} onClick={data.list.retry}>
               {REVIEW_COPY.retry}
             </button>
           </div>
@@ -368,7 +368,7 @@ function ScopeChips({ ui, data, scope, appSessionId }: { ui: StoreApi<ReviewUi>;
   return (
     <div role="group" aria-label={REVIEW_COPY.title} className="flex shrink-0 flex-wrap items-center gap-1 border-b border-border px-3 py-1.5">
       {chipOf('uncommitted', false, null)}
-      {chipOf('branch', !data.branch.settled || data.branch.base === null, branchReason)}
+      {chipOf('branch', !data.branch.settled || (data.branch.base === null && data.branch.failure === null), branchReason)}
       {chipOf('turn', !turnAvailable, turnAvailable ? null : REVIEW_COPY.noTurnChangedFiles)}
       {stagedShown ? chipOf('staged', !data.staged, data.staged ? null : REVIEW_COPY.indexMatchesHead) : null}
       {commit ? chipOf('commit', false, commit.subject, REVIEW_COPY.commitChip(commit.sha)) : null}

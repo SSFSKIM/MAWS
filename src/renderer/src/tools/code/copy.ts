@@ -78,7 +78,7 @@ export const REVIEW_COPY = {
   indexMatchesHead: 'Index matches HEAD',
   // UX wave U5b-2 (§I): This branch off, with no default branch, or on a machine whose MAWS does not serve the reads
   noDefaultBranch: 'No default branch to compare with',
-  branchNeedsReads: (machine: string | null) => (machine === null ? "This branch needs this Mac's MAWS service to be updated" : `This branch needs a newer MAWS on ${machine}`),
+  branchNeedsReads: (machine: string | null) => (machine === null ? 'This branch needs this Mac’s MAWS service to be updated' : `This branch needs a newer MAWS on ${machine}`),
   noTurnChangedFiles: 'No turn has changed files yet', // UX wave U5b (l5-code-12 c): Last turn is always listed
   // Empty scopes
   noUncommitted: 'No uncommitted changes',
@@ -138,7 +138,7 @@ export const REVIEW_COPY = {
   notRepository: 'Not a git repository',
   unavailable: (message: string) => `Diff unavailable: ${message}`,
   // UX wave U5b-2 (§H's refusals told apart, for a commit's diff; §I): `null` names this Mac's service
-  commitNeedsReads: (machine: string | null) => (machine === null ? "Diff unavailable: this Mac's MAWS service is older than this window" : `Diff unavailable: ${machine} runs an older MAWS`),
+  commitNeedsReads: (machine: string | null) => (machine === null ? 'Diff unavailable: this Mac’s MAWS service is older than this window' : `Diff unavailable: ${machine} runs an older MAWS`),
   commitOffline: (machine: string) => `Diff unavailable: ${machine} is offline`,
   commitRefused: (machine: string) => `Diff unavailable: ${machine} refused this read`,
   refused: (message: string) => `Refused: ${message}`, // a diff tab's path outside the session's directories
