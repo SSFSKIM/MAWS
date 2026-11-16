@@ -243,3 +243,77 @@ export function supplementJournal(dir: string, startAt: number): string {
   return write(dir, 'p2c2-supplement');
 }
 // P2-C2 end
+
+// UX wave U2b (M6; docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §M): the journal of e2e/to-human.spec.ts's
+// record-line scene, built as `toHumanJournal` is (the M5 fixture's frames, invented content, the launch the decided
+// one). Two human turns, three stretches of work:
+//   1. a Bash call, then a message; a second Bash call, then a message; the turn ends (two closed stretches);
+//   2. a third Bash call left running: the replay holds at a `get_context_usage` of the test's own (reads.jsonl seq 56
+//      to 57) while that stretch grows; then its result, a message and the turn's end.
+// The to-human mod's file of fold summaries the scene writes names these calls as its runs' bounds.
+export const SUMMARY = {
+  first: 'Check the tree, then list the fixtures, and tell me after each.',
+  second: 'Now run the unit suite and tell me how it went.',
+  calls: { tree: 'toolu_01U2bM6Tree', list: 'toolu_01U2bM6List', suite: 'toolu_01U2bM6Suite' },
+  lines: { tree: 'Check the tree', list: 'List the fixtures', suite: 'Run the unit suite' }, // each call's description: its line
+  messages: { tree: 'The tree is clean.', list: 'Three fixtures are on disk.', suite: 'The unit suite passes: twelve tests.' },
+  stored: { tree: 'Checked the tree; it is clean', list: 'Listed the fixtures; three found' }, // the invented summaries
+};
+
+export function summaryJournal(dir: string, startAt: number): string {
+  const { frame, push, now, id, lifecycle, running, prompt, echo, text, result, prelude, write } = scribe(startAt);
+  const reads = rowsOf('spikes/protocol-probe/fixtures/reads.jsonl');
+  // A Bash call and, unless it is left running, its result, in the M5 fixture's shapes
+  const call = (user: string, uuid: string, message: string, toolUseId: string, input: Record<string, unknown>) => {
+    const tool = frame(10);
+    Object.assign(tool, { uuid, user_message_uuid: user, user_message_uuids: [user] });
+    Object.assign(tool.message as Record<string, unknown>, { id: message, content: [{ type: 'tool_use', id: toolUseId, name: 'Bash', input }] });
+    push('in', tool);
+  };
+  const callResult = (uuid: string, toolUseId: string, stdout: string) => {
+    const toolResult = frame(11);
+    Object.assign(toolResult, { uuid, timestamp: now(), tool_use_result: { stdout, stderr: '', interrupted: false, isImage: false, noOutputExpected: false } });
+    Object.assign(toolResult.message as Record<string, unknown>, { content: [{ tool_use_id: toolUseId, type: 'tool_result', content: stdout, is_error: false }] });
+    push('in', toolResult);
+  };
+  const message = (body: string) => `<message>\n${body}\n</message>`;
+
+  push('meta', { event: 'provenance', charter: 'docs/charter.md', child: 'UX wave U2b', spec: 'docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md', source: 'test/fixtures/engine/p2c-report-marks.jsonl', note: 'Synthetic (UX wave U2b, M6), built by e2e/support/to-human-replay.ts for e2e/to-human.spec.ts.' });
+  prelude();
+
+  // Turn 1: two stretches, each closed by a message
+  const u1 = id(1);
+  prompt(u1, SUMMARY.first);
+  running('running');
+  lifecycle(u1, 'queued');
+  lifecycle(u1, 'started');
+  push('in', { ...frame(8), permissionMode: 'default', output_style: TO_HUMAN.style });
+  echo(u1, SUMMARY.first);
+  call(u1, id(2), 'msg_01U2bM6Tree', SUMMARY.calls.tree, { command: 'git status --short', description: SUMMARY.lines.tree });
+  callResult(id(3), SUMMARY.calls.tree, '');
+  text('msg_01U2bM6TreeSaid', id(4), message(SUMMARY.messages.tree), u1);
+  call(u1, id(5), 'msg_01U2bM6List', SUMMARY.calls.list, { command: 'ls fixtures', description: SUMMARY.lines.list });
+  callResult(id(6), SUMMARY.calls.list, 'alpha.json\nbeta.json\ngamma.json');
+  text('msg_01U2bM6ListSaid', id(7), message(SUMMARY.messages.list), u1);
+  result(u1, message(SUMMARY.messages.list));
+  lifecycle(u1, 'completed');
+  running('idle');
+
+  // Turn 2: a stretch that grows while the call runs, then closes
+  const u2 = id(8);
+  prompt(u2, SUMMARY.second);
+  running('running');
+  lifecycle(u2, 'queued');
+  lifecycle(u2, 'started');
+  echo(u2, SUMMARY.second);
+  call(u2, id(9), 'msg_01U2bM6Suite', SUMMARY.calls.suite, { command: 'pnpm test', description: SUMMARY.lines.suite });
+  push('out', reads.find((row) => row.seq === 56)!.frame); // held: the test's own read lets the engine go on
+  push('in', reads.find((row) => row.seq === 57)!.frame);
+  callResult(id(10), SUMMARY.calls.suite, 'Tests 12 passed (12)');
+  text('msg_01U2bM6SuiteSaid', id(11), message(SUMMARY.messages.suite), u2);
+  result(u2, message(SUMMARY.messages.suite));
+  lifecycle(u2, 'completed');
+  running('idle');
+
+  return write(dir, 'u2b-summary');
+}
