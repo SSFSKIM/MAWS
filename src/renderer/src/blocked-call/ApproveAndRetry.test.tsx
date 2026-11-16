@@ -12,6 +12,7 @@ import { consentMessage } from '@shared/engine/arrival';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
+import { SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf, bareOf } from '@shared/machine/address';
 import type { JournalRow } from '@shared/wire/journal';
@@ -497,11 +498,42 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     // the stack's words for its Delete (U4b: Edit, ↑ and Delete pass their own labels to the refusal)
     expect(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel')).toContain('Update MAWS on mini');
     expect(del.getAttribute('title')).toBe(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel'));
-    expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now over the link').toBe(true);
+    expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now from a machine that lists no rl2.send-now').toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
     expect(useGrantsOut.getState().out.size, 'the grant stays out').toBe(1);
     expect(row.button()!.disabled).toBe(true);
     expect(fake.invoked('session.steer.cancel')).toEqual([]);
+  });
+
+  // The cascade merge of U4b into U1c (2026-11-16): since U4b's link capability `rl2.send-now`, a waiting grant's row on
+  // another machine offers Send now where that machine lists `rl2.send-now`, and Delete where it lists
+  // `rl2.session-acts` (this build lists both); the case above is the refused side
+  it('another machine that lists rl2.send-now and rl2.session-acts: the steered grant’s row offers Send now and Delete, and Send now is the engine’s send-now for the grant', async () => {
+    const remote = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
+    useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: T0, generation: 1, carrier: 'relay', capabilities: ['rl2.executor.machine', SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY] }]);
+    useSessions.setState({ listed: new Map([[remote, { ...remoteRow(OTHER_MACHINE, 'app-r', { lane: 'B' }), appId: remote }]]), listedMachines: new Set([OTHER_MACHINE]), records: new Map([[remote, record(remote)]]) });
+    applyRemoteSession(remoteSessionState(remote));
+    useSessions.getState().applyStatus({ appSessionId: remote, status: status(remote, { turn: humanTurn }) }, OTHER_MACHINE);
+    const store = await storeAt(remote, blockedTurn(['make build'], { running: true }).events);
+    vi.useFakeTimers();
+    const row = drawn(store, blockedIds(store)[0]!);
+    fireEvent.click(row.button()!);
+    await flush();
+    expect(sent('session.steer')).toEqual([{ appSessionId: 'app-r', content: GRANT, priority: 'next' }]);
+    await answer('session.steer', { messageUuid: G1 });
+    act(() => queueOf(remote, { steers: [{ messageUuid: G1, content: GRANT, createdAt: T0 }] }));
+    render(<QueueList appSessionId={remote} busy queue={useQueueStore.getState().bySession.get(remote)!} />);
+    expect(rowText(stackRows(useQueueStore.getState().bySession.get(remote)!, new Set(), readOf(remote))[0]!)).toBe('You approved make build');
+    const sendNow = within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
+    const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
+    // offered: open, its title the stack's own words for Send now during a turn, no refusal's
+    expect([sendNow.disabled, sendNow.getAttribute('title')], 'Send now offered').toEqual([false, STACK_WORDS.sendNowWhileRunning]);
+    expect(del.disabled, 'Delete offered').toBe(false);
+    expect(del.getAttribute('title') ?? '', 'no refusal on Delete').not.toContain('Update MAWS');
+    fireEvent.click(sendNow);
+    await flush();
+    expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: 'app-r', messageUuid: G1 }]);
+    expect(row.button()!.disabled, 'the grant is still out until the record reads it').toBe(true);
   });
 });
 
