@@ -28,7 +28,7 @@ import type { AskIn } from './manage';
 import { pluginRowViewOf, type PluginRowState } from './plugin-row';
 import { removalDirectoryOf, removeRequestOf, resultFor, shadowWords, signInViewOf, type AuthPosture, type SignInFacts, type SignInView } from './present';
 import type { ConnectorRowModel } from './rows';
-import { cancelSignIn, forgetSignIn, releaseStartedOn, RUNNING, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, startSignInFromRow, useSignIns, useStartedOn, type SignInRecord, type SignInServer } from './sign-in';
+import { cancelSignIn, forgetSignIn, RUNNING, signInKeyOf, signInMachineOf, signsInDynamic, startSignIn, startSignInDynamic, startSignInFromRow, useSignIns, useStartedOn, type SignInRecord, type SignInServer } from './sign-in';
 
 const BUTTON = 'rounded-sm px-2 py-1 text-ui-sm outline-accent hover:bg-bg-hover focus-visible:outline-2 disabled:text-fg-faint';
 const TONE: Record<SignInView['tone'], string> = { muted: 'text-fg-muted', success: 'text-success', danger: 'text-danger' };
@@ -180,18 +180,16 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   );
 }
 
-// The record of a sign-in pressed on this row (`startSignInFromRow`) while it runs, else null (UX wave U11h, the branch
-// panel's ruling of 2026-11-16): an operation is bound to the row it was started on, so its step and Cancel stay there
-// when the row's engine name changes or can no longer be read. Once a record after the press has ended, the binding is
-// let go and the row's result is the one its name now keys, shown by today's rule (its revision).
+// The record of the operation this row's own press started (`startSignInFromRow`) while it runs, else null (UX wave
+// U11h, the architect's rulings of 2026-11-16): its step and Cancel stay on this row when the row's engine name changes
+// or can no longer be read, and no other operation of the server is taken for it. The binding ends where the events are
+// heard; the row's result is then the one its name now keys, shown by today's rule (its revision).
 function useRunningStartedOn(rowKey: string): SignInRecord | null {
   const started = useStartedOn((s) => s.rows.get(rowKey) ?? null);
-  const record = useSignIns((s) => (started === null ? null : (s.byServer.get(signInKeyOf(started.server)) ?? null)));
-  const running = record !== null && RUNNING.has(record.event.state);
-  useEffect(() => {
-    if (started !== null && !running && record !== started.before) releaseStartedOn(rowKey, started);
-  }, [rowKey, started, record, running]);
-  return running ? record : null;
+  return useSignIns((s) => {
+    const record = started === null ? undefined : s.byServer.get(started.key);
+    return record !== undefined && record.event.opId === started!.opId && RUNNING.has(record.event.state) ? record : null;
+  });
 }
 
 // A plugin's row's revision as last answered: while main's answer for a re-read is out the last one stands, so a result
