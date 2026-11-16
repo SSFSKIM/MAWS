@@ -12,5 +12,10 @@ export function openCommit(appSessionId: AppSessionId, commit: string, path?: st
   panelHost.addTool(REVIEW_TOOL_ID, { appSessionId, params: { scope: 'commit', commit, ...(path ? { path } : {}) } });
 }
 
+// How a commit's short hash is drawn where it can be pressed (UX wave U5b-2, Decision Log 37): mono, as the commit list
+// draws it; the row under Review's toolbar uses it for a commit's comment, and M10's commit list is to share it.
+export const COMMIT_HASH_BUTTON =
+  'rounded-sm font-mono text-fg underline decoration-border underline-offset-2 outline-accent hover:decoration-fg focus-visible:outline-2';
+
 // What Review's folder registers with the transcript (App.tsx's C8c block): the chip of a commit's comment opens it.
 export const reviewTranscriptActions: Pick<TranscriptActions, 'openCommit'> = { openCommit };

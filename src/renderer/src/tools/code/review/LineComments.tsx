@@ -49,6 +49,7 @@ const isFileLine = (comment: PassComment): comment is PassComment & { anchor: Fi
 export interface UnplacedComment {
   comment: PassComment;
   kind: Unplaced;
+  commit?: string; // UX wave U5b-2: the commit an `on-commit` comment was made on
 }
 
 /**
@@ -75,9 +76,11 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
     let waiting: { path: string; serial: number } | null = null;
     if (pass === null) return { rows, unplaced, card, holdPath, waiting };
     const lines: ScopeLines =
-      state === 'ready' ? { state, files: sections.map((section) => ({ path: section.file.path, absolute: anchorPathOf(section.file, repoRoot, commit), blocks: section.blocks, state: sectionStateOf(section) })) } : { state, files: [] };
-    // UX wave U5b-2 (§G): a commit's scope draws its own commit's comments, every other scope those with none, each by
-    // the comment's own anchor
+      state === 'ready'
+        ? { state, commit, files: sections.map((section) => ({ path: section.file.path, absolute: anchorPathOf(section.file, repoRoot, commit), blocks: section.blocks, state: sectionStateOf(section) })) }
+        : { state, commit, files: [] };
+    // UX wave U5b-2 (§G, Decision Log 37): a commit's scope draws no comment made on no commit; a comment made on another
+    // commit than the scope's is unplaced by its own reason (`placementOf`), in the row under the toolbar
     const comments = pass.comments.filter(isFileLine).filter((comment) => ofScope(comment.anchor, commit)).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
       const at = placementOf(comment, lines, madeIn.get(comment.id));
@@ -86,7 +89,7 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
       if (at.kind === 'placed') {
         if (comment.id === ours) card = { ...at.place, path: at.path, serial: serial! };
         else rows.set(at.path, [...(rows.get(at.path) ?? []), { ...at.place, comment }]);
-      } else if (isUnplaced(at)) unplaced.push({ comment, kind: at.kind });
+      } else if (isUnplaced(at)) unplaced.push(at.kind === 'on-commit' ? { comment, kind: at.kind, commit: at.commit } : { comment, kind: at.kind });
     }
     return { rows, unplaced, card, holdPath, waiting };
   }, [repoRoot, commit, state, pass, sections, ours, serial]);

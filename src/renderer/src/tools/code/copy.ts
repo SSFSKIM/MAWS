@@ -82,6 +82,7 @@ export const REVIEW_COPY = {
   noTurnChangedFiles: 'No turn has changed files yet', // UX wave U5b (l5-code-12 c): Last turn is always listed
   // Empty scopes
   noUncommitted: 'No uncommitted changes',
+  emptyCommit: 'No changes in this commit', // UX wave U5b-2 (§I; Decision Log 37): a commit with no change against its first parent, where noUncommitted stands
   nothingOnBranch: (branch: string, base: string) => `Nothing on ${branch} beyond ${base}`,
   nothingStaged: 'Nothing staged',
   turnChangedNothing: 'This turn changed no files',
@@ -97,6 +98,9 @@ export const REVIEW_COPY = {
   fileChanged: 'This file changed',
   lineLeftDiff: 'The line this comment was on is no longer in this diff.', // over the comments whose line left the diff (M5; D11, Decision Log 20 and 21)
   fileNotInScope: 'The file this comment is on is not in this diff.', // over the comments whose file the scope does not hold, or whose scope has no files (Decision Log 21)
+  // UX wave U5b-2 (§G, §I; Decision Log 37): over a comment made on a commit, in any scope but that commit's; the short hash is
+  // drawn as a button that opens the commit at the comment's file (`UnplacedComments`)
+  onCommit: (sha: string) => `This comment is on commit ${sha.slice(0, 7)}.`,
   diffNotShown: "This file's diff is not shown here.", // over the comments whose file is in the scope while the surface draws no lines for it: its own read failed, or it is too large to draw (Decision Log 21)
   refresh: 'Refresh',
   untrackedNote: 'Untracked file · not in the diff',

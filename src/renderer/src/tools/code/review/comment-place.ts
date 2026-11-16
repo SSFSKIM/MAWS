@@ -91,6 +91,7 @@ export function placeOf(comment: { anchor: FileLineAnchor; quote?: string | null
  * state a scope and a file's section can be in (`SECTION_STATES`, from `sectionStateOf`):
  *
  *   the case          when                                                    the answer        the sentence over it
+ *   on-commit         made on a commit the scope is not (first, whatever else) `on-commit`       `REVIEW_COPY.onCommit(sha)`
  *   scope-reading     the scope's list not read yet                           `pending`         none: nothing listed
  *   scope-empty       the scope read with no files, or not readable           `no-files`        `REVIEW_COPY.fileNotInScope`
  *   not-in-scope      the scope holds no section for the comment's file       `not-in-scope`    `REVIEW_COPY.fileNotInScope`
@@ -111,8 +112,9 @@ export type Placement =
   | { kind: 'diff-not-shown'; path: string }
   | { kind: 'not-in-scope' }
   | { kind: 'no-files' }
+  | { kind: 'on-commit'; commit: string } // UX wave U5b-2 (Decision Log 37): made on a commit other than the scope's
   | { kind: 'pending'; path: string | null };
-export type Unplaced = Extract<Placement, { kind: 'line-left' | 'diff-not-shown' | 'not-in-scope' | 'no-files' }>['kind'];
+export type Unplaced = Extract<Placement, { kind: 'line-left' | 'diff-not-shown' | 'not-in-scope' | 'no-files' | 'on-commit' }>['kind'];
 
 // The states a file's section can be in, as the predicate reads them.
 export const SECTION_STATES = ['reading', 'folded-unread', 'lines', 'binary', 'failed', 'too-large'] as const;
@@ -126,10 +128,11 @@ export function sectionStateOf(section: { hunks: readonly string[] | null; binar
   return tooLarge({ hunks: section.hunks }) ? 'too-large' : 'lines';
 }
 
-export type PlacementCase = 'scope-reading' | 'scope-empty' | 'not-in-scope' | Exclude<SectionState, 'lines'> | 'line-found' | 'line-not-found';
+export type PlacementCase = 'on-commit' | 'scope-reading' | 'scope-empty' | 'not-in-scope' | Exclude<SectionState, 'lines'> | 'line-found' | 'line-not-found';
 
 // The table's answers, one per case (`lines` splits by the quote).
 export const PLACEMENT_TABLE: Readonly<Record<PlacementCase, Placement['kind']>> = {
+  'on-commit': 'on-commit',
   'scope-reading': 'pending',
   'scope-empty': 'no-files',
   'not-in-scope': 'not-in-scope',
@@ -145,29 +148,36 @@ export const PLACEMENT_TABLE: Readonly<Record<PlacementCase, Placement['kind']>>
 // The surface's scope as the predicate reads it: `reading` while its list is not read yet, `none` while it cannot be read.
 export interface ScopeLines {
   state: 'reading' | 'none' | 'ready';
+  commit?: string | null; // UX wave U5b-2: the commit whose diff the scope is; absent or null, a scope of no commit
   // `path`, the stack's identity; `absolute`, the path a comment on the file names (`anchorPathOf`)
   files: readonly { path: string; absolute: string | null; blocks: readonly (readonly string[])[]; state: SectionState }[];
 }
 
-// The sentence over each kind of comment the surface cannot place (the table's last column).
-export const UNPLACED_WORDS: Readonly<Record<Unplaced, string>> = {
+// The sentence over each kind of comment the surface cannot place (the table's last column). A commit's comment's sentence
+// names its commit, so it is a function of the hash, and the row stands one per commit and file (`UnplacedComments`).
+export const UNPLACED_WORDS: Readonly<Record<Exclude<Unplaced, 'on-commit'>, string> & { 'on-commit': (sha: string) => string }> = {
   'line-left': REVIEW_COPY.lineLeftDiff,
   'not-in-scope': REVIEW_COPY.fileNotInScope,
   'no-files': REVIEW_COPY.fileNotInScope,
   'diff-not-shown': REVIEW_COPY.diffNotShown,
+  'on-commit': REVIEW_COPY.onCommit,
 };
 
-// The order the sentences stand in the row under the toolbar when more than one kind is present, each with its kinds.
-export const UNPLACED_ORDER: readonly { name: string; words: string; kinds: readonly Unplaced[] }[] = [
+// The order the sentences stand in the row under the toolbar when more than one kind is present, each with its kinds; a
+// commit's comments last (UX wave U5b-2), their sentence the commit's (`words` null).
+export const UNPLACED_ORDER: readonly { name: string; words: string | null; kinds: readonly Unplaced[] }[] = [
   { name: 'line-left', words: UNPLACED_WORDS['line-left'], kinds: ['line-left'] },
   { name: 'not-in-diff', words: UNPLACED_WORDS['not-in-scope'], kinds: ['not-in-scope', 'no-files'] },
   { name: 'diff-not-shown', words: UNPLACED_WORDS['diff-not-shown'], kinds: ['diff-not-shown'] },
+  { name: 'on-commit', words: null, kinds: ['on-commit'] },
 ];
 
 export const isUnplaced = (placement: Placement): placement is Extract<Placement, { kind: Unplaced }> => placement.kind in UNPLACED_WORDS;
 
 /** The table's answer for a comment in a scope; `block` is the block the comment was made in, when known (`placeOf`). */
 export function placementOf(comment: { anchor: FileLineAnchor; quote?: string | null }, scope: ScopeLines, block?: number): Placement {
+  const { commit } = comment.anchor;
+  if (commit !== undefined && commit !== (scope.commit ?? null)) return { kind: 'on-commit', commit }; // first, whatever the scope holds
   if (scope.state === 'reading') return { kind: 'pending', path: null };
   if (scope.state === 'none' || scope.files.length === 0) return { kind: 'no-files' };
   const file = scope.files.find((each) => each.absolute === comment.anchor.path);
@@ -198,8 +208,11 @@ export function reviewLineAnchor(path: string, line: number, side: LineSide, com
   return side === 'old' ? { ...anchor, side: 'old' } : anchor;
 }
 
-/** UX wave U5b-2: whether a comment belongs to a scope: a commit's scope takes its own commit's comments, every other scope those with none. */
-export const ofScope = (anchor: Pick<FileLineAnchor, 'commit'>, commit: string | null): boolean => (anchor.commit ?? null) === commit;
+/**
+ * UX wave U5b-2: whether a surface draws a comment at all: a commit's scope takes no comment made on no commit (its lines are
+ * the commit's); every other comment is drawn, by `placementOf` (a commit's comment in another scope under its own reason).
+ */
+export const ofScope = (anchor: Pick<FileLineAnchor, 'commit'>, commit: string | null): boolean => commit === null || anchor.commit !== undefined;
 
 /**
  * The path a comment on a file of the stack names (§A): in a commit's scope the path as that commit's diff names it,

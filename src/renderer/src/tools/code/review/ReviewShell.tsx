@@ -197,7 +197,7 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
           <CardSlot element={slot} />
         </div>
       )}
-      {!stacked && bare.unplaced.length > 0 ? <UnplacedComments passKey={bare.key} hostId={hostId} unplaced={bare.unplaced} opened={bare.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
+      {!stacked && bare.unplaced.length > 0 ? <UnplacedComments appSessionId={appSessionId} passKey={bare.key} hostId={hostId} unplaced={bare.unplaced} opened={bare.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       {data.list.phase === 'unavailable' ? (
         data.list.retry && target ? (
           // UX wave U5b-2 (S22): a commit's diff that failed, with Retry in its row
@@ -313,7 +313,7 @@ function StackView({ appSessionId, hostId, cardSlot, setRow, keyboardToCard, cla
         onWrap={() => useViewer.getState().setWrap(!wrap)}
       />
       {refused !== null ? <RefusedPath path={refused} /> : null}
-      {comments.unplaced.length > 0 ? <UnplacedComments passKey={comments.key} hostId={hostId} unplaced={comments.unplaced} opened={comments.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
+      {comments.unplaced.length > 0 ? <UnplacedComments appSessionId={appSessionId} passKey={comments.key} hostId={hostId} unplaced={comments.unplaced} opened={comments.opened} onRow={setRow} claimFocus={claimFocus} /> : null}
       <Stack
         key={key}
         appSessionId={appSessionId}
@@ -344,7 +344,7 @@ function emptyOf(scope: ReviewScope | null, data: ReviewData): string {
     case 'turn':
       return REVIEW_COPY.turnChangedNothing;
     case 'commit':
-      return ''; // UX wave U5b-2: a commit with no change against its first parent has no sentence of its own in §I (reported)
+      return REVIEW_COPY.emptyCommit; // UX wave U5b-2 (Decision Log 37): no change against its first parent
     default:
       return REVIEW_COPY.noUncommitted;
   }
