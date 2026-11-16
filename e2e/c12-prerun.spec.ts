@@ -801,7 +801,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await send(page, 'Use the Write tool to create a file named c12-deep.txt containing the single line DEEP, then reply with exactly the word CREATED.');
       await log.idle(180_000);
       await showTool(page, 'Review');
-      await expect(panel(page).locator('[role="option"] button[data-path="c12-deep.txt"]')).toBeVisible({ timeout: 30_000 });
+      await expect(panel(page).locator('[data-review-file="c12-deep.txt"]')).toBeVisible({ timeout: 30_000 }); // UX wave U5b: a section of the stack
       const uncommitted = { header: await panel(page).locator('[data-review-header]').innerText(), footer: await panel(page).locator('[data-review-footer]').innerText() };
       const shotsUncommitted = await shoot(page, '10.4-review');
       git(worktree!, 'add', 'c12-deep.txt');

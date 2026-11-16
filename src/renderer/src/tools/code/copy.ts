@@ -61,38 +61,57 @@ export const VIEWER_COPY = {
   zoomPercent: (scale: number) => `${Math.round(scale * 100)}%`,
 } as const;
 
-const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
+// A count as Review prints it, with the thousands separator (UX wave U5b, §I); English throughout, as the app's other counts.
+const count = (n: number) => n.toLocaleString('en-US');
 
 export const REVIEW_COPY = {
   title: 'Review',
   noSession: 'Open a session to review its changes',
   scopes: { uncommitted: 'Uncommitted', branch: 'This branch', turn: 'Last turn', staged: 'Staged' },
-  header: (files: number, added: number, removed: number, scope: string) => `${plural(files, 'file')} changed · +${added} −${removed} · ${scope}`,
+  // UX wave U5b (§I; card 1 at its default, built in `totalsWords`): the totals without the scope's name, which the
+  // pressed chip above them says.
+  totals: (files: number, added: number, removed: number) => `${count(files)} ${files === 1 ? 'file' : 'files'} changed · +${count(added)} −${count(removed)}`,
   // A disabled chip's reason, as its tooltip.
   mainWorktreeBranch: (branch: string) => `Session runs on ${branch}, the main worktree's branch`,
   detachedHead: 'Detached HEAD',
   indexMatchesHead: 'Index matches HEAD',
   noMainBranch: 'The main worktree has no branch', // C10 answered a detached main worktree (base `HEAD`)
   noCommits: (branch: string) => `No commits on ${branch} yet`, // C10 answered null: the branch does not resolve
+  noTurnChangedFiles: 'No turn has changed files yet', // UX wave U5b (l5-code-12 c): Last turn is always listed
   // Empty scopes
   noUncommitted: 'No uncommitted changes',
   nothingOnBranch: (branch: string, base: string) => `Nothing on ${branch} beyond ${base}`,
   nothingStaged: 'Nothing staged',
   turnChangedNothing: 'This turn changed no files',
-  // A file
-  kinds: { modified: 'Modified', added: 'Added', deleted: 'Deleted', binary: 'Binary', untracked: 'Untracked' },
+  // A file's section (UX wave U5b, §F and §I): a kind's badge (none for a modified file), its counts, its body
+  kinds: { modified: 'Modified', added: 'Added', deleted: 'Deleted', renamed: 'Renamed', binary: 'Binary', untracked: 'Untracked', conflict: 'Conflict' },
   renamedFrom: (old: string) => `Renamed from ${old}`,
-  fileHeader: (path: string, kind: string) => `${path} · ${kind}`,
+  renamed: (old: string, now: string) => `${old} → ${now}`, // a rename whose two paths fit whole
+  added: (n: number) => `+${count(n)}`,
+  removed: (n: number) => `−${count(n)}`,
+  binaryFile: 'Binary file',
+  retry: 'Retry',
+  // A file held still under an open comment card while the agent changed it (UX wave U5b, M5; §G, §I)
+  fileChanged: 'This file changed',
+  lineLeftDiff: 'The line this comment was on is no longer in this diff.', // over the comments whose line left the diff (M5; D11, Decision Log 20 and 21)
+  fileNotInScope: 'The file this comment is on is not in this diff.', // over the comments whose file the scope does not hold, or whose scope has no files (Decision Log 21)
+  diffNotShown: "This file's diff is not shown here.", // over the comments whose file is in the scope while the surface draws no lines for it: its own read failed, or it is too large to draw (Decision Log 21)
+  refresh: 'Refresh',
   untrackedNote: 'Untracked file · not in the diff',
+  // The toolbar (UX wave U5b, §F): Collapse all and the View menu, which holds the stack's Unified, Split and Wrap
+  collapseAll: 'Collapse all',
+  expandAll: 'Expand all',
+  view: 'View',
   unified: 'Unified',
   split: 'Split',
+  splitNeedsRoom: 'Split needs a wider column',
   wrap: 'Wrap',
   hunkOf: (index: number, count: number) => `Showing hunk ${index} of ${count}`,
+  hunkOfShort: (index: number, count: number) => `${index} of ${count}`, // where the long form does not fit (card 1)
   previousHunk: 'Previous hunk',
   nextHunk: 'Next hunk',
-  previousFile: 'Previous file',
-  nextFile: 'Next file',
   openFile: 'Open file ↗',
+  openFileGlyph: '↗', // "Open file ↗" in a narrow header (card 2), its words the tooltip
   markViewed: 'Mark viewed',
   viewed: 'Viewed',
   tooLarge: 'Diff too large to display.',

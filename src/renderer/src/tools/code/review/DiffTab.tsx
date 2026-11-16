@@ -1,8 +1,8 @@
 // The `diffTab` slot (C8c execution document, M3's decisions; K4): Review in the main area for a `ref`
-// (`scope [' @ ' path]`, a TurnId its own scope word), beside the transcript. The same shell and the same data as the
-// panel's Review (one `git.diff` per directory and scope, shared), with its own view state per tab (mode, selection,
-// hunk, scroll, viewed marks), so the two share data and not scroll. A ref's scope is the tab's identity (C5's tab id
-// holds it), so the tab shows no scope chips.
+// (`scope [' @ ' path]`, a TurnId its own scope word), beside the transcript. The same shell, the same stack and the same
+// data as the panel's Review (one `git.diff` per directory and scope, shared), with its own view state per tab (mode,
+// folds, the counter, viewed marks), so the two share data and not scroll. A ref's scope is the tab's identity (C5's
+// tab id holds it), so the tab shows no scope chips; its path is brought into view once (UX wave U5b, §F).
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
@@ -29,8 +29,8 @@ function prune(): void {
 
 type Ref = NonNullable<ReturnType<typeof parseRef>>;
 
-// A tab's view as its ref starts it in `directory`: the ref's scope, turn and file, the scroll at the top.
-const fromRef = (ref: Ref, directory: string): Partial<ReviewUi> => ({ directory, scope: ref.scope, turnId: ref.turnId, selected: ref.path, hunk: 0, scrollTop: 0, redecide: null });
+// A tab's view as its ref starts it in `directory`: the ref's scope and turn, its file to be brought into view.
+const fromRef = (ref: Ref, directory: string): Partial<ReviewUi> => ({ directory, scope: ref.scope, turnId: ref.turnId, reveal: ref.path === null ? null : { path: ref.path, n: 1 }, hunk: 0, redecide: null });
 
 function viewOf(tab: DiffTabRef, ref: Ref, directory: string): StoreApi<ReviewUi> {
   following ??= useLayout.subscribe((state, prev) => {
@@ -76,7 +76,7 @@ function DiffTabBody({ tab, parsed, directory }: { tab: DiffTabRef; parsed: Ref;
   if (!synced) return null;
   return (
     <div data-diff-tab={tab.ref} className="h-full min-h-0">
-      <ReviewShell key={`${tab.id}\0${directory}`} appSessionId={tab.appSessionId} directory={directory} ui={ui} chips={false} />
+      <ReviewShell key={`${tab.id}\0${directory}`} appSessionId={tab.appSessionId} directory={directory} ui={ui} hostId={tab.id} hostMode="tab" chips={false} />
     </div>
   );
 }
