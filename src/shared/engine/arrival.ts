@@ -180,8 +180,9 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
   // The most opening lines outside a pasted segment a text may hold for the reading past the bound to run (the
   // architect's ruling of 2026-11-16, A3). That reading searches to the text's end from each opening line, for each
   // envelope the loop takes, so its work grows with the square of the opening lines. A joined message holds one opening
-  // line per answer waiting at one turn's end, and an earlier build's question one more at most in any text MAWS has
-  // met; eight is well above that. A text with more is left as it is, and the grant readers fail closed on it.
+  // line per answer waiting at one turn's end, and an earlier build's envelope one more only where the model wrote one
+  // into its question (no recording holds such a question); eight leaves room for several of each. A text with more is
+  // left as it is, and the grant readers fail closed on it (A2).
   const PAST_THE_BOUND_OPENINGS = 8;
   if (starts.length > PAST_THE_BOUND_OPENINGS) return { members, rest: text };
   // The bound took nothing, so every opening line is still in the text: one reading past it, from the last
