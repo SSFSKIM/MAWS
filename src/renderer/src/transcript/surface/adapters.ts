@@ -190,6 +190,19 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
+// UX wave U2b, M5's fix wave 1 (the execution document, §E "A call's ask never changes kind over its row's life"): a
+// standalone call row that the live derivation draws as a run asks the run's site, as it did while its run stood: a
+// call that joins runs (`classification.groupable`, the test groups.ts takes a call into a run by) is drawn alone only
+// once its run of one is no longer active (a turn's end, or following text), so its row asks `ToolGroup` under its
+// run's id with its calls, the run's open state its own (`expandedGroups`, under the run's row id). Read from the cell
+// alone, so a window opened later, or the file's route, asks what the live window asked. Null for a call that never
+// joins a run (it asks `ToolUse`), and where the run would ask nothing (a waiting request, the jump's target).
+export function standaloneRunInput(cell: RowOf<'cell'>, turn: TurnState | undefined, state: TranscriptState, revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+  if (!cell.classification.groupable) return null;
+  const id = rowId.group(cell.id);
+  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) } as RowOf<'group'>, turn, state.pending, revealed);
+}
+
 // UX wave U3b (decision 5): the command is the run the output's event carries, else, for an output under its command's
 // bubble, that command's line (`turnCommandLine`: the turn it is in, or on the file's routes the turn it is placed
 // after), else none; `isErrored` is the row's error. Nothing but that one turn is read.
