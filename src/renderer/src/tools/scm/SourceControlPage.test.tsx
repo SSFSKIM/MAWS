@@ -65,7 +65,14 @@ function mount(appSessionId: AppSessionId = LOCAL, visible = true) {
 
 const part = (name: string) => document.querySelector<HTMLElement>(`[data-scm-part="${name}"]`);
 const parts = () => [...document.querySelectorAll<HTMLElement>('[data-scm-part]')].map((el) => el.dataset.scmPart);
-const text = (el: Element | null | undefined) => el?.textContent?.replace(/\s+/g, ' ').trim() ?? null;
+// What a person reads in an element: its text pieces in order, a space between blocks and pieces, spaces collapsed
+function text(el: Element | null | undefined): string | null {
+  if (!el) return null;
+  const walker = document.createTreeWalker(el, NodeFilter.SHOW_TEXT);
+  const pieces: string[] = [];
+  for (let node = walker.nextNode(); node; node = walker.nextNode()) pieces.push(node.textContent ?? '');
+  return pieces.join(' ').replace(/\s+/g, ' ').trim();
+}
 const commitRows = () => [...(part('commits')?.querySelectorAll<HTMLButtonElement>('[data-scm-commit]') ?? [])];
 const branchAsks = () => main.callsOf('git.branchCommits').length;
 const flush = () => act(async () => new Promise<void>((resolve) => setTimeout(resolve, 0)));
@@ -131,7 +138,7 @@ describe('the page (S1, S2)', () => {
     serves();
     main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', pr: prOf({ checks: { summary: 'pass', items: [{ name: 'build', bucket: 'pass', state: 'SUCCESS', link: null, workflow: null }] } }) }));
     mount();
-    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-checks]')).not.toBeNull());
+    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-checks]')).toBeTruthy());
     expect(screen.queryAllByRole('textbox')).toEqual([]);
     expect(screen.queryAllByRole('checkbox')).toEqual([]);
     expect(document.querySelectorAll('[data-scm-action], [data-scm-row], input, textarea, select')).toHaveLength(0);
@@ -359,7 +366,7 @@ describe('a failed read, told apart (S9; frames’ S9, S14)', () => {
     mount();
     await waitFor(() => expect(sentence()).toBe('Commits unavailable: this Mac’s MAWS service is older than this window'));
     expect(refresh()).toBeNull();
-    otherParts();
+    await waitFor(otherParts);
   });
 
   it('an endpoint that does not offer the read (internal, not-offered): "runs an older MAWS", no refresh', async () => {
@@ -436,7 +443,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     serves();
     scripted({ title: 'Export the berths as CSV', reviewDecision: 'CHANGES_REQUESTED', checks: { summary: 'fail', items: [check('lint', 'pass'), check('integration', 'pending'), check('unit tests', 'fail'), check('types', 'pass'), check('build', 'pass')] } });
     mount();
-    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-pr-title]')).not.toBeNull());
+    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-pr-title]')).toBeTruthy());
     const pr = part('pr')!;
     expect(text(pr.querySelector('[data-scm-pr-heading]'))).toBe('Pull request #7');
     expect(text(pr.querySelector('[data-scm-pr-title]'))).toBe('Export the berths as CSV');
@@ -492,7 +499,7 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     serves();
     scripted({ reviewDecision: 'APPROVED', mergeStateStatus: 'CLEAN' });
     mount();
-    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-pr-state]')).not.toBeNull());
+    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-pr-state]')).toBeTruthy());
     const phrases = [...part('pr')!.querySelectorAll<HTMLElement>('[data-scm-pr-state] [data-scm-phrase]')];
     expect(phrases.map(text)).toEqual(['Open ·', 'into main ·', 'Approved ·', 'Ready to merge']);
     expect(phrases.every((phrase) => phrase.className.includes('whitespace-nowrap'))).toBe(true);
