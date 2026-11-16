@@ -1006,7 +1006,10 @@ test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers
 // `u704-end-prompt-first-1`). The host splits it where it becomes an event: the person's bubble holds the prompt alone,
 // nothing on the page begins `[MAWS ask` or shows the answer's JSON, and the ask's capsule reads answered. The ask is
 // the recording's real call, answered by the host's own `maws` server; the answer goes through `maws.ask.answer`, as
-// the Question sheet's Submit sends it.
+// the Question sheet's Submit sends it. Since board ticket 711 the host writes that envelope in its new form (no text the
+// model wrote), while the recording's joined replay holds the envelope the probe wrote, in the earlier form: the replay
+// matches a write by its type, so the window draws the recording's joined line, split as any is, and the capsule keeps
+// the answers of the host's own write, which came first. Nothing asserted here reads the envelope's lines.
 test('ticket 704, a joined answer: the prompt and the answer the engine joined draw as the person’s prompt alone and an answered capsule', async ({ editor }) => {
   const { page } = editor;
   const id = 'u704-joined-answer';
