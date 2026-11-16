@@ -9,6 +9,7 @@ import { QueryClientProvider } from '@tanstack/react-query';
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { frameUrl } from '@shared/files/framed';
+import type { TabRef } from '@shared/ipc/schema/layout';
 import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { record } from '../../../../../../test/support/builders';
 import { Shell } from '../../../app/Shell';
@@ -20,7 +21,7 @@ import { queryClient } from '../../../ipc/query';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { installDisk, type DiskOptions } from '../../../test-support/code-disk';
-import { A, probeTool, ref, resetPanelStores } from '../../../test-support/panel';
+import { A, mainShowing, probeTool, ref, resetPanelStores } from '../../../test-support/panel';
 import { resetShellStores } from '../../../test-support/shell-stores';
 import { useFiles } from '../files/store';
 import { openFile, resetKeptOpens } from '../open-file';
@@ -154,5 +155,49 @@ describe('a framed file in the main area while the main area is not on screen', 
     expect(disk.callsOf('files.read')).toHaveLength(2);
     expect(disk.callsOf('layout.frameFile')).toHaveLength(2);
     await waitFor(() => expect(disk.released()).toEqual([disk.issued[0]]));
+  });
+});
+
+// Decision Log 35's table, the split pane collapsed to no width: while the divider is dragged past the float's threshold
+// the armed side's column goes to 0 px with its content kept mounted and hidden (`collapsedBody` in `main/Pane.tsx`), but
+// only a pane whose tab in front is a session can arm (`splitDrag`'s `canFloat` is `paneShowsSession`). A pane whose tab
+// in front is a file is never the collapsed one, so its frame stays drawn: pinned here on the real shell, both sides.
+describe('a framed file in a split pane while the divider is dragged to either edge', () => {
+  const fileTab: TabRef = { id: KEY(VIDEO), kind: 'file', path: VIDEO, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false };
+  const sessionTab: TabRef = { id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false };
+  const divider = () => mainRegion().querySelector<HTMLElement>('[role="separator"][aria-label="Resize panes"]')!;
+  const drag = (x: number) =>
+    act(() => {
+      const at = Number(divider().getAttribute('aria-valuenow'));
+      fireEvent.pointerDown(divider(), { pointerId: 1, button: 0, clientX: at });
+      fireEvent.pointerMove(divider(), { pointerId: 1, clientX: x });
+    });
+  const release = () => act(() => void fireEvent.pointerCancel(divider(), { pointerId: 1 }));
+
+  it.each([
+    ['the file on the left, the session on the right', [fileTab, sessionTab]],
+    ['the session on the left, the file on the right', [sessionTab, fileTab]],
+  ] as const)('%s: the file’s pane is never collapsed and its video stays drawn', async (_, [left, right]) => {
+    const base = mainShowing(A);
+    useLayout.setState({ main: { ...base, panes: [{ tabs: [left], activeTabId: left.id }, { tabs: [right], activeTabId: right.id }], splitRatio: 0.5 } });
+    render(
+      <QueryClientProvider client={queryClient}>
+        <Shell />
+      </QueryClientProvider>,
+    );
+    await waitFor(() => expect(entry(VIDEO)?.frame?.status).toBe('ready'));
+    const video = inMain('video')!;
+    expect(video).not.toBeNull();
+    const filePane = video.closest<HTMLElement>('[role="tabpanel"]')!;
+    const sessionPane = [...mainRegion().querySelectorAll<HTMLElement>('[role="tabpanel"]')].find((panel) => panel !== filePane)!;
+    const sessionCollapsed: boolean[] = [];
+    for (const x of [-2000, 4000]) {
+      drag(x);
+      expect(filePane.style.visibility, `dragged to ${x}`).not.toBe('hidden');
+      expect(inMain('video'), `dragged to ${x}`).toBe(video);
+      sessionCollapsed.push(sessionPane.style.visibility === 'hidden');
+      release();
+    }
+    expect(sessionCollapsed, 'the control: the session’s pane collapses at its own edge').toContain(true);
   });
 });
