@@ -1086,6 +1086,63 @@ describe('a framed file (UX wave U6b-2)', () => {
     await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
   });
 
+  // The re-review's finding: the bound is one ask in flight per living entry (decision 5); a removed or replaced entry's
+  // ask goes on alone and its answer is released when it comes (the table's X row), never holding back the next entry.
+  it('an entry closed and opened again while its ask is held asks at once and draws; the closed entry’s answer, arriving after, is released and overwrites nothing', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    const first = main.hold('layout.frameFile');
+    const view = show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    view.unmount();
+    act(() => useLayout.getState().closeTab(FILE(PDF), { remember: false }));
+    expect(entry()).toBeUndefined();
+    show(); // opened again
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    await waitFor(() => expect(frameSrc()).toBe(`${frameUrl(main.issued[1]!, 'ledger.pdf')}#navpanes=0`));
+    first.release();
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    await settle();
+    expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] });
+    expect(main.callsOf('layout.frameFile')).toHaveLength(2);
+  });
+
+  it('an entry replaced under the same key while its ask is held asks at once and draws; the replaced entry’s answer, arriving after, is released and overwrites nothing', async () => {
+    const OTHER = '/r/annex.pdf';
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n', [OTHER]: '%PDF-1.4 annex\n' });
+    const KEY_ = 'file:t:the-one-tab';
+    const first = main.hold('layout.frameFile');
+    const view = render(<FileBody tabId={KEY_} appSessionId={A} path={PDF} />);
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    view.rerender(<FileBody tabId={KEY_} appSessionId={A} path={OTHER} />); // another file under the same key
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    expect(main.callsOf('layout.frameFile')[1]).toEqual({ appSessionId: MAIN_A, path: OTHER });
+    await waitFor(() => expect(useViewer.getState().entries.get(KEY_)).toMatchObject({ path: OTHER, frame: { status: 'ready', token: main.issued[1] } }));
+    first.release();
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    await settle();
+    expect(useViewer.getState().entries.get(KEY_)).toMatchObject({ path: OTHER, frame: { status: 'ready', token: main.issued[1] } });
+  });
+
+  it('a closed entry’s answer that arrives before the reopened entry’s is released and leaves the new one asking until its own', async () => {
+    const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
+    const first = main.hold('layout.frameFile');
+    const second = main.hold('layout.frameFile');
+    const view = show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(1));
+    view.unmount();
+    act(() => useLayout.getState().closeTab(FILE(PDF), { remember: false }));
+    show();
+    await waitFor(() => expect(main.callsOf('layout.frameFile')).toHaveLength(2));
+    first.release();
+    await waitFor(() => expect(main.released()).toEqual([main.issued[0]]));
+    await settle();
+    expect(entry()!.frame).toEqual({ status: 'asking', shown: null });
+    second.release();
+    await waitFor(() => expect(entry()!.frame).toMatchObject({ status: 'ready', token: main.issued[1] }));
+    expect(main.released()).toEqual([main.issued[0]]);
+  });
+
   // Sequence 1: a token asked while the tab closes.
   it('an answer for an entry that is gone releases its token', async () => {
     const main = installDisk({ [PDF]: '%PDF-1.4 invented\n' });
