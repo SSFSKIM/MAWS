@@ -646,6 +646,7 @@ export const TOOL_ERRORS = {
   notAFile: (path: string) => `send_file: not a file: ${path}`,
   deliveryUnavailable: 'send_file: the artifact store is unavailable in this run of MAWS; nothing was delivered', // P3-L (M6b): no X12 record stands in for it
   sessionEnded: 'ask: the session ended before the user answered',
+  askQuotesGrant: 'An ask may not quote a permission grant. Ask the question in your own words.', // board ticket 711
   unknownPane: (pane: string) => `show_pane: unknown pane "${pane}"; known panes: ${AGENT_PANE_NAMES.join(', ')}`,
   // UX wave U6d (O-44): a call for the retired `artifact` pane, whatever else it holds; the agent is told to write the link
   artifactPaneRetired: 'show_pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.',

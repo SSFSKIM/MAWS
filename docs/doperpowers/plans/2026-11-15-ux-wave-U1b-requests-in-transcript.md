@@ -942,6 +942,16 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   Rationale: the chain-merge brief; the architect's messages of 2026-11-15.
   Date/Author: 2026-11-15, the controller.
 
+- Decision: the cascade link, named by the architect: `636d277c0` (the final head of `ux-wave/U5b`, which holds the cascade base `962206168`: the desk web app's depth-scene test fix and board ticket 711's security fix) merged as `11a521d3e` from `4508f1826`. There was one conflict, in `e2e/maws-tools.spec.ts`, and it was resolved, not keep-both:
+  - In the async ask scene and the notes scene, U1b's steps are kept (the form in the capsule's row, and the sheet opening only on "Open beside").
+  - The fix's assertions on the steer's text and block are kept as written. They replace U1b's word-for-word match of the recorded steer.
+  - The async scene's title joins U1b's place of answering with the fix's form of the steer.
+  - Read in the merged tree: `WIRE_MINOR` 51 and `RL2_PROTOCOL` 1.15, the merged head's own.
+  - By reading, MAWS's ask capsule, the read-only sheet, the waiting row's receipt and the cards read an answer the same after the merge: `askAnswersFromSteer` joins the steer's `q<n>` and `option <k>` back to the call's ids and labels, and U1b pinned no steer text in a unit case.
+  - No follow-up commit.
+  Rationale: the architect's cascade prompt; cascade.md and chain-merge.md.
+  Date/Author: 2026-11-16 (UTC), the cascade merge's executor; folded by the controller.
+
 ## Outcomes & Retrospective
 
 Written 2026-11-15 by the controller at the end of M7, on the head that holds M1 to M7, the two probes merges and the early chain merge of U6b. The branch review, class 1a, the Electron groups and the pull request are the architect's.

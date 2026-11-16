@@ -10,12 +10,17 @@
 // A waiting message that is MAWS's answer envelope reads as the answer (UX wave U4b, X-049;
 // docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 2 and 3): whether it is one, from
 // the reader's class (`readAnswerEnvelope`); each question's title as its ask's capsule shows it, from the ask's row
-// where the window holds it; each answer in the capsule's words (`askAnswerCopy`).
+// where the window holds it; each answer in the capsule's words (`askAnswerCopy`). Since board ticket 711 the host
+// writes the envelope's new form (each question by its place, a pick by `option <k>`); with the ask's questions in
+// hand it is read back through the one reader, `askAnswersFromSteer`, so the row says what the earlier form of the same
+// answers said. Without them (the window holds no row of the ask) the row has no title and shows the bare words, a
+// pick by its place, as every reader without the call shows it.
 import type { SendContent } from '@shared/engine/session-state-store';
 import { readAnswerEnvelope, readConsents } from '@shared/engine/arrival'; // U4b; U1c: readConsents
 import { messageText } from '@shared/engine/peer-envelope';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
+import { askAnswersFromSteer } from '@shared/maws/ask';
 import type { AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
 import type { BlockedCall } from '../../transcript/model/blocked'; // UX wave U1c
@@ -69,8 +74,10 @@ export function answerWords(text: string, questions: Read['questions']): string 
   const envelope = readAnswerEnvelope(text);
   if (envelope === null) return null;
   const asked = questions(envelope.call);
-  // MAWS's own envelope always carries its answers; the class's null is another tool's shape
-  const answers = envelope.answers ?? [];
+  // MAWS's own envelope always carries its answers; the class's null is another tool's shape. A new-form answer joins its
+  // question by its place and comes back with the question's own id and the picked labels (board ticket 711); an earlier
+  // build's comes back as it is
+  const answers = asked === null ? (envelope.answers ?? []) : askAnswersFromSteer(asked, envelope.answers ?? []);
   // the asked order: the ask's questions where the window holds it, then any answer none of them holds; else the array's
   const ordered = asked === null ? answers : [...asked.flatMap((question) => answers.filter((answer) => answer.id === question.id)), ...answers.filter((answer) => !asked.some((question) => question.id === answer.id))];
   const pairs = ordered.map((answer) => {

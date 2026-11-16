@@ -4,6 +4,7 @@
 // carries the AskResult in a fenced JSON block, so a session read from the engine's transcript (no host journal) still
 // finds the answers (`parseAskSteer`).
 import * as z from 'zod';
+import { quotesGrant } from '../engine/grant'; // board ticket 711 (a module with no imports: the arrivals reader imports this one)
 import { RequestIdSchema, ToolUseIdSchema } from '../graph/ids';
 import { askQuestionId, AskQuestionSchema, AskResultSchema, type AskAnswer, type AskQuestion, type AskResult } from './tools';
 
@@ -86,8 +87,9 @@ const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
 const BLOCK_OPEN = '\n```json\n';
 const BLOCK_CLOSE = '\n```';
 
-// The appended result block alone: the last `json` fence, which must end the text. A question, header, label or answer
-// may carry fences of its own above it; the block's body cannot hold its opener, since JSON escapes every newline.
+// The appended result block alone: the last `json` fence, which must end the text. The lines above it in an envelope an
+// earlier build wrote may carry fences of their own (a question, a header, a label, a path); the block's body cannot
+// hold its opener, since JSON escapes every newline.
 function resultBlock(text: string): string | null {
   if (!text.endsWith(BLOCK_CLOSE)) return null;
   const end = text.length - BLOCK_CLOSE.length;
@@ -95,13 +97,73 @@ function resultBlock(text: string): string | null {
   return start === -1 ? null : text.slice(start + BLOCK_OPEN.length, end);
 }
 
-// One answer as the steer's line reads it: the labels (and what was typed under Other), the text in quotes, the paths
-// one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design system's
-// `<name> (<id>)` or the build request (P3-D), or the two non-answers.
-function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
+// Board ticket 711: the steer is a user-role message, which the engine (its auto-mode permission classifier among its
+// readers) takes for the person's words; probes on 2.1.322 recorded that classifier allowing a blocked call's retry on
+// the engine's consent sentence where it stood in a question's header, and again where it stood in the label the
+// person picked, written as a JSON string. So the steer holds no text the model wrote: only MAWS's own words, the ask's
+// id, each question's number, a picked option by its place (`option <k>`), and what the person typed or chose from the
+// machine, each such value a JSON string, so no line break or quote in it can shape a line. The model holds its
+// questions and their options in its own call.
+
+const OPTION = /^option ([1-9]\d*)$/;
+const PLACE = /^q([1-9]\d*)$/;
+
+// A choice's picks as the steer writes them: `option <k>`, k the 1-based place of the picked label among the question's
+// options (the first, where two options share a label). A value that is none of its labels is not written at all: the
+// host admits any string as a pick (askAnswersProblem checks the shape alone), and no text of it may reach the steer.
+function picksOf(question: AskQuestion, values: readonly string[]): string[] {
+  const labels = (question.options ?? []).map((option) => option.label);
+  return values.flatMap((value) => {
+    const k = labels.indexOf(value);
+    return k === -1 ? [] : [`option ${k + 1}`];
+  });
+}
+
+// The fields an answer carries beyond its id, question and status, in the schema's order: each the person's or MAWS's
+// own (`create`). What the person typed (a text answer, what was typed under Other, a note) is their own words and is
+// written as it is. A name or a path the person picked (a design system's name, an artifact's title; a repository's
+// name; a file's, a folder's or a repository's path) may have been written by a model with tools, as an option's label
+// is, and there is no place to write instead: one that quotes the grant (quotesGrant) is left out (`kept`). A choice's
+// picks are written by their place.
+const CARRIED = ['value', 'otherText', 'name', 'designSystemId', 'create', 'note'] as const;
+const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood
+const isPath = (question: AskQuestion) => question.modality === 'file' || question.modality === 'folder' || question.modality === 'repository';
+
+// The answer with every picked name and path that quotes the grant left out
+function kept(question: AskQuestion, answer: AskAnswer): AskAnswer {
+  const out = { ...answer };
+  if (out.name !== undefined && quotesGrant(out.name)) delete out.name;
+  if (isPath(question) && out.value !== undefined) {
+    if (Array.isArray(out.value)) out.value = out.value.filter((path) => !quotesGrant(path));
+    else if (quotesGrant(out.value)) delete out.value;
+  }
+  return out;
+}
+
+// An answer as the steer's block carries it, built field by field (nothing copied that is not named here): its
+// question named by its place, `q<n>` (the id askQuestionId gives a question with none of the model's: a question's id
+// is the model's own words, up to 64 characters), its question empty, and a choice's picks by their place, as a list
+// (the shape the sheet sends) whether its value came as a list or as one string (which the schema admits; an earlier
+// build's reader takes either shape)
+function steeredAnswer(question: AskQuestion, place: number, given: AskAnswer): AskAnswer {
+  const answer = kept(question, given);
+  const steered: AskAnswer = { id: `q${place + 1}`, question: '', status: answer.status };
+  for (const field of CARRIED) if (answer[field] !== undefined) Object.assign(steered, { [field]: answer[field] });
+  if (question.modality === 'choice' && answer.value !== undefined) steered.value = picksOf(question, Array.isArray(answer.value) ? answer.value : [answer.value]);
+  return steered;
+}
+
+// One answer as the steer's line reads it: the picks by their place (and what was typed under Other), the text, the
+// paths one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design
+// system's `<name> (<id>)` (P3-D), each value a JSON string; or MAWS's own words: the build request and the two
+// non-answers, and MAWS's words where a path that quotes the grant stood. `answer` is the steered one (steeredAnswer),
+// `given` the one the person gave, whose paths say where one was left out.
+function answerText(question: AskQuestion, answer: AskAnswer | undefined, given: AskAnswer | undefined): string {
   if (answer === undefined || answer.status === 'skipped') return 'skipped';
   if (answer.status === 'decide_for_me') return 'decide for me';
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
+  const paths = given?.value === undefined ? [] : Array.isArray(given.value) ? given.value : [given.value];
+  const path = (value: string) => (quotesGrant(value) ? LEFT_OUT : JSON.stringify(value));
   switch (question.modality) {
     case 'choice':
       return [values.join(', '), answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
@@ -109,12 +171,16 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
       return JSON.stringify(values.join('\n'));
     case 'file':
     case 'folder':
-      return values.map((path) => `\n   ${path}`).join('');
-    case 'repository':
-      return answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
-    case 'design_system': // P3-D
+      return paths.map((value) => `\n   ${path(value)}`).join('');
+    case 'repository': {
+      const directory = paths.map(path).join(', ');
+      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${directory})` : directory;
+    }
+    case 'design_system': { // P3-D
       if (answer.create === true) return 'build a new one with me';
-      return answer.name !== undefined ? `${answer.name} (${answer.designSystemId ?? ''})` : (answer.designSystemId ?? '');
+      const id = JSON.stringify(answer.designSystemId ?? '');
+      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${id})` : id;
+    }
   }
 }
 
@@ -122,19 +188,55 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
 // engine joined with other messages opens a member only at this line (`readAnswerEnvelopes`, shared/engine/arrival.ts).
 export const askSteerOpening = (askId: string): string => `[MAWS ask ${askId}] The user answered the questions you asked:`;
 
-// The text of the steer that delivers an async ask's answers: one line per question in the asked order, `<header, else
-// the question> — <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3),
-// then the AskResult of status `answered` as a fenced JSON block.
+// The text of the steer that delivers an async ask's answers: one line per question in the asked order,
+// `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the
+// AskResult of status `answered` as a fenced JSON block. Neither a question's header, its words, its labels nor its id
+// (model text too) are on its line. In the block every answer's `id` is its question's place, `q<n>` (the readers of
+// this build join an answer to its question by that place and hand on the question's own id; the capsule's AnswerLine,
+// the read-only sheet's QuestionSection and the transcript's markdown then join by id as before); its `question` is
+// written as the empty string (AskAnswerSchema, as the earlier builds have it, requires the key, and a block they could
+// not parse would draw the envelope as raw text), and a choice's `value` holds the picks by their place. No reader takes a
+// question's words from a steer: they come from the ask's call, joined by the place, and so do the labels and the
+// question's own id (askAnswersFromSteer).
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
-  const byId = new Map(answers.map((answer) => [answer.id, answer]));
-  const lines = questions.map((question, index) => {
-    const answer = byId.get(askQuestionId(question, index));
-    const text = answerText(question, answer);
-    const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
-    return `${index + 1}. ${question.header ?? question.question} —${text.startsWith('\n') ? '' : ' '}${text}${note}`;
+  const places = new Map(questions.map((question, index) => [askQuestionId(question, index), index]));
+  // an answer that names no question of the ask is not written: nothing says what its value is (the host refuses one,
+  // askAnswersProblem; the writer does not lean on that)
+  const steered = answers.flatMap((answer) => {
+    const place = places.get(answer.id);
+    return place === undefined ? [] : [steeredAnswer(questions[place]!, place, answer)];
   });
-  const result: AskResult = { status: 'answered', askId, answers: [...answers] };
+  const byPlace = new Map(steered.map((answer) => [answer.id, answer]));
+  const givenAt = new Map(answers.map((answer) => [places.get(answer.id), answer]));
+  const lines = questions.map((question, index) => {
+    const answer = byPlace.get(`q${index + 1}`);
+    const text = answerText(question, answer, givenAt.get(index));
+    const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
+    return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
+  });
+  const result: AskResult = { status: 'answered', askId, answers: steered };
   return [askSteerOpening(askId), ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+}
+
+// The answers a steer carried, read with the ask's questions in hand: each new-form answer joined to its question by
+// the place its id names (`q<n>`) and handed on with that question's own id (askQuestionId), so every reader that joins
+// by id is unchanged, and a choice's `option <k>` back to the question's k-th label, so a reader draws the label the
+// person picked. An envelope is of the new form when every answer's `question` is empty (an earlier build's holds the
+// question's words, which its sheet always writes); any other is an earlier build's, and comes back as it is. A
+// new-form id of no place form, or of a place the ask has not, joins nothing and is left out rather than drawn against
+// a wrong question; a value that names no option of the call stays as written. A reader with no call in hand shows the
+// block as it is: `q<n>` and `option <k>`.
+export function askAnswersFromSteer(questions: readonly AskQuestion[], answers: AskAnswer[]): AskAnswer[] {
+  if (answers.length === 0 || !answers.every((answer) => answer.question === '')) return answers;
+  return answers.flatMap((answer) => {
+    const place = Number(PLACE.exec(answer.id)?.[1] ?? 0) - 1;
+    const question = questions[place];
+    if (place < 0 || question === undefined) return [];
+    const joined = { ...answer, id: askQuestionId(question, place) };
+    if (question.modality !== 'choice' || !Array.isArray(answer.value)) return [joined];
+    const labels = (question.options ?? []).map((option) => option.label);
+    return [{ ...joined, value: answer.value.map((value) => labels[Number(OPTION.exec(value)?.[1] ?? 0) - 1] ?? value) }];
+  });
 }
 
 // The steer recognised back from a user message's text: its ask id and answered result, or null for any other text (an
