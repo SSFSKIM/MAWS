@@ -74,10 +74,17 @@ export function turnOriginOf(arrival: Arrival): 'human' | 'peer' | 'engine' {
   return arrival.class === 'peer' ? 'peer' : 'engine';
 }
 
-/** MAWS's own answer envelope read from a message's text alone, for a message still waiting in MAWS's queue. */
+/**
+ * MAWS's own answer envelope that a whole text is, read as the split reads a person's message (ticket 704; the Decision
+ * Log's ruling of 2026-11-16): one envelope from the writer's whole first line (`askSteerOpening`) to the text's last
+ * byte, by `envelopeSlices`. Null for any other text: one that holds an envelope beside anything else, white space
+ * included, or that opens with the tag and other words. A reader of a person's message asks `answerEnvelopeOf`
+ * (persons-message.ts), which reads its content through this.
+ */
 export function readAnswerEnvelope(text: string): Answer | null {
-  const steer = parseAskSteer(text);
-  return steer === null ? null : { class: 'answer', tool: 'maws', call: steer.askId, summary: text, answers: steer.result.answers, dismissed: false };
+  const { members } = envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+  const [only] = members;
+  return members.length === 1 && only!.text === text ? { class: 'answer', tool: 'maws', call: only!.read.askId, summary: text, answers: only!.read.result.answers, dismissed: false } : null;
 }
 
 type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;

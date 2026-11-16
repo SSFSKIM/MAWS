@@ -6,6 +6,7 @@ import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 704: t
 import { envelopeSlices } from '@shared/engine/arrival';
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
 import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
+import { parseBash } from './backfill';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 
 // At worst JSON escaping costs six bytes per UTF-16 code unit: a page is < 1 MiB,
@@ -55,6 +56,7 @@ const PASTED_BLOCK = ${PASTED_BLOCK};
 const answeredBlock = ${answeredBlock};
 const envelopeSlices = ${envelopeSlices};
 const answerOutsideTranscript = ${answerOutsideTranscript};
+const parseBash = ${parseBash}; // the backfill's own test of a shell row, which the split never reads
 // A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after
 // the person's words; read again until a reading takes nothing out, as the split does (an envelope's lines can stand
 // around another's). White space left beside an envelope is no words of the person's. Null when nothing is left.
@@ -71,8 +73,9 @@ function searchableText(text) {
   const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');
   return parts.length === 0 ? null : parts.join('\n');
 }
-// The text blocks a line holds, or null when it is not JSON. A person's row (a user row with no origin, or the person's:
-// the row's form of the split's gate) has its envelopes read out; a text left empty yields nothing.
+// The text blocks a line holds, or null when it is not JSON. A person's row (a user row with no origin, or the person's,
+// that is no shell row: the row's form of the split's gate, the shell test the backfill's own) has its envelopes read
+// out; a text left empty yields nothing.
 function blocksOf(line) {
   let row;
   try { row = JSON.parse(line.toString('utf8')); } catch { return null; }
@@ -80,7 +83,7 @@ function blocksOf(line) {
     const content = row.message?.content;
     const texts = typeof content === 'string' ? [content] : Array.isArray(content)
       ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
-    const persons = row.type === 'user' && (row.origin == null || typeof row.origin !== 'object' || row.origin.kind === 'human');
+    const persons = row.type === 'user' && (row.origin == null || typeof row.origin !== 'object' || row.origin.kind === 'human') && !(typeof content === 'string' && parseBash(content) !== null);
     return persons ? texts.map(searchableText).filter((text) => text !== null) : texts;
   }
   return [];

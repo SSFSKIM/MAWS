@@ -12,8 +12,7 @@ import { messageLine, previewLine } from '@shared/owner/preview';
 import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3
 import { slashCommandLine } from '@shared/wire/local-command';
 import { currentChain, LastPromptAnchorSchema, TranscriptRecordSchema, withResponseGroups, type Delivery, type TranscriptRecord } from '@shared/wire/transcript';
-import { readAnswerEnvelope } from '@shared/engine/arrival'; // ticket 704
-import { answerOutsideTranscript } from '@shared/engine/persons-message';
+import { answerEnvelopeOf, answerOutsideTranscript } from '@shared/engine/persons-message'; // ticket 704
 import { createBackfillContext, isHumanPrompt, isTaskNotification, localCommandKind, recordToEvents } from '../../engine-host/fs/backfill';
 import { jsonLines, readTailSized, type OpenFile } from '@shared/fs/read-tail';
 
@@ -33,7 +32,7 @@ const textOf = (content: string | ContentBlock[]): string =>
 function promptText(event: Extract<SessionEvent, { kind: 'user.message' }>): string {
   if (event.bash?.part === 'input') return `! ${event.bash.command}`;
   const text = textOf(event.content);
-  if (readAnswerEnvelope(text) !== null) return answerOutsideTranscript(text);
+  if (answerEnvelopeOf(event.content) !== null) return answerOutsideTranscript(text);
   return (slashCommandLine(text) ?? text).trim();
 }
 

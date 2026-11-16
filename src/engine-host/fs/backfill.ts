@@ -1093,8 +1093,9 @@ const isContentBlock = (value: unknown): value is ContentBlock & { [k: string]: 
 
 type Bash = Extract<SessionEvent, { kind: 'user.message' }>['bash'];
 
-// Bash-mode messages carry their command and output as tags (`<bash-input>`, `<bash-stdout>…<bash-exit-code>`).
-function parseBash(content: string): Bash {
+// Bash-mode messages carry their command and output as tags (`<bash-input>`, `<bash-stdout>…<bash-exit-code>`). The
+// search text's worker runs its source to pass over the same rows (ticket 704), so it uses its argument alone.
+export function parseBash(content: string): Bash {
   const input = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
   if (input) return { part: 'input', command: input[1] };
   const stdout = /<bash-stdout>([\s\S]*?)<\/bash-stdout>/.exec(content);

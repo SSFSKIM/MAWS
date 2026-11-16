@@ -10,14 +10,13 @@ import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, CellId, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
-import { parseAskSteer } from '@shared/maws/ask'; // E1
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
 import { continuedAfter, presentationOf } from './classify'; // P5 O9; UX wave U2: continuedAfter
 import { isUnseenTurnEnd } from './gap'; // P5 O7 M8
 import { carriedOf } from '@shared/engine/arrival-schema'; // UX wave U3
-import { splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
+import { answerEnvelopeOf, splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704; E1's steer read as the split reads it
 import { headRole } from './head'; // UX wave U3
 
 type Event<K extends SessionEvent['kind']> = Extract<SessionEvent, { kind: K }>;
@@ -995,15 +994,17 @@ const SPLIT_PART = '~part';
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
 // its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
-// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers.
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers. A message is a steer
+// only as the split reads one (`answerEnvelopeOf`; ticket 704, the ruling of 2026-11-16): a lone envelope, or one the
+// split read out of a message; never a text that only opens with the tag, an envelope spread over blocks, or a message
+// with any other block.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
-  const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
-  const steer = parseAskSteer(text);
-  if (steer === null) return;
-  const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
-  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) return;
+  const steer = answerEnvelopeOf(event.content);
+  if (steer === null || steer.answers === null) return; // MAWS's own envelope always carries its answers
+  const owner = batch.state.index.toolUses.get(steer.call as ToolUseId); // the askId is the call's tool use id (residue 2)
+  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.call)) return;
   const turn = batch.touch(owner);
-  turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
+  turn.askSteers = new Map(turn.askSteers).set(steer.call, steer.answers);
   turn.version += 1;
 }
 // E1 end

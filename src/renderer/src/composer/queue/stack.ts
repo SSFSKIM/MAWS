@@ -9,14 +9,13 @@
 //
 // A waiting message that is MAWS's answer envelope reads as the answer (UX wave U4b, X-049;
 // docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 2 and 3): whether it is one, from
-// the reader's class (`readAnswerEnvelope`); each question's title as its ask's capsule shows it, from the ask's row
+// the reader's class, read as the split reads a person's message (`answerEnvelopeOf`; ticket 704); each question's title as its ask's capsule shows it, from the ask's row
 // where the window holds it; each answer in the capsule's words (`askAnswerCopy`).
 // A waiting message that holds an attachment beside the envelope is no answer row (the architect's rule, ticket 704): it
 // stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
 // message and keeps its reading.
 import type { SendContent } from '@shared/engine/session-state-store';
-import { readAnswerEnvelope } from '@shared/engine/arrival';
-import { messageText } from '@shared/engine/peer-envelope';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { AskQuestion } from '@shared/maws/tools';
@@ -61,7 +60,10 @@ export const STACK_WORDS = {
 
 /** A waiting answer's words, from the reader's class; null for any message that is no answer envelope. */
 export function answerWords(text: string, questions: Read['questions']): string | null {
-  const envelope = readAnswerEnvelope(text);
+  return wordsOf(answerEnvelopeOf(text), questions);
+}
+
+function wordsOf(envelope: ReturnType<typeof answerEnvelopeOf>, questions: Read['questions']): string | null {
   if (envelope === null) return null;
   const asked = questions(envelope.call);
   // MAWS's own envelope always carries its answers; the class's null is another tool's shape
@@ -80,12 +82,9 @@ export function answerWords(text: string, questions: Read['questions']): string 
   return STACK_WORDS.answers(pairs.map(({ title, words }) => (title === '' ? words : `${title}: ${words}`)));
 }
 
-const textOf = (content: SendContent): string => messageText(content as string | ContentBlock[]);
-
 /** A waiting message's answer words: null for a message that is no answer envelope, or that holds an attachment beside one. */
 function waitingAnswer(content: SendContent, questions: Read['questions']): string | null {
-  if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return null;
-  return answerWords(textOf(content), questions);
+  return wordsOf(answerEnvelopeOf(content as string | ContentBlock[]), questions);
 }
 
 export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, read: Read): StackRow[] {

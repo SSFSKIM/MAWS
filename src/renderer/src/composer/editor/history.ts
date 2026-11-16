@@ -10,7 +10,7 @@
 // reaches the transcript read apart (ticket 704: the person's message, then the envelope as a message of its own), so a
 // row's text is the person's words and the recall takes it as drawn. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { readAnswerEnvelope } from '@shared/engine/arrival';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -70,9 +70,10 @@ const entryKey = (e: HistoryEntry) =>
 
 // A row that is one of MAWS's answer envelopes, whole, with no attachment (a row of an orphan envelope, whose ask the
 // window does not hold, or one the person typed); a row with attachments recalls as it draws (the task review of U4b's
-// fix wave). The recall is the row's text as drawn, never the rest of a reading of it.
+// fix wave). The recall is the row's text as drawn, never the rest of a reading of it. Read as the split reads a
+// person's message (`answerEnvelopeOf`; ticket 704), so a text that only opens with the tag is a prompt.
 function allAnswer(row: UserRow): boolean {
-  return row.attachments.length === 0 && readAnswerEnvelope(row.text) !== null;
+  return row.attachments.length === 0 && answerEnvelopeOf(row.text) !== null;
 }
 
 // The recallable entries, oldest first (navigation starts from the end): earlier history, then this session's prompts.

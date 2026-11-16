@@ -10,7 +10,7 @@
 import { PASTED_BLOCK } from '../composer/pasted-content';
 import type { ContentBlock, EventPayload } from '../graph/events';
 import { askSteerOpening, parseAskSteer } from '../maws/ask';
-import { envelopeSlices } from './arrival';
+import { envelopeSlices, readAnswerEnvelope, type Arrival } from './arrival';
 
 export type UserMessage = Extract<EventPayload, { kind: 'user.message' }>;
 type Content = string | ContentBlock[];
@@ -60,9 +60,19 @@ export function personsParts(content: Content): { own: Content | null; envelopes
 // person's or none. A peer's, a coordinator's, a task's, a command's or a marker's message is never read.
 const isPersons = (message: UserMessage): boolean => !message.isSynthetic && message.bash === null && message.messageUuid !== null && (message.origin === 'human' || message.origin === null);
 
-// The message is one envelope and nothing else, as it was written: a text, or a single text block, that is the envelope
-const isLoneEnvelope = (content: Content, envelope: string): boolean =>
-  typeof content === 'string' ? content === envelope : content.length === 1 && content[0]!.type === 'text' && content[0]!.text === envelope;
+/**
+ * The answer a person's content is, read exactly as the split reads it: a text, or a single text block, that is one
+ * envelope whole, from the writer's first line to its closing block (`readAnswerEnvelope`). The split returns such a
+ * message as it is, and every envelope it splits out is one; nothing else is: a content with any other block, an
+ * envelope spread over two blocks, a text beside an envelope, a text that only opens with the tag. The one test of
+ * "this content is an answer envelope" for every reader of a person's message: an answer is recorded, a message hidden
+ * or passed over as an answer only where it holds (the Decision Log's ruling of 2026-11-16).
+ */
+export function answerEnvelopeOf(content: Content): Extract<Arrival, { class: 'answer' }> | null {
+  const [block, ...more] = typeof content === 'string' ? [] : content;
+  const text = typeof content === 'string' ? content : more.length === 0 && block?.type === 'text' && typeof block.text === 'string' ? block.text : null;
+  return text === null ? null : readAnswerEnvelope(text);
+}
 
 /**
  * The one split: the messages to emit in a message's place. The message itself, the same object, when it splits nothing
@@ -71,9 +81,9 @@ const isLoneEnvelope = (content: Content, envelope: string): boolean =>
  * `arrival` on the first and on no other. Every message it returns, split again, is returned as it is.
  */
 export function splitPersonsMessage(message: UserMessage): UserMessage[] {
-  if (!isPersons(message)) return [message];
+  if (!isPersons(message) || answerEnvelopeOf(message.content) !== null) return [message];
   const { own, envelopes } = personsParts(message.content);
-  if (envelopes.length === 0 || (own === null && envelopes.length === 1 && isLoneEnvelope(message.content, envelopes[0]!))) return [message];
+  if (envelopes.length === 0) return [message];
   const { joined, arrival } = message;
   const answers = envelopes.map((text): UserMessage => ({ kind: 'user.message', messageUuid: message.messageUuid, content: text, isReplay: message.isReplay, isSynthetic: false, origin: message.origin, bash: null }));
   if (own !== null) return [{ ...message, content: own }, ...answers];

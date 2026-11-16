@@ -7,7 +7,8 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { answerEnvelopeOf } from '@shared/engine/persons-message'; // ticket 704: a steer read as the split reads it
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -161,8 +162,9 @@ export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'created
 }
 
 // An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
-// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message.
-export const askSteerOf = (content: string | ContentBlock[]): string | null => parseAskSteer(messageText(content))?.askId ?? null;
+// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message. Read as the split
+// reads it (ticket 704): a content that is one envelope alone, so a message with an attachment is never hidden whole.
+export const askSteerOf = (content: string | ContentBlock[]): string | null => answerEnvelopeOf(content)?.call ?? null;
 
 // Whether such a steer answered a capsule this state holds (the reducer's recordAskSteer): the capsule then reads
 // Answered with the answers, and the envelope is no bubble, neither the steer's own nor (L276) the held one a Stop
