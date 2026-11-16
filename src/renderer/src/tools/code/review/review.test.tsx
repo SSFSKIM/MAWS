@@ -1917,6 +1917,16 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(calls + 1));
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
   });
+
+  // UX wave U5b-2 fix 1 (Decision Log 37): an empty commit's words, where Uncommitted's empty message stands
+  it('says “No changes in this commit” for a commit with no change against its first parent', async () => {
+    serveReads();
+    main().state.commits = () => ok({ commit: commitOf(SHA), onHead: true, patch: '', files: [] });
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-empty]')?.textContent).toBe('No changes in this commit'));
+    expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names');
+  });
 });
 
 describe('a file’s diff body', () => {

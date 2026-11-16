@@ -1034,4 +1034,114 @@ describe('comments on lines in Review', () => {
     expect(message).toContain(`commit ${SHA_A}`);
     expect(message).toContain(`commit ${SHA_B}`);
   });
+
+  // UX wave U5b-2 fix 1 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §G, Decision Log 37): a
+  // comment made on a commit, while Review shows any other scope, is listed in the row under the toolbar under "This comment
+  // is on commit <sha7>.", whose hash opens that commit at the comment's file by the act R8's chip uses; the row keeps its
+  // controls; U5a's chip opening it stands its card there. Comments made through the card's real store and producers.
+  describe('a comment made on a commit, while another scope is shown (UX wave U5b-2)', () => {
+    const ON = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+    const ELSE = 'c3d4e5f60718293a4b5c6d7e8f901234567890ab';
+    const serve = () => act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
+    const openOn = (commit: string) => act(() => void panelHost.addTool('review', { appSessionId: A, params: { scope: 'commit', commit } }));
+    const onCommitWords = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="on-commit"]')].map((each) => each.textContent);
+    const commitButton = () => document.querySelector<HTMLButtonElement>('[data-review-unplaced] [data-review-unplaced-commit]');
+    afterEach(() => useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() }));
+
+    // Review on commit ON, and a comment left on report.ts's line 12 there
+    async function commentOnCommit() {
+      openOn(ON);
+      await drawn('src/report.ts');
+      await drawn('src/other.ts');
+      addOn('src/report.ts', 'new', 12);
+      await painted(() => card() !== null);
+      type('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+    }
+    async function mounted() {
+      serve();
+      openReview();
+      render(<TestHost />);
+      await drawn('src/report.ts');
+    }
+
+    const scopes: [string, () => void][] = [
+      ['Uncommitted', () => fireEvent.click(scopeChip('uncommitted')!)],
+      ['This branch', () => fireEvent.click(scopeChip('branch')!)],
+      ['another commit', () => openOn(ELSE)],
+    ];
+    for (const [name, choose] of scopes)
+      for (const present of [true, false])
+        it(`lists it under “This comment is on commit a1b2c3d.” in ${name}, its file ${present ? 'in' : 'not in'} that scope`, async () => {
+          await mounted();
+          await commentOnCommit();
+          if (!present) {
+            main.state.patch = OTHER();
+            main.state.files = FILES().filter((file) => file.path === 'src/other.ts');
+          }
+          choose();
+          await drawn('src/other.ts');
+          await painted(() => onCommitWords().length === 1);
+          expect(sectionOf('src/report.ts') !== null).toBe(present);
+          expect(onCommitWords()).toEqual(['This comment is on commit a1b2c3d.']);
+          expect(commitButton()?.textContent).toBe('a1b2c3d');
+          expect(unplacedRows()).toHaveLength(1);
+          expect(unplacedRows()[0].textContent).toContain('Quote only where a comma is.');
+          expect(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' })).toBeTruthy();
+          expect(unsentRows()).toEqual([]); // drawn under no line, even where its file and line are in the scope
+        });
+
+    it('opens the newest comment from U5a’s chip in that row when it is a commit’s, and removes it there', async () => {
+      await mounted();
+      await drawn('src/other.ts');
+      addOn('src/other.ts', 'new', 2); // an older comment, in Uncommitted
+      await painted(() => card() !== null);
+      type('Name it for what it counts.');
+      leave();
+      await painted(() => card() === null);
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => onCommitWords().length === 1 && unsentRows('src/other.ts').length === 1);
+      expect(chip()?.textContent).toBe('2 unsent comments');
+      fireEvent.click(chip()!);
+      await painted(() => card() !== null);
+      expect(lineLeft()!.contains(card())).toBe(true);
+      expect(cardRow()?.dataset.reviewCardRow).toBe('away');
+      expect(field().value).toBe('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unplacedRows().length === 1);
+      fireEvent.click(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' }));
+      await painted(() => lineLeft() === null);
+      expect(pass()!.comments.map((c) => c.text)).toEqual(['Name it for what it counts.']);
+    });
+
+    it('edits it in that row and sends it, its anchor the commit’s', async () => {
+      await mounted();
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => unplacedRows().length === 1);
+      fireEvent.click(unplacedEdit(0));
+      await painted(() => card() !== null && lineLeft()!.contains(card()));
+      expect(field().value).toBe('Quote only where a comma is.');
+      type('Quote only where a comma or a quote is.');
+      fireEvent.click(sendButton());
+      await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
+      expect(main.callsOf('side.comment.content')).toEqual([
+        { comments: [{ anchor: commitLineAnchor('src/report.ts', 12, 'new', ON), text: '`return quoted(value);`\nQuote only where a comma or a quote is.', screenshot: null }] },
+      ]);
+    });
+
+    it('opens Review on that commit at the comment’s file from the hash, by the act R8’s chip uses; there it stands under its line', async () => {
+      await mounted();
+      await commentOnCommit();
+      fireEvent.click(scopeChip('uncommitted')!);
+      await painted(() => commitButton() !== null);
+      const addTool = vi.spyOn(panelHost, 'addTool');
+      fireEvent.click(commitButton()!);
+      expect(addTool.mock.calls).toEqual([['review', { appSessionId: A, params: { scope: 'commit', commit: ON, path: 'src/report.ts' } }]]);
+      await painted(() => scopeChip('commit')?.getAttribute('aria-pressed') === 'true' && unsentRows('src/report.ts').length === 1);
+      expect(onCommitWords()).toEqual([]);
+    });
+  });
 });
