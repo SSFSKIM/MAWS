@@ -22,7 +22,7 @@ How to see it working: the unit tests named under each milestone, which run the 
 - [x] (2026-11-15) The probes of "Probes" recorded and on the branch (merge `32c5a243d`): probes 1, 2 and 3 and the pasted-envelope case, thirteen recordings under `spikes/protocol-probe/fixtures/uxwave/u704-*`, findings `spikes/protocol-probe/findings-uxwave-u704-envelope-split.txt`. The stop condition is not met: every joined line's origin is `human`.
 - [x] (2026-11-15) The architect's rulings on the probes' findings recorded in place ("Engine facts", "Probes", decisions 6 and 7, M1's and M3's tests; Decision Log).
 - [x] (2026-11-15 UTC) M1 — One reading of a person's message, and the window that reads it once. Commits `6ad59e796`..`a29982f21`, fix `60af4bc4f`; task review clean.
-- [ ] M2 — The producers: the live wire, the file, another machine's rows, a rewind's text.
+- [x] (2026-11-15 UTC) M2 — The producers: the live wire, the file, another machine's rows, a rewind's text. Commits `5cc75f108`..`215b7d2c4`; task review clean.
 - [ ] M3 — Outside the transcript: the search text, the resume preview, the title; the scene, the record, the last run.
 
 ## What this landing is built on
