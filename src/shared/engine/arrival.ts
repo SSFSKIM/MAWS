@@ -482,11 +482,11 @@ function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTur
  * frame line that names `human`, the words after it, as the `own` class reads them (with its guard for words that read
  * as the interrupt marker); else the text. The rewind's text of a prompt sminos delivered opens with that line.
  * MAWS's answer envelopes are never the person's words, in either form (board ticket 711): a text that holds one is
- * read without it (`readAnswerEnvelopes`'s rest), so an envelope alone reads as no words.
+ * read without it, as the split reads a person's message (`readPersonsContent`, the reader's one loop; ticket 704), so
+ * an envelope alone reads as no words.
  */
 export function ownWordsOf(text: string): string {
-  const { envelopes, rest } = readAnswerEnvelopes(text);
-  const words = envelopes.length > 0 ? rest : text;
+  const words = (readPersonsContent(text).own as string | null) ?? '';
   const { frame, body } = sminosParts(words);
   return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : words;
 }
