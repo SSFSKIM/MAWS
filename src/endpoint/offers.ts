@@ -275,6 +275,12 @@ export const OFFERS: Offers = {
     'git.worktree.list': checkout,
     'git.worktree.status': checkout,
     'git.worktree.branch': checkout,
+    // The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D): the branch read,
+    // the commit read and the working-tree read, by the same rule. A commit is any commit of that repository, which a
+    // reader at `view` may already diff; a device sends them only to an endpoint that lists `rl2.git-reads`.
+    'git.branchCommits': checkout,
+    'git.commitDiff': checkout,
+    'git.changesSince': checkout,
     // A child agent's events, the engine host's read. P5 O7 M8: the follow it starts is held by the channel's client, and
     // ends with the channel or that client's unfollow of the agent it names (the engine host lets go of its own hold
     // alone); the session-wide unfollow (`agentId: null`) would stop every client's follow of the session and is refused.

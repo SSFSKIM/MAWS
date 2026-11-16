@@ -23,6 +23,7 @@
 // one function words, for every act, why its control is disabled and why it ended without its effect (UC-7.5).
 import { gradeOf } from './grades';
 import type { CommandName } from './schema';
+import { GIT_READS_CAPABILITY } from './schema/git';
 
 const NOT_YET = 'Not on another machine yet';
 const notYet = (what: string) => `${NOT_YET}: ${what}`;
@@ -103,6 +104,10 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'maws.pane.answer': SESSION_ACTS_CAPABILITY,
   'session.fork': SESSION_ACTS_CAPABILITY, // in place, the machine's owners' (M2)
   'artifacts.undelete': 'rl2.artifact-undelete', // UX wave U10b (M4, §C.3): the undo of an agent's delete, the owners'
+  // UX wave U5b-2 (M8): the branch read, the commit read and the working-tree read; reads, so no ACT_WORDS row
+  'git.branchCommits': GIT_READS_CAPABILITY,
+  'git.commitDiff': GIT_READS_CAPABILITY,
+  'git.changesSince': GIT_READS_CAPABILITY,
 };
 
 /**

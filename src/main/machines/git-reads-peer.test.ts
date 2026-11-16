@@ -57,15 +57,17 @@ describe('this Mac’s machine and the git reads', () => {
     expect(source.read()).toBeNull();
     let told = 0;
     const off = source.onChange(() => void told++);
-    h.welcome(PROJECT_ACTS_MINOR - 1);
-    expect(source.read()).toEqual([]);
-    h.welcome(GIT_READS_MINOR - 1);
-    expect(source.read()).toEqual([PROJECT_ACTS_CAPABILITY]);
-    h.welcome(GIT_READS_MINOR);
-    expect(source.read()).toEqual([PROJECT_ACTS_CAPABILITY, GIT_READS_CAPABILITY]);
-    h.welcome(null);
-    expect(source.read()).toBeNull();
-    expect(told).toBeGreaterThanOrEqual(4); // each source hears the daemon's state: a change may be told once a source
+    // each source hears the daemon's state, so a change is told at least once (once a source)
+    const welcomed = (minor: number | null) => {
+      const before = told;
+      h.welcome(minor);
+      expect(told).toBeGreaterThan(before);
+      return source.read();
+    };
+    expect(welcomed(PROJECT_ACTS_MINOR - 1)).toEqual([]);
+    expect(welcomed(GIT_READS_MINOR - 1)).toEqual([PROJECT_ACTS_CAPABILITY]);
+    expect(welcomed(GIT_READS_MINOR)).toEqual([PROJECT_ACTS_CAPABILITY, GIT_READS_CAPABILITY]);
+    expect(welcomed(null)).toBeNull();
     off();
     expect(h.listeners.size).toBe(0);
   });
