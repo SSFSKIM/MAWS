@@ -116,6 +116,8 @@ function classOf(row: Row, context: Context): ViewClass {
     case 'artifact': return 'stays';
     case 'delivery': return 'stays';
     case 'side_thread': return 'stays';
+    // UX wave U3b (Interfaces §E): "Compacting session…", MAWS's own line at the list's end, in no fold.
+    case 'activity': return 'stays';
     // Tool calls: `recordRow` at `ToolUse`. Decided here (card 3).
     case 'agent_list': return 'folds';
     case 'browser_action': return 'folds';

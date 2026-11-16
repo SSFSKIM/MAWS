@@ -3,6 +3,7 @@
 // answer's action row moves for it.
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
+import { mirrorRows, stretchesOf } from '../../owner/view/mirror';
 import { answerActionsOf } from '../model/answer-actions';
 import { END_ROW, endRequestId } from '../model/keys';
 import { RowSchema } from '../model/schema';
@@ -51,5 +52,14 @@ describe('compactingRow', () => {
     expect([...answerActionsOf(drawn)]).toEqual([...answerActionsOf(rows)]);
     expect(answerActionsOf(drawn).has(COMPACTING_ROW)).toBe(false);
     expect(answerActionsOf(drawn).get('text:2' as RowId)?.rewindTo).toBeNull();
+  });
+
+  // The chain merge of U1c's head (U2b's to-human view on this tree): the mirror classes the row as one that stays, so it
+  // is drawn in sight after a closed record and never taken into a stretch
+  it('stays in sight in the to-human view, after a closed record, in no stretch', () => {
+    const work: Row = { id: 'cell:toolu_1' as RowId, turnId: 'turn:2' as TurnId, at: AT, kind: 'cell', toolUseId: 'toolu_1', toolName: 'Bash' } as unknown as Row;
+    const drawn = compactingRow([prompt('2'), work], SINCE);
+    expect(mirrorRows(drawn, {}).map((row) => row.kind)).toEqual(['user', 'record_fold', 'activity']);
+    expect(stretchesOf(drawn).flatMap((stretch) => stretch.rows.map((row) => row.id))).toEqual(['cell:toolu_1']);
   });
 });
