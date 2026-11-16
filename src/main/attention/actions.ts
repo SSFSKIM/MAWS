@@ -5,6 +5,8 @@ import type { RequestAnswer } from '@shared/engine/answers';
 import type { SpineView } from '@shared/spine/view';
 import { outsideAnswers, shownCommand, type OutsideAnswers } from '@shared/attention/outside-answers';
 import { waits } from '@shared/attention/kinds';
+import { frameConsentLines } from '@shared/composer/consent-lines';
+import { pastedTagId } from '@shared/composer/pasted-framing';
 import type { HostDispatch } from '../ipc/router';
 
 /** What a permission's notification offers (UX wave U1a §H), and its body when that is the command it allows. */
@@ -54,7 +56,8 @@ export function notificationActions(deps: {
       const ready = await deps.view.acquire(id, 'send');
       if (ready.status !== 'ready') throw new Error('Open the session before sending this reply.');
       // Same command as the hover card: the engine host owns the queue. Never steer.
-      const sent = await deps.dispatch('engine-host', 'session.send', { appSessionId: id, content: text });
+      // UX wave U1c: the one-writer rule (shared/composer/consent-lines.ts); main holds no engine session id here
+      const sent = await deps.dispatch('engine-host', 'session.send', { appSessionId: id, content: frameConsentLines(text, pastedTagId(null)) });
       if (!sent.ok) throw new Error(sent.error.message);
     },
   };

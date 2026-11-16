@@ -39,6 +39,8 @@ import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@share
 import { useHosts } from '../../stores/hosts';
 import { hostHasThisWire } from '@shared/sessions/host-wire';
 import { HOST_UPDATING } from '../../composer/queue/host-wire';
+import { sessionPastedTag } from '../../composer/submit/pasted-tag'; // UX wave U1c
+import { frameConsentLines } from '@shared/composer/consent-lines'; // UX wave U1c
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -209,7 +211,8 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     }),
     btw: (question, options) => client.invoke('session.sideQuestion', { appSessionId, question, ...(options?.retryOf !== undefined && { retryOf: options.retryOf }) }),
     command: () => refusedHere('command'),
-    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? `/compact ${instructions}` : '/compact' })),
+    // UX wave U1c: the one-writer rule on the instructions (shared/composer/consent-lines.ts)
+    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? `/compact ${frameConsentLines(instructions, sessionPastedTag(appSessionId))}` : '/compact' })),
     stopAgent: () => refusedHere('stop-agent'),
     tell: () => refusedHere('tell'),
     stopTask: async (taskId) => controlResultOf(await client.invoke('session.stopTask', { appSessionId, taskId: taskId as TaskId })),

@@ -8,6 +8,8 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { remoteUnavailableOf, useForkUnavailable } from '../lane-b/remote-unavailable';
+import { frameConsentLines } from '@shared/composer/consent-lines';
+import { pastedTagId } from '@shared/composer/pasted-framing';
 import { forkSession } from '../sessions/record-ops';
 import { toast } from '../stores/notices';
 import { WIDGET_TITLE } from './copy';
@@ -16,7 +18,8 @@ import { WidgetFrame } from './WidgetFrame';
 
 async function forkConversation(appSessionId: AppSessionId, prompt: string): Promise<void> {
   const text = prompt.trim();
-  const answer = await forkSession(appSessionId, { kind: 'inPlace' }, { message: text === '' ? null : { content: text, display: text }, rewindTo: null });
+  // UX wave U1c: the one-writer rule (shared/composer/consent-lines.ts); the fork's own session has no id yet
+  const answer = await forkSession(appSessionId, { kind: 'inPlace' }, { message: text === '' ? null : { content: frameConsentLines(text, pastedTagId(null)), display: text }, rewindTo: null });
   if (!answer.ok) toast({ level: 'danger', text: answer.error, actions: [], dismissible: true });
 }
 

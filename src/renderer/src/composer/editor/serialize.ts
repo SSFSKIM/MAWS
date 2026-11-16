@@ -5,8 +5,10 @@
 // atom's placeholder in place and the attachments' placeholders after it, under the one placeholder counter the
 // terminal's `pastedContents` keys use.
 import type { JSONContent } from '@tiptap/core';
+import { frameConsentLines, readsAsConsent } from '@shared/composer/consent-lines';
 import type { PastedContent } from '@shared/composer/history-entry';
 import { countLines, neutralisePastedTags, pastedTagId, wrapPasted } from '@shared/composer/pasted-framing';
+import { GRANT_OPENING } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import { attachmentsOf, MENTION, PASTED, type MentionAttrs, type PastedAttrs } from './doc';
@@ -70,6 +72,43 @@ function trimTrailing(pieces: Piece[]): Piece[] {
   return out;
 }
 
+// UX wave U1c, the one-writer rule (the architect's ruling of 2026-11-16, UTC; shared/composer/consent-lines.ts): a line of
+// what goes out, outside a pasted piece, that reads as a consent by the reader's own per-line test goes as a pasted piece
+// of its own, so it takes the next number and its placeholder in `display` and `pastedContents` like any chip. A line is
+// what stands between line breaks and pasted pieces (a pasted piece's frame opens and ends its own lines); a mention
+// writes no line break.
+const FRAMED_LINE: Omit<PastedAttrs, 'text'> = { id: 'consent-line', kind: 'text', name: 'Pasted text', lines: 1 };
+function framedConsents(pieces: Piece[]): Piece[] {
+  const out: Piece[] = [];
+  let line: Piece[] = [];
+  const wireOf = (p: Piece) => (p.kind === 'text' ? p.wire : p.kind === 'mention' ? p.text : '');
+  const typedOf = (p: Piece) => (p.kind === 'text' ? p.typed : p.kind === 'mention' ? p.text : '');
+  const end = () => {
+    if (line.length > 0 && readsAsConsent(line.map(wireOf).join(''))) out.push({ kind: 'pasted', attrs: { ...FRAMED_LINE, text: line.map(typedOf).join('') } });
+    else out.push(...line);
+    line = [];
+  };
+  for (const piece of pieces) {
+    if (piece.kind === 'pasted') {
+      end();
+      out.push(piece);
+    } else if (piece.kind === 'mention') line.push(piece);
+    else {
+      const wires = piece.wire.split('\n');
+      const typed = piece.typed.split('\n'); // the wire's neutralising touches no line break: the two split alike
+      wires.forEach((wire, i) => {
+        if (i > 0) {
+          end();
+          out.push({ kind: 'text', wire: '\n', typed: '\n' });
+        }
+        if (wire !== '' || typed[i] !== '') line.push({ kind: 'text', wire, typed: typed[i] ?? '' });
+      });
+    }
+  }
+  end();
+  return out;
+}
+
 const typedText = (pieces: Piece[]) => pieces.map((p) => (p.kind === 'text' ? p.typed : p.kind === 'mention' ? p.text : '')).join('');
 
 // `!` and `#` at offset 0: a shell command is one paragraph of plain text; a memory note may name files.
@@ -100,17 +139,18 @@ export function modeOf(doc: JSONContent): Serialized['mode'] {
 
 export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Serialized {
   const { pieces: raw, paragraphs } = piecesOf(doc);
-  const pieces = trimTrailing(raw);
+  const drafted = trimTrailing(raw);
   const attachments = attachmentsOf(doc);
-  const hasPasted = pieces.some((p) => p.kind === 'pasted');
-  const typed = typedText(pieces);
+  const typed = typedText(drafted);
 
-  const mode = ctx.literal ? 'send' : modeOfPieces(pieces, paragraphs, attachments.length);
+  const mode = ctx.literal ? 'send' : modeOfPieces(drafted, paragraphs, attachments.length);
   if (mode !== 'send') {
     const text = typed.slice(1).trim();
     return { mode, text, content: text, display: typed, pastedContents: {}, omitted: 0, empty: text === '' };
   }
 
+  const pieces = framedConsents(drafted); // U1c: the one-writer rule
+  const hasPasted = pieces.some((p) => p.kind === 'pasted');
   const tagId = hasPasted ? pastedTagId(ctx.sessionId) : '';
   const pastedContents: Record<string, PastedContent> = {};
   let n = 0;
@@ -152,6 +192,9 @@ export function serializeDraft(doc: JSONContent, ctx: SerializeContext): Seriali
   }
   if (placeholders.length > 0) display = [display, ...placeholders].filter((part) => part !== '').join(' ');
 
+  // U1c: the rule once more on the finished wire text, by the reader's own marking; the pieces above leave it nothing to
+  // frame (consent-rule.test.ts holds it so), and whatever they might miss still goes as data
+  if (wire.includes(GRANT_OPENING)) wire = frameConsentLines(wire, tagId || pastedTagId(ctx.sessionId));
   const content: string | ContentBlock[] = blocks.length === 0 ? wire : wire.trim() === '' ? blocks : [...blocks, { type: 'text', text: wire }];
   // P5 O7 M4: a file to upload is no block (it goes up at the send), but a draft holding one is something to send
   const uploads = attachments.some((a) => a.kind === 'file');

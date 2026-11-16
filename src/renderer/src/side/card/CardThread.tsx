@@ -14,6 +14,8 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
 import type { HumanPromptResult } from '../../composer/submit/send-human-prompt';
+import { frameConsentLines } from '@shared/composer/consent-lines';
+import { sessionPastedTag } from '../../composer/submit/pasted-tag';
 import { sendToSession } from '../../session/controls/controls-for'; // P5 O9 M4
 import { failureOf, isStarting, useSetup } from '../../sessions/store';
 import { TrustCard } from '../../sessions/TrustCard';
@@ -239,7 +241,8 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const settled = onSending?.(content); // P3-F (L154): told as it sets out, then whether it went, the card gone or not
     let result: HumanPromptResult;
     try {
-      result = await sendToSession(child, content, { origin: 'comment' });
+      // UX wave U1c: the one-writer rule (shared/composer/consent-lines.ts): a line of it that reads as a consent goes as data
+      result = await sendToSession(child, frameConsentLines(content, sessionPastedTag(child)), { origin: 'comment' });
     } catch (error) {
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }
