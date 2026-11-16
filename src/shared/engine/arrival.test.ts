@@ -908,10 +908,11 @@ describe('the grants in a person’s message (rule R)', () => {
       within(closes);
     });
 
-    it('tens of thousands of pasted segments, closed and left open: the sentence after them is read', () => {
+    it('tens of thousands of pasted segments, closed, left open, and left open after as many closing tags: the sentence after them is read', () => {
       for (const text of [
         [...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line\n</pasted_content id="abcd">'), GRANT].join('\n'),
         [...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line'), GRANT].join('\n'),
+        [...Array.from({ length: N }, () => '</pasted_content id="abcd">'), ...Array.from({ length: N }, () => '<pasted_content id="abcd">\na log line'), GRANT].join('\n'),
       ]) {
         const read = counted(text);
         expect(read.grants).toEqual([grant('make build')]);
