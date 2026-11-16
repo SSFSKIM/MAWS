@@ -1,13 +1,18 @@
 // Media a viewer draws or plays, made without checked-in assets: a one-page PDF, a WAV of silence and a WebM recorded in
 // the app's page. E2's Deliverables spec made them first; P3-L (M5b) moved them here so the library's viewer cases use
 // the same files (`e2e/deliverables.spec.ts`, `e2e/library.spec.ts`).
-import type { Page } from '@playwright/test';
+import type { ElectronApplication, Locator, Page } from '@playwright/test';
 
-// A one-page PDF whose page is mostly a filled black square, so a drawn page is told from a blank or blocked frame by its
-// dark pixels; the cross-reference offsets are computed, so the file is valid as written. With `link`, the square is
-// also a /URI link annotation to that URL.
-export function minimalPdf(link?: string): Buffer {
-  const content = '0 0 0 rg 20 20 160 160 re f';
+// A colour as main's capture reads it, 0 to 255 per channel.
+export type Rgb = readonly [number, number, number];
+export const BLACK: Rgb = [0, 0, 0];
+export const INVENTED_RED: Rgb = [204, 26, 26]; // UX wave U6b-2: a second version's mark, told from the first's black
+
+// A one-page PDF whose page is mostly a filled square of `mark` (black by default), so a drawn page is told from a blank,
+// blocked or error frame by that colour's pixels (`markPixels`); the cross-reference offsets are computed, so the file is
+// valid as written. With `link`, the square is also a /URI link annotation to that URL.
+export function minimalPdf(link?: string, mark: Rgb = BLACK): Buffer {
+  const content = `${mark === BLACK ? '0 0 0' : mark.map((channel) => (channel / 255).toFixed(3)).join(' ')} rg 20 20 160 160 re f`;
   const objects = [
     '<< /Type /Catalog /Pages 2 0 R >>',
     '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
@@ -25,6 +30,28 @@ export function minimalPdf(link?: string): Buffer {
   body += `xref\n0 ${objects.length + 1}\n0000000000 65535 f \n${offsets.map((o) => `${String(o).padStart(10, '0')} 00000 n \n`).join('')}`;
   body += `trailer\n<< /Size ${objects.length + 1} /Root 1 0 R >>\nstartxref\n${xref}\n%%EOF\n`;
   return Buffer.from(body, 'latin1');
+}
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): how many pixels of `element`'s
+// rect, in what main paints for the window showing `page`, are within 40 of `mark` on every channel: a PDF drawn by
+// Chromium's viewer is its page's square of that colour, which neither the viewer's error page nor a blank frame paints.
+// 0 when the element has no box yet (not attached, or replaced while it is read), so a poll on it asks again rather than
+// ending on a throw; a capture that fails still throws.
+export async function markPixels(app: ElectronApplication, page: Page, element: Locator, mark: Rgb = BLACK): Promise<number> {
+  const rect = await element.boundingBox({ timeout: 2_000 }).catch(() => null);
+  if (!rect || rect.width < 1 || rect.height < 1) return 0;
+  const clip = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
+  return app.evaluate(
+    async ({ BrowserWindow }, { clip, url, mark }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL() === url);
+      if (!win) throw new Error(`no window shows ${url}`);
+      const bitmap = (await win.webContents.capturePage(clip)).toBitmap(); // BGRA
+      let count = 0;
+      for (let i = 0; i < bitmap.length; i += 4) if (Math.abs(bitmap[i + 2] - mark[0]) <= 40 && Math.abs(bitmap[i + 1] - mark[1]) <= 40 && Math.abs(bitmap[i] - mark[2]) <= 40) count++;
+      return count;
+    },
+    { clip, url: page.url(), mark: [...mark] },
+  );
 }
 
 // A second of 8 kHz mono 16-bit silence: a valid WAV the audio element loads.

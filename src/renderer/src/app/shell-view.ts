@@ -14,6 +14,19 @@ export function shellGeometryOf(state: LayoutState, width: number) {
   const tabs = surfaceTabs(state, surfaceSession(state));
   return shellGeometry(state.regions, width, tabs.length > 0, isWideColumn(tabs), state.panelWidths);
 }
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Decision Log 35): whether the main area is
+// on screen. Three things take it off screen and keep it mounted (the shell's main section inert, or its wrapper behind a
+// page invisible and inert): the side column maximized or floating over it, the side column as a sheet over a narrow
+// window, and a page covering it. A main-area file tab's framed file reads it, and draws no element while it is false.
+export const mainAreaOnScreen = (state: LayoutState, width: number): boolean => {
+  const geometry = shellGeometryOf(state, width);
+  return !pageOpen(state) && !geometry.mainHidden && !geometry.sheet;
+};
+export function useMainAreaOnScreen(): boolean {
+  const width = useWindowWidth();
+  return useLayout((state) => mainAreaOnScreen(state, width));
+}
 export function useShellGeometry() {
   const width = useWindowWidth();
   const state = useLayout();

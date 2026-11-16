@@ -1,6 +1,7 @@
 // What a permission request's tool does, in the card's words: the class that picks its preview and its verb, the files
 // a file tool touches, and the MCP server a tool belongs to. Pure.
 import type { SessionEvent } from '@shared/graph/events';
+import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
 import type { Proposed } from './preview/proposed';
 
 type PermissionEvent = Extract<SessionEvent, { kind: 'permission.requested' }>;
@@ -18,11 +19,11 @@ const CLASSES: Record<string, ToolClass> = {
   LS: 'read',
   Glob: 'search',
   Grep: 'search',
-  WebFetch: 'fetch',
   WebSearch: 'web_search',
 };
 
-export const toolClass = (toolName: string): ToolClass => CLASSES[toolName] ?? (toolName.startsWith('mcp__') ? 'mcp' : 'other');
+// UX wave U3b (M5): every web fetch, the web plugin's among them, is a fetch before any MCP tool is
+export const toolClass = (toolName: string): ToolClass => (isWebFetch(toolName) ? 'fetch' : (CLASSES[toolName] ?? (toolName.startsWith('mcp__') ? 'mcp' : 'other')));
 
 export const field = (input: unknown, key: string): string | null => {
   const value = input !== null && typeof input === 'object' ? (input as Record<string, unknown>)[key] : undefined;

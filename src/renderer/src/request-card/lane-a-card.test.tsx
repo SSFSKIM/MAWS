@@ -1,7 +1,8 @@
 // The request card on a terminal session MAWS drives through its sminos bridge (P5 O9 M6, "The card's options" and "The
 // race"; the owner's Q3): each option lane A can't carry is drawn disabled in place with its reason and never sent; the
 // card says the terminal asks too, settles in place as the race ended (a late answer included), and past a background
-// request's window reads as the terminal's to answer. A docked request the terminal answered stays docked, settled, 3 s.
+// request's window reads as the terminal's to answer. (UX wave U1b: a request the terminal answered first is held settling
+// for 3 s by the card's follower, `request-card/receipts.ts`, and its test.)
 import { act, cleanup, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,7 +15,6 @@ import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../test/support/machine';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
-import { SETTLED_MS, useSettling } from '../lane-a/race';
 import { connectKeys } from '../keymap/dispatcher';
 import { bindingsOf } from '../keymap/useKeyChord';
 import { applyLaneAState, resetLaneAStore } from '../stores/lane-a';
@@ -71,7 +71,12 @@ const answers = () => fake.invoked('laneA.answer').map((input) => (input as { an
 
 function mount(event: Extract<SessionEvent, { kind: `${string}.requested` }>, over: Partial<AttentionItem> = {}) {
   const item = itemFor(event, APP, over);
-  render(<RequestCard item={item} request={event} placement="docked" paneIndex={0} />);
+  // UX wave U1b: the end row's open card, in a row that takes focus as a transcript's row does
+  render(
+    <div tabIndex={-1} data-end-row="">
+      <RequestCard item={item} request={event} placement="inline" region="end" askInPlace paneIndex={0} />
+    </div>,
+  );
   return item;
 }
 
@@ -242,7 +247,7 @@ describe('a terminal session’s plan and question cards', () => {
     const skip = screen.getByRole('button', { name: 'Skip' });
     expect(skip.hasAttribute('disabled')).toBe(true);
     expect(skip.getAttribute('title')).toBe('An async question needs an answer');
-    act(() => document.querySelector<HTMLElement>('[data-docked-frame]')!.focus());
+    act(() => document.querySelector<HTMLElement>('[data-end-row]')!.focus());
     await userEvent.setup().keyboard('{Escape}');
     expect(answers()).toEqual([]);
     await userEvent.setup().click(within(screen.getByRole('radiogroup', { name: 'Ship it?' })).getByRole('radio', { name: 'Yes' }));
@@ -295,32 +300,5 @@ describe('a terminal session’s plan and question cards', () => {
     mountAsync();
     act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: by === 'terminal' ? 'terminal' : 'other', outcome: 'withdrawn', by }] }));
     expect(screen.getByRole('status').textContent).toBe(words);
-  });
-});
-
-describe('the docked request a terminal answered', () => {
-  function Dock({ item }: { item: AttentionItem | null }) {
-    const shown = useSettling(item);
-    return <p>{shown === null ? 'nothing docked' : `docked ${shown.id}`}</p>;
-  }
-
-  it('stays docked SETTLED_MS once the terminal answered it, and leaves at once when this app did', () => {
-    vi.useFakeTimers();
-    const item = itemFor(permission({ requestId: REQ }), APP);
-    live({ pending: [raised()] });
-    const view = render(<Dock item={item} />);
-    act(() => live({ pending: [], settled: [{ request: REQ, session: 'eng-1', winner: 'terminal', outcome: 'allow', by: 'terminal' }] }));
-    view.rerender(<Dock item={null} />);
-    expect(screen.getByText(`docked ${item.id}`)).toBeTruthy();
-    act(() => void vi.advanceTimersByTime(SETTLED_MS - 1));
-    expect(screen.getByText(`docked ${item.id}`)).toBeTruthy();
-    act(() => void vi.advanceTimersByTime(1));
-    expect(screen.getByText('nothing docked')).toBeTruthy();
-
-    const ours = itemFor(permission({ requestId: 'toolu_ours' as RequestId }), APP);
-    view.rerender(<Dock item={ours} />);
-    act(() => live({ pending: [], settled: [{ request: 'toolu_ours', session: 'eng-1', winner: 'web', outcome: 'allow', by: 'maws' }] }));
-    view.rerender(<Dock item={null} />);
-    expect(screen.getByText('nothing docked')).toBeTruthy();
   });
 });

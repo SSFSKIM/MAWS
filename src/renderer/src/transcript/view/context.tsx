@@ -3,12 +3,14 @@
 // request-card renderer, and view-only disclosure state (bubbles, pasted blocks, thinking) that must survive a row
 // scrolling out of the virtualised list and back.
 import { createContext, useContext, useState, useSyncExternalStore, type ReactNode } from 'react';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
-import type { AskRowData, Cell, Row, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { AskRowData, Cell, CellId, Row, RowId, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { AnswerAction } from '../model/answer-actions'; // UX wave U3b
 import type { TaskId } from '@shared/graph/ids'; // UX wave U3
+import type { BlockedCall } from '../model/blocked'; // UX wave U1c
 import { WorkMotion } from './motion';
 
 export interface TranscriptActions {
@@ -77,7 +79,23 @@ export interface TranscriptActions {
   // session, or null where this mount cannot open one. Optional, with no default: a mount that omits it draws no
   // "Open output" on a task's notice.
   outputAction?(appSessionId: AppSessionId | null): ((output: TaskOutput) => void) | null;
+  /** UX wave U1c: the control under a blocked call's line, for the row's session. Optional, with no default: a mount that omits it draws none. */
+  renderBlockedCall?(props: BlockedCallProps): ReactNode;
+  // UX wave U3b (the U3b document, decision 14, Interfaces §D): "Fork from here" under an answer. Optional, with no
+  // default: a mount that omits it draws no Fork (the desk; another machine's terminal session).
+  forkFrom?: {
+    /** Why the fork cannot run now for this session, in U9's words; null when it can. A hook. */
+    useUnavailable(appSessionId: AppSessionId): string | null;
+    /** Forks in place from before `rewindTo` (null: the whole conversation). Opens the fork's tab or says why not; never throws. */
+    run(appSessionId: AppSessionId, rewindTo: MessageUuid | null): Promise<void>;
+  };
 }
+
+// UX wave U1c (the U1c document, Interfaces §D): what the control under a blocked call's line is given: the row's cell (a
+// press remembers it: M3's review, finding 1), the name the rule read from the store's row, whether the row is blocked
+// again, whether its grant waits, and whether the row's line names the subject whole (`lineNamesWhole`), so the control
+// draws the subject itself only when the line does not.
+export interface BlockedCallProps { cell: CellId; call: BlockedCall; again: boolean; grant: 'none' | 'waiting'; onLine: boolean }
 
 // UX wave U3: a task notice's output, as "Open output" hands it to the mount: the file the engine named, the task's id
 // and the line's words as the view's title.
@@ -152,6 +170,35 @@ export class Disclosures {
   };
 }
 
+// UX wave U3b (Interfaces §C): which answers of the drawn list carry the action row, as the mount placed them once per
+// change of its list. A row reads its own entry, the same object until that entry's value changes, so a change of the
+// list re-renders only the rows whose entry changed.
+export interface AnswerActionsSource {
+  subscribe(listener: () => void): () => void;
+  get(id: RowId): AnswerAction | undefined;
+}
+export class AnswerActionsStore implements AnswerActionsSource {
+  private entries = new Map<RowId, AnswerAction>();
+  private listeners = new Set<() => void>();
+  get = (id: RowId) => this.entries.get(id);
+  subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  };
+  publish(next: ReadonlyMap<RowId, AnswerAction>): void {
+    let changed = next.size !== this.entries.size;
+    const kept = new Map<RowId, AnswerAction>();
+    for (const [id, entry] of next) {
+      const before = this.entries.get(id);
+      const same = before !== undefined && before.turnId === entry.turnId && before.rewindTo === entry.rewindTo && before.fork === entry.fork;
+      kept.set(id, same ? before : entry);
+      if (!same) changed = true;
+    }
+    this.entries = kept;
+    if (changed) for (const listener of this.listeners) listener();
+  }
+}
+
 export interface TranscriptContextValue {
   storeKey: string;
   variant: 'session' | 'child';
@@ -170,6 +217,7 @@ export interface TranscriptContextValue {
   // additive (board 525): who wrote a prompt, as the reader names them; null, or absent, where it is the reader's own
   // ("Your message"): a session another member owns names its owners
   promptAuthor?: (row: { id: string; messageUuid: string | null }) => string | null;
+  answerActions?: AnswerActionsSource; // additive (UX wave U3b): absent outside a mounted transcript, which places none
 }
 
 const TranscriptContext = createContext<TranscriptContextValue>({

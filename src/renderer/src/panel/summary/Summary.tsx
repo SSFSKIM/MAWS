@@ -46,7 +46,7 @@ function SessionCards({ appSessionId, record }: { appSessionId: AppSessionId; re
   const waiting = useAttention((s) => selectPendingOf(s, appSessionId).some(waitsOnAnswer));
   useEffect(() => useTaskGraph.getState().watch(appSessionId), [appSessionId]); // M8 decision 1: a listed session's too
   return (
-    <div className="flex max-h-full w-70 max-w-full min-h-0 flex-col">
+    <div className="flex h-full w-70 max-w-full min-h-0 flex-col">
       <div aria-label="Session cards" className="flex min-h-0 flex-col gap-1.5 overflow-y-auto p-1">
         {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
         {waiting && <Waiting appSessionId={appSessionId} />}

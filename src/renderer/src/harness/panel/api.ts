@@ -48,7 +48,7 @@ export interface PanelHarnessTab {
 // the last row's rect inside the scroll element; `scrollWidth` and `clientWidth` are the region's slot element's, and
 // `overflowX` the widest horizontal overflow of the slot, the host's tab panel and the list's scroll element (a
 // transcript that overflows sideways scrolls inside its own list, which the slot alone would not show);
-// `regionWidth` the rendered width of the panel region; `pendingRequests` the child's request_slot rows.
+// `regionWidth` the rendered width of the panel region; `pendingRequests` the child's waiting rows and its end row (UX wave U1b).
 export interface PanelChildMetrics {
   rows: number;
   domRows: number;
@@ -88,7 +88,10 @@ export interface PanelHarnessApi {
   // M4: R7. The `child` tool (open it with addTool('child') after loading a fixture with a child agent) mounts C6's child
   // transcript over the loaded session's first child. release(n) steps the parent's player n events and resolves, two
   // frames later, with the child's row count; expandAll() expands the child's entry, then two frames.
-  child: { release(n: number): Promise<number>; expandAll(): Promise<void>; metrics(): PanelChildMetrics };
+  // UX wave U1b: raisePending() lists the requests the child's transcript holds pending in the tab's session's attention
+  // list, as main's attention service lists them (nothing answers `attention.list` on this page), and resolves two frames
+  // later with how many it listed; closing the tab takes them back.
+  child: { release(n: number): Promise<number>; raisePending(): Promise<number>; expandAll(): Promise<void>; metrics(): PanelChildMetrics };
   editor: PanelHarnessEditorProbe; // P3-G (M3): the harness-editor tool's registration
   setWidth(px: 280 | 380 | 640): void; // the panel restored and shown, and the width of the class in view through setPanelWidth (UX wave U8b); C5's clamp applies
   collapseSidebar(on: boolean): void; // C5's sidebar column (the page's debug strip), so 640 renders as set in a window under 1420 px

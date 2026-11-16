@@ -79,6 +79,20 @@ export const CONNECTORS = {
     other_entry: 'that session uses another entry of this name',
   } satisfies Record<Reason, string>,
   cancelled: 'cancelled',
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §E, §G): a plugin's connector's
+  // row, and the lines that stand in its state's place
+  fromPlugin: (plugin: string) => `from ${plugin}`,
+  pluginNameUnread: 'Its plugin’s name can’t be read, so it can’t be matched to a session.',
+  sameAddressAs: (name: string) => `Not loaded: same address as ${name}`,
+  pluginOff: 'Plugin turned off',
+  collision: (plugins: readonly string[]) => `More than one plugin supplies a connector with this name (${plugins.join(', ')}). Claude Code keeps only one. Turn the others off to sign in.`,
+  nameTooLong: 'Its name is too long to sign in from MAWS.',
+  addressAtStart: 'Its address is set when a chat starts. Sign in from that chat’s Connectors dialog.',
+  notInAttached: 'Not in the attached session',
+  otherPlugin: 'That session loaded this connector’s name from another plugin.',
+  otherVersion: 'That session loaded another version of this plugin. Start a new session, then sign in.',
+  absent: 'That session loaded no plugin that supplies this connector.', // the architect's ruling of 2026-11-16
+  notReported: 'Send a message in that session, then sign in.',
   // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §E): a custom connector's sheet
   addCustom: 'Add custom connector…',
   customTitle: 'Add custom connector',

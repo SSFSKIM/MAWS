@@ -76,14 +76,44 @@ export interface Product {
   scratch: CodeScratch;
 }
 
-// `launch`: the app's AppKit defaults for this launch (classic scroll bars, for a scene that drags one).
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, launch: Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): `frames`, for a case whose fixture
+// makes a session's file in its frame log errors of its own (a page's stylesheet and script refused by the frame's CSP):
+// each pattern is matched against `<location> <text>`. The closing check leaves out a console error located in a frame (a
+// token's URL or Chromium's PDF viewer) only when one of the patterns matches it, and a page error only when the frame that
+// threw it (its stack's first call site, read after the message) is one and a pattern matches; every other error, the
+// window's own and a frame's unexpected load or viewer error, fails the case. Without `frames`, every error fails it.
+const FRAME_LOCATION = /^(maws-artifact|chrome-extension):/;
+
+// The URL of a page error's first call site, read below its message (which can hold any text); '' when the stack does not
+// begin with the message as Playwright writes it, so such an error counts as the window's.
+function thrownAt(error: Error): string {
+  const head = `${error.name}: ${error.message}`;
+  const stack = error.stack ?? '';
+  if (!stack.startsWith(head)) return '';
+  return /^\s+at (?:[^\n]*\()?([^\s()]+):\d+:\d+\)?$/m.exec(stack.slice(head.length))?.[1] ?? '';
+}
+
+// `launch` (`appKitDefaults`): the app's AppKit defaults for this launch (classic scroll bars, for a scene that drags one).
+// Both options share the one argument, so either side's callers read as they did.
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: RegExp[] } & Pick<ShellLaunchOptions, 'appKitDefaults'> = {}): Promise<void> {
+  const { frames, ...launch } = opts;
   const scratch = buildCodeScratch();
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
     maws = await launchMaws({ env: scratch.env, ...launch });
     const { page } = maws;
+    const expected = frames;
+    const own: string[] = expected ? maws.consoleErrors() : [];
+    if (expected) {
+      const theFrames = (location: string, text: string) => FRAME_LOCATION.test(location) && expected.some((pattern) => pattern.test(`${location} ${text}`));
+      page.on('console', (message) => {
+        if (message.type() === 'error' && !theFrames(message.location().url, message.text())) own.push(message.text());
+      });
+      page.on('pageerror', (error) => {
+        if (!theFrames(thrownAt(error), error.message)) own.push(`uncaught: ${error.message}`);
+      });
+    }
     // W11: the row is in its project, expanded once the stub's records are in.
     await expect(sidebarOf(page).locator('[data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
     await (await sidebarRow(page, CHARTER)).click();
@@ -92,7 +122,7 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await expect(tab).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });
-    expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    expect(expected ? own : maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws?.cleanup();
     scratch.cleanup();

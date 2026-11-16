@@ -1,0 +1,128 @@
+UX wave, landing U1b, probe 9: a message sent while a blocking question waits (9a), and Stop while a terminal
+session's sminos asynchronous question waits (9b), engine 2.1.322 (U1b, requests drawn in the transcript: the
+acceptance lines "While a blocking question waits, a message sent from the composer is delivered as a message and
+the question still waits" and "Stop ends the turn and leaves the question open"; asked by the architect 2026-11-15;
+VM dc-uxwave5-26dc, branch ux-wave/U1b-probes)
+
+Verdict.
+  9a, a message while a blocking question waits. The same in 12 of 12 runs, for both question kinds: the engine's
+  own AskUserQuestion held as an unanswered can_use_tool, and MAWS's blocking mcp__maws__ask held as an unanswered
+  tools/call.
+    - The message is QUEUED, not injected. The engine answers it with command_lifecycle `queued` (its
+      command_uuid = the message's uuid) within 3 ms. The file writes a `queue-operation` enqueue with its text.
+      There is no replay and nothing else. The pending request stays: no control_cancel_request, no tool_result, no
+      notifications/cancelled. The question still waits (6 s watched, then answered or stopped).
+    - Answered: the tool's tool_result comes first. Then, 10 to 30 ms later, the message's replay (isReplay true,
+      same uuid) and lifecycle `started`. The model reads the answer and the message in ONE request and replies to
+      both ("Mango\nKIWI", 6 of 6). In the file the message becomes an `attachment` {type: "queued_command",
+      source_uuid: the message} placed after the tool_result, plus a queue-operation `remove`. It never becomes a
+      `user` row. Both commands end `completed` with one `result success`.
+    - Stopped instead, the question never answered (Stop's interrupt {reason: "user-cancel", cancel_queued:
+      false}): the interrupt's answer lists the message as still waiting, {still_queued: [<the message's uuid>]}.
+      The pending request is withdrawn: for AskUserQuestion by control_cancel_request {request_id}, before the
+      interrupt's answer; for mcp__maws__ask by an mcp_message `notifications/cancelled` {requestId: <the
+      tools/call id>, reason: "AbortError: remote-cancel"}, before the answer. Then the tool_result is_error ("The
+      user doesn't want to proceed with this tool use. …") and "[Request interrupted by user for tool use]", and
+      `result error_during_execution` (stop_reason tool_use). The message SURVIVES: at once, with no new prompt,
+      the engine starts it as the next turn (lifecycle `started`, its replay, `requesting`), and the model answers it
+      (result success, its reply ending KIWI, 6 of 6).
+  So the first acceptance line holds as written, with one qualification: the message reaches the model only once
+  the question is answered or the turn ends. Until then it is a queued message: a lifecycle `queued` frame and a
+  queue-operation row, with no replay.
+
+  9b, Stop while a terminal session's sminos asynchronous question waits (the bridge's Stop, then answer, 3 runs;
+  then dismiss, 3 runs; the same each time).
+    - Stop ends the turn and LEAVES THE QUESTION OPEN. The bridge's `interrupt` answers {ok: true, result: {turnId,
+      stopped: [<the backgrounded Bash task>], running: []}}. The turn ends `aborted` (event `turn` phase complete).
+      The session writes three rows of origin plugin sminos: isMeta "[Request interrupted by user]", an isMeta note
+      ("The interrupt came from outside the terminal. Task <id>, the Bash command the interrupt moved to the
+      background, was then stopped …") and a `system` informational row. The question is still pending in the
+      bridge's own list (the /events snapshot's `pending`) and at GET /requests/<id> (200, the request), 6 of 6.
+      No settlement is written, by anyone.
+    - Answered after the Stop (POST /requests/<id>/decision {behavior: "allow", updatedInput: {answers}, by:
+      "maws"}): answered 200 {accepted: true}; the bridge emits `settled` {outcome: "answered", winner: "web", by:
+      "maws"}. GET /requests/<id> turns 410 with that settlement, and the list moves it from pending to settled. The
+      idle session gets the answer as a NEW TURN: queue-operation enqueue and dequeue, then a `user` row of origin
+      {kind: "plugin", name: "sminos"} (not isMeta, no asUser): "The sminos plugin sent a message:\nThe human
+      responded to your async AskUserQuestion (call <id>): Your questions have been answered: \"…\"=\"Mango\". …".
+      Then a bridge `turn` start whose text is that message, and the model takes it up (3 of 3) and says the fruit.
+      In r1 it reran the stopped sleep first; in r2 and r3 it answered without a tool.
+    - Dismissed after the Stop (POST …/decision {behavior: "dismiss", by: "maws"}): 200 {accepted: true}; `settled`
+      {outcome: "withdrawn", winner: "web", by: "maws"}; 410 at GET /requests/<id>. NOTHING reaches the session: no
+      row and no turn (3 of 3).
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md).
+  9a: scenarios/pass3/uxwave-u1b-ask-wait.mjs. The launch is MAWS's (uxwave-common-arrivals.mjs). MAWS's launch
+  disallows AskUserQuestion, so the `engine` kind launches with the new option `engineAsk: true`, which drops
+  `--disallowedTools AskUserQuestion` and nothing else. The `mcp` kind keeps MAWS's launch, and the probe serves
+  `ask` on the `maws` SDK server itself, holding the tools/call and answering in the shape MAWS's answer has
+  (fixtures/pass3/p1-maws-ask-blocking.jsonl seq 137). Those fixtures were recorded by MAWS's own E1 build (commit
+  b65ab57eb), so there was no scenario to reuse, and the stand-in is this scenario's. The steps: the question
+  arrives and is held; 2 s later the composer's user frame "Also: end your reply with the word KIWI." is written on
+  stdin (origin human, as the harness's prompt writes it); 6 s are watched; then UXW_END=answer releases the hold
+  with "Mango", or UXW_END=interrupt sends Stop's interrupt as src/engine-host/session.ts does and the session is
+  watched until idle. Fixtures fixtures/uxwave/u1b-askwait-{engine,mcp}-{answer,interrupt}-r{1,2,3} (.jsonl,
+  .transcript.jsonl): 12 runs, 3 per variant.
+  9b: scenarios/pass3/uxwave-u1b-ask-stop.mjs. The interactive engine runs in tmux with sminos 1.47.0 from the VM's
+  marketplace copy (--plugin-dir, CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1). The plugin's state is the scratch HOME's,
+  under the containment checks of uxwave-u3-sminos.mjs: no sign-in, no credential, nothing installed. The model is
+  asked to raise sminos's asynchronous question (mcp__sminos__AskUserQuestion with async true) and then run a 45 s
+  foreground python sleep. A bare `sleep 45` is refused by the engine's sleep guard (seen in a discarded first
+  take). The question is found as the bridge's `raised` event. 3 s later Stop is posted as lane A's driver posts
+  it: POST /command {op: "interrupt", launch}. After 6 s and idle, the question is answered or dismissed as the
+  driver's `answer` does: GET /requests/<id>, then POST /requests/<id>/decision. The bridge's /events stream is
+  kept whole, except the streaming `chunk` events. The bridge's pending and settled lists (the snapshot that opens a
+  fresh /events stream) and GET /requests/<id> are read before the Stop, after it, and after the decision. Fixtures
+  fixtures/uxwave/u1b-askwait-stop-{answer,dismiss}-r{1,2,3} (.terminal.json with the events, answers and
+  snapshots; .transcript.jsonl). r1 of `answer` has no list snapshot (GET /requests only); the list read was added
+  for the other five.
+  Spend: US$0.022 for 9a, US$0.019 for 9b including the discarded take; US$0.041 in all.
+
+Observed, 9a (journal seq; the other two runs of each variant hold the same frames at nearby seqs).
+  engine-answer-r1: 46 assistant tool_use AskUserQuestion; 47 session_state_changed requires_action; 48
+    can_use_tool fcc8a202…, held. 54 out user "Also: …" (uuid f1b79612…); 55 command_lifecycle queued
+    (command_uuid f1b79612…); file line 25 queue-operation enqueue "Also: …". Nothing more for 6 s. 57 out the
+    allow with answers; 58 the engine's echo of it (inbound control_response, same request_id); 59 running; 60
+    tool_result "Your questions have been answered: \"Which fruit do you prefer?\"=\"Mango\". …"; 61 the message's
+    replay (isReplay true); 62 lifecycle started; 63 requesting; 69 assistant "Mango\n\nKIWI"; 73 the message
+    completed; 74 result success; 75 the first prompt's command completed. File: 26 tool_result, 28 attachment
+    queued_command (source_uuid f1b79612…), 29 queue-operation remove.
+  mcp-answer-r1: 57 control_request mcp_message tools/call ask (held); 63 out the message; 64 queued; 66 out the
+    tools/call answer; 67 the engine's echo; 68 tool_result (the answer's JSON); 69 the message's replay; 70
+    started; 75 "Mango\n\nKIWI"; 80 result success.
+  engine-interrupt-r1: 55 out the message, 56 queued; 58 out interrupt; 59 control_cancel_request
+    {request_id: the held can_use_tool}; 60 the interrupt's answer {still_queued: ["54025130…" (the message)]}; 62
+    running; 63 tool_result is_error; 64 "[Request interrupted by user for tool use]"; 65 result
+    error_during_execution; 66 the first prompt's command cancelled; 67 the message started; 69 requesting; 70 its
+    replay; 124 result success (the reply ends "KIWI"); 125 the message completed.
+  mcp-interrupt-r1: 62 out the message, 63 queued; 65 out interrupt; 66 mcp_message notifications/cancelled
+    {requestId: 2, reason: "AbortError: remote-cancel"}; 68 the interrupt's answer {still_queued: [the message]};
+    70 tool_result is_error; 71 "[Request interrupted by user for tool use]"; 72 result error_during_execution; 74
+    the message started; 78 its replay; 173 result success (ends KIWI).
+  In every run the message's file row is a queue-operation enqueue while it waits. It is a queued_command attachment
+  (answer) or a dequeue followed by a `user` row of its own at the next turn (interrupt). The wire shows it only as
+  lifecycle frames until its replay.
+Observed, 9b (ms from the run's start; answer-r1).
+  12320 bridge `tool` call mcp__sminos__AskUserQuestion and `raised` {request: toolu_01CL…}; 12363 the tool's result
+  "Your questions are waiting for the human; this call does not wait for them. …"; 14044 the Bash call (the python
+  sleep). 15754 POST interrupt; 15942 answer {ok: true, result: {turnId, stopped: ["brl9coame"], running: []}};
+  15948 the Bash result "Command running in background with ID: brl9coame …"; 16124 `turn` complete, reason
+  "aborted"; rows 42, 43 (isMeta, origin plugin sminos) and 44 (system informational); 45 the Bash tool_result.
+  GET /requests/<id> 200 at 15726 and at 24481. 24513 POST decision allow; 24553 `settled` {winner: "web", outcome:
+  "answered", by: "maws"}; 24702 answer 200 {accepted: true}; rows 46, 47 queue-operation; 49 the `user` row of
+  origin plugin sminos with the answer; 24927 `turn` start (text: that message); 74844 the reply "DONE\n\nYour
+  answer reached me: you chose **Mango**."; GET /requests/<id> 410 with the settlement.
+  answer-r2 and -r3 add the list: `pending` holds the request before and after the Stop, and after the answer
+  pending is [] and `settled` holds {outcome: "answered", by: "maws"}.
+  dismiss-r1 to -r3: the same up to the decision; then `settled` {outcome: "withdrawn", winner: "web", by: "maws"},
+  the list moves it to settled, 410 at /requests, and no row or turn follows in the 15.6 s watched.
+
+Inference, in U1b's terms.
+  - 9a: a composer send while a blocking question waits is delivered as a queued message. A window can draw it as a
+    message waiting (lifecycle `queued`) under a card that stays. It joins the turn right after the answer's
+    tool_result. If Stop ends the turn instead, the question's card leaves (control_cancel_request for the engine's
+    own question; for MAWS's ask, the host's tools/call is cancelled by notifications/cancelled), and the message
+    runs as the next turn by itself. With cancel_queued false, Stop does not drop it.
+  - 9b: "Stop ends the turn and leaves the question open" holds for a terminal session's sminos asynchronous
+    question. The card should stay after Stop. An answer opens a new turn delivered as a plugin message; a
+    dismissal settles it `withdrawn` by maws and the session hears nothing.

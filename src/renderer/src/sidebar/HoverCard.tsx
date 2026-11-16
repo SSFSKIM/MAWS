@@ -38,6 +38,8 @@ import { ownerEntries, ownersLabel } from './owners'; // P5 O8 M5
 import { ReachLine } from './ReachMark'; // P5 O8 M6b
 import { displayTitle } from '../sessions/title';
 import { useSessionControls } from '../session/controls/controls-for'; // P5 O9 M4
+import { useCompactingSince } from '../stores/compacting'; // UX wave U3b (M4)
+import { COMPACTING_SESSION } from '../transcript/model/copy'; // UX wave U3b (M4)
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
 import { SidebarInteractionContext } from './interaction';
 import { SIDE_COPY } from '../side/copy'; // E3
@@ -178,6 +180,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const machine = useMachineMark(appSessionId);
   const controlled = useSessionControls(appSessionId) !== null; // P5 O9 M4: a session held elsewhere takes no reply
   const bridged = useLaneAState(appSessionId)?.bridge === 'live'; // P5 O9 M5
+  const compacting = useCompactingSince(appSessionId) !== null; // UX wave U3b (M4)
   if (!record) return null;
   const glyph = glyphFor(record, digest, pending, listing);
   const waiting = waitingItem(pending);
@@ -185,7 +188,7 @@ function Body({ appSessionId, reply }: { appSessionId: AppSessionId; reply: Quic
   const working = digest?.phase === 'working' || digest?.phase === 'starting';
   const held = holderLine(record);
   // P5 O9 M5 (the owner's Q1): a foreign session MAWS drives through its bridge says so
-  const doing = (held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null;
+  const doing = compacting ? COMPACTING_SESSION : ((held !== null && bridged ? BRIDGED_LINE(record.holder.kind === 'terminal' ? null : held) : held) ?? (working ? digest?.activity : null) ?? null); // UX wave U3b (M4)
   const meta = [glyph.label, sessionAge(record, digest, now, seenAt, listing), digest?.context ? `ctx ${Math.round(digest.context.percent)}%` : null].filter(Boolean).join(' · ');
 
   return (

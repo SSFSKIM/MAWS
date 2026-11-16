@@ -5,8 +5,11 @@
 // socket under the launch's scratch sminos home, with a catalog as the bridge pushes one.
 import { execFileSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../../test/support/fake-bridge';
 import type { StoreFixture } from '../../test/support/store-fixture';
+import { REPO_ROOT } from './launch';
 
 const run = { class: 'run', enabled: true, measured: '2.1.300' } as const;
 
@@ -237,4 +240,18 @@ export function pluginStopNoteRecord(sessionId: string, cwd: string, parentUuid:
     origin: { kind: 'plugin', name: 'sminos' },
     message: { role: 'user', content: [{ type: 'text', text: `Agent ${stop.agentId} was stopped by the person from outside the terminal: it is not running. Do not start it again or redo its task unless the person asks.` }] },
   };
+}
+
+// UX wave U1c (M5, scene S4): a terminal session's transcript as probe T recorded it (engine 2.1.322 in a terminal, the
+// grant of "Approve and retry" delivered through sminos's bridge; spikes/protocol-probe/findings-uxwave-u1c-terminal-grant.txt):
+// `uxwave/<run>.transcript.jsonl`'s rows, each as this test's session writes it (its `sessionId` and `cwd` the scene's,
+// everything else as recorded). Index k is the findings' line k + 1.
+export function probeTerminalRecords(run: string, sessionId: string, cwd: string): Record<string, unknown>[] {
+  return readFileSync(join(REPO_ROOT, 'spikes/protocol-probe/fixtures/uxwave', `${run}.transcript.jsonl`), 'utf8')
+    .split('\n')
+    .filter((line) => line.trim() !== '')
+    .map((line) => {
+      const row = JSON.parse(line) as Record<string, unknown>;
+      return { ...row, ...('sessionId' in row && { sessionId }), ...('cwd' in row && { cwd }) };
+    });
 }

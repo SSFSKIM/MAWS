@@ -9,6 +9,7 @@ import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
+import { consentMessage } from '../../src/shared/engine/arrival';
 import { REPO_ROOT } from './launch';
 
 export const replaySpec = (appSessionId: string, replay: string, over: Partial<LaunchSpec> = {}): LaunchSpec => ({
@@ -194,13 +195,127 @@ export function sendNowJournal(dir: string, name: string): string {
   return writeJournal(dir, `${name}-send-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
 }
 
-// UX wave U4a (M8, the Send now scene's after-the-turn case): Send now on a row that waits after the turn is the queue's
-// promote at `now`, as `uxwave/u4p3-promote-late-1` recorded it on engine 2.1.322: the probe's prompt (seq 12) and its
-// Bash call, registered as a task (37); the message at the next step (39); the `now` frame of the promoted message (42),
-// which has the command moved (46) and the turn cut (`success`, `aborted_tools`, 49); the `now` message's own turn, and
-// the waiting message read at its first tool boundary (120 to 122). C3's prelude stands in for the probe's handshake,
-// and the answer at 14 and the meta rows go, as in `sendNowJournal`.
-export function promoteNowJournal(dir: string, name: string): string {
-  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4p3-promote-late-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
-  return writeJournal(dir, `${name}-promote-now`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+// UX wave U1b (decision 22, probe 8): Stop while the main loop's permission prompt waits, as
+// `uxwave/u1b-intpend-main-r1` recorded it on engine 2.1.322 under MAWS's launch: the probe's prompt (seq 18), its Bash
+// call and the call's `can_use_tool` (39); the replay then holds at Stop's interrupt (43), recorded as the plain stop
+// writes it; after it the engine's `control_cancel_request` for the request (44), the interrupt's answer (45), the
+// rejected call's result (48), the turn's end (`error_during_execution`, 50) and idle (52). C3's prelude stands in for
+// the probe's handshake (3 to 16); the maws server's tool listing (19, its answer 20 and its echo 24) and the answer to
+// the thinking-display write (21) go, as do the meta rows; the probe's late allow (54) and its next prompt are cut, so
+// the replay waits for the test's end.
+export function stopPendingJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1b-intpend-main-r1.jsonl').filter((r) => r.seq >= 18 && r.seq <= 52 && ![19, 20, 21, 24].includes(r.seq) && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-stop-pending`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
+// UX wave U1b (acceptance 8's first sentence, probe 9a): a message sent while MAWS's blocking ask waits, as
+// `uxwave/u1b-askwait-mcp-answer-r1` recorded it on engine 2.1.322 under MAWS's launch. C3's prelude stands in for the
+// probe's handshake (its initialize 3 and answer 6, the surface's attach and panes 7, 11 to 13 and 15, the
+// thinking-display write 16 and its answer 21); the engine's own handshake with the `maws` server stays (4, 5, 8 to 10,
+// 14; the tool listing 19, 20, 24), answered by the host's real server. Then the probe's prompt (18), the ask's
+// `tools/call` (58), held; the message (63), which the engine queues (64); the ask's answer (66), its result (68), the
+// message's replay (69) and start (70), the reply and the turn's end (80) and idle (82). The meta rows go, and the
+// probe's end_session and exit (85 to 87), so the replay waits for the test's end.
+export function askWaitJournal(dir: string, name: string): string {
+  const prelude = new Set([3, 6, 7, 11, 12, 13, 15, 16, 21]);
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1b-askwait-mcp-answer-r1.jsonl').filter((r) => r.direction !== 'meta' && !prelude.has(r.seq) && r.seq <= 82);
+  return writeJournal(dir, `${name}-ask-wait`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
+// UX wave U4b (M3's conditional step; the Decision Log's line on the first Mac run): Send now on a row that waits after
+// the turn while a turn runs is a promote at `next` and then the engine's send-now request for the uuid it answered, as
+// `uxwave/u4b-two-1` recorded it early in a shell call with a message already waiting (spikes/protocol-probe/
+// findings-uxwave-u4b-send-now-early.txt): the probe's prompt (seq 12) and its Bash call (32); the message at the next
+// step (37, queued 39); the promoted message at `next` (40) and the request naming it (41), answered `delivering` with
+// both still queued (44); the command moved (46 to 48) and the turn cut (`success`, `aborted_tools`, 50); both messages
+// `started` (53, 54) and read as one turn (the joined replay, 58). The replay matches a user write by its type and maps
+// each recorded uuid onto the one the host minted, so the request's `message_uuid` is held to the promoted message's own.
+// C3's prelude stands in for the probe's handshake, and the answer at 14 and the meta rows go, as in `sendNowJournal`.
+export function sendNowAfterJournal(dir: string, name: string): string {
+  const rows = rowsOf('spikes/protocol-probe/fixtures/uxwave/u4b-two-1.jsonl').filter((r) => r.seq >= 12 && r.seq !== 14 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-send-now-after`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+
+// UX wave U1c (M5, scenes S1 and S2): a call auto mode blocked, its grant and what followed, as the probe recorded them on
+// engine 2.1.322 under MAWS's launch (`uxwave/u1-soft-seeded-1`: the block, the grant, the retry that ran;
+// `uxwave/u1-hard-seeded-1`: the block, the grant, the retry blocked again). C3's prelude stands in for the probe's
+// handshake, and the probe's prompt is the first write; the answer to its thinking-display write goes (the host's own
+// write is answered in its place), and the meta rows with it, the exit included, so the replay waits for the test's end.
+// The replay holds at the grant's `user` write until the press writes it.
+export function recordedBlockJournal(dir: string, name: string, fixture: 'u1-soft-seeded-1' | 'u1-hard-seeded-1'): string {
+  const rows = rowsOf(`spikes/protocol-probe/fixtures/uxwave/${fixture}.jsonl`);
+  const thinking = rows.find((r) => r.direction === 'out' && r.frame.type === 'control_request' && (r.frame.request as { subtype?: string }).subtype === 'set_max_thinking_tokens')!.frame.request_id;
+  const answersThinking = (r: Row) => r.direction === 'in' && r.frame.type === 'control_response' && (r.frame.response as { request_id?: string }).request_id === thinking;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const kept = rows.slice(prompt).filter((r) => r.direction !== 'meta' && !answersThinking(r));
+  return writeJournal(dir, `${name}-${fixture}`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...kept]);
+}
+
+// UX wave U1c (M5, scene S3): a blocked command of two lines whose turn runs on, built from `uxwave/u1c-b-1` (engine
+// 2.1.322, probe B: in one turn the model runs the marker command, auto mode blocks it, and a 30 s foreground call
+// follows; the grant written at the next step is read at that call's result, in the same turn). No recording holds a
+// command of two lines, so the recorded command, the grant's sentence for it and the prompt are swapped for the scene's,
+// wherever a frame holds one of them whole; the streamed deltas, the thinking and the task file's read go, so no frame
+// holds the recorded command in part. The prompt's turn, the block (the call, the engine's `permission_denied` and the
+// result marked `automode-blocked`) and the model's step past it, then the held call started (seq 12 to 201). The replay
+// holds there, at the grant written at the next step (the recorded write, seq 137), until the press writes it; then the
+// engine queues it (143), Delete withdraws it as `pass3/steer-next-cancelled` answers a withdrawal (seq 34 to 36), and
+// the second press writes it again under a uuid of its own, which the engine queues. The held call's result, the grant
+// read at it (the replay of its frame and its `started`, 205 and 206), the retry, which runs, and the turn's end follow
+// (202 to 278), naming the second write.
+export function blockedTurnJournal(dir: string, name: string, prompt: string, command: string): string {
+  const recorded = rowsOf('spikes/protocol-probe/fixtures/uxwave/u1c-b-1.jsonl');
+  const at = (seq: number) => recorded.find((r) => r.seq === seq)!;
+  const recordedPrompt = (at(12).frame.message as { content: string }).content;
+  const marker = (at(133).frame.message as { content: { input: { command: string } }[] }).content[0]!.input.command;
+  const first = at(137).frame.uuid as string; // the grant's recorded write
+  const second = '00000000-0000-4000-8000-0000000001c3'; // the second press's write
+  const session = at(15).frame.session_id as string;
+  const scene = swapping([[recordedPrompt, prompt], [marker, command], [consentMessage('command', marker), consentMessage('command', command)]]);
+  const head = [12, 14, 15, 16, 17, 18, 133, 135, 140, 142, 183, 197, 201].map((seq) => scene(at(seq)));
+  const grant = scene(at(137));
+  const queued = at(143);
+  const withdrawal = rowsOf('spikes/protocol-probe/fixtures/pass3/steer-next-cancelled.jsonl')
+    .filter((r) => [34, 35, 36].includes(r.seq))
+    .map(swapping([['d7fade79-6f39-40b6-91f3-9998597857b4', first], ['31f347b4-c94c-4fe7-a295-65e7667a8d76', session]]));
+  const again = [{ ...grant, frame: { ...grant.frame, uuid: second } }, { ...queued, frame: { ...queued.frame, command_uuid: second, uuid: '10000000-0000-4000-8000-0000000001c3' } }];
+  const named = swapping([[first, second]]);
+  const tail = [202, 203, 204, 205, 206, 207, 262, 266, 267, 271, 275, 276, 278].map((seq) => named(scene(at(seq))));
+  const prelude = rowsOf('test/fixtures/engine/replay-handshake.jsonl');
+  const rows = [...head, grant, queued, ...withdrawal, ...again, ...tail].map((row, k) => ({ ...row, seq: prelude.at(-1)!.seq + 1 + k }));
+  return writeJournal(dir, `${name}-blocked-turn`, [...prelude, ...rows]);
+}
+
+// A row with every string value that equals one of the pairs' first members replaced by its second, at any depth.
+function swapping(pairs: [string, string][]): (row: Row) => Row {
+  const map = new Map(pairs);
+  const walk = (value: unknown): unknown =>
+    typeof value === 'string' ? (map.get(value) ?? value)
+      : Array.isArray(value) ? value.map(walk)
+        : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, walk(entry)]))
+          : value;
+  return (row) => ({ ...row, frame: walk(row.frame) as Row['frame'] });
+}
+
+// The UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M3's scene): a prompt and MAWS's answer
+// envelope waiting together, which the engine joined into one message, as probe 1 recorded it on engine 2.1.322 with a
+// real non-blocking ask served by a `maws` server (`uxwave/u704-end-prompt-first-1`; spikes/protocol-probe/
+// findings-uxwave-u704-envelope-split.txt). C3's prelude stands in for the probe's handshake (seq 3 to 17, the `maws`
+// server's own MCP handshake among them, which the host's server does not need: it answers each message by itself);
+// then the first prompt (18), the engine's `tools/list` (20) and its `ask` call (109) for the host's server to answer,
+// the prompt at the next step (159) and the envelope after it (161) for the host to write, the turn's end (673, 674) and
+// the joined replay (680) under the envelope's uuid, read as the second turn. The answer to the probe's thinking-display
+// write (22) goes, as the host's own write is answered in place of it, and so do the meta rows, the exit (730) with them,
+// so the replay waits for the test's end. The replay maps each recorded uuid onto the one the host minted.
+export const JOINED_ANSWER_RECORDING = 'spikes/protocol-probe/fixtures/uxwave/u704-end-prompt-first-1.jsonl';
+export function joinedAnswerJournal(dir: string, name: string): string {
+  const rows = rowsOf(JOINED_ANSWER_RECORDING).filter((r) => r.seq >= 18 && r.seq !== 22 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-joined-answer`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+/** What the recording holds that the scene writes or reads: the frame MAWS wrote at `seq`, and the answers the host journaled. */
+export function joinedAnswerRecorded(): { first: string; prompt: string; answers: unknown[] } {
+  const rows = rowsOf(JOINED_ANSWER_RECORDING);
+  const content = (seq: number) => ((rows.find((r) => r.seq === seq)!.frame as { message: { content: string } }).message.content);
+  const answered = rows.find((r) => r.direction === 'meta' && r.frame.event === 'maws_ask_answered')!.frame as { answers: unknown[] };
+  return { first: content(18), prompt: content(159), answers: answered.answers };
 }

@@ -28,7 +28,7 @@ import { seedTranscript, SIDE_FOLLOW_UP, SIDE_FOLLOW_UP_ROWS, SIDE_QUESTION, SID
 import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
-import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sideColumn, sideTab, surface } from './support/shell';
+import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sessionCards, sideColumn, sideTab, surface, surfaceRow } from './support/shell';
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -185,6 +185,50 @@ async function startParent(page: Page, repo: ScratchRepo): Promise<string> {
 
 const mainRegion = (page: Page) => page.locator('[data-region="main"]');
 const panelRegion = (page: Page) => page.locator('[data-region="panel"]');
+
+// UX wave U4b (M4): the card column's cards' list and each of its cards, by box, rounded to the pixel.
+type Box = { x: number; y: number; width: number; height: number };
+const columnBoxes = (page: Page): Promise<{ list: Box; cards: Box[] }> =>
+  sessionCards(page).evaluate((aside) => {
+    const box = (element: Element) => {
+      const r = element.getBoundingClientRect();
+      return { x: Math.round(r.x), y: Math.round(r.y), width: Math.round(r.width), height: Math.round(r.height) };
+    };
+    const list = aside.querySelector('div[aria-label="Session cards"]')!;
+    return { list: box(list), cards: Array.from(list.querySelectorAll(':scope > section')).map(box) };
+  });
+const overlaps = (a: Box, b: Box) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height;
+// The open side chat card at the column's foot: inside the column, its bottom edge within 8 px of the column's, over
+// neither the composer's frame nor the jump control, and the cards above it in the boxes `before` recorded. The jump
+// control ("Jump to latest") is drawn only while the transcript is not following its end, which this scene's one short
+// exchange never leaves, so it is not measured itself: the transcript's own root is, since the control is placed inside
+// that box wherever it is drawn (`.transcript-jump` is absolute in the `relative` root, `transcript/view/transcript.css`).
+async function expectAtFoot(page: Page, before: { cards: Box[] }): Promise<void> {
+  const column = (await sessionCards(page).boundingBox())!;
+  const card = (await sessionCards(page).locator('[data-btw-card="foot"]').boundingBox())!;
+  expect(card.x >= column.x - 0.5 && card.x + card.width <= column.x + column.width + 0.5 && card.y >= column.y - 0.5, `the card ${JSON.stringify(card)} inside the column ${JSON.stringify(column)}`).toBe(true);
+  const gap = column.y + column.height - (card.y + card.height);
+  expect(gap, 'the card’s bottom edge at the column’s').toBeGreaterThanOrEqual(-0.5);
+  expect(gap, 'the card’s bottom edge at the column’s').toBeLessThanOrEqual(8);
+  const main = mainRegion(page);
+  for (const [name, other] of [['the composer’s frame', main.locator('[data-composer-frame]:visible')], ['the transcript, which holds the jump control', main.locator('div.transcript[data-hydration]:visible')]] as const) {
+    await expect(other, `${name} is drawn`).toHaveCount(1);
+    const box = await other.boundingBox();
+    expect(box, `${name} has a box`).not.toBeNull();
+    expect(overlaps(card, box!), `the card ${JSON.stringify(card)} clear of ${name} ${JSON.stringify(box)}`).toBe(false);
+  }
+  expect((await columnBoxes(page)).cards, 'every card where it was before /btw').toEqual(before.cards);
+}
+// The title bar's "Session cards" icon (in "More surfaces" where the row has no room for it): the column off when it is
+// shown, on when it is not.
+async function pressSessionCards(page: Page): Promise<void> {
+  const icon = surfaceRow(page).getByRole('button', { name: 'Session cards', exact: true });
+  if (await icon.count()) await icon.click();
+  else {
+    await surfaceRow(page).getByRole('button', { name: 'More surfaces', exact: true }).click();
+    await page.getByRole('menuitem', { name: 'Session cards', exact: true }).click();
+  }
+}
 
 // The session's tab in the main area, shown through its sidebar row.
 async function showSession(page: Page, id: string): Promise<void> {
@@ -563,7 +607,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(maws.consoleErrors()).toEqual([]);
   });
 
-  test('5. /btw: the side question goes to the engine beside the conversation and answers in the session’s side chat card, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
+  // UX wave U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 4 and 5; O-20,
+  // A18): with the card column shown for the session, its side chat card stands at the column's foot, at its bottom
+  // right, and nothing lies over the pane's corner; with the column off it is over the corner again, the same card; the
+  // cards above it keep their boxes, and with the card closed the column draws as it did before /btw was asked.
+  test('5. /btw: the side question goes to the engine beside the conversation and answers in the session’s side chat card at the card column’s foot, with history; nothing reaches the main transcript; Continue as a side thread forks one', async () => {
     test.setTimeout(120_000);
     const c = await begin((cwd, dir) => {
       const parent = parentJournal(cwd);
@@ -574,6 +622,14 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const { page, maws, parent } = c;
     const main = mainRegion(page);
     const composer = main.getByRole('textbox', { name: 'Message' });
+    const column = sessionCards(page);
+    const foot = column.locator('[data-btw-card="foot"]');
+    const corner = main.locator('[data-btw-card="corner"]');
+
+    // the column as it is drawn before any /btw: the cards' list and each card, by box
+    await expect(column, 'the card column is drawn for the session at this window’s width').toBeVisible();
+    const before = await columnBoxes(page);
+    expect(before.cards.length, 'the session’s cards').toBeGreaterThan(0);
 
     // the palette lists it
     await composer.click();
@@ -586,10 +642,10 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.type('w');
     await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
     await page.keyboard.press('Enter');
-    const picked = main.locator('[data-btw-card="corner"]');
-    await expect(picked).toBeVisible();
-    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toBeFocused();
-    await expect(picked.getByRole('textbox', { name: 'Ask a side question' })).toHaveAttribute('placeholder', 'Ask a quick question…');
+    await expect(foot).toBeVisible();
+    await expect(corner, 'the card is drawn once, at the column’s foot').toHaveCount(0);
+    await expect(foot.getByRole('textbox', { name: 'Ask a side question' })).toBeFocused();
+    await expect(foot.getByRole('textbox', { name: 'Ask a side question' })).toHaveAttribute('placeholder', 'Ask a quick question…');
     await expect(page.locator('[data-widget-dialog="btw"]'), 'no dialog: the card took the pick').toHaveCount(0);
     expect(writtenControls(maws, parent, 'side_question'), 'nothing asked yet').toEqual([]);
     await composer.click();
@@ -597,14 +653,15 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await page.keyboard.press('Backspace');
     await expect(composer).toHaveText('');
 
-    // typed: asked, the composer cleared, the session's card shows it answered (UX wave U4a, O-20: the card at the pane's
-    // corner, not the Side pane)
+    // typed: asked, the composer cleared, the session's card shows it answered (UX wave U4a, O-20: the session's card, not
+    // the Side pane; U4b: at the card column's foot while the column is drawn for the session)
     await page.keyboard.type(`/btw ${SIDE_QUESTION}`);
     await page.keyboard.press('Enter');
     await expect(composer).toHaveText('');
-    const view = main.locator('[data-btw-card="corner"]');
+    const view = foot;
     await expect(view).toBeVisible();
     await expect(view.getByRole('heading', { name: 'Side chat' })).toBeVisible();
+    await expect(corner).toHaveCount(0);
     await expect(panelRegion(page).locator('[data-side-btw-view]'), 'no question view in the Side pane').toHaveCount(0);
     await expect(view.locator('[data-side-exchange]').first()).toContainText(SIDE_QUESTION);
     await expect(view.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
@@ -614,6 +671,31 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     // the card is in the main region and holds the answer: the transcript is what must not
     await expect(main.locator('[data-transcript-scroller]').getByText('ZEBRA', { exact: true })).toHaveCount(0);
 
+    // where it stands (what jsdom cannot show): inside the column, its bottom edge at the column's, over neither the
+    // composer's frame nor the jump control, and every card above it where it was
+    await expectAtFoot(page, before);
+
+    // the column turned off: the same card over the pane's corner, with its exchange; turned on: at the foot again
+    await pressSessionCards(page);
+    await expect(column).toBeHidden();
+    await expect(corner).toBeVisible();
+    await expect(corner.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
+    await expect(foot).toHaveCount(0);
+    await pressSessionCards(page);
+    await expect(column).toBeVisible();
+    await expect(foot).toBeVisible();
+    await expect(corner).toHaveCount(0);
+    await expect(foot.locator('[data-side-exchange="answered"]').first()).toContainText('ZEBRA');
+    await expectAtFoot(page, before);
+
+    // folded, the chip is the column's; opened again, the card
+    await foot.getByRole('button', { name: 'Fold side chat' }).click();
+    await expect(column.locator('[data-btw-chip="foot"]')).toBeVisible();
+    await expect(main.locator('[data-btw-chip="corner"]')).toHaveCount(0);
+    await expect(foot).toHaveCount(0);
+    await column.locator('[data-btw-chip="foot"]').click();
+    await expect(foot).toBeVisible();
+
     // a second question carries the first exchange as history
     await view.getByRole('textbox', { name: 'Ask a side question' }).fill(SIDE_FOLLOW_UP);
     await view.getByRole('textbox', { name: 'Ask a side question' }).press('Enter');
@@ -622,14 +704,33 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     expect(writtenControls(maws, parent, 'side_question')[1]!.frame.request).toEqual({ subtype: 'side_question', question: SIDE_FOLLOW_UP, history: [{ question: SIDE_QUESTION, response: 'ZEBRA' }] });
     await expect(main.locator('[data-bubble]')).toHaveCount(1);
 
-    // Continue as a side thread: a fork whose first prompt lists the exchanges, shown in the pane
-    await view.getByRole('button', { name: 'Continue as a side thread' }).click();
-      const promoted = await sideThreadOf(page, parent, 'btw');
+    // closed: the column draws as before any /btw (decision 5's condition), and nothing of the card is left in it
+    await view.getByRole('button', { name: 'Close side chat' }).click();
+    await expect(main.locator('[data-btw-card], [data-btw-chip]')).toHaveCount(0);
+    await expect.poll(() => columnBoxes(page), { message: 'the cards’ list and each card where they were before /btw' }).toEqual(before);
+
+    // opened again by a bare /btw, with its two exchanges; Continue as a side thread: a fork whose first prompt lists the
+    // exchanges, shown in the Side pane, the column gone with the side surface open, and the card, where still open, at the
+    // pane's corner
+    await composer.click();
+    await page.keyboard.type('/btw');
+    await expect(commands.locator('[role="option"][aria-selected="true"]')).toContainText('/btw');
+    await page.keyboard.press('Enter');
+    await expect(foot.locator('[data-side-exchange="answered"]')).toHaveCount(2);
+    await composer.click();
+    await page.keyboard.press('ControlOrMeta+a');
+    await page.keyboard.press('Backspace');
+    await expect(composer).toHaveText('');
+    await foot.getByRole('button', { name: 'Continue as a side thread' }).click();
+    const promoted = await sideThreadOf(page, parent, 'btw');
     const thread = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, promoted)}"]`);
     await expect(thread).toBeVisible();
     await expect(thread.getByText(PROMOTED_REPLY)).toBeVisible({ timeout: 20_000 });
     await expect(thread.locator('header')).toContainText('Side question');
     await expect(thread.locator('[data-side-question]')).toHaveText(SIDE_QUESTION);
+    await expect(column, 'a side surface open: no card column').toBeHidden();
+    await expect(main.locator('[data-btw-card="foot"], [data-btw-chip="foot"]')).toHaveCount(0);
+    await expect(main.locator('[data-btw-card]:not([data-btw-card="corner"])'), 'a card still open is the pane’s, at its corner').toHaveCount(0);
     const record = value(await invoke(page, 'session.get', { appSessionId: promoted as never }));
     expect(record?.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: PARENT, openedBy: 'btw' });
     expect(spawnRow(maws, promoted).args).toContain('--fork-session');
@@ -837,7 +938,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await shootCard(maws, viewerBox, 'card-composing');
     await card.getByRole('button', { name: 'Send' }).click();
     await expect(card).toHaveAttribute('data-card-phase', 'thread', { timeout: 20_000 });
-    await expect(card.locator('[data-request-card]')).toContainText('echo themed', { timeout: 20_000 });
+    await expect(card.locator('[data-request-end] [data-request-card]'), 'at the thread transcript’s end (UX wave U1b)').toContainText('echo themed', { timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // the strip's words on one line at the card's width, its two buttons wrapping under them rather than squeezing them
     const stripLines = await card.locator('[data-needs-you] > span').evaluate((text) => Math.round(text.getBoundingClientRect().height / parseFloat(getComputedStyle(text).lineHeight)));
@@ -876,11 +977,11 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(card.getByText(CARD_COMMENT, { exact: true })).toBeVisible();
     await expect(card.getByText(FIRST_REPLY), 'none of the parent’s copied history').toHaveCount(0);
     await expect(card.getByText(FIRST_PROMPT)).toHaveCount(0);
-    // the comment row's time, Copy and Edit, shown on hover, sit inside the card (the card's narrow width; whole-branch
-    // review, fix wave)
+    // the comment row's time, Copy and Edit, shown on hover on their line under the bubble (UX wave U3b, decision 10),
+    // sit inside the card (the card's narrow width; whole-branch review, fix wave)
     const comment = card.getByRole('region', { name: 'Your message' }).first();
     await comment.hover();
-    const toolbar = comment.locator('.transcript-user-actions');
+    const toolbar = comment.locator('.transcript-user-line-actions');
     await expect(toolbar).toHaveCSS('opacity', '1');
     const [cardBox, toolbarBox] = [(await card.boundingBox())!, (await toolbar.boundingBox())!];
     expect(toolbarBox.x, 'the toolbar’s left inside the card').toBeGreaterThanOrEqual(cardBox.x);
@@ -930,8 +1031,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const allowed = () => journal(maws, child).filter((r) => r.direction === 'out' && r.frame.type === 'control_response').length;
 
     // the first request: C7's inline card (the transcript's, named by its heading) inside the card's box, the strip above
-    // Reply naming it
-    const request = card.locator('[data-request-card]');
+    // Reply naming it. UX wave U1b: a permission is the card at the end of the thread's transcript
+    const request = card.locator('[data-request-end] [data-request-card]');
     await expect(request).toBeVisible({ timeout: 20_000 });
     await expect(request.getByRole('heading', { name: 'Run a command' }), 'the loaded card says what is asked (U1a §D)').toBeVisible({ timeout: 20_000 });
     await expect(request).toContainText('echo first-step');
@@ -954,9 +1055,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await strip.getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo second-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo second-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect.poll(allowed).toBe(2);
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
     expect(writtenUsers(maws, parent)).toHaveLength(1);
@@ -988,9 +1089,9 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await card.locator('[data-needs-you]').getByRole('button', { name: 'Open in Side pane' }).click();
     await expect(card).toHaveCount(0);
     const pane = panelRegion(page).locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
-    const docked = pane.getByRole('group', { name: 'Approval needed' });
-    await expect(docked).toContainText('echo the-step');
-    await docked.getByRole('button', { name: 'Allow once', exact: true }).click();
+    const atEnd = pane.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }); // UX wave U1b: the thread view's end
+    await expect(atEnd).toContainText('echo the-step');
+    await atEnd.getByRole('button', { name: 'Allow once', exact: true }).click();
     await expect(pane.getByText(CARD_REPLY)).toBeVisible({ timeout: 20_000 });
 
     // Show in artifact: the parent's Artifacts tool on the artifact, the card back on the same thread under the heading
@@ -1046,7 +1147,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
 
     // the thread reads the page (allowed by a rule) and asks to publish over it: C7's request card inside the card and the
     // strip, then Allow there
-    const request = card.locator('[data-request-card]');
+    const request = card.locator('[data-request-end] [data-request-card]'); // UX wave U1b: at the thread transcript's end
     await expect(request.getByRole('button', { name: 'Allow once', exact: true }), 'the loaded permission card').toBeVisible({ timeout: 20_000 });
     await expect(card.locator('[data-needs-you]')).toContainText('Waiting for your permission');
     // P3-F (a diagnostic, not a fix): the request's identity and the public pending state are read before the two clicks

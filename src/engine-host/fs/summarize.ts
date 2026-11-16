@@ -8,6 +8,7 @@ import type { MessageUuid, SessionId } from '@shared/graph/ids';
 import { isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
 import { branchName } from '@shared/sessions/branch';
+import { flatPersonsWords, personsWords } from '@shared/engine/persons-message'; // ticket 704
 import type { TranscriptSummary } from '@shared/wire/store';
 import { isNoContent, TranscriptRecordSchema, type TranscriptRecord } from '@shared/wire/transcript';
 
@@ -58,8 +59,9 @@ export function summarize(
     aiTitle: lastString(tailReversed, 'ai-title', 'aiTitle') ?? lastString(headReversed, 'ai-title', 'aiTitle'),
     // The conversation's first prompt (charter §19, the title rule): the engine's `last-prompt` follows the latest one,
     // a relay's steer included, so it stands in only when the first prompt's record is cut by the head window, and
-    // then its earliest copy the windows hold (debt wave 4).
-    firstPrompt: firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt'),
+    // then its earliest copy the windows hold (debt wave 4). Ticket 704: the person's words of each, never MAWS's
+    // answer envelope's: a copy with none left is passed over.
+    firstPrompt: firstUserText(headRecords) ?? firstLastPrompt([...headRecords, ...tailRecords]),
     lastAssistantText: lastAssistant,
     // W9 (H2): the latest the windows hold; HEAD (a non-repository or a detached checkout) or empty is no branch
     gitBranch: branchName(firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch')),
@@ -199,9 +201,19 @@ function firstString(records: TranscriptRecord[], field: string): string | null 
   return null;
 }
 
+// The earliest `last-prompt` whose one-line text holds words of the person's (ticket 704): what stands before an answer
+// envelope's opening sentence, the rest of the line being the envelope cut near 200 characters (`flatPersonsWords`).
+function firstLastPrompt(records: TranscriptRecord[]): string | null {
+  for (const record of records) {
+    if (record.type !== 'last-prompt' || typeof record.lastPrompt !== 'string') continue;
+    const words = flatPersonsWords(record.lastPrompt);
+    if (words !== null) return words;
+  }
+  return null;
+}
+
 // The field of the first record of that type in `records`' order: given newest first, the last such record in the
-// window (`lastString`); given in file order, the earliest (`firstOfType`).
-const firstOfType = (records: TranscriptRecord[], type: string, field: string): string | null => lastString(records, type, field);
+// window.
 function lastString(records: TranscriptRecord[], type: string, field: string): string | null {
   for (const record of records) {
     if (record.type !== type) continue;
@@ -212,28 +224,38 @@ function lastString(records: TranscriptRecord[], type: string, field: string): s
 }
 
 // The engine's head-scanning first-prompt extractor, reduced: skip tool results and meta records, cap at 200 characters.
+// Ticket 704: a person's row (no origin, or the person's: the row's form of the split's gate) titles with its words,
+// MAWS's answer envelopes read out (`personsWords`); a text of answers alone holds none, and the next text is read.
 function firstUserText(records: TranscriptRecord[]): string | null {
   for (const record of records) {
     if (record.type !== 'user' || record.isMeta === true) continue;
     const content = (record.message as { content?: unknown } | undefined)?.content;
     if (isNoContent(content)) continue; // P5 O9: the engine's word for a message with none titles nothing
+    const words = isPersonsRow(record) ? personsWords : (text: string) => text;
     if (typeof content === 'string') {
       // A bash-mode prompt stores its command in tags; it titles as the terminal shows it, `! <command>` (debt wave 4)
       const bash = /^<bash-input>([\s\S]*?)<\/bash-input>/.exec(content);
       if (bash) return `! ${bash[1]}`.slice(0, TEXT_CAP);
-      if (content.length > 0) return content.slice(0, TEXT_CAP);
+      const text = content.length > 0 ? words(content) : null;
+      if (text !== null) return text.slice(0, TEXT_CAP);
       continue;
     }
     if (Array.isArray(content)) {
       // W11 (I1): an empty text block (beside an image, say) is no prompt; the record's first block with words is
-      const text = content.find(
-        (block): block is { type: 'text'; text: string } => isBlock(block) && block.type === 'text' && typeof block.text === 'string' && block.text.trim() !== '',
-      );
-      if (text) return text.text.slice(0, TEXT_CAP);
+      for (const block of content) {
+        if (!isBlock(block) || block.type !== 'text' || typeof block.text !== 'string' || block.text.trim() === '') continue;
+        const text = words(block.text);
+        if (text !== null) return text.slice(0, TEXT_CAP);
+      }
     }
   }
   return null;
 }
+
+const isPersonsRow = (record: TranscriptRecord): boolean => {
+  const origin = record.origin as { kind?: unknown } | null | undefined;
+  return origin === null || origin === undefined || typeof origin !== 'object' || origin.kind === 'human';
+};
 
 function assistantText(record: TranscriptRecord): string | null {
   if (record.type !== 'assistant') return null;

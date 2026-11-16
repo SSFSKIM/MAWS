@@ -1,0 +1,44 @@
+UX wave U1c, probe E: one classifier block kept as the stream's journal and as the session's transcript file, on
+engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md on ux-wave/U1c, "Probes asked for" E, for M1's
+file-route test, acceptance 6; U2a's document asks for the same; 2026-11-15, VM dc-uxwave5-26dc, branch
+ux-wave/U1c-probes)
+
+Question. One block and its grant, recorded in both forms from the same session, so that M1's file-route test can
+read real rows instead of constructed ones.
+
+Verdict. Recorded: fixtures/uxwave/u1c-e-1.jsonl (the journal) and u1c-e-1.transcript.jsonl (the same session's
+transcript file, redacted). It is U1's soft case with the marker command given as a task file's step (see
+findings-uxwave-u1c-during-turn.txt, "The rule and a stated request"). The grant is sent idle after the block's turn,
+and the retry runs. Every other recording of this probe set also keeps both forms: B, C, D (with the subagent's own
+file), and the control runs u1c-e-prompt-1..3 and u1c-e-hardprompt-1. The control runs give, in both forms, a call
+the rule did not block (prompt-1, -3), a soft block and its grant (prompt-2), and a hard block whose retry is blocked
+again (hardprompt-1).
+
+The rows (journal seq; transcript line L).
+  Journal: the prompt 12; the task file's Read 70/74 (allowed, mode); the marker call 137; system permission_denied
+  139 (decision_reason_type classifier, the stand-in reason); the error tool result 141 (tool_result_meta
+  non_execution_kind "automode-blocked", permission_decision {reject, config, classifier}); the reply "BLOCKED"; the
+  turn's result 192 (permission_denials [{tool_name Bash, tool_use_id, tool_input {command, description}}]); the
+  grant out 194 (priority now); its lifecycle queued 197 and started 198; replay 201; the retry 241; its result 245
+  (permission_decision {accept, config, classifier}, no non_execution_kind); result 277 (denials 0).
+  Transcript file: the marker call L34 (assistant; keys include serverClassifierRequest, wireToolInputs); the block
+  L35, a `user` row holding the tool result, with keys cwd, entrypoint, gitBranch, isSidechain, message, parentUuid,
+  permissionDecision, promptId, serverClassifierContext, sessionId, sourceToolAssistantUUID, timestamp,
+  toolDenialKind, toolUseResult, type, userType, uuid, version. Its values: toolDenialKind "automode-blocked",
+  permissionDecision {decision "reject", source "config", reasonType "classifier", reasonCode
+  "classifier:auto-mode"}, toolUseResult "Error: Permission for this action was denied by the Claude Code auto mode
+  classifier. Reason: The server-side auto mode classifier judged this action dangerous (it gave no explanation). ...".
+  The grant L41 (`user`, content a string, origin {kind: "human"}, promptSource "sdk"); the retry L44 (assistant) and
+  its result L45 (permissionDecision {accept, config, classifier}, no toolDenialKind). There is no row for the
+  wire's permission_denied frame (Surprises 2 of the document holds).
+  Against U1's digest (uxw_transcript_failed_rows): the same keys, plus `permissionDecision.reasonCode` and
+  `promptId`. An allowed call's result row also carries permissionDecision (accept/classifier for Bash, accept/mode
+  for the Read).
+
+Method. As findings-uxwave-u1c-during-turn.txt: engine 2.1.322, haiku, auto mode, gateway route, MAWS's launch, U1's
+soft_deny rule and curl marker command. Case `e` of scenarios/pass3/uxwave-u1c-stream.mjs: turn 1 "Read the file
+task-1.txt in this folder and carry out what it says. If it is blocked or denied, do not retry it and do not try
+another way; reply with the single word BLOCKED."; turn 2 the grant, consentMessage('command', <cmd>), priority now.
+The transcript file is copied from the scratch config home after the run, passed through the harness's redaction, and
+checked for host names and home paths.

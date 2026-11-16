@@ -2,7 +2,9 @@ import { withAppRewindGuards } from '../../test/support/app-rewind-fixture';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
-import { loadJournal } from '../../test/support/fixtures';
+import { askSteerText } from '@shared/maws/ask';
+import { loadJournal, loadUxwaveJournal } from '../../test/support/fixtures';
+import { recordedJoin } from '../../test/support/recorded-joins';
 import { handshakeResponder, replayedSession, scriptedSession } from './conformance/session-harness';
 import { rewind, rewindFiles } from './rewind';
 
@@ -97,5 +99,38 @@ describe('rewind sends last_seen and derives the boundary from the response', ()
     expect(ofKind(run.events, 'turn.ended').map((e) => e.userMessageUuids)).toEqual([[sent[0]], [sent[1]], [sent[2]]]);
     expect(run.session.queue.state.entries).toEqual([]);
     expect(run.rebuilt()).toEqual(run.events);
+  });
+});
+
+// Ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M2): a rewind to a message the engine joined from the
+// person's prompt and MAWS's answer envelope answers the joined line's whole text as its prefill (probe 2); the box gets
+// the person's words, and the boundary's tooltip holds no envelope
+describe('a rewind to a joined answer and prompt (ticket 704)', () => {
+  const probe = loadUxwaveJournal('u704-rewind-1');
+  // the engine's answer to the rewind, as the wire carried it (seq 771; the probe's meta row at seq 772 repeats it)
+  const response = (probe.find((r) => r.seq === 771)!.frame as { response: { response: Record<string, unknown> } }).response.response;
+  const JOINED = response.targetMessageUuid as MessageUuid;
+  const { prompt, envelopes } = recordedJoin('u704-rewind-1');
+
+  async function rewound(answer: Record<string, unknown>) {
+    const s = scriptedSession({ responder: handshakeResponder({ rewind_conversation: () => ({ response: answer }) }) });
+    await s.session.start();
+    const outcome = await rewind(s.session, { targetMessageUuid: JOINED, lastSeenMessageUuid: JOINED, files: false });
+    return { outcome, boundary: ofKind(s.events, 'boundary.rewind') };
+  }
+
+  it('u704-rewind-1, the recorded response: the outcome’s prefill and the boundary’s are the prompt alone', async () => {
+    expect(response.prefillText).toBe(`${prompt as string}\n${envelopes[0]!}`); // the engine's text: prompt, then envelope
+    const { outcome, boundary } = await rewound(response);
+    expect(outcome.prefillText).toBe(prompt);
+    expect(boundary).toHaveLength(1);
+    expect(boundary[0]).toMatchObject({ targetMessageUuid: JOINED, prefillText: prompt });
+  });
+
+  it('made by hand: a prefill that is an envelope alone leaves nothing of the person’s, so neither the outcome nor the boundary has one', async () => {
+    const lone = askSteerText('toolu_ask_lone', [{ id: 'q1', question: 'Which fruit?', header: 'Fruit', modality: 'choice', options: [{ label: 'Pear' }, { label: 'Plum' }] }], [{ id: 'q1', question: 'Which fruit?', status: 'answered', value: ['Pear'] }]);
+    const { outcome, boundary } = await rewound({ ...response, prefillText: lone });
+    expect(outcome.prefillText).toBeNull();
+    expect(boundary.map((event) => event.prefillText)).toEqual([null]);
   });
 });

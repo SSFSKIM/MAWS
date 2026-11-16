@@ -15,6 +15,9 @@ import { useTranscriptStore } from '../stores/transcript';
 import { ipcSource } from './source/ipc';
 import { TranscriptSlot } from './lazy';
 import { registerTranscriptActions } from './view/registry';
+import { useForkUnavailable } from '../lane-b/remote-unavailable'; // UX wave U3b
+import { forkInPlace } from '../sessions/record-ops'; // UX wave U3b
+import { connectCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 // P2-C start (2026-10-09)
 import { registerAction } from '../keymap/actions-runtime';
 // P2-C end
@@ -53,10 +56,13 @@ export function connectTranscript(): () => void {
   registerSlot('transcript', ShellTranscript);
   const offReport = registerAction('transcript.toggleReport', toggleView); // P2-C (2026-10-09); UX wave U2b: the view's switch
   const offMarkAll = registerAction('transcript.markAllRead', markAllRead); // UX wave U2b
-  const offActions = registerTranscriptActions({ openFile: openFileInTab });
+  // UX wave U3b (Interfaces §D): an answer's "Fork from here" is U9's own two names and decides nothing itself
+  const offActions = registerTranscriptActions({ openFile: openFileInTab, forkFrom: { useUnavailable: useForkUnavailable, run: forkInPlace } });
+  const offCompacting = connectCompacting(); // UX wave U3b (M4): whether a session compacts, for its row and its hover card
   return () => {
     offReport();
     offMarkAll();
     offActions();
+    offCompacting();
   };
 }

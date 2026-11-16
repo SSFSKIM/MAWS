@@ -4,8 +4,11 @@ import { describe, expect, it } from 'vitest';
 import type { PendingSteer, QueueEntry } from '@shared/engine/session-state-store';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { SessionQueue } from '../../stores/queue';
-import { firstToSend, newestToTake, stackRows, type Read, type StackRow } from './stack';
+import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
+import { entryDisplay } from './entry-text';
+import { answerWords, firstToSend, newestToTake, rowText, stackRows, type Read, type StackRow } from './stack';
 
 const APP = 'app-1' as AppSessionId;
 const U1 = '11111111-1111-4111-8111-111111111111' as MessageUuid;
@@ -17,11 +20,18 @@ const entry = (queueId: string, minute: number, over: Partial<QueueEntry> = {}):
   queueId, appSessionId: APP, content: `entry ${queueId}`, createdAt: at(minute), state: 'queued', messageUuid: null, submittedAt: null, uncertain: false, steer: false, ...over,
 });
 const queue = (over: Partial<SessionQueue> = {}): SessionQueue => ({ entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [], loaded: true, ...over });
-const read = (unread: Read['unread'] = [], started: readonly MessageUuid[] = []): Read => ({ unread, started: (uuid) => started.includes(uuid) });
+const read = (unread: Read['unread'] = [], started: readonly MessageUuid[] = [], asks: Record<string, readonly AskQuestion[]> = {}): Read => ({
+  unread, started: (uuid) => started.includes(uuid), questions: (call) => asks[call] ?? null,
+});
 const NONE = new Set<string>();
 const kinds = (rows: StackRow[]) => rows.map((row) => row.kind);
-// an async ask's answer, as `parseAskSteer` reads it
-const ANSWER = askSteerText('ask-1', [], []);
+// an async ask's answer envelope, as `askSteerText` writes it (invented questions)
+const LAYOUT: AskQuestion = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }], multi: true };
+const THEME: AskQuestion = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice', options: [{ label: 'Dark' }, { label: 'Light' }] };
+const SIZE: AskQuestion = { id: 'q3', question: 'How large should the tiles be?', modality: 'text' };
+const GRID: AskAnswer = { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] };
+const ANSWER = askSteerText('ask-1', [LAYOUT], [GRID]);
+const noAsks: Read['questions'] = () => null;
 
 describe('the stack’s rows', () => {
   it('lists the steers at the next step, then the queue’s entries, in the order they will be read', () => {
@@ -54,9 +64,101 @@ describe('the stack’s rows', () => {
     expect(kinds(stackRows(q, new Set(['q-1']), read([{ messageUuid: U1, text: 'entry q-1', at: at(1) }])))).toEqual(['sending']);
   });
 
-  it('knows an answer’s envelope', () => {
-    const rows = stackRows(queue({ steers: [steer(U1, 1, ANSWER)], entries: [entry('q-1', 2)] }), NONE, read());
-    expect(rows.map((row) => 'answer' in row && row.answer)).toEqual([true, false]);
+  it('reads an answer’s envelope as the answer, on a next-step row and on a held one; any other message is no answer', () => {
+    const asks = { 'ask-1': [LAYOUT] };
+    const rows = stackRows(queue({ steers: [steer(U1, 1, ANSWER)], entries: [entry('q-1', 2)] }), NONE, read([], [], asks));
+    expect(rows.map((row) => 'answer' in row && row.answer)).toEqual(['Answer to Layout: Grid', null]);
+    expect(rows.map(rowText)).toEqual(['Answer to Layout: Grid', 'entry q-1']);
+    // after a Stop holds it, the same words
+    const held = stackRows(queue({ paused: true, pauseReason: 'interrupt', entries: [entry('q-a', 1, { content: ANSWER })] }), NONE, read([], [], asks));
+    expect(held.map((row) => [row.kind, rowText(row)])).toEqual([['held', 'Answer to Layout: Grid']]);
+  });
+
+  it('gives a sending and a handed row an answer’s words too, and what they read today otherwise', () => {
+    const q = queue({ entries: [entry('q-s', 1, { state: 'submitting', submittedAt: at(1), content: ANSWER }), entry('q-t', 2, { state: 'submitting', submittedAt: at(2) })] });
+    const rows = stackRows(q, new Set(['q-s', 'q-t']), read([{ messageUuid: U3, text: ANSWER, at: at(0) }, { messageUuid: U2, text: 'typed', at: at(0) }]));
+    expect(rows.map((row) => [row.kind, rowText(row)])).toEqual([
+      ['handed', `Answer to ${LAYOUT.question}: Grid`],
+      ['handed', 'typed'],
+      ['sending', `Answer to ${LAYOUT.question}: Grid`],
+      ['sending', 'entry q-t'],
+    ]);
+  });
+});
+
+describe('a waiting message that holds an attachment beside an answer’s envelope (the architect’s rule, ticket 704)', () => {
+  // made by hand: what the composer sends when the person pastes an envelope beside an image or a PDF
+  const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const pdf = { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: 'JVBERi0xLjQ=' } };
+  const asks = { 'ask-1': [LAYOUT] };
+
+  it('is no answer row on a next-step, after-the-turn, held or sending row: its text is the message as an ordinary one', () => {
+    const withImage = [{ type: 'text', text: ANSWER }, image];
+    const withPdf = [pdf, { type: 'text', text: ANSWER }];
+    const rows = stackRows(
+      queue({ steers: [steer(U1, 1, withImage as never)], entries: [entry('q-1', 2, { content: withPdf as never }), entry('q-s', 3, { state: 'submitting', submittedAt: at(3), content: withImage as never })] }),
+      new Set(['q-s']),
+      read([], [], asks),
+    );
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined])).toEqual([['next', null], ['after', null], ['sending', undefined]]);
+    // what the stack draws of any message with an attachment: the attachment named, then the text
+    expect(rows.map(rowText)).toEqual([entryDisplay(withImage as never), entryDisplay(withPdf as never), entryDisplay(withImage as never)]);
+    expect(rowText(rows[0]!).startsWith('[Image #1] [MAWS ask ask-1]')).toBe(true);
+    const held = stackRows(queue({ paused: true, pauseReason: 'interrupt', entries: [entry('q-a', 1, { content: withImage as never })] }), NONE, read([], [], asks));
+    expect(held.map((row) => [row.kind, 'answer' in row && row.answer])).toEqual([['held', null]]);
+  });
+
+  it('the up-arrow can take it, as any ordinary waiting message', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 5), steer(U2, 9, [{ type: 'text', text: ANSWER }, image] as never)] }), NONE, read());
+    expect(newestToTake(rows)?.key).toBe(U2);
+  });
+
+  it('the envelope alone in one text block is still the answer row', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 1, [{ type: 'text', text: ANSWER }] as never)] }), NONE, read([], [], asks));
+    expect(rows.map((row) => 'answer' in row && row.answer)).toEqual(['Answer to Layout: Grid']);
+  });
+});
+
+describe('a waiting answer’s words', () => {
+  it('one question: the header where the window holds the ask, else the question’s own text', () => {
+    expect(answerWords(ANSWER, (call) => (call === 'ask-1' ? [LAYOUT] : null))).toBe('Answer to Layout: Grid');
+    expect(answerWords(ANSWER, noAsks)).toBe('Answer to Which layout should the gallery use?: Grid');
+    // the window holds the ask, and no question of it has the answer's id
+    expect(answerWords(ANSWER, () => [THEME])).toBe('Answer to Which layout should the gallery use?: Grid');
+  });
+
+  it('a question with no header reads its question; an empty header reads the bare words, as the capsule’s label is empty', () => {
+    const tiles: AskAnswer = { id: 'q3', question: SIZE.question, status: 'answered', value: 'Small' };
+    expect(answerWords(askSteerText('ask-2', [SIZE], [tiles]), () => [SIZE])).toBe('Answer to How large should the tiles be?: Small');
+    const blank: AskQuestion = { ...SIZE, header: '' };
+    expect(answerWords(askSteerText('ask-2', [blank], [tiles]), () => [blank])).toBe('Answer: Small');
+  });
+
+  it('several questions: counted, in the asked order, skipped and left to the agent in the capsule’s words, a note as the capsule reads it', () => {
+    const answers: AskAnswer[] = [
+      { ...GRID, value: ['Grid', 'List'] },
+      { id: 'q2', question: THEME.question, status: 'skipped' },
+      { id: 'q3', question: SIZE.question, status: 'decide_for_me', note: 'whatever fits' },
+    ];
+    const text = askSteerText('ask-3', [LAYOUT, THEME, SIZE], answers);
+    expect(answerWords(text, () => [LAYOUT, THEME, SIZE])).toBe('Answers to 3 questions: Layout: Grid, List; Theme: Skipped; How large should the tiles be?: Decide for me · Note: whatever fits');
+    const blank: AskQuestion = { ...THEME, header: '' };
+    expect(answerWords(text, () => [LAYOUT, blank, SIZE])).toBe('Answers to 3 questions: Layout: Grid, List; Skipped; How large should the tiles be?: Decide for me · Note: whatever fits');
+  });
+
+  it('follows the asked order where the window holds the ask, whatever the answers’ order; an answer no question holds comes after', () => {
+    const theme: AskAnswer = { id: 'q2', question: THEME.question, status: 'answered', value: 'Dark' };
+    const reversed = askSteerText('ask-4', [LAYOUT, THEME], [theme, GRID]);
+    expect(answerWords(reversed, () => [LAYOUT, THEME])).toBe('Answers to 2 questions: Layout: Grid; Theme: Dark');
+    // where the window holds no such row, the array's own order is the only one it has
+    expect(answerWords(reversed, noAsks)).toBe('Answers to 2 questions: Which theme?: Dark; Which layout should the gallery use?: Grid');
+    const stray: AskAnswer = { id: 'q9', question: 'Anything else?', status: 'answered', value: 'No' };
+    expect(answerWords(askSteerText('ask-4', [LAYOUT, THEME], [stray, theme, GRID]), () => [LAYOUT, THEME])).toBe('Answers to 3 questions: Layout: Grid; Theme: Dark; Anything else?: No');
+  });
+
+  it('a text that is no envelope is no answer, one changed character in the tag included', () => {
+    expect(answerWords('Use the grid', noAsks)).toBeNull();
+    expect(answerWords(ANSWER.replace('[MAWS ask', '[MAWS asc'), noAsks)).toBeNull();
   });
 });
 
@@ -72,5 +174,67 @@ describe('the rows the keys act on', () => {
     expect(newestToTake(rows)?.key).toBe('q-1');
     expect(newestToTake(stackRows(queue({ steers: [steer(U2, 9, ANSWER)] }), NONE, read()))).toBeNull();
     expect(newestToTake([])).toBeNull();
+  });
+});
+
+// UX wave U1c (the U1c document, Interfaces §G; card 2): a waiting "Approve and retry" reads as the line it becomes.
+describe('a grant’s row', () => {
+  const GRANT = consentMessage('command', 'make build');
+  it('a row whose whole text is one grant carries it and reads “You approved <the command>”, whichever wait it is in', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 1, GRANT)], entries: [entry('q-1', 2, { content: GRANT }), entry('q-u', 0, { content: GRANT, uncertain: true })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined, rowText(row)])).toEqual([
+      ['next', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['after', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['uncertain', { kind: 'command', subject: 'make build' }, 'You approved make build'],
+    ]);
+  });
+
+  it('a row with only text (handed, sending) whose message is one grant reads so too: a handed one as its transcript row records it', () => {
+    const rows = stackRows(queue({ entries: [entry('q-s', 1, { content: GRANT, state: 'submitting', submittedAt: at(1) })] }), new Set(['q-s']), read([{ messageUuid: U3, text: GRANT, at: at(3), grant: { kind: 'command', subject: 'make build' } }]));
+    expect(rows.map((row) => [row.kind, rowText(row)])).toEqual([['handed', 'You approved make build'], ['sending', 'You approved make build']]);
+  });
+
+  // Decision Log 53: no row reads a grant from the text it draws, which is the message with MAWS's envelopes taken out
+  it('a handed row whose drawn text is the sentence and whose transcript row records no grant reads as its text', () => {
+    const [row] = stackRows(queue(), NONE, read([{ messageUuid: U3, text: GRANT, at: at(3) }]));
+    expect(row).toMatchObject({ kind: 'handed', grant: null });
+    expect(rowText(row!)).toBe(GRANT);
+  });
+
+  it('a message that holds a grant line among other words is the person’s own message: no grant, its own words', () => {
+    const words = `Go ahead with this one.\n${GRANT}`;
+    const [row] = stackRows(queue({ entries: [entry('q-1', 1, { content: words })] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'after', grant: null });
+    expect(rowText(row!)).toBe(words);
+  });
+
+  it('an answer’s row is unchanged: no grant, its envelope’s words', () => {
+    const [row] = stackRows(queue({ steers: [steer(U1, 1, ANSWER)] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'next', answer: answerWords(ANSWER, read().questions), grant: null });
+    expect(rowText(row!)).toBe(answerWords(ANSWER, read().questions));
+  });
+
+  // board ticket 704 at the chain's merge: a waiting message is read as the split reads a person's message, so the grant
+  // that is the person's whole part is the row's grant, and the envelopes beside it are answers of their own
+  it('an answer, the grant and the answer again, as one text or as text blocks: the grant’s row, no answer, whichever wait it is in', () => {
+    const joined = `${ANSWER}\n${GRANT}\n${ANSWER}`;
+    const blocks = [{ type: 'text' as const, text: ANSWER }, { type: 'text' as const, text: GRANT }, { type: 'text' as const, text: ANSWER }];
+    const rows = stackRows(queue({ steers: [steer(U1, 1, joined)], entries: [entry('q-1', 2, { content: blocks }), entry('q-u', 3, { content: joined, uncertain: true })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, 'grant' in row ? row.grant : undefined, rowText(row)])).toEqual([
+      ['next', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['after', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['uncertain', undefined, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+    ]);
+    // an attachment beside them keeps the message the person's own (Decision Log 44), as beside the grant alone
+    const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'iVBORw0KGgo=' } };
+    const [row] = stackRows(queue({ entries: [entry('q-i', 4, { content: [...blocks, image] })] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'after', answer: null, grant: null });
+  });
+
+  it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {
+    const rows = stackRows(queue({ steers: [steer(U1, 5)], entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read());
+    expect(newestToTake(rows)?.key).toBe(U1);
+    expect(newestToTake(stackRows(queue({ entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read()))).toBeNull();
+    expect(firstToSend(stackRows(queue({ entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read()))?.key).toBe('q-g');
   });
 });

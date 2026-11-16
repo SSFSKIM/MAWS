@@ -1,16 +1,17 @@
-// The docked placement's chrome, focus and keys (C7 execution document, Composer public surface; §5.7): the X4 card's
-// docked placement and C10's trust and relay-down cards all render inside this frame, so they take focus, give it
-// back and answer Enter and Esc under exactly one set of rules. The frame root is focusable (tabIndex -1) and takes
-// focus on mount when its pane held focus; on unmount, if focus was inside the frame, it goes back to the session's
-// composer (the focus target a mounted composer registers), else to what held it before, unless the session's next
-// docked frame mounts in the same commit, which takes it instead. Enter and Esc are
-// `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them only while
-// the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its key unbound.
+// The docked placement's chrome, focus and keys (C7 execution document, Composer public surface; §5.7): C10's trust,
+// relay-down and failed-start cards render inside this frame, so they take focus, give it back and answer Enter and Esc
+// under exactly one set of rules (UX wave U1b: no request docks; a request is drawn in its session's transcript). The
+// frame root is focusable (tabIndex -1) and takes focus on mount when its pane held focus; on unmount, if focus was
+// inside the frame, it goes back to the session's composer (the focus target a mounted composer registers), else to
+// what held it before, unless the session's next docked frame mounts in the same commit, which takes it instead. Enter
+// and Esc are `request.accept` and `request.decline` bound `within` the frame root, so C5's dispatcher delivers them
+// only while the frame itself holds focus: never from a textarea, a button or another pane. A null handler leaves its
+// key unbound.
 // UX wave U1a (§D): a permission prompt adds `request.allowOnce` (⌘↩) and `request.allowLasting` (⇧⌘↩), bound the same
 // way; every key the frame binds acts on a fresh press only, so a key held through one answer cannot answer the request
-// whose frame takes focus next (a card another child docks has the rule too). UX wave U1a §J: the title line says the
-// composer is paused for a request; a card another child docks (trust, relay down, a failed start) passes `titleAlone`.
-// This module imports no editor code: the request card imports it directly, never through `composer/index.ts`.
+// whose frame takes focus next. UX wave U1a §J's "Composer paused" was a request's; the title line now reads the title
+// alone for every frame.
+// This module imports no editor code.
 import { useLayoutEffect, useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { useKeyChord } from '../../keymap/useKeyChord';
@@ -19,7 +20,6 @@ import { useComposerStore } from '../../stores/composer';
 export interface DockedCardFrameProps {
   appSessionId: AppSessionId;
   title: string;
-  titleAlone?: boolean; // U1a §J: the title with nothing after it (a card another child docks)
   onAccept: (() => void) | null;
   onDecline: (() => void) | null;
   onAllowOnce?: (() => void) | null; // U1a: only a permission prompt has them
@@ -28,16 +28,13 @@ export interface DockedCardFrameProps {
 }
 
 // Sessions whose frame unmounted with focus inside it, each with the mark of that hand-over. A frame that mounts for the
-// same session in that commit (the next docked request, behind the `1 more waiting` pager) takes the focus instead
-// of the editor, which stays hidden behind it: its own mount sees focus on the body by then, never in its pane.
-// UX wave U1a (decision 17; the ruling of 2026-11-13): the next request can also dock a commit later, the engine asking
-// about its next call once the first is answered. The mark then lives until the animation frame in which the editor's
-// deferred focus has had its turn, and a frame mounting meanwhile claims it when the focus is on the body or inside its
-// own pane; anywhere else the person moved it, and the mark is dropped. After that frame, the editor holds the focus
-// inside the pane and the next frame takes it by `before`, or nothing does. No timer: the frame order bounds it.
+// same session in that commit (the next docked card) takes the focus instead of the editor, which stays hidden behind
+// it: its own mount sees focus on the body by then, never in its pane. The mark lives until the commit's microtask
+// (UX wave U1b, decision 11: U1a's later-commit hand-over, for the engine's next request, went with the dock); a frame
+// mounting later takes the focus only by its pane holding it (`before`).
 const handingOver = new Map<AppSessionId, object>();
 
-export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAccept, onDecline, onAllowOnce = null, onAllowLasting = null, children }: DockedCardFrameProps) {
+export function DockedCardFrame({ appSessionId, title, onAccept, onDecline, onAllowOnce = null, onAllowLasting = null, children }: DockedCardFrameProps) {
   const frameRef = useRef<HTMLDivElement>(null);
   useKeyChord('request.accept', () => onAccept?.(), { within: frameRef, enabled: onAccept !== null, fresh: true });
   useKeyChord('request.decline', () => onDecline?.(), { within: frameRef, enabled: onDecline !== null, fresh: true });
@@ -62,15 +59,12 @@ export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAcc
       const ours = () => handingOver.get(appSessionId) === mark;
       queueMicrotask(() => {
         if (!ours()) return;
+        handingOver.delete(appSessionId);
         const target = useComposerStore.getState().focusTargets.get(appSessionId);
         // The composer's editor is visible again: its Frame's `hidden` cleared in the commit this frame unmounted in,
         // and `focusEditor` is Tiptap's `commands.focus()`, which defers to the next frame besides.
         if (target) target.focusEditor();
         else if (before?.isConnected && !frame.contains(before)) before.focus();
-        // Registered after the editor's own deferred focus, so it runs once that has had its turn in the same frame.
-        requestAnimationFrame(() => {
-          if (ours()) handingOver.delete(appSessionId);
-        });
       });
     };
   }, [appSessionId]);
@@ -86,7 +80,6 @@ export function DockedCardFrame({ appSessionId, title, titleAlone = false, onAcc
     >
       <p className="m-0 text-ui-sm text-fg-muted">
         <span className="font-medium text-fg">{title}</span>
-        {!titleAlone && ' · Composer paused · draft preserved'}
       </p>
       {children}
     </div>

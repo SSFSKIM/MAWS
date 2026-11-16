@@ -1,16 +1,15 @@
 // A session tab's content (§5.4; C10's ask of C5). A session with a record reads as the transcript slot over the
-// composer zone: the docked request (the X4 slot, `placement: 'docked'`) above the composer slot, and nothing under it
-// (W2: §5.5 as amended 2026-10-01, the status line is gone). A session with no controls port (P5 O9 M4: a foreign-live
-// one, held by a terminal or a background job) gets the holder notice in place of the composer and never a docked
-// request (D-12); P5 O9 M5: a foreign-live session whose sminos bridge is live gets lane A's port, so the composer, and the
-// notice only while it has none, with the reason its bridge gave when one answered but can't be driven; M6: its requests
-// dock as any session's, and one its terminal answered first stays docked 3 s, settled in place (the owner's Q3). A session with
-// no record yet is unstarted: the `newSession` slot
+// composer zone: the composer slot, and nothing under it (W2: §5.5 as amended 2026-10-01, the status line is gone). UX
+// wave U1b: a waiting request is drawn in the session's transcript (its call's row, or the transcript's end), never in
+// the composer zone. A session with no controls port (P5 O9 M4: a foreign-live one, held by a terminal or a background
+// job) gets the holder notice in place of the composer (D-12); P5 O9 M5: a foreign-live session whose sminos bridge is
+// live gets lane A's port, so the composer, and the notice only while it has none, with the reason its bridge gave when
+// one answered but can't be driven. A session with no record yet is unstarted: the `newSession` slot
 // (C10's heading and setup) with the composer frame centred beneath it and nothing else; it swaps to the ordinary pane
 // when the record arrives. In both placements the composer sits in the column the transcript's rows use
 // (`.thread-column`, W2: §5.4 as amended 2026-10-01, Codex's shared class), so the frame is exactly the transcript's
 // width. P5 O9 M9: another machine's terminal session (a listed lane A row) has no record and reads as started: its
-// transcript from its machine's plane, its composer driven through the lane A port, its requests docked as cards.
+// transcript from its machine's plane, its composer driven through the lane A port.
 // P5 O7 M2: another machine's lane B session is started once main has read its record there (main emits it as
 // `session.changed`, so the pane is a record's like a local one's); until then it reads "Opening on <machine>…", and
 // "<machine> can't place this session" (or whatever reason main says) with Try again once main gave up. The pane's mount
@@ -18,18 +17,15 @@
 // Board 525: another member's session on either lane whose read its machine refused at the member's grade (Can message)
 // reads as what the member can do there and whom to ask for View, with no transcript and no composer; a pane opening the
 // session asks afresh (sessions/share/reader-connect.ts).
-import { useEffect, useRef, type ReactNode } from 'react';
-import type { AttentionItem } from '@shared/graph/attention';
+// UX wave U1b (M5; acceptance 10): the compact composer of a closed floating card, which shows no transcript, has one
+// line above it while requests of the session wait, "Waiting for you · N"; its click opens the card and goes to the oldest
+// of them. The composer's own toolbar is not touched (the architect's ruling A4).
+import { useRef, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { SurfaceViewportProvider } from '../engine-surface/viewport';
 import { useSlot } from '../app/slots';
-import { FALLBACKS } from '../app/slot-fallbacks'; // C7
-import { waitingItem } from '../attention/derive';
-import { ipc } from '../ipc/client';
-import { selectPendingOf, useAttention } from '../stores/attention';
 import { useLaneAState } from '../stores/lane-a'; // P5 O9 M5
-import { useSettling } from '../lane-a/race'; // P5 O9 M6
 import { useSessions } from '../stores/sessions';
 import { useRemoteLaneA } from '../lane-a/remote-session'; // P5 O9 M9
 import { retryRemoteSession, useRemotePaneOpening } from '../lane-b/remote-connect'; // P5 O7 M2
@@ -45,6 +41,9 @@ import { useCantRead, useWhomToAsk } from '../sessions/share/reader'; // board 5
 import { useReaderPane } from '../sessions/share/reader-connect'; // board 525
 import { ComputerUseStrip } from '../computer-use/Strip'; // UX wave U12a
 import { BtwCard } from '../side/BtwCard'; // UX wave U4a
+import { selectWaitingRequests, useAttention } from '../stores/attention'; // UX wave U1b
+import { showWaiting } from '../request-card/show-waiting'; // UX wave U1b
+import { openCard } from '../shell/floating'; // UX wave U1b
 
 type PaneIndex = 0 | 1;
 
@@ -120,22 +119,22 @@ function UnstartedPane({ appSessionId, paneIndex, compact }: { appSessionId: App
 function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSessionId: AppSessionId; record: SessionRecord | null; paneIndex: PaneIndex; compact: boolean }) {
   const Transcript = useSlot('transcript');
   const Composer = useSlot('composer');
-  const pending = useAttention((s) => selectPendingOf(s, id));
   const holder = record?.holder ?? null;
   const readOnly = useSessionControls(id) === null; // P5 O9 M4: no port drives the session
   const bridgeReason = useLaneAState(id)?.reason ?? null; // P5 O9 M5: a bridge that answered but can't be driven
-  // A docked request is the session's oldest actionable item (the one its Needs-you row shows); held peer messages
-  // are not requests.
-  const waiting = waitingItem(pending);
-  const docked = useSettling(!readOnly && waiting?.tier === 1 && Composer === FALLBACKS.composer ? waiting.oldest : null); // C7: a registered composer is the one docked swap (it docks the request itself)
   const noticed = readOnly && holder !== null && (holder.kind === 'terminal' || holder.kind === 'background_job'); // the holder notice stands in the composer's place
 
   return (
     <div className="flex h-full flex-col">
       {!compact && <ComputerUseStrip appSessionId={id} /> /* UX wave U12a: no height, its line over the transcript's top edge */}
       {/* UX wave U4a (M7): a positioned box around the transcript's scroller, so the session's `/btw` card is a layer of the
-          pane over the transcript's bottom right corner and not of the scroller */}
-      {!compact && <div className="relative flex min-h-0 flex-1 flex-col">
+          pane over the transcript's bottom right corner and not of the scroller. UX wave U1b (the branch review's rule of
+          2026-11-15 UTC): inside the floating card (`[data-pane="card"]`), while the session has a request waiting that
+          its transcript draws, in its call's row or at its end (both carry `[data-request-waiting]`), the box keeps
+          200 px, so the request's form is not clipped by the transcript's scroller at the card's minimum size; the card's
+          body then scrolls between it and the composer. A main pane, a card with no request waiting and the compact pane
+          (which draws no transcript) lay out as before. */}
+      {!compact && <div className="relative flex min-h-0 flex-1 flex-col in-data-[pane=card]:has-[[data-request-waiting]]:min-h-50">
         <div className="scroll-gutter-scope min-h-0 flex-1 overflow-auto">
           {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
           <Transcript appSessionId={id} agentId={null} paneIndex={paneIndex} waiting={noticed ? undefined : 'stacked'} /* UX wave U4a: the composer's stack draws a waiting message */ />
@@ -144,8 +143,8 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
       </div>}
       <div className={`shrink-0 ${compact ? "py-2" : "scroll-gutter-under pt-4 pb-4"}`}>
         <ComposerColumn>
+          {compact && <WaitingLine appSessionId={id} /* UX wave U1b: no transcript here, so the count above the composer */ />}
           {compact && <BtwCard appSessionId={id} placement="flow" /* UX wave U4a: no transcript here, so directly above the frame */ />}
-          {docked && <DockedRequest item={docked} paneIndex={paneIndex} />}
           {/* C10 start: an interrupted delete's Finish deleting or Keep, and the card a resume waits on */}
           <SessionTabNotes appSessionId={id} />
           {/* C10 end */}
@@ -166,14 +165,19 @@ function StartedPane({ appSessionId: id, record, paneIndex, compact }: { appSess
   );
 }
 
-function DockedRequest({ item, paneIndex }: { item: AttentionItem; paneIndex: PaneIndex }) {
-  const Card = useSlot('requestCard');
-  const request = useAttention((s) => s.requests.get(item.id) ?? null);
-  useEffect(() => void useAttention.getState().loadRequest(ipc, item), [item]);
+// UX wave U1b (M5): how many requests of the session wait, as one line above the compact composer; the card opens on a
+// click, and the oldest of them is shown in its transcript once that mounts, its row taking the keyboard (the card's
+// composer is not handed it).
+function WaitingLine({ appSessionId }: { appSessionId: AppSessionId }) {
+  const waiting = useAttention((s) => selectWaitingRequests(s, appSessionId).length);
+  if (waiting === 0) return null;
+  const go = () => {
+    openCard(false);
+    showWaiting(appSessionId, null);
+  };
   return (
-    <div className="rounded-lg border border-border-strong bg-bg-raised p-3">
-      {/* eslint-disable-next-line react-hooks/static-components -- registered once at composition, not created in render */}
-      <Card item={item} request={request} placement="docked" paneIndex={paneIndex} />
-    </div>
+    <button type="button" data-waiting-count={waiting} onClick={go} className="flex w-full min-w-0 items-center rounded-sm px-2 py-1 text-left text-ui-sm text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2">
+      Waiting for you · {waiting}
+    </button>
   );
 }

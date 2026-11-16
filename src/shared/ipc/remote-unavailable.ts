@@ -51,7 +51,6 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.applyFlagSettings': notYet('changing the session’s settings flags'),
   'session.setCwd': notYet('changing the working directory'),
   'session.history.append': notYet('adding to the prompt history'),
-  'session.steer.sendNow': notYet('sending a waiting message now while the agent works'), // UX wave U4a; U4b offers it
   'session.reloadSkills': notYet('reloading skills'),
   // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),
@@ -87,6 +86,8 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
 
 /** The capability an endpoint lists once it serves the session acts the UX wave offers (UC-7.4). */
 export const SESSION_ACTS_CAPABILITY = 'rl2.session-acts';
+/** The capability an endpoint lists once it offers sending a waiting message now (the UX wave, U4b; UC-7.6). */
+export const SEND_NOW_CAPABILITY = 'rl2.send-now';
 
 /**
  * A command a machine takes only when its endpoint's handshake lists the capability named: the device sends it to no
@@ -103,6 +104,7 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'maws.pane.answer': SESSION_ACTS_CAPABILITY,
   'session.fork': SESSION_ACTS_CAPABILITY, // in place, the machine's owners' (M2)
   'artifacts.undelete': 'rl2.artifact-undelete', // UX wave U10b (M4, §C.3): the undo of an agent's delete, the owners'
+  'session.steer.sendNow': SEND_NOW_CAPABILITY, // U4b: offered later than the session acts, so a capability of its own
   // UX wave U5b-2 (M8): the branch read, the commit read and the working-tree read (GIT_READS_CAPABILITY,
   // ./schema/git.ts); reads, so no ACT_WORDS row
   'git.branchCommits': 'rl2.git-reads',
@@ -117,7 +119,7 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
  */
 export type ActWords = { act: string; done: string; closes?: true };
 
-/** UC-7.5's words per act. Taking back a waiting message and a pane's answer have none yet (U4 and U12 add theirs). */
+/** UC-7.5's words per act. A pane's answer has none yet (U12 adds its). */
 export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>> = {
   'session.fork': { act: 'fork', done: 'forked', closes: true },
   'session.archive': { act: 'archive', done: 'archived', closes: true },
@@ -128,6 +130,10 @@ export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>> = {
   'session.send': { act: 'send', done: 'sent' },
   'session.steer': { act: 'send', done: 'sent' },
   'artifacts.undelete': { act: 'restore', done: 'restored' }, // UX wave U10b (M4)
+  // U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces D; the owner's card 1, built at
+  // its default): a waiting message taken back (Edit, ↑ and Delete pass their own labels) and sent now
+  'session.steer.cancel': { act: 'take back', done: 'taken back' },
+  'session.steer.sendNow': { act: 'send now', done: 'sent now' },
 };
 
 export type LinkPhase = 'up' | 'connecting' | 'reconnecting' | 'offline' | 'removed';
@@ -199,6 +205,10 @@ function reasonOf(command: CommandName, machine: string, refusal: string, detail
     case 'busy':
     case 'state-too-old':
       return `${machine} is busy; try again in a moment`;
+    // U4b (decision 14): the device's own word, never on the link, for an act the endpoint accepted and an earlier engine
+    // host, still serving the session after an update, refused `unavailable` (it has no handler for the command)
+    case 'host-older':
+      return `the engine host on ${machine} is finishing an update; this works once it has handed the session over`;
     default:
       return `${machine} refused it (${refusal})`;
   }

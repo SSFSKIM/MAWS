@@ -4,7 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AgentId, MessageUuid, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { AgentMetaSchema, currentChain, parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
-import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture } from '../../../test/support/fixtures';
+import { FIXTURE_DIR, loadEngineJournal, loadJournal, loadSyntheticTranscript, loadTranscript, loadTranscriptFixture, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { Normalizer } from '../normalizer'; // E7
 import { recordedReceiptRecord } from '../../../test/support/agents-events';
 import { createBackfillContext, endedByExit, recordToEvents, SPILL_MARKER, startsTurn, type BackfillContext, type SubagentLookup } from './backfill';
@@ -1107,5 +1107,118 @@ describe('a refused call’s kind, from the file', () => {
     expect(resultsOf([refusedRow({ toolDenialKind: 'classifier-later-kind' })]).map((r) => r.denial)).toEqual([null]);
     expect(resultsOf([refusedRow({ toolDenialKind: 7 })]).map((r) => r.denial)).toEqual([null]);
     expect(resultsOf([refusedRow({})]).map((r) => r.denial)).toEqual([null]);
+  });
+});
+
+// UX wave U1c, M1 (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, Design 2, "The join, from a
+// file"; Acceptance 14): probe B's transcript files (findings-uxwave-u1c-during-turn.txt). At the turn's end the engine
+// writes the waiting messages as one `user` row of origin `human`, the texts joined by one line break, and each grant
+// line of it is the person's grant; mid-turn each message is its own queued prompt.
+describe('a joined row keeps every grant, from the file (U1c)', () => {
+  const GRANT = (n: string) => ({ class: 'consent', kind: 'command', subject: `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"` });
+  const messageOf = (name: string, line: number) => {
+    const records = loadUxwaveTranscript(name);
+    const ctx = createBackfillContext({ sessionId: SESSION, agent: null });
+    const before = records.slice(0, line - 1).flatMap((record) => recordToEvents(record, ctx));
+    expect(before.length, name).toBeGreaterThan(0);
+    return only(mapAll([records[line - 1]!], ctx), 'user.message');
+  };
+
+  it('at the turn’s end, joined: the one row carries the mark of each grant line, in order, under the second frame’s uuid', () => {
+    expect(messageOf('u1c-b-joinend-grant-first-1', 42)).toEqual([expect.objectContaining({ messageUuid: 'f85e3839-8569-463a-b00e-fe1ae5ce3dd0', origin: 'human', isSynthetic: false, arrival: [GRANT('1')] })]);
+    expect(messageOf('u1c-b-joinend-other-first-1', 39)).toEqual([expect.objectContaining({ messageUuid: 'f1e78acb-5a61-46d3-a2c6-e147781964cd', arrival: [GRANT('1')] })]);
+    expect(messageOf('u1c-b-twoend-1', 47)).toEqual([expect.objectContaining({ messageUuid: '01cc8d05-81ae-4fc9-87c3-5d8ab4578a95', arrival: [GRANT('1a'), GRANT('1b')] })]);
+  });
+
+  it('mid-turn, not joined: each queued prompt is its own message, a grant with its mark and the other words with none', () => {
+    const marks = (name: string, lines: number[]) => lines.map((line) => messageOf(name, line).map((event) => event.arrival ?? null));
+    expect(marks('u1c-b-join-grant-first-1', [42, 45])).toEqual([[[GRANT('1')]], [null]]);
+    expect(marks('u1c-b-join-other-first-1', [42, 45])).toEqual([[null], [[GRANT('1')]]]);
+    expect(marks('u1c-b-two-1', [44, 47])).toEqual([[[GRANT('1a')]], [[GRANT('1b')]]]);
+  });
+});
+
+// UX wave U1c, M4 (the U1c document, Design 7 and Interfaces §C, 6 and 8; probe T,
+// findings-uxwave-u1c-terminal-grant.txt): the grant a sminos bridge carried to a terminal session, from its file. Idle,
+// the bridge's row submitted as the user is the grant's message and opens its turn. During a turn and after an Esc the
+// bridge appends it: the appended row stays the synthetic message it was, and the words the mirror line names become
+// the person's steer, which carries the mark, so the mark is on one event of the uuid; after an Esc that steer waits
+// for the turn the bridge's wake opens, and opens it. Over the nine recorded runs, whole.
+describe('a grant a sminos bridge carried to a terminal session, from the file (U1c, M4; probe T)', () => {
+  const GRANT = (n: number) => ({ class: 'consent', kind: 'command', subject: `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"` });
+  // each run: its name, the line of the grant's row, the marker its command names
+  const runs: Record<'idle' | 'busy' | 'esc', [string, number, number][]> = {
+    idle: [['u1c-t-idle-1', 53, 1], ['u1c-t-idle-2', 51, 2], ['u1c-t-idle-3', 47, 3]],
+    busy: [['u1c-t-busy-1', 52, 1], ['u1c-t-busy-2', 53, 2], ['u1c-t-busy-4', 49, 4]],
+    esc: [['u1c-t-esc-1', 56, 1], ['u1c-t-esc-2', 51, 2], ['u1c-t-esc-3', 52, 3]],
+  };
+  /** The run's file mapped whole, the uuid of its grant's row, and the messages that carry a consent mark. */
+  const mapped = (name: string, line: number) => {
+    const records = loadUxwaveTranscript(name);
+    const events = mapAll(records);
+    const uuid = records[line - 1]!.uuid as MessageUuid;
+    const marks = (event: Extract<SessionEvent, { kind: 'user.message' }>) => (event.arrival ?? []).some((entry) => (entry as { class?: unknown }).class === 'consent');
+    return { events, uuid, marked: only(events, 'user.message').filter(marks) };
+  };
+  const delivered = (events: SessionEvent[]) => only(events, 'notice.posted').filter((event) => event.text.startsWith('sminos: delivered: '));
+
+  it.each(runs.idle)('idle, %s: the row the bridge submitted as the user is the grant’s message, with its mark, and opens its turn', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: null, isSynthetic: false, arrival: [GRANT(n)] })]);
+    expect(only(events, 'turn.started').map((event) => event.userMessageUuid)).toContain(uuid);
+  });
+
+  // Decision Log 38: the approval waits for the running turn, its start held to the events of the running call's result
+  // (the line after the mirror line in each run), which the engine's next request carries
+  it.each(runs.busy)('during a turn, %s: the words the mirror line names are the person’s steer, with the mark, waiting for the running turn: its start comes after the running call’s result, not at the mirror line; the appended row is a synthetic message with none; the line is no notice', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: 'human', isSynthetic: false, arrival: [GRANT(n)] })]);
+    const result = loadUxwaveTranscript(name)[line + 1]!.uuid as string;
+    const started = events.filter((event) => event.kind === 'command.lifecycle' && event.commandUuid === uuid);
+    expect(started, 'one start').toHaveLength(1);
+    const at = events.indexOf(started[0]!);
+    expect(events[at - 1], 'right after the running call’s result').toMatchObject({ kind: 'tool.result', messageUuid: result });
+    expect(started[0]!.id.startsWith(result), 'made at the result’s record').toBe(true);
+    expect(only(events, 'user.message').filter((event) => event.messageUuid === uuid).map((event) => [event.isSynthetic, event.arrival ?? null])).toEqual([[true, null], [false, [GRANT(n)]]]);
+    expect(delivered(events)).toEqual([]);
+  });
+
+  it.each(runs.esc)('after an Esc, %s: the words the mirror line names wait for the turn the bridge’s wake opens, and open it with the mark; the line is no notice', (name, line, n) => {
+    const { events, uuid, marked } = mapped(name, line);
+    expect(marked).toEqual([expect.objectContaining({ messageUuid: uuid, origin: 'human', isSynthetic: false, arrival: [GRANT(n)] })]);
+    const opened = only(events, 'turn.started').find((event) => event.userMessageUuid === uuid);
+    expect(opened, 'the wake’s turn, opened by the grant').toBeDefined();
+    expect(events.indexOf(opened!)).toBeLessThan(events.indexOf(marked[0]!));
+    expect(delivered(events)).toEqual([]);
+  });
+
+  const sminos = { kind: 'plugin', name: 'sminos' };
+  const prompt = rec({ type: 'user', uuid: 'p1', parentUuid: null, cwd: '/d', timestamp: at(0), origin: { ...sminos, asUser: true }, message: { role: 'user', content: 'run the build' } });
+  const row = (uuid: string, text: string) => rec({ type: 'user', uuid, parentUuid: 'p1', isMeta: true, timestamp: at(1), origin: sminos, promptId: 'x', message: { role: 'user', content: [{ type: 'text', text }] } });
+  const line = (uuid: string, parentUuid: string, text: string) => rec({ type: 'system', subtype: 'informational', uuid, parentUuid, isMeta: false, timestamp: at(2), content: `sminos: delivered: ${text.replaceAll('\n', ' ')}`, level: 'notice' });
+  const SENTENCE = 'Permission granted for this exact command only, as one whole string: "make build". This does not approve any other command, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact command if you would like.';
+
+  // Decision Log 38, scope (A): only an approval waits; any other words the bridge appends into a running turn keep
+  // today's events, the steer taken at once, whether the mirror line names them or MAWS draws them (`mawsDrawn`)
+  it('an ordinary steer the bridge appended into a running turn keeps today’s events: its message and its start together, at the mirror line and at MAWS’s drawn row', () => {
+    const call = rec({ type: 'assistant', uuid: 'a1', parentUuid: 'p1', timestamp: at(1), message: { id: 'msg_1', model: 'x', content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'sleep 30' } }] } });
+    const drawn = rec({ type: 'attachment', uuid: 'd2', parentUuid: 'n1', timestamp: at(3), attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'And the docs.' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'd2', mawsDrawn: true } });
+    const events = mapAll([prompt, call, row('d1', 'Also run the linter.'), line('n1', 'd1', 'Also run the linter.'), drawn]);
+    const steers = events.filter((event) => (event.kind === 'user.message' && !event.isSynthetic && event.messageUuid !== 'p1') || event.kind === 'command.lifecycle');
+    expect(steers.map((event) => [event.kind, event.kind === 'user.message' ? event.messageUuid : (event as Extract<SessionEvent, { kind: 'command.lifecycle' }>).commandUuid])).toEqual([
+      ['user.message', 'd1'], ['command.lifecycle', 'd1'],
+      ['user.message', 'd2'], ['command.lifecycle', 'd2'],
+    ]);
+  });
+
+  it('appended words that hold the sentence among other words, or behind the person’s sminos frame line, are the person’s words with no mark', () => {
+    const among = `Also run the linter.\n${SENTENCE}`;
+    const framed = `[sminos message from human id=0f0e0d0c]\n${SENTENCE}`;
+    const events = mapAll([prompt, row('d1', among), line('n1', 'd1', among), row('d2', framed), line('n2', 'd2', framed)]);
+    expect(only(events, 'user.message').filter((event) => !event.isSynthetic).map((event) => [event.messageUuid, event.content, event.arrival ?? null])).toEqual([
+      ['p1', 'run the build', null],
+      ['d1', among, null],
+      ['d2', SENTENCE, null],
+    ]);
   });
 });

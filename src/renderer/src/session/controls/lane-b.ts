@@ -18,7 +18,8 @@
 // UX wave U4a (decision 30; Interfaces D): the stack's Send now on a next-step row (`session.steer.sendNow`) goes only to an
 // engine host of this build's wire, by the same reading of `host.status`; under another build's host the port answers the
 // sentence and invokes nothing (that host does not know the command). A session on another machine is never gated here:
-// its host is that machine's, and the command is declared not offered there.
+// its host is that machine's, and main's adapter sends the act only to a machine whose handshake lists `rl2.send-now`
+// (UX wave U4b).
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';

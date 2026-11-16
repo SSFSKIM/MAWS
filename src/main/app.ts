@@ -142,6 +142,8 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 // P3-A start
 import { installStorePolicies, startArtifacts } from './artifacts'; // P5 O5: registerStoreSchemes runs in the entry's shared bootstrap
 // P3-A end
+import { startFileFrames } from './file-frames'; // UX wave U6b-2: a PDF, a page or media drawn by a path
+import { writeSeam } from '../render/policies'; // UX wave U6b-2: the file frames' e2e seam line
 // P3-L start
 import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index; P5 O4 M3: the export formats and Save as alone
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
@@ -620,9 +622,27 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // no fields).
   process.env.MAWS_USER_DATA = app.getPath('userData');
   // C3 end
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M4): the file frames' tokens, made
+  // before the policies that ask their owner; `layout.frameFile` reads this Mac's files through mawsd's files service as
+  // the asking page, and copies another machine's over its link; every token released at quit
+  const fileFrames = startFileFrames({
+    local,
+    read: (input, client) => invokeOwn('files.read', input, { client, target: local }) as Promise<CommandResult<'files.read'>>,
+    copy: (machine, source, sink, max, options) => remoteLaneB.artifacts.copyInto(machine, source, sink, max, options),
+    page: (client) => {
+      const page = pageOf(client);
+      return page && { id: page.id, send: (name, payload) => void emitTo(page, name, payload) };
+    },
+    userData: () => app.getPath('userData'),
+    register: registerMainHandler,
+    ...(process.env.MAWS_E2E === '1' && { seam: (line: string) => writeSeam(process.env, line) }),
+    log: (line) => console.log(line),
+  });
+  shutdown.add('file frames', fileFrames.stop);
   // E2's frame policies on the window's session and the capture partition, before any window loads (P3-L M6b: the
-  // artifact scheme's, `installStorePolicies`; the deliverable store's reader, scheme and IPC are gone)
-  installStorePolicies(process.env, appUrl);
+  // artifact scheme's, `installStorePolicies`; the deliverable store's reader, scheme and IPC are gone). UX wave U6b-2:
+  // with the file frames' owner's check first
+  installStorePolicies(process.env, appUrl, fileFrames.tokens.ownerOf);
 
   // P5 O8 M2: the roster of other machines (declared above), for the org rows composed over the spine's view below
   machines.onRemote((refs) => {
@@ -936,6 +956,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     artifactsSocket: daemonPaths(profile).artifactsSocket, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
     authors: exportAuthors, // P5 O5 M3
     remote: remoteLaneB.artifacts.scheme, // P5 O7 M5b: another machine's artifact pages, over its link
+    fileFrames: fileFrames.responder, // UX wave U6b-2: first on the window's session
   });
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's

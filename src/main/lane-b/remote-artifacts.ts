@@ -21,14 +21,17 @@
 //   unavailable with the reason, as M2 substitutes `attention.request`, so the reader always holds a reading. Its changes
 //   come on the session's checkout feed (./remote-checkout.ts).
 // - The machine's `artifacts` feed (./remote-artifact-feed.ts), and open-a-copy and Save As's bytes (./remote-copy.ts).
+//   UX wave U6b-2: and a file frame's copy, into the nameless descriptor main hands it (`copyInto`).
 // - P5 O7 M5b ("The `http` stream"): the scheme's remote responder (../artifacts/remote-scheme.ts), which main's chain asks
 //   for a page of an artifact the table places on an RL2 machine (`scheme`), and through which a dashboard's Download
 //   fetches another machine's asset (`assets`, for `artifacts.downloadAsset`; the artifact recorded as it goes).
 // - P5 O7 M5b ("The `document` stream"): `artifacts.open` of a document here is the bridge's (../artifacts/remote-open.ts):
 //   the artifact recorded on the link's machine as every request is, so the table that routes its pages routes its
 //   document, and the window's port bridged to a `document` stream, `edit` first, else `view` and `readOnly`.
+import type { FileHandle } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import type { MessageChannelMain } from 'electron';
+import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { toWire } from '@shared/host/json-bytes';
 import { ipcError, type IpcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -46,7 +49,7 @@ import type { RemoteLibraryFiles } from '../library/files';
 import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { ActHandle, ActOutcome, RemoteLink } from '../machines/remote/link';
 import { createRemoteArtifactFeed } from './remote-artifact-feed';
-import { fetchToFile, openCopy, type ArtifactSource } from './remote-copy';
+import { fetchInto, fetchToFile, openCopy, type ArtifactSource } from './remote-copy';
 import { readInPages } from './remote-files-read';
 import { outcomeAsResult, pendingResult, TOO_LARGE_WORDS } from './remote-outcomes';
 
@@ -100,6 +103,8 @@ export interface RemoteArtifacts {
   dispatch(link: RemoteLink, name: CommandName, fields: Record<string, unknown>, client?: ClientRef): Promise<CommandResult<CommandName>>;
   /** `remote.openCopy`, main's handler's. */
   openCopy(input: CommandInput<'remote.openCopy'>): Promise<CommandResult<'remote.openCopy'>>;
+  /** UX wave U6b-2: a session's file paged into `sink`, a descriptor with no name (`fetchInto`); null while no link reaches the machine. */
+  copyInto(machine: MachineRef, source: { appSessionId: AppSessionId; path: string }, sink: FileHandle, max: number, options: { label: string; seen(first: { mime: string; bytes: number }): void }): Promise<Awaited<ReturnType<typeof fetchInto>> | null>;
   /** A remote artifact's stored files and exports, for Save As (../library/files.ts); null while no link reaches it. */
   files(machine: MachineRef): RemoteLibraryFiles | null;
   /** P5 O7 M5b: the scheme's remote responder, main's chain's second (../artifacts/index.ts). */
@@ -222,6 +227,10 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
       if (link === null) return failure('host_unavailable', `remote.openCopy: machine ${machine} is not connected`) as CommandResult<'remote.openCopy'>;
       if ('artifactId' in source) deps.machines.record(source.artifactId, machine);
       return openCopy(link, source, { openPath: deps.openPath, tempDir, env: deps.env, log: deps.log });
+    },
+    async copyInto(machine, source, sink, max, options) {
+      const link = deps.remote(machine);
+      return link === null ? null : fetchInto(link, source, sink, max, deps.log, options);
     },
     files(machine) {
       if (deps.remote(machine) === null) return null;

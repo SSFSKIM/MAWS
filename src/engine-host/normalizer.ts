@@ -46,14 +46,15 @@ import { MAWS_SERVER_NAME } from '@shared/maws/tools'; // P2-C3
 import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
-import { carriedOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { carriedOf, commandEntry, commandFactsOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { personsWords, splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
 import {
   arrivalTurnOpened, carried, engineTurnOpened, headed, idle, keep, launchEnded, noLiveArrivals, opensAtHead, output, personsTurnOpened, readFrame, resultReached, scheduleFire, userFrame,
   type LiveArrivals,
 } from './normalizer-arrivals'; // UX wave U3 (the U3a document, M4 and Interfaces E)
-import { interruptAnswered, interruptWritten, lifecycleSeen, noSendNow, outputSeen, promptStarted, promptWritten, replayJoins, turnEnded, type SendNowState } from './normalizer-send-now'; // UX wave U4a
+import { interruptAnswered, interruptWritten, joinedMarks, lifecycleSeen, marksWritten, noSendNow, outputSeen, promptStarted, promptWritten, replayJoins, turnEnded, type SendNowState } from './normalizer-send-now'; // UX wave U4a; U1c the marks
 
 export interface NormalizerWarning {
   event: 'block_pairing' | 'unknown_denial_kind' | 'unmatched_response' | 'unknown_permission_mode';
@@ -461,7 +462,10 @@ export class Normalizer {
       // UX wave U4a (decision 32 b): unless the engine wrote several waiting prompts as one under this uuid: then the one
       // message it wrote, which a reader draws in their place
       const joined = replayJoins(this.state.sendNow, uuid, content);
-      if (joined !== null) out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, joined }, attribution);
+      if (joined === null) return;
+      // UX wave U1c (Interfaces §C, 4): with the consent marks the host put on each frame it joins, in the joined order
+      const consent = joinedMarks(this.state.sendNow, uuid, joined);
+      out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null, joined, ...(consent.length > 0 && { arrival: consent }) }, attribution);
       return;
     }
     if (main && this.arrivalIn(frame, row.seq, uuid, arrivals, out, attribution)) return; // UX wave U3 (UC-2)
@@ -554,13 +558,15 @@ export class Normalizer {
 
   // A slash command's output (class `command`): the engine's own tag around it, its escapes removed, in the turn that
   // runs, which is its command's. The engine sends one output again under the same uuid (u3-commands-r1, seq 406 and
-  // 422): a uuid already mapped in this launch emits nothing.
+  // 422): a uuid already mapped in this launch emits nothing. UX wave U3b (Interfaces A): the event carries the command
+  // the engine ran, where the frame named it, in a `command` entry.
   private commandOutput(uuid: MessageUuid | null, arrivals: Arrival[], isReplay: boolean, out: Emitter, attribution: Attribution): void {
     const outputs = this.state.arrivals.commandOutputs;
     if (uuid !== null && outputs.has(uuid)) return;
     if (uuid !== null) outputs.add(uuid);
     const content = localCommandText(arrivals.flatMap((arrival) => (arrival.class === 'command' ? [arrival] : [])));
-    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: false, origin: 'local-command', bash: null }, attribution);
+    const entry = commandEntry(commandFactsOf(arrivals));
+    out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay, isSynthetic: false, origin: 'local-command', bash: null, ...(entry.length > 0 && { arrival: entry }) }, attribution);
   }
   // UX wave U3 end
 
@@ -664,11 +670,13 @@ export class Normalizer {
       if (parsed?.success) out.emit({ kind: 'plugin.panes', ...rosterOf(parsed.data) }, attribution);
       return;
     }
+    // A rewind's prefill is the engine's copy of the message's whole text: the person's words alone, null when none are
+    // left (UX wave, ticket 704: a message the engine joined holds MAWS's answer envelope too)
     if (sent.subtype !== 'rewind_conversation' || frame.response.subtype !== 'success') return;
     const parsed = RewindConversationResponseSchema.safeParse(frame.response.response);
     if (!parsed.success || !parsed.data.rewound) return;
     const target = parsed.data.targetMessageUuid ?? (sent.request as { target_message_uuid?: unknown }).target_message_uuid;
-    out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText ?? null }, attribution);
+    out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText === null ? null : personsWords(parsed.data.prefillText) }, attribution);
   }
 
   // `context.sample` from a successful `get_context_usage` answer (reads.jsonl seq 57): the engine's own count and window,
@@ -734,7 +742,8 @@ export class Normalizer {
     this.state.lastUserMessageUuid = uuid;
     // UX wave U3 (UC-2, class `consent`; decision 10): MAWS's own "Approve and retry" message is the person's prompt or
     // steer and carries its arrival, which draws it as one line
-    const consent = readArrivals({ type: 'user', origin: { kind: 'human' }, message: frame.message }).filter((arrival) => arrival.class === 'consent');
+    const consent = readArrivals({ type: 'user', origin: { kind: 'human' }, message: frame.message }).filter((arrival): arrival is Extract<Arrival, { class: 'consent' }> => arrival.class === 'consent');
+    if (uuid !== null) marksWritten(this.state.sendNow, uuid, consent); // UX wave U1c: for a join that takes this frame
     out.emit({ kind: 'user.message', messageUuid: uuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...(consent.length > 0 && { arrival: consent }) }, main);
   }
 
@@ -858,8 +867,15 @@ class Emitter implements EventSink {
     this.sessionId = () => state.sessionId ?? ('unknown' as SessionId);
   }
 
-  // P5 O16 M3: `restored`, an event a gap's reseed rebuilt from the transcript (its record's time, `reseeded: true`)
+  // P5 O16 M3: `restored`, an event a gap's reseed rebuilt from the transcript (its record's time, `reseeded: true`).
+  // UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, Interfaces D): every `user.message` passes
+  // the one split, so a message the engine joined from the person's prompt and MAWS's answer envelopes is emitted as the
+  // person's message and then one message per envelope, each under the emitter's next id
   emit(payload: EventPayload, attribution: Attribution | null, restored?: { at: string; reseeded: true }): void {
+    for (const part of payload.kind === 'user.message' ? splitPersonsMessage(payload) : [payload]) this.push(part, attribution, restored);
+  }
+
+  private push(payload: EventPayload, attribution: Attribution | null, restored?: { at: string; reseeded: true }): void {
     const id = `${this.appSessionId}:${this.launchId}:${this.row.seq}:${this.events.length}` as EventId;
     this.events.push({
       id, sessionId: this.sessionId(), at: restored?.at ?? this.at, seq: this.row.seq,

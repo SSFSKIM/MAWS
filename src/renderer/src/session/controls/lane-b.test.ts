@@ -293,6 +293,21 @@ describe('lane B on another machine', () => {
 
   // One deadline per send (A4): main's adapter resumes a released session itself under the send's own bound, so the
   // renderer makes one invocation, never `session.acquire` first nor a status or queue read across the link
+  // UX wave U4b (Interfaces C): Send now on a waiting message is offered over the link, so the port's `sendNow` reaches
+  // main's adapter whatever this Mac's own engine host is; that machine's host is the one that runs it
+  it('sends a waiting message now through the machine, under any engine host of this Mac', async () => {
+    const before = useHosts.getState().supervisor;
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    try {
+      const fake = fakeClient({ 'session.steer.sendNow': { outcome: 'delivering' } });
+      const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+      expect(await port.queue()!.sendNow({ messageUuid: UUID })).toEqual({ ok: true, value: { outcome: 'delivering' } });
+      expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: REMOTE, messageUuid: UUID }]);
+    } finally {
+      useHosts.setState({ supervisor: before });
+    }
+  });
+
   it('sends to a released session with one invocation, leaving the resume to main', async () => {
     remoteRecord();
     const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: UUID } });

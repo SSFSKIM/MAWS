@@ -9,7 +9,7 @@
 // offered only for a prompt whose text can be edited in place, which a message of several comments cannot (Retry and
 // Cancel stand for it); the click reads the prompt again and never answers `edit_prompt` for one that cannot. Before the
 // click, only the rows a holder follows now can hide it (Decision Log 52).
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ipc } from '../../ipc/client';
 import { startInlineEdit } from '../../composer/resubmit-seam';
@@ -62,7 +62,7 @@ function RefusalFallback({ item, payload, busy: answering, submit, bindKeys }: D
       else toast({ level: 'info', text: 'No prompt to edit', actions: [], dismissible: true });
     });
   };
-  useEffect(() => bindKeys({ accept: retry, decline: cancel }));
+  useLayoutEffect(() => bindKeys({ accept: retry, decline: cancel }));
   return (
     <div className="flex flex-col gap-3">
       {payload.guidanceText && <p className="m-0 text-fg">{payload.guidanceText}</p>}
@@ -90,7 +90,7 @@ function AutoModeServerFallback({ payload, busy, submit, bindKeys }: DialogProps
   const answer = (result: 'continue' | 'interrupt', what: string) => submit(toAnswer({ kind: 'dialog', dialogKind: 'auto_mode_server_fallback', result }), what);
   const proceed = () => answer('continue', 'Continued');
   const stop = () => answer('interrupt', 'Stopped');
-  useEffect(() => bindKeys({ accept: proceed, decline: stop }));
+  useLayoutEffect(() => bindKeys({ accept: proceed, decline: stop }));
   return (
     <div className="flex flex-col gap-3">
       {payload.paragraphs.map((paragraph, i) => (
@@ -116,7 +116,7 @@ function AutoModeServerFallback({ payload, busy, submit, bindKeys }: DialogProps
 
 // An undeclared kind, or a declared one whose payload failed its schema: visible, never answered.
 function Unanswerable({ request, problem, bindKeys }: DialogProps & { problem: string | null }) {
-  useEffect(() => bindKeys({ accept: null, decline: null }));
+  useLayoutEffect(() => bindKeys({ accept: null, decline: null }));
   return (
     <div className="flex flex-col gap-2">
       <pre className="m-0 max-h-[8lh] overflow-auto rounded-sm border border-border bg-bg px-2.5 py-2 font-mono text-ui-sm whitespace-pre-wrap">{pretty(request.payload)}</pre>

@@ -13,6 +13,7 @@ import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
+import type { JournalRow } from '@shared/wire/journal';
 import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../test/support/memory-reader';
@@ -380,6 +381,89 @@ describe('a slash command’s output, from the file (Acceptance 6)', () => {
     expect(rows.filter((row) => row.kind === 'local_command' && row.text.includes('Compaction canceled.'))).toHaveLength(1);
   });
 });
+
+// UX wave U3b (M1; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, Acceptance 1 and 2,
+// decisions 2 and 3): an output's row says the command the engine ran (`run`), whether all of it was an error, whether
+// its text was a terminal's (`plain`) and whether no bubble of its command is drawn directly above it (`lone`), the same
+// on every route. The live route places an output in its command's turn; the file's routes place it as a loose event
+// after that turn, drawn under the bubble: `lone` is decided on the drawn order, so the two agree. The recorded sessions
+// hold typed commands, each with its output, several in a row (the second output never reads the first command's
+// bubble as its own); no recording holds an output standing alone, nor a loose row of another kind between a command's
+// turn and its output, so the one alone below is written by hand in the recorded shapes, and the other is not written.
+// Another machine's rows ride the backfill (`recordToEvents`), so the reader of them gains nothing: its events carry
+// the same entry as the file's.
+const commandRows = (rows: Row[]): string[] =>
+  ofKind(rows, 'local_command').map((row) => `${row.run === undefined ? '-' : `/${row.run.command}`}${row.error ? ' error' : ''}${row.plain ? ' plain' : ''}${row.lone ? ' lone' : ''}: ${firstLine(row.text)}`);
+const outputEntries = (events: SessionEvent[]) => events.flatMap((event) => (event.kind === 'user.message' && event.origin === 'local-command' ? [event.arrival ?? null] : []));
+
+describe('a slash command’s output names its command, its error and its kind of text, on every route', () => {
+  it('u3-commands-r1: the file, another machine’s rows and the journal draw the same rows, each named by the run the engine wrote', async () => {
+    const text = recorded('u3-commands-r1');
+    const [fileEvents, remoteEvents] = [await fromFile(text), await fromRows(text)];
+    expect(outputEntries(remoteEvents)).toEqual(outputEntries(fileEvents));
+    const file = commandRows(drawn(stateOf(fileEvents)));
+    expect(file).toEqual([
+      '/compact error: Error: No messages to compact',
+      '-: Compacted',
+      '/usage: Total cost:            $0.0020',
+      '/context: ## Context Usage',
+      '/reload-plugins: Reloaded: 0 plugins · 0 skills · 5 agents · 0 hooks · 0 plugin LSP servers',
+      '/rename: Session renamed to: uxw renamed',
+      '/model: API error: 400 ClaudeUsage routes Claude models only; got uxw-no-such-model · model not changed',
+      '-: Compaction canceled.',
+      '-: Compacted',
+    ]);
+    expect(commandRows(drawn(stateOf(remoteEvents)))).toEqual(file);
+    // The branch panel's finding 2 (§B's drawn adjacency): the live route draws a typed /compact's bubble, the boundary,
+    // then its output, which therefore stands alone; the file's routes draw the boundary first and the output directly
+    // under its bubble. Every other output reads the same on the three routes.
+    expect(commandRows(drawn(stateOf(fromJournal('u3-commands-r1'))))).toEqual(file.map((row) => (row === '-: Compacted' ? '- lone: Compacted' : row)));
+  });
+
+  it('u3-terminal-commands-r1: the terminal’s grid is a plain row with no escape in it, named by its run', async () => {
+    const text = recorded('u3-terminal-commands-r1');
+    const [fileEvents, remoteEvents] = [await fromFile(text), await fromRows(text)];
+    expect(outputEntries(remoteEvents)).toEqual(outputEntries(fileEvents));
+    const rows = drawn(stateOf(fileEvents));
+    const grid = ofKind(rows, 'local_command').find((row) => row.text.startsWith('Context Usage'));
+    expect(grid).toMatchObject({ run: { command: 'context', args: '' }, plain: true });
+    expect(grid!.text).not.toContain('\u001b');
+    expect(commandRows(rows).filter((row) => row.includes(' plain'))).toEqual(['- plain: Compacted (ctrl+o to see full summary)', '/context plain: Context Usage', '- plain: Compacted (ctrl+o to see full summary)']);
+    expect(commandRows(rows)[0]).toBe('/compact error: Error: No messages to compact');
+    expect(commandRows(drawn(stateOf(remoteEvents)))).toEqual(commandRows(rows));
+    expect(commandRows(rows).filter((row) => row.includes(' lone'))).toEqual([]); // each under its bubble
+  });
+
+  it('an output standing alone (no bubble of its command above it) is lone on the file, another machine’s rows and the live route', async () => {
+    // written by hand, invented: a prompt answered, then a command's output its turn did not ask for (a plugin's run)
+    const output = { type: 'system', subtype: 'local_command', content: '<local-command-stdout>Current session: 24% used</local-command-stdout>', commandRun: { command: 'usage', args: '' }, level: 'info', isMeta: false };
+    const text = `${transcript(typed('Summarise the notes.'), said('The notes are summarised.'), ended(), output)}\n`; // a whole last line
+    const [fileEvents, remoteEvents] = [await fromFile(text), await fromRows(text)];
+    const live = journalToEvents(LONE_JOURNAL);
+    const expected = ['/usage lone: Current session: 24% used'];
+    expect(commandRows(drawn(stateOf(fileEvents)))).toEqual(expected);
+    expect(commandRows(drawn(stateOf(remoteEvents)))).toEqual(expected);
+    expect(commandRows(drawn(stateOf(live)))).toEqual(expected);
+  });
+});
+
+// The live route of the same: the person's prompt, its answer and its end, then the command output frame the engine
+// writes (`local_command_source` with `local_command_run`, as u3-commands-r1 seq 167 has it), with invented values.
+const LONE_JOURNAL: JournalRow[] = [
+  { direction: 'out', frame: { type: 'user', uuid: 'p-lone', message: { role: 'user', content: 'Summarise the notes.' }, parent_tool_use_id: null, origin: { kind: 'human' } } },
+  { direction: 'in', frame: { type: 'command_lifecycle', command_uuid: 'p-lone', state: 'started', uuid: 's-lone', session_id: 'sess-demo' } },
+  { direction: 'in', frame: { type: 'assistant', message: { id: 'm-lone', type: 'message', role: 'assistant', model: 'claude-demo', content: [{ type: 'text', text: 'The notes are summarised.' }], stop_reason: 'end_turn', usage: { input_tokens: 1, output_tokens: 1 } }, parent_tool_use_id: null, uuid: 'a-lone', session_id: 'sess-demo' } },
+  { direction: 'in', frame: { type: 'result', subtype: 'success', session_id: 'sess-demo', is_error: false, duration_ms: 10, duration_api_ms: 8, num_turns: 1, total_cost_usd: 0.01, usage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 }, modelUsage: {}, permission_denials: [], result: 'OK', terminal_reason: 'completed', uuid: 'r-lone' } },
+  { direction: 'in', frame: { type: 'command_lifecycle', command_uuid: 'p-lone', state: 'completed', uuid: 'c-lone', session_id: 'sess-demo' } },
+  { direction: 'in', frame: { type: 'system', subtype: 'session_state_changed', state: 'idle', uuid: 'st-lone', session_id: 'sess-demo' } },
+  {
+    direction: 'in',
+    frame: {
+      type: 'assistant', message: { id: 'm-out', type: 'message', role: 'assistant', model: '<synthetic>', content: [{ type: 'text', text: 'Current session: 24% used' }], stop_reason: 'end_turn', usage: { input_tokens: 0, output_tokens: 0 } },
+      parent_tool_use_id: null, uuid: 'o-lone', session_id: 'sess-demo', local_command_source: '<local-command-stdout>Current session: 24% used</local-command-stdout>', local_command_run: { command: 'usage', args: '' },
+    },
+  },
+].map((row, i) => ({ seq: i + 1, at: `2026-11-12T10:00:${String(i).padStart(2, '0')}.000Z`, ...row }) as JournalRow);
 
 // M4: the live half. What the live wire does not carry, row by row (Acceptance 7): a monitor's event, the stall notice and
 // the withheld report's `Agent "…" finished` told while the session was idle (no frame tells the host the model was

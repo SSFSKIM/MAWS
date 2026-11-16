@@ -4,6 +4,7 @@ import { DENIAL_KINDS } from '@shared/graph/enums';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId } from '@shared/graph/ids';
 import { api, builder, MODEL, parent, tool, uuid } from './test-events';
+import { webFetchCases } from '../../../../../test/support/web-fetch-recorded';
 
 const base: ClassifyContext = { denial: null, turn: { closed: false, stopped: false }, continued: false, humanDecision: false, safeguard: 'not_evaluated', imageResult: false, isError: false };
 
@@ -58,6 +59,16 @@ describe('classification table', () => {
 
   it('an artifact screenshot, the pane-opening call and the computer-use call stay cells of their own', () => {
     for (const name of ['mcp__maws__artifact_screenshot', 'mcp__maws__show_pane', 'mcp__plugin_cua_cua_repl__js', 'mcp__cua_repl__js']) expect(classifyTool(name, {}, base).groupable, name).toBe(false);
+  });
+
+  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is in the web group, as WebFetch, never the MCP group
+  it('classes the web plugin’s fetch as WebFetch: web, a step of its run, a cell', () => {
+    for (const [label, call] of webFetchCases()) {
+      const c = classifyTool(call.toolName, call.input, base);
+      expect([c.category, c.groupable], label).toEqual(['web', true]);
+      expect(presentationOf(call.toolName), label).toBe('cell');
+    }
+    expect(classifyTool('mcp__web__search', {}, base).category).toBe('mcp');
   });
 
   it('routes the row-kind tools out of the cell table', () => {

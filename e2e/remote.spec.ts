@@ -71,6 +71,8 @@ import { machineProjectId } from '../src/shared/machine/project-ids'; // the UX 
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
+import { REMOTE_COPY_MAX_BYTES } from '../src/shared/ipc/schema/remote'; // UX wave U6b-2: the copy's bound, one byte past it
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: a PDF of B's checkout, drawn on A
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { addedListeners, loopbackPort } from './support/connector-direct-checks';
 import { browserOpens, connectionWords } from './support/connector-direct-oauth';
@@ -97,6 +99,7 @@ import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
+import { sendNowJournal, steerStopJournal } from './support/c7-replay'; // the UX wave, U4b: U4a's journals, run on B
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -164,12 +167,16 @@ const SEARCHED = 'hello';
 // M5a: what B's first session makes at A's ask, through its `maws` tools (served by B's engine host, so each artifact is
 // linked to the session): a text file it wrote in B's checkout, delivered as a File artifact, and an HTML page, whose
 // PDF B's render host exports; the title A renames the File artifact to; an HTML file of B's checkout A opens a copy of
+// (UX wave U6b-2: and draws from a copy, its inline script marking that it ran; a PDF drawn from a copy; a file one byte
+// past the copy's bound)
 const MAKE_ASK = 'Make the notes and the report.';
 const MADE_REPLY = 'Both are in B’s library.';
 const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the session on B delivered.\n' };
 const RENAMED = 'B notes, renamed on A';
 const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
-const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
+const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p id="said">A page in the checkout on B.</p><script>document.body.dataset.ran = "yes";</script>\n' };
+const LARGE_ON_B = 'b-large.pdf'; // UX wave U6b-2: REMOTE_COPY_MAX_BYTES + 1 bytes, past what A copies to draw
+const PDF_ON_B = 'b-drawn.pdf'; // UX wave U6b-2: a PDF of B's checkout, drawn on A from a copy
 // M5b: a document B's first session starts at A's ask (an empty one, linked to the session on B), and what A types in it
 // M5c: the servers of B's user settings, by their names there (the rows server's and its tool's are the
 // dashboard-live-data fixture's, connector-scene.ts's SERVER and TOOL); the rows it answers, first and at the schedule
@@ -1045,7 +1052,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
 
-    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout opens as a copy, and the Browser tool reads B’s reason', async () => {
+    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, an HTML file and a PDF of B’s checkout are drawn from a copy and the page opens as a copy, one past the copy’s bound shows its row, nothing is created, and the Browser tool reads B’s reason', async () => {
       const sessionTab = mainTabById(again, `session:${address}`);
       const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
 
@@ -1114,8 +1121,22 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(again.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
       console.log(`[e2e:remote] M5a: B's PDF export saved on A, ${readFileSync(pdf).length} bytes`);
 
-      // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
+      // An HTML file of B's checkout, drawn here from a copy, and Open externally in its bar: a copy paged here is what main
+      // hands the OS (the open seam). UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6;
+      // B6, B16): the copy a frame draws from has no name while a byte is in it, so A's frame-copies folder lists nothing
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
+      writeFileSync(join(checkout, PDF_ON_B), minimalPdf());
+      writeFileSync(join(checkout, LARGE_ON_B), Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(REMOTE_COPY_MAX_BYTES + 1 - 9)]));
+      const frameCopies = () => { const dir = join(aUserData, 'frame-copies'); return existsSync(dir) ? readdirSync(dir) : []; }; // prettier-ignore
+      // B8: what the frames must not create: B's Library, B's session's artifacts and every artifact of B's, and the files
+      // under A's artifacts folder (a refused read throws in b.request)
+      const createdNow = async () => ({
+        library: (await b.request<Rows>('library.list', {})).rows.map((row) => row.id).sort(),
+        sessionArtifacts: (await b.request<Linked>('artifacts.list', { filter: { appSessionId: app } })).artifacts.map((x) => x.id).sort(),
+        artifacts: (await b.request<Linked>('artifacts.list', {})).artifacts.map((x) => x.id).sort(),
+        aArtifactFiles: existsSync(join(aUserData, 'artifacts')) ? readdirSync(join(aUserData, 'artifacts'), { recursive: true }).map(String).sort() : [],
+      });
+      const createdBefore = await createdNow();
       // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
       // again (the strip is inert under a page, so the tab is not clicked)
       await backToTabs(again);
@@ -1131,17 +1152,54 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
       await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pageRow.click();
-      const external = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"] [data-external-row]`);
-      const open = external.getByRole('button', { name: 'Open externally', exact: true });
+      const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      await quoting(expect(pageViewer, 'B’s page drawn here from a copy').toHaveAttribute('data-frame', 'html', { timeout: 60_000 }), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const pageSrc = (await pageViewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+      expect(pageSrc, 'a token and the file’s name, no folder of B’s').toMatch(new RegExp(`^maws-artifact://[0-9a-f]{32}/${PAGE_ON_B.name.replace('.', '\\.')}$`));
+      let drawn: ReturnType<Page['frames']>[number] | undefined;
+      await expect.poll(() => (drawn = again.frames().find((frame) => frame.url() === pageSrc)) !== undefined, { message: 'the page’s frame' }).toBe(true);
+      await expect(drawn!.locator('#said')).toHaveText('A page in the checkout on B.');
+      await expect.poll(() => drawn!.evaluate(() => document.body.dataset.ran ?? ''), { message: 'its inline script ran' }).toBe('yes');
+      await expect(pageViewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the page is drawn').toEqual([]);
+      const open = pageViewer.getByRole('button', { name: 'Open externally', exact: true }); // the bar's
       await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
       await open.click();
-      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`));
-      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the row: ${await external.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      // the open seam's lines for the file, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`) && !line.startsWith('frame-'));
+      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
       const [copy] = opened();
       expect(copy, 'a copy under this Mac’s copies of B’s files, not B’s path').toContain(`/maws-remote-copies/${b.ref}/`);
       expect(readFileSync(copy!, 'utf8'), 'holding the file’s bytes').toBe(PAGE_ON_B.content);
-      await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
+      await expect(pageViewer.getByRole('alert'), 'nothing refused').toHaveCount(0);
       rmSync(dirname(copy!), { recursive: true, force: true });
+
+      // a PDF of B's checkout, drawn here from a copy by Chromium's viewer: its page's black square painted
+      const pdfRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PDF_ON_B)}"]`);
+      await expect(pdfRow, 'the PDF written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await pdfRow.click();
+      const pdfViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PDF_ON_B)}"]`);
+      await quoting(expect(pdfViewer, 'B’s PDF drawn here from a copy').toHaveAttribute('data-frame', 'pdf', { timeout: 60_000 }), async () => `the viewer: ${await pdfViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const pdfFrame = pdfViewer.locator('[data-artifact-frame="pdf"]');
+      await expect(pdfFrame, 'a token and the file’s name, no folder of B’s').toHaveAttribute('src', new RegExp(`^maws-artifact://[0-9a-f]{32}/${PDF_ON_B.replace('.', '\\.')}#toolbar=0&navpanes=0$`));
+      await expect.poll(() => markPixels(againApp, again, pdfFrame), { timeout: 30_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the PDF is drawn').toEqual([]);
+
+      // a file one byte past the copy's bound: its row says it is too large to show here, with its size, and offers no
+      // Open externally, whose copy has the same bound (L4)
+      const largeRow = files.locator(`[role="treeitem"][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await expect(largeRow, 'the large file written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await largeRow.click();
+      const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await quoting(expect(largeViewer, 'its row, not a frame').toHaveAttribute('data-frame', 'row', { timeout: 60_000 }), async () => `the viewer: ${await largeViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const largeShown = largeViewer.locator('[data-external-row]');
+      await expect(largeShown.getByText('Too large to show here: MAWS copies at most 64.0 MB from another machine.', { exact: true })).toBeVisible();
+      await expect(largeShown.getByText('64.0 MB', { exact: true }), 'its size').toBeVisible();
+      await expect(largeViewer.getByRole('button', { name: 'Open externally' }), 'no act that can only fail').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry after the refused copy').toEqual([]);
+      rmSync(join(checkout, LARGE_ON_B));
+      rmSync(join(checkout, PDF_ON_B));
+      expect(await createdNow(), 'nothing created by the frames, on B or on A').toEqual(createdBefore);
 
       // The session's agent has a browser on B, seen from here by screencast (P5 O17's local stage, §I): B's own front reads
       // it, A's main answers it for B's session over the link (M5a's capability read), and A's Browser tool shows the
@@ -2185,12 +2243,14 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       const capsuleOn = (on: Page) => main(on).locator('section.transcript-ask');
       await quoting(expect(capsuleOn(page), 'the ask’s card in A’s pane, waiting').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
       await quoting(expect(capsuleOn(page2), 'and in A2’s').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
-      const sheet = page.locator('[data-ask-sheet]');
-      await expect(sheet, 'its sheet, read from A').toHaveAttribute('data-ask-id', askId, { timeout: 30_000 });
-      const question = sheet.locator('section[data-question-id="q1"]');
+      // UX wave U1b (O-17): the ask's form stands in its capsule's row, read from A, and no sheet opens by itself
+      const form = capsuleOn(page).locator('.transcript-ask-form [data-hover-ask]');
+      await quoting(expect(form, 'its form in the capsule’s row, read from A').toHaveAttribute('data-hover-ask', askId, { timeout: 30_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
+      await expect(page.locator('[data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
+      const question = form.locator('section[data-question-id="q1"]');
       await expect(question).toContainText(M8_QUESTION);
       await question.getByRole('radio', { name: 'Yes' }).click();
-      await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+      await form.getByRole('button', { name: 'Submit', exact: true }).click();
       await quoting(expect(capsuleOn(page), 'settled on A').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
       await expect.poll(async () => (await b.request<Asks>('maws.asks.list', { appSessionId: spawnedApp })).asks, { timeout: 30_000, message: 'on B: nothing pending' }).toEqual([]);
       await quoting(expect(capsuleOn(page2), 'and on A2, which answered nothing').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
@@ -3720,3 +3780,327 @@ test('U10b A4 on B: B’s agent deletes its own draft; A’s row of B’s sessio
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// ---- UX wave U4b: Send now, taking back and Delete on a message that waits in a session on B --------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 9 to 11, 13, 15 and 17.) B's
+// sessions run on the journals U4a's composer scenes replay (e2e/support/c7-replay.ts): `sendNowJournal`, the engine's
+// own answers to a send-now request behind a running command (`uxwave/u4p2-a-1`), and `steerStopJournal`, a turn that
+// runs on with a `next` steer waiting, whose withdrawal (`cancel_async_message`) is all a take-back and a Delete write.
+// They are started over B's machine.sock, as laneBOpened's session is, and each holds its first turn running at the
+// replay's next recorded write until A acts. Each journal is re-addressed first (`onB`) as e2e/support/side-replay.ts
+// re-addresses the frames it borrows: an engine session id of its own (two launches of one recording would otherwise
+// bind one id on B), the init's directory B's checkout, and the init's mode the session's own, so the host has no mode to
+// correct.
+const U4B_NOW = 'b0c0d0e0-0000-4000-8000-0000000000e2'; // the engine session ids the re-addressed journals pin
+const U4B_BACK = 'b0c0d0e0-0000-4000-8000-0000000000e3';
+const U4B_DELETE = 'b0c0d0e0-0000-4000-8000-0000000000e4';
+const U4B_FORK = 'b0c0d0e0-0000-4000-8000-0000000000e5'; // the fork's launch on B: its prelude, no turn
+const U4B_WITHOUT = 'b0c0d0e0-0000-4000-8000-0000000000e6';
+const U4B_LONG = 'Run the long command in the foreground.'; // a first prompt (the replay matches a user write by its type)
+const U4B_COUNT = 'Count to 30 slowly, one Bash call per number.';
+const U4B_COUNT_AGAIN = 'Count to 20 slowly, one Bash call per number.'; // a first prompt of its own: each tab's text is its own
+
+type Swapped = Record<string, unknown>;
+function swappedAll(value: unknown, swap: Record<string, string>): unknown {
+  if (typeof value === 'string') return swap[value] ?? value;
+  if (Array.isArray(value)) return value.map((entry) => swappedAll(entry, swap));
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, swappedAll(entry, swap)]));
+  return value;
+}
+/** `path`, a journal of U4a's writers, re-addressed in place for a launch on B (the section's comment above); answers it. */
+function onB(path: string, sessionId: string, cwd: string): string {
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: Swapped });
+  const init = rows.find((row) => row.direction === 'in' && row.frame.type === 'system' && row.frame.subtype === 'init')!.frame;
+  const swap = { [init.session_id as string]: sessionId, [init.cwd as string]: cwd };
+  const readdressed = rows.map((row) => {
+    const frame = swappedAll(row.frame, swap) as Swapped;
+    return row.direction === 'in' && frame.type === 'system' && frame.subtype === 'init' ? { ...row, frame: { ...frame, permissionMode: 'default' } } : { ...row, frame };
+  });
+  writeFileSync(path, readdressed.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+/** The frames B's engine host wrote to the engine for `app`, from its own journal of the launch. */
+type U4bFrame = { type?: string; uuid?: string; priority?: string; message?: { content?: unknown }; request?: { subtype?: string; send_now?: unknown; message_uuid?: unknown } };
+async function writtenOnB(b: RemoteScene['b'], app: string): Promise<U4bFrame[]> {
+  const { journalPath } = await b.request<{ journalPath: string }>('session.status', { appSessionId: app });
+  return readFileSync(journalPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { direction: string; frame: U4bFrame })
+    .filter((row) => row.direction === 'out')
+    .map((row) => row.frame);
+}
+const controlsOnB = async (b: RemoteScene['b'], app: string) => (await writtenOnB(b, app)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype);
+const steerOnB = async (b: RemoteScene['b'], app: string, text: string) => (await writtenOnB(b, app)).find((f) => f.type === 'user' && f.message?.content === text && f.priority === 'next');
+
+/**
+ * B's sessions MAWS runs, one per entry of `starts`, each on the journal of its place in `journals` (the replay list, one
+ * per launch in order; entries past `starts` are later launches, a fork's), started over B's machine.sock and left with
+ * its first turn running; then A, launched over the relay, the sessions listed under B's machine row and not opened.
+ * `bEnv` is B's own (an endpoint of an earlier build: MAWS_E2E_ENDPOINT_WITHOUT).
+ */
+async function runningOnB(opts: { root: string; aUserData: string; journals: (dir: string, checkout: string) => string[]; starts: { first: string; title: string }[]; bEnv?: Record<string, string> }, held: TerminalHeld) {
+  const checkout = join(opts.root, 'b-checkout');
+  const journals = join(opts.root, 'journals');
+  for (const dir of [checkout, journals]) mkdirSync(dir);
+  const scene = (held.scene = await startRemoteScene({
+    scratch: join(opts.root, 'scene'),
+    aUserData: opts.aUserData,
+    b: {
+      root: '/tmp', // as laneBOpened's
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.journals(journals, checkout).join(','), DISABLE_AUTOUPDATER: '1', ...opts.bEnv },
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    },
+  }));
+  const { b } = scene;
+  await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+  const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+  type Status = { process: string; turn: unknown; engineSessionId: string | null };
+  const status = (app: string) => b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+  const sessions: { app: string; engine: string; first: string; title: string }[] = [];
+  for (const start of opts.starts) {
+    const app = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+    await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: start.first, display: start.first }, options: {} });
+    expect(started.status, `B's session starts: ${JSON.stringify(started)}`).not.toBe('needs_trust');
+    // its launch takes its journal before the next session's does: the replay list is consumed in launch order
+    await expect.poll(async () => { const s = await status(app); return s !== null && s.process === 'ready' && s.turn !== null && s.engineSessionId !== null; }, { timeout: 60_000, message: `B's session runs its first turn\n${b.log().slice(-4000)}` }).toBe(true);
+    sessions.push({ app, engine: (await status(app))!.engineSessionId!, ...start });
+  }
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+  keepMainLines(a);
+  const { page } = a;
+  await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+  const bProject = machineProjectId((await scene.org.chain()).org, B_NAME);
+  for (const s of sessions) await scene.sminos.list({ engine: s.engine, app: s.app, owners: [scene.member], project: bProject, title: s.title, cwd: checkout });
+  for (const s of sessions) await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === s.app), { timeout: 60_000, message: `B's session ${s.title} is a row of A's\n${mainSaid(page)}` }).toBe(true);
+  await expandMachine(page, b.ref);
+  /** The session's row clicked in A: its tab in front, its first prompt drawn, its turn running there (the composer offers Stop). */
+  const openOnA = async (s: (typeof sessions)[number]) => {
+    const row = sessionRow(page, addressOf(b.ref, s.app));
+    await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await quoting(expect(main(page).getByText(s.first).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    await expect(shownPrimary(page), 'B’s turn runs: the composer offers Stop').toHaveText('Stop', { timeout: 30_000 });
+  };
+  const turnRuns = async (app: string) => { const s = await status(app); return s !== null && s.process === 'ready' && s.turn !== null; };
+  return { scene, b, page, sessions, openOnA, turnRuns, status, bProject, checkout };
+}
+
+const stackOnA = (page: Page) => main(page).getByRole('region', { name: 'Queued messages' });
+// The composer's round button in the tab in front (the other sessions' tabs keep their panes mounted, hidden).
+const shownPrimary = (page: Page) => main(page).locator('[data-submit-state]:visible');
+const stackNoticeOnA = (page: Page) => main(page).getByRole('status', { name: 'Stack notice' });
+/** A types `text` into the session's empty box while B's turn runs and presses Enter: a "Next step" row, written on B. */
+async function nextStepOnA(page: Page, b: RemoteScene['b'], app: string, text: string) {
+  await composerOf(page).click();
+  await page.keyboard.type(text);
+  await page.keyboard.press('Enter');
+  await expect(composerOf(page), 'the box is cleared by the send').toHaveText('');
+  const row = stackOnA(page).locator('li[data-queue-state="next"]').filter({ hasText: text });
+  await quoting(expect(row.locator('[data-mark]'), 'the message waits at the next step').toHaveText('Next step', { timeout: 30_000 }), () => mainSaid(page));
+  await expect.poll(async () => (await steerOnB(b, app, text))?.uuid ?? null, { timeout: 30_000, message: 'B’s engine was written the `next` steer' }).not.toBeNull();
+  return { row, uuid: (await steerOnB(b, app, text))!.uuid! };
+}
+
+test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine through B’s engine host and stops nothing; /fork greys while B’s turn runs and forks there once a session is idle', async () => {
+  test.setTimeout(300_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u4b-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u4b-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { b, page, sessions, openOnA, turnRuns, status } = await runningOnB(
+      {
+        root,
+        aUserData,
+        journals: (dir, checkout) => [
+          onB(sendNowJournal(dir, 'u4b-b-now'), U4B_NOW, checkout),
+          onB(steerStopJournal(dir, 'u4b-b-back'), U4B_BACK, checkout),
+          onB(steerStopJournal(dir, 'u4b-b-delete'), U4B_DELETE, checkout),
+          new SideJournal(U4B_FORK, checkout).write(dir, 'u4b-b-fork'), // the fork's own launch, as U9's fork scene's
+        ],
+        starts: [
+          { first: U4B_LONG, title: 'B’s session to send now in' },
+          { first: U4B_COUNT, title: 'B’s session to take back from' },
+          { first: U4B_COUNT_AGAIN, title: 'B’s session to delete from' },
+        ],
+      },
+      held,
+    );
+    const [now, back, deleted] = sessions as [(typeof sessions)[number], (typeof sessions)[number], (typeof sessions)[number]];
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists Send now and the session acts\n${mainSaid(page)}` }).toEqual(expect.arrayContaining(['rl2.send-now', 'rl2.session-acts']));
+
+    await test.step('Send now on the first session’s next-step row: B’s engine is written the send-now request for its message, nothing is withdrawn, and the turn ends for the message', async () => {
+      await openOnA(now);
+      const message = 'Reply with one word, then carry on.';
+      const { row, uuid } = await nextStepOnA(page, b, now.app, message);
+      const sendNow = row.getByRole('button', { name: 'Send now' });
+      await expect(sendNow, 'B lists rl2.send-now').toBeEnabled();
+      await clickRevealed(row, sendNow);
+      const interrupts = async () => (await writtenOnB(b, now.app)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+      await quoting(expect.poll(async () => (await interrupts()).length, { timeout: 30_000, message: 'one request reached B’s engine' }).toBe(1), () => mainSaid(page));
+      expect((await interrupts())[0]!.request, 'the send-now request, naming the row’s message: not a stop').toEqual({ subtype: 'interrupt', send_now: true, message_uuid: uuid });
+      expect(await controlsOnB(b, now.app), 'nothing withdrawn').not.toContain('cancel_async_message');
+      await expect(stackOnA(page), 'the row leaves once B’s engine starts the message').toHaveCount(0, { timeout: 30_000 });
+      const transcript = main(page).locator('[data-transcript-scroller]:visible');
+      await expect(transcript).toContainText('Ended for your message after', { timeout: 30_000 });
+      await expect(transcript, 'B’s turn was not stopped').not.toContainText('You stopped after');
+      await expect(toastsOf(page)).not.toContainText('Not sent now');
+    });
+
+    await test.step('↑ on the second session’s next-step row: the message is back in A’s box, withdrawn from B’s engine, kept on B as an ordinary draft, and B’s turn runs on', async () => {
+      await openOnA(back);
+      const message = 'Count only to ten.';
+      const { uuid } = await nextStepOnA(page, b, back.app, message);
+      await page.keyboard.press('ArrowUp');
+      await expect(composerOf(page)).toHaveText(message, { timeout: 30_000 });
+      await expect(composerOf(page), 'the box takes typing again once the take-back has settled').toHaveAttribute('contenteditable', 'true', { timeout: 30_000 });
+      await expect(stackOnA(page)).toHaveCount(0);
+      const cancels = (await writtenOnB(b, back.app)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'cancel_async_message');
+      expect(cancels.map((f) => (f.request as { message_uuid?: unknown }).message_uuid), 'the steer withdrawn from B’s engine').toEqual([uuid]);
+      type Kept = { doc: unknown } | null;
+      const kept = () => invoke<Kept>(page, 'session.drafts.get', { appSessionId: back.app }, b.ref).catch((error: unknown) => `unanswered: ${String(error)}`);
+      await expect
+        .poll(async () => { const draft = await kept(); return draft === null || typeof draft === 'string' ? draft : { text: JSON.stringify(draft.doc).includes(message), takeBack: ((draft.doc as { attrs?: { takeBack?: unknown } } | null)?.attrs?.takeBack ?? null) !== null }; }, { timeout: 30_000, message: 'the draft kept for the member on B' })
+        .toEqual({ text: true, takeBack: false });
+      expect(await turnRuns(back.app), 'B’s turn was not stopped').toBe(true);
+      expect(await controlsOnB(b, back.app), 'no stop reached B’s engine').not.toContain('interrupt');
+    });
+
+    await test.step('while the second session’s turn runs on B, /fork in A’s palette is greyed with the turn’s sentence', async () => {
+      await composerOf(page).click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(composerOf(page)).toHaveText('');
+      await page.keyboard.type('/fork');
+      const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
+      await expect(fork).toHaveAttribute('aria-disabled', 'true');
+      await fork.hover();
+      await expect(page.locator('#composer-slash-detail')).toContainText('Wait for the turn to end, or stop it first');
+      // the disabled row's detail lies over the box and would intercept a click, so the palette is closed the way a person does: Esc is safe here
+      // because the open palette takes the key first (it closes the popup and returns), so it reaches nothing else and cannot stop B's turn
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox', { name: 'Commands' }), 'Esc closed the palette').toHaveCount(0);
+      expect(await turnRuns(back.app), 'Esc closed only the palette: B’s turn runs on').toBe(true);
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(composerOf(page)).toHaveText('');
+      expect(await turnRuns(back.app)).toBe(true);
+    });
+
+    await test.step('Delete on the third session’s next-step row: the row leaves, B’s engine withdraws the message, nothing is said, and B’s turn runs on', async () => {
+      await openOnA(deleted);
+      const message = 'Then say the total.';
+      const { row, uuid } = await nextStepOnA(page, b, deleted.app, message);
+      await clickRevealed(row, row.getByRole('button', { name: 'Delete' }));
+      await expect(stackOnA(page).locator('li'), 'the row leaves').toHaveCount(0, { timeout: 30_000 });
+      await expect.poll(async () => (await writtenOnB(b, deleted.app)).filter((f) => f.request?.subtype === 'cancel_async_message').map((f) => (f.request as { message_uuid?: unknown }).message_uuid), { timeout: 30_000 }).toEqual([uuid]);
+      await expect(stackNoticeOnA(page), 'no line is said').toHaveCount(0);
+      await expect(toastsOf(page)).not.toContainText('Not taken back');
+      expect(await turnRuns(deleted.app), 'B’s turn was not stopped').toBe(true);
+      expect(await controlsOnB(b, deleted.app)).not.toContain('interrupt');
+      await expect(composerOf(page), 'a Delete loads nothing into the box').toHaveText('');
+    });
+
+    await test.step('once the first session is idle on B, /fork picked in A’s palette opens the fork’s tab on B', async () => {
+      await expect.poll(async () => { const s = await status(now.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s first session ends its turns' }).toBeNull();
+      const row = sessionRow(page, addressOf(b.ref, now.app));
+      await row.click();
+      await expect(shownPrimary(page), 'A reads the session idle').not.toHaveText(/^Stop/, { timeout: 30_000 });
+      const before = await sessionTabsOf(page);
+      await composerOf(page).click();
+      await page.keyboard.type('/fork');
+      const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
+      await expect(fork).not.toHaveAttribute('aria-disabled', 'true');
+      await fork.click();
+      let forked: string | undefined;
+      await quoting(expect.poll(async () => (forked = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'the fork’s tab opens' }).toBeDefined(), () => mainSaid(page));
+      expect(forked!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${forked})`).toBe(true);
+      type Lineage = { lineage: { parentAppSessionId: string } | null } | null;
+      await expect.poll(async () => (await b.request<Lineage>('session.get', { appSessionId: bareOf(forked!) }).catch(() => null))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(now.app);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U4b (M4; Acceptance 10 and 15; Interfaces G, the rows "this build | build G" and "this build | build F"): B's
+// endpoint started as one of an earlier build, its `h2` without `rl2.send-now` (build G's list), then without it and
+// `rl2.session-acts` (build F's). The session runs on `steerStopJournal`, whose recorded plain stop (the steer withdrawn,
+// then the interrupt) is what ⌘. writes; nothing else this block presses reaches B's engine.
+for (const withheld of [['rl2.send-now'], ['rl2.send-now', 'rl2.session-acts']]) {
+  test(`U4b, a machine that does not offer Send now (B lists no ${withheld.join(' and no ')}): its controls are disabled with their sentences, the keys say them and send nothing, and ⌘. still stops B’s turn`, async () => {
+    test.setTimeout(180_000);
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u4b-old-')));
+    const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u4b-old-'));
+    const held: TerminalHeld = { scene: null, a: null };
+    try {
+      const { b, page, sessions, openOnA, status } = await runningOnB(
+        { root, aUserData, journals: (dir, checkout) => [onB(steerStopJournal(dir, 'u4b-b-old'), U4B_WITHOUT, checkout)], starts: [{ first: U4B_COUNT, title: 'B’s session of an earlier build' }], bEnv: { MAWS_E2E_ENDPOINT_WITHOUT: withheld.join(',') } },
+        held,
+      );
+      const [session] = sessions as [(typeof sessions)[number]];
+      const noActs = withheld.includes('rl2.session-acts');
+      await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? null, { message: `A knows B’s capabilities\n${mainSaid(page)}` }).not.toBeNull();
+      const capabilities = (await machineOf(page, b.ref))!.capabilities!;
+      expect(capabilities, 'B lists no rl2.send-now').not.toContain('rl2.send-now');
+      expect(capabilities.includes('rl2.session-acts'), 'B lists the session acts as its build would').toBe(!noActs);
+      await openOnA(session);
+      const { row } = await nextStepOnA(page, b, session.app, 'Count only to five.');
+
+      const sendNow = row.getByRole('button', { name: 'Send now' });
+      await expect(sendNow).toBeDisabled();
+      await expect(sendNow).toHaveAttribute('title', `Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+      if (noActs) {
+        const del = row.getByRole('button', { name: 'Delete' });
+        await expect(del).toBeDisabled();
+        await expect(del).toHaveAttribute('title', `Can’t delete on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await clickRevealed(row, row.getByRole('button', { name: 'More' }));
+        const edit = page.getByRole('menuitem', { name: 'Edit', exact: true });
+        await expect(edit).toHaveAttribute('data-disabled', /.*/);
+        await expect(edit).toHaveAttribute('title', `Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await page.keyboard.press('Escape');
+        await expect(edit).toHaveCount(0);
+        // ↑ in the empty box says Edit's sentence and walks no history: the box stays empty
+        await composerOf(page).click();
+        await page.keyboard.press('ArrowUp');
+        await expect(stackNoticeOnA(page)).toHaveText(`Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await expect(composerOf(page)).toHaveText('');
+        await expect(row.locator('[data-mark]'), 'the message still waits').toHaveText('Next step');
+      }
+      // Esc on the first row says Send now's sentence in the stack and sends nothing
+      await composerOf(page).click();
+      await page.keyboard.press('Escape');
+      await expect(stackNoticeOnA(page)).toHaveText(`Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+      await expect(row.locator('[data-mark]')).toHaveText('Next step');
+      const written = await controlsOnB(b, session.app);
+      expect(written, 'B’s engine was written no send-now and no stop').not.toContain('interrupt');
+      expect(written, 'and nothing was withdrawn').not.toContain('cancel_async_message');
+      expect((await status(session.app))?.turn ?? null, 'B’s turn runs').not.toBeNull();
+
+      // ⌘. still stops: the steer held first, then B's turn interrupted
+      await composerOf(page).click();
+      await page.keyboard.press('Meta+.');
+      await quoting(expect.poll(async () => { const s = await status(session.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s turn ends at ⌘.' }).toBeNull(), () => mainSaid(page));
+      expect((await status(session.app))?.process, 'no unrecorded write ended B’s replay').toBe('ready');
+      const controls = await controlsOnB(b, session.app);
+      expect(controls.indexOf('cancel_async_message'), 'the steer is held before the interrupt').toBeGreaterThan(-1);
+      expect(controls.indexOf('interrupt')).toBeGreaterThan(controls.indexOf('cancel_async_message'));
+      const interrupt = (await writtenOnB(b, session.app)).find((f) => f.request?.subtype === 'interrupt')!;
+      expect(interrupt.request?.send_now, 'a plain stop, not a send-now').toBeUndefined();
+      await expect(stackOnA(page).locator('li [data-mark]')).toHaveText(['Held'], { timeout: 30_000 });
+    } finally {
+      await held.a?.cleanup();
+      await held.scene?.stop();
+      rmSync(aUserData, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

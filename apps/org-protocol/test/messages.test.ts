@@ -197,7 +197,7 @@ describe('the pong clock', () => {
     }
   });
 
-  it('is at minor 16 of major 1 (the UX wave’s U5b: `rl2.git-reads`, after U10b’s `rl2.artifact-undelete` at 15)', () => {
+  it('is at minor 16 of major 1 (the UX wave’s U4b: `rl2.send-now`, after U10b’s `rl2.artifact-undelete` at 15)', () => {
     expect(RL2_PROTOCOL).toEqual({ major: 1, minor: 16 });
   });
 });

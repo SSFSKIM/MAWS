@@ -51,6 +51,10 @@
     "id": "local:54ea7128-6390-42c7-92a7-a878191e6250",
     "kind": "local_command",
     "messageUuid": "54ea7128-6390-42c7-92a7-a878191e6250",
+    "run": {
+      "args": "E312 slash name",
+      "command": "rename"
+    },
     "text": "Session renamed to: E312 slash name",
     "turnId": "turn:21bdf7c8-01aa-4e28-a60e-de13c16c8065"
   },

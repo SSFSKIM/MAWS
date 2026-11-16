@@ -176,13 +176,14 @@ describe('live thinking label', () => {
 });
 
 describe('local command row', () => {
-  it('shows the command output under its header, never as a bubble', async () => {
+  it('shows the command output as a light line under ⎿, with no header, never as a bubble (UX wave U3b, M1)', async () => {
     const b = builder();
     b.emit('user.message', { messageUuid: uuid('lc'), content: '<local-command-stdout>Total cost: $0.0123</local-command-stdout>', isReplay: true, isSynthetic: false, origin: 'local-command', bash: null });
     const store = await storeWith(b.events);
     const row = rowOf(store.rows(), 'local_command');
     const { container } = renderRow(row);
-    expect(container.textContent).toContain('Command output');
+    expect(container.textContent).not.toContain('Command output');
+    expect(container.querySelector('.transcript-command-mark')?.textContent).toBe('⎿');
     expect(container.textContent).toContain('Total cost: $0.0123');
     expect(container.querySelector('[data-bubble]')).toBeNull();
   });

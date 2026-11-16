@@ -26,6 +26,9 @@
 /* The view's switch above the composer (`Switch.tsx`; the mod's band): inside the band's frame, with no row above it
    (ruling 3, item iv); its muted caption and its button one text size (item v), the button at full contrast on hover. */
 .owner-view-switch { display: flex; flex-wrap: wrap; align-items: baseline; color: var(--fg-muted); font-size: var(--text-ui); }
+/* The caption ends in a space ("to-human view · "). A flex item's trailing space is dropped at its line's end, which
+   drew "·full transcript"; `pre` keeps it. */
+.owner-view-switch > span { white-space: pre; }
 .owner-view-switch > button { color: var(--fg-muted); font-size: inherit; text-align: left; }
 .owner-view-switch > button:hover { color: var(--fg); }
 .owner-view-switch > button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }

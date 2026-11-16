@@ -40,7 +40,7 @@ export interface CodeHarnessSection {
 
 export interface CodeHarnessViewer {
   path: string;
-  kind: 'code' | 'markdown' | 'image' | 'external' | 'head';
+  kind: 'code' | 'markdown' | 'image' | 'frame' | 'external' | 'head'; // UX wave U6b-2: 'frame', a PDF, a page or media drawn
   line: number | null;
   notice: string | null;
   lines: number | null; // the file's line count: CodeMirror's doc.lines, minus one when the text ends with a line break

@@ -59,6 +59,15 @@ export const VIEWER_COPY = {
   actualSize: 'Actual size',
   fit: 'Fit',
   zoomPercent: (scale: number) => `${Math.round(scale * 100)}%`,
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, "The sentences a person reads"): a
+  // framed file's failure body and its button, the line under an HTML page's bar, and the row's sentence per reason
+  frameStopped: 'This file stopped loading: it changed, or it can no longer be read.',
+  openAgain: 'Open again',
+  besideFiles: 'Shown without the files beside it',
+  tooLargeHere: (bound: number) => `Too large to show here: MAWS copies at most ${formatSize(bound)} from another machine.`,
+  videoUnplayable: 'This video can’t be played here.',
+  soundUnplayable: 'This sound can’t be played here.',
+  olderService: 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.',
 } as const;
 
 // A count as Review prints it, with the thousands separator (UX wave U5b, §I); English throughout, as the app's other counts.

@@ -38,7 +38,8 @@ afterEach(() => {
 
 const CONFIG_HOME = '/scratch-root/config';
 let endpoints: CommandOutput<'customization.serverEndpoints'>['servers'] = [];
-afterEach(() => { endpoints = []; });
+let pluginEndpoints: CommandOutput<'customization.serverEndpoints'>['pluginServers']; // UX wave U11h; absent: an earlier host's answer
+afterEach(() => { endpoints = []; pluginEndpoints = undefined; });
 
 // The engine host as the catalog asks it, answering from a recorded view; counts each command.
 function host(view: (name: CommandName) => Promise<EngineView>, failing = false) {
@@ -62,7 +63,7 @@ function host(view: (name: CommandName) => Promise<EngineView>, failing = false)
         case 'customization.inventory':
           return { skills: [], servers: (v.servers ?? []).map((n) => ({ name: n, scope: 'user', path: '/x/.claude.json', transport: 'http' })), warnings: [], serversRead: true };
         case 'customization.serverEndpoints':
-          return { servers: endpoints };
+          return { servers: endpoints, ...(pluginEndpoints && { pluginServers: pluginEndpoints }) };
         case 'plugins.directoryProvenance':
           return { pluginsDir: `${CONFIG_HOME}/plugins`, entries: [...v.directoryInstalled].map(([name, repositoryKey]) => ({ name, repositoryKey })) };
         default:
@@ -270,7 +271,7 @@ describe('the catalog service', () => {
     expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
       { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker', iconUrl: null }, // U11c: its record's icon is on the vendor's own host
       { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null, iconUrl: null }, // Linear's name, not its endpoint
-    ] });
+    ], plugins: [] }); // UX wave U11h: the engine host answered no plugin's connector
     // each postures call asked, and the view's read asked once beside it (the baseline an MCP change is compared with)
     expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }, { cwd: PROJECT_A }]);
   });
@@ -401,6 +402,27 @@ describe('the icons of installed plugins and configured connectors', () => {
       { name: 'buoy', iconUrl: null },
       { name: 'anchors', iconUrl: null },
     ]);
+  });
+
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M1): a plugin's connector, row
+  // for row with the engine host's `pluginServers`, by the same match; none where an earlier host answered none
+  it('gives each plugin’s connector its posture, icon, fingerprint and revision by the same match, and none where the host answered no list', async () => {
+    hold();
+    const plugin = (server: string, url: string, revision: string | null): NonNullable<typeof pluginEndpoints>[number] => ({ plugin: 'key-tides@harbour-market', pluginName: 'mani-tides', server, name: `plugin:mani-tides:${server}`, version: '1.2.0', path: '/plugins/tides/.mcp.json', transport: 'http', url, revision });
+    pluginEndpoints = [plugin('tides-http', 'https://mcp.tides.example/mcp', 'rev-tides'), plugin('moorings', 'https://mcp.moorings.example/mcp', null), plugin('buoy', 'https://buoy.internal.example/mcp', 'rev-buoy')];
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
+    const { servers, plugins } = await invoke('catalog.postures', { cwd: PROJECT_A });
+    expect(servers).toEqual([]);
+    expect(plugins.map(({ plugin: key, server, path, iconUrl, revision }) => ({ key, server, path, iconUrl, revision }))).toEqual([
+      { key: 'key-tides@harbour-market', server: 'tides-http', path: '/plugins/tides/.mcp.json', iconUrl: `${BUCKET}/tides.svg`, revision: 'rev-tides' },
+      { key: 'key-tides@harbour-market', server: 'moorings', path: '/plugins/tides/.mcp.json', iconUrl: null, revision: null }, // two records
+      { key: 'key-tides@harbour-market', server: 'buoy', path: '/plugins/tides/.mcp.json', iconUrl: null, revision: 'rev-buoy' },
+    ]);
+    expect(plugins.map((p) => p.fingerprint)).toEqual([expect.stringMatching(/^[0-9a-f]{32}$/), expect.stringMatching(/^[0-9a-f]{32}$/), expect.stringMatching(/^[0-9a-f]{32}$/)]);
+    expect(plugins[2]!.authPosture).toBeNull();
+    expect(JSON.stringify(plugins)).not.toMatch(/mcp\.tides\.example|internal\.example/);
+    pluginEndpoints = undefined;
+    expect((await invoke('catalog.postures', { cwd: PROJECT_A })).plugins).toEqual([]);
   });
 
   it('asks the network for the URLs they hand out only as the icon route keeps its copies', async () => {

@@ -45,6 +45,7 @@ import type { LaneAAgent } from '@shared/lane-a/agents';
 import { laneAAgentsWatchEnded, laneAJobsWatchEnded, noteLaneAAgents, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
 import { learnReaderGrade, readerGradeOf, useReader } from '../sessions/share/reader';
 import { isRemoteLaneA } from './remote-session';
+import { clearCompacting, noteCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 
 // `resumed` (P5 O9 M9): a remote link's transport is back after a pause, the watch going on as it was (never a reset).
 export type PlaneEvent =
@@ -95,9 +96,10 @@ const tell = (entry: Entry, event: PlaneEvent) => {
 function keepOps(appSessionId: AppSessionId, messages: readonly SessionMessage[]): void {
   for (const message of messages) {
     if (message.kind !== 'op' && message.kind !== 'compact') continue;
-    const body = message.body as { id?: unknown; rpc?: unknown };
+    const body = message.body as { id?: unknown; rpc?: unknown; phase?: unknown };
     const id = message.kind === 'op' ? body.id : body.rpc;
     if (typeof id !== 'string') continue;
+    if (message.kind === 'compact') noteCompacting(appSessionId, { kind: 'bridge', rpc: id }, body.phase === 'start'); // UX wave U3b (M4)
     let kept = ops.get(appSessionId);
     if (!kept) ops.set(appSessionId, (kept = new Map()));
     kept.set(id, [...(kept.get(id) ?? []), message]);
@@ -134,6 +136,7 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
   } else if ('reset' in payload) {
     entry.log = null;
     entry.overflowed = false; // the fresh snapshot follows
+    if (session) clearCompacting(appSessionId); // UX wave U3b (M4): a compaction's end may be among what was lost
     tell(entry, { kind: 'reset' });
   } else if ('ended' in payload) {
     end(appSessionId, entry, payload.ended);
@@ -157,6 +160,7 @@ function end(appSessionId: AppSessionId, entry: Entry, reason: string): void {
   if (entry.agentId === null) {
     laneAJobsWatchEnded(appSessionId);
     laneAAgentsWatchEnded(appSessionId);
+    clearCompacting(appSessionId); // UX wave U3b (M4)
   }
   tell(entry, { kind: 'ended', reason });
 }
@@ -223,7 +227,10 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
     entry.overflowed = false;
-    if (agentId === null) laneAAgentsWatchEnded(appSessionId); // UX wave U8d: the watch has ended, as at its other two ends
+    if (agentId === null) {
+      laneAAgentsWatchEnded(appSessionId); // UX wave U8d: the watch has ended, as at its other two ends
+      clearCompacting(appSessionId); // UX wave U3b (M4): this window's own reset, as the link's
+    }
     tell(entry, { kind: 'reset' });
   }
   entry.watchers.add(watcher);
@@ -232,6 +239,7 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     if (!entry.watchers.delete(watcher) || entry.watchers.size > 0) return;
     entry.off();
     entries.delete(key);
+    if (agentId === null) clearCompacting(appSessionId); // UX wave U3b (M4): nothing would hear its end now
     if (entry.watch !== null) void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
     if (agentId === null) laneAAgentsWatchEnded(appSessionId); // UX wave U8d: no longer heard, a running agent is no longer known to run

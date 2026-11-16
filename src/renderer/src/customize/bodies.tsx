@@ -18,7 +18,7 @@ import { PluginsList, useLibrarySelection, usePluginsLibrary } from '../widgets/
 import { useEngineRead } from '../widgets/read';
 import { SkillsLibrary } from '../widgets/skills/SkillsLibrary';
 import { diskSkillGroups, hasPluginSkills, skillsView } from '../widgets/skills/skills';
-import { ConnectorsDiscover, ConnectorsMine } from './connectors/ConnectorsSection';
+import { ConnectorsDiscover, ConnectorsMine, usePluginList } from './connectors/ConnectorsSection';
 import { CONNECTORS } from './connectors/copy';
 import { pluginIdOf } from './discover/add';
 import { DiscoverPane } from './discover/DiscoverPane';
@@ -141,7 +141,7 @@ function SkillsMine({ onDetail, toList }: { onDetail(open: boolean): void; toLis
   useLayoutEffect(() => () => onDetail(false), [onDetail]);
   return (
     <div data-customize-body="skills" className="flex min-h-0 flex-1 flex-col p-3">
-      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />
+      <InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />
       {inventory.data && <DiskSkills inventory={inventory.data} onDetail={onDetail} toList={toList} />}
     </div>
   );
@@ -160,19 +160,24 @@ function DiskSkills({ inventory, onDetail, toList }: { inventory: Inventory; onD
   return <SkillsLibrary groups={groups} shown={shown} onDetail={onDetail} onReset={reset} toList={toList} />;
 }
 
-// My items' connectors, and under them what the attached session has live.
+// My items' connectors, and under them what the attached session has live. UX wave U11h (the architect's ruling of
+// 2026-11-15): the plugin list is read only where the inventory holds a plugin's connector, so a folder with none pays no
+// read; a plugin's row offers Sign in once it has answered.
 function ConnectorsBody() {
-  const { cwd, name, inventory, attached, askIn } = usePlace();
+  const { cwd, directory, session, name, inventory, attached, askIn } = usePlace();
   const search = useCustomizePage((s) => s.search);
+  const pluginConnectors = (inventory.data?.pluginServers?.length ?? 0) > 0;
+  const pluginList = usePluginList(usePluginsLibrary(pluginConnectors ? directory : null, session));
   return (
     <WithoutReload>
       <div data-customize-body="connectors" className="flex min-h-0 flex-1 flex-col pt-3">
         <ConnectorsMine
           cwd={cwd}
           place={name}
-          servers={inventory.data?.servers}
+          inventory={inventory.data}
+          pluginList={pluginList}
           readAt={inventory.dataUpdatedAt}
-          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} refresh={() => void inventory.refetch()} />}
+          inventoryState={<InventoryState error={inventory.error} pending={inventory.isPending} warnings={inventory.data?.warnings} pluginServers={inventory.data?.pluginServers} refresh={() => void inventory.refetch()} />}
           attached={attached}
           askIn={askIn}
           search={search}

@@ -158,7 +158,7 @@ function typeOf(name: string): string {
 
 // One `bytes=` range of a `size`-byte body: null to answer the whole (none asked, a multi-range, a malformed one),
 // 'unsatisfiable' for a range that starts past the end.
-function rangeOf(header: string | null, size: number): { start: number; end: number } | 'unsatisfiable' | null {
+export function rangeOf(header: string | null, size: number): { start: number; end: number } | 'unsatisfiable' | null {
   const match = header === null ? null : /^bytes=(\d*)-(\d*)$/.exec(header.trim());
   if (!match || (match[1] === '' && match[2] === '')) return null;
   if (size === 0) return 'unsatisfiable';

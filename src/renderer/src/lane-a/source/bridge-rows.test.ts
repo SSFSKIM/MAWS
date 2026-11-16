@@ -143,7 +143,7 @@ describe("the plugin's appended rows", () => {
     const steer = appended('use the split store');
     expect(steerAsDrawn(steer)).toEqual({
       uuid: steer.uuid, parentUuid: null, timestamp: steer.timestamp, sessionId: 'sess-1', isSidechain: false, type: 'attachment',
-      attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'use the split store' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: steer.uuid },
+      attachment: { type: 'queued_command', prompt: [{ type: 'text', text: 'use the split store' }], commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: steer.uuid, mawsDrawn: true }, // U1c (Decision Log 38): MAWS's drawing, never the engine's
     });
     for (const text of ['[Request interrupted by user]', 'The interrupt came from the desk.', STOP('bk3x9a1', 'the desk'), '[sminos chat MAWS hub/5e55e5e5:12 from human → @you]\nRun the suites.']) {
       const row = appended(text);
