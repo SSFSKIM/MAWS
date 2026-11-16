@@ -4,9 +4,12 @@
 // store's turn, whatever is drawn.
 import type { MessageUuid } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
+import { loadJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../dev/journal';
 import { aboveLastCompaction, answerActionsOf, answerMarkdownOf } from './answer-actions';
+import { rowsOf } from './derive';
 import { turnId as turnIdOf } from './keys';
-import { applyEvents, createState } from './reduce';
+import { applyEvents, createState, withUi } from './reduce';
 import type { Row, RowId, TurnId } from './rows';
 import { builder, uuid } from './test-events';
 
@@ -140,6 +143,49 @@ describe('aboveLastCompaction', () => {
     expect(rows.map((_, i) => aboveLastCompaction(rows, i))).toEqual([true, true, false, false, false]);
     const auto = [prompt('1'), prompt('2'), divider('2'), compaction('2')]; // an automatic compaction: its turn’s prompt was written before it
     expect(auto.map((_, i) => aboveLastCompaction(auto, i))).toEqual([true, true, true, false]);
+  });
+});
+
+// The branch panel's finding 1 (ruled 2026-11-15 (UTC)): a row on a rewound (discarded) branch gets no action row, and
+// every target an action names is resolved on the live branch only, the discarded rows skipped as if absent, whether
+// the rewind is revealed or not. pass2/rewind, recorded: APPLE answered OK, BANANA answered OK, a rewind to BANANA's
+// prompt, then a new prompt answered APPLE.
+describe('a rewound branch (the branch panel’s finding 1)', () => {
+  function recordedRewind() {
+    const state = applyEvents(createState(null, null), journalToEvents(loadJournal('pass2', 'rewind')));
+    const rewind = rowsOf(state).find((row) => row.kind === 'boundary' && row.boundaryKind === 'rewind')!;
+    const revealed = withUi(state, { ...state.ui, revealedBoundaries: new Set([rewind.id]), version: state.ui.version + 1, global: state.ui.global + 1 });
+    return { state, hidden: rowsOf(state), revealed: rowsOf(revealed), discarded: state.hidden?.turns ?? [] };
+  }
+  /** Each entry as `[the prompt its answer replies to, rewindTo's prompt, fork]`, prompts named by their words. */
+  const named = (rows: Row[], discarded: readonly TurnId[]) => {
+    const words = new Map(rows.flatMap((row) => (row.kind === 'user' && row.messageUuid !== null ? [[row.messageUuid as string, row.text.split(' ').slice(0, 3).join(' ')]] : [])));
+    const opener = new Map(rows.flatMap((row) => (row.kind === 'user' && row.turnId !== null ? [[row.turnId, words.get(row.messageUuid as string)]] : [])));
+    return [...answerActionsOf(rows, discarded).values()].map((entry) => [opener.get(entry.turnId), entry.rewindTo === null ? null : words.get(entry.rewindTo), entry.fork]);
+  };
+
+  it('the recording holds the discarded turn, drawn only when the rewind is revealed', () => {
+    const { hidden, revealed, discarded } = recordedRewind();
+    expect(discarded).toHaveLength(1);
+    expect(hidden.some((row) => row.turnId === discarded[0])).toBe(false);
+    expect(revealed.filter((row) => row.turnId === discarded[0]).map((row) => row.kind)).toEqual(expect.arrayContaining(['user', 'assistant_text']));
+  });
+
+  it('read with the rewind hidden and revealed, the live rows get the same targets, and the discarded answer gets none', () => {
+    const { hidden, revealed, discarded } = recordedRewind();
+    const live = [['Remember the word', 'List every word', true], ['List every word', null, true]];
+    expect(named(hidden, discarded)).toEqual(live);
+    expect(named(revealed, discarded)).toEqual(live);
+    const discardedAnswers = revealed.filter((row) => row.kind === 'assistant_text' && row.turnId === discarded[0]);
+    expect(discardedAnswers).toHaveLength(1);
+    expect(answerActionsOf(revealed, discarded).has(discardedAnswers[0]!.id)).toBe(false);
+  });
+
+  it('never names a discarded prompt as the message to fork from', () => {
+    const { revealed, discarded } = recordedRewind();
+    const gone = new Set(revealed.flatMap((row) => (row.kind === 'user' && row.turnId !== null && discarded.includes(row.turnId) ? [row.messageUuid] : [])));
+    expect(gone.size).toBe(1);
+    for (const entry of answerActionsOf(revealed, discarded).values()) expect(gone.has(entry.rewindTo)).toBe(false);
   });
 });
 
