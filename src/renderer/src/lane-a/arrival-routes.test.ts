@@ -414,7 +414,10 @@ describe('a slash command’s output names its command, its error and its kind o
       '-: Compacted',
     ]);
     expect(commandRows(drawn(stateOf(remoteEvents)))).toEqual(file);
-    expect(commandRows(drawn(stateOf(fromJournal('u3-commands-r1'))))).toEqual(file);
+    // The branch panel's finding 2 (§B's drawn adjacency): the live route draws a typed /compact's bubble, the boundary,
+    // then its output, which therefore stands alone; the file's routes draw the boundary first and the output directly
+    // under its bubble. Every other output reads the same on the three routes.
+    expect(commandRows(drawn(stateOf(fromJournal('u3-commands-r1'))))).toEqual(file.map((row) => (row === '-: Compacted' ? '- lone: Compacted' : row)));
   });
 
   it('u3-terminal-commands-r1: the terminal’s grid is a plain row with no escape in it, named by its run', async () => {

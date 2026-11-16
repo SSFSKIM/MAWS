@@ -6,6 +6,9 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { commandEntry } from '@shared/engine/arrival';
 import { describe, expect, it } from 'vitest';
+import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../dev/journal';
+import { commandInput } from '../surface/adapters';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -134,6 +137,54 @@ describe('a command output’s row', () => {
   // A loose row of another kind between a command's turn and its output: no recording holds one (the probes' files place
   // each output directly after its command's turn), so no order is written here for it. By the rule, its output would
   // then have no bubble directly above it and stand alone.
+
+  // The branch panel's finding 2 (ruled 2026-11-15 (UTC)): §B's drawn adjacency. An output stands alone unless the row
+  // drawn directly before it is its command's bubble, derived from the preceding drawn row, not from the turn: on the
+  // live route a typed /compact draws its bubble, the compaction's boundary, then its output, which therefore stands alone.
+  describe('separated from its bubble by a row its own turn draws (the branch panel’s finding 2)', () => {
+    const live = (name: string) => applyEvents(createState(null, null), journalToEvents(loadUxwaveJournal(name)));
+    /** The drawn rows from each /compact bubble on, up to the next bubble: the bubble, what stands between, its output. */
+    const compactions = (drawn: Row[]) => drawn.flatMap((row, i) => {
+      if (row.kind !== 'user' || row.text !== '/compact') return [];
+      const next = drawn.findIndex((later, j) => j > i && later.kind === 'user');
+      return [drawn.slice(i, next < 0 ? undefined : next).filter((later) => later.kind !== 'time')];
+    });
+    const shape = (rows: Row[]) => rows.map((row) => (row.kind === 'local_command' ? `output ${row.text.split('\n')[0]}${row.lone ? ' lone' : ''}` : row.kind === 'boundary' ? `boundary ${row.boundaryKind}` : row.kind));
+
+    for (const name of ['u3b-forkcmd-source-compact', 'u3-commands-r1']) {
+      it(`${name}, live: a /compact that compacted draws its output alone under the boundary, in the drawn row and in its copy`, () => {
+        const state = live(name);
+        const drawn = rowsOf(state);
+        const separated = compactions(drawn).filter((rows) => rows.some((row) => row.kind === 'boundary'));
+        expect(separated.length).toBeGreaterThan(0);
+        for (const rows of separated) {
+          expect(shape(rows)).toEqual(['user', 'boundary compaction', 'output Compacted lone']);
+          const output = rows.at(-1) as Extract<Row, { kind: 'local_command' }>;
+          expect(serializeRows([output])).toBe(`⎿ ${output.text}`); // the standalone form; no run is recorded for it (Engine facts, 7)
+          expect(commandInput(output, state)?.props).toMatchObject({ command: '', args: '' }); // the opener's fallback does not cross the boundary
+        }
+      });
+    }
+
+    it('u3-commands-r1, live: a /compact with nothing to compact keeps its output directly under its bubble', () => {
+      const unseparated = compactions(rowsOf(live('u3-commands-r1'))).filter((rows) => !rows.some((row) => row.kind === 'boundary'));
+      expect(unseparated.map(shape)).toContainEqual(['user', 'output Error: No messages to compact']);
+    });
+
+    it('a separated output that carries a run keeps its standalone prefix when drawn and when copied', () => {
+      // the recorded live shape (u3b-forkcmd-source-compact seq 40 to 50: bubble, boundary, output), with a run written in
+      const b = builder();
+      b.turn('u1', '/compact');
+      b.emit('boundary.compaction', { trigger: 'manual', preTokens: 1000, postTokens: null, logicalParentUuid: null, historical: false });
+      output(b, 'o1', '<local-command-stdout>Compacted </local-command-stdout>', commandEntry({ run: { command: 'compact', args: '' }, plain: false }));
+      b.end(['u1']);
+      const state = applyEvents(createState(null, null), b.events);
+      const drawn = rowsOf(state).filter((row) => row.kind !== 'time');
+      expect(shape(drawn)).toEqual(['user', 'boundary compaction', 'output Compacted lone']);
+      const row = drawn.at(-1) as Extract<Row, { kind: 'local_command' }>;
+      expect(serializeRows([row])).toBe('⎿ /compact · Compacted');
+    });
+  });
 
   it('copies as its line: the mark, then the output, the name first when it stands alone with a run, and no heading', () => {
     const b = builder();
