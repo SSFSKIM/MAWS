@@ -28,7 +28,7 @@ import { forgetKeptOperations } from '../../widgets/plugins/operation';
 import { useReadLoads } from '../../widgets/read';
 import { useCustomizeProject } from '../open';
 import { useCustomizePage, useOpenRequest } from '../page';
-import { heard, resetSignIns } from './sign-in';
+import { heard, resetSignIns, useSignIns } from './sign-in';
 
 const P = at('project-tides' as ProjectId);
 const KEY = 'tide-tables@harbour-market';
@@ -419,6 +419,30 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       await reads(row, COLLISION('Tide tables, tide-chart'));
       expect(signIn(row)).toBeNull();
       expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+
+    it('a postures read that fails after an unchanged re-read keeps the retained result, in the row and in the sign-in book; the same revision answered again still shows it', async () => {
+      await signedInFrom();
+      const row = await rowOf('tides-http');
+      changed('done', { where: 'here' });
+      await reads(row, 'Signed in · connected here');
+      const kept = () => [...useSignIns.getState().byServer.values()].filter((record) => record.event.name === NAME && record.event.state === 'done');
+      expect(kept()).toHaveLength(1);
+      const answer = answered!.postures;
+      backend.script('catalog.postures', () => {
+        throw new WidgetBackendError({ code: 'internal', message: 'the directory copy could not be read' });
+      });
+      await readAgain();
+      await waitFor(() => expect(client.getQueryCache().getAll().some((query) => query.queryKey.includes('postures') && query.state.status === 'error')).toBe(true));
+      await reads(row, 'Signed in · connected here');
+      expect(kept()).toHaveLength(1);
+      backend.script('catalog.postures', () => answer); // the same revision again
+      const postureReads = asked('catalog.postures').length;
+      await readAgain();
+      await waitFor(() => expect(asked('catalog.postures').length).toBeGreaterThan(postureReads));
+      await waitFor(() => expect(within(row).getByRole('button', { name: SIGN_IN })).toBeTruthy());
+      await reads(row, 'Signed in · connected here');
+      expect(kept()).toHaveLength(1);
     });
 
     it('after a failure, and after a cancel, a collision’s line replaces Sign-in didn’t finish, with no Sign in', async () => {
