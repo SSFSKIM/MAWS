@@ -404,7 +404,7 @@ describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => 
   });
 
   // addition B (2026-11-16): the one test of one string, which the ask tool's guard and the steer's writer both call
-  it('quotesGrant: the sentence quotes the grant, read with tags removed or with their brackets' words kept', () => {
+  it('quotesGrant: the sentence quotes the grant, read with tags removed or with their brackets’ words kept', () => {
     for (const kind of ['command', 'call'] as const) expect(quotesGrant(consentMessage(kind, 'x'))).toBe(true);
     expect(quotesGrant('**Permission** granted <b>for</b> it')).toBe(true);
     expect(quotesGrant('Permission granted <for it>')).toBe(true);
