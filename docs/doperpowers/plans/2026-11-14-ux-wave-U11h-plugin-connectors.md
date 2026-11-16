@@ -21,7 +21,7 @@ How to see it working: Acceptance, H1 to H10.
 - [x] (2026-11-15 (UTC)) The architect's rulings on those three points, written into M1, M3, §E and the checks (Decision Log; under the table).
 - [x] (2026-11-15 (UTC)) M1 — The inventory lists a plugin's connectors. Commits `1b87d0313`..`c966751a5` (the stand-in minor 49 in `c966751a5` alone), fixes `17c48cf83`..`d81aa792c`; task review clean after two fix rounds (Decision Log, "the controller, on M1's task review").
 - [x] (2026-11-15 (UTC)) M2 — The rule, at three points of the operation. Commits `add32850b`..`3ded12f06`, fix `a045c6b0f`..`5a82acbe0`; task review clean after one fix round (Decision Log, "the controller, on M2's task review"); each point's named tests shown red with that point's check removed, on a scratch branch, before and after the fix.
-- [ ] M3 — The row in My items, its lines and Sign in; the coverage note; the lists before a chat starts.
+- [x] (2026-11-16 (UTC)) M3 — The row in My items, its lines and Sign in; the coverage note; the lists before a chat starts. Commits `50ddb212d`..`3feb94f1a` (M1's side of the over-bound ruling first, `50ddb212d`, `2e309faba`), fixes `fc9009c03`..`8db76947d`; task review clean after two fix rounds (the `absent` line as ruled; a revision answered null forgets an ended record, a failed read forgets nothing).
 - [ ] M4 — The record, the e2e scenes written, the whole checks, the hand-back.
 - [ ] The architect's: the e2e scenes on a Mac, the branch review, class 1a, the pull request (Proof, P1 to P5).
 
@@ -749,6 +749,9 @@ Opened by the architect after the gate. Its body opens with the root's path, "U1
 
 - Decision (the architect's rulings on M3's four points, 2026-11-16 (UTC)). (1) **Overruled:** the verdict `absent` in §E's row 10 draws a line, the services' own sentence for it in the row's register, "That session loaded no plugin that supplies this connector.", with no Sign in; its place in row 10's order is after `other-version` and before `not-reported` (§E, §G); a unit case shows the verdict draws that line and offers no Sign in. The architect reports the sentence to the owner as a decision made in their place. (2) Accepted: row 11 draws the posture's words in the state's place and "Open a session, then sign in" in the trailing place, as a configured row does today. (3) Accepted: before a chat starts, the plugin rows wait for the launch profile's read, as a plugin's skill does. (4) Accepted: "What the code says", item 9, corrected in place. And: keeping the last known revision on a plugin's row is accepted; the configured rows' same flicker stays out of this landing, with a tracker row naming the remedy (The record, row 7). M4's hand-back names the scene sentence it changes in `e2e/widgets.spec.ts`.
   Date/Author: 2026-11-16 (UTC), the architect; recorded by the controller.
+
+- Decision (the controller, on M3's task review, 2026-11-16 (UTC)): a plugin row's revision counts as known only from main's answer to the latest read; a null revision inside that answer is an answer (an http connector that becomes a local command drops its ended record), and a failed read with no answer keeps the last known revision and forgets nothing. Each has a regression through the real readers.
+  Date/Author: 2026-11-16 (UTC), the controller.
 
 ## Outcomes & Retrospective
 
