@@ -541,7 +541,9 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const state = stateOf(events);
     const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
-    return { consents, approvals, readings: readings(state) };
+    // the answers the person's messages carry, each as its tool, its call and how many answers it holds
+    const answers = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'answer' ? [JSON.stringify([entry.tool, entry.call, entry.answers?.length ?? null])] : [])) : [])))];
+    return { consents, approvals, answers, readings: readings(state) };
   };
   const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
@@ -595,7 +597,8 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   it('(c3) one message of an answer, a grant and an answer again: one answer, no consent, no approval row, the blocked row not approved, in either form', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
-      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        expect(answers, `${form}, ${route}: the reader takes the message for one answer to the ask`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
         expect(consents, `${form}, ${route}`).toEqual([]);
         expect(approvals, `${form}, ${route}`).toEqual([]);
         expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
