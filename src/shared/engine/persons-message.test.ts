@@ -282,6 +282,26 @@ describe('flatPersonsWords, over the recorded last-prompt rows', () => {
     expect(flatPersonsWords(line)).toBe(recordedJoin('u704-rewind-1').prompt);
   });
 
+  // The task review of M1: the engine's cut can fall anywhere in the tag or the opening sentence, the bracket included
+  it('made by hand: a line closed with `…` at every cut position through the tag and the opening sentence gives the words, or nothing at the line’s start', () => {
+    const opening = askSteerOpening('toolu_01UXWNoSuchAskInThisSession');
+    for (let length = 1; length <= opening.length; length++) {
+      const head = `${opening.slice(0, length)}…`;
+      expect(flatPersonsWords(`Keep these notes. ${head}`), head).toBe('Keep these notes.');
+      expect(flatPersonsWords(head), head).toBeNull();
+    }
+    expect(flatPersonsWords('Keep these notes. [MAWS ask ask-1]…')).toBe('Keep these notes.');
+  });
+
+  it('made by hand: a line not closed with `…` that holds a head of the opening sentence is unchanged', () => {
+    const opening = askSteerOpening('ask-1');
+    for (const length of [1, 10, 15, 16, 17, opening.length - 1]) {
+      const line = `Keep these notes. ${opening.slice(0, length)}`;
+      expect(flatPersonsWords(line), line).toBe(line);
+    }
+    expect(flatPersonsWords('Keep these notes. [MAWS ask ask-1] The user answered the questions you as… and more')).toBe('Keep these notes. [MAWS ask ask-1] The user answered the questions you as… and more');
+  });
+
   it('a line without the opening sentence is unchanged, the tag mid-word or alone included', () => {
     for (const line of ['Run the tests and tell me what failed.', 'Please read [MAWS ask ask-1] as a label', 'notes[MAWS ask ask-1] The user answered the questions you asked: none']) expect(flatPersonsWords(line)).toBe(line);
   });

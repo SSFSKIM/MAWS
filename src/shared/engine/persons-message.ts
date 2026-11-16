@@ -95,22 +95,29 @@ export function personsWords(text: string): string | null {
  * head of it that closes the line counts as the opening.
  */
 export function flatPersonsWords(line: string): string | null {
-  const tag = /(?:^| )(\[MAWS ask ([^\]\s]*)(\] )?)/g;
-  for (const match of line.matchAll(tag)) {
-    const at = match.index + match[0].length - match[1]!.length;
-    if (!opensHere(line.slice(at), match[2]!, match[3] !== undefined)) continue;
+  for (const match of line.matchAll(/(?:^| )\[/g)) {
+    const at = match.index + match[0].length - 1; // the tag's bracket
+    if (!opensHere(line.slice(at))) continue;
     const words = line.slice(0, at).trim();
     return words === '' ? null : words;
   }
   return line;
 }
 
-// The writer's whole opening sentence for the id, or (the line cut and closed with `…` inside it) the head of it
-function opensHere(from: string, id: string, closed: boolean): boolean {
-  if (closed && from.startsWith(askSteerOpening(id))) return true;
+// The writer's whole opening sentence for the id its tag names; or, the line closed with `…`, a head of that sentence
+// running to the `…`: the tag cut anywhere (inside its prefix, inside the id, at the bracket, at the space after it) or
+// the sentence cut anywhere after it
+function opensHere(from: string): boolean {
+  const id = /^\[MAWS ask ([^\]\s]+)\] /.exec(from)?.[1];
+  if (id !== undefined && from.startsWith(askSteerOpening(id))) return true;
   if (!from.endsWith('…')) return false;
   const head = from.slice(0, -1);
-  return closed ? askSteerOpening(id).startsWith(head) : /^\[MAWS ask [^\]\s]*$/.test(head);
+  const prefix = '[MAWS ask ';
+  if (head.length <= prefix.length) return prefix.startsWith(head);
+  if (!head.startsWith(prefix)) return false;
+  const cutId = /^[^\]\s]*/.exec(head.slice(prefix.length))![0];
+  if (prefix.length + cutId.length === head.length) return true; // the cut falls inside the id
+  return cutId !== '' && askSteerOpening(cutId).startsWith(head);
 }
 
 /** What an answer reads as outside the transcript: the search text and the resume preview (ruling A, its one place). It
