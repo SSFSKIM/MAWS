@@ -227,10 +227,8 @@ export class OwnerChannelStore {
       };
       if (!launch.laneOn) values.enabled_at = null;
       else if ((row?.enabledAt ?? null) === null) values.enabled_at = launch.at;
-      if (launch.reserved === true && row?.advertised) {
-        const { prior: _bound, ...reservation } = row.advertised;
-        values.advertised = JSON.stringify({ ...reservation, launchId: launch.launchId });
-      }
+      const reserved = row?.advertised;
+      if (launch.reserved === true && reserved) values.advertised = JSON.stringify({ launchId: launch.launchId, number: reserved.number, plugin: reserved.plugin, at: reserved.at }); // bound: no prior
       this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, values);
     });
   }
@@ -244,8 +242,8 @@ export class OwnerChannelStore {
       this.db.run('INSERT INTO owner_channel_sessions (app_session_id) VALUES (?) ON CONFLICT (app_session_id) DO NOTHING', appSessionId);
       const stored = this.session(appSessionId)?.advertised ?? null;
       const prior = stored === null ? undefined : stored.launchId !== null ? { launchId: stored.launchId, number: stored.number, plugin: stored.plugin } : stored.prior;
-      const { prior: _given, ...unbound } = reservation;
-      this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify({ ...unbound, launchId: null, ...(prior && { prior }) }) });
+      const unbound = { launchId: null, number: reservation.number, plugin: reservation.plugin, at: reservation.at, ...(prior && { prior }) };
+      this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify(unbound) });
     });
   }
 
