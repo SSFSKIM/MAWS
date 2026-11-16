@@ -167,6 +167,10 @@ describe('the person’s own text: an anchored message counts only when read who
     ['other words, then a framed message of several comments', () => `Look.\n${commentsMessage([{ anchor: linkedLabel, text: 'This', screenshot: false }, { anchor: plain, text: 'That', screenshot: false }], 'main')}`],
     ['a newline before an anchored message', () => `\n${one(linkedLabel)}`],
     ['a space before an anchored message', () => ` ${one(linkedLabel)}`],
+    // the same anchor's message twice reads as led and writes back to the byte: the first's tag and the second's lead
+    // fall inside the comment's words
+    ['the same anchor’s message joined to itself by a newline', () => `${one(linkedLabel)}\n${one(linkedLabel)}`],
+    ['the same anchor’s message joined to itself by a blank line', () => `${one(linkedLabel)}\n\n${one(linkedLabel)}`],
   ])('a link only in the lead names it for a read only: %s', (_, text) => {
     expect(both(text())).toEqual([OTHER, OTHER]);
   });

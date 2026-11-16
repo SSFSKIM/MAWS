@@ -25,6 +25,12 @@ export const VERBS = {
   prepare: /\bprepare\??:\s*\(content|\bdeps\.prepare\(/g,
   // a frame or a row given the person's origin
   frame: /origin:\s*\{\s*kind:\s*['"]human['"]/g,
+  // a conversation's first message (the closing wave's item 4): a command that starts one named (`session.start`,
+  // `session.fork`, `session.spawn` with its brief, `side.thread.open`), a start seam of the services or the window,
+  // defined or called, and a first message composed in place
+  start: /['"](?:session\.(?:start|fork|spawn)|side\.thread\.open)['"]/g,
+  startSeam: /\b(?:startSession|forkSession)\(/g,
+  firstMessage: /\bmessage:\s*\{\s*content\b/g,
 } as const;
 export type Verb = keyof typeof VERBS;
 export type Site = { file: string; verbs: Partial<Record<Verb, number>> };
@@ -39,8 +45,8 @@ export function sitesIn(source: string, file: string): Site | null {
   return Object.keys(verbs).length > 0 ? { file, verbs } : null;
 }
 
-// Every site of the repository's source: src/ and apps/, tests, specs, fixtures, test supports, e2e trees and
-// declarations aside.
+// Every site of the repository's source: src/ and apps/, TypeScript and JavaScript alike (apps/'s deploy probes are
+// `.mjs`), tests, specs, fixtures, test supports, e2e trees, build output and declarations aside.
 export function scanSends(root = REPOSITORY): Site[] {
   return ['src', 'apps'].flatMap((top) => listSources(join(root, top))).flatMap((path) => {
     const site = sitesIn(readFileSync(path, 'utf8'), relative(root, path).split(sep).join('/'));
@@ -53,6 +59,6 @@ function listSources(dir: string): string[] {
   return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
     const path = join(dir, entry.name);
     if (entry.isDirectory()) return SKIPPED_DIRECTORIES.has(entry.name) ? [] : listSources(path);
-    return /\.tsx?$/.test(entry.name) && !/\.(?:test|spec|fixture)\.|\.d\.ts$/.test(entry.name) ? [path] : [];
+    return /\.[cm]?[jt]sx?$/.test(entry.name) && !/\.(?:test|spec|fixture)\.|\.d\.[cm]?ts$/.test(entry.name) ? [path] : [];
   });
 }

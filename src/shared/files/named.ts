@@ -1117,6 +1117,9 @@ function* personNames(content: unknown, path: string): Steps<boolean> {
 // Each reader charges its work to `work`: a constant's search one native pass over the text, the grant's test what it
 // counts itself, the answer lines' match two (a line's opening, then its words).
 type Work = { steps: number };
+// The typed command's pattern at any line's start: the engine reads one only at a message's start, and a message MAWS
+// joined to other words after a newline is read only all the same (the guard's forms, test/support/person-sends.test.ts)
+const COMMAND_LINE = new RegExp(TYPED_COMMAND.source, 'm');
 const holds = (needle: string) => (text: string, work: Work) => {
   work.steps += text.length + 1;
   return text.includes(needle);
@@ -1136,7 +1139,7 @@ const CLAIMED: readonly ((text: string, work: Work) => boolean)[] = [
   holds(COMMAND_NAME_OPENING), // a slash command as the engine records it (ruling C)
   (text, work) => {
     work.steps += text.length + 1;
-    return TYPED_COMMAND.test(text); // a slash command as typed (ruling C), anchored at the text's start
+    return COMMAND_LINE.test(text); // a slash command as typed (ruling C), at the start of any line of the text
   },
 ];
 
