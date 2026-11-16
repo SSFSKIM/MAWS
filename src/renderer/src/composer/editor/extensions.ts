@@ -21,7 +21,7 @@ import { suggestionRenderer, type PopupItem } from '../mentions/popup';
 import { SlashPalette } from '../mentions/SlashPalette';
 import { MentionView } from './nodes/Mention';
 import { PastedView } from './nodes/Pasted';
-import { handlesPlainText, plainTextSlice } from './clipboard';
+import { framedText, handlesPlainText, plainTextSlice } from './clipboard';
 import { DictationInterim } from './dictation-plugin'; // E9
 import type { EditorEnv } from './env';
 import { PASTED } from './doc';
@@ -42,7 +42,9 @@ export function closeSuggestions(editor: Editor): void {
 const run = ({ editor, range, props }: { editor: Editor; range: Range; props: PopupItem }) => props.apply(editor, range);
 
 // The text paste rule: a very long plain-text paste becomes a pasted atom; any other goes in line for line, blank lines kept.
-// The editor's own copied slice is ProseMirror's to paste (its chips come back with their attributes).
+// The editor's own copied slice is ProseMirror's to paste (its chips come back with their attributes). UX wave U1c: a
+// paste or a drop of text that quotes the grant's opening, in any form, becomes a pasted atom (`framedText`); a drag
+// inside the editor moves or copies the person's own draft, and is ProseMirror's.
 const TextPaste = (env: () => EditorEnv) =>
   Extension.create({
     name: 'composerTextPaste',
@@ -51,13 +53,25 @@ const TextPaste = (env: () => EditorEnv) =>
         new Plugin({
           key: new PluginKey('composerTextPaste'),
           props: {
-            handlePaste: (view, event) => {
+            handlePaste: (view, event, slice) => {
               const data = event.clipboardData;
               if (!data || data.files.length > 0) return false;
               const text = data.getData('text/plain');
+              const framed = framedText(text, slice);
+              if (framed !== null) {
+                env().frameText(framed);
+                return true;
+              }
               if (text === '' || !handlesPlainText({ html: data.getData('text/html') })) return false;
               if (env().pasteText(text)) return true;
               view.dispatch(view.state.tr.replaceSelection(plainTextSlice(view.state.schema, text)).scrollIntoView());
+              return true;
+            },
+            handleDrop: (view, event, slice) => {
+              if (view.dragging || !event.dataTransfer || event.dataTransfer.files.length > 0) return false;
+              const framed = framedText(event.dataTransfer.getData('text/plain'), slice);
+              if (framed === null) return false;
+              env().frameText(framed, view.posAtCoords({ left: event.clientX, top: event.clientY })?.pos);
               return true;
             },
           },

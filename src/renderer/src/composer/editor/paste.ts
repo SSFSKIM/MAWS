@@ -3,6 +3,7 @@
 // only one past 20,000 characters becomes a pasted atom (the chip), which can be opened and turned into text. A file is attached as bytes only when the API reads it: PNG, JPEG, GIF and WebP
 // images and PDFs, within their caps; any other file with a path becomes a mention of that path (HEIC, BMP and TIFF
 // included: never bytes), and a file with no path (dragged from a browser) is read as text or refused. Pure.
+import { quotesGrant } from '@shared/engine/grant';
 import { MENTION_BREAKS } from './mention-text';
 
 // The one number C1 (a 20,000-character paste on the owner's machines) may lower, if typing in the box does not stay
@@ -14,8 +15,10 @@ export const MAX_SOURCE_IMAGE_BYTES = 20 * MiB; // what `layout.pickFiles` reads
 export const MAX_PDF_BYTES = 32 * MiB;
 export const MAX_TEXT_FILE_BYTES = MiB;
 
+// UX wave U1c (the architect's ruling of 2026-11-16): a text that quotes the grant's opening is an atom whatever its size,
+// framed as data, since a grant by text is the person's only when they typed it.
 export function classifyText(text: string): 'inline' | 'atom' {
-  return text.length > PASTE_INLINE_MAX_CHARS ? 'atom' : 'inline';
+  return text.length > PASTE_INLINE_MAX_CHARS || quotesGrant(text) ? 'atom' : 'inline';
 }
 
 export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'; path: string } | { kind: 'text' } | { kind: 'refused'; reason: string };
