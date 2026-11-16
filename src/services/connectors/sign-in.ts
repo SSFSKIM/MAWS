@@ -203,7 +203,8 @@ export function createSignIn(deps: SignInDeps): SignIn {
   const authenticateInOrder = (op: Operation, input: CommandInput<'session.mcpAuthenticate'>) => {
     const key = flowKey(op);
     const send = () => ask(op, 'session.mcpAuthenticate', input);
-    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (!live(op) ? null : op.kept === null ? send() : passes(op, 2).then((passed) => (passed ? send() : null))));
+    // a cancel that lands between the passing check and the send is honoured: the operation is confirmed live again
+    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (!live(op) ? null : op.kept === null ? send() : passes(op, 2).then((passed) => (passed && live(op) ? send() : null))));
     const tail = call.catch(() => {});
     authTail.set(key, tail);
     void tail.then(() => authTail.get(key) === tail && authTail.delete(key));
@@ -307,11 +308,15 @@ export function createSignIn(deps: SignInDeps): SignIn {
     if (refusal !== null) return fail(op, 'other_entry', refusal);
     const before = await serverOf(op); // the baseline: a connection already there is not this flow's
     if (before === undefined || !live(op)) return;
-    // UX wave U11h: point 1's baseline is a status read like any other, judged by (b) and (c) against the entry point 1 kept
+    // UX wave U11h: point 1's baseline is a status read like any other, judged by (b) and (c) against the entry point 1 kept;
+    // and "already connected" is a report of a sign-in, so before it is said the session is judged as point 3 judges one:
+    // (a) on the list it reports now, and nothing moved since point 1
     if (op.kept !== null) {
       if (op.kept.pointOne === undefined) throw new Error(`the check of ${op.name} kept no entry at its first point`);
       const different = pluginServerRefusal(op.kept.pointOne.entry, before === null ? [] : [before]);
       if (different !== null) return fail(op, 'other_entry', different);
+      if (before?.status === 'connected' && !(await passes(op, 3))) return;
+      if (!live(op)) return;
     }
     if (before?.status === 'connected') return move(op, 'done', { where: 'here', message: ALREADY_CONNECTED });
     let expected: string | null = null; // the engine's state, once it answered
@@ -350,7 +355,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
     if (!auth.ok) return fail(op, 'engine', auth.message);
     // UX wave U11h: point 3, before the answer is acted on in any way; a failure ends the operation as a cancel does
     // (listener closed, later answers dropped) and sends the engine nothing
-    if (op.kept !== null && !(await passes(op, 3))) return;
+    if (op.kept !== null && (!(await passes(op, 3)) || !live(op))) return; // a cancel meanwhile is honoured
     const { authUrl, requiresUserAction, redirectScheme, state } = auth.answer;
     if (authUrl === undefined || requiresUserAction === false) return move(op, 'done', { where: 'here' });
     move(op, 'waiting_browser');
