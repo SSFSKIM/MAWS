@@ -1,9 +1,10 @@
 // The compaction's row (UX wave U3b, M4; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md,
 // decisions 16 and 17, Interfaces §E): placed by the view at the drawn list's end, never derived, never copied, and no
 // answer's action row moves for it.
-import type { MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
 import { answerActionsOf } from '../model/answer-actions';
+import { END_ROW, endRequestId } from '../model/keys';
 import { RowSchema } from '../model/schema';
 import { serializeRows } from '../model/serialize';
 import type { Row, RowId, TurnId } from '../model/rows';
@@ -27,6 +28,14 @@ describe('compactingRow', () => {
     expect(drawn.at(-1)).toEqual({ id: COMPACTING_ROW, turnId: null, at: '2026-11-15T10:05:00.000Z', kind: 'activity', activity: 'compacting', since: '2026-11-15T10:05:00.000Z' });
     expect(RowSchema.safeParse(drawn.at(-1)).success).toBe(true);
     expect(rows).toHaveLength(4); // the list it was given is not changed
+  });
+
+  // The chain merge of U1c's head (U1b's end row on this tree): the row that must stay last stays last, the compaction's
+  // row directly before it
+  it('stands before U1b’s end row, the last row before it, when the list ends with one', () => {
+    const end: Row = { id: END_ROW, kind: 'request_slot', turnId: null, at: '', requestId: endRequestId('app-1' as AppSessionId, null), toolUseId: null, requestKind: 'permission', toolName: null, requestedAt: '' };
+    expect(compactingRow([...rows, end], SINCE).map((row) => row.id)).toEqual([...rows.map((row) => row.id), COMPACTING_ROW, END_ROW]);
+    expect(compactingRow([end], SINCE).map((row) => row.id)).toEqual([COMPACTING_ROW, END_ROW]);
   });
 
   it('stands at the end of an empty list too (a session whose rows are still on their way)', () => {
