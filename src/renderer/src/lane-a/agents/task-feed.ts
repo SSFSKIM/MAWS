@@ -17,6 +17,10 @@
 // DX4 does not, the end's time and summary go with it. The graph it patches is kept apart (the caller holds both), so a
 // body that changes later is laid over the rows' own graph again, not over its own earlier patch. A producer older than
 // DC8 sends no status: the held rows' events give it, and the graph is the one DC6 drew.
+//
+// UX wave U8d (Interfaces §C): the same function lays this Mac's body over the graph of a terminal session it drives
+// (`tools/agents/store.ts`); that body carries, beside DX4's facts, when each agent's call was made (`startedAt`), a
+// node's start before the agent file's first row.
 import type { SubagentEntry } from '@shared/ipc/schema/fs';
 import type { AgentId, TaskId } from '@shared/graph/ids';
 import type { SessionEvent } from '@shared/graph/events';
@@ -46,16 +50,18 @@ export const withEvents = (graph: TaskGraph, events: readonly SessionEvent[]): T
 /** The tree with the metas as they now stand (a meta only adds or fills; a wire fact is never overwritten). */
 export const withMetas = (graph: TaskGraph, metas: readonly SubagentMeta[]): TaskGraph => mergeSidecars(graph, sidecarsOf(metas));
 
-type StatusEntry = Extract<SubagentMeta, { status: string }>;
+/** DX4's entry, and this Mac's addition to it: when the agent's call was made (absent from the shared contract). */
+export type StatusedMeta = SubagentMeta & { startedAt?: string };
+type StatusEntry = Extract<SubagentMeta, { status: string }> & { startedAt?: string };
 const text = (value: string | null | undefined): string | null => (value ? value : null);
 
 /** One agent's node with DX4's facts laid over what the held rows and its meta gave. */
-function patchedNode(node: TaskNode, { status, spawn, outcome, file }: StatusEntry): TaskNode {
+function patchedNode(node: TaskNode, { status, evidence, spawn, outcome, file, startedAt }: StatusEntry): TaskNode {
   const agent = node.agent;
   const next: TaskNode = {
     ...node,
     description: node.description === node.taskId ? (text(spawn?.description) ?? node.description) : node.description,
-    startedAt: node.startedAt ?? file?.firstAt ?? null,
+    startedAt: node.startedAt ?? text(startedAt) ?? file?.firstAt ?? null,
     summary: node.summary ?? text(outcome?.summary),
     outputFile: node.outputFile ?? text(outcome?.outputFile),
     agent: agent && {
@@ -66,6 +72,9 @@ function patchedNode(node: TaskNode, { status, spawn, outcome, file }: StatusEnt
       model: agent.model ?? text(spawn?.model),
     },
   };
+  // Card C1 (the owner's answer, option 2): an exited row's word turns on what its status rests on
+  if (status === 'exited') next.evidence = evidence;
+  else delete next.evidence;
   // DX4's status stands. An end the held rows claimed for another status is not this one's: its time and summary go.
   if (status !== node.status) {
     next.status = status;
@@ -78,13 +87,25 @@ function patchedNode(node: TaskNode, { status, spawn, outcome, file }: StatusEnt
 
 const sameShallow = (a: object | null, b: object | null): boolean =>
   a === b || (a !== null && b !== null && Object.keys(b).every((key) => (a as Record<string, unknown>)[key] === (b as Record<string, unknown>)[key]));
-const sameNode = (a: TaskNode, b: TaskNode): boolean => (Object.keys(b) as (keyof TaskNode)[]).every((key) => (key === 'agent' ? sameShallow(a.agent, b.agent) : a[key] === b[key]));
+const sameNode = (a: TaskNode, b: TaskNode): boolean =>
+  ([...new Set([...Object.keys(a), ...Object.keys(b)])] as (keyof TaskNode)[]).every((key) => (key === 'agent' ? sameShallow(a.agent, b.agent) : a[key] === b[key])); // C1: a key one lacks (`evidence`) counts
+
+/** Whether two graphs' nodes say the same (an overlay's nodes are fresh objects even when they say what the last one did). */
+export function sameTasks(a: TaskGraph, b: TaskGraph): boolean {
+  if (a.tasks === b.tasks) return true;
+  if (a.tasks.size !== b.tasks.size) return false;
+  for (const [taskId, node] of b.tasks) {
+    const held = a.tasks.get(taskId);
+    if (held === undefined || (held !== node && !sameNode(held, node))) return false;
+  }
+  return true;
+}
 
 /**
  * The graph the held rows built, with each agent's status as a producer of DC8 or later carries it (above). The same
  * graph when nothing changes, so MAWS's selectors, memoised on it, keep their answers.
  */
-export function withStatuses(held: TaskGraph, metas: readonly SubagentMeta[]): TaskGraph {
+export function withStatuses(held: TaskGraph, metas: readonly StatusedMeta[]): TaskGraph {
   let tasks: Map<TaskId, TaskNode> | null = null;
   for (const entry of metas) {
     if (entry.status === undefined) continue;

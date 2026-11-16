@@ -1,10 +1,9 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId, MessageUuid, RequestId } from '@shared/graph/ids';
-import { DEFAULT_MEMORY_TARGET, drainComposerAttachments, IDLE_RESUBMIT, inlineEditOf, insertComposerText, isDocked, openComposerWidget, isStarting, markDocked, memoryTargetOf, prefillComposer, queueComposerAttachment, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setInlineEdit, setInlineText, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
+import { DEFAULT_MEMORY_TARGET, drainComposerAttachments, IDLE_RESUBMIT, inlineEditOf, insertComposerText, openComposerWidget, isStarting, memoryTargetOf, prefillComposer, queueComposerAttachment, registerFocusTarget, resetComposerStore, resubmitOf, resubmitRecordOf, setInlineEdit, setInlineText, setMemoryTarget, setResubmit, setStarting, takePrefill, useComposerStore } from './composer';
 
 const A = 'app-a' as AppSessionId;
 const B = 'app-b' as AppSessionId;
-const r1 = 'req-1' as RequestId;
 
 beforeEach(() => resetComposerStore());
 
@@ -16,18 +15,6 @@ describe('composer store seam', () => {
     expect(takePrefill(B)).toBeNull();
     expect(takePrefill(A)).toMatchObject({ text: 'second' });
     expect(takePrefill(A)).toBeNull();
-  });
-
-  it('counts docked placements of a request, so one of two unmounting leaves it docked', () => {
-    const one = markDocked(A, r1);
-    const two = markDocked(A, r1);
-    expect(isDocked(useComposerStore.getState(), A, r1)).toBe(true);
-    expect(isDocked(useComposerStore.getState(), B, r1)).toBe(false);
-    one();
-    one(); // a disposer releases once
-    expect(isDocked(useComposerStore.getState(), A, r1)).toBe(true);
-    two();
-    expect(isDocked(useComposerStore.getState(), A, r1)).toBe(false);
   });
 
   it('keeps the focus target a composer registers, and its disposer removes only its own', () => {

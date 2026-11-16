@@ -1,8 +1,10 @@
-// Turn-level report folding stays intact; individual messages remain in authored Markdown flow and attached mods draw them.
+// The to-human view where MAWS draws it (UX wave U2b, the mirror): the work between two rows the person reads is one
+// record line until it is opened, no turn folds while the view is in force, and individual messages remain in authored
+// Markdown flow and attached mods draw them.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { status } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
@@ -13,8 +15,9 @@ import { useTranscriptStore } from '../../stores/transcript';
 import { api, BASH_RESULT, builder } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
-import { CLOSE_MOTION, OPEN_MOTION } from '../../ui/disclosure';
 import sitting31 from './fixtures/sitting-31.txt?raw';
+import { loadEngineJournal } from '../../../../../test/support/fixtures';
+import { journalToEvents } from '../../transcript/dev/journal';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {
@@ -73,8 +76,10 @@ function session() {
   return b.events;
 }
 
-const record = () => document.querySelector<HTMLElement>('[data-kind="owner_record"] .transcript-disclosure');
+const records = () => screen.queryAllByRole('button', { name: '› working record' });
+const folds = () => screen.queryAllByRole('button', { name: '‹ fold to report' });
 const dividers = () => [...document.querySelectorAll('[data-kind="divider"] .transcript-divider > .transcript-disclosure')] as HTMLElement[];
+const turnLines = () => [...document.querySelectorAll('[data-kind="divider"] .transcript-turn-line')] as HTMLElement[];
 
 describe('the report view', () => {
   // WR #31: exact assistant text at 2026-10-19 08:25:08.827Z, sitting session
@@ -95,7 +100,7 @@ describe('the report view', () => {
     expect(critical.querySelector('code')?.textContent).toContain('Critical');
   });
 
-  it('a resting report reuses the projected completed summary, not a stale running divider', async () => {
+  it('at rest, an opened record shows its turn’s line completed, not running', async () => {
     const b = builder();
     b.turn('resting-user');
     b.toolUse('resting-tool', 'Bash', { command: 'ls' });
@@ -103,103 +108,89 @@ describe('the report view', () => {
     b.text('resting-text', 0, '<message>Done.</message>');
     const { source } = pushSource(b.events);
     render(<Transcript source={source} variant="session" ownerLane atRest />);
-    await waitFor(() => expect(record()).not.toBeNull());
-    fireEvent.click(record()!);
-    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
-    expect(record()?.textContent).toMatch(/^Worked for/);
+    await waitFor(() => expect(records()).toHaveLength(1));
+    expect(turnLines()).toEqual([]); // a closed turn's line shows only with a record of it open
+    fireEvent.click(records()[0]);
+    await waitFor(() => expect(turnLines()).toHaveLength(1));
+    expect(turnLines()[0].textContent).toMatch(/^Worked for/);
     expect(document.querySelector('[data-plugin-spinner]')).toBeNull();
   });
 
-  it('opens a marked turn’s working record to the work in one click, without a second turn fold', async () => {
+  // The scene "the to-human view folds work by stretch, draws each message as the mod does…" (e2e/transcript.spec.ts)
+  // over its own recorded replay: opening the first turn's call shows that turn's line (decision 11).
+  it('over the report scene’s recorded replay, opening the first turn’s call shows its turn’s line, with no chevron', async () => {
+    await mounted(journalToEvents(loadEngineJournal('p2c-report-marks')));
+    await waitFor(() => expect(records()).toHaveLength(3));
+    expect(turnLines()).toEqual([]);
+    fireEvent.click(document.querySelector('[data-row-id="record-fold:closed:toolu_01P2cM5Bash01"] button')!);
+    await waitFor(() => expect(folds()).toHaveLength(1));
+    expect(document.querySelectorAll('[data-kind="divider"]')).toHaveLength(1);
+    expect(turnLines()[0].textContent).toMatch(/Worked for .* · Ran a command/);
+    expect(dividers()).toEqual([]);
+  });
+
+  it('folds each stretch between the rows the person reads under one line, and opens it in one click with no second fold', async () => {
     await mounted(session());
-    // level 0
-    await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
-    expect(record()!.getAttribute('aria-expanded')).toBe('false');
+    await waitFor(() => expect(records()).toHaveLength(2)); // the first turn's work, and the second's (in force by time)
+    expect(records()[0].getAttribute('aria-expanded')).toBe('false');
     expect(screen.getByText('The plan is to add the table.', { exact: false })).toBeTruthy();
-    expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // no within-message fold
     expect(screen.queryByText('Unmarked closing words.')).toBeNull();
-    expect(dividers()).toHaveLength(1); // the unmarked turn's own divider: drawn as the full transcript
-    expect(screen.getByText('A plain answer.')).toBeTruthy();
-    // One disclosure opens the work; the unmarked turn keeps its own divider.
-    fireEvent.click(record()!);
-    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
-    expect(record()?.textContent).toMatch(/Worked for .* · Ran a command/); // UX wave U2 (O-15): the turn's line
-    expect(document.querySelector('[data-kind="owner_record"] [aria-label="Turn summary"]')).not.toBeNull();
-    expect(dividers()).toHaveLength(1);
-    expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
-    expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy(); // the marked text's own unmarked words
+    expect(screen.queryByText('A plain answer.')).toBeNull();
+    expect(dividers()).toEqual([]); // MAWS folds no turn while the view is in force
+    expect(turnLines()).toEqual([]);
+    fireEvent.click(records()[0]);
+    await waitFor(() => expect(screen.getByText('Unmarked closing words.')).toBeTruthy());
+    expect(folds()).toHaveLength(1);
+    expect(folds()[0].getAttribute('aria-expanded')).toBe('true');
+    expect(turnLines()).toHaveLength(1); // the opened record's turn: its line, with no chevron
+    expect(turnLines()[0].textContent).toMatch(/Worked for .* · Ran a command/); // UX wave U2 (O-15): the turn's line
+    expect(document.querySelector('[data-kind="divider"] [aria-label="Turn summary"]')).not.toBeNull();
+    expect(dividers()).toEqual([]);
     expect(document.querySelectorAll('[data-kind="group"], [data-kind="cell"]').length).toBeGreaterThan(0);
-    // back to the report
-    fireEvent.click(record()!);
-    await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call · 2 messages'));
-    expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+    expect(screen.queryByText('A plain answer.')).toBeNull(); // the other stretch stays closed
+    fireEvent.click(folds()[0]);
+    await waitFor(() => expect(screen.queryByText('Unmarked closing words.')).toBeNull());
+    expect(records()).toHaveLength(2);
+    expect(turnLines()).toEqual([]);
   });
 
-  it('keeps the working-record disclosure focused through expansion and collapse', async () => {
+  it('hands keyboard focus to the other line of the record as it opens and as it folds again', async () => {
     await mounted(session());
-    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
-    const disclosure = record()!;
-    disclosure.focus();
-    expect(document.activeElement).toBe(disclosure);
-
-    fireEvent.click(disclosure); // native keyboard activation dispatches a click to this same button
-    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('true'));
-    expect(document.activeElement).toBe(disclosure);
-    expect(record()).toBe(disclosure);
-    expect(document.querySelectorAll('[data-kind="owner_record"] .transcript-disclosure')).toHaveLength(1);
-    expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
-
-    fireEvent.click(disclosure);
-    await waitFor(() => expect(record()?.getAttribute('aria-expanded')).toBe('false'));
-    expect(document.activeElement).toBe(disclosure);
-    expect(record()).toBe(disclosure);
-    expect(screen.queryByText('Unmarked closing words.')).toBeNull();
+    await waitFor(() => expect(records()).toHaveLength(2));
+    records()[0].focus();
+    fireEvent.click(records()[0]); // native keyboard activation dispatches a click to this same button
+    await waitFor(() => expect(folds()).toHaveLength(1));
+    expect(document.activeElement).toBe(folds()[0]);
+    fireEvent.click(folds()[0]);
+    await waitFor(() => expect(folds()).toEqual([]));
+    expect(document.activeElement).toBe(records()[0]);
   });
 
-  it('restoring an open Report record cancels a Transcript fold without disabling later fold animations', async () => {
-    const { key } = await mounted(session());
-    await waitFor(() => expect(record()).not.toBeNull());
-    const work = () => document.querySelector('[data-cell-id="cell:t1"]')?.closest<HTMLElement>('[data-kind="cell"]') ?? null;
-    fireEvent.click(record()!);
-    expect(work()).not.toBeNull();
-    act(() => useTranscriptStore.getState().setView(key, 'transcript'));
-    expect(dividers()[0].getAttribute('aria-expanded')).toBe('true');
-
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
-    try {
-      fireEvent.click(dividers()[0]);
-      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
-      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
-      expect(work()!.style.height).toBe('0px');
-      act(() => useTranscriptStore.getState().setView(key, 'report'));
-      // Wait beyond both motion windows: an obsolete Transcript callback must not fold the restored work away.
-      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms + OPEN_MOTION.ms + 1));
-      expect(record()?.getAttribute('aria-expanded')).toBe('true');
-      expect(work()).not.toBeNull();
-      expect(work()!.getAttribute('style')).toBeNull();
-      expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
-
-      // A new, deliberate fold in Transcript still animates before removing its rows.
-      act(() => useTranscriptStore.getState().setView(key, 'transcript'));
-      fireEvent.click(dividers()[0]);
-      expect(work()!.style.transition).toContain(`height ${CLOSE_MOTION.ms}ms`);
-      act(() => vi.advanceTimersByTime(CLOSE_MOTION.ms - 1));
-      expect(work()).not.toBeNull();
-      act(() => vi.advanceTimersByTime(1));
-      expect(work()).toBeNull();
-      expect(dividers()[0].getAttribute('aria-expanded')).toBe('false');
-    } finally {
-      vi.useRealTimers();
+  it('hands focus within the pane pressed: two panes of one session, each press focuses that pane’s other line', async () => {
+    const { source } = pushSource(session());
+    const panes = [render(<Transcript source={source} variant="session" ownerLane />), render(<Transcript source={source} variant="session" ownerLane />)];
+    const within = (pane: number, name: string) => [...panes[pane].container.querySelectorAll('button')].filter((button) => button.textContent === name);
+    await waitFor(() => expect(within(1, '› working record')).toHaveLength(2));
+    for (const pane of [1, 0]) {
+      within(pane, '› working record')[0].focus();
+      fireEvent.click(within(pane, '› working record')[0]);
+      await waitFor(() => expect(within(pane, '‹ fold to report')).toHaveLength(1));
+      expect(document.activeElement).toBe(within(pane, '‹ fold to report')[0]);
+      fireEvent.click(within(pane, '‹ fold to report')[0]);
+      await waitFor(() => expect(within(pane, '‹ fold to report')).toEqual([]));
+      expect(document.activeElement).toBe(within(pane, '› working record')[0]);
     }
   });
 
-  it('the transcript view draws every turn in full, the marks unboxed', async () => {
+  it('the full transcript folds nothing: every turn in full, each line with no chevron, the marks unboxed', async () => {
     const { key } = await mounted(session());
-    await waitFor(() => expect(record()).not.toBeNull());
+    await waitFor(() => expect(records().length).toBeGreaterThan(0));
     act(() => useTranscriptStore.getState().setView(key, 'transcript'));
-    await waitFor(() => expect(record()).toBeNull());
-    expect(dividers()).toHaveLength(2);
+    await waitFor(() => expect(records()).toEqual([]));
+    expect(dividers()).toEqual([]);
+    expect(turnLines()).toHaveLength(2);
     expect(screen.getByText('Unmarked closing words.')).toBeTruthy();
+    expect(screen.getByText('A plain answer.')).toBeTruthy();
     expect(document.querySelector('.owner-message-ink')?.textContent).toContain('The plan is to add the table.');
     expect(screen.getByText('Checking the tree.', { exact: false })).toBeTruthy();
   });
@@ -212,33 +203,35 @@ describe('the report view', () => {
     b.text('m1', 0, '<to-human>\nThe README plan.\n\n<insight>\nThe branch is master.\n</insight>\n\n<essential>\nUnverified.\n</essential>\n\n<need-input>Which tone?\n<choice recommended>Concise</choice>\n<choice>Friendly</choice>\n</need-input>\n</to-human>');
     b.end(['u1']);
     await mounted(b.events);
-    await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call'));
-    // the answer's own drawing, its row's first child: the UX wave's U3b draws the answer's action row after it
-    expect(document.querySelector('[data-kind="assistant_text"]')?.firstElementChild?.textContent?.replace(/\s+/g, ' ').trim()).toBe('The README plan. The branch is master. Unverified. Which tone? Concise Friendly');
+    await waitFor(() => expect(records()).toHaveLength(1));
+    // UX wave U2b (M2): each run of text under one mark is a message of its own, the first with the bullet
+    expect([...document.querySelectorAll('[data-kind="assistant_text"] .owner-message-ink')].map((node) => node.textContent?.replace(/\s+/g, ' ').trim())).toEqual(['● messageThe README plan.', 'messageThe branch is master.', 'messageUnverified.', 'messageWhich tone? Concise Friendly']);
     expect(document.querySelector('[data-owner-card], .owner-card-label')).toBeNull();
   });
 
-  it('an open turn: the record runs, and a streaming message fills in as it arrives', async () => {
+  it('an open turn: its line stays in sight after the record, and a streaming message fills in as it arrives', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'sleep 20' });
     const { push } = await mounted(b.events);
-    expect(record()).toBeNull(); // nothing marked yet: the full transcript
+    expect(records()).toEqual([]); // no message yet: the plain transcript
     const delta = (textDelta: string) => b.emit('assistant.block.delta', { apiMessageId: api('m9'), blockIndex: 0, blockType: 'text', textDelta, thinkingDelta: null, inputJsonDelta: null, userMessageUuid: null });
     push([delta('<to-human>Halfway')]);
-    await waitFor(() => expect(record()?.textContent).toBe('Working record · 1 tool call'));
-    expect(record()!.querySelector('[aria-label="Working"]')).not.toBeNull();
-    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway');
+    await waitFor(() => expect(records()).toHaveLength(1));
+    const kinds = [...document.querySelectorAll('[data-kind]')].map((element) => element.getAttribute('data-kind'));
+    expect(kinds.indexOf('divider')).toBe(kinds.indexOf('record_fold') + 1); // ruling 5: the running turn's line, after the closed record
+    expect(turnLines()[0].textContent).toMatch(/^Working/);
+    expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('● message …Halfway'); // UX wave U2b (M2): an open message streams under its label
     push([delta(' there.')]);
-    await waitFor(() => expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('<to-human>Halfway there.'));
+    await waitFor(() => expect(document.querySelector('[data-kind="assistant_text"]')?.textContent).toBe('● message …Halfway there.'));
     push([delta('</to-human>')]);
-    await waitFor(() => expect(document.querySelector('.owner-message-ink')?.textContent).toBe('Halfway there.'));
+    await waitFor(() => expect(document.querySelector('.owner-message-ink')?.textContent).toBe('● messageHalfway there.'));
   });
 
   it('with the lane off, a marked turn is P1’s drawing: R4’s presenter, the turn folded by its divider', async () => {
     await mounted(session(), false);
     await waitFor(() => expect(document.querySelector('.owner-message-ink')).not.toBeNull());
-    expect(record()).toBeNull();
+    expect(records()).toEqual([]);
     expect(document.querySelector('[data-owner-card]')).toBeNull();
     expect(dividers()).toHaveLength(2);
   });
@@ -255,8 +248,9 @@ describe('the lane with an engine surface attached', () => {
   const assistantAsks = (fake: ReturnType<typeof fakeClient>) => (fake.invoked('session.ui.render') as { component: string; props: { text: string } }[]).filter((a) => a.component === 'AssistantMessage').map((a) => a.props.text);
 
   it('both marked and unmarked texts are offered to the attached surface', async () => {
-    const { fake } = await attached(session());
+    const { fake, key } = await attached(session());
     await waitFor(() => expect(assistantAsks(fake)).toContain(MARKED));
+    act(() => useTranscriptStore.getState().setView(key, 'transcript')); // the full transcript: no record holds a text out of sight
     expect(document.querySelector('[data-owner-card]')).toBeNull();
     await waitFor(() => expect(assistantAsks(fake)).toContain('A plain answer.'));
     expect(assistantAsks(fake)).toContain(MARKED);

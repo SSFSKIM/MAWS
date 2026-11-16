@@ -312,7 +312,7 @@ const endOf = (recording: Recording) => recording.steps.findIndex((s) => s.k ===
 const scroller = (view: Locator) => view.locator('[data-transcript-scroller]');
 const toBottom = (view: Locator) => scroller(view).evaluate((el) => el.scrollTo({ top: el.scrollHeight }));
 
-test("@layout a session's channel on the phone is its session view: its working record unfolds in place onto a folded run that opens on a tap, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
+test("@layout a session's channel on the phone is its session view: its record line unfolds in place onto a folded run that opens on a tap, each tool call one line that opens on a tap, long inputs truncated, and at 390 and 320 nothing wider than the screen", async ({ page, hub }) => {
   const { fm, view } = await openReplay(page, hub, withLongInputs(loadRecording(SESSION_VIEW)));
   fm.step(endOf(fm.recording)); // every row in, the session idle and still running
   const answer = view.locator('.owner-message-ink').filter({ hasText: LONG_ANSWER });
@@ -321,43 +321,39 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(page.getByRole('complementary', { name: 'Session depth' })).toHaveCount(0);
 
   // The recorded subagents' row, in the turn that launched them, is a plain row here: their tree is the depth column's,
-  // which stays on a computer, so nothing in it opens one.
+  // which stays on a computer, so nothing in it opens one. UX wave U2b: it stays in sight in the to-human view, with
+  // no turn to unfold.
   const launched = view.locator('[data-row-id^="user:"]').filter({ hasText: 'Do these four steps' });
-  for (let i = 0; i < 80 && (await launched.count()) === 0; i++) {
-    await scroller(view).evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollBy({ top: -el.clientHeight * 0.6 }); });
-    await page.waitForTimeout(60);
-  }
+  await revealEarlier(view, launched);
   const launchTurn = await launched.locator('[data-turn-id]').first().getAttribute('data-turn-id');
-  const launchDivider = view.locator(`[data-row-id="divider:${launchTurn}"] button.transcript-disclosure`);
-  for (let i = 0; i < 40 && (await launchDivider.count()) === 0; i++) {
-    await scroller(view).evaluate((el) => el.scrollBy({ top: el.clientHeight * 0.4 }));
-    await page.waitForTimeout(60);
-  }
-  await launchDivider.click();
   const subagents = view.locator(`[data-turn-id="${launchTurn}"] .transcript-subagent`);
+  await revealEarlier(view, subagents);
   await expect(subagents).toHaveCount(1);
   await expect(subagents.locator('button')).toHaveCount(0);
-  await revealEarlier(view, launchDivider); // expansion can recycle the divider outside the mounted window
-  await launchDivider.click();
 
-  // The added turn: its prompt, one closed record, its message.
+  // The added turn: its prompt, one closed record line (its run's three calls, keyed by the run's first call), its
+  // message.
   await toBottom(view);
   const turn = 'turn:10a91e55-0000-4000-8000-000000000001';
-  const record = view.locator(`[data-row-id="owner-record:${turn}"]`);
-  await expect(record).toContainText('Working record · 3 tool calls');
+  const closed = view.locator('[data-row-id="record-fold:closed:toolu_long_bash"] button');
+  const opened = view.locator('[data-row-id="record-fold:open:toolu_long_bash"] button');
+  await expect(closed).toHaveText('› working record');
+  await expect(closed).toHaveAttribute('aria-expanded', 'false');
   await expect(view).not.toContainText('Ran the phone layout cases in WebKit');
   await fitsTheWidth(page);
 
-  // One record disclosure unfolds to the turn's work: UX wave U2 (O-29, O-15), its line says what the turn did, and its
-  // three calls are one run, folded until a tap opens it onto their rows; each call's detail stays one tap away.
-  const disclosure = record.locator('button.transcript-disclosure');
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'true');
-  await expect(disclosure).toContainText('Worked for');
-  await expect(disclosure).toContainText('Ran a command');
-  await expect(disclosure).toContainText('searched code');
-  await expect(disclosure).not.toContainText('tool call');
-  await expect(view.locator(`[data-row-id="divider:${turn}"]`)).toHaveCount(0);
+  // The record line unfolds to the turn's work, `‹ fold to report` under it: the turn's line (UX wave U2, O-15) says
+  // what the turn did, with no chevron, and the three calls are one run, folded until a tap opens it onto their rows;
+  // each call's detail stays one tap away.
+  await closed.click();
+  await expect(opened).toHaveText('‹ fold to report');
+  await expect(opened).toHaveAttribute('aria-expanded', 'true');
+  const turnLine = view.locator(`[data-row-id="divider:${turn}"]`);
+  await expect(turnLine).toContainText('Worked for');
+  await expect(turnLine).toContainText('Ran a command');
+  await expect(turnLine).toContainText('searched code');
+  await expect(turnLine).not.toContainText('tool call');
+  await expect(turnLine.locator('button.transcript-disclosure')).toHaveCount(0);
   const run = view.locator(`[data-turn-id="${turn}"] .transcript-run-line`);
   await expect(run).toHaveCount(1);
   await expect(run).toHaveAttribute('aria-expanded', 'false');
@@ -397,13 +393,14 @@ test("@layout a session's channel on the phone is its session view: its working 
   await expect(bash).toHaveAttribute('aria-expanded', 'false');
 
   // Folded again to the report.
-  await disclosure.click();
-  await expect(disclosure).toHaveAttribute('aria-expanded', 'false');
-  await expect(record).toContainText('Working record · 3 tool calls');
+  await opened.click();
+  await expect(closed).toHaveText('› working record');
+  await expect(closed).toHaveAttribute('aria-expanded', 'false');
+  await expect(view.locator(`[data-row-id="divider:${turn}"]`)).toHaveCount(0);
   await expect(view).not.toContainText('Ran the phone layout cases in WebKit');
 });
 
-test('@layout the running turn streams on the phone: the answer draws as it is written, its folded record working', async ({ page, hub }) => {
+test("@layout the running turn streams on the phone: the answer draws as its message as it is written, the work before it folded and the turn's line working", async ({ page, hub }) => {
   const { fm, view } = await openReplay(page, hub, loadRecording(SESSION_VIEW));
   const recording = fm.recording;
   const uuid = recording.rows.main.find((row) => JSON.stringify(row.message ?? {}).includes('<message>You chose'))!.uuid;
@@ -416,10 +413,13 @@ test('@layout the running turn streams on the phone: the answer draws as it is w
     fm.step(1);
     await page.waitForTimeout(20);
   }
-  // An open mark already folds the working turn, but its unfinished text remains literal and without ink.
-  await expect(streaming.last()).toContainText('<message>You chose blue');
-  await expect(streaming.last().locator('.owner-message-ink')).toHaveCount(0);
-  await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
+  // UX wave U2b: a message still streaming is drawn as the message it is, under its label and ` …`; the work before
+  // it is folded (the session holds the older turns' messages) and the running turn's line says it works.
+  const workingLine = view.locator('[data-kind="divider"]').filter({ hasText: /Working/ });
+  await expect(streaming.last()).not.toContainText('<message>');
+  await expect(streaming.last().locator('.owner-message-ink')).toContainText('You chose blue');
+  await expect(streaming.last().locator('.owner-message-label')).toHaveText('● message …');
+  await expect(workingLine).toHaveCount(1);
   await expect(view).not.toContainText("Wrote 'blue' to recorded.txt in the current directory");
   const answerBlock = recording.steps.find((s) => s.k === 'block-row' && s.body.uuid === uuid)!;
   if (answerBlock.k !== 'block-row') throw new Error('no block-row');
@@ -428,7 +428,7 @@ test('@layout the running turn streams on the phone: the answer draws as it is w
   await toBottom(view);
   await expect(streaming.last().locator('.owner-message-ink')).toContainText('You chose blue');
   expect(fm.depth.rows.get('main')!.some((row) => row.uuid === uuid)).toBe(false); // its row is not written yet
-  await expect(view.locator('[data-row-id^="owner-record:"] .transcript-working-dots')).toHaveCount(1);
+  await expect(workingLine).toHaveCount(1);
   for (const width of [390, 320]) {
     await page.setViewportSize({ width, height: 844 });
     await fitsTheWidth(page);

@@ -4,6 +4,7 @@
 // `index`/`worktree` without a field of their own. A file changed in the index and again in the working tree (`MM`) is
 // listed in Staged and in Unstaged, as git shows it. No I/O and no React here.
 import type { GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import { unmerged } from '../code/review/review-model';
 
 export type ScmGroupName = 'conflicts' | 'staged' | 'unstaged' | 'untracked';
 export const SCM_GROUPS: readonly ScmGroupName[] = ['conflicts', 'staged', 'unstaged', 'untracked']; // as the body shows them
@@ -34,9 +35,8 @@ export interface ScmSelection {
   path: string;
 }
 
-export function unmerged(file: GitFileStatus): boolean {
-  return file.index === 'U' || file.worktree === 'U' || (file.index === 'A' && file.worktree === 'A') || (file.index === 'D' && file.worktree === 'D');
-}
+// One predicate for an unmerged entry, Review's (UX wave U5b, M2), until these groups leave (M11).
+export { unmerged };
 
 const SIDE_CHANGES: Record<string, ScmChange> = { M: 'modified', A: 'added', D: 'deleted', R: 'renamed', C: 'copied', T: 'type-changed' };
 

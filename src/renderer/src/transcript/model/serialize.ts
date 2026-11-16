@@ -2,7 +2,7 @@
 // One part per row (a group is one part with its cells as a nested list), joined by blank lines; user text is emitted
 // untagged (pasted bodies in place of their placeholders); answer markdown is emitted verbatim.
 import { bashFooter, bashHeader, COMMAND_LINE, commandLead, dividerCopy, NOT_SENT, planBadge, plural, QUESTION, requestSlotPlaceholder } from './copy';
-import { ASK, askAnswerCopy, askStateCopy, deliveryHeading } from './copy'; // E1
+import { ASK, askAnswerCopy, askQuestionTitle, askStateCopy, deliveryHeading } from './copy'; // E1
 import { agentListCopy } from './copy'; // E7
 import { messageMore } from './rows'; // E7; UX wave U3
 import { artifactHeading } from './copy'; // E2
@@ -46,7 +46,7 @@ function partOf(row: Row): string | null {
     case 'agent_message': return messagePart(row); // E7: the body or report under the line when it shows more
     case 'thinking': return row.text.length > 0 ? `*${row.live ? 'Thinking' : 'Thought'}*\n${indent(row.text, '> ')}` : null;
     case 'plan': return `**Plan · ${planBadge(row.outcome, row.feedback)}**\n\n${row.plan}`;
-    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.answers !== null && Object.keys(row.answers).length === 0 ? QUESTION.skipped : '—')}`).join('\n'); // an empty answer map: skipped (a plain deny)
+    case 'question': return row.questions.map((q) => `**${q.header}** ${q.question}: ${row.answers?.[q.question] ?? (row.dismissed === true || (row.answers !== null && Object.keys(row.answers).length === 0) ? QUESTION.dismissed : '—')}`).join('\n'); // UX wave U1b (decision 10): dismissed, or declined whole (a plain deny's empty map)
     case 'request_slot': return `*${requestSlotPlaceholder(row.toolName ?? row.requestKind)}*`;
     case 'error': return `*${row.text}*`;
     case 'boundary': return `---\n*${row.text}*`;
@@ -55,7 +55,7 @@ function partOf(row: Row): string | null {
     case 'notice': return row.detail === null ? `*${noticeLine(row)}*` : `*${noticeLine(row)}*\n${indent(row.detail, '> ')}`; // UX wave U3: its line, then what opens under it
     case 'local_command': return `${COMMAND_LINE.mark} ${row.lone && row.run ? commandLead(row.run) : ''}${row.text}`; // UX wave U3b: its line
     // E1 start
-    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${q.header ?? q.question}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
+    case 'ask': return [`**${row.title ?? ASK.title}** · ${ASK.count(row.questions.length)} · ${askStateCopy(row)}`, ...(row.answers === null ? [] : row.questions.map((q) => `- ${askQuestionTitle(q)}: ${askAnswerCopy(row.answers?.find((a) => a.id === q.id))}`))].join('\n');
     case 'delivery': return [`**${deliveryHeading(row)}**${row.caption ? ` · ${row.caption}` : ''}`, ...row.files.map((file) => `- ${file.path}`), ...(row.error === null ? [] : [`*${row.error}*`])].join('\n');
     // E1 end
     case 'side_thread': return `*${SIDE_COPY.row.lead} \`${SIDE_COPY.label(row.label, row.openedBy)}\` ${sideRowStatus(row)}*`; // E3
@@ -63,7 +63,7 @@ function partOf(row: Row): string | null {
     case 'artifact': return `**${artifactHeading(row)}**`; // E2
     case 'browser_action': return browserActionPart(row); // E4c
     case 'browser_activity': return `- ${browserActivityLine(row.activity)}`; // E13
-    case 'owner_record': return null; // P2-C (2026-10-09): the report view's own row; the copy is the transcript's
+    case 'record_fold': return null; // UX wave U2b: the to-human view's own line; the copy is the transcript's
     case 'to_human': return `<message>${row.text}</message>`; // P4-R7: as the span it stands in for copies, verbatim
     case 'activity': return null; // UX wave U3b (decision 17): what the session does now, no part of what it said
   }

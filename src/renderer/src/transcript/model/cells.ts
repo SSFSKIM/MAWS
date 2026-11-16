@@ -13,6 +13,7 @@ import { baseName, cellLabel, descriptionLabel, hostOf, PANE_CELL, SHELL_CELL, s
 import { ARTIFACT_CELL } from './copy'; // E2
 import { ARTIFACT_TITLE, type ArtifactCallWords } from './copy'; // UX wave U2
 import { shortCommand } from './short-command'; // UX wave U2
+import { blockedCallOf, classifierReason, readsApproved, shellToolOf, type BlockedState } from './blocked'; // UX wave U1c
 import { cellId } from './keys';
 import type { TurnState } from './reduce';
 import type { Cell, CellDetail, ChangedFile, Hunk, Spill, ToolCategory, Truncation } from './rows';
@@ -284,8 +285,9 @@ function stoppedRowLabel(rec: ToolRecord, detail: CellDetail, titles: ArtifactTi
   return stoppedLabel(mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName, true);
 }
 
-// UX wave U2 (O-49): the shell tools whose command line Desktop's rule shortens (its `fu`, for Bash and PowerShell)
-export const shellToolOf = (toolName: string): 'Bash' | 'PowerShell' | null => (toolName === 'Bash' || toolName === 'PowerShell' ? toolName : null);
+// UX wave U2 (O-49): the shell tools whose command line Desktop's rule shortens (its `fu`, for Bash and PowerShell). UX
+// wave U1c: defined in blocked.ts, beside the grant's name, which reads the same list
+export { shellToolOf } from './blocked';
 
 // UX wave U2 start (l6-artifacts-12; the U2a document, Interfaces §D, Reported 4): an artifact is named by the title a
 // result in the loaded transcript gave it (a creation, a read, a publication, a list, a search or a screenshot: this
@@ -375,15 +377,23 @@ function errorOf(rec: ToolRecord): string | undefined {
 }
 // UX wave U2 end
 
+// What a refused call's row names: a shell call's command, a file change's path, every other call's tool name (UX wave
+// U1c: one helper, for the model's label and the view's recomposed one)
+export const refusedSubject = (detail: CellDetail, toolName: string): string => (detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : toolName);
+
+// UX wave U1c (Design 1 and 3; Interfaces §D's label half): a blocked row's label with what the rule says of it, "again"
+// and "· approved", composed from the cell's own fields as `labelOf` composes its base words; the view draws it
+export function blockedLabel(cell: Cell, state: BlockedState): string {
+  const denial = cell.classification.denial!;
+  return cellLabel({ kind: 'denied', subject: refusedSubject(cell.detail, cell.toolName), disposition: denial.disposition, denialKind: denial.kind, reason: denial.reason, again: state.again, approved: readsApproved(state) });
+}
+
 function labelOf(rec: ToolRecord, detail: CellDetail, status: Cell['status'], category: ToolCategory, classification: Cell['classification'], turn: TurnContext, titles: ArtifactTitles): string {
   const input = record(rec.use.input);
   // UX wave U2 (decision 23, R2): a stopped call that does not stand alone as a refusal reads one form on every family;
   // a moved call whose process exited is none of them: it has its result and keeps its moved words (U4a, decision 33)
   if (status === 'stopped' && rec.moved !== true && (classification.denial === null || stoppedMember(classification.denial))) return stoppedRowLabel(rec, detail, titles);
-  if (classification.denial) {
-    const subject = detail.kind === 'shell' ? detail.command : detail.kind === 'edit' ? detail.filePath : rec.use.toolName;
-    return cellLabel({ kind: 'denied', subject, disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
-  }
+  if (classification.denial) return cellLabel({ kind: 'denied', subject: refusedSubject(detail, rec.use.toolName), disposition: classification.denial.disposition, denialKind: classification.denial.kind, reason: classification.denial.reason });
   if (rec.moved === true) { // UX wave U4a (decision 33): the same words while it runs, once its task ends and once its process exits
     const mcp = MCP_TOOL.exec(rec.use.toolName);
     const name = detail.kind === 'shell' ? detail.command : mcp ? `${mcp[1]} · ${mcp[2]}` : rec.use.toolName;
@@ -449,7 +459,8 @@ function screenshotLabel(rec: ToolRecord): string {
 // an artifact a call names (UX wave U2); a caller with no transcript to read gives none, and the call names its handle.
 export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, displayStatus?: Cell['status'], titles: ArtifactTitles = noTitles): Cell {
   const { use, result } = rec;
-  const denial = result?.denial ? { kind: result.denial, reason: resultText(result.content).trim() || null } : null;
+  // UX wave U1c (Design 1): a call auto mode blocked gives the classifier's own reason, or none; every other refusal its text
+  const denial = result?.denial ? { kind: result.denial, reason: result.denial === 'automode-blocked' ? classifierReason(resultText(result.content)) : resultText(result.content).trim() || null } : null;
   const context: ClassifyContext = {
     denial, turn, continued: turn.continued.has(use.toolUseId), humanDecision: rec.humanDecision,
     safeguard: result && result.safeguard !== 'not_evaluated' ? result.safeguard : rec.safeguard, imageResult: isImageResult(result), isError: result?.isError ?? false,
@@ -466,9 +477,10 @@ export function cellOf(rec: ToolRecord, turn: TurnContext, expanded: boolean, di
   // row reads done
   const doneLabel = status === 'stopped' || (status === 'error' && artifactCallOf(use.toolName) !== null) ? labelOf(rec, detailOf(rec, 'done'), 'done', category, { ...classification, denial: null }, turn, titles) : label;
   const error = status === 'error' ? errorOf(rec) : undefined; // UX wave U2 (decision 13)
+  const blocked = classification.denial?.kind === 'automode-blocked' ? blockedCallOf(use.toolName, use.input) : null; // UX wave U1c (Design 3)
   return {
     id: cellId.tool(use.toolUseId), toolUseId: use.toolUseId, toolName: use.toolName, category, classification, status,
-    label, ...(doneLabel !== label && { doneLabel }), ...(error !== undefined && { error }), ...(rec.summary ? { summary: rec.summary } : {}), ...(rec.moved === true ? { moved: true } : {}), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
+    label, ...(doneLabel !== label && { doneLabel }), ...(error !== undefined && { error }), ...(rec.summary ? { summary: rec.summary } : {}), ...(rec.moved === true ? { moved: true } : {}), ...(blocked !== null && { blocked }), paths, startedAt: use.at, endedAt: result?.at ?? null, detail, expanded, agent: null,
     background: result !== null && recordedStatus === 'running', // UX wave U2 (decision 20)
   };
 }

@@ -278,8 +278,9 @@ export async function replay(s: Scene, id: string, fixture: string): Promise<voi
   value(await invoke(s.page, 'session.send', { appSessionId: id as AppSessionId, content: firstPrompt(fixture) }));
 }
 
-// The next permission the session asks, allowed once through the request card docked in the composer (the replay
-// compares the response's behaviour: every fixture recorded `allow`).
+// The next permission the session asks, allowed once through its request card (since UX wave U1b at the transcript's
+// end, a group named by its kind's heading, as the docked frame was; the replay compares the response's behaviour: every
+// fixture recorded `allow`).
 export async function allowNext(s: Scene, id: string): Promise<void> {
   const answered = ofKind(await s.events(id), 'permission.resolved').length;
   await expect.poll(async () => ofKind(await s.events(id), 'permission.requested').length, { timeout: 30_000 }).toBeGreaterThan(answered);

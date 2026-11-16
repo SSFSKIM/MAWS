@@ -6,7 +6,7 @@
 // are the machine's half (src/services/catalog/machine.ts, whose own suite holds the watch's cases); here the person's
 // half is composed over the machine's on the services bus, as either root composes them, and over a machine it cannot
 // ask.
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -14,10 +14,12 @@ import type { EngineViewWire } from '@shared/catalog/engine-view';
 import { decodeJsonLine, encodeJsonLine } from '@shared/host/json-bytes';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
 import { commands } from '@shared/ipc/schema';
+import { CATALOG_EGRESS, egressGet } from '@shared/net/egress';
 import { NETWORK_FIXTURES, PROJECT_A, recordedEngine, SCRATCH, TEST_MARKETPLACE } from '../../../test/support/catalog-inputs';
 import { fakeBus } from '../../../test/support/fake-bus';
 import { startCatalogMachine } from '../../services/catalog/machine';
 import type { PollFn, WatchFn } from '../../services/catalog/state-watch';
+import { iconGet, type IconGet } from './fetch';
 import { startCatalog, type CatalogDeps } from './index';
 import { engineViewFromWire, type EngineView } from './normalize';
 
@@ -79,7 +81,7 @@ const inert: { watch: WatchFn; poll: PollFn } = { watch: () => ({ close: () => {
 
 // The person's half over the machine's, on one services bus (`invoke` as main's own route, the machine's
 // `catalog.engineChanged` heard as main taps it); `machine: false` composes a machine that cannot be asked.
-function service(call: HostCall, env: Record<string, string> = {}, { machine = true } = {}) {
+function service(call: HostCall, env: Record<string, string> = {}, { machine = true, icons, now }: { machine?: boolean; icons?: IconGet; now?: () => number } = {}) {
   const handlers = new Map<string, (input: unknown) => Promise<unknown>>();
   const emitted: string[] = [];
   const changedListeners = new Set<() => void>();
@@ -107,6 +109,8 @@ function service(call: HostCall, env: Record<string, string> = {}, { machine = t
     env: { MAWS_CATALOG_FIXTURES: NETWORK_FIXTURES, ...env },
     userAgent: 'MAWS/test',
     log: () => {},
+    iconGet: icons,
+    now,
   });
   const stop = () => (catalog.stop(), part?.stop());
   stops.push(stop);
@@ -264,8 +268,8 @@ describe('the catalog service', () => {
     expect(JSON.stringify(before)).not.toMatch(/linear\.app|internal\.example/);
     await invoke('catalog.home', { tab: 'connectors', cwd: PROJECT_A }); // the directory read once
     expect(await invoke('catalog.postures', { cwd: PROJECT_A })).toEqual({ servers: [
-      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker' },
-      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null }, // Linear's name, not its endpoint
+      { name: 'work-tracker', scope: 'user', path: '/x/.claude.json', authPosture: 'auth_required', fingerprint: tracker, revision: 'rev-tracker', iconUrl: null }, // U11c: its record's icon is on the vendor's own host
+      { name: 'linear', scope: 'project', path: `${PROJECT_A}/.mcp.json`, authPosture: null, fingerprint: project, revision: null, iconUrl: null }, // Linear's name, not its endpoint
     ] });
     // each postures call asked, and the view's read asked once beside it (the baseline an MCP change is compared with)
     expect(engine.asked.filter((a) => a.name === 'customization.serverEndpoints').map((a) => a.input)).toEqual([{ cwd: PROJECT_A }, { cwd: PROJECT_A }, { cwd: PROJECT_A }]);
@@ -285,5 +289,158 @@ describe('the catalog service', () => {
     expect(added).toMatchObject({ key: 'added', title: 'Your sources', total: 4 });
     const hooked = await invoke('catalog.item', { id: `local:${TEST_MARKETPLACE}#plugins/hooked`, cwd: PROJECT_A });
     expect(hooked).toMatchObject({ publisher: 'MAWS e2e hooks', runsOnYourComputer: true, install: { marketplaceSource: TEST_MARKETPLACE, present: false } });
+  });
+});
+
+// UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C; C7): the directory's icons on what is
+// installed and configured. My items asks main for the icon URLs of its rows (`catalog.pluginIcons`, the postures'
+// `iconUrl`), which come from the copy main holds and ask nothing; the bytes are `catalog.icon`'s, which asks the network
+// only as its route keeps a copy. Every source here is invented, held on disk as an earlier run kept it, long enough ago
+// that a read that refreshed would refresh it.
+describe('the icons of installed plugins and configured connectors', () => {
+  const PLUGIN_ICON = `https://api.anthropic.com/api/directory/plugin-icons/${'0a'.repeat(32)}/256.png`;
+  const BUCKET = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons';
+  const VENDOR_ICON = 'https://cdn.tide-tables.example/icon.png';
+  const BERTH = 'berth-notes@claude-plugins-official';
+  const TIDE = 'tide-tables@claude-plugins-official'; // its record's icon is on its vendor's site
+  const QUAY = 'quay-ledger@claude-plugins-official'; // the directory has no record of it
+  const ELSEWHERE = 'berth-notes@harbour-market'; // a marketplace no seed is
+  const OFFICIAL = 'anthropics/claude-plugins-official'; // the seed's own repository, as the engine lists its marketplace
+  const asked = (...plugins: [id: string, marketplaceLocator: string | null][]) => ({ plugins: plugins.map(([id, marketplaceLocator]) => ({ id, marketplaceLocator })) });
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+  const SVG = new TextEncoder().encode('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1 1"/>');
+
+  const record = (name: string, icon: string | null) => ({
+    id: `plugin_${name}`,
+    name,
+    summary: `${name}, an invented plugin`,
+    surfaces: ['claude_code'],
+    components: [],
+    source: { repository: { url: 'https://github.com/anthropics/claude-plugins-official', path: `plugins/${name}`, reviewed_commit: 'b'.repeat(40) } },
+    ...(icon === null ? {} : { media: { icons: [{ url: icon }] } }),
+  });
+  const server = (id: string, name: string, url: string, icon: string | null) => ({ id, type: 'remote', name, icon_url: icon, works_with: ['claude-code'], remote: { url, transport: 'streamable-http', auth_posture: 'oauth' } });
+  const SOURCES = {
+    'seed:claude-plugins-official': { name: 'claude-plugins-official', owner: { name: 'Anthropic' }, plugins: ['berth-notes', 'tide-tables', 'quay-ledger'].map((name) => ({ name, source: `./plugins/${name}`, description: `${name}, invented` })) },
+    'directory:plugins': { data: [record('berth-notes', PLUGIN_ICON), record('tide-tables', VENDOR_ICON)] },
+    'directory:servers': {
+      servers: [
+        server('srv-tides', 'Tides', 'https://mcp.tides.example/mcp', `${BUCKET}/tides.svg`),
+        server('srv-moorings', 'Moorings', 'https://mcp.moorings.example/mcp', `${BUCKET}/moorings.png`),
+        server('srv-moorings-mirror', 'Moorings Mirror', 'https://mcp.moorings.example/mcp', `${BUCKET}/moorings-mirror.png`), // the same address: two records
+        server('srv-anchors', 'Anchors', 'https://mcp.anchors.example/mcp', 'https://anchors.example/logo.png'), // an icon off the routes
+      ],
+      next_cursor: null,
+    },
+  };
+  const hold = () => {
+    mkdirSync(join(userData, 'catalog'), { recursive: true });
+    for (const [key, page] of Object.entries(SOURCES)) writeFileSync(join(userData, 'catalog', `${key}.json`), JSON.stringify({ key, fetchedAt: 0, pages: [page] }));
+  };
+  const at = (name: string, url: string): CommandOutput<'customization.serverEndpoints'>['servers'][number] => ({ name, scope: 'user', path: '/x/.claude.json', transport: 'http', url });
+
+  // The network as the catalog rule reaches it: every request recorded, answered while `up`.
+  function network() {
+    const net = { asked: [] as string[], up: true };
+    const get = iconGet({}, 'MAWS/test', egressGet(CATALOG_EGRESS, async (url) => {
+      net.asked.push(url);
+      if (!net.up) return new Response('no', { status: 503 });
+      return new Response(url.endsWith('.svg') ? SVG : PNG, { headers: { 'content-type': url.endsWith('.svg') ? 'image/svg+xml' : 'image/png' } });
+    }));
+    return { net, get };
+  }
+
+  it('answers each installed plugin’s icon from the copy held, refreshing nothing and asking the machine nothing', async () => {
+    hold();
+    const engine = host(() => recordedEngine(PROJECT_A));
+    const { invoke, emitted } = service(engine.call);
+    expect(await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL], [TIDE, OFFICIAL], [QUAY, OFFICIAL], [ELSEWHERE, 'harbour/market']))).toEqual({
+      icons: [
+        { id: BERTH, iconUrl: PLUGIN_ICON },
+        { id: TIDE, iconUrl: null }, // off the directory's icon routes
+        { id: QUAY, iconUrl: null },
+        { id: ELSEWHERE, iconUrl: null }, // no route installs it
+      ],
+    });
+    expect(engine.asked).toEqual([]); // no engine view, so no CLI read
+    expect(emitted).toEqual([]);
+    const held = Object.fromEntries((await invoke('catalog.sources', {})).filter((s) => s.fetchedAt !== null).map((s) => [s.key, [s.fetchedAt, s.state]]));
+    expect(held).toEqual({ 'seed:claude-plugins-official': [new Date(0).toISOString(), 'stale'], 'directory:plugins': [new Date(0).toISOString(), 'stale'], 'directory:servers': [new Date(0).toISOString(), 'stale'] }); // not refreshed
+  });
+
+  // The branch panel's finding (P2), confirmed by the architect on 2026-11-15: a marketplace that reuses a seed's name
+  // from another repository is one the person added (normalize.ts, scalpel-1#2), so its same-named plugin is not the
+  // seed's and draws no seed's icon; nor does one whose marketplace is a folder, or one the window knows no source of.
+  it('hands a seed’s icon only to the plugin of the seed’s own repository: none to one from a marketplace that reuses its name', async () => {
+    hold();
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
+    const one = async (marketplaceLocator: string | null) => (await invoke('catalog.pluginIcons', asked([BERTH, marketplaceLocator]))).icons[0]!.iconUrl;
+    expect(await one(OFFICIAL)).toBe(PLUGIN_ICON);
+    expect(await one('https://github.com/Anthropics/claude-plugins-official.git')).toBe(PLUGIN_ICON); // the same repository, spelled otherwise
+    expect(await one('harbour-works/claude-plugins-official')).toBeNull();
+    expect(await one('https://github.com/harbour-works/claude-plugins-official')).toBeNull();
+    expect(await one('/tmp/harbour/claude-plugins-official')).toBeNull();
+    expect(await one(null)).toBeNull();
+  });
+
+  it('answers no icon while no copy is held, and refuses more than 512 plugins', async () => {
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
+    expect(await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL]))).toEqual({ icons: [{ id: BERTH, iconUrl: null }] });
+    const many = (n: number) => asked(...Array.from({ length: n }, (_, i): [string, string] => [`plugin-${i}@harbour-market`, 'harbour/market']));
+    expect(commands['catalog.pluginIcons'].input.safeParse(many(512)).success).toBe(true);
+    expect(commands['catalog.pluginIcons'].input.safeParse(many(513)).success).toBe(false);
+  });
+
+  it('gives a configured connector the icon of the one record its address matches: none for two, none for none, none off the routes', async () => {
+    hold();
+    endpoints = [at('tides', 'https://mcp.tides.example/mcp'), at('moorings', 'https://mcp.moorings.example/mcp'), at('buoy', 'https://buoy.internal.example/mcp'), at('anchors', 'https://mcp.anchors.example/mcp')];
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call);
+    expect((await invoke('catalog.postures', { cwd: PROJECT_A })).servers.map(({ name, iconUrl }) => ({ name, iconUrl }))).toEqual([
+      { name: 'tides', iconUrl: `${BUCKET}/tides.svg` },
+      { name: 'moorings', iconUrl: null },
+      { name: 'buoy', iconUrl: null },
+      { name: 'anchors', iconUrl: null },
+    ]);
+  });
+
+  it('asks the network for the URLs they hand out only as the icon route keeps its copies', async () => {
+    hold();
+    endpoints = [at('tides', 'https://mcp.tides.example/mcp')];
+    let now = 1_000_000;
+    const { net, get } = network();
+    const { invoke } = service(host(() => recordedEngine(PROJECT_A)).call, {}, { icons: get, now: () => now });
+    const plugin = (await invoke('catalog.pluginIcons', asked([BERTH, OFFICIAL]))).icons[0]!.iconUrl!;
+    const connector = (await invoke('catalog.postures', { cwd: PROJECT_A })).servers[0]!.iconUrl!;
+    expect([plugin, connector]).toEqual([PLUGIN_ICON, `${BUCKET}/tides.svg`]);
+    const draw = (url: string) => invoke('catalog.icon', { url });
+    // no copy kept: one request per URL, however many rows ask together
+    const [pluginData, , , connectorData] = await Promise.all([draw(plugin), draw(plugin), draw(plugin), draw(connector), draw(connector)]);
+    expect(pluginData!.dataUrl).toMatch(/^data:image\/png;base64,/);
+    expect(connectorData!.dataUrl).toMatch(/^data:image\/svg\+xml;base64,/);
+    expect(net.asked).toEqual([plugin, connector]);
+    // a copy younger than a day: none
+    now += 23 * 60 * 60_000;
+    await draw(plugin);
+    await draw(connector);
+    expect(net.asked).toHaveLength(2);
+    // a plugin icon's copy, of any age: none
+    now += 400 * 24 * 60 * 60_000;
+    net.up = false;
+    expect(await draw(plugin)).toEqual(pluginData);
+    expect(net.asked).toHaveLength(2);
+    // a connector icon's copy older than a day: one request; it fails, and the old copy is still drawn
+    expect(await draw(connector)).toEqual(connectorData);
+    expect(net.asked).toEqual([plugin, connector, connector]);
+    // not asked again inside five minutes, the old copy drawn meanwhile; then once more
+    now += 4 * 60_000;
+    expect(await draw(connector)).toEqual(connectorData);
+    expect(net.asked).toHaveLength(3);
+    now += 60_000;
+    net.up = true;
+    await draw(connector);
+    expect(net.asked).toHaveLength(4);
+    // a URL off the two icon routes (what a record names on a vendor's site): no request, no icon
+    expect(await draw(VENDOR_ICON)).toEqual({ dataUrl: null });
+    expect(net.asked).toHaveLength(4);
   });
 });

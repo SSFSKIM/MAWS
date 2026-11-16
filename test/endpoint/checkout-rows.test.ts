@@ -134,7 +134,8 @@ describe('the checkout’s offer rows (M4)', () => {
   });
 
   it('leave unoffered what the spec keeps local or for later', () => {
-    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'session.create', 'session.launch']) {
+    // UX wave U6e: the outside save and the grant stay on the session's own machine (until U6f)
+    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'files.writeOutside', 'files.grant', 'session.create', 'session.launch']) {
       expect([name, Object.hasOwn(OFFERS.commands, name)]).toEqual([name, false]);
     }
   });

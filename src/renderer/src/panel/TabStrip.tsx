@@ -9,17 +9,32 @@
 // area", disabled with the reason a drag of it would be refused. UX wave U8b (M3): the menu then offers "Move below" on a
 // tab of the upper group (while the column has two groups or its one group more than one tab) and "Move above" on a tab
 // of the lower one; it opens on a right click and on Shift+F10. A strip knows its group and hands it to its "+".
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 6 and 16): a tab of Files
+// that holds a file is titled by the file's name, in italics while it is the session's preview tab (`data-preview`),
+// which a double-click on it keeps; it has no pin glyph. "+ ▸ Files" shows the tree-only tab the scope has (the tool's
+// `reuse`) and adds one only when it has none. M2: while the file has unsaved edits the tab carries the dot a main file
+// tab carries (`data-dirty`), read from the viewer's entry under the file's key. M4 (Interfaces §D; U8b's §C.3): every
+// tab drags; a strip takes a tab dragged from the other group's strip, and the lower part of a one-group column takes
+// one while the group has another (`LowerGroupDrop`), the tab kept either way; a tab whose tool has a main-tab form (an
+// artifact's record, a file) also drags onto the main area's targets and its menu moves it there. The selected tab is
+// scrolled into view, the nearest way, when it becomes selected and when the keyboard arrives on it, so no caller asks.
 import { ContextMenu, DropdownMenu } from 'radix-ui';
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState, type DragEvent, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PanelTabRef } from '@shared/ipc/schema/layout';
+import { machineOf } from '@shared/machine/address';
 import { Icon, IconButton } from '../app/IconButton';
-import { useLayout } from '../stores/layout';
+import { useLayout, type LayoutState } from '../stores/layout';
 import { COPY } from './copy';
 import { openPaneTab, usePanes } from '../engine-surface/panes'; // R2
 import { PANE_COPY } from '../engine-surface/PaneTool'; // R2
-import { beginDrag, endDragFrom, moveArtifactToTab, panelTabMoves, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
+import { beginDrag, endDrag, endDragFrom, holdSideViews, moveToMain, panelTabMoves, panelTabOfDrop, usePanelRecord, useTransferRefusal } from '../shell/transfer'; // P4-B3
+import { DropHighlight, DropOverlay } from '../shell/DropOverlay'; // UX wave U6b-1 (M4)
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3
+import { EDITOR_COPY } from '../tools/code/copy'; // UX wave U6b-1
+import { fileKey, fileOfTab, FILES_TOOL_ID, keep, pinnableTab, sideFileOf } from '../tools/code/files/tabs'; // UX wave U6b-1
+import { useViewer } from '../tools/code/viewer/viewer-store'; // UX wave U6b-1
+import { personsOpenBeside } from '../tools/code/open-file'; // UX wave U6e (decision 19): a person's click on a file's tab, or its move, is the person's open
 import { panelHost, togglePinned, usePanelHost, useTabLabel, type PanelHostState } from './host';
 import { groupOf, sideGroups, type SideGroupName } from './surface-model';
 
@@ -46,8 +61,7 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
   // keyboard in this strip.
   const move = (tabId: string, to: SideGroupName): SideGroupName | null => {
     handKeyboardTo(tabId, to);
-    useLayout.getState().moveSurfaceTab(appSessionId, tabId, to);
-    const landed = groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+    const landed = moveBetweenGroups(appSessionId, tabId, to);
     if (landed !== to) takesKeyboard(tabId, to);
     return landed;
   };
@@ -61,19 +75,109 @@ export function TabStrip({ appSessionId, group, tabs, activeTabId, bodyId, trail
     buttons[(at + (event.key === 'ArrowRight' ? 1 : buttons.length - 1)) % buttons.length].focus();
   };
 
+  const drop = useGroupDrop(appSessionId, group);
   return (
-    <div data-side-strip className="flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border px-1">
+    <div data-side-strip {...drop.handlers} className="relative flex h-9 min-w-0 shrink-0 items-center gap-1 border-b border-border px-1">
+      {drop.over && <DropHighlight label={group === 'lower' ? COPY.moveBelow : COPY.moveAbove} className="inset-0 z-10" />}
       <div ref={list} role="tablist" aria-label="Panel tools" onKeyDown={onKeyDown} className="flex min-w-0 flex-1 items-center gap-0.5 overflow-x-auto [scrollbar-width:none]">
         {tabs.map((tab) => {
           const selected = tab.id === activeTabId;
           const shape: TabShape = fit.icons.has(tab.id) ? 'icon' : selected && fit.shownMax !== null ? 'cut' : 'whole';
-          return <Tab key={tab.id} tab={tab} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => panelHost.selectTab(tab.id)} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
+          return <Tab key={tab.id} tab={tab} appSessionId={appSessionId} group={group} selected={selected} shape={shape} maxWidth={shape === 'cut' ? fit.shownMax : null} canPin={appSessionId !== null} bodyId={bodyId} onSelect={() => { panelHost.selectTab(tab.id); personsOpenBeside(tab.id); }} moveTo={moveTo} onMove={(to) => move(tab.id, to)} />;
         })}
       </div>
       <AddMenu appSessionId={appSessionId} group={group} />
       {trailing}
     </div>
   );
+}
+
+// ---- a side tab dragged between the groups (UX wave U6b-1, M4; U8's O-36) -------------------------------------------------
+
+// The side tab under drag that may join `group`: one of the scope's tabs in the other group (a strip never takes its own
+// group's tab; reordering inside a strip is nobody's), read from the drag state, since a `dragover` cannot read the payload.
+function draggedInto(appSessionId: AppSessionId | null, group: SideGroupName, state: LayoutState = useLayout.getState()): string | null {
+  const dragging = state.dragging;
+  if (dragging?.source !== 'panel') return null;
+  const from = groupOf(sideGroups(state, appSessionId), dragging.tabId);
+  return from !== null && from !== group ? dragging.tabId : null;
+}
+
+// A side tab into the other group, by the drag or the menu, answering the group it ended in (`moveSurfaceTab` refuses a
+// group's only tab when it would make the second group; a tab no list holds any more moves nothing). A file's view mounts again
+// there, so its key is held first, as for a move to the main area (Decision 20b; the branch review's third finding): the
+// prune of the view that goes, and the viewer's cap, leave its entry for the view that comes. A tab whose move was made
+// is kept (Decision 6; the fifth finding: the menu's move as the drag's), wherever it lands: the upper group's only tab
+// moved below joins both groups into the upper one.
+function moveBetweenGroups(appSessionId: AppSessionId | null, tabId: string, to: SideGroupName): SideGroupName | null {
+  const file = sideFileOf(tabId);
+  if (file !== null) holdSideViews(file.key);
+  const before = useLayout.getState();
+  before.moveSurfaceTab(appSessionId, tabId, to);
+  if (useLayout.getState() !== before) {
+    keep(tabId); // a refused move sets nothing
+    personsOpenBeside(tabId); // U6e (decision 19): the person's move, so the agent's mark goes, from a kept tab too
+  }
+  return groupOf(sideGroups(useLayout.getState(), appSessionId), tabId);
+}
+
+// The highlight shows while a drag the strip would take is over it; it goes with that drag, by whichever path the drag
+// ends (a drop elsewhere, its source removed), and a later drag does not find it on.
+function useGroupDrop(appSessionId: AppSessionId | null, group: SideGroupName) {
+  const [over, setOver] = useState(false);
+  const live = useLayout((state) => draggedInto(appSessionId, group, state) !== null);
+  if (over && !live) setOver(false);
+  const accept = (event: DragEvent) => {
+    if (draggedInto(appSessionId, group) === null) return false;
+    event.preventDefault();
+    event.dataTransfer.dropEffect = 'move';
+    return true;
+  };
+  const handlers = {
+    onDragEnter: (event: DragEvent) => void (accept(event) && setOver(true)),
+    onDragOver: accept,
+    onDragLeave: (event: DragEvent) => {
+      if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setOver(false);
+    },
+    onDrop: (event: DragEvent) => {
+      setOver(false);
+      const tabId = draggedInto(appSessionId, group);
+      if (tabId === null || (panelTabOfDrop(event)?.tabId ?? tabId) !== tabId) return;
+      event.preventDefault();
+      endDrag();
+      moveBetweenGroups(appSessionId, tabId, group);
+    },
+  };
+  return { over: over && live, handlers };
+}
+
+// The lower part of a column with one group, a target while one of its tabs drags and the group has another to keep;
+// the drop makes the second group with that tab (U8's "a drag of the tab onto the lower part of the column").
+export function LowerGroupDrop({ appSessionId }: { appSessionId: AppSessionId | null }) {
+  const tabId = useLayout((s) => {
+    const groups = sideGroups(s, appSessionId);
+    const dragging = s.dragging;
+    if (dragging?.source !== 'panel' || groups.lower !== null || groups.upper.tabs.length < 2) return null;
+    return groups.upper.tabs.some((tab) => tab.id === dragging.tabId) ? dragging.tabId : null;
+  });
+  if (tabId === null) return null;
+  return (
+    <div data-side-lower-drop className="absolute inset-x-0 bottom-0 z-20 h-1/2">
+      <DropOverlay accepts label={COPY.moveBelow} onDrop={() => void moveBetweenGroups(appSessionId, tabId, 'lower')} />
+    </div>
+  );
+}
+
+// ---- the selected tab kept in view (UX wave U6b-1, M4) ---------------------------------------------------------------------
+
+// The strip scrolls by the least that shows the whole tab; nothing else scrolls (no ancestor, no window).
+function revealTab(tab: HTMLElement | null): void {
+  const strip = tab?.parentElement;
+  if (!tab || !strip) return;
+  const box = strip.getBoundingClientRect();
+  const at = tab.getBoundingClientRect();
+  if (at.left < box.left) strip.scrollLeft -= box.left - at.left;
+  else if (at.right > box.right) strip.scrollLeft += Math.min(at.right - box.right, at.left - box.left);
 }
 
 // ---- where the keyboard goes after a strip's own act (UX wave U8b; the branch review's findings 4 and 5) -----------------
@@ -153,6 +257,7 @@ type TabShape = 'whole' | 'icon' | 'cut';
 
 interface TabProps {
   tab: PanelTabRef;
+  appSessionId: AppSessionId | null; // the strip's scope: the session whose list holds a file's tab
   group: SideGroupName; // the group whose strip draws it
   selected: boolean;
   shape: TabShape;
@@ -164,20 +269,34 @@ interface TabProps {
   onMove(to: SideGroupName): SideGroupName | null; // answers the group the tab ended up in
 }
 
-function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
-  const { tool, title, suffix } = useTabLabel(tab); // the header reads the same label (P3-G)
+function Tab({ tab, appSessionId, group, selected, shape, maxWidth, canPin, bodyId, onSelect, moveTo, onMove }: TabProps) {
+  const label = useTabLabel(tab); // the header reads the same label (P3-G)
+  const { tool, suffix } = label;
+  const params = useLayout((s) => s.panelParams[tab.id]);
+  const file = tab.toolId === FILES_TOOL_ID ? fileOfTab(params) : null; // UX wave U6b-1
+  const title = file ? file.file.slice(file.file.lastIndexOf('/') + 1) : label.title;
+  const preview = file?.preview === true;
+  const dirty = useViewer((s) => file !== null && appSessionId !== null && (s.entries.get(fileKey(machineOf(appSessionId), file.file))?.dirty ?? false));
   const closing = usePanelHost((s) => s.closing.has(tab.id));
-  const pinnable = tool ? tool.pinnable : true;
+  const pinnable = (tool ? tool.pinnable : true) && pinnableTab(params);
   const ToolIcon = tool?.icon;
-  const label = suffix ? `${title} · ${suffix}` : title;
+  const name = suffix ? `${title} · ${suffix}` : title;
   const iconOnly = shape === 'icon';
   const revealed = selected ? '' : 'hidden group-hover:inline-flex group-focus-within:inline-flex'; // unrevealed glyphs take no width
   const record = usePanelRecord(tab.id); // P4-B3: the artifact it shows, which a drag moves to main
-  useEffect(() => () => endDragFrom('panel', tab.id), [tab.id]); // INV-5: a tab unmounting mid-drag ends its drag
+  // INV-5: a tab unmounting mid-drag ends its drag; UX wave U6b-1 (sequence 7): so does a file's tab given another file
+  const held = file?.file ?? null;
+  useEffect(() => () => endDragFrom('panel', tab.id), [tab.id, held]);
   const button = useRef<HTMLButtonElement>(null);
+  const outer = useRef<HTMLDivElement>(null);
   useLayoutEffect(() => {
     if (takesKeyboard(tab.id, group)) button.current?.focus();
   });
+  // UX wave U6b-1: in view when it becomes selected (by the host, a click, an opener), and again when its shape changes
+  // under the selection (a tab drawn as its icon until now grows)
+  useLayoutEffect(() => {
+    if (selected) revealTab(outer.current);
+  }, [selected, shape, maxWidth]);
   // A move remounts the tab in the other strip, which takes the keyboard, or leaves it in this strip, focused already: the
   // menu's close after the move gives none back. Once: a tab that stayed is the same instance, and a later menu of its
   // dismissed gives the keyboard back to it as usual.
@@ -185,10 +304,13 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
 
   const element = (
     <div
+      ref={outer}
       data-tab-id={tab.id}
       data-tab-shape={shape}
-      draggable={record !== null || undefined}
-      onDragStart={record === null ? undefined : (event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, artifactId: record })}
+      data-preview={preview ? 'true' : undefined}
+      data-dirty={dirty ? 'true' : undefined}
+      draggable
+      onDragStart={(event) => beginDrag(event, { source: 'panel', tabId: tab.id, toolId: tab.toolId, ...(record !== null ? { artifactId: record } : {}) })}
       style={maxWidth === null ? undefined : { maxWidth }}
       className={`group flex h-7 shrink-0 items-center rounded-sm ${iconOnly ? 'w-7' : 'max-w-48 min-w-18'} ${selected ? 'bg-bg-active text-fg' : 'text-fg-muted hover:bg-bg-hover hover:text-fg'}`}
     >
@@ -198,20 +320,27 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
         role="tab"
         aria-selected={selected}
         aria-controls={selected ? bodyId : undefined}
-        aria-label={iconOnly ? label : undefined}
-        title={iconOnly ? label : undefined}
+        aria-label={iconOnly ? name : undefined}
+        title={file ? file.file : iconOnly ? name : undefined} // UX wave U6e (decision 11): a file's tab has its full path as its tooltip
         tabIndex={selected ? 0 : -1}
         onClick={onSelect}
+        onFocus={() => revealTab(outer.current)} // the F6 stop and the arrows focus without scrolling
+        onDoubleClick={preview ? () => keep(tab.id) : undefined}
         className={`flex h-full min-w-0 flex-1 items-center rounded-sm text-ui outline-accent focus-visible:outline-2 ${iconOnly ? 'justify-center' : 'gap-1.5 pr-1 pl-2'}`}
       >
         {ToolIcon ? <ToolIcon className="size-3.5 shrink-0" /> : iconOnly && <span aria-hidden>{title.slice(0, 1).toUpperCase()}</span>}
         {!iconOnly && (
-          <span className="truncate">
+          <span className={preview ? 'truncate italic' : 'truncate'}>
             {title}
             {suffix && <span className="text-fg-faint"> · {suffix}</span>}
           </span>
         )}
       </button>
+      {!iconOnly && dirty && (
+        <span role="img" aria-label={EDITOR_COPY.unsaved} className="shrink-0 px-0.5 text-fg">
+          •
+        </span>
+      )}
       {!iconOnly && pinnable && (
         <GlyphButton
           label={tab.pinned ? COPY.unpin(title) : COPY.pin(title)}
@@ -232,7 +361,7 @@ function Tab({ tab, group, selected, shape, maxWidth, canPin, bodyId, onSelect, 
   );
   // Every tab is a trigger, disabled while its menu would be empty, so a tab is not mounted again when its menu gains or
   // loses its items (a second tab opened, a group closed) and the keyboard stays on it.
-  const toMain = panelTabMoves(tab);
+  const toMain = panelTabMoves(tab, params); // the subscribed params: a file given to a tree-only tab shows here
   return (
     <ContextMenu.Root modal={false}>
       <ContextMenu.Trigger asChild disabled={!toMain && moveTo === null} onKeyDown={openMenuOnShiftF10}>{element}</ContextMenu.Trigger>
@@ -269,14 +398,15 @@ function openMenuOnShiftF10(event: KeyboardEvent<HTMLDivElement>) {
   event.currentTarget.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
 }
 
-// P4-B3 (M3 of the prior art): the record into a main tab, appended to the focused pane, as the record bar's Move to tab.
+// P4-B3 (M3 of the prior art): the record into a main tab, appended to the focused pane, as the record bar's Move to tab;
+// UX wave U6b-1: a file likewise.
 function MoveToMainItem({ tabId }: { tabId: string }) {
   const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
   return (
     <ContextMenu.Item
       disabled={refusal !== null}
       title={refusal ?? undefined}
-      onSelect={() => void moveArtifactToTab(tabId)}
+      onSelect={() => void moveToMain(tabId)}
       className={MENU_ITEM}
     >
       {TRANSFER_COPY.moveToMain}

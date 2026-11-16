@@ -2,8 +2,8 @@
 // events reshaped into the session-plane messages sminos's own plane makes of them (doperpowers
 // `sminos/skills/sminos/scripts/sminos_plane.py`, `Sub.event`), so the renderer reads one lane A vocabulary whether the
 // session is here or on another machine. Locally the transcript's rows come from MAWS's disk tail, so a snapshot carries
-// only what the disk lacks: the streaming blocks and the usage, and the jobs main derives from that disk (./jobs.ts),
-// which also go out as a `subagents` message whenever they change.
+// only what the disk lacks: the streaming blocks and the usage, and the jobs and subagents main derives from that disk
+// and the bridge (./jobs.ts; UX wave U8d M2), which also go out as a `subagents` message whenever they change.
 //
 // Each subscription tracks its loops' open model requests by `(turnId, agentId, step)`, seeded from its snapshot's
 // `streaming` (a watch opened mid-reply knows the step it never saw start): `step end` closes one, and `turn complete`
@@ -13,6 +13,20 @@
 // `sub` the watch's id; the session-wide kinds (`raised`, `settled`, `op`, `compact`) carry `sub` and `n` null.
 import type { Job } from 'desk-hub/protocol';
 import type { LaneARaised, LaneASettled, PlaneMessage } from '@shared/ipc/schema/lane-a';
+import type { LaneAAgent } from '@shared/lane-a/agents';
+
+/**
+ * What main derives of a session's tasks (U8d's Interfaces §B): its subagents and its loop's jobs, and `origin`, the
+ * holder whose bridge child the facts came from (`holderOrigin`; the fence review's ruling): a key beside the agents
+ * list that DX4 does not have, which a reader that does not know it reads past. Absent until a derivation names one.
+ */
+export interface SubagentsBody {
+  subagents: readonly LaneAAgent[];
+  jobs: readonly Job[];
+  origin?: string;
+}
+
+export const NO_SUBAGENTS: SubagentsBody = { subagents: [], jobs: [] };
 
 export interface PlaneContext {
   machine: string;
@@ -51,16 +65,16 @@ export class Reshaper {
 
   constructor(private readonly ctx: PlaneContext) {}
 
-  // The subscription's snapshot line: one `snapshot` (n 0) carrying the session's jobs, then a `raised` per pending
-  // request.
-  snapshot(snap: Event, jobs: readonly Job[] = []): PlaneMessage[] {
+  // The subscription's snapshot line: one `snapshot` (n 0) carrying the session's jobs and subagents, then a `raised`
+  // per pending request.
+  snapshot(snap: Event, { jobs, subagents, origin }: SubagentsBody = NO_SUBAGENTS): PlaneMessage[] {
     this.open.clear();
     this.n = 0;
     const streaming = Array.isArray(snap.streaming) ? (snap.streaming as Event[]) : [];
     for (const entry of streaming) this.open.set(stepKey(entry as Step), { turnId: entry.turnId, agentId: entry.agentId ?? null, step: entry.step });
     const pending = Array.isArray(snap.pending) ? (snap.pending as Event[]) : [];
     return [
-      this.envelope('snapshot', { streaming, usage: snap.usage ?? null, jobs }, 0),
+      this.envelope('snapshot', { streaming, usage: snap.usage ?? null, jobs, subagents, ...(origin !== undefined && { origin }) }, 0),
       ...pending.filter((p) => typeof p.request === 'string').map((p) => this.wide('raised', raisedOf(p, this.ctx.session))),
     ];
   }
@@ -109,10 +123,10 @@ export class Reshaper {
     }
   }
 
-  // The session's jobs, changed since this subscription last carried them: DX4's `subagents` body, with no agents and no
-  // MCP servers (locally those are read from MAWS's own sources).
-  jobs(jobs: readonly Job[]): PlaneMessage {
-    return this.sub('subagents', { subagents: [], jobs, mcp: [] });
+  // The session's subagents and jobs, changed since this subscription last carried them: DX4's `subagents` body, with no
+  // MCP servers (locally those are read from MAWS's own source).
+  subagents({ subagents, jobs, origin }: SubagentsBody): PlaneMessage {
+    return this.sub('subagents', { subagents, jobs, mcp: [], ...(origin !== undefined && { origin }) });
   }
 
   private opened(e: Event): void {

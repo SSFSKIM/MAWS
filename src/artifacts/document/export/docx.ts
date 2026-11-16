@@ -44,7 +44,7 @@ import type { Mark, Node as PMNode } from '@tiptap/pm/model';
 import { TableMap } from '@tiptap/pm/tables';
 import type { Actor } from '@shared/artifacts/actor';
 import { CALLOUT_TONES } from '../schema';
-import { dsValue, exportDesign, hexOf, houseSystem, officeFace, pageOf, themeSlot, twipsOf, type DsName, type ExportDesign } from './design-system';
+import { dsValue, exportDesign, hexOf, officeFace, pageOf, themeSlot, twipsOf, type DsName, type ExportDesign } from './design-system';
 import { imageSize } from './image-size';
 import { chipText } from './values';
 import { defaultAuthorName, tabsOf, type ExportOptions, type ExportSource, type ImageLoader } from './source';
@@ -496,7 +496,7 @@ const initials = (name: string) =>
 /** The document (one tab, or every tab under its title, each on a new page) as a Word file. */
 export async function exportDocx<T>(source: ExportSource, options: DocxExportOptions<T> = {}): Promise<Uint8Array> {
   const tabs = tabsOf(source, options.tab);
-  const design = options.system ? exportDesign(options.system, source.overrides) : exportDesign(houseSystem, source.overrides);
+  const design = exportDesign(options.system, source.overrides, source.page.density); // UX wave U10b: and the document's density
   const value = (name: DsName) => dsValue(design, name);
   const color = (name: DsName) => hexOf(value(name)) ?? undefined;
   const halfPoints = (name: DsName) => {
@@ -504,7 +504,7 @@ export async function exportDocx<T>(source: ExportSource, options: DocxExportOpt
     return twips ? Math.round(twips / 10) : undefined;
   };
   const bold = (name: DsName) => Number(value(name) ?? 400) >= 600;
-  const page = pageOf(design, options.pageSize);
+  const page = pageOf(design, options.pageSize ?? source.page.size); // UX wave U10b: the call's size, else the document's
   const [width, height, margin] = [twipsOf(page.width) ?? 12240, twipsOf(page.height) ?? 15840, twipsOf(page.margin) ?? 1440];
   const images = await loadImages(
     tabs.map(({ body }) => body),

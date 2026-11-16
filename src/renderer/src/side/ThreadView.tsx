@@ -33,7 +33,6 @@ import { useEffect } from 'react';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { AppSessionId } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
-import { machineFor } from '../ipc/machine';
 import { SessionPane } from '../session/SessionPane';
 import { QUIET, SECONDARY } from '../sessions/ui';
 import { useLayout } from '../stores/layout';
@@ -55,6 +54,7 @@ import { closeCard, openCard, targetOf, useCommentCard } from './card/store';
 import { usePageDock } from '../tools/browser/comment/dock'; // P2-F L146
 // P2-F start: Reopen in browser
 import { panelHost } from '../panel/host';
+import { openFile } from '../tools/code/open-file'; // UX wave U6b-1: beside the chat, as every open
 import { browserTool, type BrowserParams } from '../tools/browser/BrowserTool';
 import { browserSessionOf } from '../tools/browser/comment/actions';
 import { useBrowser } from '../tools/browser/store';
@@ -135,7 +135,7 @@ export function ThreadView({ parent, child, visible }: { parent: AppSessionId; c
             <button
               type="button"
               title={anchor?.locator}
-              onClick={() => useLayout.getState().openTab({ kind: 'file', path, line: anchor?.line ?? null, appSessionId: parent, machine: machineFor(parent) })}
+              onClick={() => void openFile(parent, path, anchor?.line ?? null)}
               className="max-w-full truncate rounded-sm font-mono text-ui-sm text-fg outline-accent hover:underline focus-visible:outline-2"
               aria-label={COPY.openFile(label)}
             >

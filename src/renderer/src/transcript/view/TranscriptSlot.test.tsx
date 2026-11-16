@@ -11,13 +11,14 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { OTHER_MACHINE, TEST_MACHINE, at } from '../../../../../test/support/machine';
-import { remoteRow } from '../../../../../test/support/builders'; // P5 O9 M9
+import { item, remoteRow } from '../../../../../test/support/builders'; // P5 O9 M9; UX wave U1b: item
 import { Chain, SESSION } from '../../lane-a/test-support/chain-rows'; // P5 O9 M9
 import { resetRemoteTranscripts } from '../../lane-a/remote-source'; // P5 O9 M9
 import { laneAState } from '../../lane-a/test-support/lane-a-state'; // P5 O9
 import { resetLaneAWatches, watchLaneA } from '../../lane-a/watches'; // P5 O9
 import { applyLaneAState, resetLaneAStore } from '../../stores/lane-a'; // P5 O9
 import { resetQueueStore } from '../../stores/queue';
+import { useAttention } from '../../stores/attention'; // UX wave U1b
 import { useSessions } from '../../stores/sessions';
 import { useMachines } from '../../stores/machines'; // 2026-11-06
 import { applyTaskEvents, emptyGraph } from '../../tools/agents/model/task-graph';
@@ -27,6 +28,9 @@ import { chunksSettled } from '../lazy'; // the U4a landing's unit shard
 import { BASH_RESULT, builder, request, task, tool, uuid } from '../model/test-events';
 import type { Row } from '../model/rows';
 import { registeredActions } from './registry';
+import { viewLaneOf } from './TranscriptSlot'; // UX wave U2b
+import { resetOwnerChannelStore, useOwnerChannelStore } from '../../stores/owner-channel'; // UX wave U2b
+import { useSettings } from '../../stores/settings'; // UX wave U2b
 import { noteOwnPrompt, resetReader } from '../../sessions/share/reader'; // board 525
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures'; // UX wave U4a
 import { journalToEvents } from '../dev/journal'; // UX wave U4a
@@ -129,7 +133,7 @@ describe('TranscriptSlot', () => {
     fireEvent.click(screen.getByTitle('Edit here · Send rewinds this session to this message'));
     expect(editAndResubmit).toHaveBeenCalledTimes(1);
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP);
+    expect(openFile).toHaveBeenCalledWith('src/a.ts', undefined, APP, { main: false });
 
     const again = vi.fn();
     let dispose = () => {};
@@ -470,33 +474,38 @@ describe('TranscriptSlot', () => {
     });
   });
 
-  it('docks the latest registered request renderer in a pending request’s slot; its disposer restores the previous one, then the placeholder', async () => {
+  // UX wave U1b (M3): a waiting prompt is drawn at the transcript's end row, by the latest registered renderer; with none,
+  // the row draws nothing (no row draws an empty slot)
+  it('draws a waiting prompt at its end row with the latest registered request renderer; its disposer restores the previous one, then nothing', async () => {
     const b = builder();
-    b.turn('u1', 'Ask me');
-    b.toolUse('q1', 'AskUserQuestion', { questions: [] });
-    b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
+    b.turn('u1', 'Check it');
+    b.toolUse('b1', 'Bash', { command: 'make check' });
+    b.emit('permission.requested', { requestId: request('r1'), toolUseId: tool('b1'), toolName: 'Bash', displayName: null, input: { command: 'make check' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null });
     const invoke = vi.fn((name: string) => Promise.resolve({ ok: true, value: name === 'session.queue.list' ? EMPTY : name === 'session.appEvents' ? { events: [] } : { events: b.events, lastSeq: 3, complete: true } }));
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
-    render(<TranscriptSlot appSessionId={at('app-slot-request' as AppSessionId)} />);
-    const slot = () => document.querySelector<HTMLElement>('[data-kind="request_slot"]');
+    const id = at('app-slot-request' as AppSessionId);
+    const waiting = item(id, 'permission', '2026-09-29T09:00:00.000Z', { request: { requestId: request('r1'), toolUseId: tool('b1'), taskId: null, agentId: null } });
+    act(() => useAttention.setState({ bySession: new Map([[id, [waiting]]]) }));
+    onTestFinished(() => useAttention.setState({ bySession: new Map() }));
+    render(<TranscriptSlot appSessionId={id} />);
+    const end = () => document.querySelector<HTMLElement>('[data-row-id="request-end"]');
     await settle();
-    expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
+    expect(end()?.textContent).toBe('');
 
     let disposeFirst = () => {};
     let disposeSecond = () => {};
     act(() => {
-      disposeFirst = registerRequestRenderer((row) => <div data-card="first">{`First card ${row.requestId}`}</div>);
+      disposeFirst = registerRequestRenderer((row) => <div data-card="first">{`First card ${row.id}`}</div>);
     });
-    expect(slot()?.textContent).toBe('First card r1');
+    expect(end()?.textContent).toBe('First card request-end');
     act(() => {
       disposeSecond = registerRequestRenderer((row) => <div data-card="second">{`Second card ${row.requestKind}`}</div>);
     });
-    expect(slot()?.textContent).toBe('Second card question');
+    expect(end()?.textContent).toBe('Second card permission');
     act(() => disposeSecond());
-    expect(slot()?.textContent).toBe('First card r1');
+    expect(end()?.textContent).toBe('First card request-end');
     act(() => disposeFirst());
-    expect(slot()?.textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
-    expect(slot()?.querySelector('[role="status"]')).not.toBeNull();
+    expect(end()?.textContent).toBe('');
   });
 
   // P2-E1 (M2; ledger §5 row 3): the comment card's three options. `startAt` names the first row shown (none while it
@@ -538,7 +547,7 @@ describe('TranscriptSlot', () => {
     expect(document.body.textContent).not.toContain('The parent’s copied');
     expect(document.querySelector('.owner-message-ink')).not.toBeNull(); // the local presenter
     fireEvent.click(document.querySelector<HTMLElement>('[data-chip="path"]')!);
-    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id);
+    expect(override).toHaveBeenCalledWith('src/a.ts', undefined, id, { main: false });
     expect(registered).not.toHaveBeenCalled();
 
     view.rerender(<TranscriptSlot appSessionId={id} />); // inert by default: every row, the registered action
@@ -932,3 +941,66 @@ describe('who wrote a prompt there', () => {
   });
 });
 
+
+// UX wave U2b (M2; card 4, "This app's switch"): the lane the to-human view follows, from one of three sources: the
+// session's owner channel when it answers; for a session on another machine, whose channel cannot be read over the
+// machine link, this app's own switch (`mods.toHuman.enabled`); else off.
+describe('the lane of the to-human view', () => {
+  const lane = { on: true, override: 'inherit', applied: 'maws-contract', pending: null, mismatch: null } as const;
+  const channel = (on: boolean) => ({ appSessionId: 'x' as AppSessionId, lane: { ...lane, on }, marks: [] });
+  it.each([
+    ['the channel answers on', channel(true), false, false, true],
+    ['the channel answers off, whatever the app’s switch', channel(false), true, true, false],
+    ['another machine, the app’s switch on', null, true, true, true],
+    ['another machine, the app’s switch off', null, true, false, false],
+    ['this machine, the channel not answered', null, false, true, false],
+  ] as const)('%s', (_name, owner, elsewhere, appSwitch, on) => {
+    expect(viewLaneOf(owner, elsewhere, appSwitch)).toBe(on);
+  });
+
+  afterEach(() => {
+    resetOwnerChannelStore();
+    useSettings.setState({ state: null });
+    useSessions.setState({ listed: new Map() });
+  });
+  const turn = () => {
+    const b = builder();
+    b.turn('u1', 'Count the lines');
+    b.text('m1', 0, '<message>Two lines.</message>');
+    b.end(['u1']);
+    return b.events;
+  };
+  const answering = (answers: Record<string, unknown>) => {
+    const invoke = vi.fn((name: string) => Promise.resolve(name in answers ? { ok: true, value: answers[name] } : { ok: false, error: { code: 'unavailable', message: 'not yet' } }));
+    window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
+  };
+  const base = { 'session.appEvents': { events: [] }, 'session.queue.list': { entries: [], paused: false, pauseReason: null, steers: [], withdrawn: [] } };
+  const settings = (enabled: boolean) => useSettings.setState({ state: { settings: { mods: { toHuman: { enabled } } } } as never });
+
+  it('a session on another machine, whose channel is refused, follows this app’s switch', async () => {
+    const REMOTE = addressOf(OTHER_MACHINE, 'app-lane' as AppSessionId);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-lane'), appId: REMOTE }]]) });
+    answering({ ...base, 'session.events': { events: turn(), lastSeq: 3, complete: true } });
+    settings(true);
+    render(<TranscriptSlot appSessionId={REMOTE} />);
+    await settle();
+    await settle();
+    expect(useTranscriptStore.getState().entries[REMOTE]?.state.ui.ownerLane).toBe(true);
+    act(() => settings(false));
+    await settle();
+    expect(useTranscriptStore.getState().entries[REMOTE]?.state.ui.ownerLane).toBe(false);
+  });
+
+  it('a session on this machine follows its channel, and is off while the channel has not answered', async () => {
+    const LOCAL = at('app-lane-here' as AppSessionId);
+    answering({ ...base, 'session.events': { events: turn(), lastSeq: 3, complete: true } });
+    settings(true);
+    render(<TranscriptSlot appSessionId={LOCAL} />);
+    await settle();
+    expect(useTranscriptStore.getState().entries[LOCAL]?.phase).toBe('live');
+    expect(useTranscriptStore.getState().entries[LOCAL]!.state.ui.ownerLane ?? false).toBe(false); // the app's switch is not this session's lane
+    act(() => useOwnerChannelStore.setState({ bySession: new Map([[LOCAL, { ...channel(true), appSessionId: LOCAL }]]) }));
+    await settle();
+    expect(useTranscriptStore.getState().entries[LOCAL]?.state.ui.ownerLane).toBe(true);
+  });
+});

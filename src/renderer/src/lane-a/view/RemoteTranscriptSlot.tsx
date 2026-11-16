@@ -12,7 +12,7 @@ import { useAgentLookup } from '../../transcript/view/agent-lookup';
 import { useRegisteredActions, useRegisteredRequestRenderer } from '../../transcript/view/registry';
 import type { TranscriptActions } from '../../transcript/view/context'; // UX wave U3b
 import { Transcript, type TranscriptListHandle } from '../../transcript/view/Transcript';
-import type { TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
+import { useViewLane, type TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
 import { useRemoteTranscript } from '../remote-source';
 import { useLaneAStreaming } from '../stream/use-overlay';
 import { drawnRows } from './drawn-rows';
@@ -45,6 +45,7 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
   const rewind = useMemo(() => ({ ...ipcRewind(appSessionId), unavailable: filesReason }), [appSessionId, filesReason]);
   const streaming = useLaneAStreaming(appSessionId, storeKey);
   const promptAuthor = usePromptAuthor(appSessionId); // board 525: another member's session names its prompts' authors
+  const ownerLane = useViewLane(appSessionId); // UX wave U2b: its channel is not read over the link, so this app's switch decides
   const compacting = useCompactingSince(appSessionId); // UX wave U3b (M4): between its bridge's `compact` start and end
   // Older rows when the reader reaches the top, while what is drawn does not fill the pane, and after a page that drew
   // nothing new; the reader's place kept through each (the desk's own rules, lifted with the plane transcript).
@@ -80,6 +81,7 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
         tail={streaming.tail}
         startAt={startAt}
         presentation={presentation}
+        ownerLane={ownerLane}
         atRest={atRest}
         placed={streaming.kept}
         promptAuthor={promptAuthor}

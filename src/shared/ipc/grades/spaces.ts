@@ -7,4 +7,6 @@ export const grades = {
   'spaces.create': 'manage',
   'spaces.update': 'manage',
   'spaces.delete': 'manage',
+  'spaces.instructions': 'view', // UX wave U10b (M9): read as the Spaces are
+  'spaces.setInstructions': 'manage',
 } as const satisfies CommandGrades<'spaces'>;

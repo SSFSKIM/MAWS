@@ -323,6 +323,11 @@ function applyAdd(add: Add, id?: string, restored?: ReadonlySet<string>): string
     const existing = scopeRefs(target).find((t) => t.toolId === tool.id);
     if (existing && id !== undefined && restored?.has(existing.id) && !instances.has(existing.id)) return replaceRestored(existing, add, id);
     if (existing) return retarget(existing, add);
+  } else if (tool.reuse) {
+    // UX wave U6b-1 (Decision 21): a multi-instance tool may name the tab of its own an add re-targets
+    const own = scopeRefs(target).filter((t) => t.toolId === tool.id);
+    const reused = own.find((t) => t.id === tool.reuse!(own, params));
+    if (reused) return retarget(reused, add);
   }
   const tabId = id ?? mintTabId(tool.id);
   const ref: PanelTabRef = { id: tabId, toolId: tool.id, pinned: pin };

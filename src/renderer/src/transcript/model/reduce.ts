@@ -10,7 +10,7 @@ import { toolUseOf } from '@shared/graph/ids';
 import { rowId, turnId as turnIdOf } from './keys';
 import type { CellDetail, CellId, Row, RowId, Spill, SubagentRef, SubagentStatus, ToolCategory, TurnId } from './rows';
 import { appendStripped, stripAnsi } from '@shared/wire/ansi';
-import { parseAskSteer } from '@shared/maws/ask'; // E1
+import { readAnswerEnvelopes } from '@shared/engine/arrival'; // E1; UX wave U4b: the envelopes inside a joined message
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import { isInterruptionMarker, isLocalCommand } from './user-text';
 import { INTERRUPT_CUT } from '@shared/lane-a/interrupt-cut'; // P5 O9
@@ -101,17 +101,29 @@ export interface TranscriptUi {
   stamps: Map<TurnId, number>;
   version: number;
   // P2-C start (2026-10-09; the P2-C document, Design §7): the owner channel's lane for the session (absent: off, P1's
-  // drawing), under which a commentary block with a mark stays in view when its turn folds, as an inked one does; the
-  // view the reader chose (absent: the report while the lane is on); and the turns whose working record they opened in
-  // the report. Only `ownerLane` reaches a turn's rows; the other two are read by the report projection.
+  // drawing), under which a commentary block with a mark stays in view when its turn folds, as an inked one does; and
+  // the view the reader chose (absent: the report while the lane is on).
   ownerLane?: boolean;
   view?: 'report' | 'transcript';
-  reportOpenTurns?: Set<TurnId>;
   // P2-C end
+  // UX wave U2b (the execution document, Interfaces §C): the to-human view where MAWS draws it. `openStretches`, the
+  // stretches the reader opened, by key (`owner/view/mirror.ts`); `tailMessage`, whether the rows the transcript was
+  // handed from outside the store hold a message, as `Transcript` reports it; `noTurnFold`, set by the store while the
+  // lane is on and the session holds a message (its events, a streaming block, or those outside rows): no turn folds,
+  // in either view, and the mirror applies; `modDraws` (the second pull request), the mod draws the view here.
+  // `noTurnFold` reaches every turn's rows; the others are read by the mirror's callers.
+  openStretches?: Set<string>;
+  tailMessage?: boolean;
+  noTurnFold?: boolean;
+  modDraws?: boolean;
   // UX wave U3 (UC-3; the U3a document, Interfaces F): the target of the tab's last jump (`jumpTo`, the cell jump,
   // `jumpToMessage`), each replacing the last; absent before the first. Where a mod draws a fold MAWS cannot open, the
   // row or cell it names asks no mod's site and MAWS draws it; U2 reads it for its own asks and may clear it by its rule.
   revealed?: RowId | CellId;
+  // UX wave U1b (the U1b document, Interfaces §B; decision 2): the calls whose row holds a waiting form, as the session's
+  // list says them (`setWaitingForms`); absent: none. A `question`, `ask` or `plan` row carries `waiting` exactly while its
+  // call is here, so every fold decides from the row alone.
+  waitingForms?: ReadonlySet<ToolUseId>;
 }
 
 // A receipt's undo state, driven by the view through the RewindInterface: the dry run's answer (asked once per
@@ -168,7 +180,7 @@ export interface TranscriptState {
   order: TurnId[];
   loose: SessionEvent[]; // events outside any turn (boundaries between turns, process exit, reconnects)
   hidden: (HiddenBranch & { branches: Map<RowId, HiddenBranch> }) | null; // all hidden turns (for row muting), with each rewind boundary’s own branch; fromTurn is the latest target
-  pending: Map<RequestId, SessionEvent>; // unresolved requests → request_slot rows
+  pending: Map<RequestId, SessionEvent>; // unresolved requests (U2's groupInput reads them; UX wave U1b: no row is made from them)
   seen: Set<EventId>; // every applied event id
   echoUuids: Set<MessageUuid>; // uuids of bash_echo messages, so a turn.started naming one is dropped
   ui: TranscriptUi;
@@ -187,8 +199,10 @@ export interface TranscriptState {
   // `arrivals` (UX wave U3, decision 8): the arrival-bearing synthetic message placed under each uuid (the one whose
   // line is drawn) and the turn holding it, or null when it is kept loose (no turn was open for it), so a later one under
   // the same uuid takes that one out (one arrival per uuid). `endArrivals` (the whole-branch review's finding 3, its
-  // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived)
-  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>> };
+  // handover round): the uuids of the arrivals placed that tell a task's end (taskEndArrived). `answers` (UX wave U1b,
+  // Interfaces §B): the delivered answer of each asynchronous question the sminos ask asked, by its call, the latest
+  // delivery standing, whatever turn it reached the agent in and whether or not the call is loaded yet
+  index: { toolUses: Map<ToolUseId, TurnId>; tasks: Map<TaskId, TurnId>; requests: Map<RequestId, TurnId>; hooks: Map<string, TurnId>; messages: Map<MessageUuid, TurnId>; pluginIssues: Set<string>; arrivals: Map<MessageUuid, { turn: TurnId | null; event: EventId }>; endArrivals: Map<TaskId, Set<MessageUuid>>; answers: Map<ToolUseId, { summary: string; dismissed: boolean }> };
   memo: Map<TurnId, MemoEntry>;
   lineage: { latest: TranscriptState | null };
   // E3 start: where each side thread's row lives (Design §5): the turn its first event landed in, or, for one that
@@ -213,7 +227,7 @@ export function createState(sessionId: SessionId | null, agentId: AgentId | null
     sessionId, agentId, turns: new Map(), order: [], loose: [], hidden: null, pending: new Map(), seen: new Set(), echoUuids: new Set(),
     ui: { assistantInk: new Set(), expandedTurns: new Set(), collapsedTurns: new Set(), expandedGroups: new Set(), expandedCells: new Set(), revealedBoundaries: new Set(), receipts: new Map(), spills: new Map(), global: 0, stamps: new Map(), version: 0 },
     current: null, cwd: null, pluginStatus: new Map(), placement: new Map(),
-    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map() },
+    index: { toolUses: new Map(), tasks: new Map(), requests: new Map(), hooks: new Map(), messages: new Map(), pluginIssues: new Set(), arrivals: new Map(), endArrivals: new Map(), answers: new Map() },
     memo: new Map(),
     lineage: { latest: null },
   };
@@ -975,16 +989,18 @@ function apply(batch: Batch, event: SessionEvent): void {
 // re-derives, since the steer usually runs as a turn of its own (pass3/p1-maws-ask-async) and on the disk path it is
 // the only record of the answers. A steer naming no call this state holds answers nothing (the call always precedes
 // its steer). The first steer naming an ask wins. The message itself is placed as any other prompt (its turn, its fold);
-// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers.
+// derive draws no bubble for a steer that answered a capsule here, the capsule showing the answers. UX wave U4b (the
+// joined answer, step 2): the engine joins a waiting envelope with the prompts waiting beside it into one message, so
+// every envelope the shared reader finds in the text answers its ask, not only a text that is all envelope.
 function recordAskSteer(batch: Batch, event: Event<'user.message'>): void {
   const text = typeof event.content === 'string' ? event.content : event.content.filter((block) => block.type === 'text').map((block) => String(block.text ?? '')).join('\n');
-  const steer = parseAskSteer(text);
-  if (steer === null) return;
-  const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
-  if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) return;
-  const turn = batch.touch(owner);
-  turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
-  turn.version += 1;
+  for (const steer of readAnswerEnvelopes(text).envelopes) {
+    const owner = batch.state.index.toolUses.get(steer.askId as ToolUseId); // the askId is the call's tool use id (residue 2)
+    if (owner === undefined || batch.state.turns.get(owner)?.askSteers?.has(steer.askId)) continue;
+    const turn = batch.touch(owner);
+    turn.askSteers = new Map(turn.askSteers).set(steer.askId, steer.result.answers);
+    turn.version += 1;
+  }
 }
 // E1 end
 
@@ -1011,6 +1027,7 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
   const turn = batch.current();
   if (turn) batch.push(turn, event);
   else batch.loose(event);
+  joinAnswers(batch, event); // UX wave U1b
   if (event.messageUuid === null) return;
   batch.state.index.arrivals.set(event.messageUuid, { turn: turn?.id ?? null, event: event.id });
   for (const taskId of endedTasks(event)) {
@@ -1018,6 +1035,20 @@ function placeArrival(batch: Batch, event: Event<'user.message'>): void {
     batch.state.index.endArrivals.set(taskId, uuids.add(event.messageUuid));
   }
   batch.endsChanged(event);
+}
+
+// UX wave U1b (Interfaces §B, "The answer's join"): each answer the arrival delivers for a question the sminos ask asked
+// without waiting is kept under the call it names, a later delivery replacing an earlier one, and the turn that holds the
+// call derives again, which is rarely the turn the delivery landed in. MAWS's own envelope is not read here: its ask is
+// filled from `maws.ask.answered`. A call not loaded yet finds the entry when its page comes.
+function joinAnswers(batch: Batch, event: Event<'user.message'>): void {
+  for (const entry of carriedOf(event.arrival)) {
+    if (entry.class !== 'answer' || entry.tool !== 'sminos') continue;
+    const call = entry.call as ToolUseId;
+    batch.state.index.answers.set(call, { summary: entry.summary, dismissed: entry.dismissed });
+    const owner = batch.state.index.toolUses.get(call);
+    if (owner !== undefined && batch.state.turns.has(owner)) batch.touch(owner).version += 1;
+  }
 }
 
 // The tasks whose end an arrival tells: its task entries that name a task and state an outcome. A monitor's event,

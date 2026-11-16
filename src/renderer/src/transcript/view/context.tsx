@@ -7,9 +7,10 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
 import type { MachineRef } from '@shared/machine/ref';
 import type { ArtifactOpenAt } from '../../artifacts/open-at';
-import type { AskRowData, Cell, Row, RowId, Spill, SubagentRef, TurnId } from '../model/rows';
+import type { AskRowData, Cell, CellId, Row, RowId, Spill, SubagentRef, TurnId } from '../model/rows';
 import type { AnswerAction } from '../model/answer-actions'; // UX wave U3b
 import type { TaskId } from '@shared/graph/ids'; // UX wave U3
+import type { BlockedCall } from '../model/blocked'; // UX wave U1c
 import { WorkMotion } from './motion';
 
 export interface TranscriptActions {
@@ -17,8 +18,9 @@ export interface TranscriptActions {
   openFullLog(cell: Cell): void; // C8: destination of "Open full log"
   reviewChanges(turnId: TurnId, path?: string): void; // C8: Review tool
   // C5: the layout store action openTab({ kind: 'file', path, line }). P5 O6 M4: `appSessionId` is the session of the row
-  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine.
-  openFile(path: string, line?: number, appSessionId?: AppSessionId | null): void;
+  // the chip is in, when it is in a mounted transcript, so the file opens on that session's machine. UX wave U6b-1: the
+  // file opens beside the chat, and `main` (a path link's ⌘-click) asks for the main area.
+  openFile(path: string, line?: number, appSessionId?: AppSessionId | null, options?: { main?: boolean }): void;
   // C5: layout.openExternal. P5 O7 M3: `appSessionId` is the session of the row the link is in, when it is in a mounted
   // transcript: a loopback link of another machine's session opens forwarded in the in-app browser (App.tsx's E4d block)
   openExternal(url: string, appSessionId?: AppSessionId | null): void;
@@ -53,6 +55,10 @@ export interface TranscriptActions {
   // An artifact mention's click asks it first (card C5, "Show that tab"; Link.tsx's openArtifactMention); when omitted,
   // the click opens beside the chat as before
   showOpenArtifactTab?(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean;
+  // UX wave U10b: undo an agent's delete on the session's machine. Resolves null when the artifact is live again, else the sentence to show.
+  // library/actions.ts's undeleteSessionArtifact, registered from App.tsx's E2 block beside openArtifact; when omitted, as
+  // in the desk, the delete's row draws no Undo
+  undeleteArtifact?(appSessionId: AppSessionId, artifactId: string): Promise<string | null>;
   // E4d start: a page element comment's chip (tools/browser/comment/actions.ts, registered from App.tsx's E4d block)
   openBrowserUrl(appSessionId: AppSessionId, url: string): void; // the in-app browser on the page: the session's, a side thread's parent's
   // E4d end
@@ -69,6 +75,8 @@ export interface TranscriptActions {
   // session, or null where this mount cannot open one. Optional, with no default: a mount that omits it draws no
   // "Open output" on a task's notice.
   outputAction?(appSessionId: AppSessionId | null): ((output: TaskOutput) => void) | null;
+  /** UX wave U1c: the control under a blocked call's line, for the row's session. Optional, with no default: a mount that omits it draws none. */
+  renderBlockedCall?(props: BlockedCallProps): ReactNode;
   // UX wave U3b (the U3b document, decision 14, Interfaces §D): "Fork from here" under an answer. Optional, with no
   // default: a mount that omits it draws no Fork (the desk; another machine's terminal session).
   forkFrom?: {
@@ -78,6 +86,12 @@ export interface TranscriptActions {
     run(appSessionId: AppSessionId, rewindTo: MessageUuid | null): Promise<void>;
   };
 }
+
+// UX wave U1c (the U1c document, Interfaces §D): what the control under a blocked call's line is given: the row's cell (a
+// press remembers it: M3's review, finding 1), the name the rule read from the store's row, whether the row is blocked
+// again, whether its grant waits, and whether the row's line names the subject whole (`lineNamesWhole`), so the control
+// draws the subject itself only when the line does not.
+export interface BlockedCallProps { cell: CellId; call: BlockedCall; again: boolean; grant: 'none' | 'waiting'; onLine: boolean }
 
 // UX wave U3: a task notice's output, as "Open output" hands it to the mount: the file the engine named, the task's id
 // and the line's words as the view's title.

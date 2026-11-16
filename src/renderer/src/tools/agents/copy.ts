@@ -40,6 +40,7 @@ export const SUBAGENTS_COPY = {
   finishedWithErrors: (ago: string) => `finished with errors · ${ago}`,
   stopped: (ago: string) => `stopped · ${ago}`,
   endedWithSession: 'ended with the session',
+  ended: 'ended', // card C1, the owner's answer: known to have ended, with no record of how, while the session still runs
   // the same outcomes with no end time known (a sidecar's `stoppedByUser` carries none)
   finishedUndated: 'finished',
   finishedWithErrorsUndated: 'finished with errors',
@@ -89,6 +90,7 @@ export const RELAY_COPY = {
     finished: 'This agent has finished',
     stopped: 'This agent was stopped',
     exited: 'This agent ended with the session',
+    ended: 'This agent ended', // card C1: its row reads ended (Decision Log 17 (a))
     diskOnly: 'Known only from disk',
     pending: 'Waiting for the last relay',
   },

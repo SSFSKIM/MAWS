@@ -63,6 +63,7 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   [MAWS_TOOL_USE.artifact_create]: 'artifact',
   [MAWS_TOOL_USE.artifact_publish]: 'artifact',
   [HISTORICAL_ARTIFACT_UPDATE_TOOL_USE]: 'artifact',
+  [MAWS_TOOL_USE.artifact_delete]: 'artifact', // UX wave U10b (M5, §C.4): an agent's delete is the row's third action
   // E2 end
   // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
   ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),

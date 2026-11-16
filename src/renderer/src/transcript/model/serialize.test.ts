@@ -1,5 +1,6 @@
 import type { SessionEvent } from '@shared/graph/events';
 import { afterEach, describe, expect, it } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import { serializeRows } from './serialize';
@@ -91,7 +92,7 @@ describe('serializeRows', () => {
   it('renders a notice as its line and its detail, and a consent prompt as its line', () => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('c1'), origin: 'human' });
-    b.emit('user.message', { messageUuid: uuid('c1'), content: 'Permission granted for this exact command only…', isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'echo `date`' }] });
+    b.emit('user.message', { messageUuid: uuid('c1'), content: consentMessage('command', 'echo `date`'), isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject: 'echo `date`' }] });
     b.emit('user.message', { messageUuid: uuid('n1'), content: '', isReplay: false, isSynthetic: true, origin: 'task-notification', bash: null, arrival: [
       { class: 'task', taskId: 'a1', toolUseId: null, runId: 'r1', outcome: 'completed', summary: 'Agent "Survey notes" finished', durationMs: 65_000, outputFile: null, detail: 'Found three notes.\nTwo are stale.' },
       { class: 'wake' },

@@ -159,7 +159,7 @@ export class SessionMaws {
     try {
       const result = await this.read.call(
         { artifact: artifactId, ...(link.tab !== undefined && { tab: link.tab }) },
-        { appSessionId: sessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false },
+        { appSessionId: sessionId, cwd: this.host.cwd(), toolUseId: null, requestId: `linked-read-${randomUUID()}` as RequestId, signal: new AbortController().signal, fromSubagent: false, linkedRead: true /* UX wave U10b (M10) */ },
       );
       const block = result.content.find((b) => b.type === 'text');
       text = result.isError || !block || block.type !== 'text' ? null : block.text;
@@ -193,8 +193,12 @@ export class SessionMaws {
   }
 
   // P4-A2 (X35): the session's events, every lane: an artifact call's input as it streams, and the engine's results.
+  // UX wave U10b (M10, decision 2): a compaction boundary, seen here before any call after it is answered, forgets which
+  // Spaces' instructions the session was given, so the next answer about each gives them again (a boundary marked
+  // historical too: at worst they are given once more).
   observe(events: readonly SessionEvent[]): void {
     this.provisional.observe(events);
+    if (events.some((event) => event.kind === 'boundary.compaction')) this.artifactSession.forgetInstructed();
   }
 
   // P5 O16 M3 (Interfaces §D's table): the `maws` requests an earlier engine host left unanswered. A call of any tool but

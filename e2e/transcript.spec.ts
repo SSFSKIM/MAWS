@@ -5,18 +5,22 @@
 // denial jump (acceptance item 4), the child transcript (acceptance item 9) and expanded old work over every fixture.
 // R1 adds one case in the product app: a mod's pushes (pass3/mods-pushes) replayed through C3's replay transport into a
 // session tab, showing its toast, its log lines in the transcript and its status line in the panel summary.
+// UX wave U2b adds the to-human view where MAWS draws it: over the harness's synthetic session in that view, the fold by
+// stretch, its record lines and a jump into a closed record, and the anchoring bound of 40 mounted rows there; and,
+// in the product app, the report scene redrawn as that view, with its switch above the composer.
 // Runs only under `pnpm e2e:transcript`, which builds with MAWS_HARNESS=1 first (playwright.config.ts).
 import { randomUUID } from 'node:crypto';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test as base, type Locator, type Page } from '@playwright/test';
-import type { HarnessApi, HarnessMetrics } from '../src/renderer/src/harness/api';
+import type { HarnessApi, HarnessMetrics, HarnessQuestion } from '../src/renderer/src/harness/api';
 import { thinkingTier } from '../src/renderer/src/transcript/model/copy'; // decision 17: the tiers' words live in the copy only
 import { addressed } from './support/address';
 import { withNativeClipboard } from './support/clipboard';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 import { unfoldSessionCard } from './support/shell';
 import { addSurfaceSeedEchoes, ownerMarkedText, r3Output, r3Question, recordedSurfaceJournal, recordedSurfaceSessionId, sittingSeed, transcriptSeed } from '../test/support/r3-surface';
@@ -235,6 +239,138 @@ test('anchoring: 500 turns stream while old work is expanded', async ({ harness 
   };
   console.log(`anchoring context: ${JSON.stringify(context)}`);
   test.info().annotations.push({ type: 'anchoring context', description: JSON.stringify(context) });
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2b (A18): the same five hundred turns in the to-human view where MAWS draws it (`synthetic/500/report`: the
+// lane on, each turn's final answer a message, the last one streaming), so no turn folds and the list holds every
+// turn's rows, the mirror folding each stretch of work to one line. Far up the history, with one record opened, the
+// list mounts at most 40 rows while the last turn streams below. A count, never a time: the measured half of the
+// anchoring spike stays the lane-off case's above.
+test('the mirrored view mounts at most 40 rows while 500 turns stream', async ({ harness }) => {
+  test.setTimeout(120_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await load(page, 'synthetic/500/report');
+  const list = page.locator('[data-transcript-scroller]');
+  await play(page, 1);
+  await page.waitForTimeout(1500);
+  // In force: the work between the messages is folded to record lines, and no turn's line offers a fold of its own (its
+  // disclosure; the line keeps its summary's trigger, `Turn summary`, as `TurnLine` in `Divider.tsx` draws it).
+  await expect(list.locator('[data-row-id^="record-fold:closed:"]').first()).toBeAttached();
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
+
+  // Far up, one stretch opened onto its rows.
+  await page.evaluate((turn) => (window as unknown as HarnessWindow).__maws_harness.scrollToTurn(turn), TURN);
+  await settle(page, 500);
+  const shown = await list.evaluate((scroller) => {
+    const top = scroller.getBoundingClientRect().top;
+    const bottom = scroller.getBoundingClientRect().bottom;
+    const lines = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id^="record-fold:closed:"]'));
+    return lines.find((line) => line.getBoundingClientRect().top >= top && line.getBoundingClientRect().bottom <= bottom)?.getAttribute('data-row-id') ?? null;
+  });
+  expect(shown, 'a closed record line in view far up the history').not.toBeNull();
+  const stretch = shown!.slice('record-fold:closed:'.length);
+  await list.locator(rowSelector(shown!)).getByRole('button').click();
+  await expect(list.locator(rowSelector(`record-fold:open:${stretch}`)).getByRole('button')).toHaveAttribute('aria-expanded', 'true');
+  await settle(page);
+
+  // The stream window: the most rows mounted in any frame of ten seconds.
+  const before = await metrics(page);
+  const streamWindow = await page.evaluate(async (durationMs) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    let most = 0;
+    const started = performance.now();
+    while (performance.now() - started < durationMs) {
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+      most = Math.max(most, scroller.querySelectorAll('[data-index]').length);
+    }
+    return { domRows: most };
+  }, STREAM_WINDOW_MS);
+  const after = await metrics(page);
+  console.log(`mirrored anchoring: ${JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches })}`);
+  test.info().annotations.push({ type: 'mirrored anchoring', description: JSON.stringify({ domRows: streamWindow.domRows, rows: after.rows, batches: after.batches - before.batches }) });
+  expect(after.batches - before.batches, 'the stream ran during the window').toBeGreaterThan(0);
+  await expect.poll(async () => (await metrics(page)).batches, { message: 'the stream still runs at the window’s end' }).toBeGreaterThan(after.batches);
+  expect(streamWindow.domRows, 'DOM rows').toBeLessThanOrEqual(40);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// UX wave U2b (A13): the to-human view where MAWS draws it, over the synthetic session in that view
+// (`synthetic/20/report`; the harness's unit suite pins that the fifth turn's first text is commentary inside a
+// stretch). Each stretch of work is one closed `› working record` line; a press opens it onto the plain transcript's
+// rows, with its turn's line (no chevron) and `‹ fold to report` under its last row, and hands focus to that line; a
+// press there folds it again. A jump to a row inside a closed record opens that record and lands on the row.
+test('the to-human view folds by stretch, opens, folds again, and a jump opens the record that holds its target', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await load(page, 'synthetic/20/report');
+  const list = page.locator('[data-transcript-scroller]');
+  // The reader goes to the first turn, out of follow mode, so a stretch opening grows below them.
+  await list.evaluate((el) => { el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); el.scrollTop = 0; });
+  await settle(page, 500);
+  const WORK = '[data-kind="group"], [data-kind="cell"], [data-kind="thinking"]';
+  const closedLines = list.locator('[data-row-id^="record-fold:closed:"]');
+  const openLines = list.locator('[data-row-id^="record-fold:open:"]');
+
+  // Folded: messages in sight, each stretch of work one line, no work mounted, no turn's line (the running turn's is at
+  // the end, out of the mounted range) and no turn's fold.
+  await expect(closedLines.first().getByRole('button')).toHaveText('› working record');
+  await expect(closedLines.first().getByRole('button')).toHaveAttribute('aria-expanded', 'false');
+  await expect(openLines).toHaveCount(0);
+  await expect(list.locator('.owner-message-ink > .owner-message-label').first()).toHaveText('● message');
+  await expect(list.locator(WORK)).toHaveCount(0);
+  await expect(list.locator('[data-kind="divider"]')).toHaveCount(0);
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
+
+  // Opened: the stretch's rows as the plain transcript draws them, its turn's line with no chevron, the other line under
+  // its last row, focused.
+  const first = (await closedLines.first().getAttribute('data-row-id'))!;
+  const stretch = first.slice('record-fold:closed:'.length);
+  await list.locator(rowSelector(first)).getByRole('button').click();
+  const openLine = list.locator(rowSelector(`record-fold:open:${stretch}`)).getByRole('button');
+  await expect(openLine).toHaveText('‹ fold to report');
+  await expect(openLine).toHaveAttribute('aria-expanded', 'true');
+  await expect(openLine).toBeFocused();
+  await expect(list.locator(rowSelector(first))).toHaveCount(0);
+  await expect.poll(() => list.locator(WORK).count(), { message: 'the stretch’s work is drawn' }).toBeGreaterThan(0);
+  await expect.poll(() => list.locator('[data-kind="divider"]').count(), { message: 'its turn’s line is drawn' }).toBeGreaterThan(0);
+  await expect(list.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
+
+  // Folded again: the closed line back in its place, focused, the work gone.
+  await openLine.click();
+  const closedLine = list.locator(rowSelector(first)).getByRole('button');
+  await expect(closedLine).toHaveAttribute('aria-expanded', 'false');
+  await expect(closedLine).toBeFocused();
+  await expect(openLines).toHaveCount(0);
+  await expect(list.locator(WORK)).toHaveCount(0);
+  await expect(list.locator('[data-kind="divider"]')).toHaveCount(0);
+
+  // A jump to the fifth turn's commentary, which a closed record holds: the record opens and the jump lands on the row.
+  const h = '__maws_harness';
+  const target = await page.evaluate(([key, turn]) => (window as unknown as Record<string, HarnessApi>)[key]!.rowOfText(turn), [h, 5] as const);
+  expect(target, 'the fifth turn’s first text is loaded').not.toBeNull();
+  await expect(list.locator(rowSelector(target!))).toHaveCount(0);
+  await page.evaluate(([key, turn]) => (window as unknown as Record<string, HarnessApi>)[key]!.reach(turn), [h, 5] as const);
+  const text = list.locator(rowSelector(target!)).locator('[data-kind="assistant_text"]').first();
+  await expect(text).toBeFocused();
+  await expect(text.locator('.owner-message-ink')).toHaveCount(0); // commentary, drawn as the plain transcript draws it
+  // Its record is the one open: its line follows the target with no closed line between, and the view is still the report.
+  await expect(openLines).toHaveCount(1);
+  await expect(openLines.getByRole('button')).toHaveText('‹ fold to report');
+  await expect(openLines.getByRole('button')).toHaveAttribute('aria-expanded', 'true');
+  const order = await list.evaluate((scroller, id) => {
+    const row = scroller.querySelector(`[data-row-id="${CSS.escape(id)}"]`);
+    const open = scroller.querySelector('[data-row-id^="record-fold:open:"]');
+    const after = (el: Element | null) => !!row && !!el && (row.compareDocumentPosition(el) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0;
+    const between = Array.from(scroller.querySelectorAll('[data-row-id^="record-fold:closed:"]')).filter((line) => after(line) && open && (line.compareDocumentPosition(open) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0);
+    return { follows: after(open), closedBetween: between.length };
+  }, target!);
+  expect(order, 'the target’s record is the open one').toEqual({ follows: true, closedBetween: 0 });
+  // Still the report: the other stretches stay folded (the full transcript draws no record line). The harness mounts a
+  // transcript and no composer, so no view switch stands here; the app's report scene reads the switch.
+  await expect.poll(() => closedLines.count(), { message: 'the other stretches stay folded' }).toBeGreaterThan(0);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -773,6 +909,178 @@ test('an answered question reads as one compact receipt that stays in view when 
   const box = (await widget.boundingBox())!;
   expect(box.width, 'a compact widget, 480 px at most').toBeLessThanOrEqual(480);
   expect(box.height, 'two lines').toBeLessThan(72);
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1b: a question's form in the row of its call (Proof 3, acceptance 6 and 13; the architect's ruling A2) ----
+// `synthetic/questions` is the seeded transcript with three question calls put in it (harness/questions.ts): two of a
+// terminal session's asynchronous questions (the sminos ask mod's call and its immediate result, the agent going on for a
+// hundred turns and more with them open), a hundred turns apart, and, as its last turn, the engine's own AskUserQuestion
+// dismissed whole. `raise` makes an asynchronous call a waiting request of the transcript's session as its bridge raises
+// one (an `async_input` item and its request view, read by the shared `laneAEntryOf`, in the attention store), and from
+// then on the page draws requests through the real card's renderer.
+const QUESTIONS = 'synthetic/questions';
+const questionsOf = (page: Page): Promise<HarnessQuestion[]> => page.evaluate(() => (window as unknown as HarnessWindow).__maws_harness.questions());
+const raise = (page: Page, call: string): Promise<string> => page.evaluate((c) => (window as unknown as HarnessWindow).__maws_harness.raise(c), call);
+const lower = (page: Page, id: string) => page.evaluate((i) => (window as unknown as HarnessWindow).__maws_harness.lower(i), id);
+const scrollToTurn = (page: Page, n: number) => page.evaluate((turn) => (window as unknown as HarnessWindow).__maws_harness.scrollToTurn(turn), n);
+const PILL = 'Needs your input. Scroll to the request';
+// The reader leaves follow mode as a wheel turned upward leaves it (the list releases on that intent).
+const leaveFollow = (page: Page) =>
+  page.evaluate(() => document.querySelector<HTMLElement>('[data-transcript-scroller]')!.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })));
+// The first row whose box shows in the scroller, and how far its top stands from the scroller's top (negative: partly
+// scrolled past).
+const firstShown = (page: Page) =>
+  page.evaluate(() => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const top = scroller.getBoundingClientRect().top;
+    const rows = Array.from(scroller.querySelectorAll<HTMLElement>('[data-row-id]'))
+      .map((row) => ({ id: row.dataset.rowId!, box: row.getBoundingClientRect() }))
+      .filter(({ box }) => box.height > 0 && box.bottom > top + 0.5)
+      .sort((a, b) => a.box.top - b.box.top);
+    return rows.length === 0 ? null : { id: rows[0].id, offset: rows[0].box.top - top };
+  });
+// Where a row stands against the scroller: above it, in it, below it, or not mounted by the virtual list.
+const placeOf = (page: Page, rowId: string) =>
+  page.evaluate((id) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`);
+    if (row === null) return 'unmounted';
+    const view = scroller.getBoundingClientRect();
+    const box = row.getBoundingClientRect();
+    return box.bottom <= view.top ? 'above' : box.top >= view.bottom ? 'below' : 'in view';
+  }, rowId);
+
+// The child's check, "a row that mounts a card far from the end" (Proof 3, acceptance 13): with the reader in the middle
+// of a transcript of several hundred rows, an asynchronous question raised for a call whose row stands just above the viewport (mounted
+// by the list's overscan, so its form mounts there and the row grows) and one for a call far below leave the reader's
+// first visible row where it was, to the pixel. The form scrolled out (the list unmounts its row) and back holds what was
+// picked in it: the draft is held by the request, not by the row. With requests waiting out of view the jump button is
+// the pill, and it goes to the oldest of them.
+test('an asynchronous question raised above and below a reader mid-transcript moves nothing they see, and its form scrolled away and back keeps its draft', async ({ harness }) => {
+  test.setTimeout(90_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  expect((await metrics(page)).rows, 'several hundred rows').toBeGreaterThan(500);
+  const [above, below] = (await questionsOf(page)).filter((question) => !question.dismissed);
+  expect(below.turn - above.turn, 'the two calls a hundred turns apart').toBeGreaterThan(50);
+
+  // The reader in the middle: the row of the first call just above the viewport, the second's far below it.
+  await leaveFollow(page);
+  await scrollToTurn(page, above.turn);
+  await settle(page, 500);
+  await expect.poll(() => placeOf(page, above.row), { message: 'the first call’s row is mounted' }).not.toBe('unmounted');
+  await page.evaluate((id) => {
+    const scroller = document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
+    const row = scroller.querySelector<HTMLElement>(`[data-row-id="${CSS.escape(id)}"]`)!;
+    scroller.scrollTop += row.getBoundingClientRect().bottom - scroller.getBoundingClientRect().top + 24;
+  }, above.row);
+  await settle(page, 500);
+  expect((await metrics(page)).following, 'a reader in the middle').toBe(false);
+  expect(await placeOf(page, above.row), 'the first call’s row stands just above the viewport, mounted').toBe('above');
+  expect(await placeOf(page, below.row), 'the second call’s row is below the viewport').not.toBe('in view');
+  const before = await firstShown(page);
+  expect(before, 'a row is shown').not.toBeNull();
+  const scrolled = await scrollerTop(page);
+
+  // Both raised: the first's form mounts in its row above the reader, the second's is out of reach below.
+  const first = await raise(page, above.call);
+  await raise(page, below.call);
+  const form = page.locator(`[data-waiting-form="${first}"]`);
+  await expect(form, 'the form mounts in the row above the reader').toBeAttached();
+  await expect(form.getByRole('group', { name: 'Question waiting' }), 'a terminal session’s asynchronous question').toBeAttached();
+  await settle(page, 500);
+  const after = await firstShown(page);
+  expect(after?.id, 'the same row is the first the reader sees').toBe(before!.id);
+  expect(Math.abs(after!.offset - before!.offset), `the reader's first row stays to the pixel (scrollTop ${scrolled} → ${await scrollerTop(page)})`).toBeLessThanOrEqual(1);
+  expect(await placeOf(page, above.row), 'the grown row is still above the reader').toBe('above');
+
+  // Two requests wait out of view: the jump button is the pill, and it goes to the older, the keyboard on its row.
+  const pill = page.getByRole('button', { name: PILL });
+  await expect(pill).toBeVisible();
+  await expect(pill).toHaveAttribute('data-state', 'input');
+  await expect(pill).toHaveText(/Needs your input/);
+  await pill.click();
+  await expect(form, 'the pill shows the oldest request out of view').toBeInViewport();
+  await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
+
+  // A pick in the form, the form scrolled out until the list unmounts its row, and back: the pick is still there.
+  const thursday = form.getByRole('radio', { name: /Thursday/ });
+  await thursday.click();
+  await expect(thursday).toHaveAttribute('aria-checked', 'true');
+  await scrollToTurn(page, 1);
+  await settle(page, 300);
+  await expect(form, 'scrolled far away, the row and its form are unmounted').toHaveCount(0);
+  await scrollToTurn(page, above.turn);
+  await expect(form).toBeVisible();
+  await expect(form.getByRole('radio', { name: /Thursday/ }), 'the draft is held by the request').toHaveAttribute('aria-checked', 'true');
+  await expect(form.getByRole('radio', { name: /Tuesday/ })).toHaveAttribute('aria-checked', 'false');
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// Acceptance 6 (the jump button's request state, §D): with the reader at the end, following, an asynchronous question
+// that waits in a row far above (the agent having gone on past it) makes the jump button the pill, though the reader is at the end; the pill scrolls to the question and puts
+// the keyboard on its row; once no request waits the pill is gone, and the reader, away from the end, has the round
+// button back.
+test('an asynchronous question waiting far above a reader at the end: the pill reads Needs your input, goes to it, and goes once it no longer waits', async ({ harness }) => {
+  test.setTimeout(90_000);
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  expect((await metrics(page)).following, 'the reader at the end').toBe(true);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ }), 'following, nothing out of view: no button').toHaveCount(0);
+  const [, waiting] = (await questionsOf(page)).filter((question) => !question.dismissed);
+  const id = await raise(page, waiting.call);
+
+  const pill = page.getByRole('button', { name: PILL });
+  await expect(pill, 'at the end, the pill: the request is out of view').toBeVisible();
+  await expect(pill).toHaveAttribute('data-state', 'input');
+  await expect(pill).toHaveAttribute('title', PILL);
+  await expect(pill).toHaveText(/Needs your input/);
+  expect((await metrics(page)).following, 'a request waiting above moves no follower').toBe(true);
+  expect(await distanceFromEnd(page), 'the reader is still at the end').toBeLessThanOrEqual(80);
+
+  await pill.click();
+  const form = page.locator(`[data-waiting-form="${id}"]`);
+  await expect(form, 'the pill scrolls to the question').toBeInViewport();
+  await expect(form.getByRole('group', { name: 'Question waiting' })).toBeVisible();
+  await expect(rowOf(form), 'and puts the keyboard on its row').toBeFocused();
+  await expect(pill, 'in view, the request needs no pill').toHaveCount(0);
+
+  await lower(page, id);
+  await expect(form, 'no longer waiting, the row draws its receipt').toHaveCount(0);
+  await expect(page.locator(`[data-row-id="question:${waiting.call}"] .transcript-question`)).toBeVisible();
+  await expect(pill, 'nothing waits: no pill').toHaveCount(0);
+  await expect(page.getByRole('button', { name: /^Jump to latest/ }), 'away from the end, the round button').toBeVisible();
+  expect(harness.consoleErrors()).toEqual([]);
+});
+
+// The architect's ruling A2 (M1 builds it, this scene asserts it on a real layout; the unit DOM computes none): a question
+// dismissed whole reads Dismissed on each of its lines (the owner's card 2), and a header of fourteen characters beside it
+// is shown whole, not cut: a header is cut only when header and answer together exceed the widget's widest width.
+test('a dismissed question’s receipt shows each header whole beside Dismissed', async ({ harness }) => {
+  const { page } = harness;
+  await harnessReady(page);
+  await blockHumanInput(page);
+  await loadAll(page, QUESTIONS);
+  const dismissed = (await questionsOf(page)).find((question) => question.dismissed)!;
+  const widget = page.locator(`[data-row-id="${dismissed.row}"] .transcript-question`);
+  await expect(widget).toBeVisible();
+  const lines = widget.locator('[data-question]');
+  await expect(lines).toHaveCount(2);
+  await expect(lines.locator('.transcript-question-answer')).toHaveText(['Dismissed', 'Dismissed']);
+  await expect(lines.locator('[data-question-label]')).toHaveText(['Release window', 'Sign-off']);
+  const layout = await lines.first().evaluate((line) => {
+    const label = line.querySelector<HTMLElement>('[data-question-label]')!;
+    const answer = line.querySelector<HTMLElement>('.transcript-question-answer')!;
+    return { cut: label.scrollWidth > label.clientWidth, labelRight: label.getBoundingClientRect().right, answerLeft: answer.getBoundingClientRect().left, answerLines: Math.round(answer.getBoundingClientRect().height / parseFloat(getComputedStyle(answer).lineHeight)) };
+  });
+  expect(layout.cut, 'the fourteen-character header is not cut beside Dismissed').toBe(false);
+  expect(layout.labelRight, 'the header stands before its answer, on its line').toBeLessThan(layout.answerLeft);
+  expect(layout.answerLines, 'Dismissed on one line').toBe(1);
   expect(harness.consoleErrors()).toEqual([]);
 });
 
@@ -2254,8 +2562,49 @@ test('M1 marked commentary is visible at full contrast before and after folding 
 });
 
 
-// The owner lane still folds whole work rows; text inside an authored message is never cardified or moved to a margin.
-test('the report folds work while marked text retains its authored flow and geometry', async () => {
+// UX wave U2b (the architect's ruling of 2026-11-15, digest 4): the pane's rows when a count over them fails, attached to
+// the test: as the DOM holds them (the list's mounted window, `OVERSCAN` past the viewport) and as the list holds them
+// (read by stepping its scroller from the top to the end, then put back), each with its index, id, kind and turn, and
+// whether it is mounted now. The recording's invented content only.
+async function attachPaneRows(pane: Locator, name: string): Promise<void> {
+  const rows = await pane.locator('[data-transcript-scroller]').first().evaluate(async (scroller) => {
+    const read = () => Array.from(scroller.querySelectorAll('[data-index]')).map((item) => {
+      const frame = item.querySelector('[data-kind]');
+      return { index: Number(item.getAttribute('data-index')), id: item.getAttribute('data-row-id'), kind: frame?.getAttribute('data-kind') ?? null, turn: frame?.getAttribute('data-turn-id') ?? null };
+    });
+    const mounted = read();
+    const back = scroller.scrollTop;
+    const list = new Map<number, ReturnType<typeof read>[number]>();
+    for (let top = 0, step = 0; step < 200; top += Math.max(40, scroller.clientHeight / 2), step += 1) {
+      scroller.scrollTop = top;
+      await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+      for (const row of read()) list.set(row.index, row);
+      if (top >= scroller.scrollHeight - scroller.clientHeight) break;
+    }
+    scroller.scrollTop = back;
+    const shown = new Set(mounted.map((row) => row.index));
+    return { mounted, list: [...list.values()].sort((a, b) => a.index - b.index).map((row) => ({ ...row, mounted: shown.has(row.index) })) };
+  });
+  await test.info().attach(name, { body: JSON.stringify(rows, null, 2), contentType: 'application/json' });
+}
+
+/** An expectation over the pane's rows that, failing, attaches them first (`attachPaneRows`). */
+async function withPaneRows(pane: Locator, name: string, expectation: () => Promise<void>): Promise<void> {
+  try {
+    await expectation();
+  } catch (error) {
+    await attachPaneRows(pane, name);
+    throw error;
+  }
+}
+
+// UX wave U2b (A12, A13, A14): the session's lane on and messages in it, the report is the to-human view where MAWS
+// draws it. Each stretch of work between the rows the person reads is one `› working record` line (a mixed text's own
+// words a stretch of their own, after its messages), a message is the mod's drawing (`● message` bold in the accent over
+// the body), the switch is one line above the composer, and no bar stands above the transcript. A record opens onto the
+// plain transcript's rows, its turn's line with no chevron and `‹ fold to report` under them, and folds again; the full
+// transcript folds nothing. Text inside a message is never cardified or moved to a margin, and keeps its authored flow.
+test('the to-human view folds work by stretch, draws each message as the mod does, and switches above the composer, while marked text retains its authored flow and geometry', async () => {
   test.setTimeout(120_000);
   const fixture = 'test/fixtures/engine/p2c-report-marks.jsonl';
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c-report-')));
@@ -2282,39 +2631,65 @@ test('the report folds work while marked text retains its authored flow and geom
       value(await invoke(page, 'session.send', { appSessionId: id as never, content }));
       await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: id as never })).turn, { timeout: 20_000 }).toBeNull();
     }
-    await expect(pane.getByText('Nothing else for now.', { exact: true })).toBeVisible();
+    // Every turn ended: the first turn's call and its text's own words, and the last turn's unmarked answer, each a
+    // stretch behind its record line.
+    const closedLines = pane.getByRole('button', { name: '› working record', exact: true });
+    await expect(closedLines).toHaveCount(3);
+    await expect(pane.getByText('Nothing else for now.', { exact: true })).toHaveCount(0);
 
-    // The header: the view toggle at the trailing end, on the report
-    const toggle = pane.getByRole('group', { name: 'Session view' });
-    await expect(toggle.getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
-    await expect(toggle.getByRole('button', { name: 'Transcript' })).toHaveAttribute('aria-pressed', 'false');
+    // No bar above the transcript; the switch is one line above the composer, in the band's frame.
+    await expect(pane.getByRole('group', { name: 'Session view' })).toHaveCount(0);
+    await expect(pane.locator('[data-owner-bar]')).toHaveCount(0);
+    const viewSwitch = pane.locator('[data-view-switch]');
+    await expect(viewSwitch).toHaveText('to-human view · full transcript ›');
+    const frame = pane.locator('[data-composer-frame]');
+    expect(await viewSwitch.evaluate((el, f) => !!f && (el.compareDocumentPosition(f) & Node.DOCUMENT_POSITION_FOLLOWING) !== 0, await frame.elementHandle())).toBe(true); // above the frame
+    const switchBox = (await viewSwitch.boundingBox())!;
+    const frameBox = (await frame.boundingBox())!;
+    expect(switchBox.y + switchBox.height, 'the switch’s bottom at or above the frame’s top (a pixel for rounding)').toBeLessThanOrEqual(frameBox.y + 1);
 
-    // Level 0: whole work rows fold, but a marked text block keeps all of its authored words (UX1 l2-transcript-03).
-    const record = pane.locator('[data-kind="owner_record"] .transcript-disclosure');
-    await expect(record).toHaveText('Working record · 1 tool call · 1 message');
-    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    // A closed stretch's head is its messages alone, each under its label: the outer mark's words, the insight, the
+    // must-read and the question, each a message as the mod reads them; its own words are the record's.
     const report = pane.locator('[data-kind="assistant_text"]').filter({ hasText: "I haven't opened any files" });
-    await expect(report.locator('.transcript-prose')).toHaveCount(1);
+    await expect(report.locator('.owner-message-label')).toHaveText(['● message', 'message', 'message', 'message']);
     await expect(report).toContainText("I haven't opened any files");
     await expect(report).toContainText('The README above is unverified.');
     await expect(report).toContainText('Which tone should the README use?');
     await expect(report).toContainText('Concise reference style');
     await expect(report).toContainText('Friendly guide style');
+    await expect(report).not.toContainText('Checked the tree first: it is clean.');
     await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
-    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
-    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
+    await expect(pane.getByText('To you', { exact: true })).toHaveCount(0);
+    const label = report.locator('.owner-message-label').first();
+    await expect(label).toHaveCSS('font-weight', '600');
+    const accent = await label.evaluate((el) => { const probe = document.createElement('span'); probe.style.color = 'var(--accent)'; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    await expect(label).toHaveCSS('color', accent);
+    const body = report.locator('.owner-message-ink p').first();
+    const foreground = await body.evaluate((el) => { const probe = document.createElement('span'); probe.style.color = 'var(--fg)'; el.appendChild(probe); const color = getComputedStyle(probe).color; probe.remove(); return color; });
+    await expect(body).toHaveCSS('color', foreground);
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0); // no turn's line while its records are closed
+    const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
+    await expect(tool).toHaveCount(0);
     await captureReportShot(page, 'report-level0');
 
-    // One stable record disclosure opens directly onto the work, with the turn's own summary as its label.
-    await record.click();
-    await expect(record).toHaveAttribute('aria-expanded', 'true');
-    await expect(record).toContainText('Worked for');
-    await expect(record).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
-    await expect(record).not.toContainText('tool call');
-    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
-    await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
+    // The first stretch (the call) opens onto its rows, the turn's line with no chevron, `‹ fold to report` under them,
+    // focused.
+    const closed = pane.locator('[data-row-id="record-fold:closed:toolu_01P2cM5Bash01"]').getByRole('button');
+    const opened = pane.locator('[data-row-id="record-fold:open:toolu_01P2cM5Bash01"]').getByRole('button');
+    await expect(closed).toHaveAttribute('aria-expanded', 'false');
+    await closed.click();
+    await expect(opened).toHaveText('‹ fold to report');
+    await expect(opened).toHaveAttribute('aria-expanded', 'true');
+    await expect(opened).toBeFocused();
+    // The list mounts a window of rows past the viewport and, following its end, keeps the end in view as the record's
+    // rows go in, so its turn's line, above them, can fall outside the window: the record's rows are brought into view.
+    await opened.scrollIntoViewIfNeeded();
+    const turnLine = pane.locator('[data-kind="divider"]');
+    await withPaneRows(pane, 'the pane’s rows with the first record open', () => expect(turnLine).toHaveCount(1));
+    await expect(turnLine).toContainText('Worked for');
+    await expect(turnLine).toContainText('Ran a command'); // UX wave U2 (O-15): the turn's line names what it did
+    await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
     // The tool summary appears immediately; the command remains on demand inside its own detail.
-    const tool = pane.locator('[data-cell-id="cell:toolu_01P2cM5Bash01"]');
     const detailToggle = tool.getByRole('button', { name: 'Checked the tree', exact: true });
     await expect(detailToggle).toBeVisible();
     await expect(detailToggle).toHaveAttribute('aria-expanded', 'false');
@@ -2325,18 +2700,33 @@ test('the report folds work while marked text retains its authored flow and geom
     await expect(command).toBeVisible();
     await expect(command).toHaveText('$ git status --short');
     await captureReportShot(page, 'report-level2');
-    await record.click();
-    await expect(record).toHaveAttribute('aria-expanded', 'false');
+    await opened.click();
+    await expect(closed).toHaveAttribute('aria-expanded', 'false');
+    await expect(closed).toBeFocused();
     await expect(tool).toHaveCount(0);
-    await expect(report.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible(); // UX1: part of this same authored block
+    await expect(pane.locator('[data-kind="divider"]')).toHaveCount(0);
+    await expect(report).not.toContainText('Checked the tree first: it is clean.');
 
-    // The full transcript: no record, every word, still no cards
-    await toggle.getByRole('button', { name: 'Transcript' }).click();
-    await expect(pane.getByRole('button', { name: /^Working record/ })).toHaveCount(0);
+    // The text's own words are a stretch of their own, after its messages: opened, the text is drawn whole.
+    await closedLines.nth(1).click();
+    await expect(report).toContainText('Checked the tree first: it is clean.');
+    await expect(report.locator('.transcript-prose')).toHaveCount(1);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button')).toHaveCount(0);
+    await pane.getByRole('button', { name: '‹ fold to report', exact: true }).click();
+    await expect(report).not.toContainText('Checked the tree first: it is clean.');
+    await expect(closedLines).toHaveCount(3);
+
+    // The full transcript, from the switch: no record line, every word, still no cards, a turn's line with no chevron.
+    await viewSwitch.getByRole('button', { name: 'full transcript ›', exact: true }).click();
+    await expect(viewSwitch).toHaveText('to-human view · report only ›');
+    await expect(pane.locator('[data-kind="record_fold"]')).toHaveCount(0);
     await expect(pane.getByText('Checked the tree first: it is clean.', { exact: false })).toBeVisible();
     await expect(report.locator('[data-owner-card], .owner-card-label')).toHaveCount(0);
-    await toggle.getByRole('button', { name: 'Report' }).click();
-    await expect(pane.getByRole('button', { name: /^Working record/ })).toBeVisible();
+    await expect.poll(() => pane.locator('[data-kind="divider"]').count()).toBeGreaterThan(0);
+    await expect(pane.locator('.transcript-divider .transcript-disclosure')).toHaveCount(0);
+    await viewSwitch.getByRole('button', { name: 'report only ›', exact: true }).click();
+    await expect(viewSwitch).toHaveText('to-human view · full transcript ›');
+    await expect(closedLines).toHaveCount(3);
 
     // A long insight remains in the same document flow, including when the column narrows.
     await maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setSize(1600, 1000));

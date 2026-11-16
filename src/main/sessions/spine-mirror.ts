@@ -6,13 +6,14 @@
 // At each streaming of the `machine` host (main's transport registers no resync, so it streams from its welcome) the
 // mirror reads its snapshot: `session.list {includeArchived: true}`, `session.projects.list` (its `rows`),
 // `session.digests`, `attention.list`, `session.intent.list`, `session.visible` and `session.launchMode`, and in launch
-// mode scenario `session.engineStatuses` (M5b fix round 6: the scenario's statuses, which no stream carries); and, beside it,
-// tells `mawsd` this app's browser socket directory (`machine.client`) and follows every live session from the cursors
-// it holds (`session.follow`, `live: true`). It follows the front's events through `hosts.onEvent` (validated by main's
-// supervisor): `session.changed`, `session.removed`, `session.projects.changed`, `session.digest`, `attention.changed`
-// with its `silent` ids, `session.intent.changed`, `session.visibleChanged`; and the streams' `session.status` (the
-// engine statuses, each stream's first status its snapshot, so they never depend on the spine being loaded, D19) and
-// `session.eventBatch` (the cursors only).
+// mode scenario `session.engineStatuses` (M5b fix round 6: the scenario's statuses, which no stream carries); and,
+// beside it, tells `mawsd` this app's browser socket directory and (UX wave U6e) the app bundle it runs from
+// (`machine.client`), and follows every live session from the cursors it holds (`session.follow`, `live: true`). It
+// follows the front's events through `hosts.onEvent` (validated by main's supervisor): `session.changed`,
+// `session.removed`, `session.projects.changed`, `session.digest`, `attention.changed` with its `silent` ids,
+// `session.intent.changed`, `session.visibleChanged`; and the streams' `session.status` (the engine statuses, each
+// stream's first status its snapshot, so they never depend on the spine being loaded, D19) and `session.eventBatch`
+// (the cursors only).
 //
 // The race between a snapshot in flight and the events heard meanwhile has one rule: an event always wins over the
 // snapshot it raced, since the spine emits after it mutates. Per member the ids an event touched while that member's
@@ -44,6 +45,7 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult, ProjectRe
 import type { StreamCursor } from '@shared/ipc/schema/session';
 import type { SetupIntent } from '@shared/sessions/intent';
 import type { AcquireOutcome } from '@shared/sessions/setup';
+import { bundleOf } from '@shared/files/bundle'; // UX wave U6e
 import { SCENARIO_UNAVAILABLE, type SpineView, type SpineViewEvents } from '@shared/spine/view';
 
 export type MirrorHosts = Pick<HostSupervisor, 'dispatch' | 'onEvent' | 'onStreaming' | 'streaming' | 'onState' | 'snapshot'>;
@@ -53,6 +55,10 @@ export interface SpineMirrorOptions {
   spineRefused(): string | null; // the daemon's last `daemon.status.spine.refused`
   onDaemonStatus(listener: () => void): () => void; // a new `daemon.status` was read
   browserSocket(): string | null; // this app's cua socket directory, told at each streaming (`machine.client`)
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8): the executable whose
+  // bundle is told beside it, one of MAWS's own folders the files service never writes; `process.execPath` unless a suite
+  // names another
+  execPath?: string;
   retryMs?: number; // the first backoff after a snapshot failed (doubling to RETRY_MAX_MS)
   log(line: string): void;
 }
@@ -73,6 +79,7 @@ type Raced = { ids: Set<string>; whole: boolean };
 
 export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror {
   const { hosts, log } = options;
+  const bundle = bundleOf(options.execPath ?? process.execPath); // UX wave U6e: null where the executable is in no `*.app`
   const records = new Map<AppSessionId, SessionRecord>();
   let listed: readonly ProjectRecord[] = [];
   let rows: readonly ProjectRecord[] = [];
@@ -278,7 +285,7 @@ export function createMirrorSpineView(options: SpineMirrorOptions): SpineMirror 
   const knownRecord = (status: EngineSessionStatus) => records.has(status.appSessionId as AppSessionId);
   function follow(): void {
     const socket = options.browserSocket();
-    void hosts.dispatch('machine', 'machine.client', { browserSocket: socket }).then((answer) => {
+    void hosts.dispatch('machine', 'machine.client', { browserSocket: socket, bundle }).then((answer) => {
       if (!answer.ok) log(`[spine-mirror] machine.client: ${answer.error.code} ${answer.error.message}`);
     });
     const gen = generation;

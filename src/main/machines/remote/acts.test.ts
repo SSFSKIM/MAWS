@@ -506,6 +506,19 @@ describe('what the peer reads', () => {
     expect(h.sent).toEqual([]);
   });
 
+  // UX wave U10b (M4, §C.3): an act's `requires` is judged as its executor is: the undelete of an agent's delete goes only to
+  // a machine whose endpoint lists `rl2.artifact-undelete`, and an older one's is never sent it
+  it('refuses `not-offered`, never sent, an act whose `requires` the peer did not list', async () => {
+    const h = await harness();
+    const undelete: ActRequest = { action: 'artifacts.undelete', args: { artifactId: '11111111-1111-4111-8111-111111111111' }, executor: 'engine-host', requires: 'rl2.artifact-undelete' };
+    h.channel.peer = ['rl2.executor.machine', 'rl2.artifacts'];
+    expect(await settled(h.table.act(undelete, null).outcome)).toEqual({ state: 'refused', reason: 'not-offered' });
+    expect(h.sent).toEqual([]);
+    h.channel.peer = ['rl2.executor.machine', 'rl2.artifacts', 'rl2.artifact-undelete'];
+    h.table.act(undelete, null);
+    expect(h.acts().map((m) => m.action.action)).toEqual(['artifacts.undelete']);
+  });
+
   it('refuses `not-offered` a `machine` act held for a channel whose peer turns out not to list it', async () => {
     const h = await harness();
     h.drop();

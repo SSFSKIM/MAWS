@@ -1405,4 +1405,24 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     fireEvent.click(within(open).getByRole('button', { name: 'Show in text field' }));
     expect(handle.current?.serialize().display).toBe('one\ntwo\nthree and [Pasted text #1 +40 lines]');
   });
+
+  // UX wave U10b (M9 fix wave 1; L6, an insertion in U4's Pasted.tsx ruled 2026-11-15): a chip is no wider than its line;
+  // a long name is cut with an ellipsis while " +N lines" stays whole, and the chip's text is as before
+  it('bounds a chip by its line, cutting a long name with an ellipsis and keeping its line count whole', async () => {
+    const name = `Instructions for “${'Coastal survey grant application, second round: budget, letters and site permits '.repeat(2).trim()}”`;
+    const chip = pastedNode({ id: 'p-1', kind: 'text', name, lines: 21, text: 'Use metres.' });
+    const { port } = drafts({ doc: docOf([paragraph(textNode('Make a document: '), chip)]), attachments: [], updatedAt: '2026-11-15T00:00:00.000Z' });
+    const { container } = render(<Editor appSessionId={APP} cwd="/repo" sessionId={null} drafts={port} client={client} handle={createRef<EditorHandle>()} />);
+    await waitFor(() => expect(container.querySelectorAll('[data-pasted]')).toHaveLength(1));
+    const wrapper = container.querySelector<HTMLElement>('[data-pasted]')!;
+    const button = within(wrapper).getByRole('button');
+    expect(button.textContent).toBe(`${name} +21 lines`);
+    const [shownName, count] = [...button.querySelectorAll('span')];
+    expect(shownName?.textContent).toBe(name);
+    expect(shownName?.classList.contains('truncate')).toBe(true);
+    expect(count?.textContent).toBe(' +21 lines');
+    expect(count?.classList.contains('truncate')).toBe(false);
+    expect(count?.classList.contains('shrink-0')).toBe(true);
+    for (const bounded of [wrapper, button]) expect(bounded.classList.contains('max-w-full')).toBe(true);
+  });
 });

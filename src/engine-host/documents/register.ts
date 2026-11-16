@@ -39,13 +39,14 @@ type HostArtifactCommand = Exclude<keyof typeof ArtifactCommands, 'artifacts.ope
 
 export const ARTIFACTS_DEADLINE_SHAPES: Record<HostArtifactCommand, DeadlineShape> = {
   'artifacts.list': 'immediate', 'artifacts.get': 'immediate', 'artifacts.create': 'immediate', 'artifacts.update': 'immediate',
-  'artifacts.delete': 'immediate', 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
+  'artifacts.delete': 'immediate', 'artifacts.undelete': 'immediate' /* UX wave U10b */, 'artifacts.duplicate': 'immediate', 'artifacts.search': 'immediate', 'artifacts.versions': 'immediate',
   'artifacts.saveVersion': 'immediate', 'artifacts.nameVersion': 'immediate', 'artifacts.restore': 'immediate', 'artifacts.markViewed': 'immediate', 'artifacts.pruneVersions': 'immediate',
   'artifacts.versionState': 'immediate', 'artifacts.attributions': 'immediate', 'artifacts.acceptSuggestion': 'immediate', 'artifacts.rejectSuggestion': 'immediate', 'artifacts.uploadAsset': 'immediate', 'artifacts.copyAsset': 'immediate' /* P3-C */, 'artifacts.readDataset': 'immediate' /* P3-E */, 'artifacts.testLoopDelay': 'immediate',
   'artifacts.setDefaults': 'immediate', 'artifacts.content': 'immediate', 'artifacts.state': 'immediate', 'artifacts.assets': 'immediate', 'artifacts.status': 'immediate', 'artifacts.testWrite': 'immediate',
   'artifacts.captureDatasetState': 'immediate', 'artifacts.holdAssets': 'immediate', 'artifacts.releaseAssets': 'immediate', 'artifacts.datasetRefreshRequest': 'immediate', // E3
   'artifacts.datasetFiles': 'immediate', 'artifacts.rereadDatasetFile': 'immediate', // WR 67
   'spaces.list': 'immediate', 'spaces.create': 'immediate', 'spaces.update': 'immediate', 'spaces.delete': 'immediate',
+  'spaces.instructions': 'immediate', 'spaces.setInstructions': 'immediate', // UX wave U10b (M9)
 };
 
 export interface ArtifactsSurfaceDeps {
@@ -127,7 +128,10 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
     // P3-E: main's open preflight, so a document that cannot be opened is refused by name; `prepare: false` (Decision Log
     // 22) is a retained version's reader, which never touches the live document
     if (prepare) await prepared(store, artifactId);
-    return store.readCommitted(() => ({ artifact: row(store, artifactId, includeDeleted) }));
+    return store.readCommitted(() => {
+      const deleted = store.deletion(artifactId); // UX wave U10b (§C.5): a deleted artifact's word
+      return { artifact: row(store, artifactId, includeDeleted), ...(deleted && { deleted }) };
+    });
   });
   serve('artifacts.create', async ({ content, ...input }) => {
     const store = storeOf();
@@ -142,6 +146,10 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('artifacts.delete', async ({ artifactId }) => {
     await storeOf().delete(artifactId);
+  });
+  serve('artifacts.undelete', async ({ artifactId }) => {
+    const store = storeOf();
+    await store.writeCommitted(() => store.undelete(artifactId)); // UX wave U10b (§C.2): its refusal is store state too
   });
   serve('artifacts.duplicate', async ({ artifactId, versionId }) => {
     const store = storeOf();
@@ -329,6 +337,15 @@ export function registerArtifacts(on: HostOn, emit: HostEmit, client: Pick<HostC
   });
   serve('spaces.delete', async ({ spaceId }) => {
     await storeOf().deleteSpace(spaceId);
+  });
+  // UX wave U10b (M9, §E.1): a Space's instructions, this machine's windows' alone (not offered over the link)
+  serve('spaces.instructions', () => {
+    const store = storeOf();
+    return store.readCommitted(() => ({ instructions: store.allSpaceInstructions() }));
+  });
+  serve('spaces.setInstructions', async ({ spaceId, text }) => {
+    const store = storeOf();
+    await store.writeCommitted(() => store.setSpaceInstructions(spaceId, text)); // a Space gone is store state too
   });
 
   const offs: (() => void)[] = [];
