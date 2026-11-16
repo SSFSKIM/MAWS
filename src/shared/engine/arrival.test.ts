@@ -843,6 +843,21 @@ describe('the grants in a person’s message (rule R)', () => {
     expect(routes(`${WORDS}\n${GRANT}`)).toEqual([[grant('make build')], [grant('make build')]]);
   });
 
+  // L1 (the architect's ruling 3865): a line that is a whole sentence is exempt from step 2's tag test, since its
+  // subjects are JSON strings and no envelope's line can stand inside one
+  it('a sentence whose command holds the envelope’s tag: one grant beside a current-form envelope and beside the person’s words', () => {
+    const tagged = consentMessage('command', 'grep -rn "[MAWS ask " src');
+    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${tagged}`)).toEqual([grant('grep -rn "[MAWS ask " src')]);
+    expect(personsGrants(`${WORDS}\n${tagged}`)).toEqual([grant('grep -rn "[MAWS ask " src')]);
+    expect(routes(`${WORDS}\n${tagged}`)).toEqual([[grant('grep -rn "[MAWS ask " src')], [grant('grep -rn "[MAWS ask " src')]]);
+  });
+
+  // Step 1b's three forms that do not count for grants: a typed slash command (its arguments are the person's typing), the
+  // answer envelope's opening (the strict take-out and step 2 read envelopes) and the grant's own test
+  it('beside a typed slash command at a line’s start, the grant is read', () => {
+    expect(personsGrants(`/compact keep the footer\n${GRANT}`)).toEqual([grant('make build')]);
+  });
+
   // Rule 3 reads the lines left as before: a line inside a pasted segment (`PASTED_BLOCK`, the terminal's frame as the
   // transcript splits it) is data. Seeded texts of tags, words and sentences: each sentence outside every segment the
   // pattern finds is a grant, and no other.
