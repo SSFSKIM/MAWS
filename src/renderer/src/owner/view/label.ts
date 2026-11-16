@@ -125,33 +125,101 @@ function callsOf(turn: TurnState): TurnCalls {
 // several ids (a run's calls, a merged read's reads) holds them in order, each its own place, as the mod's view places
 // each kept row of the file; the row's own place is its first id's, as the mod knows a group by its first call. A row
 // kept under no id still takes a place, so a run never passes over it unseen.
+//
+// The rows are placed a turn at a time (the architect's ruling on batch 0): each stretch of consecutive rows of one turn
+// is a segment, placed among its own rows and kept while its turn's state and its rows are the same objects, so a change
+// of the rows (which touches the newest turn) places that turn's rows alone; a segment's place in the whole is the
+// count of the places before it.
 
+interface Segment {
+  turn: TurnState | undefined;
+  rows: readonly Row[];
+  ofRow: Map<Row, number>; // within the segment
+  ofKey: Map<string, number>; // by `rowKey`: the first place within the segment an id is kept at
+  size: number;
+  hits?: { bounds: Bounds; ofKey: ReadonlyMap<string, number> }; // its ids that bound a stored run, for the last runs read
+}
+// by the segment's first row, valid while its turn's state and its rows are the same objects
+const segmentMemo = new WeakMap<Row, Segment>();
+function segmentOf(rows: readonly Row[], from: number, to: number, turns: Turns): Segment {
+  const first = rows[from]!;
+  const turn = first.turnId === null ? undefined : turns?.get(first.turnId);
+  const known = segmentMemo.get(first);
+  if (known !== undefined && known.turn === turn && known.rows.length === to - from && known.rows.every((row, i) => row === rows[from + i])) return known;
+  if (first.turnId !== null) work.turnsPlaced += 1;
+  const segment: Segment = { turn, rows: rows.slice(from, to), ofRow: new Map(), ofKey: new Map(), size: 0 };
+  let at = 0;
+  for (const row of segment.rows) {
+    segment.ofRow.set(row, at);
+    const { keys } = keptOf(row, turns);
+    for (const key of keys) {
+      if (!segment.ofKey.has(key)) segment.ofKey.set(key, at);
+      at += 1;
+    }
+    if (keys.length === 0) at += 1;
+  }
+  segment.size = at;
+  segmentMemo.set(first, segment);
+  return segment;
+}
+
+interface Placed { segment: Segment; base: number } // a segment, and the places before it
 interface Places {
-  ofRow: Map<Row, number>;
-  ofId: Map<string, number>; // by `rowKey`: the first place an id is kept at
+  segments: Placed[];
+  byTurn: Map<TurnId | null, Placed[]>; // a row's segment, found by its turn
   size: number; // how many places the rows hold
 }
 const placesMemo = new WeakMap<readonly Row[], { turns: Turns; places: Places }>();
 function placesOf(rows: readonly Row[], turns: Turns): Places {
   const known = placesMemo.get(rows);
   if (known !== undefined && known.turns === turns) return known.places;
-  const places: Places = { ofRow: new Map(), ofId: new Map(), size: 0 };
-  let at = 0;
-  let turnId: TurnId | null = null;
-  for (const row of rows) {
-    if (row.turnId !== null && row.turnId !== turnId) work.turnsPlaced += 1;
-    turnId = row.turnId;
-    places.ofRow.set(row, at);
-    const { keys } = keptOf(row, turns);
-    for (const key of keys) {
-      if (!places.ofId.has(key)) places.ofId.set(key, at);
-      at += 1;
-    }
-    if (keys.length === 0) at += 1;
+  const places: Places = { segments: [], byTurn: new Map(), size: 0 };
+  for (let from = 0; from < rows.length; ) {
+    const turnId = rows[from]!.turnId;
+    let to = from + 1;
+    while (to < rows.length && rows[to]!.turnId === turnId) to += 1;
+    const placed = { segment: segmentOf(rows, from, to, turns), base: places.size };
+    places.segments.push(placed);
+    const ofTurn = places.byTurn.get(turnId);
+    if (ofTurn === undefined) places.byTurn.set(turnId, [placed]);
+    else ofTurn.push(placed);
+    places.size += placed.segment.size;
+    from = to;
   }
-  places.size = at;
   placesMemo.set(rows, { turns, places });
   return places;
+}
+
+/** A row's place among the rows, or undefined for a row they do not hold. */
+function placeOf(places: Places, row: Row): number | undefined {
+  for (const { segment, base } of places.byTurn.get(row.turnId) ?? []) {
+    const at = segment.ofRow.get(row);
+    if (at !== undefined) return base + at;
+  }
+  return undefined;
+}
+
+// The stored runs' bounds, as keys, read once for each runs array the window holds.
+interface Bounds { keys: ReadonlySet<string>; firsts: readonly string[]; lasts: readonly string[] }
+const boundsMemo = new WeakMap<readonly StoredRun[], Bounds>();
+function boundsOf(runs: readonly StoredRun[]): Bounds {
+  let bounds = boundsMemo.get(runs);
+  if (bounds === undefined) {
+    const firsts = runs.map((run) => rowKey(run.first));
+    const lasts = runs.map((run) => rowKey(run.last));
+    boundsMemo.set(runs, (bounds = { keys: new Set([...firsts, ...lasts]), firsts, lasts }));
+  }
+  return bounds;
+}
+
+// The first place of each id that bounds a stored run: from each segment's own ids that do, kept with the segment.
+function boundPlaces(places: Places, bounds: Bounds): Map<string, number> {
+  const at = new Map<string, number>();
+  for (const { segment, base } of places.segments) {
+    if (segment.hits?.bounds !== bounds) segment.hits = { bounds, ofKey: new Map([...segment.ofKey].filter(([key]) => bounds.keys.has(key))) };
+    for (const [key, place] of segment.hits.ofKey) if (!at.has(key)) at.set(key, base + place);
+  }
+  return at;
 }
 
 // The stored runs whose both bounds the rows place (`labelOf`'s placed runs, folds.tsx 547), indexed once at each change
@@ -159,15 +227,17 @@ function placesOf(rows: readonly Row[], turns: Turns): Places {
 // `cover`, for each place, the newest run with first <= place <= last (clause 3), painted newest first with each place
 // painted once (`next`: the first place at or after an index not yet painted); `byFirst`, the runs by their first's
 // place and then in the file's order (clause 4).
-interface Placed { run: StoredRun; first: number; last: number }
-interface RunIndex { cover: (StoredRun | undefined)[]; byFirst: Placed[] }
+interface PlacedRun { run: StoredRun; first: number; last: number }
+interface RunIndex { cover: (StoredRun | undefined)[]; byFirst: PlacedRun[] }
 const indexMemo = new WeakMap<readonly StoredRun[], { places: Places; index: RunIndex }>();
 function indexOf(places: Places, runs: readonly StoredRun[]): RunIndex {
   const known = indexMemo.get(runs);
   if (known !== undefined && known.places === places) return known.index;
-  const placed = runs.flatMap((run): Placed[] => {
-    const first = places.ofId.get(rowKey(run.first));
-    const last = places.ofId.get(rowKey(run.last));
+  const bounds = boundsOf(runs);
+  const bound = boundPlaces(places, bounds);
+  const placed = runs.flatMap((run, i): PlacedRun[] => {
+    const first = bound.get(bounds.firsts[i]!);
+    const last = bound.get(bounds.lasts[i]!);
     return first !== undefined && last !== undefined ? [{ run, first, last }] : [];
   });
   const cover: (StoredRun | undefined)[] = new Array(places.size);
@@ -202,14 +272,14 @@ function indexOf(places: Places, runs: readonly StoredRun[]): RunIndex {
 function runAt(stretch: Stretch, places: Places, index: RunIndex): StoredRun | undefined {
   // 1. `at` is the place of the stretch's head, else of its first row
   const head = stretch.head ?? stretch.rows[0];
-  const at = head === undefined ? undefined : places.ofRow.get(head);
+  const at = head === undefined ? undefined : placeOf(places, head);
   if (at === undefined) return undefined;
   // 3. the newest closed run with both bounds placed and first <= at <= last
   const covering = index.cover[at];
   if (covering !== undefined) return covering;
   // 4. else, of the runs with both bounds placed, the one whose first lies after `at` and at or before the place of the
   // stretch's last row, nearest first; on a tie the earlier in the file's order
-  const end = places.ofRow.get(stretch.rows.at(-1) ?? head);
+  const end = placeOf(places, stretch.rows.at(-1) ?? head);
   if (end === undefined) return undefined;
   const { byFirst } = index;
   let low = 0;
