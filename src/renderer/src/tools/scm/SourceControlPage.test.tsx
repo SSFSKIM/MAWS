@@ -138,7 +138,7 @@ describe('the page (S1, S2)', () => {
     serves();
     main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', pr: prOf({ checks: { summary: 'pass', items: [{ name: 'build', bucket: 'pass', state: 'SUCCESS', link: null, workflow: null }] } }) }));
     mount();
-    await waitFor(() => expect(part('pr')?.querySelector('[data-scm-checks]')).toBeTruthy());
+    await waitFor(() => expect(screen.queryByRole('button', { name: '1 passed' })).toBeTruthy());
     expect(screen.queryAllByRole('textbox')).toEqual([]);
     expect(screen.queryAllByRole('checkbox')).toEqual([]);
     expect(document.querySelectorAll('[data-scm-action], [data-scm-row], input, textarea, select')).toHaveLength(0);
@@ -479,6 +479,19 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     const place = skipped.querySelector('[data-scm-check-link]')!;
     expect(place.tagName).toBe('SPAN');
     expect(place.className).toContain('w-5');
+  });
+
+  // Decision Log 41: nothing to list, so no counts line; the folded line in its place lists the checks at a click
+  it('with every check passed draws the folded line in the counts line’s place, and lists the checks at a click', async () => {
+    serves();
+    scripted({ checks: { summary: 'pass', items: [check('build', 'pass'), check('docs preview', 'skipping', null), check('lint', 'pass')] } });
+    mount();
+    const fold = await screen.findByRole('button', { name: '2 passed · 1 skipped' });
+    expect(part('pr')!.querySelector('[data-scm-checks]')).toBeNull();
+    expect(fold.getAttribute('aria-expanded')).toBe('false');
+    expect(checkRows()).toHaveLength(0);
+    fireEvent.click(fold);
+    expect(checkRows().map((row) => text(row))).toEqual(['build passed ↗', 'docs preview skipped', 'lint passed ↗']);
   });
 
   it('reads "Merged · into main" with no checks, and words a merge state GitHub adds later under the line', async () => {

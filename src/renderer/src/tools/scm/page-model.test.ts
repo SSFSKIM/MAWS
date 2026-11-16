@@ -223,6 +223,35 @@ describe('the pull request’s state line and checks (S5, S6; frames’ S11)', (
     expect(checks.foldWords).toBe('3 passed · 1 skipped');
   });
 
+  // Decision Log 41: with no row to list, the counts line is not drawn and the folded line stands in its place
+  it('draws no counts line when every check passed, the folded line in its place', () => {
+    const checks = checksOf(prOf({ checks: { summary: 'pass', items: [check('build', 'pass'), check('lint', 'pass'), check('unit tests', 'pass')] } }))!;
+    expect(checks.countsLine).toBe(false);
+    expect(checks.attention).toEqual([]);
+    expect(checks.foldWords).toBe('3 passed');
+    expect(checks.folded.map((c) => c.name)).toEqual(['build', 'lint', 'unit tests']);
+  });
+
+  it('draws no counts line when the checks passed or were skipped, the folded line naming both', () => {
+    const checks = checksOf(prOf({ checks: { summary: 'pass', items: [check('build', 'pass'), check('docs', 'skipping', null), check('lint', 'pass')] } }))!;
+    expect(checks.countsLine).toBe(false);
+    expect(checks.foldWords).toBe('2 passed · 1 skipped');
+    expect(checks.folded.map((c) => c.name)).toEqual(['build', 'docs', 'lint']);
+  });
+
+  it('draws both lines when one check failed beside the passed', () => {
+    const checks = checksOf(prOf({ checks: { summary: 'fail', items: [check('build', 'pass'), check('unit tests', 'fail'), check('lint', 'pass')] } }))!;
+    expect(checks.countsLine).toBe(true);
+    expect(checks.counts).toBe('2 passed · 1 failed');
+    expect(checks.attention.map((c) => c.name)).toEqual(['unit tests']);
+    expect(checks.foldWords).toBe('2 passed');
+  });
+
+  it('keeps the counts line where nothing is listed and nothing folds (no checks yet, checks unavailable)', () => {
+    expect(checksOf(prOf({ checks: { summary: 'none', items: [] } }))!.countsLine).toBe(true);
+    expect(checksOf(prOf({ checks: { summary: 'unknown', items: [] } }))!.countsLine).toBe(true);
+  });
+
   it('lists no checks for a merged or a closed pull request', () => {
     expect(checksOf(prOf({ state: 'MERGED', checks: { summary: 'pass', items: [check('build', 'pass')] } }))).toBeNull();
     expect(checksOf(prOf({ state: 'CLOSED', checks: { summary: 'pass', items: [check('build', 'pass')] } }))).toBeNull();
