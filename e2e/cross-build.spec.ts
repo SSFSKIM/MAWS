@@ -4102,8 +4102,8 @@ async function startResume(run: Run, build: Build, id: AppSessionId): Promise<vo
   const processOf = async () => { const st = await invoke(run.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
   await expect.poll(processOf, { timeout: 60_000, message: `${build.label} resumes the session` }).toBe('ready');
 }
-const peerBar = (page: Page) => page.locator('[data-region="main"]').getByRole('group', { name: 'Session view', exact: true }); // ReportBar's toggle (f1852de3a, owner/report/ReportBar.tsx)
-const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-record > button.transcript-disclosure'); // OwnerRecordRow (f1852de3a)
+const peerBar = (page: Page) => page.locator('[data-region="main"]').getByRole('group', { name: 'Session view', exact: true }); // the peer build's report bar, its toggle group (f1852de3a, the owner report's bar)
+const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-record > button.transcript-disclosure'); // the peer build's record row (f1852de3a)
 
 test('(to-human, from the peer) a lane-on session the peer started and kept is drawn by this build’s window as the mirror: its record line and the switch, no bar, nothing refused', async () => {
   test.setTimeout(300_000);
