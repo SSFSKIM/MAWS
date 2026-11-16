@@ -15,13 +15,6 @@ describe('paste and drop classify by threshold, type and path', () => {
     expect(classifyText('x'.repeat(20_001))).toBe('atom');
   });
 
-  // UX wave U1c (the architect's ruling of 2026-11-16): a text quoting the grant's opening is data, an atom at any size
-  it('makes an atom of a text of any size that quotes the grant’s opening', () => {
-    expect(classifyText('Here it is:\nPermission granted for this exact command only, as one whole string: "x".')).toBe('atom');
-    expect(classifyText('permission **granted** for')).toBe('atom');
-    expect(classifyText('Permission was granted.')).toBe('inline');
-  });
-
   it('attaches the four image types the API reads as bytes, and PDFs', () => {
     for (const type of ['image/png', 'image/jpeg', 'image/gif', 'image/webp']) expect(classifyFile(file('a', type), '')).toEqual({ kind: 'image' });
     expect(classifyFile(file('a.pdf', 'application/pdf'), '/x/a.pdf')).toEqual({ kind: 'pdf' });

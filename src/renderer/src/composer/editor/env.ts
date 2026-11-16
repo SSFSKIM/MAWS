@@ -13,7 +13,6 @@ export interface EditorEnv {
   placeholder: string;
   files(files: File[], at?: number): void; // pasted or dropped files (`at`: where a drop landed), attached, mentioned or read as text
   pasteText(text: string): boolean; // whether a pasted text became an atom
-  frameText(text: string, at?: number): void; // U1c: a pasted or dropped text that quotes the grant, as a pasted atom (`at`: where a drop landed)
   openWidget(name: string, args: string): void;
 }
 

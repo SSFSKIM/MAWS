@@ -6,7 +6,6 @@ import { Selection, type Transaction } from '@tiptap/pm/state';
 import type { EditorView } from '@tiptap/pm/view';
 import type { Editor as TiptapEditor } from '@tiptap/react';
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { quotesGrant } from '@shared/engine/grant';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { PickedFile } from '@shared/ipc/schema/layout';
@@ -167,12 +166,6 @@ const focusIsOnThePage = () => document.activeElement === null || document.activ
 // R2: plain text as a document (one paragraph a line) and as inline content (lines joined by hard breaks).
 const textDoc = (text: string): ComposerDoc => docOf(text.split('\n').map((line) => paragraph(...(line ? [textNode(line)] : []))));
 const inlineContent = (text: string) => text.split('\n').flatMap((line, i) => [...(i > 0 ? [hardBreak()] : []), ...(line ? [textNode(line)] : [])]);
-// UX wave U1c (the architect's ruling of 2026-11-16): a text the person did not type that quotes the grant's opening goes
-// in as a pasted atom, framed as data on the wire, never as lines of their own words (a plugin's fill and suggestion here;
-// a paste and a drop through `frameText`). Text a plugin fills is still the person's by adoption for saves, never for a grant.
-const pastedChip = (text: string) => pastedNode({ id: atomId('pasted'), kind: 'text', name: 'Pasted text #1', lines: text.split('\n').length, text });
-const plainDoc = (text: string): ComposerDoc => (quotesGrant(text) ? docOf([paragraph(pastedChip(text))]) : textDoc(text));
-const plainInline = (text: string) => (quotesGrant(text) ? [pastedChip(text)] : inlineContent(text));
 
 // C11 start: how long Enter on a typed `/<widget> <args>` waits for the widget to decide before opening it
 export const TYPED_DECIDE_MS = 300;
@@ -283,7 +276,6 @@ export class EditorController {
       placeholder: this.inputs.suggestion ?? this.inputs.placeholder ?? (followUp ? 'Ask a follow-up…' : 'Do anything'), // R2: a plugin's suggestion; UX wave U4a: the turn's
       files: (files, at) => void this.addFiles(files, at),
       pasteText: (text) => this.pasteText(text),
-      frameText: (text, at) => this.frameText(text, at),
       openWidget: (name, args) => void this.openWidget(name, args),
     };
   }
@@ -357,7 +349,7 @@ export class EditorController {
     if (event.key === 'Enter' && event.altKey && !event.shiftKey && !event.metaKey && !event.ctrlKey) return editor.commands.setHardBreak();
     // R2: Tab takes a plugin's suggestion into the empty box
     if (event.key === 'Tab' && plain && !this.busy && !submissions.has(this.inputs.appSessionId) && this.inputs.disabled === null && this.inputs.suggestion && isEmptyDoc(editor.getJSON())) {
-      this.setDoc(plainDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
+      this.setDoc(textDoc(this.inputs.suggestion), { silently: false, caret: 'end' });
       this.inputs.onSuggestionTaken?.();
       return true;
     }
@@ -740,12 +732,6 @@ export class EditorController {
       .run();
   }
 
-  // UX wave U1c: a pasted or dropped text that quotes the grant, as the pasted atom a long paste is (`at`: where a drop landed)
-  private frameText(text: string, at?: number): void {
-    if (at !== undefined && at > 0 && this.editor) this.editor.commands.setTextSelection(at);
-    this.insertPasted(text, 'Pasted text #1');
-  }
-
   private insertMention(path: string): string | null {
     if (this.busy) return null;
     const id = mentionPath(path, this.inputs.cwd);
@@ -1008,9 +994,9 @@ export class EditorController {
         // UX wave U6e (ticket 675): nor while a Send waits for a drop's conversion, whose serialise would carry the fill
         if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
         this.revision += 1; // even replacing an empty box with empty text supersedes a pending draft restore
-        if (mode === 'replace') this.setDoc(plainDoc(text), { silently: false, caret: 'end' });
-        else if (mode === 'append') editor().chain().focus('end').insertContent(plainInline(text)).run();
-        else editor().chain().focus().insertContent(plainInline(text)).run();
+        if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end' });
+        else if (mode === 'append') editor().chain().focus('end').insertContent(inlineContent(text)).run();
+        else editor().chain().focus().insertContent(inlineContent(text)).run();
         return true;
       },
       refreshPlaceholder: () => {

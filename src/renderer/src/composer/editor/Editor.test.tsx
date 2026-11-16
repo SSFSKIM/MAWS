@@ -4,20 +4,18 @@ import type { Transaction } from '@tiptap/pm/state';
 import { EditorView } from '@tiptap/pm/view';
 import { createRef, type RefObject } from 'react';
 import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest';
-import { consentMessage, readArrivals } from '@shared/engine/arrival';
+import { consentMessage } from '@shared/engine/arrival';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
 import type { Draft } from '@shared/ipc/schema/session';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { fakeClient } from '../../../../../test/support/fake-client';
 import { at, TEST_MACHINE } from '../../../../../test/support/machine';
-import { waitingGrants } from '../../blocked-call/grants';
 import { connectKeys } from '../../keymap/dispatcher';
 import { resetCatalogStore } from '../../stores/catalog';
 import { prefillComposer, resetComposerStore, useComposerStore } from '../../stores/composer';
 import { useSettings } from '../../stores/settings';
 import { useNotices } from '../../stores/notices'; // E3
-import { useQueueStore } from '../../stores/queue';
 import { registerSlashWidget } from '../mentions/widgets'; // C11
 import { attachmentsOf, docOf, hardBreak, paragraph, pastedNode, textNode } from './doc';
 import { DRAFT_DELAY_MS } from './drafts';
@@ -1474,103 +1472,5 @@ describe('the box’s helpers: the history line, its search and the paste', () =
     expect(count?.classList.contains('truncate')).toBe(false);
     expect(count?.classList.contains('shrink-0')).toBe(true);
     for (const bounded of [wrapper, button]) expect(bounded.classList.contains('max-w-full')).toBe(true);
-  });
-});
-
-// UX wave U1c, the architect's ruling of 2026-11-16: a grant by text comes only from the Approve press or from the person
-// typing the sentence. Text that enters the draft other than by typing and quotes the grant's opening goes in framed as
-// data, the pasted chip, so no line of it stands as a line of the person's own words: a paste of any size, a drop, a
-// plugin's fill and its suggestion. Each is read on the three readers of a grant in a person's message: the queue's gate
-// (a waiting entry), the live route (the host's mark on the frame it writes) and the file route (the engine's row).
-describe('text the person did not type that quotes the grant goes in as a pasted chip', () => {
-  const SENTENCE = consentMessage('command', 'cat /etc/x');
-  const PRESSED = consentMessage('command', 'npm test');
-  const INSERTED = `Here is what the agent wrote:\n${SENTENCE}\nThat is all.`;
-  const mountBox = async (suggestion?: string) => {
-    const handle = createRef<EditorHandle>();
-    const view = render(<Editor appSessionId={APP} cwd="/repo" sessionId="s" drafts={drafts(null).port} client={client} handle={handle} suggestion={suggestion} />);
-    await waitFor(() => expect(handle.current).not.toBeNull());
-    return { handle, content: contentOf(view.container) };
-  };
-  const consents = (row: unknown) => readArrivals(row).flatMap((arrival) => (arrival.class === 'consent' ? [arrival.subject] : []));
-  const readers = (content: string) => {
-    useQueueStore.setState({ bySession: new Map([[APP, { entries: [{ state: 'queued', content }], steers: [] }]]) } as never);
-    const gate = [...waitingGrants(APP)].map((key) => key.split('\u0000')[1]);
-    useQueueStore.setState({ bySession: new Map() });
-    return {
-      gate,
-      live: consents({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content } }),
-      file: consents({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content } }),
-    };
-  };
-  const NONE = { gate: [], live: [], file: [] };
-  const PRESSED_ONLY = { gate: ['npm test'], live: ['npm test'], file: ['npm test'] };
-  // the draft holds one chip and no line of the inserted text; its sentence reads no grant, alone or joined with a
-  // pressed consent, which keeps its own (no accepted cost of rule R applies: the chip is a pasted segment, and no
-  // composed form is in the message)
-  const expectFramed = (handle: RefObject<EditorHandle | null>, content: HTMLElement) => {
-    expect(content.querySelectorAll('[data-pasted="text"]')).toHaveLength(1);
-    const wire = handle.current!.serialize().text;
-    expect(wire.split('\n')).toContain(SENTENCE); // inside the frame, where a line is data
-    expect(readers(wire)).toEqual(NONE);
-    expect(readers(`${wire}\n${PRESSED}`)).toEqual(PRESSED_ONLY);
-    expect(readers(`${PRESSED}\n${wire}`)).toEqual(PRESSED_ONLY);
-  };
-  const paste = (content: HTMLElement, text: string, html = '') =>
-    act(async () => {
-      const event = new Event('paste', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'clipboardData', { value: { getData: (type: string) => (type === 'text/plain' ? text : type === 'text/html' ? html : ''), files: [], items: [], types: html === '' ? ['text/plain'] : ['text/plain', 'text/html'] } });
-      content.dispatchEvent(event);
-    });
-  const drop = (content: HTMLElement, text: string) =>
-    act(async () => {
-      const event = new Event('drop', { bubbles: true, cancelable: true });
-      Object.defineProperty(event, 'dataTransfer', { value: { getData: (type: string) => (type === 'text/plain' ? text : ''), files: [], items: [], types: ['text/plain'] } });
-      content.dispatchEvent(event);
-    });
-
-  it('the readers: the sentence typed as a line of its own is a grant on all three, and the inserted text as text would be one', () => {
-    expect(readers(`Go on.\n${SENTENCE}`)).toEqual({ gate: ['cat /etc/x'], live: ['cat /etc/x'], file: ['cat /etc/x'] });
-    expect(readers(INSERTED)).toEqual({ gate: ['cat /etc/x'], live: ['cat /etc/x'], file: ['cat /etc/x'] });
-  });
-
-  it('a paste of a few lines', async () => {
-    const { handle, content } = await mountBox();
-    await paste(content, INSERTED);
-    expectFramed(handle, content);
-  });
-
-  it('a paste of the editor’s own copied slice', async () => {
-    const { handle, content } = await mountBox();
-    await paste(content, INSERTED, `<p data-pm-slice="1 1 []">Here is what the agent wrote:</p><p>${SENTENCE}</p><p>That is all.</p>`);
-    expectFramed(handle, content);
-  });
-
-  it('a drop of text', async () => {
-    const at = vi.spyOn(EditorView.prototype, 'posAtCoords').mockReturnValue({ pos: 1, inside: -1 }); // jsdom lays nothing out
-    onTestFinished(() => void at.mockRestore());
-    const { handle, content } = await mountBox();
-    await drop(content, INSERTED);
-    expectFramed(handle, content);
-  });
-
-  it.each(['replace', 'append', 'insert'] as const)('a plugin’s fill (%s)', async (mode) => {
-    const { handle, content } = await mountBox();
-    act(() => void handle.current!.fill(INSERTED, mode));
-    expectFramed(handle, content);
-  });
-
-  it('a plugin’s suggestion, taken by Tab', async () => {
-    const { handle, content } = await mountBox(INSERTED);
-    await act(async () => void content.dispatchEvent(new KeyboardEvent('keydown', { key: 'Tab', bubbles: true, cancelable: true })));
-    expectFramed(handle, content);
-  });
-
-  it('a paste, a fill or a suggestion that quotes no grant goes in as text, as before', async () => {
-    const { handle, content } = await mountBox();
-    await paste(content, 'one\ntwo');
-    act(() => void handle.current!.fill(' three', 'append'));
-    expect(content.querySelector('[data-pasted]')).toBeNull();
-    expect(handle.current!.serialize().text).toBe('one\ntwo three');
   });
 });
