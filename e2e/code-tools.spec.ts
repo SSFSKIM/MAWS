@@ -60,26 +60,24 @@ const UNLABELLED_WORDS = 'Café, naïve, Ελληνικά, 東京'; // an invent
 // toolbar's height (0 when hidden: the viewer always builds the element) and its document's title, read in the viewer's
 // own page; or `NOT_READY` for a viewer frame whose `pdf-viewer` or toolbar is not built yet, a value no matcher of the
 // scenes accepts, so a poll asks again (a throw would end the poll at once). A failure to run or parse the read still throws.
-const NOT_READY = 'not ready';
+const NOT_READY = 'not ready' as const;
 type ViewerRead = { toolbar: number; title: string } | typeof NOT_READY;
 async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<ViewerRead[]> {
-  return maws.app.evaluate(
-    async ({ BrowserWindow }, { url, viewer, notReady }) => {
+  const reads = await maws.app.evaluate(
+    async ({ BrowserWindow }, { url, viewer }) => {
       const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
       const script = `(() => {
         const element = document.querySelector('pdf-viewer');
         const toolbar = element && element.shadowRoot && element.shadowRoot.querySelector('viewer-toolbar');
         return JSON.stringify(toolbar ? { toolbar: toolbar.getBoundingClientRect().height, title: document.title } : null);
       })()`;
-      const shown: ({ toolbar: number; title: string } | typeof notReady)[] = [];
-      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) {
-        const read = JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string } | null;
-        shown.push(read ?? notReady);
-      }
+      const shown: ({ toolbar: number; title: string } | null)[] = [];
+      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) shown.push(JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string } | null);
       return shown;
     },
-    { url, viewer: PDF_VIEWER, notReady: NOT_READY },
+    { url, viewer: PDF_VIEWER },
   );
+  return reads.map((read) => read ?? NOT_READY);
 }
 
 // How many pixels of a PDF frame are its page's square of `mark` (`minimalPdf`): drawn, not just framed.
