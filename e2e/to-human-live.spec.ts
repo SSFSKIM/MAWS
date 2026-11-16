@@ -72,6 +72,7 @@ import { cleanupFailure, launchMaws, REPO_ROOT, type MawsLaunch } from './suppor
 import { forwardingScript, spentUnder } from './support/live-budget';
 import { promptsEnded, sessionJournal, writtenPrompts } from './support/live-turns';
 import { a15Line, a15Reading, installedEngine } from './support/p1-live';
+import { mountedTabs, sideColumn } from './support/shell';
 import { newChatIn, sidebarRow } from './support/sidebar';
 
 const TRIAL = process.env.MAWS_U2B_TRIAL === '1';
@@ -278,14 +279,21 @@ async function open(page: Page, id: string): Promise<void> {
   await page.mouse.move(700, 450);
   await expect(paneOf(page).locator(`[data-composer="${await addressed(page, id)}"]`)).toBeVisible();
 }
-// The record lines as drawn: by the mod (buttons reading `› …` inside a drawing of the mod's), by MAWS's mirror
-const modLines = (scope: Locator) => scope.locator('[data-plugin-drawn]').getByRole('button', { name: /^› / });
-const LINE = { mod: '[data-plugin-drawn] button', mirror: '[data-kind="record_fold"] button' } as const;
+// What is in sight. Where the mod draws a row with its own tree, MAWS keeps its own drawing of that row in the DOM,
+// concealed (`display: none`, `inert`, `aria-hidden`, `visibility: hidden`: engine-surface/SurfaceRow.tsx), so every
+// reading here counts only what a person can see: an element, or one of its descendants, that is rendered with a box,
+// visible, and under no `[inert]`. The same test is written into each page function below (a page function cannot call
+// a function of this file), as `inSight`.
+//
+// The record lines as drawn: by the mod (its `to-human-toggle` button, whose accessible name is its label without the
+// `› `: engine-surface/SurfaceTree.tsx's ButtonNode; check 1's recordings, u2b-mod-label.jsonl), by MAWS's mirror
+const LINE = { mod: '[data-plugin-drawn] button[data-key="to-human-toggle"]', mirror: '[data-kind="record_fold"] button' } as const;
 type Drawer = keyof typeof LINE;
-// Every record line of the list in order, the list walked from its top (rows are virtual: only those near the viewport
+// Every record line in sight, in order, the list walked from its top (rows are virtual: only those near the viewport
 // are mounted), each line keyed by its row's index; the list is left at its end.
 async function walkLines(page: Page, drawer: Drawer): Promise<string[]> {
   return paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, selector) => {
+    const inSight = (el: Element) => !el.closest('[inert]') && [el, ...Array.from(el.querySelectorAll('*'))].some((c) => !c.closest('[inert]') && c.checkVisibility({ visibilityProperty: true }) && Array.from(c.getClientRects()).some((r) => r.width > 0 && r.height > 0));
     const seen = new Map<string, string>();
     scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     scroller.scrollTop = 0;
@@ -293,7 +301,7 @@ async function walkLines(page: Page, drawer: Drawer): Promise<string[]> {
       await new Promise((done) => requestAnimationFrame(() => requestAnimationFrame(done)));
       for (const button of Array.from(scroller.querySelectorAll<HTMLElement>(selector))) {
         const words = (button.textContent ?? '').trim();
-        if (!words.startsWith('› ')) continue;
+        if (!words.startsWith('› ') || !inSight(button)) continue;
         const row = button.closest<HTMLElement>('[data-index]');
         seen.set(`${String(row?.dataset.index ?? '?').padStart(6, '0')}|${words}`, words);
       }
@@ -306,7 +314,7 @@ async function walkLines(page: Page, drawer: Drawer): Promise<string[]> {
 }
 // The record lines once they settle: `done` holds for the walked lines, and the same lines come back on three reads in a
 // row (a bounded poll on a count of agreeing reads, never a time)
-async function settledLines(page: Page, drawer: Drawer, done: (lines: string[]) => boolean, message: string): Promise<string[]> {
+async function settledLines(page: Page, drawer: Drawer, done: (lines: string[]) => boolean | Promise<boolean>, message: string): Promise<string[]> {
   let lines: string[] = [];
   let last = '';
   let agreeing = 0;
@@ -314,31 +322,39 @@ async function settledLines(page: Page, drawer: Drawer, done: (lines: string[]) 
     .poll(async () => {
       lines = await walkLines(page, drawer);
       const key = JSON.stringify(lines);
-      agreeing = done(lines) ? (key === last ? agreeing + 1 : 1) : 0;
+      const holds = await done(lines);
+      agreeing = holds ? (key === last ? agreeing + 1 : 1) : 0;
       last = key;
       return agreeing;
     }, { timeout: 180_000, intervals: [3_000], message })
     .toBeGreaterThanOrEqual(3);
   return lines;
 }
-// What a growing line reads: a shell call's description or command
-const callWords = (id: string) => calls(id, 'Bash').flatMap((b) => [`› ${String(b.input?.description ?? '')}`, `› ${String(b.input?.command ?? '')}`]);
-// Every closed line reads a summary: neither `working record` nor a call's own words
-const summarised = (id: string) => (lines: string[]) => lines.length > 0 && lines.every((line) => line !== NONE && !callWords(id).includes(line));
-// Who draws the record lines in a window now: the mod or MAWS's mirror (§M, "What a person sees")
-async function drawerOf(page: Page): Promise<Drawer> {
+// Every closed line reads a summary: its words are one of the summaries the mod stored for the session, as MAWS's own
+// reader gives them (`ownerChannel.folds`), so neither `working record` nor any call's own words, whatever the tool
+// (a label the mod cuts with an ellipsis is the start of its summary)
+const summaryLine = (line: string, summary: string) => line === `› ${summary}` || (line.endsWith('…') && summary.startsWith(line.slice(2, -1).trimEnd()));
+const summarised = (page: () => Page, id: string) => async (lines: string[]) => {
+  const runs = value(await invoke(page(), 'ownerChannel.folds', { appSessionId: id as AppSessionId })).runs ?? [];
+  return lines.length > 0 && lines.every((line) => runs.some((run) => summaryLine(line, run.summary)));
+};
+// Who draws the session's record lines in a window now (§M, "What a person sees"): the mod where the lane says so, else
+// the mirror once its switch is in sight
+async function drawerOf(page: Page, id: string): Promise<Drawer> {
   let drawer: Drawer | null = null;
   await expect.poll(async () => {
-    for (const d of ['mod', 'mirror'] as const) if ((await walkLines(page, d)).length > 0) return (drawer = d);
+    if ((await lane(page, id)).drawnBy === 'mod') return (drawer = 'mod');
+    if ((await paneOf(page).locator('[data-view-switch]:visible').count()) > 0) return (drawer = 'mirror');
     return null;
-  }, { timeout: 30_000, message: 'the window draws record lines' }).not.toBeNull();
+  }, { timeout: 30_000, message: 'the lane says the mod draws, or the mirror’s switch is in sight' }).not.toBeNull();
   return drawer!;
 }
-// Each message drawn once: its opening words found in the list and never twice at one stop, the list walked from its
-// top (a message's drawing is the innermost element holding its words; one with no plain opening is left out, named)
+// Each message drawn once: its opening words held, in sight, by exactly one innermost element at the stop where it is
+// seen most, the list walked from its top (a message with no plain opening is left out, named in the log)
 async function drawnOnce(page: Page, texts: string[]): Promise<void> {
   const phrases = texts.map(opening);
   const most = await paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, words) => {
+    const inSight = (el: Element) => !el.closest('[inert]') && [el, ...Array.from(el.querySelectorAll('*'))].some((c) => !c.closest('[inert]') && c.checkVisibility({ visibilityProperty: true }) && Array.from(c.getClientRects()).some((r) => r.width > 0 && r.height > 0));
     const top = words.map(() => 0);
     scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 }));
     scroller.scrollTop = 0;
@@ -347,7 +363,7 @@ async function drawnOnce(page: Page, texts: string[]): Promise<void> {
       const all = Array.from(scroller.querySelectorAll<HTMLElement>('*'));
       words.forEach((phrase, k) => {
         if (phrase === null) return;
-        const holders = all.filter((el) => (el.textContent ?? '').includes(phrase) && !Array.from(el.children).some((child) => (child.textContent ?? '').includes(phrase)));
+        const holders = all.filter((el) => (el.textContent ?? '').includes(phrase) && !Array.from(el.children).some((child) => (child.textContent ?? '').includes(phrase)) && inSight(el));
         top[k] = Math.max(top[k]!, holders.length);
       });
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
@@ -358,22 +374,30 @@ async function drawnOnce(page: Page, texts: string[]): Promise<void> {
   }, phrases);
   const read = phrases.map((phrase, k) => ({ phrase, most: most[k] }));
   log(`drawn once: ${JSON.stringify(read)}`);
-  expect(read.filter((r) => r.phrase !== null), 'each message drawn exactly once').toEqual(read.filter((r) => r.phrase !== null).map((r) => ({ ...r, most: 1 })));
+  expect(read.filter((r) => r.phrase !== null), 'each message drawn exactly once, in sight').toEqual(read.filter((r) => r.phrase !== null).map((r) => ({ ...r, most: 1 })));
 }
-const ARRIVAL = '[data-kind="agent_message"]'; // a subagent's or a peer's message, drawn as an arrival
 const modBand = (scope: Locator) => scope.locator('[data-plugin-band]').filter({ hasText: 'to-human view' });
-// The rows the full transcript shows and the report hides, by what the list draws for each
+// A row's own drawing, MAWS's, in its `[data-engine-native]` portal: concealed where the mod's report replaces it (a
+// thought, listing or notice heading a stretch answers with the mod's toggle row: check 1's u2b-mod-lone-thought,
+// -lone-listing, -lone-notice), in sight in the full transcript, where the mod answers with the engine slot
+const ownDrawing = (kind: string) => `[data-kind="${kind}"] [data-engine-native]`;
+// The rows the full transcript shows and the report hides, each judged by its own drawing in sight; a turn's line by
+// its row's box (u2b-mod-lone-turn: an empty answer, so the row draws nothing, in the report; the engine slot, MAWS's
+// line, in the full transcript)
 const HIDDEN = {
-  thought: '[data-kind="thinking"], [data-cell-id^="cell:think:"]',
-  listing: '[data-kind="agent_list"]',
-  notice: '[data-kind="notice"]',
-  'turn line': '[data-kind="divider"], [data-plugin-drawn="TurnDuration"]',
+  thought: `${ownDrawing('thinking')}, [data-cell-id^="cell:think:"]`,
+  listing: ownDrawing('agent_list'),
+  notice: ownDrawing('notice'),
+  'turn line': '[data-kind="divider"]',
 } as const;
-// Whether a row `selector` matches is drawn in sight anywhere in the list, the list walked from its top to its end as a
-// reader scrolls (the rows are virtual: a row is in the DOM only near the viewport), and whether the walk unmounted a
-// row: an index mounted at one stop and gone at a later one
+const ARRIVAL = ownDrawing('agent_message'); // a subagent's or a peer's message, drawn as an arrival
+// Whether anything `selector` matches is in sight and in the viewport anywhere in the list, the list walked from its top
+// to its end as a reader scrolls (the rows are virtual: a row is in the DOM only near the viewport), and whether the
+// walk unmounted a row: an index mounted at one stop and gone at a later one
 async function seenWhileScrolling(page: Page, selector: string): Promise<{ shown: boolean; unmounted: boolean }> {
   return paneOf(page).locator('[data-transcript-scroller]').evaluate(async (scroller, sel) => {
+    const view = () => scroller.getBoundingClientRect();
+    const inSight = (el: Element) => !el.closest('[inert]') && [el, ...Array.from(el.querySelectorAll('*'))].some((c) => !c.closest('[inert]') && c.checkVisibility({ visibilityProperty: true }) && Array.from(c.getClientRects()).some((r) => r.width > 0 && r.height > 0 && r.bottom > view().top && r.top < view().bottom));
     scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // a reader's scroll, so the list stops following the end
     scroller.scrollTop = 0;
     let shown = false;
@@ -384,11 +408,7 @@ async function seenWhileScrolling(page: Page, selector: string): Promise<{ shown
       const mounted = new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]')).map((row) => row.dataset.index ?? ''));
       if ([...mountedOnce].some((index) => !mounted.has(index))) unmounted = true;
       for (const index of mounted) mountedOnce.add(index);
-      const view = scroller.getBoundingClientRect();
-      shown ||= Array.from(scroller.querySelectorAll<HTMLElement>(sel)).some((row) => {
-        const box = row.getBoundingClientRect();
-        return box.height > 0 && box.bottom > view.top && box.top < view.bottom && getComputedStyle(row).visibility !== 'hidden';
-      });
+      shown ||= Array.from(scroller.querySelectorAll(sel)).some(inSight);
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
       scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
     }
@@ -462,16 +482,17 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       const firstCall = journal(id).findIndex((r) => r.direction === 'in' && frameOf(r).type === 'assistant' && JSON.stringify(frameOf(r).message?.content ?? '').includes('"tool_use"'));
       const asks = renderAsks(id, Math.max(0, firstCall));
       const pane = paneOf(page);
-      // the mod's drawing alone: no record line, no switch and no message drawing of MAWS's
-      await expect(pane.locator('[data-kind="record_fold"]')).toHaveCount(0);
-      await expect(pane.locator('[data-view-switch]')).toHaveCount(0);
-      await expect(pane.locator('.owner-message-ink')).toHaveCount(0);
+      // the mod's drawing alone: no record line, no switch and no message drawing of MAWS's in sight (MAWS's own drawing
+      // of a row the mod draws stays in the DOM, concealed: engine-surface/SurfaceRow.tsx)
+      expect((await seenWhileScrolling(page, '[data-kind="record_fold"]')).shown, 'no record line of MAWS’s in sight').toBe(false);
+      await expect(pane.locator('[data-view-switch]:visible'), 'no switch of MAWS’s in sight').toHaveCount(0);
+      expect((await seenWhileScrolling(page, '.owner-message-ink')).shown, 'no message drawing of MAWS’s in sight').toBe(false);
       await expect(modBand(pane), 'the mod’s band with its switch').toBeVisible({ timeout: 30_000 });
       messages = messageTexts(id);
       expect(messages.length, 'at least one message').toBeGreaterThan(0);
       await drawnOnce(page, messages);
       // the summary comes after the stretch closed (one model call of the mod's): each line leaves its newest call's words
-      labels = await settledLines(page, 'mod', summarised(id), 'each closed record line reads a summary where the mod draws');
+      labels = await settledLines(page, 'mod', summarised(() => page, id), 'each closed record line reads a summary where the mod draws');
       line(`turn 1: ${NATIVE_TO_HUMAN_ENV}=9, drawnBy mod; ${bash.length} calls, ${thoughtFirst ? 'a thought first' : 'NO thought before the first call'}; the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; no record line, switch or message drawing of MAWS's; render asks from the first call to the turn's end: ${asks}`);
       observe('turn1', { launched, calls: bash.length, thoughtFirst, labels, messages: messages.length, renderAsks: asks });
       expect(thoughtFirst, 'the stretch opens with a thought (it reads its summary on both routes)').toBe(true);
@@ -485,7 +506,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       messages = messageTexts(id);
       await drawnOnce(page, messages);
       artifactId = /maws-artifact:([A-Za-z0-9_-]+)/.exec(messages.join('\n'))?.[1] ?? null;
-      labels = await settledLines(page, 'mod', (lines) => summarised(id)(lines) && lines.length >= 2, 'two closed lines, each reading a summary');
+      labels = await settledLines(page, 'mod', (lines) => summarised(() => page, id)(lines) && lines.length >= 2, 'two closed lines, each reading a summary');
       line(`turn 2: the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; artifact_create ${calls(id, 'mcp__maws__artifact_create').length} call(s), mentioned as ${artifactId ?? 'NOTHING'}`);
       expect(artifactId, 'the final message mentions the artifact it made').not.toBeNull();
     });
@@ -507,7 +528,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
         await band.getByRole('button', { name: /report only/ }).click();
       }
       messages = messageTexts(id);
-      labels = await settledLines(page, 'mod', summarised(id), 'each closed record line reads a summary where the mod draws');
+      labels = await settledLines(page, 'mod', summarised(() => page, id), 'each closed record line reads a summary where the mod draws');
       line(`turn 3: ListAgents ${listed ? 'called' : 'NOT called'}; a task notification ${notified ? 'arrived' : 'NOT seen'}; a subagent ${agent ? 'ran' : 'NOT run'}, its arrival row ${arrival === null ? 'NOT seen' : `seen in ${arrival}`}; the mod's lines, settled ${JSON.stringify(labels)}`);
       expect([listed, notified, agent, arrival !== null]).toEqual([true, true, true, true]);
     });
@@ -530,7 +551,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       line(`full: in the report ${JSON.stringify(report)}; in the full transcript, the list walked from its top ${JSON.stringify(full)}; a row unmounted during the walk: ${unmounted}`);
       expect(report, 'hidden in the report').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, false])));
       expect(full, 'all in sight in the full transcript').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, true])));
-      expect(unmounted, 'the walk unmounted a row and mounted it again, so each was found after scrolling').toBe(true);
+      expect(unmounted, 'the walk unmounted a row it had mounted, so what it found was found after scrolling').toBe(true);
       await band.getByRole('button', { name: /report only/ }).click();
       await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1440, 900));
     });
@@ -550,26 +571,33 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
     await step('links', 'the path link and the artifact mention inside mod-drawn messages: what each opens', async () => {
       const pane = paneOf(page);
       const drawn = pane.locator('[data-plugin-drawn]');
-      const selectedTab = () => page.locator('[data-region="main"] [role="tab"][aria-selected="true"]').allTextContents();
-      const path = drawn.locator('a').filter({ hasText: 'README.md' }).first();
+      // a scheme-less link in a mod-drawn Markdown node is a path chip (markdown/sanitize.ts, `maws-path:`; markdown/
+      // Link.tsx), and a plain click opens the file beside the chat, the main strip as it was (e2e/sessions.spec.ts)
+      const strip = () => mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
+      const stripBefore = await strip();
+      const path = drawn.locator('[data-chip="path"]').filter({ hasText: 'README.md' }).first();
       await expect(path, 'a path link inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
+      const pathTitle = await path.getAttribute('title');
       await path.click();
-      await expect.poll(selectedTab, { timeout: 20_000, message: 'what the path link opened' }).toContainEqual(expect.stringContaining('README'));
-      const pathOpened = await selectedTab();
+      const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${join(repo, 'README.md')}"]`);
+      await expect(viewer, 'README.md beside the chat').toBeVisible({ timeout: 20_000 });
+      expect(await strip(), 'the main strip as it was').toEqual(stripBefore);
+      const pathOpened = { side: await viewer.getAttribute('data-path'), title: pathTitle };
       await open(page, id);
       const mention = drawn.locator(`[data-chip="artifact"][data-artifact-id="${artifactId}"]`).first();
       await expect(mention, 'the artifact mention inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
+      await expect(page.locator(`[data-artifact-viewer="${artifactId}"]`), 'no viewer of the artifact before the click').toHaveCount(0);
       await mention.click();
       // the transcript's rule (openArtifactMention): the main tab that already shows it, else the session's side column
       await expect.poll(() => page.locator(`[data-artifact-viewer="${artifactId}"]`).count(), { timeout: 20_000, message: 'the mention opened the artifact’s viewer' }).toBeGreaterThan(0);
       const mentionOpened = (await page.locator(`[data-artifact-tab="${artifactId}"]`).count()) > 0 ? 'its main tab' : 'the side column';
-      line(`links: README.md opened ${JSON.stringify(pathOpened)}; the mention of ${artifactId} opened ${JSON.stringify(mentionOpened)}`);
+      line(`links: README.md opened beside the chat ${JSON.stringify(pathOpened)}, the main strip unchanged; the mention of ${artifactId} opened ${JSON.stringify(mentionOpened)}`);
       observe('links', { pathOpened, artifactId, mentionOpened });
       await open(page, id);
     });
 
     await step('second', 'a second window on the running session reads the same record lines, drawn by the mod or the mirror', async () => {
-      labels = await settledLines(page, 'mod', summarised(id), 'the first window’s lines, settled');
+      labels = await settledLines(page, 'mod', summarised(() => page, id), 'the first window’s lines, settled');
       const app = maws!.app;
       const [second] = await Promise.all([
         app.waitForEvent('window'),
@@ -578,7 +606,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await expect(second.locator('[data-region="main"]')).toBeVisible({ timeout: 30_000 });
       await (await sidebarRow(second, { appSessionId: id })).click();
       // §M: a second window draws the session's view by the mod or by the mirror; either reads the same words
-      const drawer = await drawerOf(second);
+      const drawer = await drawerOf(second, id);
       const there = await settledLines(second, drawer, (lines) => lines.length === labels.length, 'the second window’s lines, settled');
       line(`second window: drawn by ${drawer === 'mod' ? 'the mod' : 'the mirror'}, the lines ${JSON.stringify(there)}`);
       expect(there, 'the same words in the second window').toEqual(labels);
@@ -592,9 +620,10 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       expect(spawns(id).at(-1)!.env[NATIVE_TO_HUMAN_ENV], 'no advertisement').toBeUndefined();
       await expect.poll(async () => (await lane(page, id)).drawnBy, { timeout: 30_000 }).toBe('mod');
       const pane = paneOf(page);
-      await expect(modLines(pane).first(), 'the mod’s fold').toBeVisible({ timeout: 30_000 });
-      await expect(pane.locator('.transcript-divider .transcript-disclosure'), 'no turn fold of MAWS’s').toHaveCount(0);
-      await expect(pane.locator('[data-kind="record_fold"], [data-view-switch]')).toHaveCount(0);
+      await expect.poll(async () => (await walkLines(page, 'mod')).length, { timeout: 30_000, message: 'the mod’s fold, in sight' }).toBeGreaterThan(0);
+      expect((await seenWhileScrolling(page, '.transcript-divider .transcript-disclosure')).shown, 'no turn fold of MAWS’s in sight').toBe(false);
+      expect((await seenWhileScrolling(page, '[data-kind="record_fold"]')).shown, 'no record line of MAWS’s in sight').toBe(false);
+      await expect(pane.locator('[data-view-switch]:visible'), 'no switch of MAWS’s in sight').toHaveCount(0);
       line(`lane off: no ${NATIVE_TO_HUMAN_ENV}, drawnBy mod, the mod's lines ${JSON.stringify(await walkLines(page, 'mod'))}, no turn fold of MAWS's`);
       await stop(page, id);
       value(await invoke(page, 'mods.setSessionOverride', { appSessionId: id as AppSessionId, id: 'maws.to-human', value: 'inherit' }));
@@ -604,7 +633,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       // the words just before the quit: the session is at rest since the lane-off step, so whoever draws it now reads
       // them, and they are the words the mod drew while it ran
       const running = labels;
-      const drawerBefore = await drawerOf(page);
+      const drawerBefore = await drawerOf(page, id);
       labels = await settledLines(page, drawerBefore, (lines) => lines.length === running.length, 'the lines before the quit, settled');
       expect(labels, `the words before the quit, drawn by ${drawerBefore === 'mod' ? 'the mod' : 'the mirror'}, are the mod’s`).toEqual(running);
       consoleErrors.push(...maws!.consoleErrors());
@@ -682,6 +711,8 @@ test('U2b check 5: a long seeded session the mod draws, resumed with no prompt a
   const cap = capUsd();
   const engine = installedEngine();
   mkdirSync(OUT, { recursive: true });
+  // the owner's files read before anything of this case, as the first case reads them
+  const owner = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')) };
   // the scratch home as the first case leaves it; made here when that case stopped before its setup finished
   if (!existsSync(join(config, 'plugins', 'installed_plugins.json'))) await prepare(engine.bin, cap);
   const engineId = randomUUID();
@@ -691,7 +722,9 @@ test('U2b check 5: a long seeded session the mod draws, resumed with no prompt a
     const { page } = maws;
     const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
     if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
-    budget(cap); // the resume sends no prompt; the forwarding script still reads what the cap leaves
+    // the resume sends no prompt and spends nothing, so no refusal on what is left; the forwarding script still reads a
+    // cap, what is left (a floor of a cent, so a run whose first case spent its cap can still resume)
+    writeFileSync(budgetFile, Math.max(cap - spent(), 0.01).toFixed(4));
     let id = '';
     await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === engineId)?.appId ?? ''), { timeout: 30_000, message: 'the seeded session listed' }).not.toBe('');
     await open(page, id);
@@ -717,5 +750,9 @@ test('U2b check 5: a long seeded session the mod draws, resumed with no prompt a
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
     await maws.cleanup();
+    const after = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')) };
+    appendFileSync(join(OUT, 'trial.txt'), `check 5: ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; ${a15Line('after check 5', owner.a15, after.a15, [root])}\n`);
+    expect(after.settings, '~/.claude/settings.json unchanged').toBe(owner.settings);
+    expect(compareA15(owner.a15.keys, after.a15.keys, [root]).breach, 'A-15: no key outside the run’s scratch appeared or vanished in the owner file').toEqual([]);
   }
 });
