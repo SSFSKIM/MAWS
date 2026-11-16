@@ -56,7 +56,7 @@ const pastedBodies = ${pastedBodies}; // the one definition of a pasted segment'
 const MAX_ENVELOPE_CHECKS = ${MAX_ENVELOPE_CHECKS};
 const answeredBlock = ${answeredBlock};
 const envelopeSlices = ${envelopeSlices};
-const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out
+const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out (16 at most)
 const answerOutsideTranscript = ${answerOutsideTranscript};
 const parseBash = ${parseBash}; // the backfill's own test of a shell row, which the split never reads
 // A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after

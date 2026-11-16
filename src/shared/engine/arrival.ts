@@ -394,8 +394,9 @@ export type PersonsContent = string | ContentBlock[];
  * reader reads through it: rule R reads the whole joined text (`personsLines`). Each text block by itself (decision 7):
  * an envelope spread over two blocks is not read, since the writer makes one text; a block left empty goes, every
  * other block stays, in place and unchanged. Each text is
- * read again until a reading takes nothing out (decision 17): where one envelope's lines stand around another whole
- * envelope, the first reading takes the inner one and leaves the outer one whole. `own` is null when nothing of the
+ * read again until a reading takes nothing out (decision 17), within `takeEnvelopesOut`'s 16 readings: where one
+ * envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer one
+ * whole. `own` is null when nothing of the
  * person's is left, white space beside an envelope counting as nothing (the separating newline the engine appends to
  * an envelope's text block, or puts between members). The envelopes in the order they were taken, each with what was
  * read of it.
@@ -426,19 +427,23 @@ const readOut = (text: string) => takeEnvelopesOut(text, (own) => envelopeSlices
 /**
  * The envelopes `slice` reads in a text, read again until a reading takes nothing out (ticket 704, decision 17): where
  * one envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer
- * one whole, and the next takes it. Each reading that takes something shortens the text by an envelope at least, so it
- * ends. The envelopes in the order they were taken, and what is left. The one loop: `readPersonsContent` reads through
- * it, and the search text's worker runs its source, so it uses its arguments alone.
+ * one whole, and the next takes it. At most 16 readings (the architect's ruling 4 of 2026-11-16), so a text costs at
+ * most 16 of `slice`'s own bound. A text whose 16th reading still takes an envelope is over the bound and is left
+ * whole, no envelope taken, as `envelopeSlices` leaves a text over its cap: it draws as the person's one message, the
+ * envelopes' lines and blocks as its text, and no answer is read from it. The envelopes in the order they were taken,
+ * and what is left. The one loop: `readPersonsContent` reads through it, and the search text's worker runs its source,
+ * so it uses its arguments alone.
  */
 export function takeEnvelopesOut<T>(text: string, slice: (text: string) => { members: { text: string; read: T }[]; rest: string }): { own: string; envelopes: { text: string; read: T }[] } {
   const envelopes: { text: string; read: T }[] = [];
   let own = text;
-  for (;;) {
+  for (let pass = 0; pass < 16; pass += 1) {
     const { members, rest } = slice(own);
     if (members.length === 0) return { own, envelopes };
     envelopes.push(...members);
     own = rest;
   }
+  return { own: text, envelopes: [] }; // over the bound
 }
 const leftOf = (read: { own: string; envelopes: readonly unknown[] }): string | null => (read.own === '' || (read.envelopes.length > 0 && read.own.trim() === '') ? null : read.own);
 
