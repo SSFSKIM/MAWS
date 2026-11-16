@@ -7,7 +7,7 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { askAnswersFromSteer /* board ticket 711 */, parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
 import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b: a join of envelopes alone
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
@@ -1308,13 +1308,16 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   const { use, input, opened } = ask;
   const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
   const blocking = opened?.blocking ?? input?.blocking ?? true;
-  const answers = ask.answers ?? steers?.get(askId) ?? null;
+  const questions = opened?.questions ?? (input ? withQuestionIds(input.questions) : []);
+  // board ticket 711: a steer of this build names a pick by its place; the call's questions read it back to the label
+  const steered = steers?.get(askId);
+  const answers = ask.answers ?? (steered === undefined ? null : askAnswersFromSteer(questions, steered));
   const asked = ask.asked || opened?.blocking === false;
   const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null || ask.stopped ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
   return {
     id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
-    questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
+    questions, state, answers, error: ask.error,
     cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
     ...(waitingForms?.has(use.toolUseId) === true && { waiting: true as const }), // UX wave U1b (§B, rule 2)
   };

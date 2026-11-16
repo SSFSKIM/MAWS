@@ -125,6 +125,16 @@ describe('a waiting answer’s words', () => {
     expect(answerWords('Use the grid', noAsks)).toBeNull();
     expect(answerWords(ANSWER.replace('[MAWS ask', '[MAWS asc'), noAsks)).toBeNull();
   });
+
+  // board ticket 711: the envelope's new form (each question by its number, no text the model wrote) and the form the
+  // earlier builds wrote (the question's words on its line and in its block) are both an answer's
+  it('knows an answer’s envelope in the new form and in the form the earlier builds wrote, held after the turn too', () => {
+    const answered = askSteerText('ask-2', [{ id: 'q1', question: 'Which colour?', modality: 'choice', options: [{ label: 'Blue' }] }], [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }]);
+    expect(answered.split('\n')[1]).toBe('1. option 1');
+    const old = ['[MAWS ask ask-3] The user answered the questions you asked:', '1. Which colour? — Blue', '```json', JSON.stringify({ status: 'answered', askId: 'ask-3', answers: [{ id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] }] }, null, 2), '```'].join('\n');
+    const rows = stackRows(queue({ steers: [steer(U1, 1, answered)], entries: [entry('q-1', 2, { content: old }), entry('q-2', 3)] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'answer' in row && row.answer])).toEqual([['next', true], ['after', true], ['after', false]]);
+  });
 });
 
 describe('the rows the keys act on', () => {
