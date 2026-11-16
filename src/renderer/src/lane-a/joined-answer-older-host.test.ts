@@ -10,16 +10,12 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
-import type { SessionId } from '@shared/graph/ids';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskQuestion } from '@shared/maws/tools';
-import { ChainFollower } from '../../../engine-host/fs/chain-follower';
-import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../test/support/fixtures';
-import { MemoryFileReader } from '../../../../test/support/memory-reader';
+import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { PROBE_CONTROLS, PROBE_JOINS, recordedJoin } from '../../../../test/support/recorded-joins';
 import { recallEntries, recallText } from '../composer/editor/history';
 import { rowPrefill } from '../composer/edit-prefill';
-import { journalToEvents } from '../transcript/dev/journal';
 import { turnActivity } from '../transcript/model/activity';
 import { rowsOf, withAllExpanded } from '../transcript/model/derive';
 import { applyEvents, createState, type TranscriptState } from '../transcript/model/reduce';
@@ -98,28 +94,8 @@ describe('a joined answer from a host of build G, drawn in this build’s window
   });
 });
 
-// The producers at M1's head are build G's for a person's message: their events for the recordings are still the frozen
-// ones (M2 changes the producers and removes this case)
-describe('the producers at this head still give the frozen events', () => {
-  const NAMES = [...PROBE_JOINS, ...PROBE_CONTROLS, 'u704-pasted-1', 'u704-pasted-2'];
-  async function fromFile(name: string): Promise<SessionEvent[]> {
-    const text = readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8');
-    const sessionId = text.split('\n').map((line) => (line.trim() === '' ? null : (JSON.parse(line) as { sessionId?: unknown }).sessionId)).find((id): id is string => typeof id === 'string')!;
-    const events: SessionEvent[] = [];
-    const follower = new ChainFollower(new MemoryFileReader(text), sessionId as SessionId, null, (e) => e.t === 'events' && events.push(...e.events), { holders: () => 0 });
-    await follower.start();
-    follower.stop();
-    return events;
-  }
-
-  it.each([...NAMES, 'u4b-env-end-env-first-1', 'u4b-env-two-prompt-first-1'])('%s: the journal through the normaliser', (name) => {
-    expect(journalToEvents(loadUxwaveJournal(name))).toEqual(frozen(name, 'events'));
-  });
-
-  it.each(NAMES)('%s: the file through the chain follower', async (name) => {
-    expect(await fromFile(name)).toEqual(frozen(name, 'backfill'));
-  });
-});
+// This build's producers (M2) give the frozen events for the recordings the engine did not join, and events the split
+// returns as they are for every recording: joined-answer-routes.test.ts pins both.
 
 // ---------------------------------------------------------------------------------------------------------------------
 // The reducer's contract (decision 3; Acceptance 7) and ruling B's exception (Acceptance 6), made by hand

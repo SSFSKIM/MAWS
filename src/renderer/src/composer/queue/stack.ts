@@ -11,6 +11,9 @@
 // docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 2 and 3): whether it is one, from
 // the reader's class (`readAnswerEnvelope`); each question's title as its ask's capsule shows it, from the ask's row
 // where the window holds it; each answer in the capsule's words (`askAnswerCopy`).
+// A waiting message that holds an attachment beside the envelope is no answer row (the architect's rule, ticket 704): it
+// stays an ordinary message, which the up-arrow can take, with its ordinary controls. A `handed` row is no waiting
+// message and keeps its reading.
 import type { SendContent } from '@shared/engine/session-state-store';
 import { readAnswerEnvelope } from '@shared/engine/arrival';
 import { messageText } from '@shared/engine/peer-envelope';
@@ -79,6 +82,12 @@ export function answerWords(text: string, questions: Read['questions']): string 
 
 const textOf = (content: SendContent): string => messageText(content as string | ContentBlock[]);
 
+/** A waiting message's answer words: null for a message that is no answer envelope, or that holds an attachment beside one. */
+function waitingAnswer(content: SendContent, questions: Read['questions']): string | null {
+  if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return null;
+  return answerWords(textOf(content), questions);
+}
+
 export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, read: Read): StackRow[] {
   const steers = new Set<string>(queue.steers.map((steer) => steer.messageUuid));
   // a submission the queue still lists is drawn as its entry, never also as a handed row
@@ -88,12 +97,12 @@ export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, rea
     .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: answerWords(unread.text, read.questions) ?? unread.text, createdAt: unread.at }));
   const next: StackRow[] = queue.steers
     .filter((steer) => !read.started(steer.messageUuid))
-    .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: answerWords(textOf(steer.content), read.questions) }));
+    .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: waitingAnswer(steer.content, read.questions) }));
   const entries = queue.entries.flatMap((entry): StackRow[] => {
-    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: answerWords(textOf(entry.content), read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt }] : [];
+    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: waitingAnswer(entry.content, read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt }] : [];
     if (entry.state !== 'queued') return []; // released: the running turn
     if (entry.uncertain) return [{ kind: 'uncertain', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt }];
-    return [{ kind: queue.paused ? 'held' : 'after', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, answer: answerWords(textOf(entry.content), read.questions) }];
+    return [{ kind: queue.paused ? 'held' : 'after', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, answer: waitingAnswer(entry.content, read.questions) }];
   });
   return [...handed, ...next, ...entries];
 }

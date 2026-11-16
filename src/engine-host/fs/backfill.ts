@@ -11,6 +11,7 @@ import { denialKindOf, INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
 import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { localCommandText } from '@shared/engine/engine-markers';
 import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
 import { notificationText, taskNotificationBlocks, type TaskNotificationBlock } from '@shared/engine/task-notification';
@@ -181,7 +182,22 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     default:
       events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
   }
-  return withWaitingWords(record.type === 'user' && arrivals.some((arrival) => arrival.class === 'wake'), events, ctx, base);
+  return splitMessages(withWaitingWords(record.type === 'user' && arrivals.some((arrival) => arrival.class === 'wake'), events, ctx, base), base);
+}
+
+// UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, Interfaces D): every `user.message` a row
+// makes passes the one split, so a line the engine joined from the person's prompt and MAWS's answer envelopes is the
+// person's message, under the id it had, and directly after it one message per envelope, under the row's next ordinals
+// (after every event the row already makes, so no id moves). A message the split leaves alone is the same object.
+function splitMessages(events: SessionEvent[], base: Base): SessionEvent[] {
+  if (!events.some((event) => event.kind === 'user.message')) return events;
+  return events.flatMap((event): SessionEvent[] => {
+    if (event.kind !== 'user.message') return [event];
+    const parts = splitPersonsMessage(event);
+    if (parts.length === 1 && parts[0] === event) return [event];
+    const { id, sessionId, at, seq, agentId, parentToolUseId } = event;
+    return parts.map((part, i) => ({ sessionId, at, seq, agentId, parentToolUseId, ...part, id: i === 0 ? id : base().id }));
+  });
 }
 
 type Base = () => EventBase;
