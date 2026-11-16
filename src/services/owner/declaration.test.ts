@@ -49,9 +49,11 @@ describe('readDeclaration', () => {
   });
 });
 
-// The tracker's reading after a reload (§A, table B: the declaration yes, no, or failed): a missing file and one that
-// does not parse to the declaring shape are a confirmed "no"; an I/O error other than "no such file" is a failed read,
-// unknown, which the tracker reads as declaring. The launch's reading (`readDeclaration`) takes a failed read as "no".
+// The tracker's reading after a reload (§A, table B: the declaration yes, no, or failed): a file missing from an
+// installation directory that is present, and one that does not parse to the declaring shape, are a confirmed "no" (an
+// installation's path names its release, so a present directory holds what the engine loaded from it); a directory
+// that is gone, or any other I/O error, is a failed read, unknown, which the tracker reads as declaring. The launch's
+// reading (`readDeclaration`) takes anything but "yes" as not declaring.
 describe('declarationOf', () => {
   let root: string;
   beforeEach(() => {
@@ -68,9 +70,8 @@ describe('declarationOf', () => {
   it('yes: the declaring file', async () => {
     expect(await declarationOf(installation('{ "toHumanView": { "drawsFrom": 9 } }'))).toBe(true);
   });
-  it('no: a missing file, a missing installation, another shape, a text that does not parse, a file past its bound', async () => {
+  it('B6 · no: the file missing from a present directory, another shape, a text that does not parse, a file past its bound', async () => {
     expect(await declarationOf(installation(null))).toBe(false);
-    expect(await declarationOf(join(root, 'nowhere'))).toBe(false);
     rmSync(join(root, 'to-human'), { recursive: true });
     expect(await declarationOf(installation('{ "drawsFrom": 9 }'))).toBe(false);
     rmSync(join(root, 'to-human'), { recursive: true });
@@ -78,7 +79,17 @@ describe('declarationOf', () => {
     rmSync(join(root, 'to-human'), { recursive: true });
     expect(await declarationOf(installation(`{ "toHumanView": { "drawsFrom": 9 } }${' '.repeat(70_000)}`))).toBe(false);
   });
-  it('failed (null): an I/O error other than “no such file”, a folder in the file’s place or a loop of links; the launch reads either as no', async () => {
+  it('B5 · failed (null): the installation directory gone (removed after the load, or never there); the launch reads it as no', async () => {
+    const path = installation('{ "toHumanView": { "drawsFrom": 9 } }');
+    expect(await declarationOf(path)).toBe(true);
+    rmSync(path, { recursive: true });
+    expect(await declarationOf(path)).toBeNull();
+    expect(await declarationOf(join(root, 'nowhere'))).toBeNull();
+    expect(await readDeclaration(path)).toBe(false);
+    writeFileSync(path, 'a file where the directory was');
+    expect(await declarationOf(path)).toBeNull();
+  });
+  it('B5 · failed (null): an I/O error other than “no such file”, a folder in the file’s place or a loop of links; the launch reads either as no', async () => {
     const folder = installation(null);
     mkdirSync(join(folder, TO_HUMAN_DECLARATION));
     expect(await declarationOf(folder)).toBeNull();

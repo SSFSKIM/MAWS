@@ -219,6 +219,37 @@ describe('the daemon stops between the send and the bind', () => {
     expect(drawnBy()).toBe('maws');
   });
 
+  it('C3 · the bind carries the host’s start time: a launch acknowledged late never holds the running launch over a later one', async () => {
+    installToHumanPlugin(configHome); // no declaration: the decided launch advertises 8
+    const first = start();
+    await first.work.settled();
+    const decided = await decide(first);
+    fire('session.status', { appSessionId: a, status: status({ launchId: 'l1', launchedAt: '2026-11-16T10:01:00.000Z', process: 'exited' }) });
+    fire('session.status', { appSessionId: a, status: status({ launchId: 'l2', launchedAt: '2026-11-16T10:02:00.000Z', process: 'starting' }) }); // another client's
+    ownerChannelLaunched({ owner: first.launches }, decided.record, { launchId: 'l1', at: '2026-11-16T10:03:00.000Z', launchedAt: '2026-11-16T10:01:00.000Z' });
+    expect(index.ownerChannel.session(a)?.advertised).toMatchObject({ launchId: 'l1', number: 8 });
+    fire('session.status', { appSessionId: a, status: status({ launchId: 'l2', launchedAt: '2026-11-16T10:02:00.000Z', process: 'ready' }) });
+    expect(drawnBy()).toBe('mod'); // l2, not recorded: not known (A4, B12); never l1's 8
+    expect(published()).not.toContain('maws');
+  });
+
+  it('B5, B6 · at 9, the reported installation’s directory: gone reads failed (mod); present without the file reads no (MAWS)', async () => {
+    installToHumanPlugin(configHome, { declares: true });
+    const first = start();
+    await first.work.settled();
+    ownerChannelLaunched({ owner: first.launches }, (await decide(first)).record, { launchId: 'l1', at: AT, launchedAt: AT });
+    expect(drawnBy()).toBe('mod'); // B3: bound, not yet reported
+    const gone = join(configHome, 'plugins', 'cache', 'doperpowers', 'to-human', '0.9.1'); // removed after the load
+    fire('session.status', { appSessionId: a, status: status({ plugins: plugin(gone), pluginsObservedAt: AT }) });
+    await first.work.settled();
+    expect(drawnBy()).toBe('mod');
+    const present = join(configHome, 'plugins', 'cache', 'doperpowers', 'to-human', '0.8.2');
+    mkdirSync(present, { recursive: true });
+    fire('session.status', { appSessionId: a, status: status({ plugins: plugin(present), pluginsObservedAt: '2026-11-16T10:05:00.000Z' }) });
+    await first.work.settled();
+    expect(drawnBy()).toBe('maws');
+  });
+
   it('a reservation the host never accepted stays unbound across the restart, and the session reads at rest', async () => {
     installToHumanPlugin(configHome, { declares: true });
     const first = start();

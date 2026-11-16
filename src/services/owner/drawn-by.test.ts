@@ -23,18 +23,15 @@ describe('WhoDraws', () => {
   let row: DrawRow | null;
   let changed: string[];
   let reads: { path: string; resolve: (declares: boolean | null) => void; reject: (error: Error) => void }[];
-  let now: string;
   let draws: WhoDraws;
   beforeEach(() => {
     row = bound('l1', 9);
     changed = [];
     reads = [];
-    now = T(1);
     draws = new WhoDraws({
       row: () => row, // null: no row, or one that cannot be read (the owner service's wiring catches the read)
       declares: (path) => new Promise((resolve, reject) => reads.push({ path, resolve, reject })),
       changed: (appSessionId) => void changed.push(`${appSessionId}:${draws.drawnBy(appSessionId)}`),
-      now: () => now,
     });
   });
   afterEach(() => draws.stop());
@@ -169,7 +166,7 @@ describe('WhoDraws', () => {
     it('B3 · a launch bound before its first status is live with its plugins not reported: a just-bound 9 is mod', () => {
       list();
       row = bound('l2', 9);
-      draws.bound(APP, 'l2');
+      draws.bound(APP, 'l2', T(1));
       expect(draws.drawnBy(APP)).toBe('mod');
       row = bound('l2', 8);
       expect(draws.drawnBy(APP)).toBe('maws');
@@ -178,7 +175,7 @@ describe('WhoDraws', () => {
     it('C2 · another launch’s exit never puts the running launch at rest, its id seen before or not (bound and observed at 9, then an unseen l1 exits)', () => {
       list();
       row = bound('l2', 9);
-      draws.bound(APP, 'l2');
+      draws.bound(APP, 'l2', T(1));
       draws.status(status({ launchId: 'l2', launchedAt: T(1), process: 'starting' }));
       draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'exited' })); // unseen
       expect(draws.drawnBy(APP)).toBe('mod');
@@ -191,8 +188,7 @@ describe('WhoDraws', () => {
       list([status({ launchId: 'l1', launchedAt: T(0) })]);
       expect(draws.drawnBy(APP)).toBe('maws');
       row = bound('l2', 9);
-      now = T(3);
-      draws.bound(APP, 'l2');
+      draws.bound(APP, 'l2', T(2));
       draws.status(status({ launchId: 'l2', launchedAt: T(2), process: 'starting' }));
       expect(draws.drawnBy(APP)).toBe('mod');
       draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'ready' })); // late, from the launch before
@@ -211,20 +207,50 @@ describe('WhoDraws', () => {
       expect(draws.drawnBy(APP)).toBe('maws'); // B14
     });
 
-    it('C3 · by the engine’s start time: a late live status of an older launch never becomes the running one', () => {
+    it('C3 · by the host’s start times: a late live status of an older launch never becomes the running one', () => {
       row = bound('l2', 9);
       list([status({ launchId: 'l2', launchedAt: T(2) })]);
       draws.status(status({ launchId: 'l1', launchedAt: T(0), process: 'ready' })); // unseen, started before the running one
       expect(draws.drawnBy(APP)).toBe('mod');
       draws.status(withPlugin(null, AT, { launchId: 'l1', launchedAt: T(0) }));
       expect(draws.drawnBy(APP)).toBe('mod'); // not l1's report: l2 is still not reported
-      // and against a launch bound before its first status, the bind's time
-      now = T(6);
+      // and against a launch bound before its first status, the start time the host's answer gave it
       row = bound('l5', 9);
-      draws.bound(APP, 'l5');
+      draws.bound(APP, 'l5', T(6));
       draws.status(status({ launchId: 'l4', launchedAt: T(5), process: 'ready' }));
       draws.status(withPlugin(null, AT, { launchId: 'l4', launchedAt: T(5) }));
       expect(draws.drawnBy(APP)).toBe('mod');
+    });
+
+    it('C3 · a launch acknowledged late: the host started l1 at 1, another client’s l2 at 2, the daemon binds l1 at 3: every status of l2 makes it the running one', () => {
+      list();
+      row = bound('l1', 8); // the decided launch, at 8
+      draws.status(status({ launchId: 'l1', launchedAt: T(1), process: 'exited' }));
+      draws.status(status({ launchId: 'l2', launchedAt: T(2), process: 'starting' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // l2: not recorded, not known (A4, B12)
+      draws.bound(APP, 'l1', T(1)); // the acknowledgement, late: older than the running l2 by the host's times
+      expect(draws.drawnBy(APP)).toBe('mod');
+      draws.status(withPlugin(NEWER, AT, { launchId: 'l2', launchedAt: T(2) }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // B13
+      // the bind before any status of l2
+      const other = 'app-late' as AppSessionId;
+      draws.bound(other, 'l1', T(1));
+      expect(draws.drawnBy(other)).toBe('maws'); // l1 bound at 8
+      draws.status(status({ appSessionId: other, launchId: 'l2', launchedAt: T(2), process: 'starting' }));
+      expect(draws.drawnBy(other)).toBe('mod');
+      draws.status(withPlugin(null, AT, { appSessionId: other, launchId: 'l2', launchedAt: T(2) }));
+      expect(draws.drawnBy(other)).toBe('maws'); // B14: l2's own report
+    });
+
+    it('C3 · a launch bound with no start time known: the order cannot be told, and an unseen live launch becomes the running one (A4: not known)', () => {
+      list();
+      row = bound('l5', 8);
+      draws.bound(APP, 'l5', null);
+      expect(draws.drawnBy(APP)).toBe('maws'); // B2: l5 bound at 8
+      draws.status(status({ launchId: 'l4', launchedAt: T(0), process: 'ready' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // l4, whatever its time: not known (B12), never MAWS on a guess
+      draws.status(status({ launchId: 'l3', launchedAt: T(0), process: 'exited' }));
+      expect(draws.drawnBy(APP)).toBe('mod'); // C2
     });
 
     it('C4 · a snapshot is not applied over a newer event of that session, nor puts it at rest', () => {
@@ -235,7 +261,7 @@ describe('WhoDraws', () => {
       expect(draws.drawnBy(APP)).toBe('maws');
       const other = 'app-other' as AppSessionId;
       const again = draws.mark();
-      draws.bound(other, 'l9');
+      draws.bound(other, 'l9', null);
       draws.listed([], again); // absent from the listing, but bound since the read was sent
       expect(draws.drawnBy(other)).toBe('mod');
     });
