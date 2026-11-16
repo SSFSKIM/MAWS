@@ -30,6 +30,7 @@
     "src/main/usage/claude-usage-reader.ts",
     "src/main/usage/request-ledger.ts",
     "test/support/agents-events.ts",
+    "test/support/ask-steer.ts", // board ticket 711: the steer as the earlier builds wrote it, for the U4b readers' suites
     "test/support/builders.ts",
     "test/support/engine-pin/index.ts",
     "test/support/events.ts",

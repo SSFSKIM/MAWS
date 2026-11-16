@@ -13,6 +13,7 @@ import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskQuestion } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
@@ -197,10 +198,11 @@ describe('the joined answer, the architect\'s review', () => {
     });
   });
 
-  // (3) the member boundary is the writer's whole first line
+  // (3) the member boundary is the writer's whole first line. Board ticket 711: only an earlier build's envelope holds the
+  // question's words, so the case is one an earlier build wrote
   describe('a question whose second line begins with the tag', () => {
     const TAGGED: AskQuestion = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
-    const envelope = envelopeOf('toolu_ask_t', TAGGED);
+    const envelope = earlierAskSteerText('toolu_ask_t', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Grid'] }]);
 
     it('its envelope alone answers the ask, and draws no bubble', () => {
       const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], envelope);
@@ -212,6 +214,41 @@ describe('the joined answer, the architect\'s review', () => {
       const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], `Also fix the footer.\n${envelope}`);
       expect(asksOf(rows)).toEqual([['toolu_ask_t', 'answered']]);
       expect(promptOf(rows)?.text).toBe('Also fix the footer.');
+    });
+  });
+
+  // board ticket 711: the host writes the new form (each question by its place, a pick by `option <k>`); joined or alone
+  // it answers the capsule with the labels the person picked, under the question's own id, and draws no envelope
+  describe('the new form', () => {
+    const PLAN: AskQuestion = { id: 'page-layout', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('toolu_ask_n', [PLAN], [{ id: 'page-layout', question: PLAN.question, status: 'answered', value: ['List'], note: 'for small screens' }]);
+    const answered = { askId: 'toolu_ask_n', state: 'answered', answers: [{ id: 'page-layout', question: '', status: 'answered', value: ['List'], note: 'for small screens' }] };
+
+    it('is the new form', () => {
+      expect(envelope).not.toContain(PLAN.question);
+      expect(envelope.split('\n')[1]).toBe('1. option 2');
+    });
+
+    it('alone: the capsule Answered with the label, and no bubble', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }], envelope);
+      expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject(answered);
+      expect(promptOf(rows)).toBeUndefined();
+    });
+
+    it('joined with a prompt, in either order: the capsule Answered, the bubble the prompt alone', () => {
+      for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
+        const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }], text);
+        expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject(answered);
+        expect(promptOf(rows)).toMatchObject({ text: 'Also fix the footer.', attachments: [] });
+        expect(copiedUserText(promptOf(rows)!)).toBe('Also fix the footer.');
+      }
+    });
+
+    it('two new-form envelopes joined, both asks answered here: no bubble', () => {
+      const other = askSteerText('toolu_ask_m', [PLAN], [{ id: 'page-layout', question: PLAN.question, status: 'skipped' }]);
+      const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }, { askId: 'toolu_ask_m', question: PLAN }], `${envelope}\n${other}`);
+      expect(asksOf(rows)).toEqual([['toolu_ask_n', 'answered'], ['toolu_ask_m', 'answered']]);
+      expect(promptOf(rows)).toBeUndefined();
     });
   });
 });
