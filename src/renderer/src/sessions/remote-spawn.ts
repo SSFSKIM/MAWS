@@ -151,6 +151,28 @@ export function takeFirstSend(appSessionId: AppSessionId): boolean {
 }
 
 /**
+ * The handed document sent once from the session's box, once its draft is restored (UX wave U6e, board ticket 675):
+ * the mark is taken as the Send runs, so a fill is refused until then (the box itself refuses one while that Send waits
+ * for a drop's conversion). A first send abandoned, with no box to send from or a restore that failed, releases the
+ * mark: the document stays the person's draft, and the box takes fills again.
+ */
+export function sendFirstOnce(appSessionId: AppSessionId, box: () => { restored(): Promise<void>; submit(): void } | null): void {
+  const editor = box();
+  if (!firstSends.has(appSessionId)) return;
+  if (editor === null) {
+    firstSends.delete(appSessionId);
+    return;
+  }
+  editor.restored().then(
+    () => {
+      const now = box();
+      if (firstSends.delete(appSessionId)) now?.submit();
+    },
+    () => void firstSends.delete(appSessionId),
+  );
+}
+
+/**
  * Whether the session's composer still holds a handed document it sends with no press of the person's (UX wave U6e,
  * board ticket 675): until it has gone, an engine plugin's fill or suggestion is refused, so a plugin's text never goes
  * out in, or with, the person's document.

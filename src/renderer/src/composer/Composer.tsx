@@ -61,7 +61,7 @@ import { Editor } from './editor/Editor';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { acquireBeforeMode, precheck, submitHumanSerialized, submitRemoteSerialized, submitSerialized, warn, type Dispatch } from './editor/submit'; // P2-0: X22 for human prompts; P2-A: acquireBeforeMode; P5 O7 M4: submitRemoteSerialized
 import { fileMentionsOf, ON_THIS_MAC } from './editor/remote-uploads'; // P5 O7 M4 (fix wave 1)
-import { firstSendPending, SPAWN_WORDS, spawnOnMachine, spawnTargetOf, takeFirstSend, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
+import { firstSendPending, sendFirstOnce, SPAWN_WORDS, spawnOnMachine, spawnTargetOf, useSpawning, useSpawnTarget } from '../sessions/remote-spawn'; // P5 O7 M4: the machine menu's spawn
 import { openDialog } from '../sessions/dialogs'; // P5 O7 M9: the machine's trust card
 import { useEffectiveEffort } from './effective-effort'; // W3
 import { autoFallbackNotice } from '@shared/sessions/models'; // W3
@@ -535,7 +535,7 @@ export function Composer({ appSessionId, paneIndex, client = ipc }: ComposerProp
   const takesMessages = !setup && controls !== null && controls.capability('send').available;
   useEffect(() => {
     // UX wave U6e (board ticket 675): taken only as it goes, so a plugin's fill or suggestion is refused until then
-    if (takesMessages && firstSendPending(appSessionId)) void handle.current?.restored().then(() => takeFirstSend(appSessionId) && handle.current?.submit());
+    if (takesMessages) sendFirstOnce(appSessionId, () => handle.current);
   }, [takesMessages, appSessionId]);
   const sessionId = status?.engineSessionId ?? record?.engineSessionId ?? null;
 
