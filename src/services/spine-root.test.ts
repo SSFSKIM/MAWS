@@ -809,6 +809,9 @@ describe('the spine and the checkouts composed under plain Node', () => {
   // sign-in each session's plugin list (the whole `session.status`) and the engine host's `plugins.changed` and
   // `plugins.operation`, so a press from a plugin's row that passed its first check is refused at its second after either
   it('composes the connector sign-in with each session’s plugin list and the engine host’s plugin events', async () => {
+    // what the root prints over this fake host, which answers neither engine command the settings push nor holds a session
+    const warned = captureConsole('warn', /^\[settings\] engine\.(configure|policy\.set) failed$/);
+    captureConsole('log', /^\[sessions\] resync: 0 rows/);
     const host = new FakeSpineHost();
     const bus = fakeBus();
     compose(await openSpineData(profile, { build: BUILD }), host, bus);
@@ -857,6 +860,7 @@ describe('the spine and the checkouts composed under plain Node', () => {
     const third = await press();
     expect(await endOf(third)).toMatchObject({ state: 'failed', reason: 'engine' });
     expect(host.calls.filter((call) => call.name === 'session.mcpAuthenticate')).toHaveLength(1);
+    expect(new Set(warned.lines())).toEqual(new Set(['[settings] engine.configure failed', '[settings] engine.policy.set failed']));
   });
 
   // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 6 and 7): the library's reads of a stored

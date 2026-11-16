@@ -23,7 +23,7 @@ import { readServerEndpoints } from '../../engine-host/customization/inventory';
 import { SessionStatusTracker } from '../../engine-host/session-status';
 import { listenLoopback, type ListenLoopback } from './oauth-callback';
 import { createRelayedCallbacks } from './relayed-callback';
-import { startSignIn, type SignInHost } from './sign-in';
+import { createSignIn, startSignIn, type SignInHost } from './sign-in';
 
 const PLUGINS_CHANGED = 'Plugins changed while this sign-in started. Try again.';
 const KEY = 'key-tides@harbour';
@@ -547,6 +547,49 @@ describe('a press from a plugin’s row (UX wave U11h, M2)', () => {
         expect(s.binds()).toBe(0);
         expect(s.authenticated()).toEqual([]);
       });
+
+      // "Already connected" is a report of a sign-in: before it is said, (a) is judged on the list kept now and nothing may
+      // have moved since point 1, as at point 3 (M2's task review). The server is connected at the row's address from the
+      // start; the baseline read is held open while the session's report changes.
+      async function connectedBaseline(change: (s: Awaited<ReturnType<typeof tidesSession>>) => void) {
+        const s = await tidesSession();
+        s.session.serve(SESSION, [served(TIDES_URL, { status: 'connected' })]);
+        s.hold('session.mcpStatus').release(); // point 1's read passes through
+        const baseline = s.hold('session.mcpStatus');
+        const opId = s.press(s.revision);
+        await baseline.noticed; // the baseline answered connected, at the row's address, and is held
+        change(s);
+        baseline.release();
+        await s.ended(opId);
+        return { s, opId };
+      }
+
+      it('point 1: a baseline connected at the row’s address is not reported as already connected once the session reports a collision', async () => {
+        const { s, opId } = await connectedBaseline((t) => t.session.reload(SESSION, [loaded(KEY), loaded(OTHER_KEY)]));
+        expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: PLUGINS_CHANGED });
+        expect(s.states(opId)).toEqual(['starting', 'failed']);
+        expect(s.binds()).toBe(0);
+        expect(s.authenticated()).toEqual([]);
+      });
+
+      it('point 1: a baseline connected at the row’s address is not reported as already connected once the session reports another owner', async () => {
+        const { s, opId } = await connectedBaseline((t) => t.session.reload(SESSION, [loaded(OTHER_KEY)]));
+        expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: PLUGINS_CHANGED });
+        expect(s.states(opId)).toEqual(['starting', 'failed']);
+      });
+
+      it('point 1: a baseline connected at the row’s address is not reported as already connected once the session reports its plugins anew', async () => {
+        const { s, opId } = await connectedBaseline((t) => t.session.init(SESSION, [loaded(KEY), BUILTIN])); // the same list, a new pluginsObservedAt
+        expect(s.last(opId)).toMatchObject({ state: 'failed', reason: 'other_entry', message: PLUGINS_CHANGED });
+        expect(s.states(opId)).toEqual(['starting', 'failed']);
+      });
+
+      it('point 1: a baseline connected at the row’s address with nothing moved is reported as already connected', async () => {
+        const { s, opId } = await connectedBaseline(() => {});
+        expect(s.last(opId)).toMatchObject({ state: 'done', reason: null, where: 'here', message: 'already connected' });
+        expect(s.binds()).toBe(0);
+        expect(s.authenticated()).toEqual([]);
+      });
     });
 
     describe('point 2', () => {
@@ -702,5 +745,56 @@ describe('a press from a plugin’s row (UX wave U11h, M2)', () => {
         expect(s.states(opId)).toEqual(['starting', 'failed']);
       });
     });
+  });
+
+  // A cancel between a passing check and its side effect is honoured (M2's task review): the operation confirms it is
+  // live after point 2's check before it sends, and after point 3's before it acts on the answer. The operation is driven
+  // directly, its check standing in for the service's; the cancel lands a number of microtasks after the check answers,
+  // swept over every step up to the side effect, and nothing may be sent or opened after the cancel.
+  describe('a cancel at each resumption', () => {
+    const entry = { plugin: KEY, name: NAME, version: '1.2.0', transport: 'http', url: TIDES_URL, revision: 'rev-tides' };
+    const afterTicks = (ticks: number, run: () => void) => {
+      let chain: Promise<void> = Promise.resolve();
+      for (let i = 0; i < ticks; i += 1) chain = chain.then(() => {});
+      void chain.then(run);
+    };
+    async function sweep(point: 2 | 3) {
+      for (let ticks = 0; ticks < 16; ticks += 1) {
+        const log: string[] = [];
+        let opId = '';
+        const host: SignInHost = {
+          async call(name, input) {
+            log.push(name);
+            const i = input as { redirectUri?: string | null };
+            if (name === 'session.mcpStatus') return { ok: true, value: { mcpServers: [served(TIDES_URL)] } } as never;
+            if (name === 'session.mcpAuthenticate') return { ok: true, value: { ok: true, answer: { authUrl: `http://127.0.0.1:9/authorize?state=s&redirect_uri=${encodeURIComponent(i.redirectUri ?? '')}`, requiresUserAction: true, callbackExpected: true, redirectScheme: 'custom', state: 's' } } } as never;
+            throw new Error(`unexpected ${name}`);
+          },
+        };
+        const signIn = createSignIn({
+          host,
+          listen: listenLoopback,
+          port: { openExternal: async () => (log.push('openExternal'), { opened: true }) },
+          emit: (event) => void log.push(`event:${event.state}`),
+          ready: () => true,
+          onSessionGone: () => () => {},
+          check: async (request, at) => {
+            if (at === 1) request.kept!.pointOne = { entry, observedAt: '2026-11-14T22:39:20.000Z', changes: 0 };
+            if (at === point) afterTicks(ticks, () => void signIn.cancel(opId));
+            return null;
+          },
+        });
+        opId = signIn.start({ name: NAME, scope: 'dynamic', cwd: null, entry: { revision: 'rev-tides' }, appSessionId: SESSION }, null).opId;
+        for (let i = 0; i < 400 && !log.includes('event:cancelled'); i += 1) await new Promise((resolve) => setTimeout(resolve, 5));
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        signIn.stop();
+        const cancelled = log.indexOf('event:cancelled');
+        expect([ticks, cancelled >= 0]).toEqual([ticks, true]);
+        expect([ticks, log.slice(cancelled + 1).filter((step) => !step.startsWith('event:'))]).toEqual([ticks, []]);
+      }
+    }
+
+    it('a cancel landing as point 2’s check answers sends no mcp_authenticate', () => sweep(2));
+    it('a cancel landing as point 3’s check answers opens no browser', () => sweep(3));
   });
 });
