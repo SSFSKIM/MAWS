@@ -89,6 +89,21 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(Array.isArray(s.content) && s.content[0]).toMatchObject({ type: 'image', source: { media_type: 'image/png', data: 'iVBO' } });
   });
 
+  // UX wave U10b (M9, §E.3; an insertion in U4's recall.ts): a prefill's pasted name is the chip's, as a dropped text
+  // file's name is; the placeholder still numbers it in the sent form
+  it('names a prefill’s pasted chip by the name given, its body sent as any pasted body', () => {
+    const body = 'Instructions of the Space “Work”, set by the user in MAWS:\nUse metres.';
+    const d = prefillToDoc({ text: 'Make a document: [Pasted text #1 +2 lines]', pasted: [{ name: 'Instructions for “Work”', text: body }] });
+    const chips = (d.content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === 'pasted');
+    expect(chips.map((chip) => [chip.attrs?.name, chip.attrs?.lines, chip.attrs?.text])).toEqual([['Instructions for “Work”', 2, body]]);
+    const s = serializeDraft(d, ctx);
+    expect(s.display).toBe('Make a document: [Pasted text #1 +2 lines]');
+    expect(s.pastedContents['1']?.content).toBe(body);
+    // a recalled row's numbered name, and a prefill that gives no body, read as before
+    const plainChips = (prefillToDoc({ text: '[Pasted text #1 +1 lines] [Pasted text #2 +1 lines]', pasted: [{ name: 'Pasted text #1', text: 'one' }] }).content ?? []).flatMap((p) => p.content ?? []).filter((n) => n.type === 'pasted');
+    expect(plainChips.map((chip) => chip.attrs?.name)).toEqual(['Pasted text #1', 'Pasted text #2']);
+  });
+
   // W3 (B6): a bubble edited in place may lose or move a placeholder, so its bodies are bound to what each one names
   it('rebuilds an edited text by what each placeholder names: a deleted or moved one takes no other’s body, an unknown one is unavailable', () => {
     const bodies = bodiesByPlaceholder({ text: 'a [Pasted text #1 +1 lines] b [Pasted text #2 +2 lines]', pasted: [{ name: 'Pasted text #1', text: 'one' }, { name: 'Pasted text #2', text: 't\nwo' }] });

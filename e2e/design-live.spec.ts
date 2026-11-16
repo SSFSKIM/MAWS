@@ -3,7 +3,7 @@
 // final mini run bundled) with the installed Claude Code (unmodified, D-1, named directly: no forwarding wrapper) under a
 // scratch CLAUDE_CONFIG_DIR and scratch user data, through ClaudeUsage's relay, on Haiku in default permission mode, one
 // session launched with `LaunchSpec.maxBudgetUsd = 1` and no retries, every permission allowed for the session through
-// the request card docked in the composer, the tool journal recorded. The window is never shown.
+// the request card at the transcript’s end (UX wave U1b), the tool journal recorded. The window is never shown.
 // One session, four prompts through the real composer:
 //   1. the agent reads the design guide and makes ONE `artifact_create` of a design from files: `project/canvas.json`
 //      and four boards (a 390×844 phone, an 834×1194 tablet, a 1440×1024 desktop and a 1080×9000 poster, taller than
@@ -205,7 +205,7 @@ test('the agent creates a four-board design from a brief; its stale publish is r
       }
     };
 
-    // one permission the session asks, allowed for the session through the card docked in the composer
+    // one permission the session asks, allowed for the session through the card at the transcript’s end (UX wave U1b)
     const allowPending = async (): Promise<boolean> => {
       const all = await events();
       const resolved = new Set(ofKind(all, 'permission.resolved').map((e) => e.requestId));

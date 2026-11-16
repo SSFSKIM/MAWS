@@ -1572,7 +1572,7 @@
   },
   {
    "name": "nested agents under an ended parent",
-   "why": "The parent was stopped (TaskStop, then its notification, killed: the newest terminal word in row order). Its foreground child's call never got a result and its background child has only its launch: with the parent over, both are exited (parent), while the session itself still runs.",
+   "why": "The parent was stopped (TaskStop, then its notification, killed: the newest terminal word in row order). Its foreground child's call never got a result and its background child has only its launch: with the parent over, both are exited (parent), while the session itself still runs. MAWS's copy differs from the shared vectors in this one entry (doperpowers issue 504; the U8d execution document's Decision Log 6, ruling N1): a background agent can outlive its parent, so the parent's end is no evidence for the background child, which reads running (rows) from its launch; the foreground child stays exited (parent).",
    "input": {
     "session": {
      "id": "d0c8a000-0000-4000-8000-00000000c0de",
@@ -1865,8 +1865,8 @@
        "requestShape": "background",
        "requestNonInteractive": true
       },
-      "status": "exited",
-      "evidence": "parent",
+      "status": "running",
+      "evidence": "rows",
       "outcome": {
        "status": "running",
        "raw": "async_launched",

@@ -6,7 +6,7 @@ import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { identitiesOf } from '../plugins/library';
 import type { ObservedPlugin } from '@shared/engine/observed-facts';
-import { badgeOf, hasPluginSkills, labelOf, skillGroups, skillsView, type SkillGroup } from './skills';
+import { badgeOf, hasPluginSkills, labelOf, skillGroups, skillsOfAll, skillsView, type SkillGroup } from './skills';
 
 const HERE = '/work/proj';
 const inst = (id: string, over: Partial<InstalledPlugin> = {}): InstalledPlugin => {
@@ -138,5 +138,12 @@ describe('the skills library: search and sort', () => {
     expect(flat(skillsView(groups, { search: 'intentional visual', sort: 'name' }))).toEqual([['here', ['frontend-design:frontend-design']]]);
     expect(skillsView(groups, { search: 'nothing like it', sort: 'name' })).toEqual([]);
     expect(skillsView(groups, { search: 'nothing like it', sort: 'plugin' })).toEqual([]);
+  });
+
+  // UX wave U11c (§E): Customize's My items, All
+  it('All: every skill in one part, by its label whatever its group, through the same search', () => {
+    expect(skillsOfAll(groups, '').map(labelOf)).toEqual(['debug', 'frontend-design', 'local-notes', 'lookup', 'policy', 'remember', 'synced-skill', 'u3-project-skill', 'u3-user-skill']);
+    expect(skillsOfAll(groups, 'mcp').map((row) => row.name)).toEqual(['lookup']);
+    expect(skillsOfAll(groups, 'nothing like it')).toEqual([]);
   });
 });

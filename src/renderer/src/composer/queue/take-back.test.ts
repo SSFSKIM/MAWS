@@ -191,9 +191,9 @@ function box(free = true) {
 }
 
 const textOf = (doc: ComposerDoc | null | undefined): string => JSON.stringify(doc ?? null).match(/"text":"([^"]*)"/)?.[1] ?? '';
-const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE, answer: null });
-const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE, answer: null });
-const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE, answer: null });
+const next = (messageUuid: MessageUuid, content: SendContent = TEXT) => ({ kind: 'next' as const, key: messageUuid, messageUuid, content, createdAt: SINCE, answer: null, grant: null });
+const after = (queueId: string, content: SendContent = TEXT) => ({ kind: 'after' as const, key: queueId, queueId, content, createdAt: SINCE, answer: null, grant: null });
+const held = (queueId: string) => ({ kind: 'held' as const, key: queueId, queueId, content: TEXT, createdAt: SINCE, answer: null, grant: null });
 const stageOf = (ref: MessageUuid, at = '2026-09-29T10:01:00.000Z') =>
   draftOf({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text: TEXT }] }], attrs: { takeBack: { ref, kind: 'steer', since: SINCE } } }, at, { whole: true })!;
 const notice = () => useComposerStore.getState().stackNotices.get(APP)?.text ?? null;

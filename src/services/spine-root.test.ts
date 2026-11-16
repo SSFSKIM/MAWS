@@ -18,7 +18,7 @@ import { startFakeBridge, type FakeBridge } from '../../test/support/fake-bridge
 import { FakeSpineHost } from '../../test/support/fake-spine-host';
 import { CHECKOUTS_COMMANDS, CONNECTORS_COMMANDS, LIBRARY_CATALOG_COMMANDS, SPINE_COMMANDS } from '../../test/support/spine-lists';
 import { FIXTURE_DIR } from '../../test/support/fixtures';
-import { item } from '../../test/support/builders';
+import { item, status as engineStatus } from '../../test/support/builders';
 import { summary, tempDir } from '../../test/support/index-fixture';
 import { GitService } from './git/service';
 import { Index } from './index/index';
@@ -297,6 +297,35 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
   });
 
+  // UX wave U8d M2 (Interfaces §A): the driver reads a watched session's agents from the engine host's listing,
+  // `fs.subagents`, then each `fs.subagentsChanged` (the owed listing and the host's streaming signal: driver.test.ts)
+  it('hands the lane A driver the engine host’s listing of a watched session’s agents, and each change of it', async () => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a9';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+    bridges.push(bridge);
+    const listed = (agentId: string) => ({ agentId, meta: { agentType: 'general-purpose' }, transcriptPath: join(dir.path, `agent-${agentId}.jsonl`), size: 0, mtimeMs: 0, runId: null });
+    const host = new FakeSpineHost();
+    host.answer('fs.subagents', ({ appSessionId: asked }) => ({ agents: asked === appSessionId ? [listed('a0b1c2d3e4f500001')] as never : [] }));
+    // the host's holder registry still says the terminal holds it, so the connect's fold keeps the session driven
+    host.answer('fs.state', () => ({ configHome: '/nonexistent/.claude', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [{ sessionId: engineSessionId as SessionId, appSessionId, holder: { kind: 'terminal', pid: 4242 } }], lastScanAt: null, lastScan: null }));
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
+    expect(await bus.invoke('laneA.watch', { appSessionId })).toMatchObject({ ok: true });
+    const agentIds = () => {
+      const bodies = bus.emittedOf('laneA.plane').filter((p) => p.appSessionId === appSessionId).flatMap((p) => ('messages' in p ? p.messages : [])).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents');
+      return ((bodies.at(-1)?.body as { subagents?: { agentId: string; status: string }[] } | undefined)?.subagents ?? []).map((a) => `${a.agentId} ${a.status}`);
+    };
+    await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown']);
+    host.emit('fs.subagentsChanged', { appSessionId, agents: [listed('a0b1c2d3e4f500001'), listed('a0b1c2d3e4f500002')] as never });
+    await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown', 'a0b1c2d3e4f500002 unknown']);
+  });
+
   // UX wave U1a (UC-1, Interfaces §B, "One holder"; the review of M1): an answer the bridge took leaves the machine's list,
   // its attention.changed and the session's digest through the root's own wiring, while the bridge still lists it (it
   // settles nothing here). The badge is main's count over these same items (`src/main/attention/notifier.ts`, whose test
@@ -538,6 +567,45 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(await read(C, 'written.txt')).toMatchObject({ ok: true, value: { content: 'written.txt\n', named: true } });
     expect(await read(C, 'stale.txt'), 'the old file is not read').toEqual(REFUSED);
     expect(await read(U, 'kept.txt'), 'no engine session id, no transcript').toEqual(REFUSED);
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B Wiring; decision 21, S11): the
+  // grants of chosen files are a file of the profile, read at the open and reconciled with the view, so a session the view
+  // no longer knows loses its grants; a file the session's agent sent is admitted for a save by its record's maker; and
+  // the profile itself is MAWS's own, never written, also through a chat whose folder holds it
+  it('keeps the grants in the profile, drops those of a session the view no longer knows, admits a sent file, and writes nothing of the profile', async () => {
+    const repository = realpathSync(mkdtempSync(join(dir.path, 'repository-')));
+    const outside = realpathSync(mkdtempSync(join(dir.path, 'outside-')));
+    for (const name of ['kept.txt', 'chosen.txt', 'sent.txt']) writeFileSync(join(outside, name), `${name}\n`);
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const K = seeded.sessions.upsertFromSummary(summary({ directory: repository })).record.appId;
+    const W = seeded.sessions.upsertFromSummary(summary({ directory: dir.path })).record.appId; // a chat whose folder holds the profile
+    seeded.close();
+    const grantsFile = writeAt(join(profile, 'sessions', 'file-grants.json'), JSON.stringify({ version: 1, sessions: { [K]: [{ real: join(outside, 'kept.txt'), at: 1 }], 'a-deleted-session': [{ real: join(outside, 'kept.txt'), at: 1 }] } }));
+    const sent = join(outside, 'sent.txt');
+    const ART = '00000000-0000-4000-8000-0000000000e6';
+    const host = new FakeSpineHost();
+    host.answer('library.snapshot', () => ({
+      artifacts: [{ id: ART, kind: 'file', title: 'sent.txt', createdBy: { kind: 'session', appSessionId: K }, createdAt: 1, updatedAt: 2, lastViewedAt: null, pinned: false, agentEditsAsSuggestions: false, revision: 1, lastEditor: { kind: 'session', appSessionId: K }, lastEditedAt: 2, linkedPath: sent }],
+      links: [{ artifactId: ART, appSessionId: K, role: 'created', lastAt: 1 }],
+      spaces: [],
+    }));
+    vi.spyOn(console, 'warn').mockImplementation(() => {}); // the library's text of the stand-in artifact, which the fake host does not answer
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    expect(JSON.parse(readFileSync(grantsFile, 'utf8')).sessions, 'reconciled at the open').toEqual({ [K]: [{ real: join(outside, 'kept.txt'), at: 1 }] });
+    expect(await bus.invoke('files.read', { appSessionId: K, path: join(outside, 'kept.txt'), named: true })).toMatchObject({ ok: true, value: { content: 'kept.txt\n', named: true, outside: { real: join(outside, 'kept.txt'), writable: true } } });
+    expect(await bus.invoke('files.grant', { appSessionId: K, path: join(outside, 'chosen.txt') })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+    expect(await bus.main('files.grant', { appSessionId: K, path: join(outside, 'chosen.txt') })).toEqual({ ok: true, value: { status: 'granted', path: join(outside, 'chosen.txt') } });
+    expect(JSON.parse(readFileSync(grantsFile, 'utf8')).sessions[K]).toHaveLength(2);
+    await host.ready();
+    await vi.waitFor(async () => expect(await bus.invoke('files.read', { appSessionId: K, path: sent, named: true })).toMatchObject({ ok: true, value: { named: true, outside: { real: sent, writable: true } } }));
+    const read = await bus.invoke('files.read', { appSessionId: W, path: grantsFile, hash: true });
+    expect(read).toMatchObject({ ok: true, value: { own: true } });
+    const before = readFileSync(grantsFile, 'utf8');
+    const forged = JSON.stringify({ version: 1, sessions: { [W]: [{ real: '/', at: 1 }] } });
+    expect(await bus.invoke('files.write', { appSessionId: W, path: grantsFile, content: forged, expectedHash: read.ok ? read.value.hash! : '' })).toEqual({ ok: false, error: { code: 'internal', message: `not writable: ${grantsFile}` } });
+    expect(readFileSync(grantsFile, 'utf8')).toBe(before);
   });
 
   it('admits nothing by name in launch mode scenario, whose index is not read', async () => {
@@ -803,6 +871,64 @@ describe('the spine and the checkouts composed under plain Node', () => {
     compose(await openSpineData(profile, { build: BUILD, lock }), new FakeSpineHost(), again, { engineEnv });
     expect(await again.invoke('delivery.receipts', undefined)).toEqual({ ok: true, value: { receipts: [] } });
     lock.release();
+  });
+
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M2): the root hands the connector
+  // sign-in each session's plugin list (the whole `session.status`) and the engine host's `plugins.changed` and
+  // `plugins.operation`, so a press from a plugin's row that passed its first check is refused at its second after either
+  it('composes the connector sign-in with each session’s plugin list and the engine host’s plugin events', async () => {
+    // what the root prints over this fake host, which answers neither engine command the settings push nor holds a session
+    const warned = captureConsole('warn', /^\[settings\] engine\.(configure|policy\.set) failed$/);
+    captureConsole('log', /^\[sessions\] resync: 0 rows/);
+    const host = new FakeSpineHost();
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    const appSessionId = 'app-plugin-row' as AppSessionId;
+    const name = 'plugin:mani-tides:tides-http';
+    const url = 'https://tides.example.com/mcp';
+    host.answer('customization.serverEndpoints', () => ({ servers: [], pluginServers: [{ plugin: 'key-tides@harbour', pluginName: 'mani-tides', server: 'tides-http', name, version: '1.2.0', path: join(dir.path, 'tides', '.mcp.json'), transport: 'http', url, revision: 'rev-tides' }] }));
+    // each press reads the status at its first check, for its baseline and at its second check; the first two presses'
+    // baselines are held open (reads 2 and 5) while an event arrives
+    let reads = 0;
+    const held: (() => void)[] = [];
+    host.answer('session.mcpStatus', (() => {
+      reads += 1;
+      const answer = { mcpServers: [{ name, status: 'needs-auth', scope: 'dynamic', source: 'plugin', transport: 'http', config: { type: 'http', url } }] };
+      return reads === 2 || reads === 5 ? new Promise((resolve) => held.push(() => resolve(answer))) : answer;
+    }) as never);
+    host.emit('session.status', { appSessionId, status: { ...engineStatus(appSessionId), cwd: dir.path, plugins: [{ name: 'mani-tides', path: join(dir.path, 'marketplace', 'tides'), source: 'key-tides@harbour', version: '1.2.0' }], pluginsObservedAt: '2026-11-14T22:39:20.000Z' } });
+    const press = async () => {
+      const receipt = await bus.invoke('connectors.signInDynamicServer', { name, appSessionId, entry: { revision: 'rev-tides' } });
+      if (!receipt.ok) throw new Error(receipt.error.message);
+      return receipt.value.opId;
+    };
+    const endOf = async (opId: string) => {
+      await vi.waitFor(() => expect(['done', 'failed', 'cancelled']).toContain(bus.emittedOf('connectors.signInChanged').filter((e) => e.opId === opId).at(-1)?.state));
+      return bus.emittedOf('connectors.signInChanged').filter((e) => e.opId === opId).at(-1);
+    };
+    const changed = { state: 'failed', reason: 'other_entry', message: 'Plugins changed while this sign-in started. Try again.' };
+
+    const first = await press();
+    await vi.waitFor(() => expect(held).toHaveLength(1));
+    host.emit('plugins.changed', {});
+    held[0]!();
+    expect(await endOf(first)).toMatchObject(changed);
+
+    const second = await press();
+    await vi.waitFor(() => expect(held).toHaveLength(2));
+    host.emit('plugins.operation', { opId: 'op-reef', action: 'install', target: 'key-reef@harbour', phase: 'started' });
+    held[1]!();
+    expect(await endOf(second)).toMatchObject(changed);
+    expect(host.calls.filter((call) => call.name === 'session.mcpAuthenticate')).toEqual([]);
+
+    // that operation done, and nothing else heard: the press passes both checks and the engine is asked (this fake host
+    // does not answer the call)
+    host.emit('plugins.operation', { opId: 'op-reef', action: 'install', target: 'key-reef@harbour', phase: 'done', outcome: { ok: true, result: {} } });
+    const third = await press();
+    expect(await endOf(third)).toMatchObject({ state: 'failed', reason: 'engine' });
+    expect(host.calls.filter((call) => call.name === 'session.mcpAuthenticate')).toHaveLength(1);
+    expect(new Set(warned.lines())).toEqual(new Set(['[settings] engine.configure failed', '[settings] engine.policy.set failed']));
   });
 
   // P5 O4 M3 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, acceptance 6 and 7): the library's reads of a stored

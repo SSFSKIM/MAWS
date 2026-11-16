@@ -1,14 +1,23 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { EngineSessionStatus } from '@shared/engine/status';
-import type { AppSessionId, TaskId } from '@shared/graph/ids';
-import { status } from '../../../../../test/support/builders';
-import { createSessionsStore } from '../../stores/sessions';
+import type { AgentId, AppSessionId, TaskId } from '@shared/graph/ids';
+import type { SubagentEntry } from '@shared/ipc/schema/fs';
+import type { SessionRecord } from '@shared/graph/session';
+import type { LaneAAgent } from '@shared/lane-a/agents';
+import { addressOf, bareOf } from '@shared/machine/address';
+import { record, status } from '../../../../../test/support/builders';
+import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { laneAState } from '../../lane-a/test-support/lane-a-state';
+import { resetLaneAWatches } from '../../lane-a/watches';
+import { applyLaneAState, noteLaneAAgents, resetLaneAStore, useLaneA } from '../../stores/lane-a';
+import { createSessionsStore, useSessions } from '../../stores/sessions';
+import { preloadOf } from '../../test-support/preload-of';
 import { setAgentWorkClient } from './client';
 import { applyTaskEvents, emptyGraph } from './model/task-graph';
-import { createTaskGraphStore, STOP_SETTLE_MS } from './store';
+import { createTaskGraphStore, registerRemoteTaskFeed, STOP_SETTLE_MS } from './store';
 import { event, replayed, sidecarsOf, upTo } from '../../../../../test/support/agents-events';
 import { fakeAgentWorkClient, flush, type FakeAgentWorkClient } from './fake-work-client';
-import { TEST_MACHINE } from '../../../../../test/support/machine';
+import { at as address, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 
 const A = 'A' as AppSessionId;
 const pass1 = replayed('pass1', 'subagent');
@@ -423,5 +432,290 @@ describe('task graph store', () => {
       await flush();
       expect(nodeOf('bgx')?.stopping).toBe(true);
     });
+  });
+});
+
+// UX wave U8d (M3; Interfaces §C): a terminal session this Mac drives. The store holds its lane A watch while its graph is
+// watched, and publishes the graph its own reads built (the sidecars from disk; the wire of a launch by this app, when a
+// status is held) with the statuses the watch carried laid over it. They stand while the terminal they came from holds
+// the session and after it let go of it; this app, another terminal or another machine taking it discards them.
+describe('a terminal session this Mac drives', () => {
+  const D = address('drv' as AppSessionId);
+  const E = address('drv-2' as AppSessionId);
+  const EARLIER = '2026-11-14T09:00:00.000Z'; // an earlier run of the session by this app
+  const T1 = '2026-11-15T10:00:00.000Z';
+  const T2 = '2026-11-15T10:05:00.000Z';
+  const LATER = '2026-11-15T11:00:00.000Z'; // a launch by this app after the terminal's run
+  let bridge: FakeClient;
+  const releases: (() => void)[] = [];
+
+  const sidecar = (agentId: string, over: Record<string, unknown> = {}): SubagentEntry => ({
+    agentId: agentId as AgentId,
+    meta: { agentType: 'general-purpose', description: `Agent ${agentId}`, toolUseId: `toolu_${agentId}`, spawnDepth: 1, requestShape: 'background', ...over },
+    transcriptPath: `/work/agents/agent-${agentId}.jsonl`, size: 10, mtimeMs: 1_790_000_000_000, runId: null,
+  });
+  const meta = (agentId: string) => ({ agentType: 'general-purpose', description: `Agent ${agentId}`, toolUseId: `toolu_${agentId}` });
+  const running = (agentId: string, over: Partial<LaneAAgent> = {}): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: T1 }, startedAt: T1, ...over });
+  const completed = (agentId: string): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: T2, summary: 'all green' }, startedAt: T1 });
+  const gone = (agentId: string): LaneAAgent => ({ agentId, meta: meta(agentId), status: 'exited', evidence: 'session', startedAt: T1 });
+  // the driver's body, naming the terminal its facts came from (the session's holder in these cases, pid 4242)
+  const plane = (id: AppSessionId, kind: 'snapshot' | 'subagents', subagents: LaneAAgent[], origin = 'terminal:4242') =>
+    bridge.event('laneA.plane', { appSessionId: bareOf(id), watch: 'w1', messages: [{ project: '', machine: 'm', session: 'eng-1', kind, sub: 'w1', n: kind === 'snapshot' ? 0 : 1, body: kind === 'snapshot' ? { streaming: [], usage: null, jobs: [], subagents, origin } : { subagents, jobs: [], mcp: [], origin } }] });
+  const watchEnded = (id: AppSessionId) => bridge.event('laneA.plane', { appSessionId: bareOf(id), watch: 'w1', ended: 'the session’s bridge went away' });
+  const entryOf = (id: AppSessionId) => store.getState().entries.get(id)!;
+  const statusesOf = (id: AppSessionId) => Object.fromEntries([...entryOf(id).graph.tasks.values()].map((n) => [n.taskId, n.status]));
+  const setStatusOf = (id: AppSessionId, s: EngineSessionStatus) => sessions.getState().applyStatus({ appSessionId: id, status: s }, TEST_MACHINE);
+  // the session's holder as the page's records say it (the terminal that drives it is pid 4242)
+  const TERMINAL = { kind: 'terminal', pid: 4242 } as const;
+  const holderOf = (id: AppSessionId, holder: SessionRecord['holder']) => useSessions.setState((s) => ({ records: new Map(s.records).set(id, record(id, { holder })) }));
+  const earlierRun = (id: AppSessionId) => ({ ...status(id), launchId: 'earlier', launchedAt: EARLIER, process: 'exited' as const });
+  // the store's watch of a session with no engine status here, its disk answered with these sidecars
+  const watchDisk = async (id: AppSessionId, sidecars: SubagentEntry[]) => {
+    const release = store.getState().watch(id);
+    await fake.answer('subagents', sidecars);
+    await fake.answer('workflows', []);
+    await flush();
+    return release;
+  };
+
+  beforeEach(() => {
+    bridge = fakeClient({ 'laneA.watch': { watch: 'w1' }, 'laneA.unwatch': null });
+    window.maws = preloadOf(bridge);
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(Date.parse(T1));
+    // the page's sessions store, which the watch reads the holder from
+    sessions = useSessions;
+    store = createTaskGraphStore({ sessions });
+    // every watch a case takes is let go after it: the sessions store is the page's, and a store left bound to it would
+    // answer the next case's statuses and lane A changes
+    const watch = store.getState().watch;
+    store.setState({ watch: (id) => (releases.push(watch(id)), releases.at(-1)!) });
+    holderOf(D, TERMINAL);
+    holderOf(E, TERMINAL);
+    applyLaneAState(D, laneAState(D));
+    applyLaneAState(E, laneAState(E));
+  });
+  afterEach(() => {
+    releases.splice(0).forEach((release) => release());
+    resetLaneAWatches();
+    resetLaneAStore();
+    useSessions.setState({ records: new Map(), engine: new Map(), listed: new Map() });
+  });
+
+  // The panel's finding (fix-wave-panel.md): the statuses are fenced by where they came from, not by time. When this
+  // app launches a replacement, the terminal's driver is dropped and its final body goes out; the page can hear it before
+  // or after the replacement's first status, and its receipt is later than the replacement's launch either way.
+  const replacement = (id: AppSessionId) => ({ ...status(id), launchId: 'second', launchedAt: T1 });
+  const replacementFrames = [event('subagent.started', { taskId: 'a1' }, { seq: 1, launch: 'second' }), event('subagent.finished', { taskId: 'a1', status: 'stopped' }, { seq: 2, launch: 'second' })];
+
+  it('does not lay the driver’s final body, heard before the replacement’s first status, once this app holds the session', async () => {
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [running('a1')]);
+    vi.setSystemTime(Date.parse(T2)); // received after the replacement's launch
+    plane(D, 'subagents', [gone('a1')]); // the dropped driver's final body
+    watchEnded(D);
+    holderOf(D, { kind: 'self' });
+    setStatusOf(D, replacement(D));
+    applyLaneAState(D, null);
+    await fake.answer('events', { events: replacementFrames, lastSeq: 2, complete: true });
+    expect(statusesOf(D)).toEqual({ a1: 'stopped' }); // the replacement's own reading
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+  });
+
+  it('does not lay the driver’s final body heard after the replacement’s first status', async () => {
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [running('a1')]);
+    holderOf(D, { kind: 'self' });
+    setStatusOf(D, replacement(D));
+    vi.setSystemTime(Date.parse(T2));
+    plane(D, 'subagents', [gone('a1')]); // a driver that no longer holds the session
+    watchEnded(D);
+    applyLaneAState(D, null);
+    await fake.answer('events', { events: replacementFrames, lastSeq: 2, complete: true });
+    expect(statusesOf(D)).toEqual({ a1: 'stopped' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+  });
+
+  it('discards the statuses when the session is handed to another machine, and does not lay them again when it comes back', async () => {
+    let remote = false;
+    const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'a1' }, { seq: 1 })]);
+    const off = registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null));
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [gone('a1')]);
+    watchEnded(D);
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    remote = true;
+    useSessions.setState({ listed: new Map() }); // the listing moved: the store binds the session to that machine's feed
+    expect(entryOf(D).graph).toBe(fed);
+    remote = false;
+    useSessions.setState({ listed: new Map() }); // and back to this machine's reads
+    await fake.answer('subagents', [sidecar('a1')]);
+    await fake.answer('workflows', []);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    off();
+  });
+
+  // The fence review's third finding: a first bind to another machine's feed, with no binding to this machine's reads
+  // before it on this watch, discards this Mac's statuses all the same (ruling point 5).
+  it('discards this Mac’s kept statuses at a first bind to another machine’s feed, so that coming back to this machine’s reads lays none', async () => {
+    let remote = false;
+    const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'a1' }, { seq: 1 })]);
+    releases.push(registerRemoteTaskFeed((id) => (id === D && remote ? (onGraph) => (onGraph(fed), () => {}) : null)));
+    const release = await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [gone('a1')]);
+    watchEnded(D);
+    holderOf(D, { kind: 'none' });
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    release(); // nothing watches the graph: no binding follows the listing
+    remote = true;
+    store.getState().watch(D); // bound to that machine's feed from the start
+    expect(entryOf(D).graph).toBe(fed);
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    remote = false;
+    useSessions.setState({ listed: new Map() }); // back to this machine's reads, with no new body
+    await fake.answer('subagents', [sidecar('a1')]);
+    await fake.answer('workflows', []);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown' });
+  });
+
+  it('holds the session’s lane A watch while its graph is watched and its bridge is live, and lets it go with the last watcher and when the state goes', async () => {
+    const release = store.getState().watch(D);
+    await flush();
+    expect(bridge.invoked('laneA.watch')).toEqual([{ appSessionId: bareOf(D) }]);
+    release();
+    expect(bridge.invoked('laneA.unwatch')).toEqual([{ appSessionId: bareOf(D), watch: 'w1' }]);
+    store.getState().watch(D);
+    await flush();
+    expect(bridge.invoked('laneA.watch')).toHaveLength(2);
+    applyLaneAState(D, null);
+    expect(bridge.invoked('laneA.unwatch')).toHaveLength(2);
+    applyLaneAState(D, laneAState(D, { bridge: 'starting', reason: 'starting' }));
+    await flush();
+    expect(bridge.invoked('laneA.watch')).toHaveLength(3);
+  });
+
+  it('lays the body’s statuses over the sidecars it read: sidecars then a body, and a body then sidecars, publish the same graph', async () => {
+    const body = [completed('a1'), running('a2')];
+    await watchDisk(D, [sidecar('a1'), sidecar('a2')]);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown', a2: 'unknown' });
+    plane(D, 'snapshot', body);
+    expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'running' });
+    expect(entryOf(D).graph.tasks.get('a2' as TaskId)).toMatchObject({ startedAt: T1, endedAt: null });
+    expect(entryOf(D).graph.tasks.get('a1' as TaskId)).toMatchObject({ startedAt: T1, endedAt: T2, summary: 'all green' });
+    store.getState().watch(E);
+    await flush();
+    plane(E, 'snapshot', body);
+    await fake.answer('subagents', [sidecar('a1'), sidecar('a2')]);
+    await fake.answer('workflows', []);
+    expect(entryOf(E).graph.tasks).toEqual(entryOf(D).graph.tasks);
+  });
+
+  it('publishes the same object after a body that says the same again, and lays a later body over its reads’ graph, never over the earlier overlay', async () => {
+    await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [running('a1', { spawn: { parentAgentId: 'p0', subagentType: 'general-purpose', description: 'Agent a1' } })]);
+    expect(entryOf(D).graph.tasks.get('a1' as TaskId)?.agent?.parentAgentId).toBe('p0');
+    const laid = entryOf(D);
+    plane(D, 'subagents', [running('a1', { spawn: { parentAgentId: 'p0', subagentType: 'general-purpose', description: 'Agent a1' } })]);
+    expect(entryOf(D)).toBe(laid);
+    plane(D, 'subagents', [running('a1', { startedAt: undefined })]);
+    expect(entryOf(D).graph.tasks.get('a1' as TaskId)).toMatchObject({ status: 'running', startedAt: null, agent: expect.objectContaining({ parentAgentId: null }) });
+    fake.subagentsChanged(D, [sidecar('a1'), sidecar('a3')]); // a reduction of its own, from the reads' graph, laid over again
+    expect(statusesOf(D)).toEqual({ a1: 'running', a3: 'unknown' });
+  });
+
+  // §C: the same object after a change that alters no node. What a status rests on is in the body but on no node.
+  it('publishes the same object after a body whose change alters no node: a running agent’s evidence moving from the rows to the bridge', async () => {
+    await watchDisk(D, [sidecar('a1'), sidecar('a2')]);
+    plane(D, 'snapshot', [running('a1'), completed('a2')]);
+    const laid = entryOf(D);
+    plane(D, 'subagents', [running('a1', { evidence: 'bridge', running: true, outcome: undefined }), completed('a2')]);
+    expect(useLaneA.getState().agents.get(D)?.agents[0]).toMatchObject({ evidence: 'bridge' }); // a new list was noted
+    expect(entryOf(D)).toBe(laid);
+    plane(D, 'subagents', [running('a1', { evidence: 'bridge', running: true, outcome: undefined }), gone('a2')]);
+    expect(statusesOf(D)).toEqual({ a1: 'running', a2: 'exited' }); // a change that alters a node is published
+  });
+
+  it('keeps the statuses when the watch ends after a body with none running, and reads from disk again when it ends with one running', async () => {
+    await watchDisk(D, [sidecar('a1'), sidecar('a2')]);
+    plane(D, 'snapshot', [completed('a1'), gone('a2')]);
+    watchEnded(D);
+    expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'exited' });
+    await flush(); // the bridge is live: the watch opens again
+    plane(D, 'snapshot', [completed('a1'), running('a2')]);
+    expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'running' });
+    watchEnded(D);
+    expect(statusesOf(D)).toEqual({ a1: 'unknown', a2: 'unknown' });
+  });
+
+  it('keeps the outcomes after the terminal goes, its lane A state removed last, over an exited engine status kept from an earlier run by this app', async () => {
+    setStatusOf(D, earlierRun(D));
+    store.getState().watch(D);
+    await fake.answer('events', { events: [], lastSeq: 0, complete: true });
+    await fake.answer('subagents', [sidecar('a1'), sidecar('a2')]);
+    await fake.answer('workflows', []);
+    await flush();
+    plane(D, 'snapshot', [completed('a1'), running('a2')]);
+    plane(D, 'subagents', [completed('a1'), gone('a2')]); // the body of a gone process, then the watch's end, then the state
+    watchEnded(D);
+    holderOf(D, { kind: 'none' });
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'exited' });
+    setStatusOf(D, earlierRun(D)); // the earlier run's exited status, reaching the page after the noting
+    expect(statusesOf(D)).toEqual({ a1: 'completed', a2: 'exited' });
+    expect(useLaneA.getState().agents.get(D)?.agents).toHaveLength(2);
+  });
+
+  it('a launch by this app after the terminal’s run discards the noted statuses for good: its frames are read, and they do not return when that process exits', async () => {
+    setStatusOf(D, earlierRun(D));
+    store.getState().watch(D);
+    await fake.answer('events', { events: [], lastSeq: 0, complete: true });
+    await fake.answer('subagents', [sidecar('a1')]);
+    await fake.answer('workflows', []);
+    await flush();
+    plane(D, 'snapshot', [gone('a1')]);
+    watchEnded(D);
+    holderOf(D, { kind: 'none' });
+    applyLaneAState(D, null);
+    expect(statusesOf(D)).toEqual({ a1: 'exited' });
+    holderOf(D, { kind: 'self' });
+    setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    await fake.answer('events', { events: [event('subagent.started', { taskId: 'fresh' }, { seq: 1, launch: 'second' })], lastSeq: 1, complete: true });
+    expect(statusesOf(D)).toEqual({ a1: 'unknown', fresh: 'running' });
+    holderOf(D, { kind: 'none' });
+    setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER, process: 'exited' });
+    expect(statusesOf(D)).toEqual({ a1: 'unknown', fresh: 'exited' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+  });
+
+  it('a launch by this app that came and went while nobody watched the graph discards them all the same', async () => {
+    const release = await watchDisk(D, [sidecar('a1')]);
+    plane(D, 'snapshot', [completed('a1')]);
+    watchEnded(D);
+    holderOf(D, { kind: 'none' });
+    applyLaneAState(D, null);
+    release();
+    holderOf(D, { kind: 'self' });
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined(); // the holder's change, watched or not
+    holderOf(D, { kind: 'none' });
+    setStatusOf(D, { ...status(D), launchId: 'second', launchedAt: LATER, process: 'exited' });
+    store.getState().watch(D);
+    expect(useLaneA.getState().agents.get(D)).toBeUndefined();
+    expect(statusesOf(D)).toEqual({ a1: 'unknown' });
+  });
+
+  it('leaves a session bound to another machine’s feed as its feed draws it, whatever this page noted for it', async () => {
+    const R = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
+    const fed = applyTaskEvents(emptyGraph(), [event('subagent.started', { taskId: 'r1' }, { seq: 1 })]);
+    const off = registerRemoteTaskFeed((id) => (id === R ? (onGraph) => (onGraph(fed), () => {}) : null));
+    noteLaneAAgents(R, [completed('r1')], null);
+    store.getState().watch(R);
+    expect(entryOf(R).graph).toBe(fed);
+    noteLaneAAgents(R, [gone('r1')], null);
+    expect(entryOf(R).graph).toBe(fed);
+    off();
   });
 });

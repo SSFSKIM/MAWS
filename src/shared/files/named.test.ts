@@ -6,6 +6,10 @@ import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { AnchorSchema } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, MESSAGE_COMMENTS_MAX, readAnchoredMessage } from '@shared/anchor/message';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
+import { askSteerText } from '@shared/maws/ask';
+import { loadUxwaveTranscript } from '../../../test/support/fixtures';
+import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
@@ -520,7 +524,9 @@ describe('isMcpTool and anchorPaths', () => {
 const text = (value: string) => ({ type: 'text', text: value });
 const assistant = (...content: object[]) => ({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content } });
 const call = (id: string, name: string, input: object) => ({ type: 'tool_use', id, name, input });
-const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: 'u1', message: { role: 'user', content }, ...extra });
+// A `user` row carries the person's origin as the engine writes it on a typed prompt (Decision Log 22: only such a row
+// counts as the person's); `extra` overrides it.
+const user = (content: string | object[], extra: object = {}) => ({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content }, ...extra });
 const result = (id: string, content: string | object[]) => ({ type: 'tool_result', tool_use_id: id, content });
 const queued = (prompt: string | object[], extra: object = {}) => ({
   type: 'attachment',
@@ -614,6 +620,218 @@ describe('rowClaim', () => {
     expect(callClass(assistant(call('t1', 'Edit', {})), 't2')).toBeNull();
     expect(callClass(user([result('t1', LINK)]), 't1')).toBeNull();
     expect(callClass(null, 't1')).toBeNull();
+  });
+});
+
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8, "Reported" 17): a
+// `user` row's text counts as the person's message only when the person wrote it, read off the row's own marks by U3a's
+// reader (`readArrivals`): no arrival, or only the person's own words sminos delivered. Every other arrival is text
+// someone else wrote: it names the path for a read, as a tool's result does, and for a save never. The rows are the
+// probes' recorded ones (spikes/protocol-probe/fixtures/uxwave/), their words replaced by an invented link.
+describe('rowClaim: a user row the person did not write', () => {
+  const OTHER = { names: false, pending: [], other: true };
+  // A recorded row with one run of its words replaced, the row's marks kept as recorded
+  const recorded = (name: string, line: number, words: string, by: string): unknown => {
+    const row = loadUxwaveTranscript(name)[line - 1];
+    const json = JSON.stringify(row);
+    expect(json, `${name}:${line}`).toContain(words);
+    return JSON.parse(json.replace(words, by.replace(/\\/g, '\\\\').replace(/"/g, '\\"')));
+  };
+  const classes = (row: unknown) => readArrivals(row).map((arrival) => arrival.class);
+  // The bridge's delivery of the person's words, recorded; and the same row as a peer's, its frame naming a session
+  const ownByBridge = () => recorded('u3-sminos-r1-terminal', 37, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`);
+  const peerByBridge = () => JSON.parse(JSON.stringify(ownByBridge()).replace('from human id=5aa95008', 'from session:7ef6ac00 id=5aa95008')) as unknown;
+
+  // Decision Log 22 (amending 8): the person's typed prompt names the path; the person's words sminos delivered come in a
+  // row of the plugin's origin, which is never the person's own text, whatever the reader reads off it: a read only.
+  it('names the path for the person’s typed prompt; the person’s words sminos delivered name it for a read only', () => {
+    const typed = recorded('u3-sminos-r1-maws', 3, 'Without using any tool, reply with only the word READY.', `Open ${LINK}`);
+    expect([classes(typed), classes(ownByBridge())]).toEqual([[], ['own']]);
+    expect(rowClaim(typed, P)).toEqual({ names: true });
+    expect(rowClaim(ownByBridge(), P)).toEqual(OTHER);
+  });
+
+  // The inbox's deliveries are meta rows, which the window draws no bubble for: they name nothing, as on master
+  it('names nothing by a meta row the inbox delivered, whoever wrote it', () => {
+    const rows = [
+      recorded('u3-sminos-r1-maws', 32, 'UXW owner idle: reply with only the word ONE.', `Open ${LINK}`),
+      recorded('u3-sminos-r1-maws', 41, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`),
+      recorded('u3-sminos-r1-terminal', 46, 'UXW peer idle: reply with only the word TWO.', `Open ${LINK}`),
+      recorded('u3-tasks-r1', 104, 'PONG', `PONG ${LINK}`),
+    ];
+    expect(rows.map(classes)).toEqual([['own'], ['peer'], ['peer'], ['subagent']]);
+    for (const row of rows) expect(rowClaim(row, P), JSON.stringify(row)).toEqual({ names: false, pending: [] });
+  });
+
+  it.each([
+    ['a peer session’s message the bridge delivered', peerByBridge, 'peer'],
+    ['a background task’s notification', () => recorded('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote ${LINK}`), 'task'],
+    ['MAWS’s consent message', () => user(consentMessage('command', `open ${LINK}`), { origin: { kind: 'human' } }), 'consent'],
+    ['MAWS’s answer envelope', () => user(askSteerText('toolu_f', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]), { origin: { kind: 'human' } }), 'answer'],
+  ])('names it for a read only, as a tool’s result does: %s', (_, row, kind) => {
+    expect(classes(row())).toContain(kind);
+    expect(rowClaim(row(), P)).toEqual(OTHER);
+  });
+
+  it('asks the reader only of a row whose text links the path', () => {
+    const peer = JSON.parse(JSON.stringify(peerByBridge()).replace(`Open ${LINK}`, 'Nothing linked here.')) as unknown;
+    expect(classes(peer)).toEqual(['peer']);
+    expect(rowClaim(peer, P)).toEqual({ names: false, pending: [] });
+  });
+});
+
+// UX wave U6e, Decision Log 22 (amending 8): the person's own text fails closed. Only a row positively the person's
+// counts for a save: a `user` row, or a queued prompt, whose origin is the person's (`human`, what the pinned engine
+// writes on every typed prompt: the recorded rows of 2.1.322 under spikes/protocol-probe/fixtures/uxwave/ carry
+// `origin: { kind: 'human' }`, and the only non-meta rows of plain text with no origin there are a subagent's prompt in
+// its sidecar and a teammate's) and that the reader reads no other arrival off. Every other origin, a plugin's with
+// `asUser` or without, and a row with none, names the path for a read only on the idle row and nothing on the queued
+// one, as before.
+describe('rowClaim: only a row positively the person’s counts (Decision Log 22)', () => {
+  const OTHER = { names: false, pending: [], other: true };
+  const NOTHING = { names: false, pending: [] };
+  const words = `Open ${LINK}`;
+  // Every origin kind the schema, the engine (2.1.322's bundle) and the recorded fixtures know, and none at all
+  const origins: [string, object | undefined][] = [
+    ['the sminos plugin, as the user', { kind: 'plugin', name: 'sminos', asUser: true }],
+    ['the sminos plugin', { kind: 'plugin', name: 'sminos' }],
+    ['another plugin', { kind: 'plugin', name: 'notes' }],
+    ['a peer', { kind: 'peer' }],
+    ['a coordinator', { kind: 'coordinator' }],
+    ['a task notification', { kind: 'task-notification' }],
+    ['the SDK', { kind: 'sdk' }],
+    ['a channel', { kind: 'channel', server: 'news' }],
+    ['the composer', { kind: 'composer' }],
+    ['an auto-continuation', { kind: 'auto-continuation' }],
+    ['an observer’s activity', { kind: 'observer-activity' }],
+    ['an unclassified intent', { kind: 'unclassified' }],
+    ['a voice call', { kind: 'voice-call' }],
+    ['a remote call', { kind: 'remote' }],
+    ['a suggestion', { kind: 'suggestion' }],
+    ['a person’s focus (no prompt’s kind)', { kind: 'person' }],
+    ['no origin at all', undefined],
+  ];
+  const queuedOf = (origin: object | undefined) => {
+    const row = queuedPrompt(words) as { attachment: Record<string, unknown> };
+    const attachment = { ...row.attachment };
+    if (origin === undefined) delete attachment.origin;
+    else attachment.origin = origin;
+    return { ...row, attachment };
+  };
+
+  it('names the path for the person’s typed prompt and queued message (origin human)', () => {
+    expect(rowClaim(user(words, { origin: { kind: 'human' } }), P)).toEqual({ names: true });
+    expect(rowClaim(queuedOf({ kind: 'human' }), P)).toEqual({ names: true });
+  });
+
+  it.each(origins)('a user row of %s names it for a read only; queued, it names nothing', (_, origin) => {
+    const row = user(words, { origin }); // `origin: undefined` drops the builder's: a row with none
+    expect(rowClaim(row, P)).toEqual(OTHER);
+    expect(rowClaim(queuedOf(origin), P)).toEqual(NOTHING);
+  });
+});
+
+// The panel's finding 2: a prompt queued in a running turn is the person's text only as a `user` row is: the queued
+// branch answers what the idle one answers for the same text (NAMES for the person's own, OTHER for a text someone else
+// wrote that links the path). Queued rows of another origin name nothing, as on master.
+describe('rowClaim: a queued prompt the person did not write', () => {
+  const OTHER = { names: false, pending: [], other: true };
+  const NOTHING = { names: false, pending: [] };
+  const classes = (row: unknown) => readArrivals(row).map((arrival) => arrival.class);
+  const answer = askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]);
+
+  it('names the path for the person’s queued message, as for the same text typed at rest', () => {
+    const queued = queuedPrompt(`Open ${LINK}`);
+    expect(classes(queued)).toEqual([]);
+    expect(rowClaim(queued, P)).toEqual({ names: true });
+    expect(rowClaim(user(`Open ${LINK}`, { origin: { kind: 'human' } }), P)).toEqual({ names: true });
+  });
+
+  it.each([
+    ['MAWS’s answer envelope', answer, 'answer'],
+    ['MAWS’s consent message', consentMessage('command', `open ${LINK}`), 'consent'],
+  ])('names it for a read only, as the idle row does: %s queued', (_, text, kind) => {
+    const queued = queuedPrompt(text);
+    expect(classes(queued)).toEqual([kind]);
+    expect(rowClaim(queued, P)).toEqual(OTHER);
+    expect(rowClaim(user(text, { origin: { kind: 'human' } }), P)).toEqual(OTHER);
+  });
+
+  it('names nothing by a queued peer message or a queued notification, as on master', () => {
+    const peer = queuedPeerMessage(`Open ${LINK}`);
+    const notice = queuedNotification(`Wrote ${LINK}`);
+    expect([classes(peer), classes(notice)]).toEqual([['peer'], ['task']]);
+    for (const row of [peer, notice]) expect(rowClaim(row, P), JSON.stringify(row).slice(0, 200)).toEqual(NOTHING);
+  });
+});
+
+// The table of decision 22 over the repository's recorded transcripts: a record names a path by a counted form only as
+// the agent's text or a tool call's input, a queued prompt of the person's, or a `user` row the person wrote; a tool's
+// result never names one by itself.
+describe('rowClaim: decision 22’s table over the recorded transcripts', () => {
+  const FIXTURES = join(__dirname, '../../../test/fixtures/transcripts');
+  const UXWAVE = join(__dirname, '../../../spikes/protocol-probe/fixtures/uxwave');
+  const rows = [
+    ...readdirSync(FIXTURES).filter((name) => name.endsWith('.jsonl')).map((name) => join(FIXTURES, name)),
+    ...readdirSync(UXWAVE).filter((name) => name.endsWith('.transcript.jsonl')).map((name) => join(UXWAVE, name)),
+  ].flatMap((file) =>
+    readFileSync(file, 'utf8').split('\n').flatMap((line) => {
+      try {
+        return [JSON.parse(line) as Record<string, unknown>];
+      } catch {
+        return [];
+      }
+    }),
+  );
+  // every path a record could be asked about: each link's and chip's, and an edit's result
+  const pathsIn = (row: Record<string, unknown>): string[] => {
+    const found = new Set<string>();
+    const walk = (value: unknown): void => {
+      if (typeof value === 'string') for (const path of linkPaths(value)) found.add(path);
+      else if (Array.isArray(value)) value.forEach(walk);
+      else if (value !== null && typeof value === 'object') {
+        const block = value as Record<string, unknown>;
+        if (block.type === 'tool_use' && typeof block.name === 'string') {
+          const chip = chipPath(block.name, block.input);
+          if (chip) found.add(normalizeLexically(chip));
+        }
+        Object.values(block).forEach(walk);
+      }
+    };
+    walk(row);
+    const edited = (row.toolUseResult as { filePath?: unknown } | undefined)?.filePath;
+    if (typeof edited === 'string') found.add(normalizeLexically(edited));
+    return [...found];
+  };
+  const personWrote = (row: Record<string, unknown>) => readArrivals(row).every((arrival) => arrival.class === 'own');
+  const onlyResults = (row: Record<string, unknown>) => {
+    const content = (row.message as { content?: unknown } | undefined)?.content;
+    return Array.isArray(content) && content.length > 0 && content.every((block) => (block as { type?: string }).type === 'tool_result');
+  };
+
+  it('names by a counted form only where the table counts one', () => {
+    let named = 0;
+    let other = 0;
+    let waiting = 0;
+    for (const row of rows) {
+      for (const path of pathsIn(row)) {
+        const claim = rowClaim(row, path);
+        if (claim.names) {
+          named += 1;
+          const counted = row.type === 'assistant' || row.type === 'attachment' || (row.type === 'user' && !onlyResults(row) && personWrote(row));
+          expect(counted, `${String(row.type)} ${path}: ${JSON.stringify(row).slice(0, 300)}`).toBe(true);
+        } else if (claim.other) {
+          other += 1;
+          expect((row.type === 'user' || row.type === 'attachment') && !personWrote(row), JSON.stringify(row).slice(0, 300)).toBe(true); // a queued prompt too (the panel's finding 2)
+        } else if (claim.pending.length > 0) {
+          waiting += 1;
+          expect(row.type, JSON.stringify(row).slice(0, 300)).toBe('user');
+        }
+      }
+    }
+    expect(named).toBeGreaterThan(0);
+    expect(waiting).toBeGreaterThan(0);
+    expect(other).toBe(0); // no recorded row links a path in text someone else wrote; the case above writes them
   });
 });
 

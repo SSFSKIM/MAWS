@@ -641,3 +641,36 @@ describe('a deleted design system’s files while a version pins it (Decision Lo
     expect(await refusal('artifacts.content', { artifactId: page.id, revision: page.revision, path: 'page.html' })).toMatchObject({ issues: { reason: 'notFound' } });
   });
 });
+
+// UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.2, §C.5): the undelete, and what
+// `artifacts.get` says of a deleted artifact, over the surface as main and the endpoint reach it.
+describe('the undelete and a deleted artifact’s answer (UX wave U10b)', () => {
+  const agent = { kind: 'session', appSessionId: 'app-1' as AppSessionId } as const;
+  async function agentDraft(): Promise<string> {
+    const { id } = await documents!.store.create({ kind: 'document', title: 'Draft plan' }, agent);
+    await documents!.service.writeAs(id, agent, (doc) => doc.get('root').insert(0, 'An agent wrote this.'));
+    return id;
+  }
+
+  it('answers `deleted` for a deleted artifact, undoable after an agent’s delete, and brings it back once', async () => {
+    const id = await agentDraft();
+    expect(await call('artifacts.get', { artifactId: id })).toEqual({ artifact: expect.objectContaining({ id }) }); // live: no `deleted`
+    await documents!.store.writeCommitted(() => documents!.store.deleteOwnDraft(id, ['app-1' as AppSessionId]));
+    expect(await call('artifacts.get', { artifactId: id })).toEqual({ artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable: true } });
+    expect(await call('artifacts.get', { artifactId: id, includeDeleted: true })).toMatchObject({ artifact: { id }, deleted: { undoable: true } });
+    emitted.length = 0;
+    await call('artifacts.undelete', { artifactId: id });
+    expect(await call('artifacts.get', { artifactId: id })).toEqual({ artifact: expect.objectContaining({ id, title: 'Draft plan' }) });
+    await call('artifacts.undelete', { artifactId: id }); // already live: a success that writes nothing
+    expect(emitted.filter((e) => e.name === 'artifacts.changed').map((e) => (e.payload as { change: string }).change)).toEqual(['created']);
+  });
+
+  it('refuses, typed, the undelete of an artifact deleted in the Library, which then answers `undoable: false`', async () => {
+    const id = await agentDraft();
+    await call('artifacts.delete', { artifactId: id });
+    expect(await call('artifacts.get', { artifactId: id })).toEqual({ artifact: null, deleted: { title: 'Draft plan', kind: 'document', undoable: false } });
+    expect(await refusal('artifacts.undelete', { artifactId: id })).toMatchObject({ code: 'invalid_input', message: 'this artifact was deleted in the Library, not by an agent', issues: { reason: 'invalid' } });
+    expect(await refusal('artifacts.undelete', { artifactId: '99999999-9999-4999-8999-999999999999' })).toMatchObject({ issues: { reason: 'notFound' } });
+    expect((await call('artifacts.get', { artifactId: id })).artifact).toBeNull();
+  });
+});

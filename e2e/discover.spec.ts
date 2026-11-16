@@ -22,24 +22,33 @@
 //   offline:   without the directory's and plugin-details' recordings, the manifests' items stay, plainer, with no
 //              counts and no Featured, and the Sources popover says which sources are unavailable; Connectors' Discover
 //              says the directory is unavailable, with Retry (acceptance 11; the Connectors side is M4's).
-//   agents:    a session started after Discover was browsed on its three tabs is given the same tools, and sends the
+//   agents:    a session started after Discover was browsed on its three kinds is given the same tools, and sends the
 //              model the same tool list, as one started before; nothing of the catalog reaches the model. Each session
 //              runs one turn against a loopback stand-in for the relay (support/model-stub.ts): no spend (acceptance
 //              12's e2e half, M5; its unit half is src/main/catalog/agents.test.ts).
+//   all:       the UX wave's U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, C4, C6, C8, C11): with
+//              two plugins, three skills and two connectors in the scratch configuration, My items, All lists the
+//              plugins, the mods, the skills and the connectors, each part by name, each row with its image and its kind's
+//              word in one column; a plugin's menu and a connector's Remove work from it; Discover, All is Featured and a
+//              shelf per kind, a shelf's See all chooses its kind, and a search is one grid of plugins and connectors
+//              whose + opens each kind's sheet; the head at 1512, 900, 620 and 400 px, its four Show choices on one line.
+// UX wave U11c: Customize's head chooses the view (My items | Discover) and the kind (Show); a scene reaches Discover's
+// Plugins, Skills or Connectors by the two (support/customize.ts), and the page opened by the sidebar lands on My items, All.
 // The detail, the install sheet and the add-then-install sheet are attached as screenshots beside the home's (M5, for
 // the owner's references), each sheet as it opens: its commands and files behind a closed Details (the owner's ruling,
 // 2026-10-25).
 import { execFileSync } from 'node:child_process';
-import { cpSync, existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page, type TestInfo } from '@playwright/test';
 import { invoke, value } from './support/c7-replay';
+import { chooseCustomize, customizeHead, customizePage, showChoice, viewChoice } from './support/customize';
 import { firstRead } from './support/discover-read';
 import { TEST_MARKETPLACE } from './support/discover-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { startModelStub, type ModelRequest } from './support/model-stub';
 import { REAL_ENGINE_VERSION } from './support/real-engine';
-import { openAppDestination, pageRegion } from './support/shell';
+import { openAppDestination } from './support/shell';
 
 test.skip(process.env.MAWS_DISCOVER_E2E !== '1', 'the Discover e2e runs under pnpm e2e:discover (MAWS_DISCOVER_E2E=1)');
 test.describe.configure({ timeout: 360_000 });
@@ -59,8 +68,8 @@ function engineCli(launch: MawsLaunch, args: string[]): string {
   return execFileSync('/usr/bin/env', ['-i', `HOME=${engine.scratch.home}`, `CLAUDE_CONFIG_DIR=${engine.scratch.configDir}`, 'PATH=/usr/bin:/bin', 'DISABLE_AUTOUPDATER=1', 'TERM=dumb', engine.bin, ...args], { cwd: engine.scratch.projects[0], encoding: 'utf8', timeout: CLI_MS });
 }
 
-// UX wave U7b (O-40): Customize is a page beside the sidebar, not a main tab; its library is found in the page's region.
-const library = (page: Page) => pageRegion(page).locator('[data-widget="plugins"][data-widget-variant="embedded"]');
+// UX wave U7b (O-40): Customize is a page beside the sidebar, not a main tab. UX wave U11c: Discover's Plugins, reached by
+// the head's view and Show; the head's tools (the Add menu, Sources) are found in the page.
 const pane = (page: Page) => page.locator('[data-discover="plugins"]');
 // the last grid of the pane: All on the home, else the narrowed results
 const results = (page: Page, root = pane(page)) => root.locator('[data-catalog-results]').last();
@@ -68,12 +77,11 @@ const resultCards = (page: Page) => results(page).locator('[data-catalog-grid] [
 const byName = (scope: Locator, installName: string) => scope.locator(`[data-catalog-card][data-install-name="${installName}"]`);
 const sheet = (page: Page) => page.locator('[data-plugins-sheet="install"]');
 
-// Discover on a tab, once its catalog is shown: a cwd's first read runs the engine's CLI (support/discover-read.ts).
+// Discover on a kind, once its catalog is shown: a cwd's first read runs the engine's CLI (support/discover-read.ts).
 async function openDiscover(page: Page, tab: 'Plugins' | 'Skills' = 'Plugins'): Promise<void> {
   const read = await firstRead(page);
   await openAppDestination(page, 'Customize');
-  await page.getByRole('tab', { name: tab, exact: true }).click();
-  await page.getByRole('tabpanel', { name: tab }).getByRole('radio', { name: 'Discover' }).click();
+  await chooseCustomize(page, { view: 'Discover', show: tab });
   const shown = page.locator(`[data-discover="${tab.toLowerCase()}"]`);
   await expect(shown).toBeVisible();
   await read(shown, tab.toLowerCase());
@@ -166,7 +174,7 @@ function compareShelfOrder(a: Ordered, b: Ordered): number {
 
 // The Add menu's marketplace dialogs (Add marketplace, Manage marketplaces), as the person uses them.
 async function addMarketplace(page: Page, source: string, name: string): Promise<void> {
-  await library(page).getByRole('button', { name: 'Add', exact: true }).click();
+  await customizePage(page).getByRole('button', { name: 'Add', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Add marketplace', exact: true }).click();
   const dialog = page.locator('[data-marketplaces-dialog="add"]');
   await dialog.getByRole('textbox', { name: 'Source' }).fill(source);
@@ -180,7 +188,7 @@ async function addMarketplace(page: Page, source: string, name: string): Promise
   await expect(dialog).toBeHidden();
 }
 async function removeMarketplace(page: Page, name: string): Promise<void> {
-  await library(page).getByRole('button', { name: 'Add', exact: true }).click();
+  await customizePage(page).getByRole('button', { name: 'Add', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Manage marketplaces', exact: true }).click();
   const manage = page.locator('[data-marketplaces-dialog="manage"]');
   await manage.locator(`[data-marketplace-row="${name}"]`).getByRole('button', { name: /^More actions for / }).click();
@@ -210,7 +218,7 @@ async function chooseProject(page: Page, name: string): Promise<void> {
   const read = await firstRead(page); // the project's catalog: its own first read
   const select = page.getByRole('combobox', { name: 'Project', exact: true });
   await select.selectOption((await select.locator('option', { hasText: name }).getAttribute('value'))!);
-  await library(page).getByRole('radio', { name: 'Discover' }).click(); // the page's library is the project's own
+  await chooseCustomize(page, { view: 'Discover', show: 'Plugins' }); // the page is the project's now
   await expect(pane(page)).toBeVisible();
   await read(pane(page), `plugins in ${name}`);
 }
@@ -240,7 +248,7 @@ test('home: Featured, the shelves, All under Installs; the two desktop sizes; Se
     await expect(featured).toHaveAttribute('data-featured', home.featured!.id);
     await expect(featured).toContainText('frontend-design');
     await expect(featured.locator('[data-catalog-metric]')).toHaveText('1.3M installs');
-    await expect(featured.locator('[data-catalog-icon]')).toHaveAttribute('data-catalog-icon', 'image');
+    await expect(featured.locator('[data-item-image]')).toHaveAttribute('data-item-image', 'icon');
     await expect(featured.locator('img')).toHaveAttribute('src', /^data:image\/png;base64,/);
     // the most installed of every item with a count (plugin-details counts official plugins alone) not installed here
     const counted = await allItems(page, { tab: 'plugins', cwd: null });
@@ -451,10 +459,11 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     expect(settings.extraKnownMarketplaces?.[TEST_MARKETPLACE]?.source).toEqual({ source: 'directory', path: marketplace });
     const own = JSON.parse(engineCli(maws!, ['plugin', 'list', '--json'])) as { id: string; scope: string }[];
     expect(own.find((p) => p.id === `hooked@${TEST_MARKETPLACE}`)).toMatchObject({ scope: 'user' });
-    await openCard(page, byName(results(page), 'hooked')); // installed here: it opens in My items
-    await expect(library(page).getByRole('radio', { name: 'My items' })).toHaveAttribute('data-state', 'on');
-    await expect(library(page).locator(`[data-plugin-detail="hooked@${TEST_MARKETPLACE}"], [data-plugin-row="hooked@${TEST_MARKETPLACE}"]`).first()).toBeVisible({ timeout: CLI_MS });
-    await library(page).getByRole('radio', { name: 'Discover' }).click();
+    await openCard(page, byName(results(page), 'hooked')); // installed here: it opens in My items, on Plugins
+    await expect(viewChoice(page, 'My items')).toHaveAttribute('data-state', 'on');
+    await expect(showChoice(page, 'Plugins')).toHaveAttribute('data-state', 'on');
+    await expect(customizePage(page).locator(`[data-plugin-detail="hooked@${TEST_MARKETPLACE}"], [data-plugin-row="hooked@${TEST_MARKETPLACE}"]`).first()).toBeVisible({ timeout: CLI_MS });
+    await chooseCustomize(page, { view: 'Discover' }); // Show kept: Plugins
     await expect(pane(page)).toBeVisible();
   });
 
@@ -478,7 +487,7 @@ test('install: + adds the marketplace and installs through the real CLI; warning
     await card.getByRole('button', { name: 'Add skills-only', exact: true }).click();
     await expect(sheet(page).locator('[data-catalog-summary]')).toHaveText(new RegExp(`^Installs the plugin skills-only from ${TEST_MARKETPLACE}, with 2 skills: .*greet`));
     await cancel(sheet(page));
-    await page.getByRole('tab', { name: 'Plugins', exact: true }).click();
+    await chooseCustomize(page, { show: 'Plugins' }); // the view kept: Discover
     await expect(pane(page)).toBeVisible();
   });
 
@@ -567,9 +576,9 @@ test('offline: without the directory and plugin-details, the manifests’ items 
   await search(page, 'legal');
   const legal = byName(results(page), 'commercial-legal');
   await expect(legal.locator('[data-trust]')).toHaveAttribute('data-trust', 'Listed by Anthropic'); // no review tier without the directory
-  await expect(legal.locator('[data-catalog-icon]')).toHaveAttribute('data-catalog-icon', 'monogram');
+  await expect(legal.locator('[data-item-image]')).toHaveAttribute('data-item-image', 'tile');
   await expect(results(page).locator('[data-catalog-metric]')).toHaveCount(0);
-  await library(page).getByRole('button', { name: 'Sources' }).click();
+  await customizePage(page).getByRole('button', { name: 'Sources' }).click();
   const popover = page.locator('[data-catalog-sources]');
   await expect(popover.locator('[data-source="directory:plugins"]')).toHaveAttribute('data-source-state', 'unavailable');
   await expect(popover.locator('[data-source="directory:plugins"]')).toContainText('Anthropic’s directory: plugins unavailable');
@@ -577,16 +586,15 @@ test('offline: without the directory and plugin-details, the manifests’ items 
   await expect(popover.locator('[data-source="seed:claude-for-legal"]')).not.toHaveAttribute('data-source-state', 'unavailable');
   // P4-AGG M4: the Connectors side of acceptance 11: its Discover says the directory is unavailable, with Retry
   await page.keyboard.press('Escape');
-  await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
-  const connectors = page.getByRole('tabpanel', { name: 'Connectors' });
-  await connectors.getByRole('radio', { name: 'Discover' }).click();
+  await chooseCustomize(page, { show: 'Connectors' }); // the view kept: Discover
+  const connectors = customizePage(page).locator('[data-customize-body="connectors"]'); // the words stand in the pane's place
   await expect(connectors.locator('[data-connectors-unavailable]')).toContainText('Anthropic’s directory is unavailable.');
   await expect(connectors.locator('[data-connectors-unavailable]').getByRole('button', { name: 'Retry' })).toBeEnabled();
 });
 
 // Acceptance 12's e2e half (M5). Two sessions in one project, each with one turn, which the engine sends to the loopback
 // stand-in for the relay (MAWS_RELAY_URL; support/model-stub.ts answers "ok", so nothing is spent): the first started
-// before Customize is opened, the second after Discover was browsed on all three tabs (a search, a detail, Skills,
+// before Customize is opened, the second after Discover was browsed on all three kinds (a search, a detail, Skills,
 // Connectors). Each session's system/init (its tools, MCP servers, skills, plugins, commands, agents) and the tool list of
 // its first request to the model are the same; no request the engine made carries anything only the catalog holds.
 test('agents: a session started after Discover was browsed is given the same tools as one started before; nothing of the catalog reaches the model', async () => {
@@ -620,7 +628,7 @@ test('agents: a session started after Discover was browsed is given the same too
 
     const before = await turn('before Discover');
 
-    await test.step('Discover browsed on its three tabs, nothing installed', async () => {
+    await test.step('Discover browsed on its three kinds, nothing installed', async () => {
       await openDiscover(page);
       await search(page, 'legal');
       await expect(results(page).getByRole('heading', { name: '13 results' })).toBeVisible();
@@ -629,8 +637,7 @@ test('agents: a session started after Discover was browsed is given the same too
       await expect(pane(page).locator('[data-catalog-detail]')).toBeVisible();
       await pane(page).getByRole('button', { name: 'Back to Discover' }).click();
       await openDiscover(page, 'Skills');
-      await page.getByRole('tab', { name: 'Connectors', exact: true }).click();
-      await page.getByRole('tabpanel', { name: 'Connectors' }).getByRole('radio', { name: 'Discover' }).click();
+      await chooseCustomize(page, { show: 'Connectors' }); // the view kept: Discover
       await expect(page.locator('[data-discover="connectors"] [data-catalog-card]').first()).toBeVisible();
     });
 
@@ -661,4 +668,228 @@ test('agents: a session started after Discover was browsed is given the same too
     maws = null;
     await stub.close();
   }
+});
+
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, M5's new case): My items, All (C4, C6), a
+// plugin's menu and a connector's Remove from it, Discover, All (C8) and the head at four widths (C11). The scratch
+// configuration is the engine's own CLI's: two plugins of the test marketplace at user scope (one brings two skills), one
+// skill of the person's own and two connectors, all invented; the page is the user configuration's.
+test('all: My items lists the three kinds in one list; Discover’s home has a shelf per kind; a search mixes them', async () => {
+  test.setTimeout(480_000);
+  const info = test.info();
+  maws = await launchMaws({ realEngine: { projects: 1 } });
+  const { page, app, userData } = maws;
+  const { configDir, marketplace } = maws.realEngine!.scratch;
+  const PLUGINS = [`hooked@${TEST_MARKETPLACE}`, `skills-only@${TEST_MARKETPLACE}`]; // by the name their rows show
+  const SKILLS = ['greet', 'outline-notes', 'summarize-diff']; // skills-only's two and the person's own, by label
+  const CONNECTORS = ['notes-probe', 'tasks-probe'];
+  const all = customizePage(page).locator('[data-customize-all]');
+  const discover = page.locator('[data-discover="all"]');
+  const marks = (scope: Locator, attribute: string) => scope.locator(`[${attribute}]`).evaluateAll((nodes, name) => nodes.map((node) => node.getAttribute(name)), attribute);
+  const storedDestination = () => {
+    try {
+      return (JSON.parse(readFileSync(join(userData, 'layout.json'), 'utf8')) as { destination?: { destination?: unknown } }).destination?.destination ?? null;
+    } catch {
+      return null; // not written yet
+    }
+  };
+
+  await test.step('the scratch configuration: two plugins installed and two connectors added by the engine’s own CLI, one skill on disk', async () => {
+    engineCli(maws!, ['plugin', 'marketplace', 'add', marketplace]);
+    for (const id of PLUGINS) engineCli(maws!, ['plugin', 'install', id, '--scope', 'user']);
+    engineCli(maws!, ['mcp', 'add', '--transport', 'http', 'notes-probe', 'https://notes.example.test/mcp', '--scope', 'user']);
+    engineCli(maws!, ['mcp', 'add-json', 'tasks-probe', JSON.stringify({ type: 'stdio', command: '/usr/bin/true', args: [] }), '--scope', 'user']);
+    mkdirSync(join(configDir, 'skills', 'outline-notes'), { recursive: true });
+    writeFileSync(join(configDir, 'skills', 'outline-notes', 'SKILL.md'), '---\nname: outline-notes\ndescription: Outlines a page of notes as headings. A fixture skill of the Discover e2e group.\n---\nReply with an outline.\n');
+  });
+
+  await test.step('the sidebar opens My items, All: the plugins, the mods, the skills, the connectors, each part by name, each row with its image and its kind’s word in one column', async () => {
+    await openAppDestination(page, 'Customize');
+    await expect(customizePage(page)).toHaveAttribute('data-customize-view', 'mine');
+    await expect(customizePage(page)).toHaveAttribute('data-customize-show', 'all');
+    await page.getByRole('combobox', { name: 'Project', exact: true }).selectOption({ label: 'User configuration' });
+    await expect(all.locator('[data-plugin-row]')).toHaveCount(PLUGINS.length, { timeout: CLI_MS }); // the plugin list is the engine's CLI's
+    await expect(all.locator('[data-skill-row]')).toHaveCount(SKILLS.length);
+    await expect(all.locator('[data-connector]')).toHaveCount(CONNECTORS.length);
+    const mods = value(await invoke(page, 'mods.list', {})).length; // MAWS's built-in mods, beside at least one item
+    await expect(all.locator('[data-mod-row]')).toHaveCount(mods);
+    expect(await marks(all, 'data-plugin-row')).toEqual(PLUGINS);
+    expect(await marks(all, 'data-skill-row')).toEqual(SKILLS);
+    expect(await marks(all, 'data-connector')).toEqual(CONNECTORS);
+    // no heading between the parts: one run of each kind's word, in the parts' order
+    expect(await marks(all, 'data-kind-word')).toEqual([...Array<string>(PLUGINS.length).fill('plugin'), ...Array<string>(mods).fill('mod'), ...Array<string>(SKILLS.length).fill('skill'), ...Array<string>(CONNECTORS.length).fill('connector')]);
+    await expect(all.locator('[data-plugin-row] [data-kind-word]')).toHaveText(PLUGINS.map(() => 'Plugin'));
+    await expect(all.locator('[data-skill-row] [data-kind-word]')).toHaveText(SKILLS.map(() => 'Skill'));
+    await expect(all.locator('[data-connector] [data-kind-word]')).toHaveText(CONNECTORS.map(() => 'Connector'));
+    if (mods > 0) await expect(all.locator('[data-mod-row] [data-kind-word]').first()).toHaveText('Mod');
+    const columns = await all.locator('[data-kind-word]').evaluateAll((words) => words.map((word) => Math.round(word.getBoundingClientRect().left)));
+    expect(new Set(columns).size, `the kind words' left edges: ${columns.join(', ')}`).toBe(1);
+    const rows = all.locator('li:has([data-kind-word])');
+    expect(await rows.count()).toBe(PLUGINS.length + mods + SKILLS.length + CONNECTORS.length);
+    expect(await rows.evaluateAll((items) => items.filter((item) => item.querySelector('[data-item-image]') === null).length), 'every row has its image').toBe(0);
+  });
+
+  await test.step('a plugin’s menu from All: Turn off runs through the real CLI, and the row reads Disabled in its place', async () => {
+    const hooked = all.locator(`[data-plugin-row="${PLUGINS[0]!}"]`);
+    await hooked.getByRole('button', { name: /^More actions for / }).click();
+    await page.getByRole('menuitem', { name: 'Turn off', exact: true }).click();
+    const s = page.locator('[data-plugins-sheet="disable"]');
+    const disable = s.getByRole('button', { name: 'Disable', exact: true });
+    await expect(disable).toBeEnabled({ timeout: 30_000 }); // once plugins.env answered
+    await disable.click();
+    await expect(s).toBeHidden();
+    await expect(hooked.getByText('Disabled', { exact: true })).toBeVisible({ timeout: CLI_MS });
+    expect(await marks(all, 'data-plugin-row')).toEqual(PLUGINS);
+    const settings = JSON.parse(readFileSync(join(configDir, 'settings.json'), 'utf8')) as { enabledPlugins?: Record<string, boolean> };
+    expect(settings.enabledPlugins?.[PLUGINS[0]!]).toBe(false);
+  });
+
+  await test.step('a connector’s Remove from All: the sheet at user scope, the real CLI, the row gone and its line at the head of the connectors', async () => {
+    const notes = all.locator('[data-connector="notes-probe"]');
+    await notes.getByRole('button', { name: 'Remove notes-probe', exact: true }).click();
+    const s = page.locator('[data-plugins-sheet="mcp-remove"]');
+    await expect(s.locator('[data-plugins-scope]')).toHaveText('Scope: User');
+    await expect(details(s)).toBeVisible({ timeout: 30_000 }); // once plugins.env answered
+    expect(await argvOf(s, 'data-plugins-argv')).toEqual(['mcp', 'remove', 'notes-probe', '--scope', 'user']);
+    await s.getByRole('checkbox').check();
+    await s.getByRole('button', { name: 'Remove', exact: true }).click();
+    await expect(notes).toHaveCount(0, { timeout: CLI_MS });
+    await expect(all.locator('[data-all-part="connectors"] [data-connector-gone]')).toContainText('notes-probe');
+    expect(await marks(all, 'data-connector')).toEqual(['tasks-probe']);
+    const servers = (JSON.parse(readFileSync(join(configDir, '.claude.json'), 'utf8')) as { mcpServers?: Record<string, unknown> }).mcpServers ?? {};
+    expect(Object.keys(servers).sort()).toEqual(['tasks-probe']);
+  });
+
+  await test.step('Discover, All: Featured and a shelf per kind, Plugins, Skills, Connectors, each with See all; no Category, no Sort by', async () => {
+    const read = await firstRead(page);
+    await chooseCustomize(page, { view: 'Discover' }); // Show kept: All
+    await expect(discover).toBeVisible();
+    await read(discover, 'all');
+    const home = value(await invoke(page, 'catalog.home', { tab: 'all', cwd: null }));
+    expect(home.shelves.map((shelf) => [shelf.key, shelf.title])).toEqual([['kind:plugins', 'Plugins'], ['kind:skills', 'Skills'], ['kind:connectors', 'Connectors']]);
+    for (const shelf of home.shelves) expect(shelf.total, shelf.key).toBeGreaterThan(0);
+    await expect.poll(() => marks(discover, 'data-shelf')).toEqual(home.shelves.map((shelf) => shelf.key));
+    for (const title of ['Plugins', 'Skills', 'Connectors']) await expect(discover.getByRole('button', { name: `See all of ${title}`, exact: true })).toBeVisible();
+    for (const kind of ['plugins', 'connectors']) await expect(discover.locator(`[data-shelf="kind:${kind}"] [data-catalog-card]`).first()).toBeVisible();
+    await expect(discover.locator('[data-featured]')).toHaveAttribute('data-featured', home.featured!.id);
+    await expect(customizePage(page).getByRole('button', { name: 'Category', exact: true })).toHaveCount(0);
+    await expect(customizePage(page).getByRole('button', { name: 'Sort by', exact: true })).toHaveCount(0);
+  });
+
+  await test.step('a shelf’s See all chooses its kind in Show, stored; All again is its home', async () => {
+    await discover.getByRole('button', { name: 'See all of Connectors', exact: true }).click();
+    await expect(customizePage(page)).toHaveAttribute('data-customize-view', 'discover');
+    await expect(customizePage(page)).toHaveAttribute('data-customize-show', 'connectors');
+    await expect(showChoice(page, 'Connectors')).toHaveAttribute('data-state', 'on');
+    await expect(page.locator('[data-discover="connectors"]')).toBeVisible();
+    await expect.poll(storedDestination, { message: 'the page is stored where See all put it', timeout: 15_000 }).toMatchObject({ kind: 'customize', view: 'discover', show: 'connectors' });
+    await chooseCustomize(page, { show: 'All' });
+    await expect(discover.locator('[data-discover-home]')).toBeVisible();
+  });
+
+  await test.step('a search is one grid across kinds: Canva as a connector and as a plugin, each card with its word; each + opens its kind’s sheet', async () => {
+    await search(page, 'Canva');
+    const grid = results(page, discover);
+    const cards = grid.locator('[data-catalog-grid] [data-catalog-card]');
+    await expect(cards.first()).toBeVisible();
+    expect(new Set(await marks(grid.locator('[data-catalog-grid]'), 'data-kind-word'))).toEqual(new Set(['plugin', 'connector']));
+    const connector = cards.filter({ has: page.locator('[data-kind-word="connector"]') }).filter({ hasText: 'Canva' }).first();
+    await expect(connector.locator('[data-kind-word]')).toHaveText('Connector');
+    await connector.getByRole('button', { name: 'Add Canva', exact: true }).click();
+    const connectorSheet = page.locator('[data-plugins-sheet="mcp-add"]');
+    await expect(connectorSheet).toBeVisible();
+    await cancel(connectorSheet);
+    const plugin = cards.filter({ has: page.locator('[data-kind-word="plugin"]') }).filter({ has: page.getByRole('button', { name: /^Add / }) }).first();
+    await expect(plugin.locator('[data-kind-word]')).toHaveText('Plugin');
+    await plugin.getByRole('button', { name: /^Add / }).click();
+    await expect(details(sheet(page))).toBeVisible({ timeout: 30_000 }); // the install sheet, once plugins.env answered
+    await cancel(sheet(page));
+    await search(page, '');
+    await expect(discover.locator('[data-discover-home]')).toBeVisible();
+  });
+
+  // The head's edges, measured (the architect's ruling of 2026-11-15 on the tools line)
+  const head = customizeHead(page);
+  const edges = (node: Locator) => node.evaluate((el) => { const b = el.getBoundingClientRect(); return { left: b.left, right: b.right, top: b.top, bottom: b.bottom, width: b.width }; });
+  const near = (a: number, b: number, what: string) => expect(Math.abs(a - b), `${what}: ${a} against ${b}`).toBeLessThanOrEqual(1);
+  const searchField = () => head.getByRole('searchbox').locator('xpath=ancestor::label[1]');
+  const actions = () => head.locator('[data-customize-actions] > *');
+  const showRow = () => head.locator('[data-customize-row="show"]');
+
+  await test.step('the head at 1512, 900, 620 and 400 px, in My items and in Discover, All: the four Show choices on one line; the tools line’s edges at 620 and 400 px', async () => {
+    for (const [width, height] of [[1512, 982], [900, 820], [620, 820], [400, 820]] as const) {
+      await app.evaluate(({ BrowserWindow }, [w, h]) => {
+        const win = BrowserWindow.getAllWindows()[0]!;
+        win.setMinimumSize(Math.min(w, 600), 600); // the window's own minimum is 600 px wide
+        win.setContentSize(w, h);
+      }, [width, height] as const);
+      await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([width, height]);
+      for (const view of ['My items', 'Discover'] as const) {
+        await chooseCustomize(page, { view, show: 'All' });
+        await expect(view === 'My items' ? all : discover).toBeVisible();
+        const tops = await customizeHead(page).getByRole('radiogroup', { name: 'Show', exact: true }).getByRole('radio').evaluateAll((choices) => choices.map((choice) => Math.round(choice.getBoundingClientRect().top)));
+        expect(tops, `the Show choices at ${width} px, ${view}`).toHaveLength(4);
+        expect(new Set(tops).size, `the Show choices on one line at ${width} px, ${view}: ${tops.join(', ')}`).toBe(1);
+        const at = `${width} px, ${view}`;
+        const row = await edges(showRow());
+        const search = await edges(searchField());
+        if (width === 620) {
+          // a line of their own: the search from the row's left, grown, the last action at the row's right
+          near(search.left, row.left, `${at}: the search's left edge`);
+          near((await edges(actions().last())).right, row.right, `${at}: the last action's right edge`);
+        }
+        if (width === 400) {
+          // the search takes the line; actions that no longer fit beside it start the next one from the left
+          near(search.left, row.left, `${at}: the search's left edge`);
+          near(search.right, row.right, `${at}: the search's right edge`);
+          const first = await edges(actions().first());
+          if (first.top >= search.bottom) near(first.left, row.left, `${at}: the first action's left edge, wrapped`);
+        }
+        await info.attach(`customize-head-${view === 'My items' ? 'mine' : 'discover'}-all-${width}x${height}.png`, { body: await customizeHead(page).screenshot(), contentType: 'image/png' });
+      }
+    }
+  });
+
+  // The stacked head a person can reach. Under 700 px the sidebar is an overlay and takes no column (`sidebarAside`,
+  // src/renderer/src/app/shell-geometry.ts:15-16), so there the page is the whole window, never under the window's 600 px
+  // minimum; a docked sidebar is clamped to 200..480 px (SIDEBAR_BOUNDS, src/renderer/src/app/regions.ts). The page is under
+  // the `customize` container's 24rem only beside a widened docked sidebar: here the window at 700 px and the sidebar at
+  // 480, the page about 220 px.
+  await test.step('700 px with the sidebar docked at 480 px: the page under 24rem; the switch, Showing, the Show choices, then the search at full width', async () => {
+    await app.evaluate(({ BrowserWindow }) => {
+      const win = BrowserWindow.getAllWindows()[0]!;
+      win.setMinimumSize(600, 600);
+      win.setContentSize(700, 820);
+    });
+    await expect.poll(() => page.evaluate(() => [window.innerWidth, window.innerHeight])).toEqual([700, 820]);
+    const resizer = page.locator('[data-region="sidebar"]').getByRole('separator', { name: 'Resize sidebar' });
+    await resizer.focus();
+    await page.keyboard.press('End'); // the sidebar's widest
+    await expect(resizer).toHaveAttribute('aria-valuenow', '480');
+    await chooseCustomize(page, { view: 'My items', show: 'All' });
+    await expect(all).toBeVisible();
+    const [containerWidth, rem] = await customizePage(page).evaluate((el) => [el.getBoundingClientRect().width, parseFloat(getComputedStyle(document.documentElement).fontSize)]);
+    expect(containerWidth, `the customize container, ${containerWidth} px`).toBeLessThan(24 * rem!);
+    const viewRow = await edges(head.locator('[data-customize-row="view"]'));
+    const row = await edges(showRow());
+    const showing = await edges(head.getByRole('combobox', { name: 'Project', exact: true }).locator('xpath=ancestor::label[1]'));
+    const live = head.getByRole('combobox', { name: 'Live session', exact: true }).locator('xpath=ancestor::label[1]');
+    const stacked = [
+      ['the switch', await edges(head.getByRole('radiogroup', { name: 'Library', exact: true }))],
+      ['Showing', showing],
+      ...((await live.count()) > 0 ? [['Live session', await edges(live)] as const] : []),
+      ['the Show choices', await edges(head.getByRole('radiogroup', { name: 'Show', exact: true }))],
+      ['the search', await edges(searchField())],
+    ] as const;
+    for (let i = 1; i < stacked.length; i += 1) expect(stacked[i]![1].top, `${stacked[i]![0]} under ${stacked[i - 1]![0]}`).toBeGreaterThanOrEqual(stacked[i - 1]![1].bottom);
+    for (const [name, box] of stacked.filter(([part]) => part === 'Showing' || part === 'Live session')) {
+      near(box.left, viewRow.left, `${name}'s left edge`);
+      near(box.right, viewRow.right, `${name}'s right edge`);
+    }
+    const search = await edges(searchField());
+    near(search.left, row.left, 'the search’s left edge');
+    near(search.right, row.right, 'the search’s right edge');
+    await info.attach('customize-head-mine-all-700x820-sidebar-480.png', { body: await head.screenshot(), contentType: 'image/png' });
+    await info.attach('customize-page-mine-all-700x820-sidebar-480.png', { body: await page.screenshot(), contentType: 'image/png' });
+  });
 });

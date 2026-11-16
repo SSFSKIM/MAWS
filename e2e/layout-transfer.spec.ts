@@ -10,15 +10,21 @@
 // the handler tests in src/renderer/src/shell/transfer-drag.test.tsx (C1, C2, Z2) and transfer.test.ts (C4). UX wave U8b
 // (docs/doperpowers/plans/2026-11-12-ux-wave-U8b-column-and-tabs.md, A5 and A11): the side column is a strip of tabs
 // with one in view per group; a narrow tool opens 360 px wide; a relaunch brings back one surface, or two groups with
-// their share.
+// their share. UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G, A2, L6
+// and L7): over C8c's scratch repository, a file beside the chat moves to the main area and back by every way, the edit
+// typed just before each move there once and one undo removing it; a relaunch brings back the files beside the chat, the
+// preview tab and the tree's state; a side tab dragged between the column's groups joins the group it is dropped on.
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { addressed, localRef } from './support/address';
+import { sideFileTab } from './support/code-product';
+import { buildCodeScratch, type CodeScratch } from './support/code-scratch';
 import { launchMaws, type MawsLaunch } from './support/launch';
+import { CHARTER } from './support/panel-support';
 import { sidebarRow } from './support/sidebar';
-import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, moveSideTab, openSurface, hideSurface, pinSurfaceForSessions, sideColumn, sideGroup, sideTabNames, surface } from './support/shell';
+import { mainTab as chromeTab, mainTabById, mainTabs, moveMainArtifactToPanel, moveSideTab, openSurface, hideSurface, pinSurfaceForSessions, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, surface } from './support/shell';
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
 
@@ -191,7 +197,10 @@ async function hostText(page: Page, artifactId: string): Promise<string> {
 }
 
 // An HTML5 drag of `source` onto `target` by the mouse: pressed on the source, moved in steps (Chromium starts the drag
-// past its threshold), over the target until it highlights (`over`, when given), released.
+// past its threshold), over the target until it highlights (`over`, when given), released. The last point is sampled
+// twice: Chromium fires `dragover` only on a second sample over the same innermost element (the first one there gets
+// `dragenter` alone), and Playwright sends nothing while the pointer rests, so a target that answers `dragover` only (the
+// main strip, whose tabs' parts change the element from one step to the next) would otherwise never hear one.
 async function drag(page: Page, source: Locator, target: Locator, over?: Locator): Promise<void> {
   const from = (await source.boundingBox())!;
   await page.mouse.move(from.x + from.width / 2, from.y + from.height / 2);
@@ -199,6 +208,7 @@ async function drag(page: Page, source: Locator, target: Locator, over?: Locator
   await page.mouse.move(from.x + from.width / 2 + 12, from.y + from.height / 2 + 12, { steps: 4 });
   const to = (await target.boundingBox())!;
   await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2, { steps: 12 });
+  await page.mouse.move(to.x + to.width / 2, to.y + to.height / 2);
   if (over) await expect(over).toBeVisible();
   await page.mouse.up();
 }
@@ -315,6 +325,36 @@ test('the editor header’s Expand keeps a compressed composer and folds the rig
   await expect(mainRegion(page).getByRole('separator', { name: 'Resize panes' })).toBeVisible();
   await expect(header.getByRole('button', { name: 'Expand pane', pressed: false })).toBeVisible();
   await expect(mainRegion(page).getByRole('textbox', { name: 'Message' })).toContainText('Keep this draft through reopening and restore');
+  expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// #692: in a split of a session and a document with no side surface open, the card column stays placed while either pane
+// has the session, so the press that focuses the document's pane moves nothing under the pointer and acts at once. The press
+// is held across two frames, which is when a layout shift (the column's going) would have moved the header from under it.
+test('a split of a session and a document: the card column stays through a focus move, and one press on the document pane’s header acts', async () => {
+  test.setTimeout(120_000);
+  const page = await start();
+  await (await sidebarRow(page, 'Harness A')).click();
+  const id = await documentInMain(page, 'B3 first press');
+  await menu('pane.split'); // the document into a right pane
+  await expect(mainTabs(page).getByRole('tablist', { name: 'Right pane tabs' }).locator(`[data-tab-id="artifact:${await localRef(page)}:${id}"]`)).toBeVisible();
+  await mainTabs(page).getByRole('tablist', { name: 'Left pane tabs' }).getByRole('tab', { name: /^Harness A/ }).click(); // focus on the session's pane
+  const header = inMain(page, id).locator('xpath=ancestor::*[@role="tabpanel"][1]');
+  const expand = header.getByRole('button', { name: 'Expand pane' });
+  const compact = mainRegion(page).getByRole('region', { name: 'Compact session composer' });
+  await expect(sessionCards(page), 'the column is placed beside the split').toBeVisible();
+  await expect(compact).toHaveCount(0);
+  const before = (await expand.boundingBox())!;
+
+  const frames = () => page.evaluate(() => new Promise<void>((done) => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
+  await page.mouse.move(before.x + before.width / 2, before.y + before.height / 2);
+  await page.mouse.down(); // the document pane takes focus on this pointer-down
+  await frames();
+  expect(await expand.boundingBox(), 'the control stays under the pointer after the focus move').toEqual(before);
+  await expect(sessionCards(page), 'the column stays while the document pane is focused').toBeVisible();
+  await page.mouse.up();
+  await expect(compact, 'the first press acted: the session floated into its card').toBeVisible();
+  await expect(mainRegion(page).getByRole('button', { name: 'Restore split', pressed: true })).toBeVisible();
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
 });
 
@@ -640,4 +680,183 @@ test('a relaunch brings back two groups of the side column, the tab in view of e
   expect((await ok<{ value: { lower: Record<string, unknown> } }>(page, 'layout.get', { key: 'panelTools.groups' })).value.lower[scope], 'hydration rewrote no group').toEqual(before.stored);
   expect(await regionWidth(page, 'panel')).toBe(before.width);
   expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+});
+
+// ---- UX wave U6b-1: a file beside the chat, moved, restored, and dragged between the groups -----------------------------
+
+// The product over C8c's scratch repository on this test's profile (the *Charter + research* record pointed at it), that
+// session's tab in front, the window as wide as `start` makes it.
+async function startOnScratch(code: CodeScratch): Promise<Page> {
+  launch = await launchMaws({ userData: userData!, env: code.env });
+  const { page, app } = launch;
+  await app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((win) => !win.isDestroyed())!.setContentSize(1440, 860));
+  await page.waitForFunction(() => window.innerWidth === 1440 && window.innerHeight === 860);
+  await expect(page.locator('[data-region="sidebar"] [data-kind="project"]').first()).toBeVisible({ timeout: 10_000 });
+  await (await sidebarRow(page, CHARTER)).click();
+  await expect(mainTabById(page, `session:${await addressed(page, code.appSessionId)}`)).toHaveAttribute('aria-selected', 'true');
+  return page;
+}
+
+// A row of Files' tree in the Files tab in view (one group in these scenes, so one tree is drawn).
+const treeRow = (page: Page, path: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-path="${path}"]`);
+const fileViewer = (scope: Locator, path: string) => scope.locator(`[data-file-viewer][data-path="${path}"]`);
+const codeText = async (scope: Locator, path: string) => (await fileViewer(scope, path).locator('.cm-content').textContent()) ?? '';
+// The caret at the start of the file's first line, in the view under `scope`.
+const atStart = (scope: Locator, path: string) => fileViewer(scope, path).locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
+
+test('a file moves to the main area and back by its menu and by a drag: the edit typed just before each move is there once and one undo removes it', async () => {
+  test.setTimeout(150_000);
+  const code = buildCodeScratch();
+  try {
+    const page = await startOnScratch(code);
+    const app = code.path('src/app.ts');
+    const side = sideColumn(page);
+    const main = mainRegion(page);
+    const sessionTab = mainTabById(page, `session:${await addressed(page, code.appSessionId)}`);
+    const fileTab = mainTabById(page, `file:${await localRef(page)}:${app}`);
+    // Session info stays in the column while the file is in the main area, so the column is a place to drop it on
+    await openSurface(page, 'Session info');
+    await openSurface(page, 'Files');
+    await treeRow(page, code.path('src')).click();
+    await treeRow(page, app).click();
+    await expect(fileViewer(side, app).locator('.cm-content .cm-line').first(), 'the file beside the chat').toBeVisible();
+
+    // An edit typed immediately before a move, the move made, and then: the file in the place it moved to and nowhere
+    // else, nothing asked, the edit there once, and one undo there removing it (the editor's own history came across).
+    const moveWith = async (text: string, to: 'main' | 'side', way: string, move: () => Promise<void>) => {
+      const from = to === 'main' ? side : main;
+      await atStart(from, app);
+      await page.keyboard.type(text);
+      await expect(fileViewer(from, app)).toHaveAttribute('data-dirty', 'true');
+      await move();
+      const at = to === 'main' ? main : side;
+      await expect(fileViewer(at, app), `${way}: the file ${to === 'main' ? 'in the main area' : 'beside the chat'}`).toBeVisible({ timeout: 15_000 });
+      await expect(fileViewer(from, app), `${way}: and only there`).toHaveCount(0);
+      if (to === 'main') {
+        await expect(fileTab, `${way}: its main tab in front`).toHaveAttribute('aria-selected', 'true');
+        await expect(sideFileTab(page, 'app.ts'), `${way}: no side tab of it is left`).toHaveCount(0);
+      } else {
+        await expect(fileTab, `${way}: no main tab of it is left`).toHaveCount(0);
+        await expect(sideTab(side, 'app.ts'), `${way}: its side tab in view`).toHaveAttribute('aria-selected', 'true');
+        await expect(sessionTab, `${way}: its session’s tab in front`).toHaveAttribute('aria-selected', 'true');
+      }
+      await expect(page.getByRole('dialog'), `${way}: a move asks nothing`).toHaveCount(0);
+      expect(occurrences(await codeText(at, app), text), `${way}: the edit typed just before, once`).toBe(1);
+      await atStart(at, app);
+      await page.keyboard.press('ControlOrMeta+z');
+      await expect.poll(async () => occurrences(await codeText(at, app), text), { message: `${way}: one undo removes it` }).toBe(0);
+    };
+
+    await moveWith('SIDE-MENU ', 'main', 'the side tab’s “Move to main area”', async () => {
+      await sideTab(side, 'app.ts').click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Move to main area', exact: true }).click();
+    });
+    await moveWith('MAIN-DRAG ', 'side', 'the main tab dragged onto the side column', () =>
+      drag(page, fileTab, panelRegion(page), panelRegion(page).getByText('Move to side surface', { exact: true })));
+    await moveWith('SIDE-DRAG ', 'main', 'the side tab dragged onto the main strip', () =>
+      drag(page, sideFileTab(page, 'app.ts'), mainTabs(page).getByRole('tablist').first(), mainTabs(page).getByText('Move to tab', { exact: true })));
+    await moveWith('MAIN-MENU ', 'side', 'the main tab’s “Move to side surface”', async () => {
+      await fileTab.click({ button: 'right' });
+      await page.getByRole('menuitem', { name: 'Move to side surface', exact: true }).click();
+    });
+    await moveWith('SIDE-BAR ', 'main', 'the file’s bar’s “Move to main area”', () => side.locator(`[data-files-tab][data-file="${app}"] [data-move-to-main]`).click());
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await launch?.cleanup();
+    launch = null;
+    code.cleanup();
+  }
+});
+
+test('a relaunch brings back the files beside the chat, the preview tab and the tree’s state', async () => {
+  test.setTimeout(150_000); // two launches
+  const code = buildCodeScratch();
+  try {
+    let page = await test.step('first launch', () => startOnScratch(code));
+    const [app, readme, src] = [code.path('src/app.ts'), code.path('README.md'), code.path('src')];
+    const address = await addressed(page, code.appSessionId);
+    await openSurface(page, 'Files');
+    await treeRow(page, src).click();
+    await expect(treeRow(page, src), 'a folder opened in the tree').toHaveAttribute('aria-expanded', 'true');
+    await treeRow(page, app).click();
+    await sideTab(sideColumn(page), 'app.ts').dblclick();
+    await expect(sideFileTab(page, 'app.ts'), 'the first file kept').not.toHaveAttribute('data-preview');
+    await treeRow(page, readme).click();
+    await expect(sideFileTab(page, 'README.md'), 'the second, in a tab of its own, the preview').toHaveAttribute('data-preview', 'true');
+    const divider = sideColumn(page).getByRole('separator', { name: 'Resize files', exact: true });
+    await divider.focus();
+    await divider.press('Shift+ArrowRight');
+    const width = 220 + 32; // the tree's default width (tools/code/files/tree-state.ts), then the divider's large step (app/Resizer.tsx)
+    await expect(divider, 'the tree widened').toHaveAttribute('aria-valuenow', String(width));
+
+    // what is stored before the quit: each Files tab's file and whether it is the preview, and the session's tree
+    const stored = async (on: Page) => {
+      const params = (await ok<{ value: { params?: Record<string, { file?: unknown; preview?: unknown } | null> } | null }>(on, 'layout.get', { key: 'panelTools.params' })).value?.params ?? {};
+      const tree = (await ok<{ value: { sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> } | null }>(on, 'layout.get', { key: 'files.tree' })).value?.sessions[address] ?? null;
+      return {
+        files: Object.values(params).flatMap((held) => (typeof held?.file === 'string' ? [`${held.file}${held.preview === true ? ' (preview)' : ''}`] : [])).sort(),
+        tree: tree && { width: tree.width, folded: tree.folded, src: tree.expanded.includes(src) },
+      };
+    };
+    const expected = { files: [app, `${readme} (preview)`].sort(), tree: { width, folded: false, src: true } };
+    await expect.poll(() => stored(page), { message: 'the files beside the chat and the tree’s state are stored' }).toEqual(expected);
+    const before = await sideTabNames(page, 'upper');
+    expect(before.filter((name) => name === 'app.ts' || name === 'README.md')).toHaveLength(2);
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    await test.step('quit', () => launch!.cleanup());
+    launch = null;
+
+    page = await test.step('relaunch', () => startOnScratch(code));
+    await expect.poll(() => sideTabNames(page, 'upper'), { message: 'the side tabs back, in their order', timeout: 15_000 }).toEqual(before);
+    await expect(sideTab(sideColumn(page), 'README.md'), 'the file in view at the quit in view again').toHaveAttribute('aria-selected', 'true');
+    await expect(sideFileTab(page, 'README.md'), 'the preview still the preview').toHaveAttribute('data-preview', 'true');
+    await expect(sideFileTab(page, 'app.ts'), 'the kept tab still kept').not.toHaveAttribute('data-preview');
+    await expect(fileViewer(sideColumn(page), readme), 'its file beside the chat').toBeVisible({ timeout: 15_000 });
+    await expect(sideColumn(page).locator('[data-files-tree][data-place="beside"]'), 'the tree at the file’s left').toBeVisible();
+    await expect(sideColumn(page).getByRole('separator', { name: 'Resize files', exact: true }), 'the tree’s width as stored').toHaveAttribute('aria-valuenow', String(width));
+    await expect(treeRow(page, src), 'the folder open as stored').toHaveAttribute('aria-expanded', 'true', { timeout: 15_000 });
+    expect(await stored(page), 'the read rewrote nothing of it').toEqual(expected);
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await launch?.cleanup();
+    launch = null;
+    code.cleanup();
+  }
+});
+
+test('a side tab dragged onto the other group’s strip joins it; onto the lower part of a one-group column it makes the second group', async () => {
+  test.setTimeout(120_000);
+  const code = buildCodeScratch();
+  try {
+    const page = await startOnScratch(code);
+    const groups = sideColumn(page).locator('section[data-side-group]');
+    await openSurface(page, 'Session info');
+    await openSurface(page, 'Files');
+    await treeRow(page, code.path('src')).click();
+    await treeRow(page, code.path('src/app.ts')).click();
+    await expect(sideFileTab(page, 'app.ts'), 'the file beside the chat, the preview').toHaveAttribute('data-preview', 'true');
+    await expect(groups).toHaveCount(1);
+    expect((await sideTabNames(page, 'upper')).sort()).toEqual(['Session info', 'app.ts'].sort());
+
+    // onto the lower part of the column, while its one group holds another tab: the second group, the tab in it, kept
+    const lower = sideColumn(page).locator('[data-side-lower-drop]');
+    await drag(page, sideFileTab(page, 'app.ts'), lower, lower.getByText('Move below', { exact: true }));
+    await expect(groups, 'two groups').toHaveCount(2);
+    await expect.poll(() => sideTabNames(page, 'lower')).toEqual(['app.ts']);
+    expect(await sideTabNames(page, 'upper')).toEqual(['Session info']);
+    await expect(sideFileTab(page, 'app.ts'), 'a drag keeps the tab').not.toHaveAttribute('data-preview');
+    await expect(fileViewer(sideGroup(page, 'lower'), code.path('src/app.ts'))).toBeVisible();
+
+    // onto the other group's strip: it joins that group, and the group it left, with no tab, goes
+    const upperStrip = sideGroup(page, 'upper').locator('[data-side-strip]');
+    await drag(page, sideFileTab(page, 'app.ts'), upperStrip, upperStrip.getByText('Move above', { exact: true }));
+    await expect(groups, 'one group again').toHaveCount(1);
+    await expect.poll(async () => (await sideTabNames(page, 'upper')).sort()).toEqual(['Session info', 'app.ts'].sort());
+    await expect(sideTab(sideColumn(page), 'app.ts'), 'in view in the group it joined').toHaveAttribute('aria-selected', 'true');
+    expect(launch!.consoleErrors(), 'the console stays free of errors').toEqual([]);
+  } finally {
+    await launch?.cleanup();
+    launch = null;
+    code.cleanup();
+  }
 });

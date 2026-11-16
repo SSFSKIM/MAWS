@@ -21,7 +21,8 @@
 //   holds (A's export service; D12);
 // - the agent's `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask
 //   with only the ask's questions and its recorded answers rewritten (the replay matches the host's answers by request
-//   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
+//   id; what the form submitted is asserted on the journal's own rows): the ask's form, in its capsule's row since UX wave
+//   U1b (the Question sheet's own sections), lists the seeded systems with their
 //   swatches and origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and
 //   `{create: true}` (14).
 // - P3-F's S-RESTYLE: B's real document page and C's real deck stage, side by side in a split so neither unmounts,
@@ -41,6 +42,7 @@ import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { accentBand, ACCENT_DECK, deckHeadline, highlightMix, insertThroughEditor, markedBand, markedColor, markElement, openFromLibrary, paintedColor, READING_PASSAGE, recolourThroughReplica, unacknowledged } from './support/design-restyle';
 import { allowNext, fixtureRows, mcpResultOf, ofKind, PASS3, resultText, scene, show, type Frame, type McpResult, type Scene } from './support/maws-tools';
 import { settingsDialog } from './support/shell';
+import { BUNDLED_COMPONENT_CANVASES, COMPONENT_CANVASES, componentFrameCss, holds, insetOf, smallestHolding, type ContentBox } from '../src/artifacts/design-system/page/component-canvas'; // UX wave U10b (M11)
 
 type Result<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string; issues?: unknown } };
 interface Row {
@@ -661,7 +663,7 @@ async function replayJournal(s: Scene, id: AppSessionId, journal: string): Promi
   value(await invoke(s.page, 'session.send', { appSessionId: id, content: prompt }));
 }
 
-test('the agent asks for a design system: the sheet lists the systems with their swatches and origin, offers Build one with me where allowed, and answers the chosen id or create', async () => {
+test('the agent asks for a design system: the form in the ask’s row lists the systems with their swatches and origin, offers Build one with me where allowed, and answers the chosen id or create', async () => {
   test.setTimeout(120_000);
   await scene({ titles: ['P3-D: a design system ask'], label: 'p3d-ask' }, async (s) => {
     const [id] = s.ids;
@@ -673,14 +675,18 @@ test('the agent asks for a design system: the sheet lists the systems with their
     ];
     await show(s, id);
     await replayJournal(s, id, designSystemAskJournal(s.scratch.root, answers));
-    await s.pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Transcript', exact: true }).click();
+    // UX wave U2b: the recording holds no message, so no to-human view is in force (the plain transcript, no switch)
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
     await allowNext(s, id); // mcp__maws__ask
 
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
     expect(opened).toMatchObject({ askId: ASK_TOOL_USE, blocking: true, questions: QUESTIONS });
-    const sheet = s.panel.locator('[data-ask-sheet]');
-    await expect(sheet).toHaveAttribute('data-ask-id', ASK_TOOL_USE);
-    const section = (questionId: string) => sheet.locator(`section[data-question-id="${questionId}"]`);
+    // UX wave U1b (O-17): the ask's form stands in its capsule's row; no sheet opens by itself
+    const capsule = s.pane.locator('section.transcript-ask');
+    const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+    await expect(form).toHaveAttribute('data-hover-ask', ASK_TOOL_USE);
+    await expect(s.panel.locator('[data-ask-sheet]')).toHaveCount(0);
+    const section = (questionId: string) => form.locator(`section[data-question-id="${questionId}"]`);
     // every live system by name, in order, with "Build one with me" only where the question allows it
     await expect(section('q1').getByRole('radio')).toHaveText(BUILT_IN.map((title) => new RegExp(`^${title}`)));
     await expect(section('q2').getByRole('radio')).toHaveCount(BUILT_IN.length + 1);
@@ -696,14 +702,142 @@ test('the agent asks for a design system: the sheet lists the systems with their
 
     await section('q1').getByRole('radio', { name: 'Classroom' }).click();
     await section('q2').getByRole('radio', { name: 'Build one with me' }).click();
-    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
 
     // the answers the host wrote to the engine: the system by its id and name, and the build request
     let written: McpResult | null = null;
     await expect.poll(() => (written = mcpResultOf(s.journal(id), opened!.requestId)) !== null, { timeout: 20_000 }).toBe(true);
     expect(JSON.parse(resultText(written!))).toEqual({ status: 'answered', askId: ASK_TOOL_USE, answers });
-    const capsule = s.pane.locator('section.transcript-ask');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-answer]')).toHaveText(['Design system→Classroom', 'And the slides?→Build one with me']);
   });
+});
+
+// ---- UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M11 and §J; A10, H21, H22, L7) ----------
+// A type sample is whole in its cell: at the narrowest window the title's two samples overflow nothing sideways, and a
+// Korean word too wide for the deck's sample (the largest one, at half size) breaks inside it under the system's
+// keep-all. And each component of the three bundled systems is drawn on the canvas the table names
+// (src/artifacts/design-system/page/component-canvas.ts), which is the one §J's rule gives: the frame's own document,
+// loaded outside the sandbox at each canvas in turn, its body's children's margin boxes inside the inset with 8 px to
+// spare. A table that differs from what this Chromium measures fails here with every component's readings; the table is
+// corrected from them. Layouts keep the slide canvas.
+
+const BUNDLED_KEYS = Object.keys(BUNDLED_COMPONENT_CANVASES).sort();
+const bundledName = (key: string) => /^# (.+)$/m.exec(readFileSync(join(REPO_ROOT, `src/artifacts/types/design_system/defaults/${key}/DESIGN.md`), 'utf8'))![1]!.trim();
+const resize = (app: ElectronApplication, width: number, height: number) => app.evaluate(({ BrowserWindow }, [w, h]) => BrowserWindow.getAllWindows()[0]!.setSize(w!, h!), [width, height]);
+
+test('a type sample is whole in its cell: at the narrowest window the title’s samples overflow nothing sideways, and a Korean word too wide for the deck’s sample breaks inside it', async () => {
+  test.setTimeout(180_000);
+  const page = await ready();
+  const all = await systems(page);
+  const said: string[] = [];
+  for (const key of BUNDLED_KEYS) {
+    const system = all.find((s) => s.title === bundledName(key))!;
+    await resize(launch!.app, 1440, 900);
+    const tab = await openSystemPage(page, system.title, system.id);
+    await resize(launch!.app, 600, 900); // the window's minimum: the sidebar set aside, each sample cell about 180 px
+    const row = tab.locator('[data-ds-section="type"] .dsp-type-row[data-role="title"]');
+    await row.scrollIntoViewIfNeeded();
+    const specimens = row.locator('.dsp-specimen');
+    await expect(specimens).toHaveCount(2);
+    const read = () =>
+      specimens.evaluateAll((cells) =>
+        cells.map((cell) => {
+          const p = cell.querySelector('p')!;
+          const text = p.firstChild as Text;
+          // each Korean word's lines: the distinct tops of its characters' boxes
+          const broken = [...text.data.matchAll(/\S*[가-힣]\S*/g)]
+            .filter((word) => {
+              const range = document.createRange();
+              range.setStart(text, word.index!);
+              range.setEnd(text, word.index! + word[0].length);
+              return new Set(Array.from(range.getClientRects()).map((rect) => Math.round(rect.top))).size > 1;
+            })
+            .map((word) => word[0]);
+          return { width: cell.clientWidth, overflow: Math.max(cell.scrollWidth - cell.clientWidth, p.scrollWidth - p.clientWidth), broken };
+        }),
+      );
+    await expect.poll(async () => (await read()).every((cell) => cell.width > 0 && cell.width < 260), { message: 'the cells are narrow' }).toBe(true);
+    const [docCell, deckCell] = await read();
+    expect([docCell!.overflow, deckCell!.overflow], `${key}: neither title sample overflows its cell sideways`).toEqual([0, 0]);
+    expect(deckCell!.broken.length, `${key}: a Korean word wider than the deck’s cell breaks inside it`).toBeGreaterThan(0);
+    said.push(`${key}: cells ${docCell!.width} and ${deckCell!.width} px; Korean words broken inside: document ${JSON.stringify(docCell!.broken)}, deck ${JSON.stringify(deckCell!.broken)}`);
+  }
+  await test.info().attach('title samples', { body: said.join('\n'), contentType: 'text/plain' });
+  expect(launch!.consoleErrors()).toEqual([]);
+});
+
+// A component frame's document loaded alone at `canvas`, outside the sandbox (an iframe of the page's own origin), and the
+// union of its body's children's margin boxes once its faces are loaded.
+function measureOutside(page: Page, srcDoc: string, canvas: { width: number; height: number }): Promise<ContentBox> {
+  return page.evaluate(
+    async ([source, width, height]) => {
+      const frame = document.createElement('iframe');
+      frame.setAttribute('aria-hidden', 'true');
+      frame.width = String(width);
+      frame.height = String(height);
+      frame.style.cssText = `position: fixed; left: -${width + 1000}px; top: 0; width: ${width}px; height: ${height}px; border: 0; pointer-events: none;`;
+      const loaded = new Promise((resolve) => frame.addEventListener('load', resolve, { once: true }));
+      frame.srcdoc = source;
+      document.body.append(frame);
+      try {
+        await loaded;
+        const inner = frame.contentDocument!;
+        await inner.fonts.ready;
+        const view = frame.contentWindow!;
+        const box = { top: Infinity, right: -Infinity, bottom: -Infinity, left: Infinity };
+        for (const child of Array.from(inner.body.children)) {
+          const style = view.getComputedStyle(child);
+          if (style.display === 'none') continue;
+          const rect = child.getBoundingClientRect();
+          box.top = Math.min(box.top, rect.top - parseFloat(style.marginTop));
+          box.bottom = Math.max(box.bottom, rect.bottom + parseFloat(style.marginBottom));
+          box.left = Math.min(box.left, rect.left - parseFloat(style.marginLeft));
+          box.right = Math.max(box.right, rect.right + parseFloat(style.marginRight));
+        }
+        return box;
+      } finally {
+        frame.remove();
+      }
+    },
+    [srcDoc, canvas.width, canvas.height] as const,
+  );
+}
+
+test('each component of the three bundled systems is drawn on the canvas the table names, the one §J’s rule gives when its frame is measured outside the sandbox; layouts keep the slide canvas', async () => {
+  test.setTimeout(240_000);
+  const page = await ready();
+  await resize(launch!.app, 1440, 900);
+  const all = await systems(page);
+  const readings: string[] = [];
+  const differs: string[] = [];
+  for (const key of BUNDLED_KEYS) {
+    const system = all.find((s) => s.title === bundledName(key))!;
+    const tab = await openSystemPage(page, system.title, system.id);
+    const canon = tab.locator('[data-ds-section="canon"]');
+    for (const layout of await canon.locator('iframe[title^="layouts/"]').all()) {
+      expect([await layout.getAttribute('width'), await layout.getAttribute('height')], `${key}: ${await layout.getAttribute('title')} on the slide canvas`).toEqual(['1920', '1080']);
+    }
+    for (const [path, named] of Object.entries(BUNDLED_COMPONENT_CANVASES[key]!)) {
+      const frame = canon.locator(`iframe[title="${path}"]`);
+      await expect(frame, `${key}/${path} is drawn on the canvas the table names`).toHaveAttribute('width', String(named.width));
+      await expect(frame).toHaveAttribute('height', String(named.height));
+      const srcDoc = (await frame.getAttribute('srcdoc'))!;
+      expect(srcDoc, `${key}/${path}: its document carries that canvas`).toContain(componentFrameCss(named));
+      const measured: ContentBox[] = [];
+      for (const canvas of COMPONENT_CANVASES) measured.push(await measureOutside(page, srcDoc.replace(componentFrameCss(named), componentFrameCss(canvas)), canvas));
+      const ruled = smallestHolding(measured);
+      const shown = measured.map((box, k) => {
+        const canvas = COMPONENT_CANVASES[k]!;
+        return `${(box.bottom - box.top).toFixed(1)} of ${(canvas.height - 2 * insetOf(canvas)).toFixed(1)} px at ${canvas.width} (${holds(canvas, box) ? 'holds' : 'does not hold'}; ${box.left.toFixed(1)} to ${box.right.toFixed(1)} sideways)`;
+      });
+      readings.push(`${key}/${path}: ${shown.join('; ')}; the rule gives ${ruled.width}, the table ${named.width}`);
+      if (ruled !== named) differs.push(`${key}/${path}: the rule gives ${ruled.width} × ${ruled.height}, the table names ${named.width} × ${named.height}`);
+    }
+  }
+  const body = readings.join('\n');
+  console.log(`[design-systems] component canvases, measured outside the sandbox:\n${body}`);
+  await test.info().attach('component canvases', { body, contentType: 'text/plain' });
+  expect(differs, 'every bundled component is on the canvas §J’s rule gives (the readings are attached)').toEqual([]);
+  expect(launch!.consoleErrors()).toEqual([]);
 });

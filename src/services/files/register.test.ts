@@ -193,7 +193,7 @@ describe('main answers files.* on the services bus', () => {
 
     it('asks with a signal of the asking client that ends when the client does, one per client', async () => {
       const signals: (AbortSignal | undefined)[] = [];
-      const named = vi.fn(async (_appSessionId: string, _path: string, signal?: AbortSignal) => (signals.push(signal), true));
+      const named = vi.fn(async (_appSessionId: string, _path: string, signal?: AbortSignal) => (signals.push(signal), 'counted' as const));
       const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
       await install(openExternal, undefined, { named });
       const path = join(outside(), 'notes.txt');
@@ -215,7 +215,7 @@ describe('main answers files.* on the services bus', () => {
     });
 
     it('answers the refusal to a named read whose client ends while it waits', async () => {
-      const named = vi.fn((_appSessionId: string, _path: string, signal?: AbortSignal) => new Promise<boolean>((resolve) => signal!.addEventListener('abort', () => resolve(false))));
+      const named = vi.fn((_appSessionId: string, _path: string, signal?: AbortSignal) => new Promise<false>((resolve) => signal!.addEventListener('abort', () => resolve(false))));
       await install(undefined, undefined, { named });
       const answer = invoke('files.read', { appSessionId: 'A', path: join(outside(), 'notes.txt'), named: true });
       await vi.waitFor(() => expect(named).toHaveBeenCalledOnce());
@@ -224,7 +224,7 @@ describe('main answers files.* on the services bus', () => {
     });
 
     it('never asks for a request without the key, nor for one from another machine', async () => {
-      const named = vi.fn(async () => true);
+      const named = vi.fn(async () => 'counted' as const);
       const openExternal = vi.fn<ClientPort['openExternal']>(async () => ({ opened: true }));
       await install(openExternal, undefined, { named });
       const remote = { client: page, remote: true as const };
@@ -235,6 +235,57 @@ describe('main answers files.* on the services bus', () => {
       expect(await bus.invoke('files.openExternal', { appSessionId: 'A', path: join(outside(), 'doc.pdf'), named: true }, remote)).toEqual(refused);
       expect(named).not.toHaveBeenCalled();
       expect(openExternal).not.toHaveBeenCalled();
+    });
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B, Wiring): the save outside the
+  // folders asks by name with its client's signal; the grant is main's alone; neither reaches the evidence for a caller of
+  // another machine; a read and an open hand `agent` on
+  describe('the outside save and the grant (UX wave U6e)', () => {
+    const outside = () => join(root, 'outside');
+    const sha = (text: string) => createHash('sha256').update(text).digest('hex');
+    beforeEach(() => {
+      mkdirSync(outside());
+      writeFileSync(join(outside(), 'notes.txt'), 'outside notes\n');
+    });
+
+    it('saves a named file through files.writeOutside, asking with the client’s signal, and answers its hash', async () => {
+      const signals: (AbortSignal | undefined)[] = [];
+      const named = vi.fn(async (_appSessionId: string, _path: string, signal?: AbortSignal) => (signals.push(signal), 'counted' as const));
+      await install(undefined, undefined, { named });
+      const path = join(outside(), 'notes.txt');
+      const written = await invoke('files.writeOutside', { appSessionId: 'A', path, content: 'saved\n', expectedHash: sha('outside notes\n'), real: path });
+      expect(written).toEqual({ ok: true, value: { status: 'ok', hash: sha('saved\n') } });
+      expect(readFileSync(path, 'utf8')).toBe('saved\n');
+      expect(signals).toHaveLength(1);
+      expect(signals[0]).toBeInstanceOf(AbortSignal);
+      close();
+      expect(signals[0]!.aborted).toBe(true);
+    });
+
+    it('refuses files.writeOutside and files.grant from another machine, asking nothing, and files.grant from a page', async () => {
+      const named = vi.fn(async () => 'counted' as const);
+      const has = vi.fn(() => true);
+      const sent = vi.fn(async () => true);
+      await install(undefined, undefined, { named, grants: { add: vi.fn(), has }, sent });
+      const remote = { client: page, remote: true as const };
+      const path = join(outside(), 'notes.txt');
+      expect(await bus.invoke('files.writeOutside', { appSessionId: 'A', path, content: 'x', expectedHash: sha('outside notes\n'), real: path }, remote)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect(await invoke('files.grant', { appSessionId: 'A', path })).toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+      expect(await bus.main('files.grant', { appSessionId: 'A', path }, remote)).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
+      expect([named, has, sent].map((spy) => spy.mock.calls.length)).toEqual([0, 0, 0]);
+      expect(readFileSync(path, 'utf8')).toBe('outside notes\n');
+    });
+
+    it('grants a file as main asks it, and the grant admits the file to a read', async () => {
+      const added: [string, string][] = [];
+      const grants = { add: (appSessionId: string, real: string) => void added.push([appSessionId, real]), has: (appSessionId: string, real: string) => added.some(([id, path]) => id === appSessionId && path === real) };
+      await install(undefined, undefined, { grants });
+      const path = join(outside(), 'notes.txt');
+      expect(await bus.main('files.grant', { appSessionId: 'A', path })).toEqual({ ok: true, value: { status: 'granted', path } });
+      expect(added).toEqual([['A', path]]);
+      expect(await invoke('files.read', { appSessionId: 'A', path, named: true })).toMatchObject({ ok: true, value: { content: 'outside notes\n', named: true, outside: { real: path, writable: true } } });
+      expect(await invoke('files.read', { appSessionId: 'A', path, named: true, agent: true })).toEqual({ ok: false, error: { code: 'internal', message: OUT } });
     });
   });
 

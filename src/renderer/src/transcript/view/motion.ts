@@ -16,7 +16,7 @@ import type { Row, TurnId } from '../model/rows';
 export const inWorkArea = (row: Row) => row.turnId !== null && row.kind !== 'divider' && row.kind !== 'receipt' && row.kind !== 'time' && !staysInView(row);
 
 export class WorkMotion {
-  private folding = new Map<TurnId, ReturnType<typeof setTimeout>>();
+  private folding = new Map<TurnId, { timer: ReturnType<typeof setTimeout>; settle: () => void }>();
   private opening = new Map<TurnId, number>(); // until, on performance.now()
   private listeners = new Set<() => void>();
 
@@ -36,14 +36,12 @@ export class WorkMotion {
     if (this.unfold(turn)) return;
     if (prefersReducedMotion()) return settle();
     if (expanded) {
-      this.folding.set(
-        turn,
-        setTimeout(() => {
-          this.folding.delete(turn);
-          settle();
-          this.emit();
-        }, CLOSE_MOTION.ms),
-      );
+      const timer = setTimeout(() => {
+        this.folding.delete(turn);
+        settle();
+        this.emit();
+      }, CLOSE_MOTION.ms);
+      this.folding.set(turn, { timer, settle });
       this.emit();
       return;
     }
@@ -55,10 +53,23 @@ export class WorkMotion {
   unfold(turn: TurnId): boolean {
     const running = this.folding.get(turn);
     if (running === undefined) return false;
-    clearTimeout(running);
+    clearTimeout(running.timer);
     this.folding.delete(turn);
     this.emit();
     return true;
+  }
+
+  // UX wave U2b: every fold still running ends now, where it was going (the store folds its turn), its motion skipped:
+  // the to-human view came into force, where no turn folds and nothing may wait on a close.
+  settleFolds(): void {
+    if (this.folding.size === 0) return;
+    const running = [...this.folding.values()];
+    this.folding.clear();
+    for (const { timer, settle } of running) {
+      clearTimeout(timer);
+      settle();
+    }
+    this.emit();
   }
 
   private emit() {

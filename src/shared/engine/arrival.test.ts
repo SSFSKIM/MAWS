@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, nothingOpen, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, nothingOpen, ownWordsOf, personsGrants, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -24,7 +24,7 @@ function said(arrival: Arrival): string {
     case 'answer':
       return `answer by ${arrival.tool} to ${arrival.call}${arrival.dismissed ? ', dismissed' : ''}: ${first(arrival.summary)}`;
     case 'command':
-      return `command ${arrival.run === null ? '(no run)' : `/${arrival.run.command}${arrival.run.args ? ` ${arrival.run.args}` : ''}`}: ${arrival.stderr !== '' ? `stderr ${first(arrival.stderr)}` : first(arrival.stdout)}`;
+      return `command ${arrival.run === null ? '(no run)' : `/${arrival.run.command}${arrival.run.args ? ` ${arrival.run.args}` : ''}`}${arrival.plain ? ', plain' : ''}: ${arrival.stderr !== '' ? `stderr ${first(arrival.stderr)}` : first(arrival.stdout)}`;
     case 'own':
       return `own ${arrival.via}: ${first(arrival.words)}`;
     case 'wake':
@@ -336,28 +336,50 @@ describe('the reader, on a slash command’s output (u3-commands)', () => {
     });
   });
 
+  // UX wave U3b (M1; Interfaces A): a `system` row of subtype `local_command` names the command the engine ran
+  // (`commandRun`, as the frame's `local_command_run`); a `user` row that holds an output names none (Engine facts, 6, 7)
   it('in the file: the system rows and the user rows that hold an output; the command’s own rows, a caveat and an unknown command yield nothing', () => {
     expect(transcriptArrivals('u3-commands-r1')).toEqual({
-      5: ['command (no run): stderr Error: No messages to compact'],
+      5: ['command /compact: stderr Error: No messages to compact'],
       45: ['command (no run): Compacted '],
-      55: ['command (no run): Total cost:            $0.0020'],
-      60: ['command (no run): ## Context Usage'],
-      68: ['command (no run): Reloaded: 0 plugins · 0 skills · 5 agents · 0 hooks · 0 plugin LSP servers'],
-      75: ['command (no run): Session renamed to: uxw renamed'],
-      80: ['command (no run): Set effort level to low (this session only): Quick, straightforward implementation with minimal overhead'],
-      85: ['command (no run): API error: 400 ClaudeUsage routes Claude models only; got uxw-no-such-model · model not changed'],
+      55: ['command /usage: Total cost:            $0.0020'],
+      60: ['command /context: ## Context Usage'],
+      68: ['command /reload-plugins: Reloaded: 0 plugins · 0 skills · 5 agents · 0 hooks · 0 plugin LSP servers'],
+      75: ['command /rename uxw renamed: Session renamed to: uxw renamed'],
+      80: ['command /effort low: Set effort level to low (this session only): Quick, straightforward implementation with minimal overhead'],
+      85: ['command /model uxw-no-such-model: API error: 400 ClaudeUsage routes Claude models only; got uxw-no-such-model · model not changed'],
       133: ['command (no run): Compaction canceled.'],
       145: ['command (no run): Compacted '],
     });
     const terminal = transcriptArrivals('u3-terminal-commands-r1');
     expect(Object.keys(terminal).map(Number)).toEqual([6, 50, 57, 67, 71, 76, 78, 119]); // 56, 70 and 77 hold the command; 79 the unknown one
-    expect(terminal[50]).toEqual(['command (no run): Compacted (ctrl+o to see full summary)']);
+    expect(terminal[50]).toEqual(['command (no run), plain: Compacted (ctrl+o to see full summary)']); // dimmed by the terminal: escapes removed
+    expect(terminal[57]).toEqual(['command /context, plain:  Context Usage']); // the terminal's grid, its escapes removed
+    expect(terminal[71]).toEqual(['command /rename uxw renamed: Session renamed to: uxw renamed']);
     expect(JSON.stringify(Object.values(terminal))).not.toContain('\\u001b');
   });
 
   it('reads the run the frame names and keeps the output as the tag held it', () => {
-    expect(readArrivals(frameOf('u3-commands-r1', 204))).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' }, stdout: 'Session renamed to: uxw renamed', stderr: '' }]);
-    expect(readArrivals(frameOf('u3-commands-r1', 28))).toEqual([{ class: 'command', run: { command: 'compact', args: '' }, stdout: '', stderr: 'Error: No messages to compact' }]);
+    expect(readArrivals(frameOf('u3-commands-r1', 204))).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' }, stdout: 'Session renamed to: uxw renamed', stderr: '', plain: false }]);
+    expect(readArrivals(frameOf('u3-commands-r1', 28))).toEqual([{ class: 'command', run: { command: 'compact', args: '' }, stdout: '', stderr: 'Error: No messages to compact', plain: false }]);
+    expect(readArrivals(rowOf('u3-commands-r1', 55))).toEqual([{ class: 'command', run: { command: 'usage', args: '' }, stdout: expect.stringMatching(/^Total cost: /), stderr: '', plain: false }]);
+  });
+
+  // UX wave U3b (M1; Interfaces A): `plain` says the carrier's text held a terminal's escape sequences, which the
+  // reader removed; no output on the live wire holds one (Engine facts, 8)
+  it('marks an output plain only where its text held escape sequences: the terminal’s grid, never the live wire', () => {
+    const live = Object.values(journalArrivals('u3-commands-r1')).flat();
+    expect(live.length).toBeGreaterThan(0);
+    expect(live.filter((line) => line.includes(', plain'))).toEqual([]);
+    expect(Object.values(transcriptArrivals('u3-commands-r1')).flat().filter((line) => line.includes(', plain'))).toEqual([]);
+    const terminal = Object.values(transcriptArrivals('u3-terminal-commands-r1')).flat();
+    expect(terminal.filter((line) => line.includes(', plain'))).toEqual([ // the grid, and the two dimmed "Compacted" rows (lines 50 and 119)
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+      'command /context, plain:  Context Usage',
+      'command (no run), plain: Compacted (ctrl+o to see full summary)',
+    ]);
+    const coloured = { type: 'system', subtype: 'local_command', uuid: 'c-1', content: '<local-command-stderr>\u001b[31mfailed\u001b[39m</local-command-stderr>', commandRun: { command: 'demo' } };
+    expect(readArrivals(coloured)).toEqual([{ class: 'command', run: { command: 'demo', args: '' }, stdout: '', stderr: 'failed', plain: true }]);
   });
 });
 
@@ -412,6 +434,183 @@ describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => 
   });
 });
 
+// UX wave U1c, M1 (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, Design 2 and Interfaces §C,
+// 1 to 3; Acceptance 15): the grant in the engine's own encoding (`cli.pretty.js` of 2.1.322, `Dp`, `Pp`, `Yn`), read
+// in that form and the plain one, singly and in the engine's plural sentence, whole or one line of a message the engine
+// joined. The ten recorded grants are the u1 probe's (findings-uxwave-u1-classifier-block.txt); the plural sentence is
+// read from the bundle, no recording holds it (findings-uxwave-u1c-during-turn.txt). Every other subject is invented.
+describe('the grant: its encoding and its forms (U1c)', () => {
+  const grant = (subject: string, kind: 'command' | 'call' = 'command') => ({ class: 'consent', kind, subject });
+  /** The sentence with its subject quoted by `JSON.stringify` alone: what builds before U1c sent, and what a person may paste. */
+  const plain = (kind: 'command' | 'call', subject: string) => consentMessage(kind, 'X').replace('"X"', () => JSON.stringify(subject));
+  /** The quoted subject of a sentence for one command, as written. */
+  const quotedIn = (sentence: string) => sentence.slice('Permission granted for this exact command only, as one whole string: '.length, sentence.indexOf('. This does not approve'));
+  // The engine's sentence for several calls (`Yn` with more than one), its subjects quoted as given
+  const several = (kind: 'command' | 'call', quoted: string[]) =>
+    `Permission granted for these exact ${kind}s only, each as one whole string: ${quoted.join(', ')}. This does not approve any other ${kind}, any part of these, or running them with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry these exact ${kind}s if you would like.`;
+
+  it('the ten recorded grants are byte for byte the sentence for their blocked command, and each reads as one grant', () => {
+    const names = ['u1-soft-seeded-1', 'u1-soft-seeded-2', 'u1-soft-seeded-3', 'u1-soft-seeded-4', 'u1-soft-seeded-5', 'u1-hard-seeded-1', 'u1-hard-seeded-2', 'u1-hard-seeded-3', 'u1-norule-seeded-1', 'u1-norule-seeded-2'];
+    for (const name of names) {
+      const rows = loadUxwaveJournal(name);
+      const command = rows.flatMap((row) => {
+        const content = (row.frame as { type?: unknown; message?: { content?: unknown } }).type === 'assistant' ? (row.frame as { message: { content: unknown } }).message.content : null;
+        return Array.isArray(content) ? content.filter((block) => block.type === 'tool_use' && block.name === 'Bash').map((block) => String(block.input.command)) : [];
+      })[0]!;
+      const sent = rows.filter((row) => row.direction === 'out' && (row.frame as { type?: unknown }).type === 'user').map((row) => (row.frame as { message: { content: unknown } }).message.content).filter((content): content is string => typeof content === 'string' && content.startsWith('Permission granted'));
+      expect(sent, name).toEqual([consentMessage('command', command)]);
+      expect(readConsents(sent[0]!), name).toEqual([grant(command)]);
+    }
+  });
+
+  it('a command holding U+00A0 and U+200B: the grant spells them as \\u escapes, and the reader reads that text and its plain form to the one subject', () => {
+    const command = 'echo one\u00a0two\u200bthree';
+    const sentence = consentMessage('command', command);
+    expect(quotedIn(sentence)).toBe('"echo one\\u00a0two\\u200bthree"');
+    expect(readConsents(sentence)).toEqual([grant(command)]);
+    expect(readConsents(plain('command', command))).toEqual([grant(command)]);
+    expect(plain('command', command)).not.toBe(sentence);
+  });
+
+  it('escapes as the engine’s class does: every invisible or separator character but the plain space, one escape per UTF-16 unit; JSON’s own escapes stay', () => {
+    const quoted = (subject: string) => quotedIn(consentMessage('command', subject));
+    expect(quoted('a b')).toBe('"a b"');
+    expect(quoted('a\u2028b\u00adc\u007fd')).toBe('"a\\u2028b\\u00adc\\u007fd"');
+    expect(quoted('private \ue000 and \u{f0000}')).toBe('"private \\ue000 and \\udb80\\udc00"');
+    expect(quoted('lone \ud800 surrogate')).toBe('"lone \\ud800 surrogate"');
+    expect(quoted('tab\there')).toBe('"tab\\there"');
+  });
+
+  it('a subject with a line break, a quote and a backslash round-trips in both encodings', () => {
+    const command = 'printf "a\\\\b"\nnode -e "x"\u00a0';
+    expect(readConsents(consentMessage('command', command))).toEqual([grant(command)]);
+    expect(readConsents(plain('command', command))).toEqual([grant(command)]);
+    expect(consentMessage('command', command)).not.toContain('\n');
+  });
+
+  it('reads the engine’s sentence for several calls as one grant each, in order, a quoted ", " inside a subject included, in either encoding', () => {
+    const [a, b] = ['git tag "v1", "v2"', 'echo\u00a0done'];
+    expect(quotedIn(consentMessage('command', b))).toBe('"echo\\u00a0done"');
+    expect(readConsents(several('command', [quotedIn(consentMessage('command', a)), quotedIn(consentMessage('command', b))]))).toEqual([grant(a), grant(b)]);
+    expect(readConsents(several('command', [JSON.stringify(a), JSON.stringify(b)]))).toEqual([grant(a), grant(b)]);
+    expect(readConsents(several('call', ['"{\\"path\\":\\"/tmp/demo/a.txt\\"}"', '"{\\"path\\":\\"/tmp/demo/b.txt\\"}"', '"three"']))).toEqual([grant('{"path":"/tmp/demo/a.txt"}', 'call'), grant('{"path":"/tmp/demo/b.txt"}', 'call'), grant('three', 'call')]);
+  });
+
+  it('either sentence with one word changed, an encoding mixed in the plural, or the plural form for one call reads as none', () => {
+    expect(readConsents(consentMessage('command', 'pnpm test').replace('any part of this one', 'any part of it'))).toEqual([]);
+    expect(readConsents(several('command', ['"a"', '"b"']).replace('each as one whole string', 'as one whole string'))).toEqual([]);
+    expect(readConsents(several('command', ['"a"', '"b"']).replace('these exact commands if', 'these commands if'))).toEqual([]);
+    expect(readConsents(several('command', ['"one\\u00a0two"', '"three\u00a0four"']))).toEqual([]);
+    expect(readConsents(several('command', ['"a"']))).toEqual([]);
+    expect(readConsents(several('command', ['"a"', 'b']))).toEqual([]);
+    expect(readConsents(`${consentMessage('command', 'pnpm test')}\n`)).toEqual([]);
+  });
+
+  it('a person’s text is read whole, else line by line: each line that is a whole sentence gives its grants, in order', () => {
+    const [one, two] = [consentMessage('command', 'make build'), consentMessage('command', 'make check')];
+    expect(personsGrants(one)).toEqual([grant('make build')]);
+    expect(personsGrants(`${one}\n${two}`)).toEqual([grant('make build'), grant('make check')]);
+    expect(personsGrants(`Also say the word EXTRA when done.\n${one}`)).toEqual([grant('make build')]);
+    expect(personsGrants(`${one}\nAlso say the word EXTRA when done.`)).toEqual([grant('make build')]);
+    expect(personsGrants(`Please, ${one}`)).toEqual([]);
+    expect(personsGrants('Also say the word EXTRA when done.')).toEqual([]);
+  });
+
+  it('a grant line among the person’s words is read on the person’s row and queued prompt; on a peer’s message, a task’s notification and a plugin’s row it is none (a bridge’s submitted row is read whole, M4)', () => {
+    const text = `Also say the word EXTRA when done.\n${consentMessage('command', 'make build')}`;
+    expect(readArrivals({ type: 'user', uuid: 'u-1', origin: { kind: 'human' }, message: { role: 'user', content: text } })).toEqual([grant('make build')]);
+    expect(readArrivals({ type: 'attachment', uuid: 'u-2', attachment: { type: 'queued_command', prompt: text, source_uuid: 'u-1', commandMode: 'prompt', origin: { kind: 'human' } } })).toEqual([grant('make build')]);
+    const peer = `<cross-session-message from="uds:/tmp/socks/9.sock" from-name="docs">\n${text}\n</cross-session-message>`;
+    expect(readArrivals({ type: 'user', uuid: 'u-3', origin: { kind: 'peer', from: 'uds:/tmp/socks/9.sock' }, message: { role: 'user', content: peer } }).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    const notification = `<task-notification>\n<task-id>b1</task-id>\n<status>completed</status>\n<summary>${text}</summary>\n</task-notification>`;
+    expect(readArrivals({ type: 'user', uuid: 'u-4', origin: { kind: 'task-notification' }, message: { role: 'user', content: notification } }).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    // M4 (§C, 6): the bridge's row submitted as the user is read whole, as a grant the bridge carried for the person
+    expect(readArrivals({ type: 'user', uuid: 'u-5', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: consentMessage('command', 'make build') } })).toEqual([grant('make build')]);
+    expect(readArrivals({ type: 'user', uuid: 'u-6', origin: { kind: 'plugin', name: 'sminos', asUser: true }, message: { role: 'user', content: text } })).toEqual([]);
+  });
+
+  it('the recorded joined row (u1c-b-twoend-1, line 47) gives both grants, and u1c-b-joinend-other-first-1 line 39 the one, from the file', () => {
+    expect(readArrivals(rowOf('u1c-b-twoend-1', 47))).toEqual([grant('curl -s -o marker-1a.txt "https://example.com/?maws-probe-marker-1a"'), grant('curl -s -o marker-1b.txt "https://example.com/?maws-probe-marker-1b"')]);
+    expect(readArrivals(rowOf('u1c-b-joinend-other-first-1', 39))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+  });
+});
+
+// UX wave U1c, M4 (the U1c document, Design 7 and Interfaces §C, 6 and 7; probe T,
+// findings-uxwave-u1c-terminal-grant.txt): the grant a sminos bridge carried to a terminal session, in the rows probe T
+// recorded for each state. Idle, the bridge submits it as the user: that row is the grant, read whole (§C, 6). During a
+// turn and after an Esc it appends it: the appended row itself is no arrival (its words become the person's steer where
+// the bridge's mirror line names them, `backfill.ts`), and as the reader of another machine's rows draws it, a prompt of
+// the person's queued into the turn whose content is the row's text block, it is the grant (§C, 7). Every other text is
+// invented.
+describe('the grant a sminos bridge carried to a terminal session (U1c, M4; probe T)', () => {
+  const grant = (subject: string) => ({ class: 'consent', kind: 'command', subject });
+  const marker = (n: number) => `consent to the command curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"`;
+  const GRANT = consentMessage('command', 'make build');
+
+  it('idle: in each of u1c-t-idle-1..3 the row the bridge submitted as the user is the grant, and no other row is an arrival', () => {
+    expect(transcriptArrivals('u1c-t-idle-1')).toEqual({ 53: [marker(1)] });
+    expect(transcriptArrivals('u1c-t-idle-2')).toEqual({ 51: [marker(2)] });
+    expect(transcriptArrivals('u1c-t-idle-3')).toEqual({ 47: [marker(3)] });
+  });
+
+  it('during a turn and after an Esc: in each of u1c-t-busy-1, -2, -4 and u1c-t-esc-1..3 the appended row and its mirror line are no arrival; after an Esc the bridge’s wake is', () => {
+    for (const name of ['u1c-t-busy-1', 'u1c-t-busy-2', 'u1c-t-busy-4']) expect(transcriptArrivals(name), name).toEqual({});
+    expect(transcriptArrivals('u1c-t-esc-1')).toEqual({ 61: ['wake'] });
+    expect(transcriptArrivals('u1c-t-esc-2')).toEqual({ 56: ['wake'] });
+    expect(transcriptArrivals('u1c-t-esc-3')).toEqual({ 57: ['wake'] });
+  });
+
+  // The form `steerAsDrawn` (renderer/src/lane-a/source/bridge-rows.ts) gives an appended row on the route of another
+  // machine's rows: `asQueuedPrompt`, the row as a queued prompt of the person's whose prompt is the row's content.
+  const asDrawn = (row: Record<string, unknown>) => {
+    const { message, origin: _origin, isMeta: _isMeta, ...rest } = row as { message: { content: unknown }; origin?: unknown; isMeta?: unknown };
+    void _origin;
+    void _isMeta;
+    return { ...rest, type: 'attachment', attachment: { type: 'queued_command', prompt: message.content, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: row.uuid } };
+  };
+
+  it('during a turn and after an Esc, as another machine’s rows draw the appended row (u1c-t-busy-1 line 52, u1c-t-esc-1 line 56): a prompt of the person’s queued into the turn, its text block the grant', () => {
+    expect(readArrivals(asDrawn(rowOf('u1c-t-busy-1', 52) as Record<string, unknown>))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+    expect(readArrivals(asDrawn(rowOf('u1c-t-esc-1', 56) as Record<string, unknown>))).toEqual([grant('curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"')]);
+  });
+
+  it('a queued prompt of blocks is read only when they are text alone, of the person’s, as a prompt and not meta', () => {
+    const queued = (prompt: unknown, over: Record<string, unknown> = {}) => ({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: 'u-q', ...over } });
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }]))).toEqual([grant('make build')]);
+    expect(readArrivals(queued([{ type: 'text', text: `Also run the linter.\n${GRANT}` }])), 'read whole, as the file reads the same appended words').toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }, { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }]))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { isMeta: true }))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { commandMode: 'task-notification' }))).toEqual([]);
+    expect(readArrivals(queued([{ type: 'text', text: GRANT }], { origin: { kind: 'plugin', name: 'sminos' } }))).toEqual([]);
+  });
+
+  // M4's review, finding 1: the submitted row is read whole, its every block, never its first text block alone
+  it('a submitted row of blocks is the grant only when its content is text alone and its text, the blocks joined by a line break, is the sentence whole', () => {
+    const blocks = (...content: unknown[]) => ({ type: 'user', uuid: 'u-b', origin: { kind: 'plugin', name: 'sminos', asUser: true }, promptSource: 'system', message: { role: 'user', content } });
+    const text = (t: string) => ({ type: 'text', text: t });
+    expect(readArrivals(blocks(text(GRANT))), 'one text block, the sentence').toEqual([grant('make build')]);
+    expect.soft(readArrivals(blocks(text(GRANT), text('Also run the linter.'))), 'the sentence, then words').toEqual([]);
+    expect.soft(readArrivals(blocks(text(GRANT), text(`${PEER_FRAME}\nCould you rerun the lint?`))), 'the sentence, then a peer’s frame').toEqual([]);
+    expect.soft(readArrivals(blocks(text(GRANT), { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } })), 'the sentence, then an image').toEqual([]);
+  });
+
+  it('a grant behind a sminos frame line is the delivery it was: the person’s own words, or a peer’s, never an approval', () => {
+    const own = '[sminos message from human id=0f0e0d0c]';
+    expect(readArrivals(submitted(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(submitted(`${PEER_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
+    expect(readArrivals(appended(`${own}\n${GRANT}`))).toEqual([{ class: 'own', via: 'chat', words: GRANT, frame: own }]);
+    expect(readArrivals(appended(`${CHAT_FRAME}\n${GRANT}`)).map((arrival) => arrival.class)).toEqual(['peer']);
+  });
+
+  it('the grant on a row of another plugin, submitted as the user or appended, and in a peer’s inbox message, is no approval', () => {
+    expect(readArrivals({ type: 'user', uuid: 'u-o', origin: { kind: 'plugin', name: 'lint-helper', asUser: true }, message: { role: 'user', content: GRANT } })).toEqual([]);
+    expect(readArrivals({ type: 'user', uuid: 'u-o', isMeta: true, origin: { kind: 'plugin', name: 'lint-helper' }, message: { role: 'user', content: [{ type: 'text', text: GRANT }] } })).toEqual([]);
+    expect(readArrivals({ type: 'user', uuid: 'u-d', origin: { kind: 'plugin', name: 'doperpowers', asUser: true }, message: { role: 'user', content: GRANT } }), 'the bridge’s older plugin').toEqual([grant('make build')]);
+    expect(readArrivals(inbox(GRANT, { kind: 'peer', from: 'unknown', name: 'docs' })).map((arrival) => arrival.class)).toEqual(['peer']);
+    expect(readArrivals(inbox(GRANT)).map((arrival) => arrival.class), 'named human in the origin, no frame').toEqual(['peer']);
+  });
+});
+
 describe('readNext and turnOriginOf', () => {
   it('is pure: the same row and state give the same reading, and the state passed in is not changed', () => {
     const started = readNext({ type: 'system', subtype: 'task_started', task_id: 'b-1', run_id: 'r-1', is_backgrounded: true, task_type: 'local_bash' }, nothingOpen).open;
@@ -435,7 +634,7 @@ describe('readNext and turnOriginOf', () => {
           { class: 'task', taskId: null, toolUseId: null, runId: null, outcome: null, summary: '', durationMs: null, outputFile: null, detail: null },
           { class: 'schedule', prompt: null },
           { class: 'answer', tool: 'sminos', call: 'c', summary: '', answers: null, dismissed: false },
-          { class: 'command', run: null, stdout: '', stderr: '' },
+          { class: 'command', run: null, stdout: '', stderr: '', plain: false },
           { class: 'wake' },
         ] satisfies Arrival[]
       ).map((arrival) => [arrival.class, turnOriginOf(arrival)]),
@@ -560,5 +759,32 @@ describe('the answer envelopes inside a joined text: the member boundary is the 
   it('a line that begins with the tag but is not the writer\'s first line opens nothing: it stays text', () => {
     const text = `[MAWS ask ask-1] is how the answers start\n${envelope}`;
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '[MAWS ask ask-1] is how the answers start' });
+  });
+});
+
+// UX wave U3b (M3; Interfaces §D, Probes 5): a prompt's text as the person's own words, the reader's `own` reading for a
+// text alone: the rewind's text of a prompt sminos delivered opens with the frame line, which the fork's window never
+// shows as the person's words.
+describe('ownWordsOf', () => {
+  it('takes the words after a whole frame line that names the person', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nDraft the volunteers’ note.')).toBe('Draft the volunteers’ note.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\nLine one.\nLine two.')).toBe('Line one.\nLine two.');
+  });
+
+  it('keeps the frame line before words that alone would read as the engine’s interrupt marker, as the reader does', () => {
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]')).toBe('[sminos message from human id=0a1b2c3d]\n[Request interrupted by user]');
+  });
+
+  it('leaves every other text as it is: a typed prompt, another sender’s frame, a frame line with nothing after it', () => {
+    expect(ownWordsOf('Check the gauges.')).toBe('Check the gauges.');
+    expect(ownWordsOf('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.')).toBe('[sminos message from planner id=0a1b2c3d]\nCheck the gauges.');
+    expect(ownWordsOf('[sminos message from human id=0a1b2c3d]')).toBe('[sminos message from human id=0a1b2c3d]');
+  });
+
+  it('reads the recorded rewind of a delivered prompt (u3b-fork-delivered, seq 25) as its words', () => {
+    const row = loadUxwaveJournal('u3b-fork-delivered').find((entry) => entry.seq === 25)!;
+    const prefill = (row.frame as { response: { response: { prefillText: string } } }).response.response.prefillText;
+    expect(prefill.startsWith('[sminos message from human id=')).toBe(true);
+    expect(ownWordsOf(prefill)).toBe('UXW delivered: reply with only the word DELIVERED.');
   });
 });

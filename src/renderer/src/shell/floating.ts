@@ -372,10 +372,12 @@ export function closeCard(): void {
   if (split !== null) layout().showPane(otherPane(split.pane));
 }
 
-// The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again.
-export function openCard(): void {
+// The pill: the card comes back, its composer taking the keyboard; the split's card stands for S again. UX wave U1b: a
+// caller that puts the keyboard elsewhere in the card (the compact composer's "Waiting for you · N", whose request's row
+// takes it) passes false, so the composer's focus as it mounts does not take it back a frame later.
+export function openCard(composerTakesKeyboard = true): void {
   const session = cardSession(layout());
-  if (session !== null) markFocusOnMount(session);
+  if (session !== null && composerTakesKeyboard) markFocusOnMount(session);
   useFloatingCard.getState().setClosed(false);
   const split = cardHost(layout()) === 'split' ? splitFloat(layout().main) : null;
   if (split !== null) layout().showPane(split.pane);

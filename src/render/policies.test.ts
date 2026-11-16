@@ -25,8 +25,12 @@ import {
   shouldBlockFrameNavigation,
   type FrameLike,
   shouldCancelDownload,
+  shouldCancelForOwner,
   shouldCancelRequest,
+  writeSeam,
 } from './policies';
+import { endableClientRef } from '@shared/ipc/client';
+import { createFrameTokens, type FrameFixed } from '../main/file-frames/tokens';
 
 const ID = '6f1c2d3e-4b5a-4c6d-8e9f-0a1b2c3d4e5f';
 // P3-L M6b: E2's store frame was the first store frame these policies guarded; an artifact's page at a revision is
@@ -444,5 +448,167 @@ describe('the policies installed on a session and a window', () => {
         expect(session.check!(null, 'deprecated-sync-clipboard-read', origin!, { isMainFrame: false, requestingUrl })).toBe(false);
       }
     }
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, "Main's decisions, each with a token
+// host"; R1, A1): a file frame's URL, `maws-artifact://<32 hex>/<the file's name>`, is a store frame's to every existing
+// predicate, which none of them is edited to be; and the one new question, which web contents asks, is the request
+// listener's first. Every token and name here is invented.
+describe('a file frame’s token host', () => {
+  const TOKEN = '3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b';
+  const OTHER_TOKEN = 'c0ffee11d00d4e5fa6b7c8d9e0f1a2b3';
+  const FILE = `maws-artifact://${TOKEN}/ledger draft.pdf`;
+  const OTHER_FILE = `maws-artifact://${OTHER_TOKEN}/notes.html`;
+
+  /** A live token of web contents `contentsId`, issued in a real table; the table and the token. */
+  function held(contentsId: number) {
+    const tokens = createFrameTokens();
+    const fixed: FrameFixed = { name: 'ledger draft.pdf', framed: 'pdf', mime: 'application/pdf', csp: null, source: { read: async () => ({ bytes: new Uint8Array(), size: 0, identity: 'one' }), close: async () => {} } };
+    const owner = endableClientRef(`page:${contentsId}.1`);
+    const issued = tokens.issue(owner, contentsId, fixed);
+    if (typeof issued === 'string') throw new Error(`not issued: ${issued}`);
+    return { tokens, owner, url: `maws-artifact://${issued.token}/ledger%20draft.pdf`, token: issued.token };
+  }
+
+  it('finds a token’s frame and the viewer beneath it, and nothing in the app beside them', () => {
+    expect(beneathStoreFrame(chain(APP, FILE))).toBe(true);
+    expect(beneathStoreFrame(chain(APP, FILE, VIEWER))).toBe(true);
+    expect(beneathStoreFrame(chain(APP, FILE, VIEWER, 'about:blank'))).toBe(true);
+    expect(beneathStoreFrame(chain(APP))).toBe(false);
+    expect(beneathStoreFrame(chain(APP, 'about:srcdoc'))).toBe(false);
+  });
+
+  it('cancels a request from a token’s frame, or from beneath it, for anything outside the scheme and the viewer', () => {
+    const from = (url: string, frame: FrameLike, initiatorOrigin = 'null') => shouldCancelRequest({ url, beneath: beneathStoreFrame(frame), shown: shownArtifact(frame), initiatorOrigin, appOrigin: 'file://' });
+    for (const url of ['http://127.0.0.1:8641/', 'https://example.com/x.png', 'ws://example.com/', 'wss://example.com/', 'file:///etc/hosts']) {
+      expect(from(url, chain(APP, FILE)), url).toBe(true);
+      expect(from(url, chain(APP, FILE, VIEWER)), `${url} beneath`).toBe(true);
+    }
+    expect(shouldCancelRequest({ url: 'https://example.com/', beneath: null, initiatorOrigin: `maws-artifact://${TOKEN}` })).toBe(true); // an unsandboxed frame's initiator
+    expect(from(FILE, chain(APP, FILE))).toBe(false); // its own host
+    expect(from('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/pdf_embedder.css', chain(APP, FILE))).toBe(false);
+    expect(from('chrome://resources/js/assert.js', chain(APP, FILE, VIEWER))).toBe(false);
+  });
+
+  it('refuses a token’s frame an artifact, an artifact’s frame a token, and one token’s frame another’s', () => {
+    const from = (url: string, frame: FrameLike, initiatorOrigin = 'null') => shouldCancelRequest({ url, beneath: beneathStoreFrame(frame), shown: shownArtifact(frame), initiatorOrigin, appOrigin: 'file://' });
+    expect(from(PAGE, chain(APP, FILE))).toBe(true);
+    expect(from(artifactUrl(ARTIFACT, 3, 'assets/a.png'), chain(APP, FILE, VIEWER))).toBe(true);
+    expect(from(FILE, chain(APP, PAGE))).toBe(true);
+    expect(from(OTHER_FILE, chain(APP, FILE))).toBe(true);
+    expect(from(FILE, chain(APP, OTHER_FILE), `maws-artifact://${OTHER_TOKEN}`)).toBe(true);
+    expect(from(FILE, chain(APP), 'file://')).toBe(false); // the app's own origin points its frame there
+    expect(from(FILE, chain(APP, PAGE), 'file://')).toBe(false);
+  });
+
+  it('cancels a token asked by another web contents, by none, and after its release; passes its owner’s; leaves an artifact’s id alone', () => {
+    const { tokens, owner, url, token } = held(7);
+    const ask = (asked: string, webContentsId: number | undefined) => shouldCancelForOwner({ url: asked, webContentsId, ownerOf: tokens.ownerOf });
+    expect(ask(url, 7)).toBe(false);
+    expect(ask(`${url}#toolbar=0`, 7)).toBe(false);
+    expect(ask(url, 8)).toBe(true);
+    expect(ask(url, undefined)).toBe(true); // a request the browser itself started
+    expect(ask(FILE, 7)).toBe(true); // a token of the shape that nobody holds
+    expect(ask(PAGE, 8)).toBe(false); // an artifact's id is not this question's
+    expect(ask(PAGE, undefined)).toBe(false);
+    expect(ask('https://example.com/', 8)).toBe(false);
+    expect(tokens.release(token, owner)).toBe(true);
+    expect(ask(url, 7)).toBe(true);
+  });
+
+  it('prevents a token’s frame from navigating anywhere but its own host', () => {
+    const decide = (url: string, frame: FrameLike, initiator: FrameLike | null) =>
+      shouldBlockFrameNavigation({ url, frameBeneath: beneathStoreFrame(frame), initiatorBeneath: beneathStoreFrame(initiator), initiatorShows: shownArtifact(initiator) });
+    for (const url of ['https://example.invalid/', 'data:text/html,<p>x</p>', 'blob:null/5b1e', 'about:blank', PAGE, OTHER_FILE]) {
+      expect(decide(url, chain(APP, FILE), chain(APP, FILE)), url).toBe(true);
+    }
+    expect(decide('about:blank', chain(APP, FILE, 'about:blank'), chain(APP, FILE))).toBe(true); // a frame inside it
+    expect(decide('https://example.invalid/', chain(APP, FILE, VIEWER), chain(APP, FILE, VIEWER))).toBe(true); // a PDF's link in the viewer
+    expect(decide(FILE, chain(APP, 'about:blank'), chain(APP))).toBe(false); // its first load, by the app
+    expect(decide(`maws-artifact://${TOKEN}/other.pdf`, chain(APP, FILE), chain(APP, FILE))).toBe(false); // its own host: the responder answers any other path 404
+  });
+
+  it('cancels a download of a token’s URL and of the viewer’s save from it', () => {
+    expect(shouldCancelDownload({ url: FILE, urlChain: [FILE] })).toBe(true);
+    expect(shouldCancelDownload({ url: 'https://cdn.example/x', urlChain: [FILE, 'https://cdn.example/x'] })).toBe(true);
+    expect(shouldCancelDownload({ url: 'blob:chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/9c1d', urlChain: ['blob:chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/9c1d'] })).toBe(true);
+  });
+
+  it('names a token’s frame by any origin Electron reports', () => {
+    expect(isStoreFramePermission([`maws-artifact://${TOKEN}`])).toBe(true);
+    expect(isStoreFramePermission([undefined, FILE])).toBe(true);
+    expect(isStoreFramePermission([null, 'about:blank', OTHER_FILE])).toBe(true);
+  });
+
+  it('exempts a token’s answer', () => {
+    expect(isCspExempt(FILE)).toBe(true);
+    expect(isCspExempt(OTHER_FILE)).toBe(true);
+  });
+
+  it('reads no artifact from a token frame’s message', () => {
+    expect(artifactConsoleMessageOf({ frame: { url: OTHER_FILE }, level: 'error', message: 'from a file', lineNumber: 1, sourceId: OTHER_FILE })).toBeNull();
+    expect(artifactConsoleMessageOf({ frame: { url: FILE }, level: 'warning', message: 'from a file', lineNumber: 1, sourceId: FILE })).toBeNull();
+  });
+
+  describe('on the real listener', () => {
+    class FakeSession extends EventEmitter {
+      beforeRequest: ((details: unknown, callback: (response: { cancel: boolean }) => void) => void) | null = null;
+      webRequest = {
+        onBeforeRequest: (_filter: unknown, listener: FakeSession['beforeRequest']) => {
+          this.beforeRequest = listener;
+        },
+      };
+      asked(details: Record<string, unknown>): boolean {
+        let cancel: boolean | null = null;
+        this.beforeRequest!({ method: 'GET', ...details }, (answer) => (cancel = answer.cancel));
+        return cancel!;
+      }
+    }
+
+    it('a web contents with its own filter that asks for a token it does not own is cancelled before its filter is asked, on the real listener', () => {
+      const { tokens, url } = held(7);
+      const session = new FakeSession();
+      installFramePolicies(session as unknown as Session, {}, 'file://', tokens.ownerOf);
+      const printer = vi.fn(() => false); // its own filter cancels nothing
+      const owners = vi.fn(() => false);
+      const removePrinter = restrictRequests(41, printer);
+      const removeOwners = restrictRequests(7, owners);
+      try {
+        expect(session.asked({ url, webContentsId: 41, frame: chain(APP) })).toBe(true);
+        expect(printer).not.toHaveBeenCalled();
+        expect(session.asked({ url: 'data:image/png;base64,AA==', webContentsId: 41, frame: chain(APP) })).toBe(false);
+        expect(printer).toHaveBeenCalledTimes(1); // every other request of its own is its filter's, as before
+        expect(session.asked({ url, webContentsId: 7, frame: chain(APP) })).toBe(false); // the owner's passes the check, then its own filter is asked
+        expect(owners).toHaveBeenCalledWith(url);
+      } finally {
+        removePrinter();
+        removeOwners();
+      }
+      expect(session.asked({ url, webContentsId: 9, frame: chain(APP) })).toBe(true); // a window with no filter of its own
+      expect(session.asked({ url, frame: null })).toBe(true); // no web contents at all
+      expect(session.asked({ url: PAGE, webContentsId: 9, frame: chain(APP), initiatorOrigin: 'file://' })).toBe(false); // an artifact as before
+    });
+
+    it('writes a frame-decision line for a token host under MAWS_E2E, and none outside it', async () => {
+      const { tokens, url } = held(7);
+      const session = new FakeSession();
+      installFramePolicies(session as unknown as Session, e2e(), 'file://', tokens.ownerOf);
+      session.asked({ url, webContentsId: 7, frame: chain(APP) });
+      session.asked({ url, method: 'HEAD', webContentsId: 9, frame: chain(APP) });
+      session.asked({ url, frame: null });
+      session.asked({ url: FILE, webContentsId: 7, frame: chain(APP) }); // a token nobody holds
+      session.asked({ url: PAGE, webContentsId: 7, frame: chain(APP), initiatorOrigin: 'file://' }); // an artifact: no line
+      session.asked({ url: 'https://example.com/', webContentsId: 7, frame: chain(APP) }); // no line
+      writeSeam(e2e(), `frame-entry GET - ${url}`); // the responder's line, through the same ordered writer
+      await vi.waitFor(async () => expect(await logLines()).toEqual([`frame-decision pass 7 GET ${url}`, `frame-decision cancel 9 HEAD ${url}`, `frame-decision cancel none GET ${url}`, `frame-decision cancel 7 GET ${FILE}`, `frame-entry GET - ${url}`]));
+
+      const quiet = new FakeSession();
+      installFramePolicies(quiet as unknown as Session, { MAWS_E2E_OPEN_LOG: log }, 'file://', tokens.ownerOf);
+      quiet.asked({ url, webContentsId: 9, frame: chain(APP) });
+      writeSeam({ MAWS_E2E_OPEN_LOG: log }, `frame-entry GET - ${url}`);
+      await settle();
+      expect(await logLines()).toHaveLength(5);
+    });
   });
 });

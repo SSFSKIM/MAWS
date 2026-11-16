@@ -6,6 +6,7 @@
 // live ones, drawn muted with the reason in their label, and the heading counts only the live ones.
 import { useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ATTENTION_HEADINGS } from '@shared/attention/headings';
+import { waitsOnAnswer } from '@shared/attention/kinds'; // UX wave U1b
 import type { AppSessionId } from '@shared/graph/ids'; // P2-C
 import type { SessionRecord } from '@shared/graph/session'; // P5 O7 M6
 import { MachineChip } from '../app/MachineChip';
@@ -13,6 +14,7 @@ import { greyWords, useMachineMark } from '../app/machine-mark';
 import { openAnchor, ownerAnchorOf } from '../attention/anchor'; // P2-C
 import type { NeedsYouRow } from '../attention/derive';
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
+import { showWaiting } from '../request-card/show-waiting'; // UX wave U1b
 import { displayTitle, listedTitle } from '../sessions/title';
 import { useLayout } from '../stores/layout';
 import type { OpenSessionOptions } from '../stores/layout-model'; // P2-C
@@ -115,7 +117,10 @@ function NeedsYouItem({ row, labels, selected, tabStop, onFocus, onBlur, onKeyDo
       if (!openListed(id, how.how === 'tab' ? { newTab: true } : undefined)) useLayout.getState().openSession(id, how);
     };
     if (anchor !== null) openAnchor(row.appSessionId, anchor, openSession);
-    else openSession(row.appSessionId);
+    else {
+      openSession(row.appSessionId);
+      showWaiting(row.appSessionId, waitsOnAnswer(row.oldest) ? row.oldest.id : null); // UX wave U1b (M5): then its request
+    }
   };
   const label = `${project} · ${title} · ${reason}`;
   const greyed = row.greyed === true;

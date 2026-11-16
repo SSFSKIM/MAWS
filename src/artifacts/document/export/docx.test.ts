@@ -189,6 +189,21 @@ describe('exportDocx', () => {
     expect(a4).toMatch(/<w:pgSz w:w="11906" w:h="16838"[^>]*\/>/);
   });
 
+  // UX wave U10b (l6-artifacts-07 (b), M2; §B.4): the document's own page, under the call's size, at its density
+  it('prints on the document’s page unless the call names a size, and at compact density when the document says so', async () => {
+    const source = everyKindSource();
+    source.page = { size: 'a4', density: 'compact' };
+    const xml = await parts(await exportDocx(source, { tab: 'tab-1' }));
+    expect(xml['word/document.xml']).toMatch(/<w:pgSz w:w="11906" w:h="16838"[^>]*\/>/);
+    // compact's h1: 26px × 0.9 = 23.4px, 35 half-points
+    expect(xml['word/styles.xml']).toMatch(/<w:style w:type="paragraph" w:styleId="Heading1">.*?<w:sz w:val="35"\/>.*?<\/w:style>/s);
+    expect((await parts(await exportDocx(source, { pageSize: 'letter' })))['word/document.xml']).toMatch(/<w:pgSz w:w="12240" w:h="15840"[^>]*\/>/);
+    const wide: DesignSystemExport<LocalTokens> = { ...houseSystem, tokens: { properties: { ...HOUSE_TOKENS.properties, '--ds-page-margin': '1in' } } };
+    expect((await parts(await exportDocx(source, { system: wide })))['word/document.xml']).toMatch(/<w:pgMar w:top="1080" w:right="1080" w:bottom="1080" w:left="1080"/);
+    source.page = {};
+    expect((await parts(await exportDocx(source, { system: wide })))['word/document.xml']).toMatch(/<w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440"/);
+  });
+
   it('embeds pictures it can load and names the rest', async () => {
     const loaded = await exportDocx(everyKindSource(), { tab: 'tab-1', loadImage: async ({ assetId }) => ({ bytes: assetId ? Uint8Array.from([...PNG, 0]) : PNG, mime: 'image/png' }) });
     const zip = await JSZip.loadAsync(loaded);

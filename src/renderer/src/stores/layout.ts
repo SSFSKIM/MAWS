@@ -82,9 +82,10 @@ export interface LayoutState {
   // Hydration's live record/intent resolver; derivation ignores stale contexts without deleting saved preferences.
   knownSession(appSessionId: AppSessionId): boolean;
   hydrated: boolean;
-  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab showing an artifact's record.
-  // Transient; the drop targets decide acceptance from it (`shell/transfer.ts`).
-  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId: string } | null;
+  // The tab being dragged (P4-B3, X38; its Decision Log 16): a main tab, or a panel tab (UX wave U6b-1, Decision 14: any
+  // side tab, the artifact it shows when it shows a record). Transient; the drop targets decide acceptance from it
+  // (`shell/transfer.ts`).
+  dragging: { source: 'main'; tabId: string; fromPane: Pane } | { source: 'panel'; tabId: string; toolId: string; artifactId?: string } | null;
   // W5: whether the floating Overview is open (transient: the app opens to the last active tab, §5.2 as amended); its
   // rect persists in `regions.overview`.
   overviewOpen: boolean;
@@ -704,6 +705,16 @@ export function createLayoutStore() {
         // review's finding 2).
         const surfaceActs = earlySurfaces.splice(0);
         if (surfaceActs.length > 0) hydratedPanels = { ...hydratedPanels, panelSurfaces: surfaceActs.reduce((state, change) => change(state), hydratedPanels.panelSurfaces) };
+        // UX wave U6b-1 (Decision 17, sequence 8): the files beside the chat as this build holds them, whatever build wrote
+        // them (a pin build F made on a file's tab, a file both beside the chat and in a main tab, the list's order); each
+        // list it changed is written back, with the params.
+        const files = model.repairFileTabs({ main: hydratedMain, panelPinned: hydratedPanels.panelPinned, panelBySession: hydratedPanels.panelBySession, panelParams: storedParams.params });
+        const repairedFiles = [...files.panelBySession].flatMap(([id, own]) => (own === hydratedPanels.panelBySession.get(id) ? [] : [id]));
+        if (repairedFiles.length > 0) {
+          const after = { ...hydratedPanels, panelBySession: files.panelBySession };
+          const { stacks, ...repaired } = scopePatch(after, repairedScopes(hydratedPanels, after));
+          hydratedPanels = { ...after, ...repaired, panelSurfaces: withStacks(after.panelSurfaces, stacks) };
+        }
         // F's one width is this build's wide width once; 380, F's automatic, is automatic here too (X-165).
         const fromRegions = persistedRegions.panel.width === F_AUTOMATIC_WIDTH ? null : persistedRegions.panel.width;
         const panelWidths = storedWidths ?? { version: 1 as const, wide: fromRegions, narrow: null };
@@ -712,7 +723,7 @@ export function createLayoutStore() {
         // P4-B3: the params of panel tabs no list holds now (closed, or a session's not kept) are not read; the
         // no-session selection is read back if it still names a pin.
         const live = livePanelTabIds(hydratedPanels.panelPinned, hydratedPanels.panelBySession);
-        const panelParams = Object.fromEntries(Object.entries(storedParams.params).filter(([id]) => live.has(id)));
+        const panelParams = Object.fromEntries(Object.entries(files.panelParams).filter(([id]) => live.has(id)));
         const firstReadPending = !complete && !held.has('panelTools.groups');
         // UX wave U7b ("At hydration"): the page to open is the first of these that applies. 1: what the person opened or
         // closed before the read; 2: none after an act of theirs that showed a tab; then `pageAtStart`, over the stored
@@ -747,7 +758,8 @@ export function createLayoutStore() {
         // the first read pruned, with the params it left (persistence takes the filtered params as its baseline).
         if (complete) for (const key of ['panelTools.groups', 'panelTools.widths', 'cards.open'] as const) if (!held.has(key)) unsaved.add(key);
         if (!sameJson(cardsOpen, storedCards.open)) unsaved.add('cards.open'); // a fold made while the reads were pending
-        for (const id of prunedPanels) unsaved.add(`panel.${id}`);
+        for (const id of [...prunedPanels, ...repairedFiles]) unsaved.add(`panel.${id}`);
+        if (files.panelParams !== storedParams.params) unsaved.add('panelTools.params'); // UX wave U6b-1
         // UX wave U7b: `destination` is written, or deleted, where what hydration opened differs from the file; a stored
         // value that does not parse (warned once above) is left in the file until the next page is opened or closed.
         if (readAs.has('destination') ? !sameJson(storedValue('destination', destination), readAs.get('destination')) : destination !== null) unsaved.add('destination');
@@ -760,7 +772,7 @@ export function createLayoutStore() {
           regions, 'main.tabs': storedMain(get().main), 'panel.pinned': panelPinned, 'panelTools.surfaces': get().panelSurfaces,
           'panelTools.groups': get().panelGroups, 'panelTools.widths': panelWidths, 'cards.open': storedValue('cards.open', cardsOpen),
           'panelTools.params': storedValue('panelTools.params', panelParams), destination: storedValue('destination', destination),
-          ...Object.fromEntries(prunedPanels.map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
+          ...Object.fromEntries([...prunedPanels, ...repairedFiles].map((id) => [`panel.${id}`, get().panelBySession.get(id)])),
         };
         for (const key of unsaved) {
           if (!(key in values)) continue;
@@ -921,7 +933,7 @@ export function createLayoutStore() {
         let patch: Pick<LayoutState, 'panelPinned' | 'panelActiveNoSession' | 'panelBySession'>;
         if (pinned) {
           const tab = own.tabs.find((t) => t.id === tabId);
-          if (!tab) return;
+          if (!tab || model.paramsHoldFile(prev.panelParams[tabId])) return; // UX wave U6b-1 (Decision 16): a file's tab is never pinned
           panelBySession.set(appSessionId, { ...own, tabs: own.tabs.filter((t) => t.id !== tabId) });
           patch = { ...pins([...prev.panelPinned, { ...tab, pinned: true }]), panelBySession };
         } else {
@@ -1097,59 +1109,140 @@ function storedValue(key: LayoutKey, slice: unknown): unknown {
 // would clobber them) or for hydration itself.
 // l1-sessions-13: main's inactivity sweep keeps every session `main.tabs` holds open, so a session tab (or one of its
 // agents') joining the tabs is written at once rather than after the delay; a tab leaving waits as any change does.
+// UX wave U6b-1 (Decision 19; M4's fix waves): the keys that say where a file is, `main.tabs`, each session's
+// `panel.<session>` list and `panelTools.params` (`LOGGED_KEY`), are stored through one first-in-first-out log, every
+// write of them alike: an ordinary change at its debounce moment, a move (`writeInOrder`) at once, its destination's
+// values as it left them and then its source's. One write of the log is in flight at a time; a failed one stays at the
+// head and is sent again at the next change of the layout; `beforeunload` and the stop send the whole log at once, in
+// its order (main stores each `layout.set` as it arrives). So what is stored is always a prefix of the log, and since a
+// move's destination comes before its source, after every prefix each file is in one place at least (a value that
+// brings back a tab closed since is a tab too many, never a file too few). An entry of the same key as the log's last,
+// not yet sent, takes that entry's place: the prefix it drops added nothing the later one lacks.
+// The other keys keep the debounce alone: none of them says whether a file is open (the stacks, the groups and the widths
+// order and size tabs the lists hold; `panel.pinned` never holds a file, Decision 16).
+const LOGGED_KEY = (key: LayoutKey) => key === 'main.tabs' || key === 'panelTools.params' || (key !== 'panel.pinned' && PANEL_KEY.test(key));
+const orderedWriters = new Map<typeof useLayout, (first: LayoutKey[], then: LayoutKey[]) => void>();
+
 export function persistLayout(client: MawsBridge, store = useLayout): () => void {
   const pending = new Map<LayoutKey, { timer: ReturnType<typeof setTimeout>; value: unknown }>();
   let written: Map<LayoutKey, unknown> | null = store.getState().hydrated ? persistedKeys(store.getState()) : null;
-  let published = new Set(written ? openSessionsOf(store.getState().main) : []); // the sessions main's `main.tabs` holds open
+  // The sessions main's `main.tabs` holds open once the log has landed. Counted as the log takes `main.tabs`, not as it is
+  // sent (the branch review's second finding): a join waiting in the log is a join made, so the file's close later in a
+  // move's step is an ordinary change, debounced and so left to the move's own snapshots, never a second join that would
+  // put a `main.tabs` without the file ahead of the move's destination.
+  let published = new Set(written ? openSessionsOf(store.getState().main) : []);
+  const log: { key: LayoutKey; slice: unknown }[] = []; // a null slice deletes the key
+  let flight: number | null = null; // the write of the log's head in flight
+  let failed = false; // the head's last write failed: it waits for the next change
+  let writes = 0;
 
-  const write = (key: LayoutKey, slice: unknown) => {
-    if (key === 'main.tabs') published = new Set(openSessionsOf(slice as Strip));
+  const write = (key: LayoutKey, slice: unknown): number => {
+    const sent = ++writes;
     void client.invoke('layout.set', { key, value: storedValue(key, slice) }).then((result) => {
       if (!result.ok) console.error(`[layout] layout.set ${key} failed`, result.error);
+      answered(sent, result.ok);
     });
+    return sent;
   };
+  const pump = () => {
+    if (flight === null && !failed && log.length > 0) flight = write(log[0].key, log[0].slice);
+  };
+  const answered = (sent: number, ok: boolean) => {
+    if (sent !== flight) return; // not the log's (or sent by an unload)
+    flight = null;
+    // a failed write of a key that left the state (a removed session's list, which main deletes) is not sent again
+    if (ok || (log[0].slice !== null && !persistedKeys(store.getState()).has(log[0].key))) log.shift();
+    else failed = true;
+    pump();
+  };
+  const append = (key: LayoutKey, slice: unknown) => {
+    if (key === 'main.tabs') published = new Set(openSessionsOf(slice as Strip));
+    const tail = log.at(-1);
+    if (tail?.key === key && !(log.length === 1 && flight !== null)) tail.slice = slice;
+    else log.push({ key, slice });
+  };
+  const unschedule = (key: LayoutKey) => {
+    clearTimeout(pending.get(key)?.timer);
+    pending.delete(key);
+  };
+  const persist = (key: LayoutKey, slice: unknown) => {
+    if (!LOGGED_KEY(key)) return void write(key, slice);
+    append(key, slice);
+    pump();
+  };
+  // A move: its destination's values as it left them, then its source's, after everything the log holds already.
+  const inOrder = (first: LayoutKey[], then: LayoutKey[]) => {
+    if (written === null) return; // before hydration nothing is written
+    const now = persistedKeys(store.getState());
+    for (const key of [...first, ...then.filter((key) => !first.includes(key))]) {
+      unschedule(key);
+      if (now.has(key)) append(key, now.get(key));
+    }
+    pump();
+  };
+  orderedWriters.set(store, inOrder);
   const schedule = (key: LayoutKey, value: unknown) => {
     const before = pending.get(key);
     if (before) clearTimeout(before.timer);
     const timer = setTimeout(() => {
       pending.delete(key);
-      write(key, value);
+      persist(key, value);
     }, LAYOUT_WRITE_DELAY_MS);
     pending.set(key, { timer, value });
   };
   const flush = () => {
     for (const [key, { timer, value }] of pending) {
       clearTimeout(timer);
-      write(key, value);
+      if (LOGGED_KEY(key)) append(key, value);
+      else write(key, value);
     }
     pending.clear();
+    const unsent = log.splice(flight === null ? 0 : 1); // the head in flight is on its way already
+    log.length = 0;
+    flight = null;
+    failed = false;
+    for (const { key, slice } of unsent) write(key, slice);
   };
 
   const unsubscribe = store.subscribe((state) => {
     if (!state.hydrated) return;
     const now = persistedKeys(state);
     let marks = false; // UX wave U8b: this change writes the side column's state while the first read is pending
+    let changed = false;
     if (written) {
       for (const [key, value] of now) {
         if (written.get(key) === value) continue;
+        changed = true;
         if (state.firstReadPending && (key === 'panelTools.surfaces' || key === 'panelTools.groups' || PANEL_KEY.test(key))) marks = true;
         if (key === 'main.tabs' && openSessionsOf(state.main).some((id) => !published.has(id))) {
-          clearTimeout(pending.get(key)?.timer);
-          pending.delete(key);
-          write(key, value);
+          unschedule(key);
+          persist(key, value);
         } else schedule(key, value);
       }
     } else published = new Set(openSessionsOf(state.main)); // hydration wrote what differs from layout.json, open tabs included
     // A key that left the state (a removed session's `panel.<id>`, which main deletes) must not be written back by a
-    // write still pending from before.
+    // write still pending from before, nor by the log (but for the head in flight, whose failure drops it).
     for (const [key, { timer }] of pending) {
       if (now.has(key)) continue;
       clearTimeout(timer);
       pending.delete(key);
     }
+    for (let i = log.length - 1; i >= (flight === null ? 0 : 1); i--) {
+      if (log[i].slice !== null && !now.has(log[i].key)) {
+        log.splice(i, 1);
+        if (i === 0) failed = false; // the failed head is gone: the next is sent below
+      }
+    }
     // P5 O6 M4: main deletes the panel key of its own removed session, never another machine's, so the page deletes that.
-    for (const key of written?.keys() ?? []) if (!now.has(key) && otherMachinePanelKey(key, client.localMachine)) write(key, null);
+    for (const key of written?.keys() ?? []) {
+      if (now.has(key) || !otherMachinePanelKey(key, client.localMachine)) continue;
+      changed = true;
+      persist(key, null);
+    }
     written = now;
+    // UX wave U6b-1: a change of the layout sends the log's failed head again
+    if (changed) failed = false;
+    pump();
     // UX wave U8b (Decision Log 3): after a deferred first read, this build's first write of a list, the stacks or the
     // groups marks the profile read, so no later launch prunes a tab this build may have shown.
     if (marks) {
@@ -1162,5 +1255,12 @@ export function persistLayout(client: MawsBridge, store = useLayout): () => void
     unsubscribe();
     window.removeEventListener('beforeunload', flush);
     flush();
+    if (orderedWriters.get(store) === inOrder) orderedWriters.delete(store);
   };
+}
+
+// UX wave U6b-1 (Decision 19; Interfaces §D): a move's stored writes in order, through the persistence running over
+// `store` (nothing while none runs): the values of `first` as the move left them, then those of `then`, at the log's end.
+export function writeInOrder(first: LayoutKey[], then: LayoutKey[], store = useLayout): void {
+  orderedWriters.get(store)?.(first, then);
 }

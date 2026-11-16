@@ -114,4 +114,58 @@ describe('the consent line', () => {
     expect(screen.queryByRole('button', { name: 'Copy' })).toBeNull();
     expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
   });
+
+  // UX wave U1c, M1 (the U1c document, Design 2): a grant the engine joined with the person's other words
+  it('beside the person’s other words: their bubble without the grant’s sentence, then the line', () => {
+    const subject = 'make build';
+    const rows = derived((b) => {
+      b.emit('turn.started', { userMessageUuid: uuid('j1'), origin: 'human' });
+      b.emit('user.message', { messageUuid: uuid('j1'), content: `Also say the word EXTRA when done.\n${consentMessage('command', subject)}`, isReplay: true, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject }] });
+    }).filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user');
+    expect(rows).toHaveLength(2);
+    const bubble = renderRow(rows[0]!, { storeKey: A }).container;
+    expect(bubble.querySelector('[data-bubble]')?.textContent).toContain('Also say the word EXTRA when done.');
+    expect(bubble.textContent).not.toContain('Permission granted');
+    expect(bubble.querySelector('.transcript-consent')).toBeNull();
+    cleanup();
+    const line = renderRow(rows[1]!, { storeKey: A }).container;
+    expect(line.querySelector('.transcript-consent')?.textContent).toBe(`You approved ${subject}`);
+    expect(line.querySelector('[data-bubble]')).toBeNull();
+  });
+
+  // M1's review (findings 1 and 2)
+  it('an image beside two grants in text blocks stays drawn in the bubble, and each grant is its line', () => {
+    const image = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+    const rows = derived((b) => {
+      b.emit('turn.started', { userMessageUuid: uuid('j1'), origin: 'human' });
+      b.emit('user.message', {
+        messageUuid: uuid('j1'), content: [{ type: 'text', text: consentMessage('command', 'make build') }, { type: 'text', text: consentMessage('command', 'make check') }, image], isReplay: false, isSynthetic: false, origin: 'human', bash: null,
+        arrival: [{ class: 'consent', kind: 'command', subject: 'make build' }, { class: 'consent', kind: 'command', subject: 'make check' }],
+      });
+    }).filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user');
+    expect(rows).toHaveLength(3);
+    expect(renderRow(rows[0]!, { storeKey: A }).container.querySelectorAll('.transcript-attachment-image')).toHaveLength(1);
+    cleanup();
+    expect(rows.slice(1).map((row) => {
+      const text = renderRow(row, { storeKey: A }).container.querySelector('.transcript-consent')?.textContent;
+      cleanup();
+      return text;
+    })).toEqual(['You approved make build', 'You approved make check']);
+  });
+
+  it('a grant the engine never ran keeps its line with the dropped row’s mark, Not sent, as a dropped bubble does', () => {
+    const subject = 'make build';
+    const rows = derived((b) => {
+      b.turn('u1', 'count slowly');
+      b.emit('user.message', { messageUuid: uuid('s1'), content: `Also say the word EXTRA when done.\n${consentMessage('command', subject)}`, isReplay: false, isSynthetic: false, origin: 'human', bash: null, arrival: [{ class: 'consent', kind: 'command', subject }] });
+      b.emit('command.lifecycle', { commandUuid: uuid('s1'), state: 'cancelled' });
+    }).filter((r): r is Extract<Row, { kind: 'user' }> => r.kind === 'user' && r.dropped);
+    expect(rows).toHaveLength(2);
+    const bubble = renderRow(rows[0]!, { storeKey: A }).container;
+    expect(bubble.querySelector('.transcript-not-sent')?.textContent).toBe('Not sent');
+    cleanup();
+    const line = renderRow(rows[1]!, { storeKey: A }).container;
+    expect(line.querySelector('.transcript-consent')?.hasAttribute('data-dropped')).toBe(true);
+    expect(line.querySelector('.transcript-consent .transcript-not-sent')?.textContent).toBe('Not sent');
+  });
 });

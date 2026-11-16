@@ -22,7 +22,7 @@ import { useSlot } from '../app/slots';
 import { FloatingCardLayer } from '../shell/FloatingCard'; // P3-G
 import { floatPanel } from '../shell/floating'; // P3-G
 import { DropOverlay } from '../shell/DropOverlay'; // P4-B3 M4
-import { moveArtifactToPanel, TAB_DRAG_TYPE, useCoverState } from '../shell/transfer'; // P4-B3 M4
+import { moveToPanel, TAB_DRAG_TYPE, useCoverState } from '../shell/transfer'; // P4-B3 M4; UX wave U6b-1: a file's too
 import { TRANSFER_COPY } from '../tools/artifacts/copy'; // P4-B3 M4
 
 export const PANEL_REGION_ID = 'region-panel';
@@ -95,7 +95,7 @@ export function PanelRegion() {
           data-testid="panel-drop-target"
           accepts={cover === 'accepted'}
           label={TRANSFER_COPY.moveToPanel}
-          onDrop={(event) => void moveArtifactToPanel(event.dataTransfer.getData(TAB_DRAG_TYPE))}
+          onDrop={(event) => void moveToPanel(event.dataTransfer.getData(TAB_DRAG_TYPE))}
         />
       )}
     </section>

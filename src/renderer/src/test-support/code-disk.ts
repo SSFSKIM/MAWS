@@ -5,16 +5,30 @@
 // UX wave U6c: folders outside the session's (`outside`), and the files there its transcript names (`names`): as the
 // service, a read or an "Open externally" of such a file answers only when it asks with `named` and the transcript
 // names the path, a read then answering `named: true`; any other call on a path there answers the refusal.
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, M3): what the daemon gained. A file
+// outside the folders stands admitted for a session by a grant (`grant`, which an `agent` read skips), the agent's
+// delivery (`sent`), a counted name (`names`), and, for a read alone, a name only a tool's result holds (`results`) or an
+// added record of the Library (`added`); a read of such a file answers `named` with `outside: { real, writable, why? }`,
+// and a read of a file under MAWS's own folders (`own`) answers `own`. `files.writeOutside` writes by the save's evidence
+// alone, refuses MAWS's own folders and a path that no longer resolves to the real path it names (`FILES_MOVED`), and
+// `files.write` takes the folders alone. A path's real path is itself unless `reals` says otherwise. `layout.openFile`
+// answers `pick`'s answer, an `opened` one recorded as a grant as main and the daemon record it. `older` is a daemon of
+// the parent pin (`2c7044231`): `named` with no `outside` and no `own`, and `unknown_command` for the two new commands.
+// UX wave U6b-2 (M5): main's file frames. `layout.frameFile` answers a fresh token of the path's framed kind (`frames`
+// answers otherwise when the test gives it), `layout.releaseFrame` is recorded and answered; every token issued is listed.
 import type { CommandName } from '@shared/ipc/schema';
+import { framedKindOf, frameUrl } from '@shared/files/framed';
 import { mimeOf } from '@shared/files/mime';
-import { FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
+import { FILES_MOVED, FILES_READ_DEFAULT_LENGTH } from '@shared/ipc/schema/files';
+import type { OpenFileOutput } from '@shared/ipc/schema/layout';
 import { deferred, fail, installFakeMain, ok } from './code';
 import { utf8Length } from '../tools/code/viewer/viewer-store';
 
 // A file on the fake disk: its text, and its size when the test wants it to differ from the text's UTF-8 length (a
 // file past a cap), and `utf8: false` for bytes that are not valid UTF-8 (the decoded text a lossy one; main's strict
 // decode answers false). A plain string is valid UTF-8.
-export type DiskFile = string | { text: string; bytes: number; utf8?: boolean };
+// UX wave U6b-2: `mime` for a file whose type is not its name's (a file that changed kind under the same path).
+export type DiskFile = string | { text: string; bytes: number; utf8?: boolean; mime?: string };
 
 // A stand-in for SHA-256: 64 lowercase hex characters, a function of the text alone.
 export function fakeHash(text: string): string {
@@ -30,28 +44,105 @@ export function fakeHash(text: string): string {
 
 export const OUTSIDE_REFUSAL = "path outside the session's directories";
 
+// UX wave U6b-2: the `n`th token the fake main issues, 32 lower-case hexadecimal characters built, never written out.
+export const frameToken = (n: number): string => n.toString(16).padStart(32, 'a');
+
+type Answer = ReturnType<typeof ok>;
+// What main answers `layout.frameFile` for a path: by default a ready token of the path's framed kind (an HTML page that
+// names no file beside it), `unframed` for another type.
+export type FrameAnswerer = (input: { appSessionId: string; path: string }, issue: (extra?: { neighbours?: boolean }) => Answer) => Answer;
+
 export interface DiskOptions {
   outside?: Iterable<string>; // folders outside the session's; a test adds and removes them through the returned `outside`
-  names?: (appSessionId: string, path: string) => boolean; // whether the session's transcript names the path (bare ids)
+  names?: (appSessionId: string, path: string) => boolean; // whether the session's transcript names the path (bare ids); U6e: by a counted form
+  frames?: FrameAnswerer; // UX wave U6b-2: main's answer to `layout.frameFile`, when not the default
+  // UX wave U6e
+  results?: (appSessionId: string, path: string) => boolean; // only a tool's result names the path
+  sent?: (appSessionId: string, path: string) => boolean; // the session's agent delivered the file
+  added?: Iterable<string>; // files an added record of the Library points at
+  own?: Iterable<string>; // MAWS's own folders, through the returned `own`
+  older?: boolean; // a daemon of the parent pin, through the returned `daemon.older`
 }
+
+const unknownCommand = (name: CommandName) => ({ ok: false as const, error: { code: 'unknown_command', message: `unknown command: ${name}` } });
 
 export function installDisk(files: Record<string, DiskFile>, options: DiskOptions = {}) {
   const outside = new Set(options.outside ?? []);
-  const isOutside = (path: string) => [...outside].some((folder) => path === folder || path.startsWith(`${folder}/`));
+  const under = (folders: Iterable<string>, path: string) => [...folders].some((folder) => path === folder || path.startsWith(`${folder}/`));
+  // a call with no path (the Files tree's listing of the roots) is of no folder
+  const isOutside = (path: string | undefined) => path !== undefined && under(outside, path);
+  // UX wave U6e
+  const own = new Set(options.own ?? []);
+  const added = new Set(options.added ?? []);
+  const reals: Record<string, string> = {};
+  const realOf = (path: string) => reals[path] ?? path;
+  const grants = new Set<string>();
+  const granted = (appSessionId: string, real: string) => grants.has(`${appSessionId}\0${real}`);
+  const daemon = { older: options.older === true };
+  let pick: (appSessionId: string) => OpenFileOutput = () => ({ status: 'cancelled' });
+  // What admits a path outside the folders for the session (§B's step 5): a save takes no result and no added record.
+  const markOf = (appSessionId: string, path: string, { agent, save }: { agent: boolean; save: boolean }): 'chosen' | 'sent' | 'named' | 'result' | 'added' | null => {
+    if (!agent && granted(appSessionId, realOf(path))) return 'chosen';
+    if (options.sent?.(appSessionId, path)) return 'sent';
+    if (options.names?.(appSessionId, path)) return 'named';
+    if (save) return null;
+    if (options.results?.(appSessionId, path)) return 'result';
+    if (added.has(path)) return 'added';
+    return null;
+  };
   const held = new Map<CommandName, ReturnType<typeof deferred<void>>[]>();
+  const issued: string[] = []; // UX wave U6b-2: every token `layout.frameFile` answered, in order
+  const frameFile = (input: { appSessionId: string; path: string }) => {
+    const issue = (extra: { neighbours?: boolean } = {}) => {
+      const served = files[input.path];
+      const framed = framedKindOf((typeof served === 'object' && served.mime) || mimeOf(input.path));
+      if (framed === null) return ok({ status: 'row', why: 'unframed' });
+      const token = frameToken(issued.length + 1);
+      issued.push(token);
+      return ok({ status: 'ready', token, url: frameUrl(token, input.path.slice(input.path.lastIndexOf('/') + 1)), framed, ...(framed === 'html' ? { neighbours: extra.neighbours ?? false } : {}) });
+    };
+    return options.frames ? options.frames(input, issue) : issue();
+  };
   const textOf = (path: string) => {
     const file = files[path];
-    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true } : { utf8: true, ...file };
+    return file === undefined ? undefined : typeof file === 'string' ? { text: file, bytes: utf8Length(file), utf8: true, mime: undefined } : { utf8: true, ...file };
   };
 
   const answer = (name: CommandName, input: Record<string, unknown>) => {
     if (name === 'files.watch' && isOutside(input.path as string)) return fail(OUTSIDE_REFUSAL); // a folder outside is never watched
     if (name === 'files.watch' || name === 'files.unwatch') return ok();
     if (name === 'layout.unsavedFiles' || name === 'layout.saveAllDone') return ok(); // M5: the quit guard's, recorded only
+    if (name === 'layout.get') return ok({ value: null }); // UX wave U6b-1 (M3): nothing stored, Files' tree state among it
+    if (name === 'layout.set') return ok();
+    if (name === 'layout.openFile') {
+      const answer = pick(input.appSessionId as string);
+      if (answer.status === 'opened') grants.add(`${input.appSessionId as string}\0${realOf(answer.path)}`);
+      return ok(answer);
+    }
+    if ((name === 'files.writeOutside' || name === 'files.grant') && daemon.older) return unknownCommand(name);
+    if (name === 'layout.frameFile') return frameFile(input as { appSessionId: string; path: string }); // UX wave U6b-2
+    if (name === 'layout.releaseFrame') return ok();
     const path = input.path as string;
     const file = textOf(path);
-    const named = isOutside(path) && (name === 'files.read' || name === 'files.openExternal') && input.named === true && options.names?.(input.appSessionId as string, path) === true;
+    const appSessionId = input.appSessionId as string;
+    if (name === 'files.writeOutside') {
+      if (isOutside(path) && markOf(appSessionId, path, { agent: false, save: true }) === null) return fail(OUTSIDE_REFUSAL);
+      if (file === undefined) return fail(`not found: ${path}`);
+      if (under(own, realOf(path))) return fail(`not writable: ${path}`);
+      if (realOf(path) !== input.real) return fail(FILES_MOVED);
+      return written(path, file.text, input);
+    }
+    const reading = (name === 'files.read' || name === 'files.openExternal') && input.named === true;
+    const mark = isOutside(path) && reading ? (daemon.older ? (options.names?.(appSessionId, path) || options.results?.(appSessionId, path) ? 'named' : null) : markOf(appSessionId, path, { agent: input.agent === true, save: false })) : null;
+    const named = mark !== null;
     if (isOutside(path) && !named) return fail(OUTSIDE_REFUSAL);
+    // U6e: what a read of this build's daemon answers beside `named`, and of MAWS's own
+    const admission = daemon.older
+      ? {}
+      : {
+          ...(named ? { outside: { real: realOf(path), writable: mark !== 'result' && mark !== 'added', ...(mark === 'result' || mark === 'added' ? { why: mark } : {}) } } : {}),
+          ...(under(own, realOf(path)) ? { own: true } : {}),
+        };
     if (name === 'files.openExternal') return file === undefined ? fail(`not found: ${path}`) : ok({ opened: true, message: null });
     if (name === 'files.read') {
       if (file === undefined) return fail(`not found: ${path}`);
@@ -60,20 +151,26 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
       // the suites' multi-chunk files are ASCII; past the end, zero bytes (main's `Math.max(0, …)`)
       const end = Math.max(offset, Math.min(file.text.length, offset + length));
       return ok({
-        encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: mimeOf(path),
+        encoding: 'utf8', content: file.text.slice(offset, end), bytes: file.bytes, offset, length: end - offset, truncated: end < file.bytes, mime: file.mime ?? mimeOf(path),
         hash: input.hash === true ? fakeHash(file.text) : null,
         utf8: input.hash === true ? file.utf8 : null,
         ...(named ? { named: true } : {}),
+        ...admission,
       });
     }
     if (name === 'files.write') {
       if (file === undefined) return fail(`not found: ${path}`);
-      const current = fakeHash(file.text);
-      if (current !== input.expectedHash) return ok({ status: 'conflict', hash: current });
-      files[path] = input.content as string;
-      return ok({ status: 'ok', hash: fakeHash(input.content as string) });
+      if (!daemon.older && under(own, realOf(path))) return fail(`not writable: ${path}`);
+      return written(path, file.text, input);
     }
     return fail(`unexpected ${name}`);
+  };
+  // The hash compared and the file written in place, as both writes share it.
+  const written = (path: string, text: string, input: Record<string, unknown>) => {
+    const current = fakeHash(text);
+    if (current !== input.expectedHash) return ok({ status: 'conflict', hash: current });
+    files[path] = input.content as string;
+    return ok({ status: 'ok', hash: fakeHash(input.content as string) });
   };
 
   const main = installFakeMain(async (name, input) => {
@@ -87,6 +184,15 @@ export function installDisk(files: Record<string, DiskFile>, options: DiskOption
     ...main,
     files,
     outside,
+    // UX wave U6e
+    own,
+    added,
+    reals,
+    daemon,
+    grant: (appSessionId: string, path: string) => void grants.add(`${appSessionId}\0${realOf(path)}`),
+    picks: (next: (appSessionId: string) => OpenFileOutput) => void (pick = next),
+    issued, // UX wave U6b-2
+    released: () => main.callsOf('layout.releaseFrame').map((input) => input.token as string), // UX wave U6b-2
     // The next call of `name` is answered (as the disk is when it arrives) only once the returned gate is released.
     hold(name: CommandName) {
       const gate = deferred<void>();

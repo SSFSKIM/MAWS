@@ -1236,6 +1236,20 @@ describe('the /btw card’s place', () => {
     expect(paneOf(btwCards()[0])).toBe('0');
   });
 
+  // Ticket six hundred ninety-two: in a split the column speaks of the session in view, the focused pane's or else the
+  // other pane's, so with an app-wide tab focused it speaks of the session beside it, and that session's card is its foot.
+  it('with an app-wide tab focused beside a pane that holds the session, the column speaks of that session and its card is the column’s foot', () => {
+    const diagnostics: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [diagnostics], activeTabId: diagnostics.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }], focusedPane: 0 } });
+    mount();
+    opened(A, 'for A');
+    const aside = column()!;
+    expect(cardColumnNow(useLayout.getState(), window.innerWidth)).toMatchObject({ session: A, shown: true });
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    expect(aside.contains(document.querySelector('[data-btw-card="foot"]'))).toBe(true);
+    expect(document.querySelector('[data-btw-card="corner"]')).toBeNull();
+  });
+
   it('a session the split’s floating card draws keeps its card inside that card, whatever the column shows', () => {
     const { resize } = installResizeObserver();
     const split: Strip = { ...EMPTY_STRIP, panes: [{ tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }, { tabs: [sessionTab(B)], activeTabId: sessionTab(B).id }], focusedPane: 0 };

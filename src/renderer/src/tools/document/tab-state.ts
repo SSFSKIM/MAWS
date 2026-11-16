@@ -21,6 +21,14 @@
 //
 // A replica never initialises its document: the host writes a new document's first tab in the create's own commit (the
 // document adapter's `initial`, A's seed hook), and the editor shows "Loading…" until that tab has arrived, then binds it.
+//
+// UX wave U10b (§B.5, §I and M3 decisions 2 and 3 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): the
+// Export menu's page items write on this replica (./page.ts), as one row of the person's, and never while a version is
+// shown or the document is read-only. An export of the live document prints with every write the editor made or fails:
+// while the replica holds a write the host has not acknowledged, the export waits for the acknowledgement, at most
+// EXPORT_ACK_WAIT_MS; a port that is down, a replica the host ended, the tab disposed or the wait's end exports nothing
+// and says so in one sentence (EXPORT_COPY.exportNotSaved). A version's export prints the version, which no write here
+// changes, so it waits for nothing.
 import { listTabs } from '@artifacts/document/tabs';
 import { documentCommentCounts } from '@artifacts/document/comment-counts';
 import { onUpdate, type Node as YType } from '@artifacts/yjs';
@@ -29,7 +37,7 @@ import type { DocumentRail, DocumentShown } from '@artifacts/document/editor/Doc
 import type { HistoryApi } from '@artifacts/document/editor/history/api';
 import type { MentionSource } from '@artifacts/document/editor/MentionPicker';
 import { actorKey } from '@shared/artifacts/actor';
-import type { PageSize } from '@artifacts/document/export/design-system';
+import type { DesignSystemExport, PageSize } from '@artifacts/document/export/design-system';
 import type { ArtifactHost, DocumentHandle, DocumentState } from '@artifacts/host';
 import type { ArtifactRow } from '@shared/ipc/schema/artifacts';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -38,7 +46,8 @@ import type { CloseAsk } from '../../panel/editor-host'; // P4-B3
 import { ownFileFor } from '../../library/export'; // P5 O7 M5a
 import { toast } from '../../stores/notices'; // P3-F (F7)
 import { VIEWERS_COPY } from '../artifacts/viewers/copy'; // P3-F (F7): the deck's words
-import type { DocumentExportFormat, ExportStatus } from './header';
+import { EXPORT_COPY, type DocumentExportFormat, type ExportStatus } from './header';
+import { choosePage, type PageItem } from './page'; // UX wave U10b
 import { commentDraftOf } from './comment-drafts'; // P4-B1; UX wave U5a: the pass's
 import { artifactViews } from '../../artifacts/registry'; // UX wave U5a
 import { createHistoryApi } from './history-api';
@@ -52,6 +61,8 @@ const NO_CONTENT_MS = 5_000; // the wait for a new document's first tab before s
 // bound 3: X32's saved state must not flicker) nor re-renders the tab; every React commit while the editor has the
 // focus walks the editor's whole DOM to save its selection, milliseconds a keystroke at 200 pages.
 const SAVING_SHOWN_MS = 500;
+/** UX wave U10b (§B.5): how long an export waits for the host to acknowledge the editor's writes before it fails. */
+export const EXPORT_ACK_WAIT_MS = 5_000;
 
 export interface DocumentTabDeps {
   host: ArtifactHost;
@@ -121,6 +132,7 @@ export class DocumentTabState {
   private wasShown = false;
   private readonly whenShown: Promise<void>;
   private resolveShown: () => void = () => {};
+  private readonly waits = new Set<() => void>(); // UX wave U10b: exports waiting for an acknowledgement, ended by `dispose`
 
   constructor(
     target: ArtifactEditorTarget,
@@ -297,14 +309,18 @@ export class DocumentTabState {
   }
 
   /** The document as shown, or WR 66's explicit history-card version, saved where the owner chooses. */
-  async export(format: DocumentExportFormat, pageSize: PageSize, versionId?: number): Promise<void> {
+  async export(format: DocumentExportFormat, pageSize?: PageSize, versionId?: number): Promise<void> {
     const shown = versionId === undefined ? this.current.shown : { versionId };
     if (this.current.exporting?.phase === 'running' || shown === 'compare') return; // two versions compared: nothing is exported
     this.set({ exporting: { phase: 'running', format } });
     try {
+      // UX wave U10b (§B.5): the live document prints with the editor's last write, or nothing prints
+      if (!shown && !(await this.acknowledged())) throw new Error(EXPORT_COPY.exportNotSaved);
+      if (this.disposed) return;
       // P4 (W1, L302): a file of its own, saved by its id, so Letter and A4 or the agent's export of the same revision and
-      // format between the two never swaps the file saved
-      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), pageSize, ...ownFileFor(this.artifactId) }); // P5 O7 M5a: no own file on another machine
+      // format between the two never swaps the file saved. UX wave U10b: a size only where the row carries one (a
+      // dashboard's), else the export prints on the document's own page
+      const exported = await this.deps.ipc.invoke('artifacts.export', { artifactId: this.artifactId, format, ...(shown && { versionId: shown.versionId }), ...(pageSize && { pageSize }), ...ownFileFor(this.artifactId) }); // P5 O7 M5a: no own file on another machine
       if (!exported.ok) throw new Error(exported.error.message);
       const { revision, exportId } = exported.value;
       const saved = await this.deps.ipc.invoke('library.saveAs', { artifactId: this.artifactId, source: { export: { revision, format, ...(exportId !== undefined && { exportId }) } } });
@@ -315,6 +331,46 @@ export class DocumentTabState {
       this.deps.log(`document ${this.artifactId}: the ${format} export failed: ${messageOf(error)}`);
       if (!this.disposed) this.set({ exporting: { phase: 'failed', format, message: messageOf(error) } });
     }
+  }
+
+  /**
+   * UX wave U10b (§B.5, §I): whether the host holds every write of this replica, waited for while one is in flight
+   * (at most EXPORT_ACK_WAIT_MS). False at once with no replica or a port that is down while a write waits; false when the
+   * host ends the replica, the port goes, the tab is disposed or the wait ends first.
+   */
+  private acknowledged(): Promise<boolean> {
+    const handle = this.current.handle;
+    const ended = (state: DocumentState) => state.refused !== undefined || state.phase === 'off';
+    if (!handle) return Promise.resolve(false);
+    if (handle.state().unsaved === 0) return Promise.resolve(true);
+    if (ended(handle.state())) return Promise.resolve(false);
+    return new Promise((resolve) => {
+      let off = () => {};
+      const settle = (saved: boolean) => {
+        clearTimeout(timer);
+        off();
+        this.waits.delete(stop);
+        resolve(saved);
+      };
+      const stop = () => settle(false);
+      const timer = setTimeout(stop, EXPORT_ACK_WAIT_MS);
+      this.waits.add(stop);
+      off = handle.subscribe((state) => {
+        if (state.unsaved === 0) settle(true);
+        else if (ended(state)) settle(false);
+      });
+    });
+  }
+
+  /**
+   * UX wave U10b (§B.5): a page item of the Export menu, written on this replica as one row of the person's, given the
+   * governing system's export helpers (null while they are not known); nothing while the document is shown read-only
+   * or as a version.
+   */
+  choosePage(item: PageItem, system: DesignSystemExport | null): void {
+    const handle = this.current.handle;
+    if (!handle || this.disposed || this.current.previewing || handle.state().readOnly) return;
+    choosePage(handle.doc, item, system);
   }
   dismissExport(): void {
     if (this.current.exporting?.phase !== 'running') this.set({ exporting: null });
@@ -330,7 +386,11 @@ export class DocumentTabState {
     const draft = ask?.moving || artifactViews(this.artifactId) > 1 ? null : commentDraftOf(this.artifactId); // P4-B3; UX wave U5a
     if (draft && !this.deps.confirm('Discard your unsent comment?')) return false; // P4-B1
     const handle = this.current.handle;
-    if (!handle || handle.state().readOnly || handle.state().unsaved === 0) return true;
+    if (!handle || handle.state().unsaved === 0) return true;
+    // UX wave U10b fix wave 4: read-only or not, an edit the host never acknowledged is asked about; a read-only replica
+    // (one an agent's delete parked) will acknowledge nothing meanwhile, so it is asked at once
+    const askToClose = () => this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
+    if (handle.state().readOnly) return askToClose();
     const saved = await new Promise<boolean>((resolve) => {
       const timer = setTimeout(() => {
         off();
@@ -343,7 +403,7 @@ export class DocumentTabState {
         resolve(true);
       });
     });
-    return saved || this.deps.confirm(`“${this.current.title || 'This document'}” has changes that are not saved yet. Close it anyway?`);
+    return saved || askToClose();
   };
 
   /**
@@ -390,6 +450,7 @@ export class DocumentTabState {
     if (this.rowTimer !== null) clearTimeout(this.rowTimer);
     this.rowTimer = null;
     for (const stop of this.stops.splice(0)) stop();
+    for (const stop of [...this.waits]) stop(); // UX wave U10b: an export waiting exports nothing
     this.listeners.clear();
     for (const manager of this.undo.values()) manager.destroy(); // P4-B3 M5
     this.undo.clear();

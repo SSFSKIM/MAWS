@@ -16,15 +16,17 @@ import { execFileSync } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test as base, type Page } from '@playwright/test';
+import { expect, test as base, type Locator, type Page } from '@playwright/test';
 import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
-import { invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { consentMessage } from '../src/shared/engine/arrival';
+import { blockedTurnJournal, invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
 import { askSteerText } from '../src/shared/maws/ask';
 import { launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
+import { ALLOW_ONCE_KEY, answerByKey, pastGrace, watchPrompts } from './support/request-keys';
 
 // A packaged app is built without the harness (`pnpm build:app`), whatever `out/` holds now.
 const HARNESS_BUILT = !process.env.MAWS_E2E_EXECUTABLE && existsSync(join(REPO_ROOT, 'out/renderer/harness.html'));
@@ -1016,6 +1018,168 @@ test('ticket 704, a joined answer: the prompt and the answer the engine joined d
   expect(editor.consoleErrors()).toEqual([]);
 });
 
+// ---- UX wave U1c: "Approve and retry" under a call auto mode blocked --------------------------------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, §H, M5's scenes; each runs alone on a Mac before
+// its group.) Each draws its session's transcript above the composer as U4a's scenes do, the pane spanning the page; the
+// page registers the control as App.tsx does. What the press wrote is read from the engine host's journal of the launch
+// (the replay matches a `user` write by its type). The probe's tool use ids name the rows: a cell's id is its call's.
+
+const MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"'; // the probe's blocked command
+const APPROVE = 'Approve and retry';
+const cellIn = (page: Page, toolUseId: string) => transcriptOf(page, 0).locator(`[data-cell-id="cell:${toolUseId}"]`);
+const labelOf = (cell: Locator) => cell.locator('.transcript-cell-label');
+const grantsWritten = async (page: Page, id: string, subject: string) => (await outFrames(page, id)).filter((f) => f.type === 'user' && f.message?.content === consentMessage('command', subject));
+
+// A replayed session in the wide transcript pane, its prompt sent.
+async function blockedSession(page: Page, id: string, journal: string, prompt: string): Promise<void> {
+  await openComposerPage(page);
+  await launchReady(page, id, journal);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true, wide: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(prompt);
+  await page.keyboard.press('Enter');
+  await expect(messageIn(page, 0), 'the box is cleared by the send').toHaveText('');
+}
+
+// The transcript read from its top, so a row of the first turn is drawn: a wheel stops it following the tail, as a person's would.
+const toTop = (page: Page) =>
+  transcriptOf(page, 0).evaluate((element) => {
+    element.dispatchEvent(new WheelEvent('wheel', { deltaY: -500, bubbles: true }));
+    element.scrollTop = 0;
+    element.dispatchEvent(new Event('scroll'));
+  });
+
+// A cell of the newest turn, which folded when it ended: its line opened until the cell is drawn.
+async function inNewestTurn(page: Page, toolUseId: string): Promise<Locator> {
+  const cell = cellIn(page, toolUseId);
+  await expect(async () => {
+    const line = transcriptOf(page, 0).locator('.transcript-divider .transcript-disclosure').last();
+    if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
+    await expect(cell).toBeVisible({ timeout: 1_000 });
+  }, 'the newest turn opened to its cell').toPass();
+  return cell;
+}
+
+// S1 (Acceptance 1, 13): `u1-soft-seeded-1`, the block (seq 32 to 36) in the prompt's turn, the grant the press writes
+// (48), the turn it opens and the retry that runs (66 to 70).
+test('U1c S1: a blocked command reads its short label with the button under its whole line; the press writes the engine’s grant, "You approved" is drawn, the row reads approved and the retry runs', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-approve';
+  await blockedSession(page, id, recordedBlockJournal(scratch, id, 'u1-soft-seeded-1'), 'Run the marker command.');
+  const transcript = transcriptOf(page, 0);
+
+  // the block's turn ends and folds; its line counts the block, and the count opens the row
+  const count = transcript.getByRole('link', { name: '1 auto-denied' });
+  await expect(count).toBeVisible();
+  await count.click();
+  const row = cellIn(page, 'toolu_01JqskAh583hVgaieABZQ9yn');
+  await expect(labelOf(row), 'the short label, no reason: the classifier gave only its stand-in').toHaveText(`Auto mode blocked: ${MARKER}`);
+  await expect(row, 'the line names the command whole').toHaveAttribute('data-names-whole', '');
+  await expect(row.locator('.transcript-blocked-subject'), 'so no subject block').toHaveCount(0);
+  const button = row.getByRole('button', { name: APPROVE });
+  await expect(button).toBeEnabled();
+  expect(await labelOf(row).evaluate((el) => ({ whiteSpace: getComputedStyle(el).whiteSpace, clipped: el.scrollWidth > el.clientWidth + 1 })), 'the line wraps, never clips').toEqual({ whiteSpace: 'pre-wrap', clipped: false });
+  const [line, place] = [(await labelOf(row).boundingBox())!, (await button.boundingBox())!];
+  expect(place.y, 'the button stands under the line').toBeGreaterThanOrEqual(line.y + line.height - 1);
+  await expect(transcript, 'the stand-in reason is drawn nowhere').not.toContainText('it gave no explanation');
+  await testInfo.attach('u1c-s1-offered', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, MARKER)).length, 'the press writes the engine’s sentence once').toBe(1);
+  await expect(transcript.locator('.transcript-consent')).toHaveText(`You approved ${MARKER}`);
+  await expect((await inNewestTurn(page, 'toolu_01SuiSQhK6v2WVoFVJ5DMz9s')), 'the retry ran').toHaveAttribute('data-status', 'done');
+  await toTop(page);
+  await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${MARKER} · approved`);
+  await expect(row.getByRole('button', { name: APPROVE }), 'an approved row offers no button').toHaveCount(0);
+  await testInfo.attach('u1c-s1-approved', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+  expect(await grantsWritten(page, id, MARKER), 'one grant, whatever followed').toHaveLength(1);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// S2 (Acceptance 2): `u1-hard-seeded-1`, a rule that always denies: the block (seq 31 to 35), the grant (47), and the
+// retry blocked again in the turn the grant opens (65 to 69).
+test('U1c S2: a retry blocked again reads "Auto mode blocked again", offers the button once more and says in one muted line that such a rule blocks every time', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-again';
+  await blockedSession(page, id, recordedBlockJournal(scratch, id, 'u1-hard-seeded-1'), 'Run the marker command.');
+  const transcript = transcriptOf(page, 0);
+  const counts = transcript.getByRole('link', { name: '1 auto-denied' });
+  await expect(counts).toHaveCount(1);
+  await counts.click();
+  const first = cellIn(page, 'toolu_01AkGpuG3dxh4J2MM2ofSfZ9');
+  await first.getByRole('button', { name: APPROVE }).click();
+  await expect.poll(async () => (await grantsWritten(page, id, MARKER)).length).toBe(1);
+
+  // the turn the grant opened ends blocked again: its own count opens its row
+  await expect(transcript.locator('.transcript-consent')).toHaveText(`You approved ${MARKER}`);
+  await expect(counts).toHaveCount(2);
+  await counts.last().click();
+  const again = cellIn(page, 'toolu_01DFoKqdVo4KipfKh9bopZFU');
+  await expect(labelOf(again)).toHaveText(`Auto mode blocked again: ${MARKER}`);
+  await expect(again.getByRole('button', { name: APPROVE }), 'offered once more').toBeEnabled();
+  await expect(again.getByRole('status')).toHaveText('A rule that always denies this command blocks it every time. Change the rule or the mode to run it.');
+  await testInfo.attach('u1c-s2-blocked-again', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+  await toTop(page);
+  await expect(labelOf(first), 'the first row reads approved').toHaveText(`Auto mode blocked: ${MARKER} · approved`);
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// S3 (Acceptance 11, 13): `blockedTurnJournal`, a blocked command of two lines and the call after it still running.
+const TWO_LINES = `${MARKER}\nwc -c marker-1.txt`;
+test('U1c S3: a blocked command of two lines shows its subject whole above the button; pressed while the turn runs, the grant waits at the next step in the stack and greys the button; Delete brings the button back; pressed again, it is read at the running call’s result and the row reads approved', async ({ editor }, testInfo) => {
+  const { page } = editor;
+  const id = 'u1c-during-turn';
+  const prompt = 'Do the two steps of the task, then reply DONE.';
+  await blockedSession(page, id, blockedTurnJournal(scratch, id, prompt, TWO_LINES), prompt);
+  await expect.poll(async () => (await statusOf(page, id)).turn, 'the turn runs on: the call after the block is held').not.toBeNull();
+
+  // the open turn draws the blocked row: the subject the grant quotes, whole, then the button under it
+  const row = cellIn(page, 'toolu_01UhxMDp7hAUYgsRA67ph4Dr');
+  const subject = row.locator('pre.transcript-blocked-subject');
+  await expect.poll(() => subject.textContent(), 'the block holds exactly the command the grant quotes').toBe(TWO_LINES);
+  expect(await row.getAttribute('data-names-whole'), 'a command of two lines is not named on the line').toBeNull();
+  const button = row.getByRole('button', { name: APPROVE });
+  await expect(button).toBeEnabled();
+  const [block, place] = [(await subject.boundingBox())!, (await button.boundingBox())!];
+  expect(place.y, 'the button stands under the subject').toBeGreaterThanOrEqual(block.y + block.height - 1);
+  await testInfo.attach('u1c-s3-subject', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  // pressed while the turn runs: a steer at the next step, waiting in the stack as the line it becomes
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, TWO_LINES)).map((f) => f.priority)).toEqual(['next']);
+  const waiting = stackOf(page, 0).locator('li[data-queue-state="next"]');
+  await expect(waiting.locator('[data-mark]')).toHaveText('Next step');
+  await expect(waiting.locator('[data-row-text]')).toContainText(`You approved ${MARKER}`);
+  await expect(waiting.locator('[data-row-text]')).toContainText('wc -c marker-1.txt');
+  await expect(waiting.getByRole('button', { name: 'Send now' })).toHaveCount(1);
+  await expect(waiting.getByRole('button', { name: 'Delete' })).toHaveCount(1);
+  await expect(waiting.getByRole('button', { name: 'More' }), 'a grant is not edited or moved').toHaveCount(0);
+  await expect(button, 'greyed while the grant waits').toBeDisabled();
+  await expect(labelOf(row)).not.toHaveText(/· approved$/);
+  await testInfo.attach('u1c-s3-greyed-with-stack', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+
+  // Delete withdraws the steer (the engine's `cancel_async_message` for the grant's write), and the button is back
+  await clickRevealed(waiting, waiting.getByRole('button', { name: 'Delete' }));
+  const [firstWrite] = await grantsWritten(page, id, TWO_LINES);
+  await expect.poll(async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'cancel_async_message').map((f) => f.request?.message_uuid)).toEqual([firstWrite!.uuid]);
+  await expect(stackOf(page, 0)).toHaveCount(0);
+  await expect(button, 'the withdrawn grant leaves nothing waiting').toBeEnabled();
+
+  // pressed again: written at the next step, read at the held call's result; the retry runs in the same turn
+  await button.click();
+  await expect.poll(async () => (await grantsWritten(page, id, TWO_LINES)).map((f) => f.priority)).toEqual(['next', 'next']);
+  await expect(transcriptOf(page, 0).locator('.transcript-consent:not([data-dropped])')).toContainText(`You approved ${MARKER}`);
+  await expect.poll(async () => (await statusOf(page, id)).turn, 'the turn ends').toBeNull();
+  await toTop(page);
+  const count = transcriptOf(page, 0).getByRole('link', { name: '1 auto-denied' });
+  await count.click(); // the ended turn folded its work: the count opens it again
+  await expect(labelOf(row)).toHaveText(/ · approved$/);
+  await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
+  await expect(cellIn(page, 'toolu_01QgESWU7YNR7Dsx71taDieF'), 'the retry ran').toHaveAttribute('data-status', 'done');
+  await testInfo.attach('u1c-s3-approved', { body: await pane(page, 0).screenshot(), contentType: 'image/png' });
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
 // ---- M4b: edit-and-resubmit ------------------------------------------------------------------------------------------
 
 // The engine host's own journal of the launch: what was written to the engine, whatever the renderer believed.
@@ -1229,7 +1393,8 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(await geometry(userRow.locator('.transcript-user-bubble p').first())).toMatchObject({ fontSize: '14px', lineHeight: '22.75px' });
 
   // B2: Codex's bubble. At most 70 percent of the column, 22px corners, 10 by 16px inside, the text colour at 5 percent
-  // (the token), the prose's size; Time, Copy and Edit overlay beside it on hover and reserve no line under it.
+  // (the token), the prose's size. Time, Copy and Edit sit on one line under it, at its side, shown on hover or focus
+  // within, in the 16 px the row already has under the bubble (B2 as amended 2026-11-12, UX wave U3, O-02).
   const bubble = userRow.locator('[data-bubble]');
   const look = await bubble.evaluate((el) => {
     const style = getComputedStyle(el);
@@ -1250,15 +1415,18 @@ test('W2: the shared column, the 14px prose, Codex’s bubble and Codex’s comp
   expect(look).toEqual({ radius: '22px', padding: ['10px', '16px', '10px', '16px'], fontSize: '14px', border: '0px', tinted: true, maxWidth: '70%' });
   const restRow = (await userRow.boundingBox())!.height;
   const bubbleHeight = (await bubble.boundingBox())!.height;
-  expect(restRow - bubbleHeight).toBe(16); // the row's own gap, nothing reserved for the actions
-  const overlay = userRow.locator('.transcript-user-actions');
-  await expect(overlay).toHaveCSS('opacity', '0');
-  await overlay.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
-  await expect(overlay).toHaveCSS('opacity', '1');
-  expect((await userRow.boundingBox())!.height).toBe(restRow);
-  const actionsBox = (await overlay.boundingBox())!;
+  expect(restRow - bubbleHeight).toBe(16); // the line under the bubble is laid out in the row's own 16 px
+  const actions = userRow.locator('.transcript-user-line-actions');
+  await expect(actions).toHaveCSS('opacity', '0');
+  await actions.getByRole('button', { name: 'Copy' }).focus(); // as a hover does (a hover here scrolls the short harness transcript under the pointer)
+  await expect(actions).toHaveCSS('opacity', '1');
+  expect((await userRow.boundingBox())!.height).toBe(restRow); // showing them adds no height
+  const actionsBox = (await actions.boundingBox())!;
   const bubbleBox = (await bubble.boundingBox())!;
-  expect(actionsBox.x + actionsBox.width).toBeLessThanOrEqual(bubbleBox.x); // beside the bubble, not over it
+  const rowBox = (await userRow.boundingBox())!;
+  expect(actionsBox.y).toBeGreaterThanOrEqual(bubbleBox.y + bubbleBox.height - 0.5); // under the bubble, not beside it
+  expect(actionsBox.y + actionsBox.height).toBeLessThanOrEqual(rowBox.y + rowBox.height + 0.5); // inside the row
+  expect(actionsBox.x + actionsBox.width).toBeCloseTo(bubbleBox.x + bubbleBox.width, 0); // at the bubble's side: their right edge at its
 
   // C1: Codex's box. 44px at rest with 22px corners and the faint shadow; the editor grows to a quarter of the window,
   // then scrolls inside it.
@@ -1517,5 +1685,127 @@ test('plugin mode drawings stay inside a split composer while short labels remai
       await testInfo.attach(`plugin-mode-${index}-${width}x820`, { body: await toolbar.screenshot(), contentType: 'image/png' });
     }
   }
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// ---- UX wave U1b: the composer beside a waiting prompt ----------------------------------------------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Proof 1, `e2e:composer`; acceptance 1 and 2.)
+// The recorded permission round trip (`permission-roundtrip`, held at its answer, seq 50) in the session's transcript above
+// its composer: the prompt stands at the transcript's end and the composer is never replaced. ⌘Enter with a draft is the
+// composer's (§F: the claim yields to a draft) and keeps the message for after the turn, which writes nothing while the
+// turn runs, so the replay still holds at the answer; the message is taken back (↑, which needs the session's record:
+// launched under the scratch home's indexed session) and the box emptied, and ⌘Enter from the empty box then allows the
+// prompt, the one write the replay waits on.
+const PERMISSION_FIXTURE = 'spikes/protocol-probe/fixtures/permission-roundtrip.jsonl';
+function firstRecordedPrompt(fixture: string): string {
+  for (const line of readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n')) {
+    if (!line) continue;
+    const row = JSON.parse(line) as { direction: string; frame: { type: string; message?: { content: string } } };
+    if (row.direction === 'out' && row.frame.type === 'user') return row.frame.message!.content;
+  }
+  throw new Error(`${fixture} records no prompt`);
+}
+
+test('U1b, a prompt waits at the transcript’s end while the editor takes text: ⌘Enter with a draft queues it and leaves the prompt, with none it allows', async ({ editor }) => {
+  const { page } = editor;
+  await openComposerPage(page);
+  await watchPrompts(page);
+  let id = '';
+  await expect.poll(async () => (id = value(await invoke(page, 'session.list', {})).sessions.find((s) => s.engineSessionId === transcriptSession)?.appId ?? '')).not.toBe('');
+  await launchReady(page, id, PERMISSION_FIXTURE);
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type(firstRecordedPrompt(PERMISSION_FIXTURE));
+  await page.keyboard.press('Enter');
+  const card = pane(page, 0).locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+  const allow = card.getByRole('button', { name: 'Allow once', exact: true });
+  await expect(allow, 'the prompt stands at the transcript’s end').toBeVisible();
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /).first(), 'the call says it waits').toBeVisible();
+  await expect(messageIn(page, 0), 'the composer is not replaced').toBeVisible();
+  await expect(messageIn(page, 0), 'nothing took the focus from the editor').toBeFocused();
+  await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
+  await expect(pane(page, 0).getByText('Composer paused')).toHaveCount(0);
+
+  // a draft: ⌘Enter is the composer's, kept for after the turn; the prompt, armed, still waits and nothing is written
+  await pastGrace(page, card);
+  const later = 'Then list the tags as well.';
+  await page.keyboard.type(later);
+  await page.keyboard.press(ALLOW_ONCE_KEY);
+  await expect(messageIn(page, 0), 'the box is cleared by the queue').toHaveText('');
+  await expect(stackOf(page, 0).locator('li[data-queue-state="after"]')).toContainText(later);
+  await page.waitForTimeout(300);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_response'), 'the prompt is not answered').toEqual([]);
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === later), 'the queued message is not written while the turn runs').toBe(false);
+  await expect(allow).toBeEnabled();
+
+  // taken back and emptied, so the turn's end releases nothing the replay did not record
+  await page.keyboard.press('ArrowUp');
+  await expect(messageIn(page, 0)).toHaveText(later);
+  await expect(messageIn(page, 0)).toHaveAttribute('contenteditable', 'true');
+  await expect(stackOf(page, 0)).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await expect(messageIn(page, 0)).toHaveText('');
+
+  // none: ⌘Enter from the empty box allows the prompt, and the editor keeps the keyboard
+  await answerByKey(page, {
+    focus: messageIn(page, 0),
+    control: allow,
+    key: ALLOW_ONCE_KEY,
+    answered: async () => (await outFrames(page, id)).some((f) => f.type === 'control_response'),
+    what: id,
+  });
+  await expect(card).toHaveCount(0);
+  await expect(messageIn(page, 0)).toBeFocused();
+  await expect.poll(async () => (await statusOf(page, id)).turn, { message: 'the allowed command ran and the turn ended' }).toBeNull();
+  expect(editor.consoleErrors()).toEqual([]);
+});
+
+// UX wave U1b (acceptance 1's "Stop withdraws the prompt and its card leaves"; decision 22): the main loop's prompt waits
+// at the transcript's end and Stop is pressed. Over the engine's own frames (`stopPendingJournal`,
+// `uxwave/u1b-intpend-main-r1`): the replay holds at the recorded interrupt until the plain stop writes it, then plays
+// the engine's `control_cancel_request` for the request and the turn's end. The card leaves with no answer written: the
+// broker retires the item only on that cancel (broker.test.ts, probe 8), and a subagent's prompt, which gets none, stays
+// (prompt-keys.test.tsx).
+test('U1b, Stop while the main loop’s prompt waits: the interrupt is written, the engine cancels the request, and the card leaves unanswered', async ({ editor }) => {
+  const { page } = editor;
+  const id = 'u1b-stop-pending';
+  await openComposerPage(page);
+  await launchReady(page, id, stopPendingJournal(scratch, id));
+  await showPanes(page, [{ composer: id, transcript: true, stacked: true }, null]);
+  await messageIn(page, 0).click();
+  await page.keyboard.type('Run the one shell command.');
+  await page.keyboard.press('Enter'); // seq 18; its Bash call then asks (39)
+  const card = pane(page, 0).locator('[data-request-end]').getByRole('group', { name: 'Approval needed' });
+  await expect(card.getByRole('button', { name: 'Allow once', exact: true }), 'the prompt stands at the transcript’s end').toBeVisible();
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /).first()).toBeVisible();
+  await expect(control(page, 0), 'Stop is there while the turn runs').toHaveAttribute('data-submit-state', 'stop');
+  const ofSession = (appSessionId: string) => appSessionId === id || appSessionId.endsWith(`/${id}`); // bare, or addressed
+  const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((item) => ofSession(item.appSessionId) && (item.state === 'pending' || item.state === 'delivered'));
+  await expect.poll(async () => (await listed()).length, { message: 'the session’s one request is listed' }).toBe(1);
+
+  await control(page, 0).click();
+  const interrupts = async () => (await outFrames(page, id)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+  await expect.poll(async () => (await interrupts()).length).toBe(1);
+  expect((await interrupts())[0]!.request, 'the plain stop’s interrupt, as recorded').toEqual({ subtype: 'interrupt', reason: 'user-cancel', cancel_queued: false });
+
+  // the engine's cancel names the request the card stood for; the card leaves, nothing answered it, and nothing is listed
+  const inbound = async () =>
+    readFileSync((await statusOf(page, id)).journalPath, 'utf8')
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { direction: string; frame: { type?: string; request_id?: string; request?: { subtype?: string } } })
+      .filter((row) => row.direction === 'in')
+      .map((row) => row.frame);
+  await expect.poll(async () => (await inbound()).some((f) => f.type === 'control_cancel_request'), { message: 'the engine’s cancel arrived' }).toBe(true);
+  const asked = (await inbound()).find((f) => f.type === 'control_request' && f.request?.subtype === 'can_use_tool')!;
+  expect((await inbound()).filter((f) => f.type === 'control_cancel_request').map((f) => f.request_id)).toEqual([asked.request_id]);
+  await expect(card, 'the card leaves on the cancel').toHaveCount(0);
+  await expect(pane(page, 0).locator('[data-request-end]')).toHaveCount(0);
+  await expect(pane(page, 0).getByText(/^Waiting for approval: /)).toHaveCount(0);
+  expect((await outFrames(page, id)).filter((f) => f.type === 'control_response'), 'no answer was written for it').toEqual([]);
+  await expect.poll(async () => (await listed()).length, { message: 'nothing waits' }).toBe(0);
+  await expect.poll(async () => (await statusOf(page, id)).turn, { message: 'the turn ended' }).toBeNull();
+  await expect(messageIn(page, 0), 'the composer stays').toBeVisible();
   expect(editor.consoleErrors()).toEqual([]);
 });

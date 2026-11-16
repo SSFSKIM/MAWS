@@ -76,7 +76,11 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
     commands: ['files.openExternal'],
     guard: 'issued only when machineFor(appSessionId) is this Mac’s (the named open of UX wave U6c); a session on another machine opens through lane-b/open-copy.ts’ openSessionFile, under that module’s entry',
   },
-  'test-support/code-disk.ts': { commands: ['files.openExternal'], guard: 'a test double of main’s files commands for component tests: answers the command, issues none (UX wave U6c)' },
+  'tools/code/viewer/viewer-store.ts': {
+    commands: ['files.writeOutside'],
+    guard: 'sent only for an entry with a pin, which only a read answered with `outside` sets; a session on another machine is read without `named` and never answered `outside`, so its save is files.write (UX wave U6e, §D)',
+  },
+  'test-support/code-disk.ts': { commands: ['files.openExternal', 'files.writeOutside'], guard: 'a test double of main’s files commands for component tests: answers the commands, issues none (UX wave U6c, U6e)' },
   // reported: issued for a session on another machine with no guard
   'lane-b/open-copy.ts': {
     commands: ['files.openExternal'],
@@ -88,7 +92,7 @@ const GUARDED_ELSEWHERE: Readonly<Record<string, Entries>> = {
   },
   'engine-surface/asks.ts': { commands: ['session.ui.answer'], reported: 'an automatic answer to a mod’s ask, with no control, sent for every session’s plugin.ask, another machine’s included (engine-surface/)' },
   'owner/report/answering.ts': {
-    commands: ['ownerChannel.answered', 'ownerChannel.markRead', 'ownerChannel.cancel'],
+    commands: ['ownerChannel.markRead'], // UX wave U2b: the report's cards, and their answer and cancel, are gone
     reported: 'request-card/RequestCard.tsx’s MarkRead marks an essential item read with no guard, an item of another machine’s attention feed included (request-card/, owner/report/)',
   },
   'stores/owner-channel.ts': { commands: ['ownerChannel.state'], reported: 'read at mount by transcript/view/TranscriptSlot.tsx for a lane B session on another machine (stores/, transcript/view/)' },

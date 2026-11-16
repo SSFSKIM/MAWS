@@ -244,6 +244,19 @@ describe('remote lane A over a real link', { timeout: 30_000 }, () => {
     expect(await l.cmd('laneA.state', { appSessionId: 'la-other' })).toBeNull();
   });
 
+  // UX wave U8d, the fence review's ruling (point 7): the origin a body names rides inside it, so a body another machine
+  // sends with one crosses this relay as it came, and the window reads it under the origin rule, not the no-key one.
+  // sminos sends no such key today (its plane's `subagents` and `snapshot` bodies), so its sessions read under the
+  // no-key rule: their statuses stand while the watch lives.
+  it('relays a body that names an origin with the key as the machine sent it', async () => {
+    const l = await lab();
+    const watch = await watched(l);
+    const body = { subagents: [{ agentId: 'a0b1c2d3e4f500001', meta: { agentType: 'general-purpose' }, status: 'running', evidence: 'bridge', running: true }], jobs: [], mcp: [], origin: 'terminal:4242' };
+    l.plane.emit('subagents', body);
+    await until(() => messagesOf(l, watch).some((m) => m.kind === 'subagents'), 'the subagents message');
+    expect(messagesOf(l, watch).find((m) => m.kind === 'subagents')?.body).toEqual(body);
+  });
+
   it('leaves every command but laneA.* to O7’s path, and laneA.* for a machine the link doesn’t answer', async () => {
     const l = await lab();
     expect(await l.route('session.status', { appSessionId: 'app-1' })).toEqual({ ok: true, value: 'manager' });

@@ -3,7 +3,7 @@
 // hash, pages that disagree on it read again.
 import { describe, expect, it } from 'vitest';
 import { FakeLink } from '../../../test/lane-b/fake-link';
-import { readFileInPages, REMOTE_READ_PAGE_BYTES, REMOTE_READ_TRIES } from './remote-files-read';
+import { readFileInPages, readInPages, REMOTE_READ_PAGE_BYTES, REMOTE_READ_TRIES } from './remote-files-read';
 
 const APP = 'app-1';
 
@@ -52,5 +52,31 @@ describe('readFileInPages', () => {
     const moving = machine(() => text, REMOTE_READ_PAGE_BYTES + 1024, () => String(n++ % 10).repeat(64));
     expect(await readFileInPages(moving.link, { appSessionId: APP, path: '/r/x.txt', offset: 0, length: text.length, hash: true }, () => {})).toMatchObject({ ok: false, error: { code: 'internal' } });
     expect(moving.asked.length).toBe(1 + 2 * REMOTE_READ_TRIES);
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M3, decision 9; A7): a caller may name
+// the read in its log by a label, so a file frame's copy logs no path.
+describe('readInPages’ label', () => {
+  /** A read that is too large for the channel in one answer, whose pages first disagree on the hash. */
+  async function logged(label?: string) {
+    let version = 0;
+    const text = 'x'.repeat(2 * REMOTE_READ_PAGE_BYTES);
+    const { link } = machine(() => text, REMOTE_READ_PAGE_BYTES + 1024, () => `${version++ < 2 ? 'a' : 'b'}`.repeat(64));
+    const log: string[] = [];
+    const read = await readInPages(link, 'files.read', { appSessionId: APP, path: '/r/orchard-ledger.txt', offset: 0, length: text.length, hash: true }, (line) => log.push(line), label);
+    expect(read).toMatchObject({ ok: true });
+    return log;
+  }
+
+  it('a label replaces the path in both log lines, and no label logs as before', async () => {
+    expect(await logged('file frame (html)')).toEqual([
+      'lane B: files.read of mini file frame (html): too large for the channel in one answer; read in pages',
+      'lane B: files.read of mini file frame (html): the file changed between its pages; read again',
+    ]);
+    expect(await logged()).toEqual([
+      'lane B: files.read of mini /r/orchard-ledger.txt: too large for the channel in one answer; read in pages',
+      'lane B: files.read of mini /r/orchard-ledger.txt: the file changed between its pages; read again',
+    ]);
   });
 });

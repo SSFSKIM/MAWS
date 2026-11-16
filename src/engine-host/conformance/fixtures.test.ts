@@ -4,7 +4,7 @@ import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import { parseAskSteer } from '@shared/maws/ask';
 import { ArtifactDeliverySchema, ArtifactScreenshotResultSchema, AskResultSchema } from '@shared/maws/tools';
 import { ArtifactUpdateResultSchema } from '@shared/maws/artifact-update'; // P3-A: the retired update, as recorded
-import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
+import { ClaimSessionResponseSchema, GetStatusResponseSchema, GetWorkspaceDiffResponseSchema, InitializeResponseSchema, ReloadPluginsResponseSchema, UiRenderResponseSchema, RewindConversationResponseSchema, RewindFilesResponseSchema } from '@shared/wire/control';
 import { FIXTURE_PASSES, listJournals, loadEngineJournal /* P2-C (2026-10-09) */, loadJournal, type FixturePass } from '../../../test/support/fixtures';
 import { ownerMarkedText, sittingSeed } from '../../../test/support/r3-surface';
 import { RELAY_URL } from '../launch';
@@ -577,6 +577,15 @@ describe('normaliser: per-fixture graph facts (C2 findings restated)', () => {
     const { events } = await run('pass2', 'auto-routed');
     expect(ofKind(events, 'user.message').find((e) => e.seq === 153)).toMatchObject({ origin: 'local-command', content: '<local-command-stdout>Set model to `haiku (claude-haiku-4-5-20251001)`</local-command-stdout>', isReplay: true, bash: null });
     expect(ofKind(events, 'turn.started').some((e) => e.seq === 153)).toBe(false);
+  });
+
+  // UX wave U11h (tracker row 9 of docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md): the status
+  // tracker takes a reload's server list as the session's servers, observed with its plugins, which holds only while the
+  // pinned engine's reload answer carries that list; a move of the pin that drops it fails here
+  it('typed responses: p2-no-prompt-resume-1 reload_plugins answers its MCP servers, each with a name and a status', async () => {
+    const reload = (await run('pass3', 'p2-no-prompt-resume-1')).requests.find((r) => r.subtype === 'reload_plugins');
+    const answer = ReloadPluginsResponseSchema.parse(reload?.response);
+    expect(answer.mcpServers).toEqual([expect.objectContaining({ name: 'maws', status: 'connected' })]);
   });
 
   it('typed responses: trust-attested workspace_trust_recorded, prewarm claim_session, get_status base URL row', async () => {

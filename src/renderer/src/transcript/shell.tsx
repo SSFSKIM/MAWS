@@ -15,10 +15,15 @@ import { useTranscriptStore } from '../stores/transcript';
 import { ipcSource } from './source/ipc';
 import { TranscriptSlot } from './lazy';
 import { registerTranscriptActions } from './view/registry';
+import { useForkUnavailable } from '../lane-b/remote-unavailable'; // UX wave U3b
+import { forkInPlace } from '../sessions/record-ops'; // UX wave U3b
+import { connectCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 // P2-C start (2026-10-09)
 import { registerAction } from '../keymap/actions-runtime';
-import { toggleReportView } from '../owner/report/ReportBar';
 // P2-C end
+// UX wave U2b (M2): the view's switch and Mark all read, the two actions of the to-human view
+import { markAllRead } from '../owner/report/answering';
+import { toggleView } from '../owner/view/Switch';
 
 // C5's liveness rule, as its digest carries it: main's read model moves a session's phase only while C3's process table
 // holds a live process for it (`exiting` included) or a C4 replay run plays it, so a phase of a running process says
@@ -49,10 +54,15 @@ export const openFileInTab = (path: string, line?: number, appSessionId: AppSess
 
 export function connectTranscript(): () => void {
   registerSlot('transcript', ShellTranscript);
-  const offReport = registerAction('transcript.toggleReport', toggleReportView); // P2-C (2026-10-09)
-  const offActions = registerTranscriptActions({ openFile: openFileInTab });
+  const offReport = registerAction('transcript.toggleReport', toggleView); // P2-C (2026-10-09); UX wave U2b: the view's switch
+  const offMarkAll = registerAction('transcript.markAllRead', markAllRead); // UX wave U2b
+  // UX wave U3b (Interfaces §D): an answer's "Fork from here" is U9's own two names and decides nothing itself
+  const offActions = registerTranscriptActions({ openFile: openFileInTab, forkFrom: { useUnavailable: useForkUnavailable, run: forkInPlace } });
+  const offCompacting = connectCompacting(); // UX wave U3b (M4): whether a session compacts, for its row and its hover card
   return () => {
     offReport();
+    offMarkAll();
     offActions();
+    offCompacting();
   };
 }

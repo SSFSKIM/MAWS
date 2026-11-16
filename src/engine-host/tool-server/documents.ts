@@ -23,13 +23,19 @@
 // The owner's setting is never bypassed by a direct write. A suggested batch takes no `answering` (refused, see
 // SUGGESTED_ANSWER).
 //
+// UX wave U10b (§B.2 and §B.3 of docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): `set_page` sets a
+// document's page as an op of the batch (the planner's, so it is all or none with the rest and written in the batch's
+// one transaction). A batch holding it is refused whole on a dashboard, which has no page, and when it would land as
+// suggestions, whose document's settings an accept does not carry over. A document's read names its page.
+//
 // `mawsTools` lists the four tools after A's and wraps A's `artifact_read` and `artifact_create` with
 // `documentReadTool`/`documentCreateTool`, which answer a document and hand every other kind to A's tool.
 import { precheckEdit } from '@artifacts/document/edit-plan';
 import { DocIndex } from '@artifacts/document/block-index';
 import { caretsOf } from '@artifacts/document/carets';
-import { EditError, type Op } from '@artifacts/document/edit-ops';
+import { EditError, type Op, type OpResult, type PageOpResult } from '@artifacts/document/edit-ops';
 import { importMarkdown } from '@artifacts/document/import/markdown';
+import { docPage } from '@artifacts/document/meta';
 import { applyEdit } from '@artifacts/document/patch-writer';
 import { readDocument, ReadError, type ReadOptions } from '@artifacts/document/read';
 import { nanoid8 } from '@artifacts/document/schema';
@@ -51,11 +57,13 @@ import {
   DOCUMENT_LIMITS,
   documentRefused,
   parseDocumentArguments,
+  SET_PAGE_REFUSALS,
   type ArtifactEditResult,
   type ArtifactReplyResult,
   type ArtifactResolveResult,
   type CommentAuthor,
   type DocumentRefusal,
+  type DocumentPage,
   type DocumentReadResult,
   type DocumentToolName,
   type DocumentVersionSummary,
@@ -70,7 +78,8 @@ import { chartSpecsBefore, normalizeChartSpecs, viewWarnings, type ViewWarning }
 import { changesSince, DocumentViews, onSessionReplica, warmInSlices } from '../documents/kinds/document-host';
 import type { AgentReplica } from '../documents/replica';
 import type { ArtifactStore } from '../documents/store';
-import { spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5)
+import { designSystemNamed, spaceFields, spaceNamed } from './artifact-tools'; // P3-F wave S (F5); UX wave U10b: designSystemNamed
+import { instructedOnDelivery, instructionsField, instructionsIn, OpJoin } from './artifact-context'; // UX wave U10b (M10; fix wave 1: OpJoin)
 import { defineMawsTool, toolError, toolText, type McpToolContext, type McpToolDefinition, type McpToolResult } from './server';
 import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-A2 (X35)
 
@@ -79,14 +88,20 @@ import { withProvisional, type ProvisionalEmitter } from './provisional'; // P4-
 const PRESENCE_EDITING_MS = 4_000;
 
 // What one session's document tools remember between calls: its views of each replica, the kinds whose guide it was
-// given (A's `ArtifactSession.guided` once A's tools are here), its presence timers.
+// given (A's `ArtifactSession.guided` once A's tools are here), the Spaces whose instructions it was given (A's
+// `ArtifactSession.instructed`, UX wave U10b M10), the writing calls still answering (A's `ArtifactSession.ops`, M10 fix
+// wave 1), its presence timers.
 export class DocumentToolSession {
   readonly views = new DocumentViews();
   readonly guided: Set<ArtifactKind>;
+  readonly instructed: Map<string, number>;
+  readonly ops: OpJoin;
   readonly presence = new Map<string, ReturnType<typeof setTimeout>>(); // by document key (main or suggestions)
 
-  constructor(guided?: Set<ArtifactKind>) {
+  constructor(guided?: Set<ArtifactKind>, instructed?: Map<string, number>, ops?: OpJoin) {
     this.guided = guided ?? new Set();
+    this.instructed = instructed ?? new Map();
+    this.ops = ops ?? new OpJoin();
   }
 }
 
@@ -203,12 +218,12 @@ const blockIdOf = (node: Node | null): string | null => {
  * block an unscoped quote matched, a cell, a moved block) and the blocks it made (the outermost new ones), never an
  * insert's anchor or a deleted block. Read after the write, when the doc's index holds the new blocks.
  */
-function touchedBlocksOf(doc: Doc, ops: readonly Op[], results: readonly { target: string; newIds: string[] }[]): string[] {
+function touchedBlocksOf(doc: Doc, ops: readonly Op[], results: ReadonlyArray<OpResult | PageOpResult>): string[] {
   const index = DocIndex.of(doc);
   const out: string[] = [];
   results.forEach((result, i) => {
     const op = ops[i];
-    if (op.op === 'delete') return;
+    if (op.op === 'delete' || 'op' in result) return; // a set_page touches no block
     if (op.op !== 'insert') out.push(...result.target.split(','));
     const made = new Set(result.newIds);
     for (const id of result.newIds) {
@@ -290,6 +305,12 @@ export function artifactEditTool(deps: DocumentToolDeps): McpToolDefinition {
             if (!adapter) throw refuse(TOOL, { reason: 'unavailable' }, `${artifact.kind}s are not registered with the artifact store in this run of MAWS`);
             const id = artifact.id;
             const suggesting = input.mode === 'suggest' || artifact.agentEditsAsSuggestions;
+            // UX wave U10b (§B.2): a page is a document's, and is not something the person accepts as a suggestion
+            const setPage = ops.findIndex((each) => each.op === 'set_page');
+            if (setPage >= 0 && (artifact.kind === 'dashboard' || suggesting)) {
+              const sentence = artifact.kind === 'dashboard' ? SET_PAGE_REFUSALS.dashboard : SET_PAGE_REFUSALS.suggestion;
+              return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', opIndex: setPage, message: sentence }, sentence));
+            }
             if (suggesting && input.answering !== undefined) return refusedAfterCommit(store, refuse(TOOL, { reason: 'invalid', message: SUGGESTED_ANSWER }, SUGGESTED_ANSWER));
             const writeId = suggesting ? store.service.suggestionDoc(id) : id;
             const live = store.revision(id);
@@ -591,13 +612,22 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
         const artifact = await documentOf(TOOL, store, input.artifact, ctx, deps);
         if (input.revision !== undefined || input.paths !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'a document is read by tab, range and sinceRevision (or a retained version), not by revision or paths');
         const options = { tab: input.tab, from: input.from, count: input.count ?? DOCUMENT_LIMITS.readCount };
-        const versions = await store.readCommitted(() => store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)));
+        const { versions, instructions } = await store.readCommitted(() => ({
+          versions: store.listVersions(artifact.id).slice(-VERSIONS_LISTED).reverse().map((version) => versionSummary(version, ctx.appSessionId)),
+          instructions: ctx.linkedRead ? null : instructionsIn(store, artifact.spaceId), // UX wave U10b (M10): a linked read gives none
+        }));
         const head = { status: 'read' as const, artifactId: artifact.id, kind: artifact.kind as DocumentLikeKind /* P3-E */, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }), versions };
         // P3-E: a dashboard's read closes with its datasets as the read doc holds them (the footer of the parent's §2)
         const footer = (doc: Doc) => {
           if (artifact.kind !== 'dashboard') return {};
           const warnings = viewWarnings(doc); // E2 M3: a retained spec's problems, read only (E's Decision Log 9)
           return { datasets: datasetFooter(doc, (actor) => authorOf(actor, ctx.appSessionId)), ...(warnings.length > 0 && { viewWarnings: warnings }) };
+        };
+        // UX wave U10b (§B.3): a document's page as the read state holds it (a version's own); a dashboard names none
+        const pageField = (doc: Doc): { page?: DocumentPage } => {
+          if (artifact.kind !== 'document') return {};
+          const page = docPage(doc);
+          return { page: { size: page.size ?? 'system', density: page.density ?? 'standard' } };
         };
         let result: DocumentReadResult;
         if (input.version !== undefined) {
@@ -608,7 +638,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             const doc = newDoc();
             try {
               applyV2(doc, store.versionState(artifact.id, version.id));
-              return { version, live: store.revision(artifact.id), read: readDocument(doc, options), footer: footer(doc) /* P3-E */ };
+              return { version, live: store.revision(artifact.id), read: readDocument(doc, options), footer: footer(doc) /* P3-E */, ...pageField(doc) /* U10b */ };
             } catch (error) {
               if (error instanceof ReadError) throw readRefusal(error);
               throw error;
@@ -618,7 +648,7 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
           });
           // the live revision, as every read answers (§4.3); the version's own in its summary. A version read records no
           // view, so a batch from this revision is validated as from a base the session never saw
-          result = { ...head, revision: read.live, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId), ...read.footer /* P3-E */ };
+          result = { ...head, revision: read.live, ...publicRead(read.read), version: versionSummary(read.version, ctx.appSessionId), ...read.footer /* P3-E */, ...(read.page && { page: read.page }) /* U10b */ };
         } else {
           const actor = actorOf(ctx);
           store.service.replica(ctx.appSessionId, artifact.id); // the session's replica keeps the document loaded
@@ -636,15 +666,16 @@ export function documentReadTool(deps: DocumentToolDeps, fallback?: McpToolDefin
             if (only) since.changed = read.shown;
             deps.session.views.record(doc, revision);
             warmInSlices(doc);
-            return { revision, read, since, footer: footer(doc) /* P3-E */ };
+            return { revision, read, since, footer: footer(doc) /* P3-E */, ...pageField(doc) /* U10b */ };
           }).catch((error: unknown) => {
             throw error instanceof ReadError ? readRefusal(error) : error;
           });
-          result = { ...head, revision: read.revision, ...publicRead(read.read), ...(input.sinceRevision !== undefined && { sinceRevision: input.sinceRevision }), ...read.since, ...read.footer /* P3-E */ };
+          result = { ...head, revision: read.revision, ...publicRead(read.read), ...(input.sinceRevision !== undefined && { sinceRevision: input.sinceRevision }), ...read.since, ...read.footer /* P3-E */, ...(read.page && { page: read.page }) /* U10b */ };
           // a store a newer MAWS wrote is read-only: the read stands, its viewed link is not recorded (A's reader's rule)
           if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifact.id, ctx.appSessionId, 'viewed'));
         }
-        return toolText(result);
+        const given = instructionsField(deps.session, instructions); // UX wave U10b (M10)
+        return instructedOnDelivery(toolText({ ...result, ...given }), deps.session, instructions, given);
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
@@ -675,86 +706,93 @@ export function documentCreateTool(deps: DocumentToolDeps, fallback?: McpToolDef
       answering(TOOL, async () => {
         const asked = (args as { kind?: unknown } | null)?.kind;
         if (fallback && asked !== 'document' && asked !== 'dashboard' /* P3-E */) return fallback.call(args, ctx);
-        const parsed = parseToolArguments(TOOL, args);
-        if (!parsed.ok) return toolError(parsed.error);
-        const input = parsed.data;
-        if (input.kind === undefined || !isDocumentLike(input.kind)) throw refuse(TOOL, { reason: 'invalid', kind: input.kind ?? 'html' }, 'this tool creates documents'); // P3-E: and dashboards
-        const kind = input.kind; // P3-E: the kind created, answered and guided
-        if (input.files !== undefined) throw refuse(TOOL, { reason: 'invalid', kind }, `a ${kind} artifact takes markdown content, not files`); // P3-E: A's schema lets a dashboard's through
-        if (input.content !== undefined && input.content.length > DOCUMENT_LIMITS.markdownChars) {
-          throw refuse(TOOL, { reason: 'invalid' }, `the content is ${input.content.length} characters; a document's content is at most ${DOCUMENT_LIMITS.markdownChars}`);
-        }
-        if (input.id !== undefined && input.handle !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'give handle or id (its older name), not both');
-        const handle = input.handle ?? input.id;
-        const store = storeOf(TOOL, deps);
-        const actor = actorOf(ctx);
-        // a repeated call answers what the first one did, before anything that may have moved since is read (§4.3; A's
-        // generic create)
-        const replayed = await store.replayOf(opIdOf(ctx));
-        if (replayed.found) {
-          deps.session.guided.add(kind); // P3-E
-          return toolText(replayed.result);
-        }
-        const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse(TOOL, refusal, sentence)); // P3-F wave S (F5)
-        let body: ReturnType<typeof importMarkdown>;
-        try {
-          body = importMarkdown(input.content ?? '');
-        } catch (error) {
-          throw refuse(TOOL, { reason: 'invalid' }, `the content is not the document kind's markdown: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        if (body.childCount > DOCUMENT_LIMITS.blocksPerTab) {
-          throw refuse(TOOL, { reason: 'invalid', blocks: body.childCount }, `the content holds ${body.childCount} top-level blocks; a tab takes at most ${DOCUMENT_LIMITS.blocksPerTab}: create the document with less and insert the rest elsewhere, or split it`);
-        }
-        // the answer's context, settled before the write so the recorded answer is the whole first answer: the guide when
-        // this session has not had it, the governing system's guide (a new document has no system of its own, and the
-        // Space it is made in, if any)
-        const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind]; // P3-E: by kind
-        const designSystem = await store.designSystemContextFor(space ? { spaceId: space.id } : {});
-        const created = await store.writeCommitted(() =>
-          store.withOp(
-            opIdOf(ctx),
-            TOOL,
-            null,
-            async (op) => {
-              // the handle is checked inside the operation, after its replay lookup: a repeated call answers its result
-              if (handle !== undefined) {
-                const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
-                if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
-              }
-              const made: { doc?: Doc; answer?: Record<string, unknown> & { artifactId: string }; viewWarnings?: ViewWarning[] /* P3-E */ } = {};
-              // The first tab is the create's `initial` (so the kind's seed hook writes none), written through the session's
-              // host replica in the savepoint of the entity row, the answer recorded in it too: the artifact commits with
-              // its content and its op row or not at all (P3-F, artifact-protocol finding 2)
-              await store.create(
-                {
-                  kind /* P3-E */, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }) /* F5 */,
-                  initial: (doc) => {
-                    made.doc = doc;
-                    createDocument(doc, { title: input.title, body });
-                    if (kind === 'dashboard') made.viewWarnings = normalizeChartSpecs(doc, new Map()); // P3-E (E2 M3): in the create's frame
+        // M10 fix wave 1: one response per tool-use id while a call is answering, as A's generic create (Decision Log 11)
+        return deps.session.ops.joined(opIdOf(ctx), async () => {
+          const parsed = parseToolArguments(TOOL, args);
+          if (!parsed.ok) return toolError(parsed.error);
+          const input = parsed.data;
+          if (input.kind === undefined || !isDocumentLike(input.kind)) throw refuse(TOOL, { reason: 'invalid', kind: input.kind ?? 'html' }, 'this tool creates documents'); // P3-E: and dashboards
+          const kind = input.kind; // P3-E: the kind created, answered and guided
+          if (input.files !== undefined) throw refuse(TOOL, { reason: 'invalid', kind }, `a ${kind} artifact takes markdown content, not files`); // P3-E: A's schema lets a dashboard's through
+          if (input.content !== undefined && input.content.length > DOCUMENT_LIMITS.markdownChars) {
+            throw refuse(TOOL, { reason: 'invalid' }, `the content is ${input.content.length} characters; a document's content is at most ${DOCUMENT_LIMITS.markdownChars}`);
+          }
+          if (input.id !== undefined && input.handle !== undefined) throw refuse(TOOL, { reason: 'invalid' }, 'give handle or id (its older name), not both');
+          const handle = input.handle ?? input.id;
+          const store = storeOf(TOOL, deps);
+          const actor = actorOf(ctx);
+          // a repeated call answers what the first one did, before anything that may have moved since is read (§4.3; A's
+          // generic create)
+          const replayed = await store.replayOf(opIdOf(ctx));
+          if (replayed.found) {
+            deps.session.guided.add(kind); // P3-E
+            return toolText(replayed.result); // UX wave U10b (M10, decision 4): its instructions as recorded, nothing marked given
+          }
+          const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse(TOOL, refusal, sentence)); // P3-F wave S (F5)
+          const system = await designSystemNamed(store, kind, input.designSystem, (text) => new Refusal(text)); // UX wave U10b (H10: a dashboard too)
+          let body: ReturnType<typeof importMarkdown>;
+          try {
+            body = importMarkdown(input.content ?? '');
+          } catch (error) {
+            throw refuse(TOOL, { reason: 'invalid' }, `the content is not the document kind's markdown: ${error instanceof Error ? error.message : String(error)}`);
+          }
+          if (body.childCount > DOCUMENT_LIMITS.blocksPerTab) {
+            throw refuse(TOOL, { reason: 'invalid', blocks: body.childCount }, `the content holds ${body.childCount} top-level blocks; a tab takes at most ${DOCUMENT_LIMITS.blocksPerTab}: create the document with less and insert the rest elsewhere, or split it`);
+          }
+          // the answer's context, settled before the write so the recorded answer is the whole first answer: the guide when
+          // this session has not had it, the governing system's guide (the system the create names, if any, and the Space
+          // it is made in, if any)
+          const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind]; // P3-E: by kind
+          const instructions = space ? await store.readCommitted(() => instructionsIn(store, space.id)) : null; // UX wave U10b (M10)
+          const given = instructionsField(deps.session, instructions);
+          const designSystem = await store.designSystemContextFor({ ...(system && { designSystemId: system.id }), ...(space && { spaceId: space.id }) });
+          const created = await store.writeCommitted(() =>
+            store.withOp(
+              opIdOf(ctx),
+              TOOL,
+              null,
+              async (op) => {
+                // the handle is checked inside the operation, after its replay lookup: a repeated call answers its result
+                if (handle !== undefined) {
+                  const taken = store.resolve(handle, [ctx.appSessionId]) ? 'this session' : deps.artifactScope?.length && store.resolve(handle, deps.artifactScope) ? 'the conversation this side thread was opened from' : null;
+                  if (taken) return refusedAfterCommit(store, refuse(TOOL, { reason: 'handleTaken', handle }, `an artifact "${handle}" already exists in ${taken}; edit it with artifact_edit`));
+                }
+                const made: { doc?: Doc; answer?: Record<string, unknown> & { artifactId: string }; viewWarnings?: ViewWarning[] /* P3-E */ } = {};
+                // The first tab is the create's `initial` (so the kind's seed hook writes none), written through the session's
+                // host replica in the savepoint of the entity row, the answer recorded in it too: the artifact commits with
+                // its content and its op row or not at all (P3-F, artifact-protocol finding 2)
+                await store.create(
+                  {
+                    kind /* P3-E */, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }) /* F5 */, ...(system && { designSystemId: system.id }) /* U10b */,
+                    initial: (doc) => {
+                      made.doc = doc;
+                      createDocument(doc, { title: input.title, body });
+                      if (kind === 'dashboard') made.viewWarnings = normalizeChartSpecs(doc, new Map()); // P3-E (E2 M3): in the create's frame
+                    },
                   },
-                },
-                actor,
-                (artifact) => {
-                  const revision = store.revision(artifact.id);
-                  made.answer = {
-                    status: 'created', kind /* P3-E */, artifactId: artifact.id, title: artifact.title, revision, ...(handle !== undefined && { handle }),
-                    ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
-                    ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
-                    ...spaceFields(space), // F5
-                  };
-                  if (made.doc) deps.session.views.record(made.doc, revision);
-                  op.record(made.answer);
-                },
-              );
-              return made.answer!;
-            },
-            { actor },
-          ),
-        );
-        deps.session.guided.add(kind); // P3-E
-        store.service.replica(ctx.appSessionId, created.artifactId); // the session's replica keeps the document loaded
-        return toolText(created);
+                  actor,
+                  (artifact) => {
+                    const revision = store.revision(artifact.id);
+                    made.answer = {
+                      status: 'created', kind /* P3-E */, artifactId: artifact.id, title: artifact.title, revision, ...(handle !== undefined && { handle }),
+                      ...(guide && { guide }), ...(designSystem !== null && { designSystem }),
+                      ...(made.viewWarnings?.length && { viewWarnings: made.viewWarnings }), // P3-E (E2 M3)
+                      ...spaceFields(space), // F5
+                      ...given, // UX wave U10b (M10): recorded with the op, so a replay says it too
+                    };
+                    if (made.doc) deps.session.views.record(made.doc, revision);
+                    op.record(made.answer);
+                  },
+                );
+                return made.answer!;
+              },
+              { actor },
+            ),
+          );
+          deps.session.guided.add(kind); // P3-E
+          store.service.replica(ctx.appSessionId, created.artifactId); // the session's replica keeps the document loaded
+          return instructedOnDelivery(toolText(created), deps.session, instructions, given); // UX wave U10b (M10)
+        });
       });
   return fallback ? { ...fallback, call } : defineMawsTool(TOOL, call);
 }
