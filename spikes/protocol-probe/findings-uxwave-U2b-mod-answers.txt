@@ -243,7 +243,8 @@ E6. Observed: not counted. Measured numbers:
     characters).
 
 Found beside the table.
-  1. A live stretch loses its record line when its second call arrives, with MAWS's ask pattern. Seen in 0.8.2 and 0.9.0
+  1. FIXED at e511aad9 (the branch's `joinGroup`; see "Second round" below). What was observed at 0fed175f and in 0.8.2:
+     a live stretch loses its record line when its second call arrives, with MAWS's ask pattern. Seen in 0.8.2 and 0.9.0
      alike: u2b-mod-summary seq 89, 146; u2b-mod-mock-grow-{none-before,none-after,9-after}, 3 of 3 runs.
      - MAWS asks a lone call as ToolUse and a run of two or more as ToolGroup `group:<first call>` (§E). While a stretch
        grows, its first call is first asked as ToolUse. That row enters the view's order and heads the run.
@@ -277,11 +278,12 @@ Found beside the table.
   Item 11 is unbuilt and not needed (E2).
   Not recorded here: items 7 and 8 (CLAUDE.md, the mod's own tests).
   Wrong in the document, not the mod: §E's id for a thought (C2).
-  Missing from both: the lone-call-to-group transition (Found 1).
+  Missing from both: the lone-call-to-group transition (Found 1), since fixed in the mod at e511aad9.
 
 §M, sentences the recordings contradict or qualify.
   - "What a person sees", where the mod draws: "the stretch is open and growing | › and its newest call", and "the summary
-    has arrived | › and the summary". Not with MAWS's ask pattern once a stretch has a second call (Found 1).
+    has arrived | › and the summary". At 0fed175f, not with MAWS's ask pattern once a stretch had a second call (Found
+    1). At e511aad9 both hold (Second round).
   - "The engine sends it as one request …" holds. Two details: the request carries max_tokens 6048, not 4000, and no
     request record of it is written to the transcript (its api-request rows are the main loop's, querySource `sdk`).
   - "the read at 45 is past any summary": observed summaries settled about 1.5 s after the stretch closed.
@@ -293,3 +295,71 @@ Secret scan. gitleaks 8.30.1 (the pinned version) over spikes/protocol-probe/fix
   ("U2b …" and the u2b-mod-* integrity rows): 44 of 44 pass. Provenance notes of the first 14 resumed fixtures named the
   doperpowers repository by URL. That field, which the probe itself writes, was replaced by the words "the public
   doperpowers repository" before commit. No recording of the engine was changed.
+
+Second round, on e511aad9 (2026-11-16)
+
+  "after" = e511aad9d995c371e127ebca9e2bd4281a75076f: 0fed175f, the comment commit a98c578e, and `joinGroup` in the
+  ToolGroup hook (to-human.tsx +64 lines). `joinGroup` turns a call's lone record row into the group's row when a group
+  holds that call, and the hook invalidates once when it does. Every second-round fixture's provenance names this
+  commit. The first round's fixtures are kept as the record of the defect.
+
+  Item 1. Expected: one mounted instance answers the record line at every step, the newest call and then the summary,
+  and after the switch the pushes name the group's instance. Observed: yes.
+  - Stand-in, MAWS's own pattern (lone ToolUse, then ToolGroup from the second call):
+    - At 9 (u2b-mod-mock-grow-9-after-fix u2b_grow @150) the group answers `› Grow step 1` (seq 87) and `› Grow step 2`
+      (seq 109), then `› <summary>` after the turn (seq 140).
+    - With no advertisement and "after" (-none-after-fix @153) it answers the live lines and then `› working record`
+      (seq 138; no summary is asked there).
+    - From the switch on, the pushes name the ToolGroup instance beside the ToolUse that read the state first (seq 103,
+      128, 133), and one push with no instances comes at the switch itself (seq 85).
+    - The lone ToolUse, asked once more after the switch, answers an empty Box (seq 149), as the builder said.
+    - "Before" is unchanged: its group stays hidden (-none-before-fix @149). That is 0.8.2, not part of the fix.
+  - The two patterns that worked before still work: ToolUse throughout (-9-after-head-fix @146: live lines, then the
+    summary at seq 130) and ToolGroup from the first call (-9-after-group-fix @146, the same).
+  - Real run at 9 (u2b-mod-summary-fix u2b_summary @495; two stretches, two summaries):
+    - The first stretch's group reads its summary as soon as it settles, while the turn still runs (seq 110).
+    - The second stretch's single call reads `› Second stretch, first command` (seq 116); its group reads
+      `› Second stretch, second command` (seq 149) and then its summary (seq 197).
+    - After the switch the pushes name the groups' instances (seq 134 onward).
+    - Both lone ToolUses, asked after the switch, answer an empty Box (seq 491, 494).
+    - The folds file is shape 2 with two runs, their ids on the wire and in the file.
+    - The summaries measured 386/36 and 388/27 tokens in/out (u2b_cost @522), again not counted in the result.
+    - Resumed with no prompt (u2b-mod-summary-fix-resume): both groups read their summaries (seq 27, 33) with no summary
+      request (u2b_resume @52).
+  - Each case run once. The live lines move with the stand-in's 2 s calls; the 500 ms polling saw every step.
+  - No handling was added for a ToolResult asked for a call inside a group, and none was asked here.
+
+  Item 2. The rest of the recorded answers stand, from the diff. `joinGroup` acts only in the ToolGroup hook, and only
+  when a call the group holds already stands in the view's order as a lone record row, that is, after the same call was
+  asked as ToolUse. Its other changes (`heldBy` released for a call a group lets go; one invalidation when a row joined)
+  follow from that. None of the other recordings asks a group's call as ToolUse first:
+  - the resumed seed asks the run only as `group:<first call>`, and its ToolUse asks are the message call, the ListAgents
+    call and the question, none of them a group's member;
+  - the lone, reload and label runs likewise;
+  - the six live launches ask no group;
+  - the stand-in's E1, stress and two-process runs ask no rows at all.
+  So only the MAWS-pattern recordings (u2b-mod-summary, u2b-mod-mock-grow-*) could change, and those were made again.
+
+  Item 3. Terminal sessions, before and after: the record line reads the newest call and then the summary in both. The
+  view itself shows no difference between the two installations (u2b-mod-terminal-before.json and -after.json). Method:
+  scenarios/pass3/uxwave-u2b-mod-terminal.mjs runs `vm-run.sh term` (the engine in tmux, 160x48, under vm-run's
+  namespace and gateway route): haiku, --permission-mode default, no MAWS_NATIVE_TO_HUMAN, summaries on, the same three
+  plugin folders, the style and the owner's plugin order in --settings. Turn 1 is one marked message, so the view folds
+  from turn 2. Turn 2 is the read-only stretch, then a marked message. The pane was captured every 700 ms. Each case ran
+  once, 4 to 6 model requests plus 1 summary.
+  - After: the stretch was 6 calls (Read, Glob, Bash `find`, Grep, Bash `grep`, Read: the model added the two Bash calls
+    on its own). The line moved `› Read one.txt` (ms 15249), `› Search "*.txt"` (16680), `› List top-level .txt files
+    in the work directory` (18825), `› Search "ONE"` (20254), `› Search .txt files in the work directory for ONE`
+    (21684), `› Read one.txt` (23829). Then the marked message, and the summary on the line at ms 28113. The folds file
+    is shape 2.
+  - Before: the model made 2 calls (Read, then a ToolSearch for Glob, which it reported as unavailable in that session)
+    and ended with a message-tool message instead of continuing. The line moved `› Read one.txt` (ms 15768) to
+    `› Tool search "select:Glob"` (17909), then read the summary at ms 23627. The folds file is shape 1, as 0.8.2 writes
+    it.
+  - The difference in what the two models did is the model's, not the view's. The stretch in "before" was shorter than
+    asked (2 calls, not 3 or 4), so it did not reach a third call; the rule it shows is the same.
+  - Nothing differs in the drawing: one `› ` line per stretch, the band `to-human view · full transcript ›`, the message
+    under `● message`.
+  - Interactive sessions authenticate through vm-run's route as before; nothing was missing.
+
+  Scan, second round: gitleaks 8.30.1 over the fixtures, no leaks found; the U2b rows of fixtures.test.mjs, 53 of 53 pass.

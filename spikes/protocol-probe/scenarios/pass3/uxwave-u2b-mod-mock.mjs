@@ -29,6 +29,8 @@ import {join,dirname} from 'node:path';
 import {fileURLToPath} from 'node:url';
 
 const PARTS=(process.env.U2B_MOCK||'e1,e3,stress,two,control').split(',');
+// U2B_SUFFIX names a re-recording (`-fix`: the second round, on the branch's joinGroup head).
+const SUFFIX=process.env.U2B_SUFFIX||'';
 const READER=join(dirname(fileURLToPath(import.meta.url)),'uxwave-u2b-folds-reader.mjs');
 const summaryLog=mock=>mock.log.filter(x=>x.kind==='summary').map(({digest,...x})=>({...x,digestHead:digest.slice(0,160)}));
 
@@ -51,7 +53,7 @@ async function e1(){
 
 async function e3(){
  for(const [tag,which,advert,mode] of [['none-before','before',null,'maws'],['none-after','after',null,'maws'],['9-after','after','9','maws'],['9-after-head','after','9','head'],['9-after-group','after','9','group']]){
-  const name='u2b-mod-mock-grow-'+tag;const run=scratch('grow-'+tag,which);const mock=await startMock();
+  const name='u2b-mod-mock-grow-'+tag+SUFFIX;const run=scratch('grow-'+tag,which);const mock=await startMock();
   // How the stretch is asked: as MAWS does (one call ToolUse, two or more the group), always by its first call's ToolUse, or always as a group (of one, at first).
   const askOf=st=>mode==='head'?headAsk(st):mode==='group'?{...runAsk({...st,calls:[st.calls[0],st.calls[0]]}),props:{...runAsk({...st,calls:[st.calls[0],st.calls[0]]}).props,calls:runAsk({...st,calls:[...st.calls,st.calls[0]]}).props.calls.slice(0,st.calls.length)}}:runAsk(st);
   try{
@@ -65,6 +67,8 @@ async function e3(){
     while(!done){const st=stretches(p,s.seq);if(st.length){const a=await render(p,askOf(st[0]),'growing: the stretch ('+askOf(st[0]).component+')');const l=labelOf(a);if(l!==last){last=l;timeline.push({seq:p.seq,ask:askOf(st[0]).component,calls:st[0].calls.length,results:st[0].calls.filter(c=>c.result!==undefined).length,label:l});}}await delay(500);}
     await turn;
     for(const wait of [1000,4000,8000]){await delay(wait);const st=stretches(p,s.seq);const a=await render(p,askOf(st[0]),`after the turn (+${wait} ms step)`);timeline.push({seq:p.seq,phase:'after the turn',label:labelOf(a)});}
+    // The lone ToolUse asked once more after the stretch is a group (a client that still mounts it).
+    {const st=stretches(p,s.seq);if(mode==='maws'&&st[0]?.calls.length>1){const a=await render(p,headAsk(st[0]),'the lone ToolUse of the first call, asked after the switch');timeline.push({seq:p.seq,phase:'lone ToolUse after the switch',label:labelOf(a)});}}
     p.note({event:'u2b_grow',mode,timeline,pushes:p.frames.filter(r=>r.frame.type==='system'&&r.frame.subtype==='ui_invalidate').map(r=>({seq:r.seq,instances:r.frame.instances??null})),summaryRequests:mock.count('summary'),summaries:summaryLog(mock)});
    });
   }finally{await mock.close();removeRun(run);}

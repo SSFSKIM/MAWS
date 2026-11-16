@@ -1206,3 +1206,19 @@ test('U2b E4: the folds file is replaced in one step: no read of it failed to pa
  const s=u2bJson('u2b-mod-folds-stress.reader.json');assert.ok(s.summaryRequests>=50);assert.equal(s.notParsed,0);assert.equal(s.distinctVersions,s.summaryRequests);
  const t=u2bJson("u2b-mod-folds-two.reader.json");assert.equal(t.notParsed,0);assert.deepEqual([t.final.ofA,t.final.ofB,t.final.ofNeither],[25,25,0]);
 });
+test('U2b second round (e511aad9): with MAWS\'s asks (lone ToolUse, then ToolGroup) one mounted row keeps the line: the newest call, then the summary',()=>{
+ const grow=n=>metaU2b(loadU2b('u2b-mod-mock-grow-'+n),'u2b_grow')[0];
+ for(const n of ['9-after-fix','none-after-fix','9-after-head-fix','9-after-group-fix']){const g=grow(n);assert.match(metaU2b(loadU2b('u2b-mod-mock-grow-'+n),'provenance')[0].installation.commit,/^e511aad9/);
+  for(const t of g.timeline.filter(t=>t.phase!=='lone ToolUse after the switch'))assert.match(t.label,/^› /,n+' '+t.seq);}
+ assert.match(grow('9-after-fix').timeline.at(-2).label,/mock summary/);assert.equal(grow('9-after-fix').timeline.at(-1).label,'(hidden)');
+ assert.ok(grow('9-after-fix').pushes.some(p=>p.instances?.some(i=>i.component==='ToolGroup')));
+ assert.equal(grow('none-before-fix').timeline.find(t=>t.ask==='ToolGroup').label,'(hidden)'); // 0.8.2 unchanged
+ const s=metaU2b(loadU2b('u2b-mod-summary-fix'),'u2b_summary')[0];const runs=s.foldsFile.runs.map(r=>r.summary);
+ for(const head of s.stretches.map(x=>x.head)){const last=s.timeline.filter(t=>t.head===head&&t.row==='ToolGroup').at(-1);assert.ok(runs.includes(last.label.slice(2)),head);}
+ assert.equal(metaU2b(loadU2b('u2b-mod-summary-fix-resume'),'u2b_resume')[0].summaryRequests,0);
+});
+test('U2b second round: in a terminal, before and after, the record line reads the newest call and then the summary',()=>{
+ for(const w of ['before','after']){const d=u2bJson('u2b-mod-terminal-'+w+'.json');const runs=JSON.parse(d.foldsFiles[0].text).runs;
+  const lines=d.captures.map(c=>(/^\s*› (.+)$/m.exec(c.pane)??[])[1]).filter(Boolean);
+  assert.ok(lines.length>=2,w);assert.equal(lines.at(-1).trim(),runs.at(-1)[2],w);assert.ok(lines.some(l=>/^(Read|Search|Tool search|List)/.test(l)),w);}
+});

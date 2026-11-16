@@ -28,12 +28,13 @@ const STRETCHES=['This is a test of your tools. Do exactly these steps in order,
  'Step 6: call the tool mcp__to-human__message with its text exactly `Second stretch done.` and final set to true.'].join(' ');
 const ONE_WORD='Reply with only the word OK. Use no tool.';
 
+const SUFFIX=process.env.U2B_SUFFIX||'';
 export default async()=>{
  const run=scratch('summary','after');const sid=randomUUID();const debug=join(run.root,'debug.log');
  const relay=await startRelay(process.env.ANTHROPIC_BASE_URL);
  let saved=[],savedMessages=[];
  try{
-  await mawsLaunch('u2b-mod-summary',run,{advert:'9',sessionId:sid,model:'haiku',debugFile:debug,relay:relay.url,provenance:{part:'live',questions:['E1','E2','E3','E4','E6'],prompts:[STRETCHES,ONE_WORD]}},async p=>{
+  await mawsLaunch('u2b-mod-summary'+SUFFIX,run,{advert:'9',sessionId:sid,model:'haiku',debugFile:debug,relay:relay.url,provenance:{part:'live',questions:['E1','E2','E3','E4','E6'],prompts:[STRETCHES,ONE_WORD]}},async p=>{
    const start=p.seq;const timeline=[];const last=new Map();
    const poll=async(phase)=>{
     const rows=[...stretches(p,start).map(s=>({seq:s.seq,s})),...messageAsks(p,start).map(m=>({seq:m.seq,m}))].sort((a,b)=>a.seq-b.seq);
@@ -49,6 +50,7 @@ export default async()=>{
    const end=Date.now()+50000;
    while(Date.now()<end){await poll('after the result');const f=readFolds(run,sid);if(f?.json?.runs?.length>=2&&[...last.entries()].filter(([k])=>k.includes(':Tool')).every(([,l])=>!/Second stretch|First stretch|working record/.test(l)))break;await delay(2000);}
    await delay(3000);await poll('settled');
+   for(const st of stretches(p,start))if(st.calls.length>1){const a=await render(p,headAsk(st),`the lone ToolUse of ${st.head}, asked after the switch`);timeline.push({seq:p.seq,phase:'lone ToolUse after the switch',head:st.head,label:labelOf(a)});}
    saved=stretches(p,start);savedMessages=messageAsks(p,start);
    const folds=readFolds(run,sid);
    const pushes=p.frames.filter(r=>r.seq>start&&r.frame.type==='system'&&r.frame.subtype==='ui_invalidate').map(r=>({seq:r.seq,instances:r.frame.instances??null}));
@@ -74,7 +76,7 @@ export default async()=>{
   const mock=await startMock();
   const before=existsSync(foldsFileOf(run,sid))?createHash('sha256').update(readFileSync(foldsFileOf(run,sid))).digest('hex'):null;
   try{
-   await mawsLaunch('u2b-mod-summary-resume',run,{advert:'9',resume:sid,endpoint:mock.url,provenance:{part:'live (resumed, no prompt)',questions:['E5','E4 (the session id after a resume)'],resumes:'u2b-mod-summary.jsonl'}},async p=>{
+   await mawsLaunch('u2b-mod-summary'+SUFFIX+'-resume',run,{advert:'9',resume:sid,endpoint:mock.url,provenance:{part:'live (resumed, no prompt)',questions:['E5','E4 (the session id after a resume)'],resumes:'u2b-mod-summary.jsonl'}},async p=>{
     const order=[...saved.map(s=>({seq:s.seq,ask:runAsk(s)})),...savedMessages.map(m=>({seq:m.seq,ask:m.ask}))].sort((a,b)=>a.seq-b.seq);
     for(const o of order)await render(p,o.ask,`resumed: ${o.ask.component} ${o.ask.instance_id}`);
     await render(p,ASK.band(),'resumed: band');
