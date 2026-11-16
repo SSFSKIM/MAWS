@@ -58,7 +58,7 @@ export const carriesPluginMessageTool = (declared: number | null): boolean => de
 export const NATIVE_TO_HUMAN_ENV = 'MAWS_NATIVE_TO_HUMAN';
 export const TO_HUMAN_CONTRACT_VERSION = 9; // advertised where the mod draws MAWS's view
 export const TO_HUMAN_MIRROR_VERSION = 8; // advertised where MAWS draws it: every installation steps aside and registers its tool
-export const TO_HUMAN_MOD_ROUTE: boolean = false; // M5's cutover turns it on; while it is off no launch advertises 9
+export const TO_HUMAN_MOD_ROUTE: boolean = true; // on since M5's cutover; while it is off no launch advertises 9
 export const TO_HUMAN_DECLARATION = 'maws-surface.json'; // at an installation's root (§I)
 
 export interface ContractText {
