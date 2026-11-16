@@ -22,7 +22,7 @@ export interface CardRect {
   height: number;
 }
 export type CommentPlacement =
-  | { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */; hostId?: string; rect?: CardRect }
+  | { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */ | 'review' /* UX wave U5b */; hostId?: string; rect?: CardRect }
   | { kind: 'sheet' }
   // P4-B1 (X21) start: a document's card in its margin's stack (`anchorY` the passage's first line in the page frame,
   // `stackIndex` its place in the stack's document order). The card store reads only `card` placements today; the
@@ -40,6 +40,9 @@ export interface CommentContext {
   // P3-F1 (the P3 interface ledger's X23 row of fix 2): the destination the form starts on (E3's `CommentDestination`),
   // Side thread when absent; Send to main for a session started blank for the comment, which has no conversation to fork
   destination?: 'thread' | 'main';
+  // UX wave U5b (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §B): the commented line's text,
+  // when the anchor cannot carry it (Review: the diff line without its prefix); the send quotes it (`quotedComment`)
+  quote?: string;
 }
 // P2-E1 end
 

@@ -98,7 +98,7 @@ describe('a request on a run of one', () => {
     s.step((b) => asked(b, 'r1', 't1'));
     attention(s.store.key, [permissionItem('r1', 't1')]);
     expect(s.run()).toBe(row);
-    expect(s.order()).toEqual(['group group:cell:t1', 'request_slot slot:r1']);
+    expect(s.order()).toEqual(['group group:cell:t1']); // UX wave U1b: a request makes no row
     expect(s.line().textContent).toBe('◐Waiting for approval: pnpm test');
     expect(s.line().dataset).toMatchObject({ line: 'waiting', tone: 'warning' });
     expect(s.line().querySelector('.transcript-counts')).toBeNull();
@@ -108,7 +108,7 @@ describe('a request on a run of one', () => {
     expect(s.blocks()).toEqual(['calls cell:t1']);
     s.toggle();
     expect(s.line().getAttribute('aria-expanded')).toBe('false');
-    expect(s.order()).toEqual(['group group:cell:t1', 'request_slot slot:r1']);
+    expect(s.order()).toEqual(['group group:cell:t1']); // UX wave U1b: a request makes no row
     expect(s.line().dataset.line).toBe('waiting');
 
     s.step((b) => answered(b, 'r1', 't1'));
@@ -130,7 +130,7 @@ describe('a request between two calls of one message', () => {
     s.step((b) => asked(b, 'r1', 't1'));
     attention(s.store.key, [permissionItem('r1', 't1')]);
     s.step((b) => b.toolUse('t2', 'Bash', { command: 'pnpm lint' }, 'm1', 1));
-    expect(s.order()).toEqual(['group group:cell:t1', 'request_slot slot:r1']);
+    expect(s.order()).toEqual(['group group:cell:t1']); // UX wave U1b: a request makes no row
     expect(s.line().textContent).toBe('◐Waiting for approval: pnpm test');
     expect(s.blocks()).toEqual(['calls cell:t1,cell:t2']);
     s.step((b) => answered(b, 'r1', 't1'));

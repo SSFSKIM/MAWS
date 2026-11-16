@@ -59,6 +59,23 @@ describe('SessionStatusTracker.applyReload', () => {
     reload(54);
     expect(tracker.catalog().skills).toEqual(initSkills.filter((skill) => skill !== 'e8-probe:e8-hello'));
   });
+
+  // UX wave U11h (the branch panel's rulings, 2026-11-16): the answer lists the session's MCP servers as mcp_status does
+  // (pass3/p2-no-prompt-resume-1 seq 30, after the engine applied the plugins' server changes), so the status's servers
+  // are the reload's, observed when its plugins are (`pluginsObservedAt`); an answer without the list keeps the last one.
+  it('replaces the MCP servers with the reload answer’s, by name, status and source; an answer without them keeps the init’s', () => {
+    const p2 = readFileSync(resolve(ROOT, 'spikes/protocol-probe/fixtures/pass3/p2-no-prompt-resume-1.jsonl'), 'utf8')
+      .split('\n')
+      .filter((line) => line.length > 0)
+      .map((line) => JSON.parse(line) as { seq: number; frame: Record<string, unknown> })
+      .find((row) => row.seq === 30)!.frame;
+    const tracker = new SessionStatusTracker(spec, () => {});
+    tracker.observe({ type: 'system', subtype: 'init', plugins: [], mcp_servers: [{ name: 'plugin:gone:srv', status: 'needs-auth', source: 'plugin' }] }, '2026-10-09T07:02:30.000Z');
+    tracker.applyReload(ReloadPluginsResponseSchema.parse({ commands: [], agents: [], plugins: [], error_count: 0 }));
+    expect(tracker.snapshot().mcpServers).toEqual([{ name: 'plugin:gone:srv', status: 'needs-auth', source: 'plugin' }]);
+    tracker.applyReload(ReloadPluginsResponseSchema.parse((p2.response as { response: unknown }).response));
+    expect(tracker.snapshot().mcpServers).toEqual([{ name: 'maws', status: 'connected', source: 'sdk' }]);
+  });
 });
 
 // P2-A start (2026-10-09; X17): `pluginsObservedAt` says when this launch's plugins were reported, so an empty list

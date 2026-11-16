@@ -5,7 +5,8 @@
 // P5 O7 M4: for a lane B session on another machine it would open the file on that machine's desktop. P5 O7 M5a (A10):
 // it opens a copy of the file here (lane-b/open-copy.ts), and says where the file is ("on <machine>").
 // UX wave U6c (M3 decision 1): a session on this Mac asks with `named`, so a file outside its folders that its transcript
-// links opens too; a session on another machine is asked as before.
+// links opens too; a session on another machine is asked as before. UX wave U6e (decision 19): with `agent` while the
+// tab holds the agent's mark, so a grant alone opens nothing there.
 // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5, decision 12; card 3, "True sentences
 // now"): a PDF, an HTML page, a video or a sound is drawn in MAWS now, so a row of one says why this file is not drawn,
 // and offers Open externally only where the act can work (`rowWords`, the one place). A kind MAWS does not frame keeps
@@ -26,11 +27,11 @@ import type { ViewerEntry } from './viewer-store';
 // The row's button shape, which the framed file's failure body takes too (UX wave U6b-2, M5 decision 3).
 export const rowButton = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover';
 
-export function OpenExternally({ appSessionId, path }: { appSessionId: AppSessionId; path: string }) {
+export function OpenExternally({ appSessionId, path, agent = false }: { appSessionId: AppSessionId; path: string; agent?: boolean }) {
   const [problem, setProblem] = useState<string | null>(null);
   const elsewhere = useElsewhereMachine(appSessionId);
   const open = async () => {
-    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true }) : await openSessionFile(appSessionId, path, ipc);
+    const result = machineFor(appSessionId) === ipc.localMachine ? await ipc.invoke('files.openExternal', { appSessionId, path, named: true, ...(agent ? { agent: true as const } : {}) }) : await openSessionFile(appSessionId, path, ipc);
     if (!result.ok) setProblem(VIEWER_COPY.refused(result.error.message));
     else setProblem(result.value.opened ? null : VIEWER_COPY.notOpened(result.value.message ?? ''));
   };
@@ -71,7 +72,7 @@ export function ExternalRow({ entry }: { entry: ViewerEntry }) {
       <div className="flex flex-col items-center gap-2 text-center">
         <p className="text-ui text-fg">{sentence}</p>
         {binary ? null : <p className="text-ui-sm text-fg-muted">{formatSize(entry.bytes)}</p>}
-        {open && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
+        {open && opensExternally(entry.path) && entry.appSessionId !== null ? <OpenExternally appSessionId={entry.appSessionId} path={entry.path} agent={entry.agent} /> : null /* P3-L: none for a file read by its artifact (its header opens it) */}
       </div>
     </div>
   );

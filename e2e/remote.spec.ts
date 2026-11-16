@@ -98,6 +98,7 @@ import { clickRevealed } from './support/hover'; // P5 O7 M8
 import { REMOTE_UNAVAILABLE } from '../src/shared/ipc/remote-unavailable'; // P5 O7 M8
 import { withNativeClipboard } from './support/clipboard'; // the UX wave, U9 (A4)
 import { remoteSessionActions, SESSION_ACTIONS } from '../src/renderer/src/app/session-actions'; // the UX wave, U9 (the architect's ruling of 2026-11-13)
+import { sendNowJournal, steerStopJournal } from './support/c7-replay'; // the UX wave, U4b: U4a's journals, run on B
 
 test.skip(process.env.MAWS_REMOTE_E2E !== '1', 'the remote scenes run under pnpm e2e:remote (MAWS_REMOTE_E2E=1)');
 test.setTimeout(900_000);
@@ -2173,12 +2174,14 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       const capsuleOn = (on: Page) => main(on).locator('section.transcript-ask');
       await quoting(expect(capsuleOn(page), 'the ask’s card in A’s pane, waiting').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
       await quoting(expect(capsuleOn(page2), 'and in A2’s').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
-      const sheet = page.locator('[data-ask-sheet]');
-      await expect(sheet, 'its sheet, read from A').toHaveAttribute('data-ask-id', askId, { timeout: 30_000 });
-      const question = sheet.locator('section[data-question-id="q1"]');
+      // UX wave U1b (O-17): the ask's form stands in its capsule's row, read from A, and no sheet opens by itself
+      const form = capsuleOn(page).locator('.transcript-ask-form [data-hover-ask]');
+      await quoting(expect(form, 'its form in the capsule’s row, read from A').toHaveAttribute('data-hover-ask', askId, { timeout: 30_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
+      await expect(page.locator('[data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
+      const question = form.locator('section[data-question-id="q1"]');
       await expect(question).toContainText(M8_QUESTION);
       await question.getByRole('radio', { name: 'Yes' }).click();
-      await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+      await form.getByRole('button', { name: 'Submit', exact: true }).click();
       await quoting(expect(capsuleOn(page), 'settled on A').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
       await expect.poll(async () => (await b.request<Asks>('maws.asks.list', { appSessionId: spawnedApp })).asks, { timeout: 30_000, message: 'on B: nothing pending' }).toEqual([]);
       await quoting(expect(capsuleOn(page2), 'and on A2, which answered nothing').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
@@ -3052,7 +3055,7 @@ async function readWhileDown(page: Page, electron: ElectronApplication, before: 
  * machine's own project takes no row key on A, so the session's row stays under B's machine row however its listing,
  * its record and B's registry entry reach A, and in whichever order they arrive (ticket 644's filing).
  */
-async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[] }, held: TerminalHeld) {
+async function laneBOpened(opts: { root: string; aUserData: string; journal: SideJournal; first: string; firstReply: string; title: string; open?: boolean; launches?: readonly SideJournal[]; bEnv?: Record<string, string> /* UX wave U10b */ }, held: TerminalHeld) {
   const checkout = join(opts.root, 'b-checkout');
   const journals = join(opts.root, 'journals');
   for (const dir of [checkout, journals]) mkdirSync(dir);
@@ -3063,7 +3066,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
     aUserData: opts.aUserData,
     b: {
       root: '/tmp', // as M8's: the replay writes the session's transcript only into a config home that is its own real path
-      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1' },
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: fixture, DISABLE_AUTOUPDATER: '1', ...opts.bEnv },
       prepare: ({ claudeConfigDir }) => {
         writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
         writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
@@ -3101,7 +3104,7 @@ async function laneBOpened(opts: { root: string; aUserData: string; journal: Sid
     await row.click();
     await quoting(expect(main(page).getByText(opts.firstReply).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
   }
-  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject };
+  return { scene, b, page, electron: a.app, turnOver, sendOnB, app, bProject, projectId: project.id /* UX wave U10b */ };
 }
 
 test('U9 A4, a session MAWS runs on B: its tab keeps its pane through the link’s drop under one status line, and the reader keeps their place, their draft and no error', async () => {
@@ -3626,3 +3629,409 @@ test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the wo
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4 on another machine, §C.3, §C.4): a
+// second session of B's makes its draft through its own tools (B's host runs the agent's seam, MAWS_DASHBOARD_E2E) and
+// its turn deletes it (`artifact_delete`, served by B's tool server; its journal is written once the draft exists, before
+// the session's launch reads it). In A, the transcript's row of B's session reads "Deleted Draft plan" with Undo, which
+// goes to B as the undelete over the link (`rl2.artifact-undelete`, the owners'): B's store has the draft again and the row
+// reads "Restored Draft plan". The session's next turn deletes it again; with B stopped, past the minute its link
+// reconnects, the row's Undo is disabled with "Restore is unavailable while B is offline." as a line of the row.
+const DRAFTS_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e1'; // the engine session ids the journals pin
+const DRAFTER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e2';
+
+test('U10b A4 on B: B’s agent deletes its own draft; A’s row of B’s session reads Deleted with Undo, which restores it on B, then Restored; with B stopped, Undo is disabled with its sentence as a line of the row', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-undelete-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-undelete-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(DRAFTS_SESSION, checkout);
+    journal.turn('B is ready for its drafts.');
+    const drafter = new SideJournal(DRAFTER_SESSION, checkout); // its turns are written below, once its draft exists
+    const { scene, b, page, bProject, projectId } = await laneBOpened(
+      { root, aUserData, journal, first: 'Get ready for the drafts.', firstReply: 'B is ready for its drafts.', title: 'B’s first session', open: false, launches: [drafter], bEnv: { MAWS_DASHBOARD_E2E: '1' } },
+      held,
+    );
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists the undelete\n${mainSaid(page)}` }).toContain('rl2.artifact-undelete');
+
+    // B's drafting session: its draft made by its own tools, then its turns written and its first started
+    const app = (await b.request<{ appSessionId: string }>('session.create', { projectId, location: null })).appSessionId;
+    await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    const draft = await new AgentSeam(join(b.userData, 'dashboard-e2e')).ok<{ artifactId: string }>(app, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nB’s agent wrote this.' });
+    const answer = { status: 'deleted', artifactId: draft.artifactId, kind: 'document', title: 'Draft plan' };
+    for (const reply of ['The draft plan is deleted.', 'Deleted it again.']) {
+      const prompt = drafter.prompt();
+      drafter.mawsToolCall('artifact_delete', { artifact: draft.artifactId }, answer, { asked: false });
+      drafter.reply(prompt, reply);
+      drafter.completed(prompt);
+    }
+    drafter.write(join(root, 'journals'), 'b-launch-1');
+    type Status = { process: string; turn: unknown; engineSessionId: string | null };
+    const turnOver = async () => {
+      const status = await b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+      return status !== null && status.process === 'ready' && status.turn === null;
+    };
+    const deletedOnB = async () => (await b.request<{ deleted?: { undoable: boolean } }>('artifacts.get', { artifactId: draft.artifactId })).deleted?.undoable ?? null;
+    await b.request('session.start', { appSessionId: app, message: { content: 'Delete the draft plan.', display: 'Delete the draft plan.' }, options: {} });
+    // fix wave 3: the state the scene needs, B's store with the agent's delete, then the turn's end; a status read between
+    // the launch's ready and the turn's start reads as a turn over, so the turn's end alone says nothing of the delete
+    await expect.poll(deletedOnB, { timeout: 60_000, message: `B deleted the draft, as an agent’s delete Undo can take back\n${b.log().slice(-4000)}` }).toBe(true);
+    await expect.poll(turnOver, { timeout: 60_000, message: `B's drafting session ends its turn\n${b.log().slice(-4000)}` }).toBe(true);
+
+    // A: the session's row, its artifact row, and Undo over the link
+    const engine = (await b.request<Status>('session.status', { appSessionId: app })).engineSessionId ?? DRAFTER_SESSION;
+    await scene.sminos.list({ engine, app, owners: [scene.member], project: bProject, title: 'B’s drafting session', cwd: checkout });
+    const row = sessionRow(page, addressOf(b.ref, app));
+    await expect(row, `the drafting session is a row of A's\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
+    await row.click();
+    const rows = main(page).locator(`section.transcript-artifact[data-artifact="${draft.artifactId}"]`);
+    await quoting(expect(rows.locator('[data-artifact-heading]'), 'the delete’s row').toHaveText(['Deleted Draft plan'], { timeout: 60_000 }), () => mainSaid(page));
+    const undo = rows.first().getByRole('button', { name: 'Undo', exact: true });
+    await expect(undo, 'once B’s library has answered').toBeEnabled({ timeout: 30_000 });
+    await undo.click();
+    await quoting(expect(rows.first().locator('[data-artifact-heading]'), 'B’s library lists it again').toHaveText('Restored Draft plan', { timeout: 60_000 }), () => mainSaid(page));
+    expect(await deletedOnB(), 'B’s store has the draft again').toBeNull();
+    expect((await b.request<{ artifact: { title: string } | null }>('artifacts.get', { artifactId: draft.artifactId })).artifact?.title).toBe('Draft plan');
+
+    // the session's next turn deletes it again; B stopped, its Undo is disabled with the sentence as a line of the row
+    await b.request('session.send', { appSessionId: app, content: 'Delete it again.' });
+    await expect.poll(deletedOnB, { timeout: 60_000, message: 'deleted again on B' }).toBe(true);
+    await expect(rows.locator('[data-artifact-heading]'), 'read, not remembered: both rows say Deleted').toHaveText(['Deleted Draft plan', 'Deleted Draft plan'], { timeout: 60_000 });
+    const last = rows.last();
+    await expect(last.getByRole('button', { name: 'Undo', exact: true })).toBeEnabled({ timeout: 30_000 });
+    await b.stop();
+    await quoting(expect(last.locator('[data-artifact-line]'), 'past the minute B’s link reconnects').toHaveText(`Restore is unavailable while ${B_NAME} is offline.`, { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), () => mainSaid(page));
+    await expect(last.getByRole('button', { name: 'Undo', exact: true })).toBeDisabled();
+    await expect(last.locator('[data-artifact-heading]')).toHaveText('Deleted Draft plan');
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// ---- UX wave U4b: Send now, taking back and Delete on a message that waits in a session on B --------------------------
+// (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 9 to 11, 13, 15 and 17.) B's
+// sessions run on the journals U4a's composer scenes replay (e2e/support/c7-replay.ts): `sendNowJournal`, the engine's
+// own answers to a send-now request behind a running command (`uxwave/u4p2-a-1`), and `steerStopJournal`, a turn that
+// runs on with a `next` steer waiting, whose withdrawal (`cancel_async_message`) is all a take-back and a Delete write.
+// They are started over B's machine.sock, as laneBOpened's session is, and each holds its first turn running at the
+// replay's next recorded write until A acts. Each journal is re-addressed first (`onB`) as e2e/support/side-replay.ts
+// re-addresses the frames it borrows: an engine session id of its own (two launches of one recording would otherwise
+// bind one id on B), the init's directory B's checkout, and the init's mode the session's own, so the host has no mode to
+// correct.
+const U4B_NOW = 'b0c0d0e0-0000-4000-8000-0000000000e2'; // the engine session ids the re-addressed journals pin
+const U4B_BACK = 'b0c0d0e0-0000-4000-8000-0000000000e3';
+const U4B_DELETE = 'b0c0d0e0-0000-4000-8000-0000000000e4';
+const U4B_FORK = 'b0c0d0e0-0000-4000-8000-0000000000e5'; // the fork's launch on B: its prelude, no turn
+const U4B_WITHOUT = 'b0c0d0e0-0000-4000-8000-0000000000e6';
+const U4B_LONG = 'Run the long command in the foreground.'; // a first prompt (the replay matches a user write by its type)
+const U4B_COUNT = 'Count to 30 slowly, one Bash call per number.';
+const U4B_COUNT_AGAIN = 'Count to 20 slowly, one Bash call per number.'; // a first prompt of its own: each tab's text is its own
+
+type Swapped = Record<string, unknown>;
+function swappedAll(value: unknown, swap: Record<string, string>): unknown {
+  if (typeof value === 'string') return swap[value] ?? value;
+  if (Array.isArray(value)) return value.map((entry) => swappedAll(entry, swap));
+  if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, swappedAll(entry, swap)]));
+  return value;
+}
+/** `path`, a journal of U4a's writers, re-addressed in place for a launch on B (the section's comment above); answers it. */
+function onB(path: string, sessionId: string, cwd: string): string {
+  const rows = readFileSync(path, 'utf8').trim().split('\n').map((line) => JSON.parse(line) as { direction: string; frame: Swapped });
+  const init = rows.find((row) => row.direction === 'in' && row.frame.type === 'system' && row.frame.subtype === 'init')!.frame;
+  const swap = { [init.session_id as string]: sessionId, [init.cwd as string]: cwd };
+  const readdressed = rows.map((row) => {
+    const frame = swappedAll(row.frame, swap) as Swapped;
+    return row.direction === 'in' && frame.type === 'system' && frame.subtype === 'init' ? { ...row, frame: { ...frame, permissionMode: 'default' } } : { ...row, frame };
+  });
+  writeFileSync(path, readdressed.map((row) => JSON.stringify(row)).join('\n') + '\n');
+  return path;
+}
+
+/** The frames B's engine host wrote to the engine for `app`, from its own journal of the launch. */
+type U4bFrame = { type?: string; uuid?: string; priority?: string; message?: { content?: unknown }; request?: { subtype?: string; send_now?: unknown; message_uuid?: unknown } };
+async function writtenOnB(b: RemoteScene['b'], app: string): Promise<U4bFrame[]> {
+  const { journalPath } = await b.request<{ journalPath: string }>('session.status', { appSessionId: app });
+  return readFileSync(journalPath, 'utf8')
+    .trim()
+    .split('\n')
+    .map((line) => JSON.parse(line) as { direction: string; frame: U4bFrame })
+    .filter((row) => row.direction === 'out')
+    .map((row) => row.frame);
+}
+const controlsOnB = async (b: RemoteScene['b'], app: string) => (await writtenOnB(b, app)).filter((f) => f.type === 'control_request').map((f) => f.request?.subtype);
+const steerOnB = async (b: RemoteScene['b'], app: string, text: string) => (await writtenOnB(b, app)).find((f) => f.type === 'user' && f.message?.content === text && f.priority === 'next');
+
+/**
+ * B's sessions MAWS runs, one per entry of `starts`, each on the journal of its place in `journals` (the replay list, one
+ * per launch in order; entries past `starts` are later launches, a fork's), started over B's machine.sock and left with
+ * its first turn running; then A, launched over the relay, the sessions listed under B's machine row and not opened.
+ * `bEnv` is B's own (an endpoint of an earlier build: MAWS_E2E_ENDPOINT_WITHOUT).
+ */
+async function runningOnB(opts: { root: string; aUserData: string; journals: (dir: string, checkout: string) => string[]; starts: { first: string; title: string }[]; bEnv?: Record<string, string> }, held: TerminalHeld) {
+  const checkout = join(opts.root, 'b-checkout');
+  const journals = join(opts.root, 'journals');
+  for (const dir of [checkout, journals]) mkdirSync(dir);
+  const scene = (held.scene = await startRemoteScene({
+    scratch: join(opts.root, 'scene'),
+    aUserData: opts.aUserData,
+    b: {
+      root: '/tmp', // as laneBOpened's
+      env: { MAWS_ENGINE_REPLAY: '1', MAWS_E2E_REPLAY_FIXTURES: opts.journals(journals, checkout).join(','), DISABLE_AUTOUPDATER: '1', ...opts.bEnv },
+      prepare: ({ claudeConfigDir }) => {
+        writeFileSync(join(claudeConfigDir, '.claude.json'), JSON.stringify({ hasCompletedOnboarding: true, projects: { [checkout]: { hasTrustDialogAccepted: true } } }));
+        writeFileSync(join(claudeConfigDir, 'settings.json'), JSON.stringify({ permissions: { defaultMode: 'default' } }));
+      },
+    },
+  }));
+  const { b } = scene;
+  await b.request('machineSettings.set', { patch: { gateway: { defaultRoute: 'direct' } } });
+  const project = await b.request<{ id: string }>('session.projects.add', { directory: checkout });
+  type Status = { process: string; turn: unknown; engineSessionId: string | null };
+  const status = (app: string) => b.request<Status>('session.status', { appSessionId: app }).catch(() => null);
+  const sessions: { app: string; engine: string; first: string; title: string }[] = [];
+  for (const start of opts.starts) {
+    const app = (await b.request<{ appSessionId: string }>('session.create', { projectId: project.id, location: null })).appSessionId;
+    await b.request('session.intent.patch', { appSessionId: app, patch: { gateway: 'direct' } });
+    const started = await b.request<{ status: string }>('session.start', { appSessionId: app, message: { content: start.first, display: start.first }, options: {} });
+    expect(started.status, `B's session starts: ${JSON.stringify(started)}`).not.toBe('needs_trust');
+    // its launch takes its journal before the next session's does: the replay list is consumed in launch order
+    await expect.poll(async () => { const s = await status(app); return s !== null && s.process === 'ready' && s.turn !== null && s.engineSessionId !== null; }, { timeout: 60_000, message: `B's session runs its first turn\n${b.log().slice(-4000)}` }).toBe(true);
+    sessions.push({ app, engine: (await status(app))!.engineSessionId!, ...start });
+  }
+  const a = (held.a = await launchMaws({ userData: opts.aUserData, env: { MAWS_DEV_ORG: scene.devOrgDir(false), MAWS_MACHINE_NAME: 'A' } }));
+  keepMainLines(a);
+  const { page } = a;
+  await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: `A's link to B comes up over the relay\n${mainSaid(page)}` }).toBe('up');
+  const bProject = machineProjectId((await scene.org.chain()).org, B_NAME);
+  for (const s of sessions) await scene.sminos.list({ engine: s.engine, app: s.app, owners: [scene.member], project: bProject, title: s.title, cwd: checkout });
+  for (const s of sessions) await expect.poll(async () => (await rowsOf(page)).some((row) => row.machine === b.ref && row.session === s.app), { timeout: 60_000, message: `B's session ${s.title} is a row of A's\n${mainSaid(page)}` }).toBe(true);
+  await expandMachine(page, b.ref);
+  /** The session's row clicked in A: its tab in front, its first prompt drawn, its turn running there (the composer offers Stop). */
+  const openOnA = async (s: (typeof sessions)[number]) => {
+    const row = sessionRow(page, addressOf(b.ref, s.app));
+    await expect(row, `B's row in A's sidebar\n${mainSaid(page)}`).toBeVisible({ timeout: 30_000 });
+    await row.click();
+    await quoting(expect(main(page).getByText(s.first).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    await expect(shownPrimary(page), 'B’s turn runs: the composer offers Stop').toHaveText('Stop', { timeout: 30_000 });
+  };
+  const turnRuns = async (app: string) => { const s = await status(app); return s !== null && s.process === 'ready' && s.turn !== null; };
+  return { scene, b, page, sessions, openOnA, turnRuns, status, bProject, checkout };
+}
+
+const stackOnA = (page: Page) => main(page).getByRole('region', { name: 'Queued messages' });
+// The composer's round button in the tab in front (the other sessions' tabs keep their panes mounted, hidden).
+const shownPrimary = (page: Page) => main(page).locator('[data-submit-state]:visible');
+const stackNoticeOnA = (page: Page) => main(page).getByRole('status', { name: 'Stack notice' });
+/** A types `text` into the session's empty box while B's turn runs and presses Enter: a "Next step" row, written on B. */
+async function nextStepOnA(page: Page, b: RemoteScene['b'], app: string, text: string) {
+  await composerOf(page).click();
+  await page.keyboard.type(text);
+  await page.keyboard.press('Enter');
+  await expect(composerOf(page), 'the box is cleared by the send').toHaveText('');
+  const row = stackOnA(page).locator('li[data-queue-state="next"]').filter({ hasText: text });
+  await quoting(expect(row.locator('[data-mark]'), 'the message waits at the next step').toHaveText('Next step', { timeout: 30_000 }), () => mainSaid(page));
+  await expect.poll(async () => (await steerOnB(b, app, text))?.uuid ?? null, { timeout: 30_000, message: 'B’s engine was written the `next` steer' }).not.toBeNull();
+  return { row, uuid: (await steerOnB(b, app, text))!.uuid! };
+}
+
+test('U4b, Send now, a take-back and a Delete on B: each acts on B’s engine through B’s engine host and stops nothing; /fork greys while B’s turn runs and forks there once a session is idle', async () => {
+  test.setTimeout(300_000);
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u4b-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u4b-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const { b, page, sessions, openOnA, turnRuns, status } = await runningOnB(
+      {
+        root,
+        aUserData,
+        journals: (dir, checkout) => [
+          onB(sendNowJournal(dir, 'u4b-b-now'), U4B_NOW, checkout),
+          onB(steerStopJournal(dir, 'u4b-b-back'), U4B_BACK, checkout),
+          onB(steerStopJournal(dir, 'u4b-b-delete'), U4B_DELETE, checkout),
+          new SideJournal(U4B_FORK, checkout).write(dir, 'u4b-b-fork'), // the fork's own launch, as U9's fork scene's
+        ],
+        starts: [
+          { first: U4B_LONG, title: 'B’s session to send now in' },
+          { first: U4B_COUNT, title: 'B’s session to take back from' },
+          { first: U4B_COUNT_AGAIN, title: 'B’s session to delete from' },
+        ],
+      },
+      held,
+    );
+    const [now, back, deleted] = sessions as [(typeof sessions)[number], (typeof sessions)[number], (typeof sessions)[number]];
+    await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? [], { message: `B lists Send now and the session acts\n${mainSaid(page)}` }).toEqual(expect.arrayContaining(['rl2.send-now', 'rl2.session-acts']));
+
+    await test.step('Send now on the first session’s next-step row: B’s engine is written the send-now request for its message, nothing is withdrawn, and the turn ends for the message', async () => {
+      await openOnA(now);
+      const message = 'Reply with one word, then carry on.';
+      const { row, uuid } = await nextStepOnA(page, b, now.app, message);
+      const sendNow = row.getByRole('button', { name: 'Send now' });
+      await expect(sendNow, 'B lists rl2.send-now').toBeEnabled();
+      await clickRevealed(row, sendNow);
+      const interrupts = async () => (await writtenOnB(b, now.app)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'interrupt');
+      await quoting(expect.poll(async () => (await interrupts()).length, { timeout: 30_000, message: 'one request reached B’s engine' }).toBe(1), () => mainSaid(page));
+      expect((await interrupts())[0]!.request, 'the send-now request, naming the row’s message: not a stop').toEqual({ subtype: 'interrupt', send_now: true, message_uuid: uuid });
+      expect(await controlsOnB(b, now.app), 'nothing withdrawn').not.toContain('cancel_async_message');
+      await expect(stackOnA(page), 'the row leaves once B’s engine starts the message').toHaveCount(0, { timeout: 30_000 });
+      const transcript = main(page).locator('[data-transcript-scroller]:visible');
+      await expect(transcript).toContainText('Ended for your message after', { timeout: 30_000 });
+      await expect(transcript, 'B’s turn was not stopped').not.toContainText('You stopped after');
+      await expect(toastsOf(page)).not.toContainText('Not sent now');
+    });
+
+    await test.step('↑ on the second session’s next-step row: the message is back in A’s box, withdrawn from B’s engine, kept on B as an ordinary draft, and B’s turn runs on', async () => {
+      await openOnA(back);
+      const message = 'Count only to ten.';
+      const { uuid } = await nextStepOnA(page, b, back.app, message);
+      await page.keyboard.press('ArrowUp');
+      await expect(composerOf(page)).toHaveText(message, { timeout: 30_000 });
+      await expect(composerOf(page), 'the box takes typing again once the take-back has settled').toHaveAttribute('contenteditable', 'true', { timeout: 30_000 });
+      await expect(stackOnA(page)).toHaveCount(0);
+      const cancels = (await writtenOnB(b, back.app)).filter((f) => f.type === 'control_request' && f.request?.subtype === 'cancel_async_message');
+      expect(cancels.map((f) => (f.request as { message_uuid?: unknown }).message_uuid), 'the steer withdrawn from B’s engine').toEqual([uuid]);
+      type Kept = { doc: unknown } | null;
+      const kept = () => invoke<Kept>(page, 'session.drafts.get', { appSessionId: back.app }, b.ref).catch((error: unknown) => `unanswered: ${String(error)}`);
+      await expect
+        .poll(async () => { const draft = await kept(); return draft === null || typeof draft === 'string' ? draft : { text: JSON.stringify(draft.doc).includes(message), takeBack: ((draft.doc as { attrs?: { takeBack?: unknown } } | null)?.attrs?.takeBack ?? null) !== null }; }, { timeout: 30_000, message: 'the draft kept for the member on B' })
+        .toEqual({ text: true, takeBack: false });
+      expect(await turnRuns(back.app), 'B’s turn was not stopped').toBe(true);
+      expect(await controlsOnB(b, back.app), 'no stop reached B’s engine').not.toContain('interrupt');
+    });
+
+    await test.step('while the second session’s turn runs on B, /fork in A’s palette is greyed with the turn’s sentence', async () => {
+      await composerOf(page).click();
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(composerOf(page)).toHaveText('');
+      await page.keyboard.type('/fork');
+      const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
+      await expect(fork).toHaveAttribute('aria-disabled', 'true');
+      await fork.hover();
+      await expect(page.locator('#composer-slash-detail')).toContainText('Wait for the turn to end, or stop it first');
+      // the disabled row's detail lies over the box and would intercept a click, so the palette is closed the way a person does: Esc is safe here
+      // because the open palette takes the key first (it closes the popup and returns), so it reaches nothing else and cannot stop B's turn
+      await page.keyboard.press('Escape');
+      await expect(page.getByRole('listbox', { name: 'Commands' }), 'Esc closed the palette').toHaveCount(0);
+      expect(await turnRuns(back.app), 'Esc closed only the palette: B’s turn runs on').toBe(true);
+      await page.keyboard.press('ControlOrMeta+a');
+      await page.keyboard.press('Backspace');
+      await expect(composerOf(page)).toHaveText('');
+      expect(await turnRuns(back.app)).toBe(true);
+    });
+
+    await test.step('Delete on the third session’s next-step row: the row leaves, B’s engine withdraws the message, nothing is said, and B’s turn runs on', async () => {
+      await openOnA(deleted);
+      const message = 'Then say the total.';
+      const { row, uuid } = await nextStepOnA(page, b, deleted.app, message);
+      await clickRevealed(row, row.getByRole('button', { name: 'Delete' }));
+      await expect(stackOnA(page).locator('li'), 'the row leaves').toHaveCount(0, { timeout: 30_000 });
+      await expect.poll(async () => (await writtenOnB(b, deleted.app)).filter((f) => f.request?.subtype === 'cancel_async_message').map((f) => (f.request as { message_uuid?: unknown }).message_uuid), { timeout: 30_000 }).toEqual([uuid]);
+      await expect(stackNoticeOnA(page), 'no line is said').toHaveCount(0);
+      await expect(toastsOf(page)).not.toContainText('Not taken back');
+      expect(await turnRuns(deleted.app), 'B’s turn was not stopped').toBe(true);
+      expect(await controlsOnB(b, deleted.app)).not.toContain('interrupt');
+      await expect(composerOf(page), 'a Delete loads nothing into the box').toHaveText('');
+    });
+
+    await test.step('once the first session is idle on B, /fork picked in A’s palette opens the fork’s tab on B', async () => {
+      await expect.poll(async () => { const s = await status(now.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s first session ends its turns' }).toBeNull();
+      const row = sessionRow(page, addressOf(b.ref, now.app));
+      await row.click();
+      await expect(shownPrimary(page), 'A reads the session idle').not.toHaveText(/^Stop/, { timeout: 30_000 });
+      const before = await sessionTabsOf(page);
+      await composerOf(page).click();
+      await page.keyboard.type('/fork');
+      const fork = page.getByRole('listbox', { name: 'Commands' }).getByRole('option').filter({ hasText: '/fork' });
+      await expect(fork).not.toHaveAttribute('aria-disabled', 'true');
+      await fork.click();
+      let forked: string | undefined;
+      await quoting(expect.poll(async () => (forked = (await sessionTabsOf(page)).find((id) => !before.includes(id))), { timeout: 60_000, message: 'the fork’s tab opens' }).toBeDefined(), () => mainSaid(page));
+      expect(forked!.startsWith(`${b.ref}/`), `the fork's tab is on B's address (${forked})`).toBe(true);
+      type Lineage = { lineage: { parentAppSessionId: string } | null } | null;
+      await expect.poll(async () => (await b.request<Lineage>('session.get', { appSessionId: bareOf(forked!) }).catch(() => null))?.lineage?.parentAppSessionId ?? null, { timeout: 30_000, message: 'B holds the fork, of the session' }).toBe(now.app);
+    });
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// UX wave U4b (M4; Acceptance 10 and 15; Interfaces G, the rows "this build | build G" and "this build | build F"): B's
+// endpoint started as one of an earlier build, its `h2` without `rl2.send-now` (build G's list), then without it and
+// `rl2.session-acts` (build F's). The session runs on `steerStopJournal`, whose recorded plain stop (the steer withdrawn,
+// then the interrupt) is what ⌘. writes; nothing else this block presses reaches B's engine.
+for (const withheld of [['rl2.send-now'], ['rl2.send-now', 'rl2.session-acts']]) {
+  test(`U4b, a machine that does not offer Send now (B lists no ${withheld.join(' and no ')}): its controls are disabled with their sentences, the keys say them and send nothing, and ⌘. still stops B’s turn`, async () => {
+    test.setTimeout(180_000);
+    const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-u4b-old-')));
+    const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-u4b-old-'));
+    const held: TerminalHeld = { scene: null, a: null };
+    try {
+      const { b, page, sessions, openOnA, status } = await runningOnB(
+        { root, aUserData, journals: (dir, checkout) => [onB(steerStopJournal(dir, 'u4b-b-old'), U4B_WITHOUT, checkout)], starts: [{ first: U4B_COUNT, title: 'B’s session of an earlier build' }], bEnv: { MAWS_E2E_ENDPOINT_WITHOUT: withheld.join(',') } },
+        held,
+      );
+      const [session] = sessions as [(typeof sessions)[number]];
+      const noActs = withheld.includes('rl2.session-acts');
+      await expect.poll(async () => (await machineOf(page, b.ref))?.capabilities ?? null, { message: `A knows B’s capabilities\n${mainSaid(page)}` }).not.toBeNull();
+      const capabilities = (await machineOf(page, b.ref))!.capabilities!;
+      expect(capabilities, 'B lists no rl2.send-now').not.toContain('rl2.send-now');
+      expect(capabilities.includes('rl2.session-acts'), 'B lists the session acts as its build would').toBe(!noActs);
+      await openOnA(session);
+      const { row } = await nextStepOnA(page, b, session.app, 'Count only to five.');
+
+      const sendNow = row.getByRole('button', { name: 'Send now' });
+      await expect(sendNow).toBeDisabled();
+      await expect(sendNow).toHaveAttribute('title', `Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+      if (noActs) {
+        const del = row.getByRole('button', { name: 'Delete' });
+        await expect(del).toBeDisabled();
+        await expect(del).toHaveAttribute('title', `Can’t delete on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await clickRevealed(row, row.getByRole('button', { name: 'More' }));
+        const edit = page.getByRole('menuitem', { name: 'Edit', exact: true });
+        await expect(edit).toHaveAttribute('data-disabled', /.*/);
+        await expect(edit).toHaveAttribute('title', `Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await page.keyboard.press('Escape');
+        await expect(edit).toHaveCount(0);
+        // ↑ in the empty box says Edit's sentence and walks no history: the box stays empty
+        await composerOf(page).click();
+        await page.keyboard.press('ArrowUp');
+        await expect(stackNoticeOnA(page)).toHaveText(`Can’t edit on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+        await expect(composerOf(page)).toHaveText('');
+        await expect(row.locator('[data-mark]'), 'the message still waits').toHaveText('Next step');
+      }
+      // Esc on the first row says Send now's sentence in the stack and sends nothing
+      await composerOf(page).click();
+      await page.keyboard.press('Escape');
+      await expect(stackNoticeOnA(page)).toHaveText(`Can’t send now on ${B_NAME} yet. Update MAWS on ${B_NAME} and try again.`);
+      await expect(row.locator('[data-mark]')).toHaveText('Next step');
+      const written = await controlsOnB(b, session.app);
+      expect(written, 'B’s engine was written no send-now and no stop').not.toContain('interrupt');
+      expect(written, 'and nothing was withdrawn').not.toContain('cancel_async_message');
+      expect((await status(session.app))?.turn ?? null, 'B’s turn runs').not.toBeNull();
+
+      // ⌘. still stops: the steer held first, then B's turn interrupted
+      await composerOf(page).click();
+      await page.keyboard.press('Meta+.');
+      await quoting(expect.poll(async () => { const s = await status(session.app); return s === null ? 'unavailable' : s.turn; }, { timeout: 60_000, message: 'B’s turn ends at ⌘.' }).toBeNull(), () => mainSaid(page));
+      expect((await status(session.app))?.process, 'no unrecorded write ended B’s replay').toBe('ready');
+      const controls = await controlsOnB(b, session.app);
+      expect(controls.indexOf('cancel_async_message'), 'the steer is held before the interrupt').toBeGreaterThan(-1);
+      expect(controls.indexOf('interrupt')).toBeGreaterThan(controls.indexOf('cancel_async_message'));
+      const interrupt = (await writtenOnB(b, session.app)).find((f) => f.request?.subtype === 'interrupt')!;
+      expect(interrupt.request?.send_now, 'a plain stop, not a send-now').toBeUndefined();
+      await expect(stackOnA(page).locator('li [data-mark]')).toHaveText(['Held'], { timeout: 30_000 });
+    } finally {
+      await held.a?.cleanup();
+      await held.scene?.stop();
+      rmSync(aUserData, { recursive: true, force: true });
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+}

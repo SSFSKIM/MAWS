@@ -15,7 +15,7 @@ import { useSettings } from '../stores/settings';
 import { expandPane, focusSplitCard, togglePanelFloat } from '../shell/floating'; // P3-G; P4-B3: expandPane, focusSplitCard
 import { startMarkup } from '../markup/session'; // P3-G
 import { openArtifacts } from '../main/artifacts'; // P3-G
-import { dropSideViews, holdSideViews, moveFocusedArtifactToPanel, moveShownRecordToTab, sideViewOf } from '../shell/transfer'; // P4-B3 M4; UX wave U6b-1
+import { dropSideViews, holdSideViews, moveFocusedArtifactToPanel, moveShownRecordToTab, movedByPerson, sideViewOf } from '../shell/transfer'; // P4-B3 M4; UX wave U6b-1; U6e: movedByPerson
 import { panelInMain } from './regions';
 import { setSessionUnread, visibleSessionStep } from '../keymap/session-navigation';
 import { registerSessionAction } from './session-actions';
@@ -79,6 +79,7 @@ export function registerShellActions(client: MawsBridge = ipc): () => void {
       if (file === null) return;
       if (side !== null) layout().openTab({ kind: 'file', path: file.path, line: side.line, appSessionId: side.appSessionId, machine: file.machine });
       dropSideViews(file.id);
+      movedByPerson(file.id, side?.appSessionId ?? file.appSessionId); // U6e (decision 19): the person's open, so the agent's mark goes
     }),
     // W5: ⌘0, the View menu and the palette open the floating Overview, or bring focus back to it when it is open.
     registerAction('tab.overview', () => {

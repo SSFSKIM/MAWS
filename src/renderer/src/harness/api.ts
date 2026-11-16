@@ -36,4 +36,19 @@ export interface HarnessApi {
   // `reachMessage`), or to a message in none of its history (`'missing'`); not awaited
   reach(n: number | 'missing'): void;
   rowOfText(n: number): string | null; // the row the n-th turn's first text is drawn in, null while it is not loaded
+  // UX wave U1b (Proof 3, ruling A2): the loaded fixture's question calls in reading order, each with the row it is drawn
+  // in, its turn (1-based, as `scrollToTurn` counts) and whether the person dismissed it (else it is an asynchronous
+  // question left open); and `raise`, which makes an asynchronous one a waiting request of the transcript's session, as a
+  // terminal session's bridge raises it (an `async_input` item with its request), drawn by the real request card from then
+  // on, and answers the item's id; `lower` takes that item out of the session's list (it no longer waits)
+  questions(): HarnessQuestion[];
+  raise(call: string): string;
+  lower(id: string): void;
+}
+
+export interface HarnessQuestion {
+  call: string;
+  row: string;
+  turn: number;
+  dismissed: boolean;
 }

@@ -86,7 +86,7 @@ function answer(name: CommandName, input: unknown): unknown {
     case 'catalog.pluginIcons':
       return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.postures':
-      return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })) };
+      return { servers: servers.map((s) => ({ name: s.name, scope: s.scope, path: s.path, authPosture: 'auth_required', fingerprint: 'print-1', revision: null, iconUrl: null })), plugins: [] };
     case 'session.mcpStatus':
       return { mcpServers: [] };
     case 'connectors.signInCancel':

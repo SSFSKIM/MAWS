@@ -190,23 +190,29 @@ function overtaken({ event, appSessionId, at }: SignInRecord, live: SignInFacts[
   return !(event.where === 'new_sessions' && read.appSessionId === appSessionId);
 }
 
-export function signInViewOf({ live, liveRead, posture, last: record, transport }: SignInFacts): SignInView | null {
-  if (record !== null && !overtaken(record, live, liveRead)) {
-    const last = record.event;
-    switch (last.state) {
-      case 'done':
-        return view(last.message === CONNECTOR_ALREADY_CONNECTED ? C.alreadyConnected : C.signedIn[last.where ?? 'here'], 'success', false);
-      case 'cancelled':
-        return view(C.didntFinish(C.cancelled), 'danger', true);
-      case 'failed': {
-        const reason = last.reason ?? 'engine';
-        const why = reason === 'engine' || reason === 'other_entry' ? (last.message ?? C.reason[reason]) : reason === 'denied' && last.message ? `${C.reason.denied} (${last.message})` : C.reason[reason];
-        return view(C.didntFinish(why), 'danger', true);
-      }
-      default:
-        return view(C.step[last.state], 'muted', true, true);
+/** What a server's latest sign-in says now, or null where it says nothing (none, or a success a later read contradicts).
+ * Its `signIn` is what a configured row offers beside it; a plugin's row takes the words alone (UX wave U11h, ruling E). */
+export function recordViewOf(record: SignInRecord | null, live: SignInFacts['live'], liveRead: SignInFacts['liveRead']): SignInView | null {
+  if (record === null || overtaken(record, live, liveRead)) return null;
+  const last = record.event;
+  switch (last.state) {
+    case 'done':
+      return view(last.message === CONNECTOR_ALREADY_CONNECTED ? C.alreadyConnected : C.signedIn[last.where ?? 'here'], 'success', false);
+    case 'cancelled':
+      return view(C.didntFinish(C.cancelled), 'danger', true);
+    case 'failed': {
+      const reason = last.reason ?? 'engine';
+      const why = reason === 'engine' || reason === 'other_entry' ? (last.message ?? C.reason[reason]) : reason === 'denied' && last.message ? `${C.reason.denied} (${last.message})` : C.reason[reason];
+      return view(C.didntFinish(why), 'danger', true);
     }
+    default:
+      return view(C.step[last.state], 'muted', true, true);
   }
+}
+
+export function signInViewOf({ live, liveRead, posture, last: record, transport }: SignInFacts): SignInView | null {
+  const said = recordViewOf(record, live, liveRead);
+  if (said !== null) return said;
   if (!REMOTE.has(transport)) return null;
   const authless = posture === 'no_auth';
   if (live) {

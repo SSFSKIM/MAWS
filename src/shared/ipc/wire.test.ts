@@ -390,6 +390,24 @@ describe('the dynamic sign-in on the wire (UX wave U11a M8)', () => {
   });
 });
 
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §A, §H): a plugin's connectors in
+// Customize's two reads of the engine host are three optional properties, one minor: no enum gains a member, no bound moves.
+describe('a plugin’s connectors on the wire (UX wave U11h)', () => {
+  const current = wireManifestOf(REGISTRY);
+  const INVENTORY = 'commands.customization.inventory.output.properties';
+  const ENDPOINTS = 'commands.customization.serverEndpoints.output.properties';
+  type Output = { output: { properties: Record<string, unknown> } };
+
+  it('adds three optional properties to the two answers, and nothing else', () => {
+    const before = structuredClone(current) as WireManifest & { entries: Record<string, Output> };
+    delete before.entries['commands.customization.inventory']!.output.properties.pluginServers;
+    delete before.entries['commands.customization.inventory']!.output.properties.plugins;
+    delete before.entries['commands.customization.serverEndpoints']!.output.properties.pluginServers;
+    const change = classifyWireChange(before, current);
+    expect({ additive: [...change.additive].sort(), breaking: change.breaking }).toEqual({ additive: [`${ENDPOINTS}.pluginServers`, `${INVENTORY}.pluginServers`, `${INVENTORY}.plugins`].sort(), breaking: [] });
+  });
+});
+
 describe('classifyWireChange', () => {
   const manifest = (entries: Record<string, unknown>, capabilities: string[] = []): WireManifest => ({ major: 3, minor: 0, capabilities, entries });
   const render = (schema: z.ZodType) => z.toJSONSchema(schema, { unrepresentable: 'any' });

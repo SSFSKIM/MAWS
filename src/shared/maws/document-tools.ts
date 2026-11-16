@@ -8,6 +8,7 @@ import * as z from 'zod';
 import { ARTIFACT_ID } from './artifact-id';
 import { ALWAYS_LOAD } from './always-load'; // P4-A3: the edit tool is always loaded
 import type { DashboardDatasetSummary, DashboardViewWarning } from './dashboard-tools'; // P3-E
+import type { SpaceInstructionsAnswer } from './tools'; // UX wave U10b (M10)
 
 export const DOCUMENT_TOOL_NAMES = ['artifact_edit', 'artifact_comments', 'artifact_reply', 'artifact_resolve'] as const;
 export type DocumentToolName = (typeof DOCUMENT_TOOL_NAMES)[number];
@@ -118,6 +119,7 @@ export interface DocumentReadResult {
   version?: DocumentVersionSummary; // when a retained version was read
   versions: DocumentVersionSummary[]; // the latest ones, newest first (the ids `version` takes)
   page?: DocumentPage; // UX wave U10b (§B.3): a document's (never a dashboard's), the read state's own
+  spaceInstructions?: SpaceInstructionsAnswer; // UX wave U10b (M10, §E.4): the artifact's Space's, the first time and after a change
 }
 /** A document's page as `artifact_read` names it: `system` and `standard` where the document sets none. */
 export interface DocumentPage {

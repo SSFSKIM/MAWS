@@ -1,6 +1,6 @@
 import { act, cleanup, render, screen } from '@testing-library/react';
 import { storedMain } from '@shared/ipc/schema/layout';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'; // C7: vi
+import { afterEach, beforeEach, describe, expect, it, onTestFinished, vi } from 'vitest'; // C7: vi; UX wave U2b: onTestFinished
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { addressOf } from '@shared/machine/address';
@@ -51,6 +51,16 @@ afterEach(() => {
   // C7 end
 });
 
+// UX wave U2b: a session's transcript in the store holding one turn whose answer is a message, as its slot loads it.
+async function withMessage(id: AppSessionId) {
+  const b = builder();
+  b.turn('u1', 'Count the files');
+  b.text('m1', 0, '<message>Three files.</message>');
+  b.end(['u1']);
+  const events = b.events;
+  await act(() => useTranscriptStore.getState().attach(id, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+}
+
 describe('session pane', () => {
   // UX wave U12a: the computer-use strip is mounted in the full pane only, directly above the transcript's wrapper
   it('draws the computer-use line above the transcript in the full pane, and none in the compact one', () => {
@@ -76,22 +86,20 @@ describe('session pane', () => {
     }
   });
 
-  it('shows the transcript slot and the docked request above the composer, and nothing under it (W2: no status line)', () => {
+  // UX wave U1b (M3; decision 1): a waiting request is drawn in the session's transcript, never above its composer, with
+  // the fallback composer as with a registered one
+  it('shows the transcript slot over the composer with no request between them, and nothing under it (W2: no status line)', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
     registerSlot('requestCard', ({ item, placement, paneIndex }) => <p>request {`${item.kind} ${placement} ${paneIndex}`}</p>);
-    // C7: no composer registered here (C5's stub composer registration removed): a registered composer docks the request itself (the C7 case below)
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
-    const request = screen.getByText('request permission docked 1');
-    const composer = screen.getByText('Composer unavailable'); // C7: the pane docks above C5's fallback composer only
-    expect(request.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.queryByText(/^request /)).toBeNull();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });
 
-  // C7 start: a registered composer is the one docked swap: it docks the request in its own place, so the pane's slot
-  // docks nothing (two docked placements of one request would take focus and bind Enter twice).
-  it('leaves the docking to a registered composer', () => {
+  it('draws no request beside a registered composer either', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('requestCard', ({ item, placement }) => <p>request {`${item.kind} ${placement}`}</p>);
     registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
@@ -99,7 +107,6 @@ describe('session pane', () => {
     expect(screen.getByText(`composer ${id} 1`)).toBeTruthy();
     expect(screen.queryByText('request permission docked')).toBeNull();
   });
-  // C7 end
 
   it('docks no request when nothing waits', () => {
     registerSlot('requestCard', () => <p>request</p>);
@@ -108,10 +115,10 @@ describe('session pane', () => {
     expect(screen.getByText('Composer unavailable')).toBeTruthy();
   });
 
-  it('the docked fallback does not offer to open the session it is already in', () => {
+  it('draws no card of its own for a waiting request', () => {
     render(<SessionPane appSessionId={idOf('Fix sidebar drag')} paneIndex={0} />);
-    expect(screen.getByText('Approval needed')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Open session' })).toBeNull();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.queryByText('Approval needed')).toBeNull();
   });
 
   it('replaces the composer of a foreign-live session with its holder, and docks no request', () => {
@@ -134,6 +141,36 @@ describe('session pane', () => {
     render(<SessionPane appSessionId={idOf('Somersault terminal run')} paneIndex={0} />);
     expect(screen.getByText('Live in Terminal · pid 7135 · read-only')).toBeTruthy();
     expect(screen.getByText('transcript waiting none')).toBeTruthy();
+  });
+
+  // UX wave U2b (M2; A14, decision 16): no bar above the transcript, whatever the lane; where the holder notice stands in
+  // the composer's place (a terminal session nobody drives), the view's switch stands above it while MAWS draws the view
+  // in force there, and is absent otherwise.
+  it('draws no bar above the transcript, and the view’s switch above the holder notice while the view is in force', async () => {
+    const id = idOf('Somersault terminal run');
+    onTestFinished(() => useTranscriptStore.getState().drop(id));
+    await withMessage(id);
+    const inForce = (on: boolean) => useTranscriptStore.getState().setToHumanView(id, { lane: on, tailMessage: false });
+    const view = render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    expect(document.querySelector('[data-view-switch]')).toBeNull();
+    act(() => inForce(true));
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    const notice = screen.getByText('Live in Terminal · pid 7135 · read-only');
+    const switchLine = document.querySelector('[data-view-switch]')!;
+    expect(switchLine.textContent).toBe('to-human view · full transcript ›');
+    expect(switchLine.compareDocumentPosition(notice) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy(); // directly above the notice
+    view.unmount();
+  });
+
+  it('draws no bar above the transcript of a session whose lane is on', async () => {
+    const id = idOf('Charter + research');
+    onTestFinished(() => useTranscriptStore.getState().drop(id));
+    await withMessage(id);
+    act(() => useTranscriptStore.getState().setToHumanView(id, { lane: true, tailMessage: false }));
+    render(<SessionPane appSessionId={id} paneIndex={0} />);
+    expect(document.querySelector('[data-owner-bar]')).toBeNull();
+    expect(screen.queryByRole('group', { name: 'Session view' })).toBeNull();
   });
 
   // UX wave U4a (M7; decision 26 a): the `/btw` card is a layer of the pane over the transcript's bottom right corner,
@@ -200,8 +237,8 @@ describe('session pane', () => {
   });
 
   // P5 O9 M9: another machine's terminal session is a listed lane A row with no record; it reads as started, its
-  // composer the lane A port's (never the holder notice), and its pending request docked.
-  it('shows another machine’s listed lane A session as started, with its composer and its docked request', () => {
+  // composer the lane A port's (never the holder notice); UX wave U1b: its pending request is its transcript's.
+  it('shows another machine’s listed lane A session as started, with its composer and no request docked', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
     useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
     registerSlot('transcript', ({ appSessionId }) => <p>transcript {appSessionId}</p>);
@@ -211,7 +248,7 @@ describe('session pane', () => {
     render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
     expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
     expect(screen.getByText('Composer unavailable')).toBeTruthy();
-    expect(screen.getByText('request permission docked')).toBeTruthy();
+    expect(screen.queryByText(/^request /)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'setup' })).toBeNull();
   });
 

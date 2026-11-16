@@ -1,0 +1,109 @@
+UX wave U4b, probes 2: an ask's answer envelope and a person's prompt both waiting at the engine's next step, on
+engine 2.1.322, on MAWS's own wire and environment (asked by the architect 2026-11-15; the prompt-only recordings it
+compares with are u4p3-end2-*, u4p3-end3-1, u4b-two-*, u4b-two-late-* and u4p3-promote-*, findings-uxwave-u4-send-now-
+cases.txt and findings-uxwave-u4b-send-now-early.txt; VM dc-uxwave5-26dc, branch ux-wave/U4b-probes-2)
+
+Verdict.
+  Joined or not, per case (14 recordings, every case twice, the same each time):
+    1. turn ends by itself, envelope first:            JOINED 2/2
+    2. turn ends by itself, prompt first:              JOINED 2/2
+    3. Send now early (u4b-two's timing), envelope first: JOINED 2/2; prompt first: JOINED 2/2
+    4. control, both written once the call is a task (u4b-two-late's timing), envelope first: NOT joined 2/2;
+       prompt first: NOT joined 2/2
+    5. case 1 with the multi-line variant:             JOINED 2/2
+  The engine treats the envelope exactly as it treats a prompt. Every case joins or splits as the prompt-only
+  recordings did, and nothing in the envelope (its length, its lines, its fenced block, its first line) changes that.
+  The joined form, byte for byte (each joined replay and each joined transcript user line equals the two members'
+  texts joined by "\n", compared exactly):
+    - Order: the order written. The first-written member comes first, whichever it is.
+    - Separator: exactly one "\n" between the members. Nothing is added, trimmed or escaped.
+    - Each member's bytes are intact: the envelope's em dash, its fenced block, the multi-line variant's escaped
+      "\n" inside JSON strings, and its `note:` line.
+    - Envelope first: the closing fence "```" is followed by exactly one "\n", then the prompt's first byte.
+      Envelope last: the text ends with the fence, as the envelope alone does.
+    - The joined message carries the LAST-written member's uuid (its replay, isReplay true, and the transcript's one
+      user line under that uuid). The first member also has its own replay holding only its own text, under its own
+      uuid, one frame earlier (seq n), and no transcript line. The joined replay comes at n+6, after the status
+      `requesting` that names both uuids. Both members are `started` at consecutive seqs and `completed` at
+      consecutive seqs.
+  What differs from the prompt-only recordings: nothing on the engine's side. On MAWS's side: the joined row's text
+  does not parse as an answer steer in either order (`parseAskSteer` null 10/10 joined recordings). Its tag must open
+  the text (`^\[MAWS ask …\] `), which fails when the prompt is first. Its `json` block must end the text, which fails
+  when the envelope is first. So the transcript model draws the joined row as one ordinary user bubble showing the
+  envelope's raw text and JSON beside the prompt. In a session read from its file alone, the ask's answers are not
+  recorded from it.
+
+Method. Engine 2.1.322 (/opt/maws-probe/engines/2.1.322 through vm-run.sh), model haiku (claude-haiku-5-5), the gateway
+route (spikes/protocol-probe/VM.md); MAWS's launch, environment and permission mode (auto), as the scripts below take
+them from uxwave-common-send-permission.mjs.
+  The envelope: scenarios/pass3/u4b-envelope/make-envelopes.ts builds two invented asks with the repository's own
+  askSteerText (src/shared/maws/ask.ts), and checks that parseAskSteer reads each back. It was bundled with esbuild
+  and run once; its output is scenarios/pass3/u4b-envelope/envelopes.json.
+    single: ask "uxw-ask-single-1", one single-choice question (Fruit: Apple or Mango), answered "Mango".
+    multi:  ask "uxw-ask-multi-1", one text question (Banner), answered with two lines, plus a note.
+  Each is written as answerAsk (src/engine-host/session-maws.ts) has it written: steer(askSteerText(…), {priority:
+  'next'}), which queue.ts writes as {type: "user", uuid, message: {role: "user", content: <the text>},
+  parent_tool_use_id: null, origin: {kind: "human"}, priority: "next"}. The harness's steer() writes exactly that
+  frame. The prompt member is "Reply with the single word KIWI, then carry on with what you were doing.".
+  Scripts (the earlier ones with one member replaced; the originals are unchanged):
+    scenarios/pass3/uxwave-u4b-envelope-end.mjs, from uxwave-u4-send-now-3.mjs `end2`: a no-tool story turn; 0.8 s
+      into its text the two members are written at `next`, each `queued` awaited; the turn ends by itself.
+      UXW_FIRST orders them; UXW_VARIANT picks the envelope. Cases 1, 2 and 5.
+    scenarios/pass3/uxwave-u4b-envelope-early.mjs, from uxwave-u4b-send-now-early.mjs `two` and `two-late`: a
+      foreground shell call; the first member is written at `next` 1.0 s (two) or 9.5 s (two-late) into the call,
+      its `queued` awaited; 0.5 s later the second member is written at `next` and named at once by interrupt
+      {send_now: true, message_uuid}. Cases 3 and 4.
+  Kept per recording, as the earlier ones keep: every lifecycle, every replay's full text, the status frames naming
+  uuids, the results' terminal reasons, the Send now answers, and the transcript file reduced. User lines and
+  queued_command attachments are kept whole here (the earlier scripts cut them at 200 characters).
+  The model: each recording through the engine host's normaliser (journalToEvents, as send-now.test.ts reads the
+  prompt-only recordings), applyEvents and rowsOf(withAllExpanded(…)). The reading test was run once on the VM and
+  not committed.
+  Fixtures (fixtures/uxwave/): u4b-env-end-env-first-{1,2}, u4b-env-end-prompt-first-{1,2},
+  u4b-env-end-env-first-multi-{1,2}, u4b-env-two-env-first-{1,2}, u4b-env-two-prompt-first-{1,2},
+  u4b-env-two-late-env-first-{1,2}, u4b-env-two-late-prompt-first-{1,2}.
+  Spend: US$0.042 in all.
+
+Observed (seqs of each journal; E = the envelope member, P = the prompt member).
+  u4b-env-end-env-first-1: E queued 152, P queued 155; the story's result 516 (completed); E started 519, P started
+    520; E's replay 518 (E alone, under E's uuid); requesting 522 names [E, P]; the replay 524 under P's uuid = E +
+    "\n" + P; result 613 completed; E completed 614, P 615. Transcript: queue-operation enqueue E, enqueue P, two
+    dequeues, ONE user line under P's uuid holding E + "\n" + P. No line under E's uuid, no queued_command.
+  -2: the same at 136/139, 616, 618 (E alone), 619/620, 622, 624 (joined under P), 740.
+  u4b-env-end-env-first-multi-1 and -2: the same (910 E alone, 916 joined under P; 797, 803). The multi-line
+    envelope's bytes are intact in the joined text.
+  u4b-env-end-prompt-first-1 and -2: P first. 626 P alone; 632 under E's uuid = P + "\n" + E (ends with the fence).
+    752 and 758 in -2. One user line under E's uuid.
+  u4b-env-two-env-first-1: E queued 40, P queued 44; the Send now answer {still_queued: [E, P], send_now:
+    "delivering"}; result 51 aborted_tools (the cut); E started 54, P started 55; 53 E alone; requesting 58 [E, P];
+    59 joined under P's uuid; results 181 and 249 completed. -2 the same (53, 59).
+  u4b-env-two-prompt-first-1 and -2: P first, E named by the Send now. 52/53 P alone; 58/59 joined under E's uuid =
+    P + "\n" + E.
+  u4b-env-two-late-env-first-1: E queued 41, P queued 45; the answer {still_queued: [E, P], send_now:
+    "delivering"}; no cut: requesting 55 names [the prompt, E, P]; replays 51 (E alone, under E) and 52 (P alone,
+    under P); one turn, result 229 completed. Transcript: two queued_command attachments, source_uuid E with E's
+    whole text (commandMode prompt), then source_uuid P with P's; no user line under either. -2 the same (51, 52).
+  u4b-env-two-late-prompt-first-1 and -2: the same with P first (50/51; 51/52).
+  The model (the normaliser's user.message events and the reducer's user rows):
+    joined cases (10): the user.message events are MAWS's own writes of each member (out frames, E alone parses as
+      an ask steer, P does not) and the joined replay under the last uuid, which joins the first. They draw ONE
+      user row under the last uuid whose text is the joined text, as send-now.test.ts draws two joined prompts.
+      askSteerOf(that text) is null in every one, envelope first or last.
+    not joined (4): two user rows, each under its own uuid with its own text. The envelope's row parses
+      (askSteerOf = its ask id).
+    No recording records any answers (askSteers empty). Read beside the code, this is because the invented ask has
+    no call in these sessions: recordAskSteer (reduce.ts:979) records a steer only when its ask id is a tool use
+    this session holds.
+
+Inference, in U4b's terms.
+  - Engine: an envelope and a prompt waiting together at `next` are delivered exactly as two prompts are. They join
+    when the turn ends by itself or after the Send now cut, and stay apart at a tool boundary inside the turn. The
+    joined message is the members' texts, in writing order, joined by one "\n", under the last uuid. The ruling
+    "form b by the text" holds for an envelope member too.
+  - MAWS: the joined row is a bubble showing the envelope's raw text. parseAskSteer does not read an envelope with
+    anything before or after it, so derive's answersHeldAsk cannot hide it. In a live session (journal with MAWS's
+    own write), reduce.ts:704 calls recordAskSteer on every non-synthetic user.message; the envelope's own out
+    event parses, so the answers would be recorded when the ask's call is in the session (not exercised here). From
+    a file alone (the transcript holds only the joined line) they would not be. Reading the joined text by its
+    members (split on the known member texts, or find the `[MAWS ask` line and the fence that closes its block)
+    would fix both; that is U4b's call.

@@ -22,7 +22,7 @@ import { catalogPages, iconGet, isIconUrl, NETWORK_KEYS, type IconGet } from './
 import { CatalogIcons } from './icons';
 import { buildCatalog, pluginIconKey, pluginIconsOf } from './join';
 import { connectorRoute, engineViewFromWire, type EngineView, type TestSourceData } from './normalize';
-import { configurationFingerprint, posturesOf } from './postures';
+import { configurationFingerprint, pluginPosturesOf, posturesOf } from './postures';
 import { homeOf, queryOf } from './query';
 import { testSources } from './sources';
 import { CatalogStore } from './store';
@@ -171,7 +171,8 @@ export function startCatalog(deps: CatalogDeps): Catalog {
       const route = connectorRoute(server);
       return route === null ? [] : [{ route, iconUrl: onIconRoute(server.iconUrl) }];
     });
-    return { servers: posturesOf(endpoints.value.servers, listed, fingerprint) };
+    // UX wave U11h: a plugin's connectors by the same rule; none from an engine host of an earlier build, which lists none
+    return { servers: posturesOf(endpoints.value.servers, listed, fingerprint), plugins: pluginPosturesOf(endpoints.value.pluginServers ?? [], listed, fingerprint) };
   });
   deps.register('catalog.sources', async () => {
     await store.loaded();

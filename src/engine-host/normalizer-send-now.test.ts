@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
+import { consentMessage } from '@shared/engine/arrival';
 import { loadUxwaveJournal } from '../../test/support/fixtures';
 import { Normalizer } from './normalizer';
 
@@ -137,5 +138,68 @@ describe('the messages the engine joins are forwarded as the one message it wrot
       const forwarded = events(name).filter((event): event is Message => event.kind === 'user.message' && event.isReplay && event.origin === 'human');
       expect(forwarded, name).toEqual([]);
     }
+  });
+});
+
+// UX wave U1c, M1 (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, Design 2 and Interfaces §C, 4;
+// Acceptance 14): an approval survives the engine's joining of waiting messages on the live route. Probe B's recordings
+// (findings-uxwave-u1c-during-turn.txt): mid-turn the waiting messages are not joined, each its own frame's message; at
+// the turn's end the first uuid is replayed with its own text, an echo, and the second with the joined text, which
+// carries the marks the host put on each frame it wrote, in the joined order.
+describe('a joined message carries the consent marks of the frames the host wrote (U1c)', () => {
+  const GRANT = (n: string) => ({ class: 'consent', kind: 'command', subject: `curl -s -o marker-${n}.txt "https://example.com/?maws-probe-marker-${n}"` });
+  const OTHER = 'Also say the word EXTRA when done.';
+  const written = (name: string, seq: number) => events(name).filter((event): event is Message => event.kind === 'user.message' && event.seq === seq && !event.isReplay);
+
+  it('u1c-b-joinend-grant-first-1: nothing at the grant’s own replay (345); at 350 the second’s uuid, the joined text, joined naming the grant, and the grant’s mark', () => {
+    const [grant, other] = [uuidAt('u1c-b-joinend-grant-first-1', 166), uuidAt('u1c-b-joinend-grant-first-1', 168)];
+    expect(humanMessages('u1c-b-joinend-grant-first-1', 345)).toEqual([]);
+    expect(humanMessages('u1c-b-joinend-grant-first-1', 350)).toEqual([
+      expect.objectContaining({ messageUuid: other, isReplay: true, joined: [grant], content: `${consentMessage('command', GRANT('1').subject)}\n${OTHER}`, arrival: [GRANT('1')] }),
+    ]);
+  });
+
+  it('u1c-b-joinend-other-first-1: the joined replay at 329, under the grant’s own uuid, carries its mark', () => {
+    const [other, grant] = [uuidAt('u1c-b-joinend-other-first-1', 200), uuidAt('u1c-b-joinend-other-first-1', 202)];
+    expect(humanMessages('u1c-b-joinend-other-first-1', 324)).toEqual([]);
+    expect(humanMessages('u1c-b-joinend-other-first-1', 329)).toEqual([expect.objectContaining({ messageUuid: grant, joined: [other], content: `${OTHER}\n${consentMessage('command', GRANT('1').subject)}`, arrival: [GRANT('1')] })]);
+  });
+
+  it('u1c-b-twoend-1: two grants joined at 405 carry both marks, the members’ own, in the joined order', () => {
+    const [a, b] = [uuidAt('u1c-b-twoend-1', 260), uuidAt('u1c-b-twoend-1', 262)];
+    expect(humanMessages('u1c-b-twoend-1', 400)).toEqual([]);
+    expect(humanMessages('u1c-b-twoend-1', 405)).toEqual([expect.objectContaining({ messageUuid: b, joined: [a], arrival: [GRANT('1a'), GRANT('1b')] })]);
+  });
+
+  it('mid-turn, not joined (u1c-b-join-grant-first-1, -other-first-1, -two-1): each frame the host wrote is its own message, a grant with its mark, and every replay is an echo', () => {
+    const cases: [string, number[], ('grant' | 'other')[], number[]][] = [
+      ['u1c-b-join-grant-first-1', [194, 196], ['grant', 'other'], [203, 204]],
+      ['u1c-b-join-other-first-1', [178, 180], ['other', 'grant'], [187, 188]],
+      ['u1c-b-two-1', [200, 202], ['grant', 'grant'], [209, 210]],
+    ];
+    for (const [name, outs, forms, replays] of cases) {
+      const marks = outs.map((seq) => written(name, seq).map((event) => event.arrival ?? null));
+      const subjects = name === 'u1c-b-two-1' ? ['1a', '1b'] : ['1', '1'];
+      expect(marks, name).toEqual(forms.map((form, i) => [form === 'grant' ? [GRANT(subjects[i]!)] : null]));
+      expect(replays.flatMap((seq) => humanMessages(name, seq)), name).toEqual([]);
+    }
+  });
+
+  it('u4p3-end3-1’s three joined frames with a grant in each place: the joined message carries that one mark; none carries one when no member was a grant', () => {
+    const recorded = loadUxwaveJournal('u4p3-end3-1');
+    const words = ['PINEAPPLE', 'MANGO', 'KIWI'].map((word) => `Reply with the single word ${word}, then carry on with what you were doing.`);
+    const sentence = consentMessage('command', 'make check');
+    for (const place of [0, 1, 2]) {
+      const rows = recorded.map((row) => {
+        const frame = row.frame as { type?: unknown; message?: { content?: unknown } };
+        if (frame.type !== 'user' || typeof frame.message?.content !== 'string') return row;
+        const content = frame.message.content.split('\n').map((line) => (line === words[place] ? sentence : line)).join('\n');
+        return { ...row, frame: { ...frame, message: { ...frame.message, content } } };
+      });
+      const joined = live(rows).filter((event): event is Message => event.kind === 'user.message' && event.seq === 517);
+      expect(joined, `the grant ${place + 1} of 3`).toEqual([expect.objectContaining({ joined: [uuidAt('u4p3-end3-1', 117), uuidAt('u4p3-end3-1', 120)], arrival: [{ class: 'consent', kind: 'command', subject: 'make check' }] })]);
+    }
+    expect(humanMessages('u4p3-end3-1', 517)[0]).not.toHaveProperty('arrival');
+    expect(humanMessages('u4p2-two-1-1', 60)[0]).not.toHaveProperty('arrival');
   });
 });

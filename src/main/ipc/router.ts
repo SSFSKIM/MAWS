@@ -30,6 +30,12 @@
 // P5 O7 M5c (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, "O4's surfaces: leases, the window, delivery on the
 // machine"): the same for `delivery.send`, answered here by main's shim (src/main/delivery/send.ts, export here and the
 // machine's `delivery.deliver`) while the attached daemon's welcome lists no `machine.delivery`.
+//
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 9 and §C; R2): a guard
+// (`guardCommand`) runs for the commands it names after the input is validated and before anything else, for a page's
+// route, `dispatchLocal` and `invokeOwn` alike: before the branch to another machine (another profile of this Mac is such
+// a machine, reached with no `remote`), the hooks, an interceptor and every owner. Its refusal is the answer, and nothing
+// is forwarded.
 import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron';
 import type { HostDispatch, HostOwner } from '@shared/host/host-supervisor'; // P5 O2 M3
 import { HostCommandError, thrownError } from '@shared/host/runtime';
@@ -42,6 +48,7 @@ import { gradeOf } from '@shared/ipc/grades';
 import { MachineRefSchema, type MachineRef } from '@shared/machine/ref';
 import { AppSessionIdSchema, type AppSessionId } from '@shared/graph/ids';
 import * as z from 'zod';
+import { atAppOrigin } from './app-origin'; // UX wave U6e: the origin test, shared with the guard's predicate
 import { clientOf } from './clients';
 
 export { emit } from './events';
@@ -86,6 +93,9 @@ export type MainRegistryHandler<R extends WireRegistry, N extends NameOf<R>> = (
 // answer short-circuits the route, undefined lets it continue. The window report (src/main/connectors/windows.ts) and
 // the delivery cancel of a send in its export phase (src/main/delivery/send.ts) use it.
 export type BeforeHook = (name: CommandName, input: unknown, client: ClientRef) => Promise<CommandResult<CommandName> | undefined>;
+// UX wave U6e (decision 9): a check of who asks, with the validated input and the whole context: an `IpcError` refuses the
+// command, undefined lets it continue. Synchronous, so nothing can slip between it and the route's next step.
+export type CommandGuard = (name: CommandName, input: unknown, ctx: MainContext) => IpcError | undefined;
 
 export interface Router<R extends WireRegistry> {
   install(): void; // one ipcMain.handle per name of R
@@ -93,6 +103,7 @@ export interface Router<R extends WireRegistry> {
   registerMachine<N extends NameOf<R>>(name: N, handler: RegistryHandler<R, N>): void; // refuses a name R does not give to `machine`
   intercept<N extends NameOf<R>>(name: N, handler: MainRegistryHandler<R, N>): () => void;
   before(names: readonly NameOf<R>[], hook: BeforeHook): () => void; // P5 O4 M2: the hook's disposer
+  guard(names: readonly NameOf<R>[], guard: CommandGuard): () => void; // UX wave U6e: the guard's disposer
   // P5 O6 M3: the route minus the sender check, for the client and machine `ctx` names; `internal` before `install`
   dispatchLocal(name: NameOf<R>, input: unknown, ctx: MainContext): Promise<CommandResult<CommandName>>;
   // P5 O3-E M2 (docs/doperpowers/plans/2026-10-30-p5-o3-e-checkout.md, Interfaces §D): main's own in-process call, the
@@ -146,6 +157,7 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
   const interceptors = new Map<string, AnyHandler>();
   // ---- end C5 ---------------------------------------------------------------------------------------------------------
   const befores = new Map<string, BeforeHook[]>(); // P5 O4 M2 (D24): by name, in registration order
+  const guards = new Map<string, CommandGuard[]>(); // UX wave U6e: by name, in registration order
 
   const registerIn = (table: Map<string, AnyHandler>, owner: 'main' | 'machine') => (name: string, handler: AnyHandler) => {
     const { owner: actual } = commands[name];
@@ -187,7 +199,13 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
 
   async function route(event: IpcMainInvokeEvent, name: string, rawInput: unknown, rawMachine: unknown, options: RouterOptions): Promise<CommandResult<CommandName>> {
     if (!isAppSender(event, options.appUrl)) {
-      console.warn(`[ipc] refused ${name} from ${event.senderFrame?.url ?? 'a detached frame'}`);
+      let from: string;
+      try {
+        from = event.senderFrame?.url ?? 'a detached frame';
+      } catch {
+        from = 'a frame whose URL cannot be read'; // UX wave U6e re-review: the refusal's log never throws in its place
+      }
+      console.warn(`[ipc] refused ${name} from ${from}`);
       return { ok: false, error: ipcError('forbidden_sender', `${name} may only be invoked by the app window`) };
     }
     if (mainOnly.has(name)) return mainOnlyRefusal(name);
@@ -214,6 +232,18 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
     const { target } = context;
     const input = codec.validateCommandInput(name, rawInput);
     if (!input.ok) return input;
+    // UX wave U6e: the guards, before anything is forwarded; the first refusal is the answer, and any throw is `internal`
+    // (a typed failure's code included: a guard refuses only by its answer)
+    for (const guard of guards.get(name) ?? []) {
+      let refusal: IpcError | undefined;
+      try {
+        refusal = guard(name as CommandName, input.value, context);
+      } catch (error) {
+        console.error(`[ipc] the guard of ${name} failed`, error);
+        return { ok: false, error: ipcError('internal', error instanceof Error ? error.message : String(error)) };
+      }
+      if (refusal !== undefined) return { ok: false, error: refusal };
+    }
     if (target !== local && !OPENED_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_TOOL_HERE_FOR_ANY_MACHINE.has(name) && !BROWSER_REMOTE_VIEW.has(name) && !SAVED_HERE_FOR_ANY_MACHINE.has(name)) {
       if (gradeOf(name) === 'client' && !ANSWERED_BY_ITS_LINK.has(name)) {
         if (name === 'attention.viewing') return { ok: true, value: undefined as CommandOutput<CommandName> };
@@ -310,6 +340,16 @@ function routerOver<R extends WireRegistry>(registry: R): Omit<Router<R>, 'insta
         }
       };
     },
+    guard(names, guard) {
+      for (const name of names) guards.set(name, [...(guards.get(name) ?? []), guard]);
+      return () => {
+        for (const name of names) {
+          const left = (guards.get(name) ?? []).filter((each) => each !== guard);
+          if (left.length > 0) guards.set(name, left);
+          else guards.delete(name);
+        }
+      };
+    },
     async dispatchLocal(name, input, ctx) {
       if (!installed) return { ok: false, error: ipcError('internal', `${name}: the router is not installed yet`) };
       if (mainOnly.has(name)) return mainOnlyRefusal(name);
@@ -343,6 +383,8 @@ export const registerMachineHandler: <N extends CommandName>(name: N, handler: M
 export const interceptCommand: <N extends CommandName>(name: N, handler: MainHandler<N>) => () => void = production.intercept;
 // P5 O4 M2 (Interfaces §F, D24): the seam before the owner switch (above).
 export const beforeCommand: (names: readonly CommandName[], hook: BeforeHook) => () => void = production.before;
+// UX wave U6e (decision 9): the guard after validation and before every forwarding (above).
+export const guardCommand: (names: readonly CommandName[], guard: CommandGuard) => () => void = production.guard;
 // P5 O6 M3: the local link's entry to this machine's services (src/main/machines/local-link.ts).
 export const dispatchLocal: (name: CommandName, input: unknown, ctx: MainContext) => Promise<CommandResult<CommandName>> = production.dispatchLocal;
 // P5 O3-E M2 (Interfaces §D): main's own calls (the services bus's `invoke`; P5 O4: the catalog's `catalog.engine`).
@@ -354,11 +396,11 @@ function isAppSender(event: Pick<IpcMainInvokeEvent, 'sender' | 'senderFrame'>, 
   const frame = event.senderFrame;
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!frame || !win || frame !== win.webContents.mainFrame) return false;
+  let url: string;
   try {
-    const url = new URL(frame.url);
-    const app = new URL(appUrl);
-    return app.protocol === 'file:' ? url.protocol === 'file:' : url.origin === app.origin;
+    url = frame.url; // a frame whose URL cannot be read (disposed meanwhile) is no app sender, as before the move
   } catch {
     return false;
   }
+  return atAppOrigin(url, appUrl);
 }

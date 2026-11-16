@@ -351,7 +351,7 @@ export class FakeEngineHost {
       const held = this.artifacts.get(artifactId);
       return ok(held === undefined ? { artifact: null, links: [] } : { artifact: held.row, links: held.links });
     }
-    if (name === 'artifacts.get' && typeof artifactId === 'string') return ok({ artifact: this.artifacts.get(artifactId)?.row ?? null });
+    if (name === 'artifacts.get' && typeof artifactId === 'string' && !this.reads.has(name)) return ok({ artifact: this.artifacts.get(artifactId)?.row ?? null }); // UX wave U10b: a suite's own answer wins (a deleted artifact's)
     const read = this.reads.get(name);
     if (read !== undefined) return ok(read(input));
     const { appSessionId, afterSeq, limit, requestId } = (input ?? {}) as { appSessionId?: string; afterSeq?: number | null; limit?: number | null; requestId?: string };

@@ -8,6 +8,7 @@ export const commands = [
   'layout.unsavedFiles', 'layout.saveAllDone', // E5
   'layout.captureRegion', // P3-G
   'layout.nativeEdit', // P4-B2 K6
+  'layout.openFile', // UX wave U6e: Open File…
   'layout.frameFile', 'layout.releaseFrame', // UX wave U6b-2
 ] as const;
 

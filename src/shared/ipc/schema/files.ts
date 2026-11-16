@@ -4,9 +4,14 @@
 // them with the spine on the daemon shape. Every path is confined to the session's allowlist (the realpaths of its `directory`, `additionalDirectories`
 // and `worktree.path`) by the open-first boundary in `src/services/files/service.ts`, but for one file outside them that
 // the session's deliverables name (`read`, `openExternal`, `reveal`) or, UX wave U6c, that its transcript links (`read`
-// and `openExternal`, asked with `named`); refusals answer `internal` with `path outside the session's directories`. One write is E5's `files.write`, the hash-checked save of a file that
-// already exists; the other, P5 O3-E's `files.upload`, creates new files in the session's attachments directory alone;
-// nothing here renames a file, or deletes one but the upload's own.
+// and `openExternal`, asked with `named`); refusals answer `internal` with `path outside the session's directories`. Two
+// writes are E5's hash-checked save of a file that already exists: `files.write`, inside the session's directories alone,
+// and (UX wave U6e, docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §B) `files.writeOutside`, which
+// also saves one file outside them that the session's transcript names by a counted form, that the person chose
+// (`files.grant`, main's alone) or that the session's agent sent, while the path still resolves to the real path the save
+// names; neither writes a file of MAWS's own (its profile folder, an app bundle of it). The other write, P5 O3-E's
+// `files.upload`, creates new files in the session's attachments directory alone; nothing here renames a file, or
+// deletes one but the upload's own.
 import * as z from 'zod';
 import { extensionOf, mimeOf } from '@shared/files/mime';
 import { AppSessionIdSchema } from '@shared/graph/ids';
@@ -64,11 +69,15 @@ export const FilesReadInputSchema = z.strictObject({
   // E5: answer the whole file's hash with this chunk. Main then reads the whole file (up to FILES_READ_MAX_LENGTH) into
   // one buffer, hashes it and slices the chunk from it, so the chunk's bytes are always the hashed file's.
   hash: z.boolean().optional(),
-  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §D): the caller knows the rule
-  // and holds what it reads read-only: a file outside the session's directories is read when the session's own transcript
-  // links it (`src/services/files/named.ts`), for a caller on the session's machine alone. Sent by the window only for a
-  // session on this Mac; a peer that does not know the key drops it and answers the plain read.
+  // UX wave U6c (docs/doperpowers/plans/2026-11-12-ux-wave-U6c-linked-file.md, Interfaces §D): the caller knows the rule:
+  // a file outside the session's directories is read when it stands admitted for the session, for a caller on the
+  // session's machine alone; U6e (decision 5): admitted by the session's transcript (`src/services/files/named.ts`), by a
+  // grant (`files.grant`) or by the agent's delivery, and the answer says which kind (`outside`). Sent by the window only
+  // for a session on this Mac; a peer that does not know the key drops it and answers the plain read.
   named: z.literal(true).optional(),
+  // UX wave U6e (decision 19): the open was asked by the agent (`show_pane`), so no grant admits the file; a peer that does
+  // not know the key drops it
+  agent: z.literal(true).optional(),
   // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B): the bytes of exactly
   // the range asked, as base64 whatever the type, never decoded and never re-cut, answered with the file's `identity`;
   // honoured for a caller on the file's machine alone (a remote caller's is passed over and the plain read answered).
@@ -97,9 +106,16 @@ export const FilesReadOutputSchema = z.strictObject({
   // renderer knows the text it holds re-encodes to the file's bytes exactly; null when not hashed. A byte-length
   // comparison is no such test: a truncated multi-byte sequence decodes to U+FFFD, which may be as long.
   utf8: z.boolean().nullable(),
-  // UX wave U6c: the file is outside the session's directories, admitted because the transcript names it; present only
-  // in the answer to a request that carried `named`, and absent for every other file
+  // UX wave U6c: the file is outside the session's directories and was admitted so (U6e: by the transcript, a grant or the
+  // Library); present only in the answer to a request that carried `named`, and absent for every other file
   named: z.literal(true).optional(),
+  // UX wave U6e (§B): present exactly when `named` is, on a daemon of U6e or later. `real`: the confirmed real path, which a
+  // save names (`files.writeOutside`); `writable`: false for a file only a tool's result names (`why: 'result'`) or only a
+  // record of the Library the person added admits (`why: 'added'`), which no save writes
+  outside: z.strictObject({ real: z.string(), writable: z.boolean(), why: z.enum(['result', 'added']).optional() }).optional(),
+  // UX wave U6e (decision 8): the file is under one of MAWS's own folders (its profile folder, an app bundle of it), which no
+  // write reaches; on any read, inside the directories too
+  own: z.literal(true).optional(),
   // UX wave U6b-2: the version of the file the bytes are of (its device, inode, size, modification and change times, as
   // the opened descriptor knows them); present exactly in the answer to a raw read, so two raw reads that answer the same
   // identity read the same version, and a read whose file changed while it was read is refused instead
@@ -125,9 +141,16 @@ export const FilesWriteOutputSchema = z.discriminatedUnion('status', [
 ]);
 export type FilesWriteOutput = z.infer<typeof FilesWriteOutputSchema>;
 
+// UX wave U6e (§B, decisions 5 and 6): the save of a file outside the session's directories, by a command of its own so
+// that a daemon that cannot compare the real path does not know it and writes nothing (`unknown_command`). `real` is the
+// real path the read answered (`outside.real`); a path that no longer resolves there is refused with FILES_MOVED.
+export const FILES_MOVED = 'the path no longer leads to the file that was opened';
+export const FilesWriteOutsideInputSchema = FilesWriteInputSchema.extend({ real: z.string() });
+export type FilesWriteOutsideInput = z.infer<typeof FilesWriteOutsideInputSchema>;
+
 const SessionPathSchema = z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string() });
-// UX wave U6c: `files.openExternal` takes `named` as `files.read` does
-export const FilesOpenExternalInputSchema = SessionPathSchema.extend({ named: z.literal(true).optional() });
+// UX wave U6c: `files.openExternal` takes `named` as `files.read` does; U6e: and `agent`
+export const FilesOpenExternalInputSchema = SessionPathSchema.extend({ named: z.literal(true).optional(), agent: z.literal(true).optional() });
 export type FilesOpenExternalInput = z.infer<typeof FilesOpenExternalInputSchema>;
 
 export const FilesOpenExternalOutputSchema = z.strictObject({
@@ -143,12 +166,22 @@ export const FilesRevealOutputSchema = z.strictObject({ revealed: z.boolean(), m
 export type FilesRevealOutput = z.infer<typeof FilesRevealOutputSchema>;
 // E1 end
 
+// UX wave U6e (§B, decision 2): the record that the person chose one file for one session in the system's chooser, which
+// main sends once the chooser answered and no page can (main-only). Answered with the real path the daemon granted, what
+// the tab opens; a directory, a package and a special file are refused.
+export const FilesGrantOutputSchema = z.discriminatedUnion('status', [
+  z.strictObject({ status: z.literal('granted'), path: z.string() }),
+  z.strictObject({ status: z.literal('refused'), reason: z.literal('not-a-file') }),
+]);
+export type FilesGrantOutput = z.infer<typeof FilesGrantOutputSchema>;
+
 // P5 O3-E M2 (Interfaces §D; D6): `library.read`'s reach to a File artifact's stored bytes, a path main resolved itself
 // (the artifact's admission), read with `files.read`'s rules (no link on the path, a regular file, the same answer).
 // Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
 // which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told. UX wave
-// U6c: `named` is left out as the session is; the caller's resolution is the admission. UX wave U6b-2: `raw` too.
-export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, raw: true });
+// U6c: `named` is left out as the session is; the caller's resolution is the admission. U6e: `agent` too; its answer is
+// the read's, and sets neither `outside` nor `own`. UX wave U6b-2: `raw` too.
+export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, agent: true, raw: true });
 export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema>;
 
 // P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,
@@ -250,6 +283,10 @@ export const commands = {
   // E5 start: the hash-checked save. Not a read: never in the renderer's QUERY_COMMANDS.
   'files.write': { input: FilesWriteInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
   // E5 end
+  // UX wave U6e: the save of a file outside the session's directories (bridged; offered to no other machine), and the
+  // grant of a chosen file (main-only)
+  'files.writeOutside': { input: FilesWriteOutsideInputSchema, output: FilesWriteOutputSchema, owner: 'machine' },
+  'files.grant': { input: SessionPathSchema, output: FilesGrantOutputSchema, owner: 'machine' },
   'files.reveal': { input: SessionPathSchema, output: FilesRevealOutputSchema, owner: 'machine' }, // E1
   'files.readResolved': { input: FilesReadResolvedInputSchema, output: FilesReadOutputSchema, owner: 'machine' }, // P5 O3-E: main-only
   'files.upload': { input: FilesUploadInputSchema, output: FilesUploadOutputSchema, owner: 'machine' }, // P5 O3-E

@@ -1,5 +1,3 @@
-import { ASK_SHEET_TOOL_ID } from '@shared/maws/panes';
-import { settleWaitingAsks } from '../tools/maws/ask/connect';
 import { preserveSubmenuPointer } from '@artifacts/ui/menu-pointer';
 import type { ReactElement, ReactNode } from 'react';
 import { ContextMenu, DropdownMenu } from 'radix-ui';
@@ -31,7 +29,6 @@ export function toggleSurface(toolId: string) {
     else state.hideSurfaces(session);
     return;
   }
-  if (toolId === ASK_SHEET_TOOL_ID && session) settleWaitingAsks(session);
   const groups = sideGroups(state, session);
   const remembered = [groups.upper.shown, groups.lower?.shown].find((tab) => tab?.toolId === toolId);
   const held = lastInViewOf(session, toolId) ?? remembered ?? surfaceRefs(state, session).findLast((tab) => tab.toolId === toolId);

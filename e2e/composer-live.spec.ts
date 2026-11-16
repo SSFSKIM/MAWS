@@ -20,7 +20,7 @@ import { framesOf, journal, liveScratch, liveSkipReason, mainResults, printSessi
 import { invoke, value } from './support/c7-replay';
 import { ENGINE_BIN } from '../test/support/engine-pin';
 import { launchMaws, type MawsLaunch } from './support/launch';
-import { ALLOW_ONCE_KEY, allowForTheSession, answerByKey } from './support/request-keys';
+import { ALLOW_ONCE_KEY, allowForTheSession, answerByKey, rowOf } from './support/request-keys';
 import { sidebarRow } from './support/sidebar';
 
 const skip = liveSkipReason();
@@ -235,7 +235,7 @@ test('auto mode: interrupt and send, stop and resume behave as labelled', async 
 
 // ---- 2. the ask rule in auto mode, in the focused pane only -------------------------------------------------------
 
-test('auto mode with an ask rule: the card replaces the composer, offers Allow once, and ⌘Enter answers in the focused pane only', async () => {
+test('auto mode with an ask rule: the card stands at the transcript’s end beside a free composer, offers Allow once, and ⌘Enter answers in the focused pane only', async () => {
   await withApp('ask', async (live) => {
     const { page, maws } = live;
     // As the gate in requests.spec.ts: the ask session's tab first, then the other one split into the right pane, then
@@ -251,8 +251,9 @@ test('auto mode with an ask rule: the card replaces the composer, offers Allow o
     await send(page, left, 'Use the Bash tool to run exactly `git log --oneline` and tell me what it printed.');
     const frame = left.getByRole('group', { name: 'Approval needed' });
     await expect(frame).toBeVisible({ timeout: 90_000 });
-    await expect(messageIn(left)).toBeHidden();
-    await expect(frame).toBeFocused();
+    // UX wave U1b: the prompt is drawn at the transcript's end and takes nothing from the composer, which stays shown
+    await expect(left.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' })).toBeVisible();
+    await expect(messageIn(left)).toBeVisible();
     // U1a §D: an ask rule offers no lasting scope, so the card's answer buttons are Deny and Allow once
     const lasting = await frame.getByRole('button', { name: /^(Allow for this session|Always allow in )/ }).count();
     const requests = controlRequests(ask.journalPath, 'can_use_tool');
@@ -266,7 +267,9 @@ test('auto mode with an ask rule: the card replaces the composer, offers Allow o
     const ids = requests.map((r) => (r.frame as { request_id: string }).request_id);
     expect(controlResponsesTo(ask.journalPath, ids), 'the other pane’s Enter answered nothing').toEqual([]);
 
-    await answerByKey(page, { focus: frame, control: frame.getByRole('button', { name: 'Allow once', exact: true }), key: ALLOW_ONCE_KEY, answered: async () => controlResponsesTo(ask.journalPath, ids).length > 0, what: 'the ask session' });
+    // the key from the prompt's own row (its keyboard owner); the row leaves with the last request, and the keyboard goes
+    // to the session's composer
+    await answerByKey(page, { focus: rowOf(frame), control: frame.getByRole('button', { name: 'Allow once', exact: true }), key: ALLOW_ONCE_KEY, answered: async () => controlResponsesTo(ask.journalPath, ids).length > 0, what: 'the ask session' });
     await expect.poll(() => controlResponsesTo(ask.journalPath, ids).length).toBe(1);
     await expect(messageIn(left)).toBeVisible();
     await expect(messageIn(left)).toBeFocused();
@@ -312,8 +315,9 @@ test('default mode: Allow for this session grants the exact command and a second
 // ---- 4. a two-question form --------------------------------------------------------------------------------------
 
 // P2-C2 (the P2 spec's Decision Log 33): a MAWS session's one ask is `mcp__maws__ask` (the native AskUserQuestion is
-// withdrawn at launch), so the two-question form is its sheet: a choice and a text, answered in the panel.
-test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered from its sheet; the tool result names both answers', async () => {
+// withdrawn at launch), so the two-question form is its form: a choice and a text, answered in the capsule's row (UX wave
+// U1b, O-17: the sheet opens only when the person opens it).
+test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered in its capsule’s row; the tool result names both answers', async () => {
   await withApp('question', async (live) => {
     const { page } = live;
     const pane = paneAt(page, 0);
@@ -323,21 +327,21 @@ test('auto mode: a two-question mcp__maws__ask (one choice, one text) answered f
       pane,
       'Use the mcp__maws__ask tool once, blocking, with both questions in the one call: "Which color do you prefer?" (a choice of Red and Blue) and "Which fruit do you like?" (free text). Then reply with my answers.',
     );
-    const sheet = page.locator('[data-ask-sheet]');
-    // auto mode may ask for the MCP tool's permission first: allowed once through the docked card
+    const form = pane.locator('section.transcript-ask .transcript-ask-form [data-hover-ask]');
+    // auto mode may ask for the MCP tool's permission first: allowed once through its card at the transcript's end
     await expect
       .poll(
         async () => {
           const allow = pane.getByRole('group', { name: 'Approval needed' }).getByRole('button', { name: 'Allow once', exact: true });
           if ((await allow.isVisible().catch(() => false)) && (await allow.isEnabled().catch(() => false))) await allow.click();
-          return sheet.locator('section[data-question-id]').count();
+          return form.locator('section[data-question-id]').count();
         },
         { timeout: 90_000, intervals: [500] },
       )
       .toBe(2);
-    await sheet.locator('section[data-question-id]').filter({ hasText: /colou?r/i }).getByRole('radio', { name: 'Red' }).click();
-    await sheet.locator('section[data-question-id]').filter({ hasText: /fruit/i }).getByRole('textbox').fill('Pear');
-    await sheet.getByRole('button', { name: /^Submit/ }).click();
+    await form.locator('section[data-question-id]').filter({ hasText: /colou?r/i }).getByRole('radio', { name: 'Red' }).click();
+    await form.locator('section[data-question-id]').filter({ hasText: /fruit/i }).getByRole('textbox').fill('Pear');
+    await form.getByRole('button', { name: /^Submit/ }).click();
     await idle(page, q.id);
     // the engine's tool result for the ask, as the transcript records it
     const toolResults = framesOf(rowsOf(q.journalPath), 'in').filter(({ frame }) => frame.type === 'user' && JSON.stringify(frame.message?.content).includes('tool_result'));

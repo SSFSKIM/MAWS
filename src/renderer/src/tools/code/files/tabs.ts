@@ -23,6 +23,7 @@ export interface FilesTabParams {
   file: string; // as the opener gave it, lexically normal: absolute, or a relative path chip's, which the viewer's read refuses as a main tab's does
   line: number | null;
   preview?: true;
+  agent?: true; // UX wave U6e (decision 19): an open the agent asked for made the tab; its reads say so until the person opens it
 }
 
 // What a tab of Files holds, read from its stored params: a file whenever they hold one (`paramsHoldFile`: a non-empty
@@ -30,9 +31,9 @@ export interface FilesTabParams {
 // alone (no params, or params of another shape, build F's `path` among them).
 export function fileOfTab(params: unknown): FilesTabParams | null {
   if (!paramsHoldFile(params)) return null;
-  const { file, line, preview } = params as { file: string; line?: unknown; preview?: unknown };
+  const { file, line, preview, agent } = params as { file: string; line?: unknown; preview?: unknown; agent?: unknown };
   const at = typeof line === 'number' && Number.isInteger(line) && line >= 1 ? line : null;
-  return { file: normalizeLexically(file), line: at, ...(preview === true ? { preview: true as const } : {}) };
+  return { file: normalizeLexically(file), line: at, ...(preview === true ? { preview: true as const } : {}), ...(agent === true ? { agent: true as const } : {}) };
 }
 
 // The id a main tab of the file has (`file:<machine>:<path>`), which is also the viewer's key for the file beside the chat.
@@ -91,7 +92,8 @@ export function placeOpen(state: LayoutState, request: OpenRequest): Placement {
   return { to: 'side', tabId: null, group: groupForOpen(sideGroups(state, appSessionId), FILES_TOOL_ID, null, null) };
 }
 
-// The preview tab becomes a kept tab (a double-click on it, the first edit, a move); nothing for any other tab.
+// The preview tab becomes a kept tab (a double-click on it, the first edit, a move); nothing for any other tab. UX wave
+// U6e (decision 19): the agent's mark goes with it.
 export function keep(tabId: string): void {
   const held = fileOfTab(useLayout.getState().panelParams[tabId]);
   if (!held?.preview) return;

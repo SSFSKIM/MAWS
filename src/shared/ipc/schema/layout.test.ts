@@ -532,6 +532,7 @@ describe('layout value shapes', () => {
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
       'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
       'layout.nativeEdit': 'main', // P4-B2 K6: the Edit menu's Undo or Redo no editor in the page claimed, run natively
+      'layout.openFile': 'main', // UX wave U6e: Open File…, the system's chooser, then main's grant
       'layout.frameFile': 'main', // UX wave U6b-2: a file frame's token, issued to the asking page
       'layout.releaseFrame': 'main', // UX wave U6b-2: its release by that page
     });

@@ -387,6 +387,12 @@ test('pass3 p2-c3-subagent-ask: each subagent ask is framed with its parent befo
 const dir4=new URL('./fixtures/p4/',import.meta.url);
 const load4=n=>readFileSync(new URL(n+'.jsonl',dir4),'utf8').trim().split('\n').map(JSON.parse);
 const served4=JSON.parse(readFileSync(new URL('./scenarios/pass3/p4-maws-tools.json',import.meta.url),'utf8'));
+// The tools the source gained after P4-B4's and P4-A3's recordings, which no recording was served, each with the date it
+// was added and why. A check that compares the served list with what a recording holds leaves them out; each must also
+// be absent from the recordings, so an entry cannot outlive a re-recording unnoticed (the tracker's P4-R7z row names it).
+const UNRECORDED4=[{name:'artifact_delete',added:'2026-11-15',why:"the UX wave's U10b: the agent's delete of a draft it made"}];
+const recorded4=tool=>!UNRECORDED4.some(u=>u.name===tool.name);
+const listedTools4=rows=>rows.find(r=>r.direction==='out'&&r.frame.type==='control_response'&&r.frame.response.response?.mcp_response?.result?.tools)?.frame.response.response.mcp_response.result.tools;
 const B4=['p4-b4-instructions','p4-b4-owner-style','p4-b4-append','p4-b4-no-tool-search','p4-b4-resume-first','p4-b4-resume'];
 const meta4=(rows,event)=>rows.filter(r=>r.direction==='meta'&&r.frame.event===event).map(r=>r.frame);
 const mainRequests4=rows=>meta4(rows,'stub_requests')[0].requests.filter(q=>q.main);
@@ -468,7 +474,10 @@ test('p4 deferral (for P4-A3): under tool search the maws tools are deferred and
  const result=second.messages.flatMap(m=>m.blocks).find(b=>b.type==='tool_result'&&b.tool_use_id==='toolu_stub_search');
  assert.equal(result.is_error,false);assert.equal(JSON.parse(result.content[0].text).status,'found');
  const all=mainRequests4(load4('p4-b4-no-tool-search'))[0].tools.map(t=>t.name);
- for(const tool of served4.tools)assert.ok(all.includes('mcp__maws__'+tool.name),tool.name);
+ for(const tool of served4.tools.filter(recorded4))assert.ok(all.includes('mcp__maws__'+tool.name),tool.name);
+ // the list of tools no recording was served fails closed: none of them is in a recording's tools
+ const servedThen=[...listedTools4(rows),...listedTools4(load4('p4-b4-no-tool-search'))].map(t=>t.name);
+ for(const {name} of UNRECORDED4){assert.ok(served4.tools.some(t=>t.name===name),name);assert.ok(!all.includes('mcp__maws__'+name),name);assert.ok(!servedThen.includes(name),name);}
 });
 test('p4 resume: a resumed session keeps the paragraph it was first given; the server\'s changed text is not announced',()=>{
  const q=mainRequests4(load4('p4-b4-resume'))[0];const context=contextText4(q);

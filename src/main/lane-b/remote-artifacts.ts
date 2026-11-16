@@ -35,6 +35,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { ClientRef } from '@shared/ipc/client';
 import { toWire } from '@shared/host/json-bytes';
 import { ipcError, type IpcError, type IpcErrorCode } from '@shared/ipc/errors';
+import { REMOTE_NEEDS } from '@shared/ipc/remote-unavailable'; // UX wave U10b
 import type { CommandInput, CommandName, CommandOutput, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { REMOTE_INLINE_MAX_BYTES, type RemoteCopySource } from '@shared/ipc/schema/remote';
 import { SESSION_CAPABILITY_TOOLS } from '@shared/ipc/schema/session-capabilities';
@@ -63,6 +64,7 @@ export const ARTIFACT_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'artifacts.update', 'artifacts.delete', 'artifacts.duplicate', 'artifacts.saveVersion', 'artifacts.nameVersion', 'artifacts.restore',
   'artifacts.pruneVersions', 'artifacts.acceptSuggestion', 'artifacts.rejectSuggestion', 'artifacts.uploadAsset', 'artifacts.copyAsset',
   'artifacts.rereadDatasetFile', 'artifacts.create',
+  'artifacts.undelete', // UX wave U10b (M4): needs its own capability (`REMOTE_NEEDS`)
 ]);
 /** Answered here for an RL2 machine whatever it offers: a document's port (M5b, the bridge), the session's tools (the substitute). */
 const ANSWERED_HERE: ReadonlySet<CommandName> = new Set<CommandName>(['artifacts.open', 'session.capabilities']);
@@ -159,7 +161,7 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
     if (refused !== null) return refused;
     recordRequest(link.machine, fields);
     const deadline = deps.now() + deps.pendingMs;
-    const handle = link.act({ action: name, args: fields, executor: 'engine-host', sendBy: deadline, requires: 'rl2.artifacts' });
+    const handle = link.act({ action: name, args: fields, executor: 'engine-host', sendBy: deadline, requires: REMOTE_NEEDS[name] ?? 'rl2.artifacts' });
     // taken: the endpoint accepted it, so a refusal after is the engine host's (an older one's `unknown_command`)
     let taken = handle.progress() === 'accepted';
     const off = handle.onProgress((progress) => void (taken ||= progress === 'accepted'));

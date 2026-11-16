@@ -9,6 +9,7 @@
 //   is the entry's, `dynamic` for --mcp-config; `config.url` for http and sse, redacted only for managed servers); they
 //   must be the row's. A server it does not list yet is read from its files when it is asked (the first reading stands).
 import { usedEntry, type ConfiguredEntry } from '@shared/plugins/connector-precedence';
+import { addressFormOf, addressMatches, pluginInSession, type PluginInSession, type SessionPlugin } from '@shared/plugins/plugin-connector';
 
 export interface RequestedEntry {
   name: string;
@@ -28,6 +29,7 @@ export interface EndpointEntry extends ConfiguredEntry {
 export interface LiveServer {
   name: string;
   scope?: unknown;
+  source?: unknown; // UX wave U11h: `plugin` for a plugin's server (2.1.322; spikes/protocol-probe/findings-uxwave-u11-plugin-connectors.txt, 2)
   transport?: unknown;
   config?: unknown;
 }
@@ -72,4 +74,54 @@ export function dynamicRefusal(requested: { name: string; entry?: { revision: st
   const entry = own.find((candidate) => candidate.scope === 'app' && candidate.name === requested.name);
   if (entry === undefined || typeof entry.revision !== 'string' || entry.revision !== requested.entry.revision) return `MAWS’s ${requested.name} server changed since this page read it; refresh the page, then sign in`;
   return holds(held, entry, 'dynamic') ? null : different;
+}
+
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §B, "The rule"): a press from a
+// plugin's row in Customize. Nothing on a server's status entry names its plugin (the findings, 2): the engine names it
+// `plugin:<manifest name>:<server>`, more than one plugin can build one name (two of one manifest name, or a colon in a
+// manifest name), and the engine keeps one of them and says nothing. So the row's entry is found by its revision (d), the
+// plugins the session reported must hold exactly one possible owner of the name, the row's (a), and the session's server
+// of the name must be a plugin's of the entry's transport (b) at the entry's address (c). These are the words of the
+// press (point 1); the operation's later points say one sentence of their own (./sign-in.ts).
+
+/** A plugin's connector as `customization.serverEndpoints` answers it (`pluginServers`), what the rule reads of it. */
+export interface PluginEntry { plugin: string; name: string | null; version: string | null; transport: string; url: string | null; revision: string | null }
+
+/** (d): the entry of the press's engine name whose revision is the press's, or null (gone, replaced, updated, or no revision answered). The revision covers the plugin's key, so two entries of one name are told apart. */
+export function pluginEntryOf<E extends PluginEntry>(press: { name: string; revision: string }, entries: readonly E[]): (E & { name: string }) | null {
+  return (entries.find((entry) => entry.name === press.name && entry.revision !== null && entry.revision === press.revision) as (E & { name: string }) | undefined) ?? null;
+}
+
+/** The one sentence of the operation's later points, whatever part failed there (§G). */
+export const PLUGINS_CHANGED = 'Plugins changed while this sign-in started. Try again.';
+
+/** (d) refused, in the press's words. */
+export const pluginEntryChanged = (name: string): string => `${name} changed since this page read it; refresh the page, then sign in`;
+
+const OWNER_WORDS: Record<Exclude<PluginInSession, 'ok'>, (name: string) => string> = {
+  'not-reported': () => 'that session has not reported its plugins yet; send it a message, then sign in',
+  absent: (name) => `that session loaded no plugin that supplies ${name}`,
+  collision: (name) => `more than one plugin in that session supplies ${name}; turn the others off, start a new session, then sign in`,
+  'other-plugin': (name) => `that session loaded ${name} from another plugin`,
+  'other-version': () => 'that session loaded another version of this plugin; start a new session to sign in',
+};
+
+/** (a): why the plugins the session last reported do not admit the entry, in the press's words, or null. */
+export function pluginOwnerRefusal(entry: PluginEntry & { name: string }, plugins: readonly SessionPlugin[], observedAt: string | null): string | null {
+  const verdict = pluginInSession(entry, plugins, observedAt);
+  return verdict === 'ok' ? null : OWNER_WORDS[verdict](entry.name);
+}
+
+/** (b) and (c): why the session's server of the name is not the entry's, in the press's words, or null. Also the judge of the operation's baseline read, so "already connected" is never said of a server outside the entry's address. */
+export function pluginServerRefusal(entry: PluginEntry & { name: string }, live: readonly LiveServer[]): string | null {
+  const held = live.find((server) => server.name === entry.name);
+  if (held === undefined) return `that session has no ${entry.name} server`;
+  const different = `this session uses a different ${entry.name}; start a new session to sign in`;
+  if (held.scope !== 'dynamic' || held.source !== 'plugin' || transportOf(held.transport) !== transportOf(entry.transport)) return different;
+  // a remote entry with no address: its declared address is past the endpoints' bound, and a cut text would be another
+  // address (a session at that prefix would match it), so nothing is compared and the press is refused
+  if (entry.url === null) return different;
+  if (addressFormOf(entry.url) === 'templated-origin') return `${entry.name}’s address is set when a chat starts; sign in from that chat’s Connectors dialog`;
+  const url = typeof held.config === 'object' && held.config !== null ? (held.config as { url?: unknown }).url : undefined;
+  return typeof url === 'string' && addressMatches(entry.url, url) ? null : different;
 }

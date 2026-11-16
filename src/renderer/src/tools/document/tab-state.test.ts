@@ -544,6 +544,20 @@ describe('a document tab’s state', () => {
     expect(w.confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Launch plan'));
   });
 
+  // Fix wave 4 (the panel's P1): an edit the deletion's fence refused lives only in the parked, read-only replica; its
+  // close goes through the guard, read-only or not, and asks at once (nothing will acknowledge it while it is parked)
+  it('asks before closing a read-only replica that holds an edit the host never acknowledged', async () => {
+    const w = world();
+    const state = w.open();
+    await ready(state);
+    const handle = w.handles[0]!;
+    vi.spyOn(handle, 'state').mockReturnValue({ ...handle.state(), phase: 'off', synced: false, unsaved: 1, readOnly: true });
+    expect(await state.closeGuard()).toBe(false);
+    expect(w.confirm).toHaveBeenCalledExactlyOnceWith(expect.stringContaining('Launch plan'));
+    w.confirm.mockReturnValueOnce(true);
+    expect(await state.closeGuard()).toBe(true);
+  });
+
   it('lets the tab close when everything is saved, waits for a save in flight, and asks when it does not land', async () => {
     const w = world();
     const state = w.open();

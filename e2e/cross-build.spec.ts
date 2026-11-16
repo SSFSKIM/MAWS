@@ -119,6 +119,14 @@
 // (sidebar, both ways), and its rows are in the same table.
 // UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
+// UX wave U10b-4: (space instructions, both ways), a key of the artifact store's `meta` the older builds never read, and
+// a draft's chip named for them, read across the two builds in both directions; its block is at the end of this file,
+// and its rows are in U13a's UC-14 coverage table (the table's first rows for the artifact store).
+// UX wave U6e: (an outside file, both ways) and (outside file, on the peer's daemon), a chosen file outside the session's
+// folders across build F and master at U6e's parent pin; their block is at the end of this file, and their row is in
+// U13a's UC-14 coverage table.
+// UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
+// other build's window as the row the build that reads the frames makes; its block is at the end of this file.
 // UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
 // its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
@@ -129,7 +137,7 @@
 // additive rule, the hello and welcome at each end's minor, the gap's `unknown_command`) are skipped, each said in the
 // report as a skipped check naming the wire (skipWireSkew), and everything else runs, the stored forms read both ways first.
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto'; // UX wave U6e: createHash, the files service's content hash
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -150,7 +158,8 @@ import { reachMachine } from '../src/mawsd/machine-client';
 import { answered, ENGINE_HOST_BROWSER_WORK, SCREENCAST, startPages as startHeadlessPages } from './support/headless-browser'; // P5 O17 M8; M7: the pre-O17 app's cell
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M7
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
-import { AgentSeam } from './support/dashboards';
+import { AgentSeam, refusalOf } from './support/dashboards'; // UX wave U10b: refusalOf
+import { TOOL_ERRORS } from '../src/shared/maws/tools'; // UX wave U10b
 import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
 import { readSealedText } from './support/connector-direct-checks';
 import { expectMockCustody } from './support/connector-direct-oauth';
@@ -158,9 +167,9 @@ import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from 
 import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
 import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
-import { addressed } from './support/address'; // U13a
+import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
 import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
@@ -1798,6 +1807,22 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
 //   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
 //   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
+//   | the artifact store's `meta` key               | (space instructions, both ways): F opens the store    | the return: each Space that still exists has its   |
+//   | `spaceInstructions` (U10b-4), with no         | `ok`, not `readOnly` (`user_version` 4), never reads  | text (a renamed one keeps it, marked); the entry of|
+//   | migration                                     | the key, and keeps it through its rename and delete   | one F deleted is answered for nothing and dropped  |
+//   |                                               | of Spaces                                             | at the next write; a Space F made has none         |
+//   | a stored draft whose pasted chip carries a    | (space instructions, both ways): F's box draws the    | the return: the chip by the same name, in the box  |
+//   | name (U10b-4)                                 | chip by the name stored, and its draft keeps it       | and in the draft F left                            |
+//   | the artifact store (UX wave U10b-2): the key  | (deleted draft, both ways): F's `artifacts.status` is | the return of (deleted draft, both ways): the     |
+//   | `agentDraft:<id>` in `meta` (the mark), an    | `ok`; the draft this build's agent deleted is not in  | delete of the draft F's person typed in is refused |
+//   | agent's delete recorded in it, and a cleared  | F's library; F's person types in the agent's other    | (`why: 'unknown'`); the agent's delete made before |
+//   | `deletedAt`                                   | draft and F's store holds the text                    | the stay is still undone, and the store is `ok`    |
+//   | U6e: `sessions/file-grants.json`, a profile   | (an outside file, both ways), for F and for master at | the return: both files read and savable again, the |
+//   | file the peer does not know; the mark `agent` | U6e's parent pin: the peer draws its Files tree and   | one beside the chat saving once more; the grants   |
+//   | in a Files tab's params; the tab of a chosen  | the main tab's refusal, refuses no value, writes its  | file as this build left it. The mark is written    |
+//   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
+//   |                                               |                                                       | replays; both peers keep a tab's params whole      |
+//   |                                               |                                                       | (U6b-1's row)                                      |
 //   | U6b-2: nothing stored. On the wire,           | (file frame, both ways): on the peer's mawsd this     | the second half: the peer's app on this build's    |
 //   | `files.read`'s `raw` and its answer's         | build's window draws the PDF's row, with the          | unit mawsd draws its row as it always did, Open    |
 //   | `identity` (`src/shared/ipc/schema/files.ts`) | sentence for a service that cannot serve it, and      | externally reaching the seam, nothing refused. A   |
@@ -2277,6 +2302,89 @@ test('(sidebar, both ways) this build hides a session and quits; the peer, which
     expect(again.maws.consoleErrors()).toEqual([]);
     await s.quit(again);
     said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
+});
+
+// ---- UX wave U10b-2: an agent's draft, its delete and its undo, across a stay under the peer ------------------------------
+
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M4 and M5, §C.1, §G; the wave's root,
+// UC-14): an agent's draft carries a mark in the store's `meta` table (`agentDraft:<id>`), which this build keeps with
+// every content row its own sessions write, and which a build from before U10b never reads (its `meta` is read by key
+// only) and never keeps: a content row it appends leaves the mark behind the artifact's newest row. No migration is
+// added, so the peer's store stays `ok`. Its row is in UC-14's coverage table above (U13a's block).
+//   (deleted draft, both ways) this build's agent, a session of the host's agent seam, makes two drafts and deletes the
+//                              second, and quits. The peer opens the profile: its `artifacts.status` is `ok`, its library
+//                              lists the first draft and not the deleted one, and a person types in the first, which
+//                              the peer's store holds. This build opens the profile again: the agent's delete of the
+//                              draft the person typed in is refused with §C.1's sentence (`why: 'unknown'`, the mark
+//                              behind the newest row), the delete made before the stay is still undone, and the store
+//                              is `ok`. Skipped for a peer whose store keeps the mark (its storage.ts names agentDraft).
+const keepsAgentDrafts = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/engine-host/documents/storage.ts'), 'utf8').includes('agentDraft');
+const DRAFTER = 'xb-drafter'; // the agent's session, as the host's seam names it
+const PERSON_TYPED = ' A person added this under the older build.';
+
+test('(deleted draft, both ways) this build’s agent makes two drafts and deletes one; the peer’s store is ok, lists the kept draft alone, and takes a person’s edit there; this build refuses the agent’s delete of the edited draft and still undoes the earlier delete', async () => {
+  const { here, peer } = builds();
+  test.skip(keepsAgentDrafts(peer), `the peer (wire ${wireOf(peer)}) keeps the agent-draft mark (its storage.ts names agentDraft): a build from U10b on, not one that has never heard of it`);
+  await withScratch('xb-deleted-draft', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) drafts and deletes; ${peer.label} (wire ${wireOf(peer)}) opens the profile and a person types; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam, on every launch of the scene
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const statusOf = async (page: Page) => value(await invoke(page, 'artifacts.status', undefined));
+    const listed = async (page: Page) => value(await invoke(page, 'library.list', {})).rows.map((row) => row.id);
+
+    // this build: the agent's two drafts, the second deleted by the agent
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const plan = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this.' })).artifactId;
+    const notes = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft notes', handle: 'draft-notes', content: '# Draft notes\n\nAn agent wrote these.' })).artifactId;
+    expect(await agent.ok(DRAFTER, 'artifact_delete', { artifact: notes })).toEqual({ status: 'deleted', artifactId: notes, kind: 'document', title: 'Draft notes' });
+    expect(value(await invoke(ours.page, 'artifacts.get', { artifactId: notes })).deleted, 'an agent’s delete, which Undo can take back').toEqual({ title: 'Draft notes', kind: 'document', undoable: true });
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  drafted: ${plan} (kept), ${notes} (deleted by the agent)`);
+
+    // the peer: its store ok, the deleted draft not listed, a person's edit in the kept one
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    expect(await statusOf(theirs.page), `${peer.label}'s store after this build wrote: ok, not readOnly (no migration added)`).toMatchObject({ status: 'ok' });
+    await expect.poll(() => listed(theirs.page), { timeout: 20_000, message: `${peer.label}'s library lists the kept draft` }).toContain(plan);
+    expect(await listed(theirs.page), `${peer.label}'s library leaves out the draft the agent deleted`).not.toContain(notes);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 20_000 });
+    const editor = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${plan}"] .ProseMirror[data-editor="live"]`);
+    await expect(editor, `${peer.label} draws the draft`).toContainText('An agent wrote this.', { timeout: 20_000 });
+    // the store's revision, read through the window and no session's tool, so the only content write under the peer is
+    // the person's
+    const revisionOf = async (page: Page) => value(await invoke(page, 'artifacts.get', { artifactId: plan })).artifact?.revision ?? -1;
+    const before = await revisionOf(theirs.page);
+    await editor.click();
+    await theirs.page.keyboard.press('End');
+    await theirs.page.keyboard.type(PERSON_TYPED);
+    await expect.poll(() => revisionOf(theirs.page), { timeout: 20_000, message: `${peer.label}'s store took the person's edit` }).toBeGreaterThan(before);
+    expect(await statusOf(theirs.page), `${peer.label}'s store after its own write`).toMatchObject({ status: 'ok' });
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: status ok, ${notes} not listed, a person's edit in ${plan}`);
+
+    // this build again: the edited draft refused, the earlier delete undone
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const refused = await agent.call(DRAFTER, 'artifact_delete', { artifact: plan });
+    expect(refused.text, 'the delete of a draft a person wrote to under the peer').toContain(TOOL_ERRORS.deleteUnknown('Draft plan'));
+    expect(refusalOf(refused)).toMatchObject({ reason: 'invalid', why: 'unknown' });
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: plan })).artifact?.title, 'the edited draft stays').toBe('Draft plan');
+    expect(JSON.stringify(await agent.ok('xb-reader', 'artifact_read', { artifact: plan })), `the person's edit under ${peer.label}, read here`).toContain(PERSON_TYPED.trim());
+    value(await invoke(again.page, 'artifacts.undelete', { artifactId: notes }));
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: notes })).artifact?.title, 'the agent’s delete made before the stay, undone after it').toBe('Draft notes');
+    await expect.poll(() => listed(again.page), { timeout: 20_000, message: 'the library lists the restored draft' }).toContain(notes);
+    expect(await statusOf(again.page)).toMatchObject({ status: 'ok' });
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the delete of ${plan} refused (${refusalOf(refused).why as string}), ${notes} undeleted`);
     record(said);
   });
 });
@@ -3040,6 +3148,14 @@ const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names D
 // what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
 const STAGE_ROW_MS = 6_000;
 const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+// UX wave U1b: whether a build's request takes its composer's place (its `swapOf`, the docked swap). Both peers, build F
+// and the master build, dock a session's oldest request over the box; from U1b a request is drawn in the transcript and
+// the box is shown beside it, so on such a build a request ahead holds no box and the premise above stands.
+const docksRequests = (build: Build) => {
+  const swap = join(build.root ?? REPO_ROOT, 'src/renderer/src/composer/docked/swap.ts');
+  return existsSync(swap) && readFileSync(swap, 'utf8').includes('export function swapOf');
+};
+const boxHeld = async (build: Build, page: Page, id: AppSessionId) => docksRequests(build) && (await hasRequest(page, id));
 const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
 const STAGE_TAKEN = 'Rename the second fixture once the review is done';
 const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
@@ -3128,7 +3244,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
 
     // the peer: the stage in its box as an ordinary draft, the message still listed
     const old = await launchServed(s, id, peer.root);
-    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(peer, old.page, id), STAGE_PREMISE);
     expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
     const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
     said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
@@ -3139,7 +3255,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
     expect(found, 'this build finds what the peer left').toEqual(left);
     const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
     expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
-    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(here, back.page, id), STAGE_PREMISE);
     await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
     if (stageOf(found) !== null) {
       await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
@@ -3183,7 +3299,8 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
     // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
     // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
-    // the next prompt and no request's card holds either build's box
+    // the next prompt and no request's card holds the box of a build that docks one (`docksRequests`: both peers; this
+    // build, from UX wave U1b, never covers it)
     type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
     let next: Requested | undefined;
     await expect
@@ -3494,6 +3611,452 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
 });
 // The main strip's file tabs among its tab ids (`file:<machine>:<path>`)
 const mainFileIds = (ids: string[]) => ids.filter((tabId) => tabId.startsWith('file:'));
+
+// ---- UX wave U10b-4: a Space's instructions, a key of the artifact store's meta (UC-14) -------------------------------
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M9, §E.1 and §G; the wave's root, UC-14):
+// a Space's instructions are held in the artifact store's `meta` table under one key, `spaceInstructions`
+// (`{ [spaceId]: { text, at } }`), with no migration and no change to the `spaces` table, so a build from before them
+// opens the store writable (its STORE_MIGRATIONS are the same four, `user_version` 4) and never reads the key, which its
+// `meta` reads by key only (`storage.ts`, the same at both older builds). A chat a card starts from such a Space keeps
+// them in its draft as a pasted chip named `Instructions for “<name>”`; a pasted atom's `name` is any string in both
+// older builds (a dropped text file already stores one), and their chip shows a name that is not a numbered one as it is
+// stored (`chipName`). The draft is written as the composer writes it (`prefillToDoc`'s atom, `pastedNode`'s attributes)
+// through the page's own `session.drafts.set`, onto the seeded session both builds file, as the take-back scenes write
+// their stage. Its rows are in UC-14's coverage table above (U13a's block).
+//   (space instructions, both ways) this build makes two Spaces and gives each instructions, keeps the chip's draft on
+//                        the seeded session and draws it, and quits; the stored form is read: the key holds both texts,
+//                        `user_version` is 4. The peer opens the profile: its store is `ok`, not `readOnly`; it renames
+//                        the first Space, deletes the second, makes a third, and draws the chip by the name stored, and
+//                        the key is as this build left it. This build opens the profile again: its store is `ok`, the
+//                        renamed Space's text is answered and marked, the deleted Space's entry is answered for nothing
+//                        and the third Space has none; its next write drops the deleted Space's entry; the chip is
+//                        still named as stored, in the box and in the draft the peer left. Skipped only for a peer whose
+//                        store holds Space instructions itself (its src/engine-host/documents/space-instructions.ts).
+const knowsSpaceInstructions = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/engine-host/documents/space-instructions.ts'));
+const knowsSpaceInstructionsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) holds Space instructions itself (its src/engine-host/documents/space-instructions.ts): a build from U10b-4 on, not one that never reads the key`;
+// One value of the profile's artifact store as the build that wrote it left it, read as `indexed` reads the index
+function storedValue(s: Scratch, sql: string): unknown {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'artifacts', 'store.sqlite'), sql], { encoding: 'utf8' }).trim();
+  const rows = (out === '' ? [] : JSON.parse(out)) as Record<string, unknown>[];
+  return rows.length === 0 ? null : Object.values(rows[0]!)[0] ?? null;
+}
+type StoredInstructions = Record<string, { text: string; at: number }>;
+const storedInstructions = (s: Scratch): StoredInstructions | null => {
+  const raw = storedValue(s, "SELECT value FROM meta WHERE key = 'spaceInstructions'");
+  return raw === null ? null : (JSON.parse(String(raw)) as StoredInstructions);
+};
+const storeVersion = (s: Scratch) => storedValue(s, 'PRAGMA user_version');
+const storedSpaces = (s: Scratch): Record<string, string> => {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'artifacts', 'store.sqlite'), 'SELECT id, name FROM spaces ORDER BY name'], { encoding: 'utf8' }).trim();
+  return Object.fromEntries(((out === '' ? [] : JSON.parse(out)) as { id: string; name: string }[]).map((row) => [row.id, row.name]));
+};
+// The store's status as the window's engine host reports it; null while the host does not answer
+const storeStatus = async (page: Page) => {
+  const answer = await invoke(page, 'artifacts.status', undefined);
+  return answer.ok ? answer.value.status : null;
+};
+const XB_FIRST = 'Field notes';
+const XB_RENAMED = 'Field notes, autumn';
+const XB_SECOND = 'Old trips';
+const XB_THIRD = 'Made there';
+const XB_TEXT = 'Write for ninth graders in plain English.\nName each source by its title.';
+const XB_CHIP = `Instructions for “${XB_FIRST}”`;
+// The draft a card from the first Space leaves: the opening words, then the chip (MakeSomethingNew.tsx's prefill read by
+// recall.ts's `prefillToDoc`: one paragraph, the atom with the prefill's name and its body's lines)
+function chipDraft(): Draft {
+  const body = `Instructions of the Space “${XB_FIRST}”, set by the user in MAWS:\n${XB_TEXT}`;
+  const chip = { type: 'pasted', attrs: { id: 'pasted-xb-instructions', kind: 'text', name: XB_CHIP, lines: body.split('\n').length, text: body } };
+  const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: `Make a document in the Space “${XB_FIRST}”: ` }, chip] }] };
+  return { doc, attachments: [], updatedAt: new Date().toISOString() };
+}
+// The names of the pasted chips a stored draft holds
+const chipNames = (draft: Draft | null): string[] => {
+  const names: string[] = [];
+  const walk = (node: unknown) => {
+    if (node === null || typeof node !== 'object') return;
+    const { type, attrs, content } = node as { type?: string; attrs?: { name?: unknown }; content?: unknown[] };
+    if (type === 'pasted' && typeof attrs?.name === 'string') names.push(attrs.name);
+    for (const child of content ?? []) walk(child);
+  };
+  walk(draft?.doc);
+  return names;
+};
+const chipIn = (page: Page) => composerBox(page).locator('[data-pasted="text"]');
+// A Space's heading line on the library's By Space list (Rows.tsx's GroupHeading, the same markup at both older builds)
+const spaceLine = (page: Page, name: string) => page.locator('[data-library]').getByRole('heading', { level: 2, name, exact: true }).locator('xpath=..');
+
+test('(space instructions, both ways) the instructions this build keeps in the artifact store’s meta are kept by the peer, whose store stays writable, through its rename and delete; back here every Space that still exists has its text, and a chip named for them is drawn by its name on both builds', async () => {
+  test.setTimeout(360_000);
+  const { here, peer } = builds();
+  test.skip(knowsSpaceInstructions(peer), knowsSpaceInstructionsWhy(peer));
+  await withScratch('xb-space-instructions', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) gives two Spaces instructions; ${peer.label} (wire ${wireOf(peer)}) renames one, deletes the other and makes a third; ${here.label} opens the profile again`];
+
+    // this build: two Spaces with instructions, the chip's draft on the seeded session, drawn
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    const session = `session:${await addressed(ours.page, id)}`;
+    expect(await storeStatus(ours.page), `${here.label}'s store is writable`).toBe('ok');
+    const first = value(await invoke(ours.page, 'spaces.create', { name: XB_FIRST })).space.id;
+    const second = value(await invoke(ours.page, 'spaces.create', { name: XB_SECOND })).space.id;
+    value(await invoke(ours.page, 'spaces.setInstructions', { spaceId: first, text: XB_TEXT }));
+    value(await invoke(ours.page, 'spaces.setInstructions', { spaceId: second, text: 'Keep each trip note to one page.' }));
+    const given = value(await invoke(ours.page, 'spaces.instructions', {})).instructions;
+    expect(given.map((entry) => entry.spaceId).sort(), 'both Spaces have instructions here').toEqual([first, second].sort());
+    value(await invoke(ours.page, 'session.drafts.set', { appSessionId: id, draft: chipDraft() }));
+    await showSession(ours.page, id, session);
+    await expect(chipIn(ours.page), `${here.label} draws the chip by its name`).toHaveText(`${XB_CHIP} +3 lines`, { timeout: 20_000, useInnerText: true });
+    const wrote = storedInstructions(s);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd and an engine host of its own build
+
+    // the stored form as this build left it: the key holds both texts, the store's version is still 4
+    expect(storedInstructions(s), 'the key as this build quit').toEqual(wrote);
+    expect(Object.keys(wrote ?? {}).sort(), 'the key holds both Spaces’ instructions').toEqual([first, second].sort());
+    expect(wrote![first]!.text).toBe(XB_TEXT);
+    expect(storeVersion(s), 'no migration: the store’s user_version is 4').toBe(4);
+    said.push(`  ${here.label}: spaceInstructions holds ${JSON.stringify(Object.keys(wrote!))}; user_version 4; the chip drawn as “${XB_CHIP}”`);
+
+    // the peer: its store writable, the Spaces renamed, deleted and made there, the key kept, the chip drawn by its name
+    const theirs = await s.launch({}, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await expect.poll(() => storeStatus(theirs.page), { timeout: 30_000, message: `${peer.label} opens the store this build wrote as ok, not readOnly: no migration was added` }).toBe('ok');
+    value(await invoke(theirs.page, 'spaces.update', { spaceId: first, name: XB_RENAMED }));
+    value(await invoke(theirs.page, 'spaces.delete', { spaceId: second }));
+    const third = value(await invoke(theirs.page, 'spaces.create', { name: XB_THIRD })).space.id;
+    await expect.poll(() => storedSpaces(s), { message: `${peer.label} wrote its acts on the Spaces` }).toEqual({ [first]: XB_RENAMED, [third]: XB_THIRD });
+    expect(storedInstructions(s), `${peer.label} neither read nor changed the key`).toEqual(wrote);
+    await showSession(theirs.page, id, session);
+    await expect(chipIn(theirs.page), `${peer.label} draws the chip by the name stored`).toContainText(XB_CHIP, { timeout: 20_000 });
+    await mainTabById(theirs.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(theirs.page, session), 'the session’s tab closed').toHaveCount(0);
+    await theirs.page.waitForTimeout(1_000); // past the draft writer's 750 ms: whatever the unmount writes is written
+    const left = await storedDraft(theirs.page, id);
+    expect(chipNames(left), `the draft ${peer.label} left names the chip as stored`).toEqual([XB_CHIP]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    expect(storedInstructions(s), `the key as ${peer.label} quit`).toEqual(wrote);
+    expect(storeVersion(s), `user_version after ${peer.label}'s writes`).toBe(4);
+    said.push(`  ${peer.label}: the store ok; ${XB_FIRST} renamed, ${XB_SECOND} deleted, ${XB_THIRD} made; the key kept; the chip drawn as stored`);
+
+    // this build again: the text of every Space that still exists, marked; the deleted Space's entry dropped at the next
+    // write; the chip still named as stored
+    const back = await s.launch();
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    expect(await storeStatus(back.page), `${here.label}'s store is writable after ${peer.label}'s stay`).toBe('ok');
+    expect(value(await invoke(back.page, 'spaces.instructions', {})).instructions, 'the renamed Space’s text, with its stamp; nothing for the deleted Space or the one made there').toEqual([
+      { spaceId: first, text: XB_TEXT, at: wrote![first]!.at },
+    ]);
+    await openAppDestination(back.page, 'Artifacts');
+    await back.page.locator('[data-library]').getByRole('radio', { name: 'By Space' }).click();
+    await expect(spaceLine(back.page, XB_RENAMED).getByRole('button', { name: 'Instructions', exact: true }), 'the renamed Space is marked').toBeVisible({ timeout: 20_000 });
+    await expect(spaceLine(back.page, XB_THIRD), 'the Space the peer made is listed').toBeVisible();
+    await expect(spaceLine(back.page, XB_THIRD).getByRole('button', { name: 'Instructions', exact: true }), 'and has no instructions').toHaveCount(0);
+    value(await invoke(back.page, 'spaces.setInstructions', { spaceId: first, text: `${XB_TEXT}\nEnd with one question.` }));
+    await expect.poll(() => Object.keys(storedInstructions(s) ?? {}), { message: 'this build’s write dropped the deleted Space’s entry' }).toEqual([first]);
+    expect(storeVersion(s)).toBe(4);
+    await showSession(back.page, id, session);
+    await expect(chipIn(back.page), `${here.label} draws the chip by the name stored, in the draft the peer left`).toHaveText(`${XB_CHIP} +3 lines`, { timeout: 20_000, useInnerText: true });
+    expect(chipNames(await storedDraft(back.page, id))).toEqual([XB_CHIP]);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: the store ok; ${XB_RENAMED}'s text answered and marked, nothing for ${XB_SECOND} or ${XB_THIRD}; the next write kept ${XB_RENAMED}'s entry alone; the chip drawn as stored`);
+    record(said);
+  });
+});
+
+// ---- UX wave U6e: a file from outside the session's folders, the two older builds (UC-14) ------------------------------
+// U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
+// build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
+// Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
+// `file` tab of U6b-1's shape. Its two peers are build F (`f1852de3a`) and master at its parent pin (`2c7044231`), told
+// apart by the peer's checked-out commit (the gate's peer is a worktree at it, .github/scripts/gate-peer.sh); each scene
+// skips, saying so, for a peer that is neither, and the runs of record are `--peer-exact f1852de3a` and `--peer-exact
+// 2c7044231`.
+//   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
+//                                         File… (the pick seam), saves one beside the chat and moves the other to the
+//                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
+//                                         could not show before (its Files surface with its tree; the main tab its
+//                                         refusal, since neither older daemon knows a grant), refuses no layout value,
+//                                         pins that tab so that it writes, and quits; the grants file's bytes are what
+//                                         they were; this build reads both files again, and the one beside the chat
+//                                         saves once more.
+//   (outside file, on the peer's daemon)  the peer's `mawsd` runs as the profile's unit, so this build's app is held on
+//                                         it (a private daemon of another build is restarted at the first status read);
+//                                         a file outside the folders the transcript links shows the peer's answer: F's
+//                                         daemon drops `named` and refuses it, master's answers `named` with no `outside`
+//                                         and the page holds it read-only; Open File… says it could not open the file and
+//                                         opens nothing, since neither knows `files.grant`; `files.writeOutside` through
+//                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
+// The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
+// (test/cross-build/files-schema.test.ts), as §A says.
+const U6E_PEERS = { f1852de3a: 'build F', '2c7044231': 'master at U6e’s parent pin' } as const;
+type U6ePeer = keyof typeof U6E_PEERS;
+function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
+  let head = '';
+  try {
+    head = execFileSync('git', ['-C', peer.root ?? REPO_ROOT, 'rev-parse', 'HEAD'], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
+  } catch {
+    // no commit to read: neither peer can be told
+  }
+  const which = (Object.keys(U6E_PEERS) as U6ePeer[]).find((sha) => head.startsWith(sha)) ?? null;
+  return { which, why: `the peer (wire ${wireOf(peer)}) is at ${head || 'a commit git cannot read'}: U6e's cross-build scenes are written for f1852de3a and 2c7044231 (--peer-exact)` };
+}
+const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
+const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
+// An agent's row that links `text`'s paths, appended to the session's transcript (U6c's form: the agent's own text)
+function appendReply(path: string, sid: string, cwd: string, text: string): void {
+  const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const message = { id: `msg_${randomUUID().slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } };
+  appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, type: 'assistant', message, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, sessionId: sid, version: '2.1.283' })}\n`);
+}
+// File › Open File… with the pick seam set to `path` (read at each pick); answers the file's viewer beside the chat
+async function chooseFile(run: Run, path: string): Promise<Locator> {
+  await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), path);
+  await menu(run.maws.app, 'file.open');
+  const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
+  await expect(viewer, `${basename(path)} chosen and beside the chat`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+  return viewer;
+}
+// The person types `text` at the document's end and saves with File › Save file; the file on disk then holds it
+async function typeAndSave(run: Run, viewer: Locator, path: string, text: string): Promise<void> {
+  const before = readFileSync(path, 'utf8');
+  await viewer.locator('.cm-content').click();
+  await run.page.keyboard.press('Meta+End');
+  await run.page.keyboard.type(text);
+  await expect(viewer).toHaveAttribute('data-dirty', 'true');
+  expect(readFileSync(path, 'utf8'), 'nothing written before Save').toBe(before);
+  await menu(run.maws.app, 'file.save');
+  await expect.poll(() => readFileSync(path, 'utf8'), { timeout: 20_000, message: `${basename(path)} saved` }).toBe(`${before}${text}`);
+  await expect(viewer).toHaveAttribute('data-dirty', 'false');
+}
+const grantsOf = (s: Scratch) => join(s.userData, 'sessions', 'file-grants.json');
+
+test('(an outside file, both ways) two files this build chose with Open File…, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the grants file as it was; this build reads both again and saves', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.setTimeout(300_000);
+  await withScratch('xb-u6e-both', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) chooses two files outside the session's folders; ${peer.label} (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}) reads the profile`];
+    const outside = join(s.root, 'outside'); // beside the repository and the profile, under neither
+    mkdirSync(outside);
+    const [beside, inMain] = [join(outside, 'beside.txt'), join(outside, 'in-main.txt')];
+    for (const path of [beside, inMain]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+
+    // this build: both chosen; the first edited and saved beside the chat, the second moved to the main area
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const machine = await localRef(run.page);
+    const mainTabId = `file:${machine}:${inMain}`;
+    await showSession(run.page, id, `session:${address}`);
+    const besideViewer = await chooseFile(run, beside);
+    await typeAndSave(run, besideViewer, beside, 'Saved by this build.');
+    const movedViewer = await chooseFile(run, inMain);
+    await movedViewer.locator('[data-move-to-main]').click();
+    await expect(mainTabById(run.page, mainTabId), 'the second chosen file a main tab, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect.poll(() => (existsSync(grantsOf(s)) ? Object.values((JSON.parse(readFileSync(grantsOf(s), 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions).flat().map((grant) => grant.real).sort() : []), { timeout: 20_000, message: 'the two choices recorded in the profile' }).toEqual([beside, inMain].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const grants = readFileSync(grantsOf(s));
+    const saved = readFileSync(beside, 'utf8');
+    said.push(`  ${here.label}: ${basename(beside)} saved beside the chat, ${basename(inMain)} a main tab; ${grants.length} bytes of grants`);
+
+    // the peer: the main tab its refusal (no older daemon knows a grant, and no transcript links the file), pinned so that
+    // it writes; under the session, its Files surface with its tree and no viewer of the file beside the chat
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await mainTabById(old.page, mainTabId).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"] [data-refusal]`), `${peer.label} refuses the chosen file it cannot know`).toContainText(FILES_REFUSED, { timeout: 20_000 });
+    await pinTab(old.page, mainTabId);
+    await expect.poll(() => pinnedIn((layoutJson(s)['main.tabs'] ?? null) as StoredSets | null), { timeout: 20_000, message: `${peer.label} writes main.tabs with its pin` }).toContain(mainTabId);
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await expect(toolBody(old.page, 'Files').getByRole('treeitem').first(), `${peer.label}'s Files surface draws its tree`).toBeVisible({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-file-viewer][data-path="${beside}"]`), `${peer.label} draws no file beside the chat`).toHaveCount(0);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(readFileSync(grantsOf(s)), `${peer.label} left the grants file as it was`).toEqual(grants);
+    expect([readFileSync(beside, 'utf8'), readFileSync(inMain, 'utf8')], `${peer.label} wrote neither file`).toEqual([saved, OUTSIDE_TEXT(basename(inMain))]);
+    said.push(`  ${peer.label}: ${basename(inMain)} refused in its main tab and pinned, its Files tree under the session, nothing refused; the grants file untouched`);
+
+    // this build again: the main tab reads the file, savable; the one beside the chat shows the saved text and saves again
+    const back = await s.launch();
+    await s.ready(back.page);
+    await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
+    const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
+    await expect(backMain, 'the main tab of the chosen file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await showSession(back.page, id, `session:${address}`);
+    await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
+    const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
+    await expect(backBeside.locator('.cm-content'), 'the saved text, beside the chat').toContainText('Saved by this build.', { timeout: 20_000 });
+    await typeAndSave(back, backBeside, beside, ' And once more after the peer.');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${basename(inMain)} savable in its main tab; ${basename(beside)} saved once more`);
+    record(said);
+  });
+});
+
+test('(outside file, on the peer’s daemon) this build’s app on the peer’s unit mawsd: a linked file outside the folders shows that daemon’s answer, Open File… says it could not open the file and opens nothing, and files.writeOutside answers unknown_command with the bytes unchanged', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u6e-unit', async (s) => {
+    const outside = join(s.root, 'outside');
+    mkdirSync(outside);
+    const [linked, chosen] = [join(outside, 'linked.txt'), join(outside, 'chosen.txt')];
+    for (const path of [linked, chosen]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}).`);
+    await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const id = await s.record(run.page);
+      await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+
+      // the link, clicked: the peer's daemon decides what the page may show
+      const chip = run.page.locator(`[data-region="main"] [data-chip="path"][title="${linked}"]`);
+      await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
+      await chip.click();
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
+      if (known.which === 'f1852de3a') {
+        await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
+      } else {
+        await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
+        await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();
+        await expect(viewer).toHaveAttribute('data-editable', 'false');
+        await expect(viewer.locator('.cm-content')).toHaveAttribute('title', 'Read-only: the file is outside the folders this session works in');
+      }
+
+      // Open File…: the grant is a command neither older daemon knows, so main answers refused and the page says so
+      await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), chosen);
+      await menu(run.maws.app, 'file.open');
+      await expect(run.page.locator('[data-toast-viewport]').getByText('MAWS could not open the file just now. Try Open File again in a moment.'), 'Open File… says it could not open the file').toBeVisible({ timeout: 20_000 });
+      await expect(run.page.locator(`[data-file-viewer][data-path="${chosen}"]`), 'and opens nothing').toHaveCount(0);
+      expect(existsSync(grantsOf(s)), 'nothing granted').toBe(false);
+
+      // the outside save through the page's bridge: a command the peer's daemon does not know, so nothing is written
+      const answer = await invoke(run.page, 'files.writeOutside', { appSessionId: id, path: linked, real: linked, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(linked)).digest('hex') });
+      expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+      expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the link: ${known.which === 'f1852de3a' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+// ---- UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6): a command's output -----
+// The engine writes a slash command's output as an assistant frame with `local_command_source` and, from 2.1.322, the
+// run it made (`local_command_run`); a build from U3 on maps it to the person's line of class `command` (its
+// normalizer's `commandOutput`), and U3b's event carries the run in a `command` entry. A build before U3 (build F) draws
+// it as the model's answer. Whichever build's engine host reads the frames makes the window's events: at a handover (both
+// builds list `host.holder`) the attacher's host adopts the session and folds the whole journal itself, so the entry is
+// never sent across the builds on one profile; without one the keeper's host serves the other build's app. The scene
+// keeps a session whose journal holds a `/rename` and its output (u3-commands-r1, seq 198 to 208, inside C3's permission
+// round trip), crosses each way and reads the row the attacher's window draws: one row of the output, of the kind that
+// host's build makes, drawn by the attacher's build (U3b's light line, or the earlier "Command output" card), nothing
+// refused and no gap. Where both builds hand over (this tree, build G and build F all list `host.holder`), the window's
+// build is the reading build, so this build's entry never reaches an older window here: what an older reader does with it
+// is held by acceptance 14's unit cases (src/shared/graph/arrival-builds.test.ts). The recorded rows are the probe's own,
+// with the scene's name for the session in place of the recorded one.
+const COMMAND_ROWS = { fixture: 'spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.jsonl', from: 198, to: 208, named: 'uxw renamed' };
+const COMMAND = '/rename crossing check';
+const COMMAND_OUTPUT = 'Session renamed to: crossing check';
+const sourceHas = (build: Build, file: string, text: string) => {
+  const path = join(build.root ?? REPO_ROOT, file);
+  return existsSync(path) && readFileSync(path, 'utf8').includes(text);
+};
+// What the peer knows, read from its source; this build's side is pinned, not read: its host reads the frame as a
+// command's output and its window draws U3b's light line, so losing either fails the scene rather than changing it
+const readsCommandOutput = (build: Build) => build.root === undefined || sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
+const drawsLightLine = (build: Build) => build.root === undefined || sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
+const takesStubEngine = (build: Build) => sourceHas(build, 'src/engine-host/binary-info.ts', 'MAWS_E2E_ENGINE_BIN');
+
+// C3's permission round trip with the recorded `/rename` turn ahead of its prompt, written into the scratch: the rows
+// carry the round trip's session id and its init (the recorded turn's own init names the probe's folder), the name is
+// the scene's, and the seqs run on. The stub holds at the command's `out` row until the app sends a user frame, plays the
+// command's rows, then holds at the prompt.
+function commandJournal(dir: string): string {
+  const read = (fixture: string) => readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow);
+  const rows = read(PERMISSION);
+  const init = rows.find((r) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init')!;
+  const sessionId = init.frame.session_id as string;
+  const recorded = read(COMMAND_ROWS.fixture).filter((r) => r.seq >= COMMAND_ROWS.from && r.seq <= COMMAND_ROWS.to && r.direction !== 'meta');
+  const recordedId = recorded.find((r) => typeof r.frame.session_id === 'string')!.frame.session_id as string;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const command = recorded.map((r) =>
+    r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init'
+      ? { ...init, at: rows[prompt]!.at }
+      : ({ ...JSON.parse(JSON.stringify(r).replaceAll(recordedId, sessionId).replaceAll(COMMAND_ROWS.named, COMMAND.slice('/rename '.length))), at: rows[prompt]!.at } as JournalRow),
+  );
+  const path = join(dir, 'command-output.jsonl');
+  writeFileSync(path, [...rows.slice(0, prompt), ...command, ...rows.slice(prompt)].map((r, i) => JSON.stringify({ ...r, seq: i + 1 })).join('\n') + '\n');
+  return path;
+}
+
+test('(a command’s output, both ways) a session kept with a slash command’s output in its journal shows the output once in the other build’s window, as the row the reading build makes', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  for (const [keeper, attacher] of [[here, peer], [peer, here]] as const) {
+    await withScratch(`xb-command-${keeper === here ? 'here' : 'peer'}`, async (s) => {
+      const handover = holds(keeper) && holds(attacher);
+      const reader = handover ? attacher : keeper; // the build whose engine host reads the frames
+      const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)}) keeps a session whose turn ran ${COMMAND}; ${attacher.label} (wire ${wireOf(attacher)}) shows it; ${reader.label}'s engine host reads the frames${handover ? ' (the handover)' : ''}`];
+      const stub = s.useStub({ rowMs: Number(ROW_MS) });
+
+      // the keeper: the command's turn played to its end, then the app quits and the session is kept
+      const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, keeper.root);
+      await s.ready(first.page);
+      const id = await s.record(first.page);
+      const input = fitTo(commandOf(keeper, 'session.launch')!.input, { spec: stubSpec(stub, id, commandJournal(s.root), { cwd: s.repo }) });
+      expect(value(await invoke(first.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+      await expect.poll(async () => (await statusOf(first.page, id)).process, { timeout: 30_000 }).toBe('ready');
+      value(await invoke(first.page, 'session.send', { appSessionId: id, content: COMMAND }));
+      await expect.poll(async () => JSON.stringify(await eventsOf(first.page, id)).includes(COMMAND_OUTPUT), { timeout: 60_000, message: 'the output reached the keeper’s events' }).toBe(true);
+      await turnEnded(first.page, id);
+      expect(first.maws.consoleErrors()).toEqual([]);
+      await s.quit(first);
+
+      // the attacher: served the kept session, its window shows the output once
+      const second = await launchServed(s, id, attacher.root);
+      await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+      const transcript = second.page.locator('[data-region="main"] [data-transcript-scroller]');
+      const row = transcript.locator('.transcript-row[data-kind]').filter({ hasText: COMMAND_OUTPUT });
+      await expect(row, 'one row of the output').toHaveCount(1, { timeout: 20_000 });
+      const kind = await row.getAttribute('data-kind');
+      if (readsCommandOutput(reader)) {
+        expect(kind, `${reader.label} reads the frame as a command’s output`).toBe('local_command');
+        if (drawsLightLine(attacher)) await expect(row.locator('.transcript-command-output'), `${attacher.label} draws the light line`).toHaveText(COMMAND_OUTPUT);
+        else await expect(row, `${attacher.label} draws its card`).toContainText('Command output');
+      } else expect(kind, `${reader.label} reads the frame as the model’s answer`).toBe('assistant_text');
+      await expect(transcript.locator('.transcript-row[data-kind="gap"]'), 'no gap').toHaveCount(0);
+      expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing`).toEqual([]);
+      expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+      const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+      said.push(`  ${attacher.label}'s window: one ${kind} row${kind === 'local_command' ? (drawsLightLine(attacher) ? ', the light line' : ', the "Command output" card') : ''}`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+      expect(second.maws.consoleErrors()).toEqual([]);
+      await s.quit(second);
+      record(said);
+    });
+  }
+});
 
 // ---- UX wave U6b-2: a file frame across builds (UC-14; B13) -----------------------------------------------------------
 // U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B, M6 decision 3) stores nothing and

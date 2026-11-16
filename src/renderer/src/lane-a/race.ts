@@ -90,26 +90,7 @@ export function useRace(item: Pick<AttentionItem, 'appSessionId' | 'request'>): 
   return raceOf(state, told, requestId, now);
 }
 
-// P5 O9 M6 (the owner's Q3): a docked request its terminal (or another client) answered first stays docked SETTLED_MS,
-// its card saying how the race ended, then leaves; one this app answered, or one another request replaces, leaves at
-// once.
+// P5 O9 M6 (the owner's Q3): a request its terminal (or another client) answered first says so for SETTLED_MS where it
+// stood; one this app answered, or one another request replaces, leaves at once. UX wave U1b: the card's follower holds
+// it in the attention store (`request-card/receipts.ts`, `followSettling`), since the end row leaves with its last request.
 export const SETTLED_MS = 3_000;
-export function useSettling(docked: AttentionItem | null): AttentionItem | null {
-  const [shown, setShown] = useState<{ item: AttentionItem | null; settled: boolean }>({ item: docked, settled: false });
-  const last = shown.item;
-  const away = useLaneA((s) => {
-    if (last === null) return false;
-    const { appSessionId } = last;
-    const { requestId } = last.request;
-    const where = raceOf(s.states.get(appSessionId) ?? null, requestId === null ? null : (s.told.get(appSessionId)?.get(requestId) ?? null), requestId, 0).settled?.where;
-    return where !== undefined && where !== 'maws';
-  });
-  if (docked !== null && (last !== docked || shown.settled)) setShown({ item: docked, settled: false });
-  else if (docked === null && last !== null && !shown.settled) setShown({ item: away ? last : null, settled: away });
-  useEffect(() => {
-    if (!shown.settled) return;
-    const timer = setTimeout(() => setShown({ item: null, settled: false }), SETTLED_MS);
-    return () => clearTimeout(timer);
-  }, [shown]);
-  return docked ?? (shown.settled ? shown.item : null);
-}

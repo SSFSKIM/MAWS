@@ -26,10 +26,15 @@ import { useWorkingFolder } from '../../sessions/working-folder';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
+import { isAddress, machineOf } from '@shared/machine/address'; // UX wave U2b
+import type { OwnerChannelState } from '@shared/owner/state'; // UX wave U2b
+import { ipc } from '../../ipc/client'; // UX wave U2b
 import { useOwnerChannel } from '../../stores/owner-channel'; // P2-C
+import { useSettings } from '../../stores/settings'; // UX wave U2b
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
+import { useCompactingSince } from '../../stores/compacting'; // UX wave U3b (M4)
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
@@ -45,6 +50,21 @@ import { storeKeyOf, Transcript } from './Transcript';
 // the chunk every local transcript loads.
 const RemoteTranscriptSlot = lazy(() => import('../../lane-a/view/RemoteTranscriptSlot').then((module) => ({ default: module.RemoteTranscriptSlot })));
 const RemoteAgentTranscript = lazy(() => import('../../lane-a/view/RemoteAgentTranscript').then((module) => ({ default: module.RemoteAgentTranscript }))); // 2026-11-06
+
+// UX wave U2b (M2; card 4, "This app's switch"): the lane the to-human view follows, from one of three sources: the
+// session's owner channel when it answers; for a session on another machine, whose channel cannot be read over the
+// machine link, this app's own switch (`mods.toHuman.enabled`); else off. A child's transcript has none.
+export function viewLaneOf(owner: Pick<OwnerChannelState, 'lane'> | null, elsewhere: boolean, appSwitch: boolean): boolean {
+  if (owner !== null) return owner.lane.on;
+  return elsewhere && appSwitch;
+}
+
+export function useViewLane(appSessionId: AppSessionId | null): boolean {
+  const owner = useOwnerChannel(appSessionId);
+  const appSwitch = useSettings((s) => s.state?.settings.mods.toHuman.enabled ?? false);
+  const elsewhere = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
+  return appSessionId !== null && viewLaneOf(owner, elsewhere, appSwitch);
+}
 
 export interface TranscriptSlotProps {
   appSessionId: AppSessionId;
@@ -129,8 +149,9 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const tail = useMemo(() => [...streaming.tail, ...(waiting === 'stacked' ? [] : held.filter((_, i) => !answered[i]).map(heldRow))], [streaming.tail, held, answered, waiting]); // UX wave U4a: a stack draws the held ones
   const withdrawn = useMemo(() => new Set<string>(queue.withdrawn), [queue.withdrawn]);
   const effort = useShownEffort(appSessionId);
-  const ownerLane = useOwnerChannel(agentId === undefined ? appSessionId : null)?.lane.on ?? false; // P2-C: a session's, never a child's
+  const ownerLane = useViewLane(agentId === undefined ? appSessionId : null); // P2-C: a session's, never a child's; UX wave U2b: its three sources
   const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
+  const compacting = useCompactingSince(agentId === undefined ? appSessionId : null); // UX wave U3b (M4): a session's, never a child's
   return (
     <Transcript
       source={source}
@@ -151,6 +172,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       placed={streaming.kept}
       promptAuthor={promptAuthor}
       waiting={waiting}
+      compacting={compacting}
     />
   );
 }
