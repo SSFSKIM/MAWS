@@ -932,7 +932,14 @@ At landing the architect updates the register's rows and closes ticket 586 throu
   - the guard's thresholds pinned by its test;
   - a remounted draft's focus pinned by its test;
   - the digit keys' tracker row.
-  Rationale: the chain-merge brief; the architect's message of 2026-11-15.
+  The whole suite at `6cd649c1b` (1526 s): 48 failed in 12 files.
+  - Three of the twelve are the merge's semantic meeting of U1b's answer row with U2b's R13, fixed in `e979522b5`:
+    - `lane-a/source/ask-answer.test.ts`: the to-human view now states an asynchronous answer once, on the question's row, so the report keeps no line.
+    - `owner/view/mirror.test.ts`: R13's "row carries no answers" case stands on an answer for a question the session does not hold, since U1b joins a held question's delivery to its row.
+    - `composer/Composer.test.tsx` (compiled): passes alone.
+  - The others are master's list (`hub-reads`, `production-scripts`, `staging-scripts`, `setup`, `git-reads`, `portability`) or load that passes alone (`org/rows`, `detached-transport`, `Sidebar`).
+  - The chain link then moved: `b0852ea0b` (U2b's late fix: one CSS rule, one assertion), merged conflict-free as `3a19964fd`. Wire 51, link 1.15.
+  Rationale: the chain-merge brief; the architect's messages of 2026-11-15.
   Date/Author: 2026-11-15, the controller.
 
 ## Outcomes & Retrospective
