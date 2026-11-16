@@ -426,7 +426,7 @@ test('a double-click on a single-choice option that completes the Question sheet
 
 // ---- G4: an async ask -----------------------------------------------------------------------------------------------
 
-test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2), Submit sends the recorded steer and retires the item, and the capsule turns answered across the second turn', async () => {
+test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2), Submit sends the steer by the question’s number with no words of the model’s and retires the item, and the capsule turns answered across the second turn', async () => {
   await scene({ titles: ['E1 tools: async ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -451,13 +451,26 @@ test('an async ask: acknowledged at once, an async_input item while it waits (P2
     await clearToasts(s.page);
     await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
 
-    // the steer written is the recorded one, word for word, at priority next
+    // the steer written at priority next opens as the recorded one does and then, board ticket 711, holds no text the
+    // model wrote: the question by its number, the label picked as a JSON string, the block's question empty (the
+    // recording, an earlier build's, has the question's words on its line and in its block)
     const recorded = fixtureRows(ASK_ASYNC).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && (r.frame as Frame).priority === 'next')!.frame as { message: { content: string } };
     let steer: Frame | undefined;
     await expect
       .poll(() => (steer = s.journal(id).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && (r.frame as Frame).priority === 'next')?.frame as Frame | undefined) !== undefined, { timeout: 20_000 })
       .toBe(true);
-    expect((steer!.message as { content: string }).content).toBe(recorded.message.content);
+    const content = (steer!.message as { content: string }).content;
+    expect(content.split('\n')[0]).toBe(recorded.message.content.split('\n')[0].replace(/^\[MAWS ask \S+\]/, `[MAWS ask ${opened!.askId}]`));
+    expect(content).toBe(
+      [
+        `[MAWS ask ${opened!.askId}] The user answered the questions you asked:`,
+        '1. "Yes"',
+        '```json',
+        JSON.stringify({ status: 'answered', askId: opened!.askId, answers: [{ id: 'q1', question: '', status: 'answered', value: ['Yes'] }] }, null, 2),
+        '```',
+      ].join('\n'),
+    );
+    expect(content).not.toContain('Proceed?');
     expect(metaEvents(s.journal(id))).toContain('maws_ask_answered');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect.poll(items).toEqual([]); // P2-C2: retired at the committed answer
@@ -600,11 +613,13 @@ test('notes: an async ask answered with a note beside one answer and a skip with
       .poll(() => (steer = s.journal(id).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && (r.frame as Frame).priority === 'next')?.frame as Frame | undefined) !== undefined, { timeout: 20_000 })
       .toBe(true);
     const content = (steer!.message as { content: string }).content;
-    expect(content).toContain('1. Proceed? — Yes\n   note: "Only after the tests pass"\n2. Which branch name? — skipped\n   note: "Pick one when you open the PR"\n```json\n');
+    // board ticket 711: each question by its number, no words of the model's on the lines or in the block
+    expect(content).toContain('1. "Yes"\n   note: "Only after the tests pass"\n2. skipped\n   note: "Pick one when you open the PR"\n```json\n');
     expect(parseAskSteer(content)?.result.answers).toEqual([
-      { id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'], note: 'Only after the tests pass' },
-      { id: 'q2', question: 'Which branch name?', status: 'skipped', note: 'Pick one when you open the PR' },
+      { id: 'q1', question: '', status: 'answered', value: ['Yes'], note: 'Only after the tests pass' },
+      { id: 'q2', question: '', status: 'skipped', note: 'Pick one when you open the PR' },
     ]);
+    for (const words of ['Proceed?', 'Which branch name?']) expect(content).not.toContain(words);
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await idle(s, id);

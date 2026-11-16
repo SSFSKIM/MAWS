@@ -119,6 +119,8 @@
 // (sidebar, both ways), and its rows are in the same table.
 // UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
+// Board ticket 711: (envelope, to the peer) and (envelope, from the peer), an async ask's answer envelope one build's host
+// writes and the other build's window reads; their block is at the end of this file, and their row is in the same table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -163,7 +165,7 @@ import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a:
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, firstPrompt /* board ticket 711 */, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
@@ -1788,6 +1790,9 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
 //   |                                               | build finds                                           | standing beside the message, each said             |
+//   | an async ask's answer envelope (board ticket  | (envelope, to the peer): F draws the answer on its    | (envelope, from the peer): this build draws the    |
+//   | 711): the user message the host writes, kept  | question's row, whole, and never the envelope as raw  | answer of the form F writes the same way           |
+//   | in the session's journal and transcript       | text                                                  |                                                    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3204,6 +3209,127 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     expect(back.maws.consoleErrors()).toEqual([]);
     await s.quit(back);
     said.push(`  ${here.label} again: ${outcome}`);
+    record(said);
+  });
+});
+
+// ---- Board ticket 711: an async ask's answer envelope, read across the two builds -----------------------------------
+// The answer to an asynchronous `mcp__maws__ask` reaches the engine as a user-role message, its envelope
+// (src/shared/maws/ask.ts, askSteerText), which the session's journal and the engine's transcript keep and every build
+// that opens the session reads (parseAskSteer: the transcript's capsule and bubbles, the queue's row, the arrivals
+// reader). From this landing it holds no text the model wrote: each question by its number, the answers as JSON
+// strings, the block's `question` empty and each answer's `id` kept (the capsule joins an answer to its question by
+// it). The builds before it write the question's words on its line and in its block. Both scenes play the recorded
+// async ask (pass3/p1-maws-ask-async) on the stub engine under a session host, answer it through `maws.ask.answer` as
+// the Question sheet does, and quit with the session kept; the other build opens the session.
+//   (envelope, to the peer)    this build's host writes the new form; the peer draws the answer on the question's row,
+//                              whole, and no "[MAWS ask" text in the session's transcript.
+//   (envelope, from the peer)  the peer's host writes its form; this build draws it the same. Run only with a peer that
+//                              writes the earlier form (its ask.ts keeps the question's words in the block); skipped
+//                              otherwise, saying so.
+// On this route the capsule may take its answers from the host's `maws.ask.answered` event, which wins over the steer
+// (derive.ts, askRow); the envelope is read all the same, since only a reader that parsed it draws it as no bubble. The
+// steer as the answers' only source (a session read from the engine's transcript alone) is held by the unit tests
+// (src/renderer/src/transcript/model/maws.test.ts). Its row is in UC-14's coverage table (U13a's block).
+const ASK_ASYNC_FIXTURE = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const ENVELOPE_ANSWERS = [{ id: 'q1', question: 'Proceed?', status: 'answered' as const, value: ['Yes'] }]; // as the sheet sends them
+const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes("question: '' }))");
+const writesNewEnvelopeWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) writes the envelope this build writes (its src/shared/maws/ask.ts empties the block's question): no earlier form to read; the run of record is the merge-base peer's or build F's, --peer-exact f1852de3a`;
+
+// The envelope the session's host wrote for the ask: the `user` frame it sent opening with the ask's tag
+function envelopeIn(s: Scratch, id: AppSessionId, askId: string): string | null {
+  for (const row of s.journal(id)) {
+    const content = row.direction === 'out' && row.frame.type === 'user' ? (row.frame.message as { content?: unknown } | undefined)?.content : undefined;
+    if (typeof content === 'string' && content.startsWith(`[MAWS ask ${askId}] `)) return content;
+  }
+  return null;
+}
+
+// The recorded async ask played and answered on `page`'s build: the prompt, the ask's call allowed, the ask answered as
+// the Question sheet answers it, the envelope that build's host wrote, and both main turns ended (the reply the
+// second's)
+async function answerAsyncAsk(page: Page, s: Scratch, id: AppSessionId): Promise<{ askId: string; envelope: string }> {
+  value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt(ASK_ASYNC_FIXTURE) }));
+  const requested = await untilRequested(page, id);
+  value(await invoke(page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  type Opened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+  let opened: Opened | undefined;
+  await expect.poll(async () => (opened = (await eventsOf(page, id)).find((e): e is Opened => e.kind === 'maws.ask.opened')), { timeout: 60_000, message: 'the ask opened' }).toBeDefined();
+  expect(opened!.blocking, 'the recorded ask does not wait').toBe(false);
+  value(await invoke(page, 'maws.ask.answer', { appSessionId: id, askId: opened!.askId, answers: ENVELOPE_ANSWERS }));
+  let envelope: string | null = null;
+  await expect.poll(() => (envelope = envelopeIn(s, id, opened!.askId)), { timeout: 60_000, message: 'the host wrote the answer’s envelope' }).not.toBeNull();
+  type Ended = Extract<SessionEvent, { kind: 'turn.ended' }>;
+  await expect
+    .poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).filter((e): e is Ended => e.kind === 'turn.ended' && e.parentToolUseId === null && !e.isEchoReceipt).length >= 2, { timeout: 90_000, message: 'both main turns ended, the reply the second’s' })
+    .toBe(true);
+  return { askId: opened!.askId, envelope: envelope! };
+}
+
+// The session as `run`'s window draws it: its tab shown, the ask's capsule answered with "Proceed?" → "Yes" on its one
+// question's row, and no "[MAWS ask" text in its transcript (an envelope no reader parsed would be a bubble of it)
+async function drawsAnswered(run: Run, id: AppSessionId, askId: string): Promise<void> {
+  await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+  const main = run.page.locator('[data-region="main"]');
+  const capsule = main.locator(`section.transcript-ask[data-ask-id="${askId}"]`);
+  await expect(capsule, 'the ask’s capsule reads answered').toHaveAttribute('data-ask-state', 'answered', { timeout: 30_000 });
+  const line = capsule.locator('[data-ask-answer]');
+  await expect(line, 'one row, the question’s').toHaveCount(1);
+  await expect(line.locator('.transcript-question-label'), 'the question’s words, from the call').toHaveText('Proceed?');
+  await expect(line.locator('.transcript-question-answer'), 'the answer on its question’s row').toHaveText('Yes');
+  await expect(line.locator('.transcript-question-answer')).not.toHaveAttribute('data-answer', 'none');
+  await expect(main.locator('[data-transcript-scroller]').getByText('[MAWS ask', { exact: false }), 'the envelope is drawn as no text').toHaveCount(0);
+  expect(run.maws.consoleErrors()).toEqual([]);
+}
+
+test('(envelope, to the peer) this build’s host delivers an async ask’s answer by the question’s number alone; the peer draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  await withScratch('xb-envelope-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) answers an async ask; ${peer.label} (wire ${wireOf(peer)}) opens the session`];
+    s.useStub();
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    await s.launchSession(run.page, id, ASK_ASYNC_FIXTURE, { cwd: s.repo });
+    const { askId, envelope } = await answerAsyncAsk(run.page, s, id);
+    expect(envelope.split('\n').slice(0, 3), 'this build’s host wrote the new form').toEqual([`[MAWS ask ${askId}] The user answered the questions you asked:`, '1. "Yes"', '```json']);
+    expect(envelope, 'with no words of the model’s').not.toContain('Proceed?');
+    await drawsAnswered(run, id, askId);
+    await s.quit(run);
+    said.push(`  ${here.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn here answered`);
+
+    const old = await launchServed(s, id, peer.root);
+    await drawsAnswered(old, id, askId);
+    await s.quit(old);
+    said.push(`  ${peer.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
+    record(said);
+  });
+});
+
+test('(envelope, from the peer) the peer’s host delivers an async ask’s answer in the form the earlier builds write; this build draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(writesNewEnvelope(peer), writesNewEnvelopeWhy(peer));
+  await withScratch('xb-envelope-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) answers an async ask; ${here.label} (wire ${wireOf(here)}) opens the session`];
+    s.useStub();
+    const old = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const input = fitTo(commandOf(peer, 'session.launch')!.input, { spec: stubSpec(s.stub!, id, ASK_ASYNC_FIXTURE, { cwd: s.repo }) });
+    expect(value(await invoke(old.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+    await expect.poll(async () => value(await invoke(old.page, 'session.status', { appSessionId: id })).process, { timeout: 30_000 }).toBe('ready');
+    const { askId, envelope } = await answerAsyncAsk(old.page, s, id);
+    expect(envelope.split('\n')[1], 'the peer’s host wrote the earlier form, the question’s words on its line').toBe('1. Proceed? — Yes');
+    await drawsAnswered(old, id, askId);
+    await s.quit(old);
+    said.push(`  ${peer.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn there answered`);
+
+    const back = await launchServed(s, id);
+    await drawsAnswered(back, id, askId);
+    await s.quit(back);
+    said.push(`  ${here.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
     record(said);
   });
 });

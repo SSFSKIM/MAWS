@@ -86,8 +86,9 @@ const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
 const BLOCK_OPEN = '\n```json\n';
 const BLOCK_CLOSE = '\n```';
 
-// The appended result block alone: the last `json` fence, which must end the text. A question, header, label or answer
-// may carry fences of its own above it; the block's body cannot hold its opener, since JSON escapes every newline.
+// The appended result block alone: the last `json` fence, which must end the text. The lines above it in an envelope an
+// earlier build wrote may carry fences of their own (a question, a header, a label, a path); the block's body cannot
+// hold its opener, since JSON escapes every newline.
 function resultBlock(text: string): string | null {
   if (!text.endsWith(BLOCK_CLOSE)) return null;
   const end = text.length - BLOCK_CLOSE.length;
@@ -95,41 +96,55 @@ function resultBlock(text: string): string | null {
   return start === -1 ? null : text.slice(start + BLOCK_OPEN.length, end);
 }
 
-// One answer as the steer's line reads it: the labels (and what was typed under Other), the text in quotes, the paths
-// one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design system's
-// `<name> (<id>)` or the build request (P3-D), or the two non-answers.
+// Board ticket 711: the steer is a user-role message, which the engine (its auto-mode permission classifier among its
+// readers) takes for the person's words; a probe on 2.1.322 recorded that classifier allowing a blocked call's retry on
+// the engine's consent sentence where it stood in a question's header. So the steer holds no text the model wrote: only
+// MAWS's own words, the ask's id, each question's number, and what the person gave or picked, each such value written
+// as a JSON string, so no line break or quote in it can shape a line. The model holds its questions in its own call.
+
+// One answer as the steer's line reads it: the chosen labels (and what was typed under Other), the text, the paths one
+// per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design system's
+// `<name> (<id>)` (P3-D), each value a JSON string; or MAWS's own words: the build request and the two non-answers.
 function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
   if (answer === undefined || answer.status === 'skipped') return 'skipped';
   if (answer.status === 'decide_for_me') return 'decide for me';
   const values = answer.value === undefined ? [] : Array.isArray(answer.value) ? answer.value : [answer.value];
+  const quoted = values.map((value) => JSON.stringify(value)).join(', ');
   switch (question.modality) {
     case 'choice':
-      return [values.join(', '), answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
+      return [quoted, answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
     case 'text':
       return JSON.stringify(values.join('\n'));
     case 'file':
     case 'folder':
-      return values.map((path) => `\n   ${path}`).join('');
+      return values.map((path) => `\n   ${JSON.stringify(path)}`).join('');
     case 'repository':
-      return answer.name !== undefined ? `${answer.name} (${values.join(', ')})` : values.join(', ');
-    case 'design_system': // P3-D
+      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${quoted})` : quoted;
+    case 'design_system': { // P3-D
       if (answer.create === true) return 'build a new one with me';
-      return answer.name !== undefined ? `${answer.name} (${answer.designSystemId ?? ''})` : (answer.designSystemId ?? '');
+      const id = JSON.stringify(answer.designSystemId ?? '');
+      return answer.name !== undefined ? `${JSON.stringify(answer.name)} (${id})` : id;
+    }
   }
 }
 
-// The text of the steer that delivers an async ask's answers: one line per question in the asked order, `<header, else
-// the question> — <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3),
-// then the AskResult of status `answered` as a fenced JSON block.
+// The text of the steer that delivers an async ask's answers: one line per question in the asked order,
+// `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the
+// AskResult of status `answered` as a fenced JSON block. Neither a question's header nor its words are on its line, nor
+// its id (model text too). In the block every answer keeps its `id`, which the readers of this build and of the builds
+// before it join an answer to its question by (the capsule's AnswerLine, the read-only sheet's QuestionSection, the
+// transcript's markdown), and its `question` is written as the empty string: AskAnswerSchema, as the earlier builds
+// have it, requires the key, and a block they could not parse would draw the envelope as raw text. No reader takes a
+// question's words from a steer: they come from the ask's call, by the question's id.
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
   const byId = new Map(answers.map((answer) => [answer.id, answer]));
   const lines = questions.map((question, index) => {
     const answer = byId.get(askQuestionId(question, index));
     const text = answerText(question, answer);
     const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
-    return `${index + 1}. ${question.header ?? question.question} —${text.startsWith('\n') ? '' : ' '}${text}${note}`;
+    return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });
-  const result: AskResult = { status: 'answered', askId, answers: [...answers] };
+  const result: AskResult = { status: 'answered', askId, answers: answers.map((answer) => ({ ...answer, question: '' })) };
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
 }
 
