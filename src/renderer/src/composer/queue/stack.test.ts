@@ -296,6 +296,15 @@ describe('a grant’s row', () => {
     expect(row).toMatchObject({ kind: 'after', answer: null, grant: null });
   });
 
+  // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A2), made by hand: a part left to the person
+  // that still holds an envelope's whole opening line is no grant. The row reads a grant only where that part is the
+  // sentence whole, so this holds by that rule too; it is pinned here beside the grant readers that read lines
+  it('a message whose person’s part still holds an envelope’s opening line is no grant: an envelope cut before its block beside the sentence, in either order', () => {
+    const cut = ANSWER.slice(0, ANSWER.indexOf('\n```json'));
+    const rows = stackRows(queue({ steers: [steer(U1, 1, `${GRANT}\n${cut}`)], entries: [entry('q-1', 2, { content: `${cut}\n${GRANT}` })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'grant' in row ? row.grant : undefined])).toEqual([['next', null], ['after', null]]);
+  });
+
   it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {
     const rows = stackRows(queue({ steers: [steer(U1, 5)], entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read());
     expect(newestToTake(rows)?.key).toBe(U1);

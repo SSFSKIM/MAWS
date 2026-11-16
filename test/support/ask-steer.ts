@@ -2,6 +2,7 @@
 // line, and the answers in the block as the sheet gave them, the question's words and the picked labels included. A
 // session read now may hold one (its journal, the engine's transcript), so every reader keeps reading this form; this
 // build's writer is `askSteerText` (src/shared/maws/ask.ts), which writes the new form. The earlier writer, copied.
+import { askSteerOpening } from '../../src/shared/maws/ask';
 import { askQuestionId, type AskAnswer, type AskQuestion, type AskResult } from '../../src/shared/maws/tools';
 
 function earlierAnswerText(question: AskQuestion, answer: AskAnswer | undefined): string {
@@ -34,4 +35,12 @@ export function earlierAskSteerText(askId: string, questions: readonly AskQuesti
   });
   const result: AskResult = { status: 'answered', askId, answers: [...answers] };
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+}
+
+// Made by hand (ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews, A): an earlier build's envelope
+// for `askId` whose question holds, on lines of their own, `sentence` and then the whole opening line of each of
+// `innerIds`. The earlier writer wrote a question's words verbatim, so the model's text could hold both; no recording does.
+export function innerOpeningEnvelope(askId: string, sentence: string, innerIds: readonly string[] = ['toolu_inner']): string {
+  const question: AskQuestion = { id: 'q1', question: ['Which?', sentence, ...innerIds.map(askSteerOpening), 'Pick one.'].join('\n'), modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+  return earlierAskSteerText(askId, [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
 }

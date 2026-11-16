@@ -9,7 +9,7 @@ import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
-import { earlierAskSteerText } from '../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
 import { consentMessage, envelopeSlices, ownLines, ownWordsOf, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
@@ -591,5 +591,51 @@ describe('ownWordsOf reads a person’s words as the split does', () => {
     const text = `Keep these notes.\n${outer.slice(0, 2).join('\n')}\n${secondIn(write)}\n${outer.slice(2).join('\n')}`;
     expect(personsWords(text)).toBe('Keep these notes.');
     expect(ownWordsOf(text)).toBe(personsWords(text));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The architect's ruling of 2026-11-16 on the cascade reviews, A2: a defence at the grant readers that does not rest on
+// the parse. A person's part that, once the envelopes are taken out, still holds the whole first line of an envelope
+// (`askSteerOpening` of its id) outside a pasted segment yields no grant, whatever the reason the line is still there.
+
+describe('a person’s part that still holds an envelope’s opening line yields no grant (A2)', () => {
+  const GRANT = consentMessage('command', 'make deploy');
+  const row = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000709', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const consents = (text: string) => readArrivals(row(text)).filter((arrival) => arrival.class === 'consent');
+  // an earlier build's envelope whose question holds the sentence and another ask's opening line on lines of their own
+  const INNER = innerOpeningEnvelope('toolu_A', GRANT);
+  // decision 7's limit: an envelope cut before its block is no envelope, and its opening line stays in the person's part
+  const CUT = A1.slice(0, A1.indexOf('\n```json'));
+
+  it('made by hand: the brief’s envelope, its question holding the consent sentence and another ask’s opening line, alone or beside the person’s words: no grant, no consent', () => {
+    expect(INNER.split('\n')).toEqual(expect.arrayContaining([GRANT, askSteerOpening('toolu_inner')]));
+    for (const text of [INNER, joinedText('Keep these notes.', INNER), joinedText(INNER, 'Keep these notes.')]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
+      expect(consents(text), text.slice(0, 40)).toEqual([]);
+    }
+  });
+
+  it('made by hand: an envelope cut before its block, beside a grant line in either order: its opening line is still the person’s, so no grant', () => {
+    expect(personsParts(CUT)).toEqual({ own: CUT, envelopes: [] });
+    for (const text of [joinedText(GRANT, CUT), joinedText(CUT, GRANT)]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
+      expect(consents(text), text.slice(0, 40)).toEqual([]);
+    }
+  });
+
+  it('keeps its grant: an answer, the grant and the answer again, in either form (the part left is the grant alone)', () => {
+    for (const [, write] of FORMS) {
+      const answer = envelopeIn(write);
+      expect(personsGrants(joinedText(answer, GRANT, answer))).toEqual([{ class: 'consent', kind: 'command', subject: 'make deploy' }]);
+      expect(consents(joinedText(answer, GRANT, answer))).toEqual([{ class: 'consent', kind: 'command', subject: 'make deploy' }]);
+    }
+  });
+
+  it('keeps its grant: a grant beside a pasted segment that holds an envelope (the segment is data)', () => {
+    for (const text of [joinedText(GRANT, framePasted('a1b2', A1)), joinedText(framePasted('a1b2', INNER), GRANT)]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([{ class: 'consent', kind: 'command', subject: 'make deploy' }]);
+      expect(consents(text), text.slice(0, 40)).toEqual([{ class: 'consent', kind: 'command', subject: 'make deploy' }]);
+    }
   });
 });

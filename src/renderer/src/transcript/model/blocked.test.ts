@@ -18,7 +18,7 @@ import { askSteerText } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
@@ -642,6 +642,21 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
           expect(approvals, `${form}, ${name}, ${route}`).toEqual([]);
           expect(drawnReadings, `${form}, ${name}, ${route}`).toEqual(NONE);
         }
+      }
+    }
+  });
+
+  // Ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (made by hand): an earlier build's envelope
+  // whose question holds the exact sentence and then another ask's whole opening line, on lines of their own, alone and
+  // joined with other words. A2: a person's part that still holds an envelope's opening line yields no grant
+  it('(c6) an earlier build’s envelope whose question holds the exact sentence and another ask’s opening line, alone and joined with other words: no consent, no approval row, the blocked row not approved, on both routes', async () => {
+    const inner = innerOpeningEnvelope('toolu_a', GRANT);
+    expect(inner.split('\n')).toContain(GRANT);
+    for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
+        expect(consents, `${name}, ${route}`).toEqual([]);
+        expect(approvals, `${name}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${name}, ${route}`).toEqual(NONE);
       }
     }
   });

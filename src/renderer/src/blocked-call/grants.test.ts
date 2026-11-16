@@ -16,7 +16,7 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
-import { earlierAskSteerText } from '../../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../test/support/ask-steer';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -208,6 +208,17 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
       queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answer}\n${quoting.slice(2).join('\n')}`)] });
       expect([...waitingGrants(id)], write.name).toEqual([]);
     }
+  });
+
+  // ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews (A2): a waiting message whose part left to the
+  // person, once the envelopes are out, still holds an envelope's whole opening line yields no grant. Made by hand
+  it('a waiting message whose person’s part still holds an envelope’s opening line waits for no key: an earlier build’s envelope quoting the sentence and another ask’s opening line, or an envelope cut before its block beside a grant line', () => {
+    const id = at('waiting-opening') as AppSessionId;
+    const inner = innerOpeningEnvelope('toolu_a', grant(BUILD));
+    const cut = askSteerText('toolu_b', [{ id: 'q1', question: 'Which?', modality: 'choice', options: [{ label: 'Grid' }] }], [{ id: 'q1', question: 'Which?', status: 'answered', value: ['Grid'] }]).split('\n```json')[0]!;
+    expect(inner.split('\n')).toContain(grant(BUILD));
+    queueOf(id, { entries: [entry(id, inner)], steers: [{ messageUuid: UUID, content: `Keep these notes.\n${inner}`, createdAt: T0 }, { messageUuid: '22222222-2222-4222-8222-222222222222' as MessageUuid, content: `${grant(CHECK)}\n${cut}`, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
   });
 });
 
