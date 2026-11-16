@@ -28,8 +28,8 @@ export const SPINE_COMMANDS = [
   'machine.op', 'machine.opQuery', // P5 O3-D M4: the services' operation ledger, opened only while the run holds spine.lock
   'machine.setupTrust', // P5 O7 M9: its guarded trust read (src/services/machine/setup.ts), with the session service
   'machineSettings.get', 'machineSettings.set', // P5 O3-D M5b (Interfaces §G): the machine half, for main's settings mirror
-  'mods.list', 'mods.setSessionOverride',
-  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.markRead', 'ownerChannel.state',
+  'mods.list', 'mods.setFoldSummaries' /* UX wave U2b M4 */, 'mods.setSessionOverride',
+  'ownerChannel.answered', 'ownerChannel.cancel', 'ownerChannel.folds' /* UX wave U2b M4 */, 'ownerChannel.markRead', 'ownerChannel.state',
   'scm.commit', 'scm.discard', 'scm.pr.create', 'scm.pr.plan', 'scm.pr.state', 'scm.push', 'scm.push.plan', 'scm.remote.cancel', 'scm.remote.last',
   'scm.stage', 'scm.status', 'scm.unstage',
   'session.acquire', 'session.appEvents', 'session.archive', 'session.archiveOlder', 'session.create', 'session.delete',
