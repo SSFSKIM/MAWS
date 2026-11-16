@@ -4,7 +4,7 @@
 // the host the tab is drawn in; the line for a page that names files beside it; a media position across a hide. Main's
 // commands and its event are the fake disk's (`installDisk`); every path and byte here is invented.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { frameUrl } from '@shared/files/framed';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
@@ -51,6 +51,8 @@ const body = () => viewer().lastElementChild as HTMLElement;
 const marker = () => viewer().getAttribute('data-frame');
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 20)));
 
+// UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
+beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
 const offs: (() => void)[] = [];
 beforeEach(() => {
   installResizeObserver();

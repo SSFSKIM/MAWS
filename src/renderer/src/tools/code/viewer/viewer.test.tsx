@@ -30,6 +30,8 @@ import { registerPanelTool } from '../../../panel/host'; // UX wave U6b-1: a lin
 import { filesTool } from '../files/FilesTool';
 import { currentSet } from '../../../stores/layout-model';
 
+// UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
+beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
 const text = { encoding: 'utf8' as const };
 const binary = { encoding: 'base64' as const };
 

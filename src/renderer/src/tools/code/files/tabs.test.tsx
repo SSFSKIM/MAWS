@@ -4,7 +4,7 @@
 // viewer's prune. Invented paths under `/r` and invented text throughout.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { storedMain, type PanelTabRef, type Strip } from '@shared/ipc/schema/layout';
 import { addressOf, bareOf } from '@shared/machine/address';
@@ -72,6 +72,8 @@ function mainFor(files: Record<string, string>, opts: { refused?: string[]; held
   });
 }
 
+// UX wave U6b-2: happy-dom knows no `maws-artifact:` scheme, so a file's frame only takes its URL (child-frame navigation off)
+beforeAll(() => void ((window as unknown as { happyDOM: { settings: { navigation: { disableChildFrameNavigation: boolean } } } }).happyDOM.settings.navigation.disableChildFrameNavigation = true));
 const offs: (() => void)[] = [];
 let unregisterFiles: () => void;
 beforeEach(() => {
