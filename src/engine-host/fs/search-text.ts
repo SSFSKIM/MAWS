@@ -41,7 +41,9 @@ async function fingerprint(createHash: (algorithm: string) => { update(data: Uin
 // A pass reads lines from byte `from` to the size it was started with and ends at the byte after the last line it
 // consumed: a complete line, or a last line that has no newline yet but already parses (a torn one is left for the next
 // pass, which starts at it). Lines are split on \n alone; a transcript's JSON never holds a raw line break.
-const WORKER = String.raw`
+// Exported for the guard that holds the worker's copy of the envelope's reader to the reader's own source (ticket 704,
+// the architect's ruling 6 of 2026-11-16: search-text.test.ts)
+export const WORKER = String.raw`
 const { parentPort } = require('node:worker_threads');
 const { createHash } = require('node:crypto');
 const PAGE_CHARS = ${PAGE_CHARS};
