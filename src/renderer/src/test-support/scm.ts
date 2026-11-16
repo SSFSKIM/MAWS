@@ -1,7 +1,7 @@
 // Source control tool tests (E6): a C4 status to vary per case, the answers `scm.*` gives, and main as the tool's body
 // reads it (`scmMain`). Imported only by happy-dom suites.
 import type { AppSessionId } from '@shared/graph/ids';
-import type { GitDiff, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
+import type { GitBranchCommit, GitBranchCommits, GitDiff, GitFileStatus, GitStatus } from '@shared/ipc/schema/git';
 import type { RemotePlan, ScmPrState, ScmRefusal, ScmStatus } from '@shared/ipc/schema/scm';
 import { fail, installFakeMain, ok } from './code';
 
@@ -78,7 +78,9 @@ type ScmCommand =
   | 'scm.pr.state'
   | 'git.log'
   | 'git.worktree.branch'
-  | 'layout.openExternal';
+  | 'layout.openExternal'
+  // UX wave U5b-2 (M10): the page's one new read
+  | 'git.branchCommits';
 
 // Main as the Source control body reads it: C4's watch and diffs over a scripted status, `scm.status`, and the four
 // mutations (each `{ ok: true }` with the current status unless the case scripts an answer). `change` replaces the
@@ -94,6 +96,7 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
     } as Record<'worktree' | 'staged', GitDiff>,
     untracked: new Map<string, string>([['untracked.txt', UNTRACKED_PATCH]]),
     fileDiffs: new Map<string, GitDiff>(), // one file of a staged or worktree scope, read alone past the scope's cap
+    branch: branchCommitsOf(), // UX wave U5b-2 (M10): what `git.branchCommits` answers unless a case scripts it
     answers: {} as Partial<Record<ScmCommand, (input: Record<string, unknown>) => Answer | Promise<Answer>>>,
   };
   const fake = installFakeMain((name, input) => {
@@ -143,6 +146,8 @@ export function scmMain(init: { status?: GitStatus; scm?: ScmStatus } = {}) {
         return state.answers[name]?.(input) ?? ok(null);
       case 'layout.openExternal':
         return state.answers[name]?.(input) ?? ok();
+      case 'git.branchCommits':
+        return state.answers[name]?.(input) ?? ok(state.branch);
       default:
         return fail(`no answer for ${name} in the source control suites`);
     }
@@ -209,6 +214,26 @@ export function prOf(over: Partial<NonNullable<ScmPrState['pr']>> = {}): NonNull
     headRefName: 'feature',
     mergeStateStatus: null,
     checks: { summary: 'none', items: [] },
+    ...over,
+  };
+}
+
+// UX wave U5b-2 (M10): the branch read's answers. A commit `n` hours old; its hash starts with `n` in four hexadecimal
+// digits, so each short hash is its own (`0001bbb`).
+export const shaOf = (n: number) => n.toString(16).padStart(4, '0') + 'b'.repeat(36);
+export function branchCommitOf(n: number, pushed: boolean | null, over: Partial<GitBranchCommit> = {}): GitBranchCommit {
+  const sha = shaOf(n);
+  return { sha, shortSha: sha.slice(0, 7), author: 'Ada Example', authoredAt: new Date(Date.now() - n * 3_600_000).toISOString(), subject: `Change number ${n}`, parents: [shaOf(n + 1)], pushed, ...over };
+}
+
+// A branch of `all` commits since origin/main, the newest `notPushed` of them not pushed, read with the page's limit of 50.
+export function branchCommitsOf({ all = 4, notPushed = 2, ...over }: Partial<GitBranchCommits> & { all?: number; notPushed?: number } = {}): GitBranchCommits {
+  return {
+    base: { ref: 'origin/main', mergeBase: shaOf(999) },
+    upstream: 'origin/feature/x',
+    commits: Array.from({ length: Math.min(all, 50) }, (_, i) => branchCommitOf(i + 1, i >= notPushed)),
+    counts: { all, notPushed, pushed: all - notPushed },
+    behind: 0,
     ...over,
   };
 }
