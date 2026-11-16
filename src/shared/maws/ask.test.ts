@@ -223,7 +223,7 @@ describe('the steer holds no text the model wrote (board ticket 711)', () => {
     const text = askSteerText('toolu_12', TWELVE, TWELVE_ANSWERS);
     const block = text.slice(text.lastIndexOf('\n```json\n') + '\n```json\n'.length, text.length - '\n```'.length);
     expect(AskResultSchema.parse(JSON.parse(block))).toEqual({ status: 'answered', askId: 'toolu_12', answers: fromSteer(TWELVE_ANSWERS) });
-    const dropped = { status: 'answered', askId: 'toolu_12', answers: TWELVE_ANSWERS.map(({ question: _q, ...rest }) => rest) };
+    const dropped = { status: 'answered', askId: 'toolu_12', answers: TWELVE_ANSWERS.map((answer) => Object.fromEntries(Object.entries(answer).filter(([key]) => key !== 'question'))) };
     expect(AskResultSchema.safeParse(dropped).success).toBe(false); // why the key is written empty rather than left out
   });
 
