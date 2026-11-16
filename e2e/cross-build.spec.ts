@@ -4070,7 +4070,7 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
 // mod declares it, `maws-surface.json`) and 8 where MAWS draws it, the mirror; the lane's published state says who
 // draws (`drawnBy`, an optional key an earlier build's tolerant reader drops); the launch's reservation is a column the
 // earlier builds read past (`owner_channel_sessions.advertised`), and the summaries' switch a key of the index's own
-// facts they never read (`index_meta`, `toHuman.foldSummaries`). Two scenes, each over a session whose transcript holds
+// facts they never read (`index_meta`, `toHuman.foldSummaries`). Four scenes, each over a session whose transcript holds
 // a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts):
 //   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
 //                             window attaches and draws the mirror: the record line and the switch, no bar, and no
@@ -4112,15 +4112,6 @@ async function startResume(run: Run, build: Build, id: AppSessionId): Promise<vo
   expect(value(await invoke(run.page, 'session.start', input as CommandInput<'session.start'>))).toMatchObject({ status: 'starting' });
   const processOf = async () => { const st = await invoke(run.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
   await expect.poll(processOf, { timeout: 60_000, message: `${build.label} resumes the session` }).toBe('ready');
-}
-// A stub journal whose init frames list the to-human plugin at `path`, as the engine lists a plugin it loaded
-function listingToHuman(text: string, path: string): string {
-  return text.split('\n').filter(Boolean).map((line) => {
-    const row = JSON.parse(line) as JournalRow;
-    if (row.direction !== 'in' || row.frame.type !== 'system' || row.frame.subtype !== 'init') return line;
-    const plugins = Array.isArray(row.frame.plugins) ? (row.frame.plugins as unknown[]) : [];
-    return JSON.stringify({ ...row, frame: { ...row.frame, plugins: [...plugins, { name: 'to-human', path, source: 'to-human@doperpowers' }] } });
-  }).join('\n') + '\n';
 }
 const peerBar = (page: Page) => page.locator('[data-region="main"]').getByRole('group', { name: 'Session view', exact: true }); // the peer build's report bar, its toggle group (f1852de3a, the owner report's bar)
 const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-record > button.transcript-disclosure'); // the peer build's record row (f1852de3a)
@@ -4176,12 +4167,12 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
   await withScratch('xb-to-human-to', async (s) => {
     const said: string[] = [`${here.label} (wire ${wireOf(here)}) launches a session at 9 and turns new summaries off; ${peer.label} (wire ${wireOf(peer)}) opens the profile, draws its report and launches it again; ${here.label} reads it back`];
     trustIn(s, [s.repo]);
-    const installation = installToHumanPlugin(join(s.userData, 'claude-config'), { declares: true, version: '0.9.0' }); // an installation that declares it draws from 9
+    installToHumanPlugin(join(s.userData, 'claude-config'), { declares: true, version: '0.9.0' }); // an installation that declares it draws from 9
     seedToHumanSession(s);
     const stub = s.useStub({ rowMs: Number(ROW_MS) });
-    // every resume: the handshake, its init listing the to-human plugin at that installation (as the engine reports a
-    // loaded plugin), then held at a prompt no one sends
-    writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), listingToHuman(readFileSync(ownJournal(s, turnsJournal(s.root, 'xb-to-human-to', 1)), 'utf8'), installation));
+    // every resume: the handshake, then held at a prompt no one sends (so no init is played: the launch's plugins are not
+    // yet reported)
+    writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), readFileSync(ownJournal(s, turnsJournal(s.root, 'xb-to-human-to', 1)), 'utf8'));
     let id = '' as AppSessionId;
     const reservation = () => indexed(s, `select advertised from owner_channel_sessions where app_session_id = '${id}'`);
     const launchOf = () => indexed(s, `select launch_id from owner_channel_sessions where app_session_id = '${id}'`);
@@ -4196,9 +4187,9 @@ test('(to-human, to the peer) a session this build launched at 9, with new summa
     expect(nine.env[NATIVE_TO_HUMAN_ENV], 'the launch advertises 9: the mod draws').toBe('9');
     expect(nine.env[FOLD_SUMMARIES_ENV], 'summaries on: no value').toBeUndefined();
     await expect.poll(() => JSON.parse(String(reservation() ?? 'null')) as { launchId?: string; number?: number } | null, { timeout: 30_000, message: 'the reservation bound to the launch' }).toMatchObject({ launchId: nine.launchId, number: 9 });
-    // the contrast for the return's read below, on the same stub: under its own bound launch at 9, the plugin loaded and
-    // declaring, the mod draws
-    await expect.poll(async () => value(await invoke(ours.page, 'ownerChannel.state', { appSessionId: id })).lane.drawnBy, { timeout: 30_000, message: 'under this build’s own bound launch at 9, with the declaring plugin loaded, the mod draws' }).toBe('mod');
+    // the contrast for the return's read below, on the same stub: under its own bound launch at 9, its plugins not yet
+    // reported, the mod draws (table B's arm for plugins not yet reported, @shared/owner/draws)
+    await expect.poll(async () => value(await invoke(ours.page, 'ownerChannel.state', { appSessionId: id })).lane.drawnBy, { timeout: 30_000, message: 'under this build’s own bound launch at 9, its plugins not yet reported, the mod draws' }).toBe('mod');
     value(await invoke(ours.page, 'mods.setFoldSummaries', { on: false }));
     expect(value(await invoke(ours.page, 'mods.list', { appSessionId: id }))[0]!.summaries).toBe(false);
     expect(foldSummariesFact()).toBe('off');

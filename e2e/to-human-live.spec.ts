@@ -22,8 +22,8 @@
 //               a message from another session needs sminos's hub, which a scratch home has not; the subagent's
 //               message is the arrival of a peer the scratch can make, and its row is read in the window);
 //   full        a thought, a listing, a notice and a turn's line hidden in the mod's report, and all in sight in its
-//               full transcript, the list walked from its top in a shortened window, so that rows unmount and mount
-//               again (asserted: a row mounted at one stop has left the list at a later one);
+//               full transcript, the list walked from its top in a shortened window, so that rows unmount as it goes
+//               (asserted: a row mounted at one stop has left the list at a later one);
 //   jump        the must-read's Needs-you row lands on its text, in sight;
 //   links       the path link and the artifact mention inside mod-drawn messages: what each opens;
 //   second      a second window on the running session reads the same record lines, drawn by the mod or the mirror
@@ -104,7 +104,8 @@ const PAGE_FILE = 'trial-page.html';
 const NONE = '› working record';
 const PROMPTS = {
   one: 'Think it through first. Then run these five shell commands, one at a time: `ls`, `git status --short`, `git log --oneline -1`, `echo one`, `echo two`. Then send me one short final message saying what you found. Do not create or edit any file.',
-  two: `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one final message that links the file README.md by its path, links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>), and marks as a must-read, the way your instructions describe, the words "${MUST_READ}". Do not create or edit any file.`,
+  // the path link is absolute: a relative one is a path the Files tab refuses (tools/code/files/tabs.ts)
+  two: (readme: string) => `Send me one short message now saying you are starting. Then run \`echo three\` and \`echo four\`, one at a time. Then call mcp__maws__artifact_create once with kind "html", title "${ARTIFACT}" and path "${PAGE_FILE}". Then send me one final message that links the file README.md exactly as [README.md](${readme}), links the artifact as [${ARTIFACT}](maws-artifact:<the id the call returned>), and marks as a must-read, the way your instructions describe, the words "${MUST_READ}". Do not create or edit any file.`,
   three: 'Call the ListAgents tool once. Then run the shell command `sleep 3 && echo done` in the background and wait for its notification. Then use your agent tool to ask a subagent to reply with the one word ready, and wait for it. Then send me one short final message. Do not create or edit any file.',
   four: 'Run `echo five` and then `echo six`, one at a time. Then send me one short final message. Do not create or edit any file.',
 } as const;
@@ -331,22 +332,22 @@ async function settledLines(page: Page, drawer: Drawer, done: (lines: string[]) 
   return lines;
 }
 // Every closed line reads a summary: its words are one of the summaries the mod stored for the session, as MAWS's own
-// reader gives them (`ownerChannel.folds`), so neither `working record` nor any call's own words, whatever the tool
-// (a label the mod cuts with an ellipsis is the start of its summary)
-const summaryLine = (line: string, summary: string) => line === `› ${summary}` || (line.endsWith('…') && summary.startsWith(line.slice(2, -1).trimEnd()));
+// reader gives them (`ownerChannel.folds`), so neither `working record` nor any call's own words, whatever the tool (the
+// mod cuts a summary when it stores it and draws the stored label whole)
+const summaryLine = (line: string, summary: string) => line === `› ${summary}`;
 const summarised = (page: () => Page, id: string) => async (lines: string[]) => {
   const runs = value(await invoke(page(), 'ownerChannel.folds', { appSessionId: id as AppSessionId })).runs ?? [];
   return lines.length > 0 && lines.every((line) => runs.some((run) => summaryLine(line, run.summary)));
 };
-// Who draws the session's record lines in a window now (§M, "What a person sees"): the mod where the lane says so, else
-// the mirror once its switch is in sight
+// Who draws the session's record lines in this window now (§M, "What a person sees"): the mirror when its switch is in
+// sight in the window's pane; the mod when the lane says so and the mod's band is in sight there
 async function drawerOf(page: Page, id: string): Promise<Drawer> {
   let drawer: Drawer | null = null;
   await expect.poll(async () => {
-    if ((await lane(page, id)).drawnBy === 'mod') return (drawer = 'mod');
     if ((await paneOf(page).locator('[data-view-switch]:visible').count()) > 0) return (drawer = 'mirror');
+    if ((await lane(page, id)).drawnBy === 'mod' && (await modBand(paneOf(page)).isVisible())) return (drawer = 'mod');
     return null;
-  }, { timeout: 30_000, message: 'the lane says the mod draws, or the mirror’s switch is in sight' }).not.toBeNull();
+  }, { timeout: 30_000, message: 'the mirror’s switch in sight in this window, or the lane says the mod draws and its band is in sight there' }).not.toBeNull();
   return drawer!;
 }
 // Each message drawn once: its opening words held, in sight, by exactly one innermost element at the stop where it is
@@ -408,7 +409,12 @@ async function seenWhileScrolling(page: Page, selector: string): Promise<{ shown
       const mounted = new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]')).map((row) => row.dataset.index ?? ''));
       if ([...mountedOnce].some((index) => !mounted.has(index))) unmounted = true;
       for (const index of mounted) mountedOnce.add(index);
-      shown ||= Array.from(scroller.querySelectorAll(sel)).some(inSight);
+      // a match in sight is read again over further frames (about a second: an ask's round trip) and counts only if it is
+      // still in sight at the end, since a turn's line is MAWS's own until the mod's answer lands (SurfaceTurnLine)
+      if (!shown && Array.from(scroller.querySelectorAll(sel)).some(inSight)) {
+        for (let frame = 0; frame < 60; frame += 1) await new Promise((done) => requestAnimationFrame(done));
+        shown = Array.from(scroller.querySelectorAll(sel)).some(inSight);
+      }
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
       scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
     }
@@ -501,7 +507,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
     await step('turn-2', 'a message mid-turn, two calls and an artifact, then a message with a must-read, a path link and the artifact’s mention', async () => {
       budget(cap);
       const before = written(id);
-      await send(page, PROMPTS.two);
+      await send(page, PROMPTS.two(join(repo, 'README.md')));
       await settle(page, id, before);
       messages = messageTexts(id);
       await drawnOnce(page, messages);
@@ -575,7 +581,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       // Link.tsx), and a plain click opens the file beside the chat, the main strip as it was (e2e/sessions.spec.ts)
       const strip = () => mountedTabs(page).evaluateAll((tabs) => tabs.map((tab) => tab.getAttribute('data-tab-id') ?? ''));
       const stripBefore = await strip();
-      const path = drawn.locator('[data-chip="path"]').filter({ hasText: 'README.md' }).first();
+      const path = drawn.locator(`[data-chip="path"][title="${join(repo, 'README.md')}"]`).first(); // as e2e/sessions.spec.ts selects a chip
       await expect(path, 'a path link inside a mod-drawn message').toBeVisible({ timeout: 20_000 });
       const pathTitle = await path.getAttribute('title');
       await path.click();
@@ -713,12 +719,13 @@ test('U2b check 5: a long seeded session the mod draws, resumed with no prompt a
   mkdirSync(OUT, { recursive: true });
   // the owner's files read before anything of this case, as the first case reads them
   const owner = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')) };
-  // the scratch home as the first case leaves it; made here when that case stopped before its setup finished
-  if (!existsSync(join(config, 'plugins', 'installed_plugins.json'))) await prepare(engine.bin, cap);
-  const engineId = randomUUID();
-  seedLongSession(engineId, engine.version);
-  const maws = await launch();
+  let maws: MawsLaunch | null = null;
   try {
+    // the scratch home as the first case leaves it; made here when that case stopped before its setup finished
+    if (!existsSync(join(config, 'plugins', 'installed_plugins.json'))) await prepare(engine.bin, cap);
+    const engineId = randomUUID();
+    seedLongSession(engineId, engine.version);
+    maws = await launch();
     const { page } = maws;
     const projects = value(await invoke(page, 'session.projects.list', undefined)).projects;
     if (!projects.some((p) => p.directory === repo)) value(await invoke(page, 'session.projects.add', { directory: repo }));
@@ -749,7 +756,8 @@ test('U2b check 5: a long seeded session the mod draws, resumed with no prompt a
     await stop(page, id);
     expect(maws.consoleErrors()).toEqual([]);
   } finally {
-    await maws.cleanup();
+    const teardown = await cleanupFailure(maws);
+    if (teardown !== null) appendFileSync(join(OUT, 'trial.txt'), `check 5: teardown ${teardown}\n`);
     const after = { a15: a15Reading(), settings: sha256(join(homedir(), '.claude/settings.json')) };
     appendFileSync(join(OUT, 'trial.txt'), `check 5: ~/.claude/settings.json ${after.settings === owner.settings ? 'unchanged' : 'CHANGED'}; ${a15Line('after check 5', owner.a15, after.a15, [root])}\n`);
     expect(after.settings, '~/.claude/settings.json unchanged').toBe(owner.settings);
