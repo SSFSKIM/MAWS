@@ -1789,7 +1789,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     openReview();
     render(<TestHost />);
     await waitFor(() => expect(header()).toBe('2 files changed · +2 −0, and 1 untracked file not counted'));
-    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', "This branch needs this Mac's MAWS service to be updated"]);
+    expect(chips().find((c) => c[0] === 'branch')).toEqual(['branch', true, 'false', "This branch needs this Mac’s MAWS service to be updated"]);
     expect(countsOf('notes/berths.md')).toBeNull();
     expect(reads()).toContainEqual({ directory: '/repo', scope: 'all' });
     expect(main().callsOf('git.changesSince')).toEqual([]);
@@ -1890,7 +1890,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     serveReads([]);
     const tab = { kind: 'diff' as const, id: 'diff-commit', appSessionId: A, ref: `commit:${SHA}`, pinned: false };
     render(<DiffTab tab={tab} />);
-    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe("Diff unavailable: this Mac's MAWS service is older than this window"));
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe("Diff unavailable: this Mac’s MAWS service is older than this window"));
     expect(main().callsOf('git.commitDiff')).toEqual([]);
   });
 
@@ -1916,6 +1916,111 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:02:00.000Z', generation: 1, capabilities: ['rl2.git-reads'] }]));
     await waitFor(() => expect(main().callsOf('git.commitDiff')).toHaveLength(calls + 1));
     await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+  });
+
+  // M9 fix 2 (Decision Log 38, 2): a commit's membership belongs to the hold that asked it; reopened, the fresh read's stands
+  for (const [first, checked] of [
+    [true, false],
+    [false, true],
+  ] as const)
+    it(`reopened after HEAD moved, shows the fresh read’s membership, not the last check’s (read ${first ? 'in' : 'not in'} HEAD, checked ${checked ? 'in' : 'not in'})`, async () => {
+      serveReads();
+      let full = first;
+      main().state.commits = (input) => (input.patch === false ? ok({ commit: commitOf(SHA), onHead: checked, patch: '', files: [] }) : commitAnswer(SHA, full));
+      const words = (onHead: boolean) => `Commit 3f9a1c2 · Quote the berth names${onHead ? '' : ' · not on feature/x now'}`;
+      openCommitted(SHA);
+      render(<TestHost />);
+      await waitFor(() => expect(footer()).toBe(words(first)));
+      const moved = { ...FEATURE, head: 'fedcba9876543210' };
+      main().state.status = moved;
+      act(() => main().emit('git.changed', { repoRoot: '/repo', status: moved, reason: 'head' }));
+      await waitFor(() => expect(footer()).toBe(words(checked)));
+      await act(() => panelHost.closeTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+      await waitFor(() => expect(footer()).toBeNull());
+      const back = { ...FEATURE, head: '0123456789abcdef' }; // HEAD moved again while Review was closed
+      main().state.status = back;
+      act(() => main().emit('git.changed', { repoRoot: '/repo', status: back, reason: 'head' }));
+      full = first;
+      openCommitted(SHA);
+      await waitFor(() => expect(main().callsOf('git.commitDiff').filter((input) => input.patch !== false)).toHaveLength(2)); // read afresh
+      await waitFor(() => expect(footer()).toBe(words(first)));
+      await act(tick);
+      expect(footer()).toBe(words(first));
+    });
+
+  // M9 fix 2 (Decision Log 38, 3): a branch read that failed before it ever answered leaves This branch enabled; chosen, it
+  // says the failure in §H's words with Retry, which asks the branch read again and nothing else
+  it('a first branch read that failed: This branch enabled, its failure and Retry in the body; Retry asks one branch read and, answered, shows the branch; a later failure changes nothing seen', async () => {
+    serveReads();
+    let answer: Promise<ReturnType<typeof ok>> | ReturnType<typeof ok> = fail('fatal: no merge base');
+    main().state.branch = () => answer;
+    openReview();
+    render(<TestHost />);
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(1));
+    await waitFor(() => expect(chipOf('branch')?.disabled).toBe(false));
+    fireEvent.click(chipOf('branch')!);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: fatal: no merge baseRetry'));
+    const held = deferred<ReturnType<typeof ok>>();
+    answer = held.promise;
+    const others = () => (['git.changesSince', 'git.diff', 'git.commitDiff'] as const).map((name) => main().callsOf(name).length);
+    const before = others();
+    fireEvent.click(document.querySelector<HTMLButtonElement>('[data-review-retry]')!);
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(2));
+    await act(tick);
+    expect(main().callsOf('git.branchCommits')).toHaveLength(2);
+    expect(others()).toEqual(before); // only the branch read
+    held.resolve(branchAnswer());
+    await waitFor(() => expect(footer()).toBe('feature/x · Since origin/main'));
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts', 'notes/berths.md']));
+    answer = fail('fatal: the remote hung up');
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await waitFor(() => expect(main().callsOf('git.branchCommits')).toHaveLength(3));
+    await act(tick);
+    expect(footer()).toBe('feature/x · Since origin/main');
+    expect(document.querySelector('[data-review-unavailable]')).toBeNull();
+    expect(chipOf('branch')?.disabled).toBe(false);
+  });
+
+  // M9 fix 2 (the review's fifth finding; S22): a commit's file whose own read failed past the cap, asked again by each of
+  // the three triggers; the scope's read and a file that answered are not asked again
+  it('asks a commit’s failed file again by its Retry, by Review shown again and by the machine heard again, and nothing that answered (S22)', async () => {
+    serveReads();
+    let fails = true;
+    main().state.commits = (input) => {
+      if (typeof input.path !== 'string') return ok({ commit: commitOf(SHA), onHead: true, patch: 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: [COMMITTED_FILE, ...APP_FILES] });
+      if (input.path === 'src/app.ts' && fails) return fail('the disk is busy');
+      return ok({ commit: commitOf(SHA), onHead: true, patch: input.path === 'src/app.ts' ? APP_PATCH : COMMITTED, files: [] });
+    };
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(['src/committed.ts', 'src/app.ts']));
+    fold('src/committed.ts');
+    fold('src/app.ts');
+    const readsOf = (path?: string) => main().callsOf('git.commitDiff').filter((input) => input.path === path && input.patch !== false).length;
+    const failure = () => sectionOf('src/app.ts')?.querySelector('[role="status"]')?.textContent ?? null;
+    await waitFor(() => expect(failure()).toBe('Diff unavailable: the disk is busyRetry'));
+    await waitFor(() => expect(readsOf('src/committed.ts')).toBe(1));
+    const expectOneMore = async (app: number) => {
+      await waitFor(() => expect(readsOf('src/app.ts')).toBe(app + 1));
+      await act(tick);
+      expect([readsOf(), readsOf('src/committed.ts'), readsOf('src/app.ts')]).toEqual([1, 1, app + 1]);
+    };
+
+    let app = readsOf('src/app.ts');
+    fireEvent.click(within(sectionOf('src/app.ts')!).getByRole('button', { name: 'Retry' }));
+    await expectOneMore(app);
+
+    app = readsOf('src/app.ts');
+    act(() => panelHost.showSummary());
+    act(() => panelHost.selectTab(panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id));
+    await expectOneMore(app);
+
+    app = readsOf('src/app.ts');
+    fails = false;
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'down', since: '2026-11-15T10:01:00.000Z', generation: 0, capabilities: ['rl2.git-reads'] }]));
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: '2026-11-15T10:02:00.000Z', generation: 1, capabilities: ['rl2.git-reads'] }]));
+    await expectOneMore(app);
+    await waitFor(() => expect(failure()).toBeNull());
   });
 
   // UX wave U5b-2 fix 1 (Decision Log 37): an empty commit's words, where Uncommitted's empty message stands

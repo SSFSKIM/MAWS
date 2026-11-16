@@ -77,4 +77,44 @@ describe('the branch read (UX wave U5b-2)', () => {
     expect(main.callsOf('git.branchCommits')).toHaveLength(3);
     off();
   });
+
+  // M9 fix 2 (the frontier review's first finding): hidden while its ask is out and shown again, the checkout keeps one ask
+  // in flight; the return makes one more when the first answers, and an older answer never overwrites a newer one.
+  it('keeps one ask in flight across a hide and a show; the show asks once more when the first answers, whose answer stands (release, hold, reversed completion)', async () => {
+    const held = [deferred<ReturnType<typeof ok>>(), deferred<ReturnType<typeof ok>>()];
+    let asked = 0;
+    const main = installFakeMain((name) => {
+      if (name !== 'git.branchCommits') return ok();
+      const next = held[asked]!;
+      asked += 1;
+      return next.promise;
+    });
+    const store = createBranchReads(createClient(() => main.bridge));
+    const first = store.getState().hold(TARGET);
+    await vi.waitFor(() => expect(main.callsOf('git.branchCommits')).toHaveLength(1));
+    first(); // hidden while its ask is out
+    const again = store.getState().hold(TARGET); // shown again
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(main.callsOf('git.branchCommits')).toHaveLength(1); // still the one in flight
+    held[1]!.resolve(ok(answer({ base: { ref: 'origin/main', mergeBase: MOVED_BASE } }))); // the newer read's answer, first
+    held[0]!.resolve(ok(answer())); // then the older one's
+    await vi.waitFor(() => expect(main.callsOf('git.branchCommits')).toHaveLength(2));
+    await vi.waitFor(() => expect(branchReadOf(store.getState(), TEST_MACHINE, '/repo')?.answer?.base?.mergeBase).toBe(MOVED_BASE));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(branchReadOf(store.getState(), TEST_MACHINE, '/repo')?.answer?.base?.mergeBase).toBe(MOVED_BASE);
+    expect(main.callsOf('git.branchCommits')).toHaveLength(2);
+    again();
+  });
+
+  it('publishes nothing an ask made before a reset answers', async () => {
+    const held = deferred<ReturnType<typeof ok>>();
+    const main = installFakeMain((name) => (name === 'git.branchCommits' ? held.promise : ok()));
+    const store = createBranchReads(createClient(() => main.bridge));
+    store.getState().hold(TARGET);
+    await vi.waitFor(() => expect(main.callsOf('git.branchCommits')).toHaveLength(1));
+    store.getState().reset();
+    held.resolve(ok(answer()));
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(branchReadOf(store.getState(), TEST_MACHINE, '/repo')).toBeUndefined();
+  });
 });

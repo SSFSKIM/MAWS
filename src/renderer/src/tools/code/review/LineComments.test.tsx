@@ -22,7 +22,10 @@ import { openComment } from '../../../side/register';
 import { passKey, resetPlaceNotes, useCommentCard, type PassComment } from '../../../side/card/store';
 import { useMachines } from '../../../stores/machines';
 import { useTranscriptStore, type TurnId } from '../../../transcript';
-import { builder } from '../../../transcript/model/test-events';
+import { builder, uuid } from '../../../transcript/model/test-events';
+import { rowsOf } from '../../../transcript/model/derive';
+import { applyEvents, createState } from '../../../transcript/model/reduce';
+import { renderRow, rowOf, spyActions } from '../../../transcript/view/rows/test-support';
 import { useSessions } from '../../../stores/sessions';
 import { deferred, fail, installFakeMain, ok } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
@@ -983,7 +986,7 @@ describe('comments on lines in Review', () => {
 
   // UX wave U5b-2 (M9, S19): comments on two commits' diffs, made through the card's real store, each drawn only in its own
   // commit; sent together after an amend, each anchor the producer's, and the one message naming both hashes.
-  it('keeps each commit’s comments its own, draws none in Uncommitted, and sends both after an amend, the message naming each commit (S19)', async () => {
+  it('keeps each commit’s comments its own on the same path and line, neither under a line in Uncommitted, and sends both after an amend; the message, derived as the transcript derives it, gives each chip its own commit (S19)', async () => {
     const SHA_A = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
     const SHA_B = 'b2c3d4e5f60718293a4b5c6d7e8f901234567890';
     act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state: 'up', since: T0, generation: 0, capabilities: ['rl2.git-reads'] }]));
@@ -991,24 +994,22 @@ describe('comments on lines in Review', () => {
     openCommit(SHA_A);
     render(<TestHost />);
     await drawn('src/report.ts');
-    await drawn('src/other.ts');
-    addOn('src/other.ts', 'new', 2);
+    addOn('src/report.ts', 'new', 12);
     await painted(() => card() !== null);
-    type('Name it for what it counts.');
+    type('Why quote it in this commit?');
     leave();
-    await painted(() => card() === null && unsentRows('src/other.ts').length === 1);
+    await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
 
     openCommit(SHA_B);
     await painted(() => scopeChip('commit')?.textContent === 'Commit b2c3d4e');
     await drawn('src/report.ts');
-    await drawn('src/other.ts');
-    expect(unsentRows()).toEqual([]); // commit A's comment is not drawn in commit B
-    addOn('src/report.ts', 'new', 12);
+    expect(unsentRows()).toEqual([]); // commit A's comment is not under a line of commit B
+    addOn('src/report.ts', 'new', 12); // the same path and line, in commit B
     await painted(() => card() !== null);
     type('Quote only where a comma is.');
     leave();
     await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
-    expect(unsentRows('src/other.ts')).toEqual([]);
+    expect(unsentRows('src/report.ts')[0].textContent).toBe('Quote only where a comma is.');
 
     fireEvent.click(scopeChip('uncommitted')!);
     await painted(() => scopeChip('uncommitted')?.getAttribute('aria-pressed') === 'true');
@@ -1029,10 +1030,24 @@ describe('comments on lines in Review', () => {
     fireEvent.click(sendButton());
     await waitFor(() => expect(main.callsOf('session.send')).toHaveLength(1));
     const [{ comments }] = main.callsOf('side.comment.content') as { comments: MessageComment[] }[];
-    expect(comments.map((c) => c.anchor)).toEqual([commitLineAnchor('src/other.ts', 2, 'new', SHA_A), commitLineAnchor('src/report.ts', 12, 'new', SHA_B)]);
-    const message = commentsMessage(comments, 'main');
-    expect(message).toContain(`commit ${SHA_A}`);
-    expect(message).toContain(`commit ${SHA_B}`);
+    const anchors = [commitLineAnchor('src/report.ts', 12, 'new', SHA_A), commitLineAnchor('src/report.ts', 12, 'new', SHA_B)];
+    expect(comments.map((c) => c.anchor)).toEqual(anchors);
+
+    // the message the main conversation receives, as a user event through the transcript's own derivation
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content: commentsMessage(comments, 'main'), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    const row = rowOf(rowsOf(applyEvents(createState(null, null), b.events)), 'user');
+    expect(row.comments?.map((c) => c.anchor)).toEqual(anchors);
+    const actions = { ...spyActions(), openCommit: vi.fn() };
+    const drawnRow = renderRow(row, { storeKey: A, actions });
+    const chips = [...drawnRow.container.querySelectorAll<HTMLButtonElement>('button[data-chip="anchor"]')];
+    expect(chips.map((each) => each.textContent)).toEqual(['report.ts:12 · a1b2c3d', 'report.ts:12 · b2c3d4e']);
+    chips.forEach((each) => fireEvent.click(each));
+    expect(actions.openCommit.mock.calls).toEqual([
+      [A, SHA_A, 'src/report.ts'],
+      [A, SHA_B, 'src/report.ts'],
+    ]);
   });
 
   // UX wave U5b-2 fix 1 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §G, Decision Log 37): a
