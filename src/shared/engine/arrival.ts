@@ -20,6 +20,7 @@
 import { PASTED_BLOCK } from '../composer/pasted-content';
 import { askSteerOpening, parseAskSteer } from '../maws/ask';
 import { stripAnsi } from '../wire/ansi';
+import type { ContentBlock } from '../graph/events';
 import type { Arrival, CommandFacts } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
@@ -237,42 +238,85 @@ function quotedStrings(text: string, from: number): string[] | null {
  * break, and a sentence holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c
  * document, Design 2). A grant is read only in the person's own words (Decision Log 52): never on a line of MAWS's
  * answer envelope nor inside a pasted segment, where a sentence is data; one MAWS does not read leaves its blocked row
- * with its button.
+ * with its button. The person's own words are their part as the split reads it (`readPersonsContent`; ticket 704).
  */
-export function personsGrants(text: string): Consent[] {
+export function personsGrants(content: PersonsContent): Consent[] {
+  const { own } = readPersonsContent(content);
+  const text = own === null ? '' : messageText(own);
   const whole = readConsents(text);
   if (whole.length > 0 || !text.includes('\n') || !text.includes(GRANT_OPENING)) return whole;
-  return ownLines(text).flatMap(({ line, pasted }) => (pasted ? [] : readConsents(line)));
+  return ownLines(content).flatMap(({ line, pasted }) => (pasted ? [] : readConsents(line)));
 }
 
 /**
- * The lines of a text with MAWS's answer envelopes taken out as the split takes them (`envelopesOut`'s rest), each marked
- * when it starts inside a pasted segment. The person's words are the lines not marked; joined back, every line is the rest.
+ * The lines of the person's part of a message (`readPersonsContent`'s `own`, its text blocks joined by a line break as
+ * the reader joins them everywhere), each marked when it starts inside a pasted segment; none when nothing of theirs is
+ * left. The person's words are the lines not marked.
  */
-export function ownLines(text: string): { line: string; pasted: boolean }[] {
-  const { rest } = envelopesOut(text);
-  const lines = rest.split('\n');
-  const pasted = pastedLines(rest, lines);
+export function ownLines(content: PersonsContent): { line: string; pasted: boolean }[] {
+  const { own } = readPersonsContent(content);
+  if (own === null) return [];
+  const text = messageText(own);
+  const lines = text.split('\n');
+  const pasted = pastedLines(text, lines);
   return lines.map((line, i) => ({ line, pasted: pasted[i]! }));
 }
 
+/** A person's message's content: a text, or its blocks. */
+export type PersonsContent = string | ContentBlock[];
+
 /**
- * A person's text with MAWS's answer envelopes taken out as the split takes them (ticket 704, decision 17): read again
- * until a reading takes nothing out, so where one envelope's lines stand around another whole envelope, both go; the
- * envelopes in the order they were taken, reading by reading, each with what was read of it. The split's own reading of
- * a text (`readOut`, persons-message.ts) is this loop; that module imports this one and never the reverse, so it is
- * written in both, and `persons-message.test.ts` holds the grant readers to the split's reading.
+ * A person's content with MAWS's answer envelopes taken out: the one reading of a person's message (ticket 704; the
+ * Decision Log's ruling of 2026-11-16), which the split reads it through (`personsParts`, persons-message.ts) and the
+ * grant readers here too. Each text block by itself (decision 7): an envelope spread over two blocks is not read, since
+ * the writer makes one text; a block left empty goes, every other block stays, in place and unchanged. Each text is
+ * read again until a reading takes nothing out (decision 17): where one envelope's lines stand around another whole
+ * envelope, the first reading takes the inner one and leaves the outer one whole. `own` is null when nothing of the
+ * person's is left, white space beside an envelope counting as nothing (the separating newline the engine appends to
+ * an envelope's text block, or puts between members). The envelopes in the order they were taken, each with what was
+ * read of it.
  */
-function envelopesOut(text: string): { members: { text: string; read: AskSteer }[]; rest: string } {
-  const members: { text: string; read: AskSteer }[] = [];
-  let rest = text;
+export function readPersonsContent(content: PersonsContent): { own: PersonsContent | null; envelopes: { text: string; read: AskSteer }[] } {
+  if (typeof content === 'string') {
+    const read = readOut(content);
+    return { own: leftOf(read), envelopes: read.envelopes };
+  }
+  const envelopes: { text: string; read: AskSteer }[] = [];
+  const kept: ContentBlock[] = [];
+  for (const block of content) {
+    const read = block.type === 'text' && typeof block.text === 'string' ? readOut(block.text) : null;
+    if (read === null || read.envelopes.length === 0) {
+      kept.push(block);
+      continue;
+    }
+    envelopes.push(...read.envelopes);
+    const own = leftOf(read);
+    if (own !== null) kept.push({ ...block, text: own });
+  }
+  return { own: kept.length === 0 ? null : kept, envelopes };
+}
+
+// One text read with the window's check of a whole slice
+const readOut = (text: string) => takeEnvelopesOut(text, (own) => envelopeSlices(own, askSteerOpening, PASTED_BLOCK, parseAskSteer));
+
+/**
+ * The envelopes `slice` reads in a text, read again until a reading takes nothing out (ticket 704, decision 17): where
+ * one envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer
+ * one whole, and the next takes it. Each reading that takes something shortens the text by an envelope at least, so it
+ * ends. The envelopes in the order they were taken, and what is left. The one loop: `readPersonsContent` reads through
+ * it, and the search text's worker runs its source, so it uses its arguments alone.
+ */
+export function takeEnvelopesOut<T>(text: string, slice: (text: string) => { members: { text: string; read: T }[]; rest: string }): { own: string; envelopes: { text: string; read: T }[] } {
+  const envelopes: { text: string; read: T }[] = [];
+  let own = text;
   for (;;) {
-    const read = envelopeSlices(rest, askSteerOpening, PASTED_BLOCK, parseAskSteer);
-    if (read.members.length === 0) return { members, rest };
-    members.push(...read.members);
-    rest = read.rest;
+    const { members, rest } = slice(own);
+    if (members.length === 0) return { own, envelopes };
+    envelopes.push(...members);
+    own = rest;
   }
 }
+const leftOf = (read: { own: string; envelopes: readonly unknown[] }): string | null => (read.own === '' || (read.envelopes.length > 0 && read.own.trim() === '') ? null : read.own);
 
 // Which lines start inside a pasted segment, from its opening tag through its closing one (the terminal's frame,
 // `PASTED_BLOCK`, as the transcript's `splitPastedSegments` reads it).
@@ -340,15 +384,16 @@ function personsPrompt(row: Json, text: string): Arrival[] {
     const delivery = framedDelivery(content, 'prompt', false);
     if (delivery !== null) return [delivery];
   }
-  return personsText(text);
+  return personsText(Array.isArray(content) ? content.filter(isBlock) : text); // block by block, as the split reads it (ticket 704)
 }
 
-// One answer per envelope the text holds, as the split takes them (rule 3; ticket 704, decisions 12 and 17), its summary
-// the envelope's own text, as a lone envelope's is; then the grants in the person's own words (U1c), never on an
-// envelope's lines: a text that is one envelope is no grant, nor are its lines.
-function personsText(text: string): Arrival[] {
-  const answers = envelopesOut(text).members.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
-  return [...answers, ...personsGrants(text)];
+// One answer per envelope the person's content holds, as the split takes them (rule 3; ticket 704, decisions 7, 12 and
+// 17), its summary the envelope's own text, as a lone envelope's is; then the grants in the person's own words (U1c),
+// never on an envelope's lines: a text that is one envelope is no grant, nor are its lines. Read block by block: where
+// the readings could differ (an envelope spread over two blocks), the split's wins, the one reading the ruling names.
+function personsText(content: PersonsContent): Arrival[] {
+  const answers = readPersonsContent(content).envelopes.map(({ text: summary, read }): Answer => ({ class: 'answer', tool: 'maws', call: read.askId, summary, answers: read.result.answers, dismissed: false }));
+  return [...answers, ...personsGrants(content)];
 }
 
 /** A row or a queued command of the peer origin (or a teammate's, which has none): the engine's inbox. */

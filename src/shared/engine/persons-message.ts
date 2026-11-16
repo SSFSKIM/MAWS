@@ -7,53 +7,18 @@
 // its own, of the shape an envelope sent alone has. The split is by the text (decision 6), behind one gate (decision 5),
 // which tells a person's message from what is not one and does not tell who typed it. Pure: it imports the reader and the
 // event types, nothing of the renderer or the engine host.
-import { PASTED_BLOCK } from '../composer/pasted-content';
 import type { ContentBlock, EventPayload } from '../graph/events';
-import { askSteerOpening, parseAskSteer } from '../maws/ask';
-import { envelopeSlices, readAnswerEnvelope, type Arrival } from './arrival';
+import { askSteerOpening } from '../maws/ask';
+import { readAnswerEnvelope, readPersonsContent, type Arrival } from './arrival';
 
 export type UserMessage = Extract<EventPayload, { kind: 'user.message' }>;
 type Content = string | ContentBlock[];
 
-// One text read until a reading takes nothing out (decision 17): where an envelope's lines stand around another whole
-// envelope, the first reading takes the inner one and leaves the outer one whole in the rest. The envelopes in the order
-// they were taken, reading by reading. Each reading that takes something shortens the text by at least an envelope.
-function readOut(text: string): { own: string; envelopes: string[] } {
-  const envelopes: string[] = [];
-  let own = text;
-  for (;;) {
-    const { members, rest } = envelopeSlices(own, askSteerOpening, PASTED_BLOCK, parseAskSteer);
-    if (members.length === 0) return { own, envelopes };
-    envelopes.push(...members.map((member) => member.text));
-    own = rest;
-  }
-}
-
-// What an envelope leaves of a text: nothing when only white space stands beside it (decision 7: the separating newline
-// the engine appends to an envelope's text block, or puts between members)
-const leftOf = (read: { own: string; envelopes: string[] }): string | null => (read.own === '' || (read.envelopes.length > 0 && read.own.trim() === '') ? null : read.own);
-
-/** A person's content read apart: their own part, null when nothing of theirs is left, and the envelopes' texts in order. */
+/** A person's content read apart: their own part, null when nothing of theirs is left, and the envelopes' texts in order.
+ *  The reading is the reader's one (`readPersonsContent`, arrival.ts), which the grant readers share. */
 export function personsParts(content: Content): { own: Content | null; envelopes: string[] } {
-  if (typeof content === 'string') {
-    const read = readOut(content);
-    return { own: leftOf(read), envelopes: read.envelopes };
-  }
-  // Each text block by itself; a block left empty goes, every other block stays, in place and unchanged (decision 7). An
-  // envelope that spans two blocks is not read: the writer makes one text.
-  const envelopes: string[] = [];
-  const kept: ContentBlock[] = [];
-  for (const block of content) {
-    const read = block.type === 'text' && typeof block.text === 'string' ? readOut(block.text) : null;
-    if (read === null || read.envelopes.length === 0) {
-      kept.push(block);
-      continue;
-    }
-    envelopes.push(...read.envelopes);
-    const own = leftOf(read);
-    if (own !== null) kept.push({ ...block, text: own });
-  }
-  return { own: kept.length === 0 ? null : kept, envelopes };
+  const { own, envelopes } = readPersonsContent(content);
+  return { own, envelopes: envelopes.map((envelope) => envelope.text) };
 }
 
 // The one gate (decision 5): a message that is not synthetic, has no shell part, has a uuid, and whose origin is the
@@ -93,8 +58,7 @@ export function splitPersonsMessage(message: UserMessage): UserMessage[] {
 
 /** The person's words in the engine's own copy of a message's whole text (a rewind's prefill); null when none are left. */
 export function personsWords(text: string): string | null {
-  const read = readOut(text);
-  return leftOf(read);
+  return readPersonsContent(text).own as string | null;
 }
 
 /**

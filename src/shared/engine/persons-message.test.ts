@@ -11,7 +11,7 @@ import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@sh
 import type { AskQuestion } from '@shared/maws/tools';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, ownLines, personsGrants, readAnswerEnvelopes, readArrivals } from './arrival';
+import { consentMessage, envelopeSlices, ownLines, personsGrants, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -113,6 +113,16 @@ describe('envelopeSlices', () => {
       read += own.members.length;
     }
     expect(read).toBeGreaterThan(READER_CORPUS.length / 2); // the corpus holds envelopes, not only plain texts
+  });
+
+  it('takeEnvelopesOut, the reader’s one loop, runs from its own source too, and reads the corpus as the module does', () => {
+    const [again, slices, block, opening] = [isolated(takeEnvelopesOut), isolated(envelopeSlices), isolated(answeredBlock), isolated(askSteerOpening)];
+    const lines = A1.split('\n');
+    const nested = `Keep these notes.\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
+    for (const text of [...READER_CORPUS, nested]) {
+      expect(again(text, (part: string) => slices(part, opening, PASTED_BLOCK, block))).toEqual(takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock)));
+    }
+    expect(takeEnvelopesOut(nested, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock)).envelopes.map((envelope) => envelope.text)).toEqual([A2, A1]);
   });
 });
 

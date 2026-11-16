@@ -3,7 +3,7 @@ import { open, type FileHandle } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 704: the envelope's reader, run from its source
-import { envelopeSlices } from '@shared/engine/arrival';
+import { envelopeSlices, takeEnvelopesOut } from '@shared/engine/arrival';
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
 import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
 import { parseBash } from './backfill';
@@ -55,20 +55,16 @@ const askSteerOpening = ${askSteerOpening};
 const PASTED_BLOCK = ${PASTED_BLOCK};
 const answeredBlock = ${answeredBlock};
 const envelopeSlices = ${envelopeSlices};
+const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out
 const answerOutsideTranscript = ${answerOutsideTranscript};
 const parseBash = ${parseBash}; // the backfill's own test of a shell row, which the split never reads
 // A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after
-// the person's words; read again until a reading takes nothing out, as the split does (an envelope's lines can stand
-// around another's). White space left beside an envelope is no words of the person's. Null when nothing is left.
+// the person's words; read again until a reading takes nothing out, by the reader's own loop, as the split does (an
+// envelope's lines can stand around another's). White space left beside an envelope is no words of the person's. Null
+// when nothing is left.
 function searchableText(text) {
-  let own = text;
-  const answers = [];
-  for (;;) {
-    const { members, rest } = envelopeSlices(own, askSteerOpening, PASTED_BLOCK, answeredBlock);
-    if (members.length === 0) break;
-    for (const member of members) answers.push(answerOutsideTranscript(member.text));
-    own = rest;
-  }
+  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock));
+  const answers = envelopes.map((envelope) => answerOutsideTranscript(envelope.text));
   if (answers.length === 0) return text;
   const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');
   return parts.length === 0 ? null : parts.join('\n');

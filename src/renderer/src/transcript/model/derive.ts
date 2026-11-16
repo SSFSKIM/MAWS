@@ -1627,7 +1627,7 @@ function wordsBesideGrants(content: string | ContentBlock[], marks: readonly Non
   if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
   const text = messageText(content);
   const whole = readConsents(text);
-  const lines = whole.length > 0 ? [{ line: text, grants: whole }] : ownLines(text).map(({ line, pasted }) => ({ line, grants: pasted ? [] : readConsents(line) }));
+  const lines = whole.length > 0 ? [{ line: text, grants: whole }] : ownLines(content).map(({ line, pasted }) => ({ line, grants: pasted ? [] : readConsents(line) }));
   const grants = lines.flatMap((line) => line.grants);
   if (grants.length !== marks.length || grants.some((grant, i) => grant.kind !== marks[i]!.kind || grant.subject !== marks[i]!.subject)) return undefined;
   const others = lines.filter((line) => line.grants.length === 0).map((line) => line.line);
