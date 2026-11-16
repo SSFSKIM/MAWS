@@ -588,27 +588,32 @@ describe('a plugin’s connectors (UX wave U11h)', () => {
     });
   });
 
-  it('compares, classifies and revises a declared address past the endpoints’ bound whole, and sends its endpoint no url', async () => {
+  it('lists no connector whose declared address is past the endpoints’ bound, in either answer, and compares, classifies and revises a listed one’s address whole', async () => {
     const LONG = `https://long.example.com/${'p'.repeat(4096 - 'https://long.example.com/'.length)}`;
     expect(LONG).toHaveLength(4096);
     await json(join(configHome, '.claude.json'), { mcpServers: { bound: { type: 'http', url: LONG }, past: { type: 'http', url: `${LONG}x` } } });
     const at = join(root, 'long-address');
-    const declare = (b: string) => json(join(at, '.mcp.json'), { mcpServers: {
-      longer: { type: 'http', url: `${LONG}${b}` }, // equals `bound` in its first 4096 characters only
-      exact: { type: 'http', url: LONG }, // `past` is cut to this text in its endpoint, and is still another address
-      template: { type: 'http', url: `${LONG}\${T}` },
+    const declare = (exact: { type: string; url: string }) => json(join(at, '.mcp.json'), { mcpServers: {
+      longer: { type: 'http', url: `${LONG}b` }, // past the bound: a cut text would be another address, so no row at all
+      template: { type: 'http', url: `${LONG}\${T}` }, // past the bound with a template: no row either
+      exact, // at the bound: listed; `past` is cut to this text in its own endpoint, and is still another address
+      short: { type: 'http', url: 'https://short.example.com/mcp' },
     } });
-    await declare('b');
+    await declare({ type: 'http', url: LONG });
     await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'long-address' });
     await installed({ 'long@harbour-market': [{ scope: 'user', installPath: at }] });
-    const rows = Object.fromEntries((await read()).pluginServers!.map((row) => [row.server, row]));
-    expect([rows.longer!.sameAddressAs, rows.exact!.sameAddressAs]).toEqual([null, 'bound']);
-    expect(rows.template!.address).toBe('templated');
-    const first = (await endpoints()).pluginServers!.find((row) => row.server === 'longer')!;
-    expect(first.url).toBeNull(); // past the endpoints' bound no address is sent, never a cut text a session could match
-    expect(first.revision).toMatch(/^[0-9a-f]{32}$/); // the revision is of the whole text
-    await declare('c');
-    expect((await endpoints()).pluginServers!.find((row) => row.server === 'longer')!.revision).not.toBe(first.revision);
+    const answer = await read();
+    expect(answer.pluginServers!.map((row) => row.server)).toEqual(['exact', 'short']);
+    expect(answer.plugins).toEqual([{ plugin: 'long@harbour-market', pluginName: 'long-address', installScope: 'user' }]);
+    expect(answer.pluginServers!.find((row) => row.server === 'exact')).toMatchObject({ address: 'literal', sameAddressAs: 'bound' });
+    const listed = (await endpoints()).pluginServers!;
+    expect(listed.map((row) => row.server)).toEqual(['exact', 'short']);
+    const exact = listed.find((row) => row.server === 'exact')!;
+    expect(exact.url).toBe(LONG);
+    expect(exact.revision).toMatch(/^[0-9a-f]{32}$/);
+    await declare({ type: 'http', url: `${LONG.slice(0, -1)}q` });
+    const moved = (await endpoints()).pluginServers!.find((row) => row.server === 'exact')!;
+    expect(moved.revision).not.toBe(exact.revision); // the revision is of the whole text, its last character included
   });
 
   it('caps the plugins’ connectors at the inventory’s row bound and labels the result partial', async () => {
