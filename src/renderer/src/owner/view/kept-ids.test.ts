@@ -76,7 +76,7 @@ function askedIds(row: Row, state: TranscriptState): string[] | null {
     case 'user': return [userInput(row, turn)!.instanceId];
     case 'assistant_text': return [assistantInput(row, turn)!.instanceId];
     case 'thinking': return [thinkingInput(row)!.instanceId];
-    case 'group': return groupInput(row, turn, state.pending)!.props.calls.map((call) => call.tool_use_id);
+    case 'group': return groupInput(row, turn, state.pending)!.props.calls.flatMap((call) => (call.tool_use_id === undefined ? [] : [call.tool_use_id]));
     case 'cell': return toolInputs(row, turn).map((input) => input.instanceId);
     case 'to_human': case 'agent_list': return [callInput(row, turn)!.instanceId];
     case 'question': return [questionInput(row, turn)!.instanceId];

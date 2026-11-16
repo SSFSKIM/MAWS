@@ -647,14 +647,14 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   );
   // UX wave U2b (M7; §M, "The reads"): a round of reads of the mod's summaries at each close of a stretch (a row the
   // person reads comes after the last record line) and at each end of a turn, the two moments at which the mod asks
-  const moved = summaries?.moved;
-  const closed = useMemo(() => mirrored && moved !== undefined && lastStretchClosed(merged), [mirrored, moved, merged]);
+  const foldsMoved = summaries?.moved;
+  const closed = useMemo(() => mirrored && foldsMoved !== undefined && lastStretchClosed(merged), [mirrored, foldsMoved, merged]);
   const was = useRef({ closed, working });
   useEffect(() => {
     const turned = (closed && !was.current.closed) || (!working && was.current.working);
     was.current = { closed, working };
-    if (turned) moved?.();
-  }, [closed, working, moved]);
+    if (turned) foldsMoved?.();
+  }, [closed, working, foldsMoved]);
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
   const shown = useMemo(() => {
