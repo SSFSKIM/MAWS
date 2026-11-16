@@ -755,7 +755,7 @@ describe('made by hand: the reading past the bound has a bounded work (A3)', () 
     }
   });
 
-  it.each([300])('%i opening lines, each followed by a block’s close that reads nothing: the check of a whole slice runs once per opening line', (count) => {
+  it.each([300, 20_000])('%i opening lines, each followed by a block’s close that reads nothing: the check of a whole slice runs once per opening line', (count) => {
     const text = Array.from({ length: count }, (_, i) => `${askSteerOpening(`toolu_${i}`)}\n\`\`\``).join('\n');
     let calls = 0;
     const refusing = () => {
@@ -764,5 +764,15 @@ describe('made by hand: the reading past the bound has a bounded work (A3)', () 
     };
     expect(envelopeSlices(text, askSteerOpening, PASTED_BLOCK, refusing)).toEqual({ members: [], rest: text });
     expect(calls).toBe(count);
+  });
+
+  it('20000 opening lines and no close: nothing is read, the text stays as it is, and the check of a whole slice never runs', () => {
+    const text = Array.from({ length: 20_000 }, (_, i) => askSteerOpening(`toolu_${i}`)).join('\n');
+    let calls = 0;
+    expect(envelopeSlices(text, askSteerOpening, PASTED_BLOCK, () => {
+      calls += 1;
+      return null;
+    })).toEqual({ members: [], rest: text });
+    expect(calls).toBe(0);
   });
 });

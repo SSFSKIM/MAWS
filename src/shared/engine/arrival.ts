@@ -122,7 +122,8 @@ type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
  *    nothing from themselves. A malformed member before a valid one is left as text: once the valid one is out, no
  *    block names the malformed one's ask.
  * 3. Such an envelope reads as one answer, and nothing of it is the person's.
- * A slice still ends only at a block naming its opening's ask (`read`), and never inside a pasted segment.
+ * A slice still ends only at a block naming its opening's ask (`read`), and never inside a pasted segment. The reading
+ * past the bound runs only in a text of a few opening lines (`PAST_THE_BOUND_OPENINGS`).
  */
 export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: RegExp, read: (slice: string) => T | null): { members: { text: string; read: T }[]; rest: string } {
   if (!text.includes('[MAWS ask ')) return { members: [], rest: text }; // read on every user text the transcript draws
@@ -176,6 +177,13 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
     i = found.next;
   }
   if (members.length > 0) return { members, rest: kept.join('\n') };
+  // The most opening lines outside a pasted segment a text may hold for the reading past the bound to run (the
+  // architect's ruling of 2026-11-16, A3). That reading searches to the text's end from each opening line, for each
+  // envelope the loop takes, so its work grows with the square of the opening lines. A joined message holds one opening
+  // line per answer waiting at one turn's end, and an earlier build's question one more at most in any text MAWS has
+  // met; eight is well above that. A text with more is left as it is, and the grant readers fail closed on it.
+  const PAST_THE_BOUND_OPENINGS = 8;
+  if (starts.length > PAST_THE_BOUND_OPENINGS) return { members, rest: text };
   // The bound took nothing, so every opening line is still in the text: one reading past it, from the last
   for (const start of starts.reverse()) {
     const found = envelopeAt(start, false);
