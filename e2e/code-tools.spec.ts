@@ -58,25 +58,27 @@ const UNLABELLED_WORDS = 'Café, naïve, Ελληνικά, 東京'; // an invent
 
 // What Chromium's PDF viewer draws under the frame of `url` (a token's URL, no fragment): per viewer frame beneath it, its
 // toolbar's height (0 when hidden: the viewer always builds the element) and its document's title, read in the viewer's
-// own page. A viewer frame without its `pdf-viewer` or its toolbar throws, so a poll on it fails rather than reads 0.
-async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<{ toolbar: number; title: string }[]> {
+// own page; or `NOT_READY` for a viewer frame whose `pdf-viewer` or toolbar is not built yet, a value no matcher of the
+// scenes accepts, so a poll asks again (a throw would end the poll at once). A failure to run or parse the read still throws.
+const NOT_READY = 'not ready';
+type ViewerRead = { toolbar: number; title: string } | typeof NOT_READY;
+async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<ViewerRead[]> {
   return maws.app.evaluate(
-    async ({ BrowserWindow }, { url, viewer }) => {
+    async ({ BrowserWindow }, { url, viewer, notReady }) => {
       const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
       const script = `(() => {
         const element = document.querySelector('pdf-viewer');
         const toolbar = element && element.shadowRoot && element.shadowRoot.querySelector('viewer-toolbar');
-        return JSON.stringify({ missing: !element ? 'pdf-viewer' : !toolbar ? 'viewer-toolbar' : null, toolbar: toolbar ? toolbar.getBoundingClientRect().height : 0, title: document.title });
+        return JSON.stringify(toolbar ? { toolbar: toolbar.getBoundingClientRect().height, title: document.title } : null);
       })()`;
-      const shown: { toolbar: number; title: string }[] = [];
+      const shown: ({ toolbar: number; title: string } | typeof notReady)[] = [];
       for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) {
-        const read = JSON.parse(String(await frame.executeJavaScript(script, true))) as { missing: string | null; toolbar: number; title: string };
-        if (read.missing !== null) throw new Error(`the viewer frame ${frame.url} has no ${read.missing}`);
-        shown.push({ toolbar: read.toolbar, title: read.title });
+        const read = JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string } | null;
+        shown.push(read ?? notReady);
       }
       return shown;
     },
-    { url, viewer: PDF_VIEWER },
+    { url, viewer: PDF_VIEWER, notReady: NOT_READY },
   );
 }
 
@@ -600,7 +602,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(frame, 'a token and the file’s name, with the side tab’s fragment').toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
         const side = (await frame.getAttribute('src'))!;
         const url = side.slice(0, side.indexOf('#'));
-        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => shown.toolbar), { message: 'Chromium’s viewer in the frame, drawing no toolbar beside the chat' }).toEqual([0]);
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => (shown === NOT_READY ? shown : shown.toolbar)), { message: 'Chromium’s viewer in the frame, drawing no toolbar beside the chat' }).toEqual([0]);
         await expect.poll(() => drawnMark(p, frame), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(DRAWN);
 
         // Open externally in the bar, above the frame, handing the file itself to the system
@@ -617,7 +619,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] [data-artifact-frame="pdf"]`);
         await expect(moved, 'the same token, the main area’s fragment').toHaveAttribute('src', `${url}#navpanes=0`, { timeout: 20_000 });
         expect(await moved.evaluate((element) => (element as unknown as { u6b2Side?: boolean }).u6b2Side === true), 'a new frame element').toBe(false);
-        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => [shown.toolbar > 0, shown.title]), { message: 'the viewer’s toolbar, titled with the file’s name' }).toEqual([[true, 'doc.pdf']]);
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => (shown === NOT_READY ? shown : [shown.toolbar > 0, shown.title])), { message: 'the viewer’s toolbar, titled with the file’s name' }).toEqual([[true, 'doc.pdf']]);
         await expect.poll(() => drawnMark(p, moved), { timeout: 15_000, message: 'the page drawn in the main area' }).toBeGreaterThan(DRAWN);
 
         // nothing created: the Library, the session's artifacts and every artifact as they were, and nothing written
@@ -731,6 +733,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         return { ranges, holds: ranges.some(([start, end]) => start <= target && target <= end) };
       }, target);
       expect(held.holds, `the target, ${target} s, is not loaded yet: ${JSON.stringify(held.ranges)}`).toBe(false);
+      const entriesBefore = entryRanges(p, src).length; // a request made before the seek (a metadata tail read) does not count
       const landed = await audio.evaluate(
         (a: HTMLAudioElement, target) =>
           new Promise<number>((resolve) => {
@@ -740,10 +743,10 @@ test.describe('the product in stub mode over a scratch repository', () => {
         target,
       );
       expect(landed, 'the seek succeeded').toBeCloseTo(target, 0);
-      // a ranged request from at least 90 s into the file's bytes (44-byte header, 88,200 bytes a second)
+      // a ranged request, made after the seek, from at least 90 s into the file's bytes (44-byte header, 88,200 bytes a second)
       const from = 44 + 90 * 88_200;
       await expect
-        .poll(() => entryRanges(p, src).some((range) => Number(/^bytes=(\d+)-/.exec(range)?.[1] ?? -1) >= from), { message: `a ranged request from byte ${from} or later reached the responder` })
+        .poll(() => entryRanges(p, src).slice(entriesBefore).some((range) => Number(/^bytes=(\d+)-/.exec(range)?.[1] ?? -1) >= from), { message: `a ranged request from byte ${from} or later reached the responder` })
         .toBe(true);
       expect(await snapshot(p), 'nothing created').toEqual(before);
     });
@@ -788,7 +791,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(viewer.locator('[data-updated]')).toHaveText('Updated');
         await expect(viewer).toHaveAttribute('data-frame', 'pdf');
         const after = (await frame.getAttribute('src'))!;
-        await expect.poll(async () => (await pdfViewerOf(p.maws, after.slice(0, after.indexOf('#')))).length, { message: 'Chromium’s viewer in the new frame' }).toBe(1);
+        await expect.poll(async () => (await pdfViewerOf(p.maws, after.slice(0, after.indexOf('#')))).filter((shown) => shown !== NOT_READY).length, { message: 'Chromium’s viewer, built, in the new frame' }).toBe(1);
         await expect.poll(() => drawnMark(p, frame, INVENTED_RED), { timeout: 15_000, message: 'the new version drawn: its red square' }).toBeGreaterThan(DRAWN);
         expect(await drawnMark(p, frame), 'the first version’s black square gone').toBeLessThan(DRAWN / 10);
         expect(await snapshot(p), 'nothing created').toEqual(before);

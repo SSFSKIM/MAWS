@@ -35,9 +35,10 @@ export function minimalPdf(link?: string, mark: Rgb = BLACK): Buffer {
 // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): how many pixels of `element`'s
 // rect, in what main paints for the window showing `page`, are within 40 of `mark` on every channel: a PDF drawn by
 // Chromium's viewer is its page's square of that colour, which neither the viewer's error page nor a blank frame paints.
-// 0 when the element has no box.
+// 0 when the element has no box yet (not attached, or replaced while it is read), so a poll on it asks again rather than
+// ending on a throw; a capture that fails still throws.
 export async function markPixels(app: ElectronApplication, page: Page, element: Locator, mark: Rgb = BLACK): Promise<number> {
-  const rect = await element.boundingBox();
+  const rect = await element.boundingBox({ timeout: 2_000 }).catch(() => null);
   if (!rect || rect.width < 1 || rect.height < 1) return 0;
   const clip = { x: Math.round(rect.x), y: Math.round(rect.y), width: Math.round(rect.width), height: Math.round(rect.height) };
   return app.evaluate(

@@ -1267,7 +1267,7 @@ test("a file by a path: a hostile PDF's link is a blocked navigation, its Downlo
     await expect(pdfFrame, 'the stored PDF’s frame: no sandbox').not.toHaveAttribute('sandbox');
     await expect(pdfFrame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#navpanes=0$/);
     const url = withoutFragment((await pdfFrame.getAttribute('src'))!);
-    await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
+    await expect.poll(() => markPixels(s.maws.app, s.page, pdfFrame), { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
 
     // its link: the viewer asks to navigate the window, and main's top-level guard refuses it
     const navigations = await recordNavigations(s.maws);
@@ -1472,7 +1472,7 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       await expect(viewer, 'the linked PDF drawn beside the chat').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
       const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
       const firstUrl = (await pdfFrame.getAttribute('src'))!;
-      await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF drawn before its file goes' }).toBeGreaterThan(2_000);
+      await expect.poll(() => markPixels(s.maws.app, s.page, pdfFrame), { timeout: 15_000, message: 'the PDF drawn before its file goes' }).toBeGreaterThan(2_000);
       // kept, so another tab can be shown in its place and it shown again
       await sideTab(sideColumn(s.page), 'report.pdf').dblclick();
       await expect(sideColumn(s.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the tab kept').toHaveCount(0);
@@ -1520,7 +1520,7 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       await expect(pdfFrame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
       const secondUrl = (await pdfFrame.getAttribute('src'))!;
       expect(secondUrl, 'from a new token').not.toBe(firstUrl);
-      await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
+      await expect.poll(() => markPixels(s.maws.app, s.page, pdfFrame), { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
 
       // B7 for a named PDF: replaced where no watch sees it, then its tab shown again; the showing reads it again, and the
       // new version (its square red, the first's black) is drawn from a new token
