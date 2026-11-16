@@ -61,7 +61,6 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/renderer/src/widgets/ForkWidget.tsx': { kind: 'typed', verbs: { start: 2, startSeam: 1 }, field: '`/fork <prompt>`: the prompt as typed, the fork’s first message, without the command' },
   'src/main/attention/actions.ts': { kind: 'typed', verbs: { command: 1 }, field: 'a notification’s reply field (`reply`)' },
   // MAWS's forms
-  'src/renderer/src/owner/report/answering.ts': { kind: 'maws', verbs: { seam: 1 }, forms: [{ form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none' }] },
   // the comments sent to the main conversation, and a thread's first message (`adoptFork`, which a session's start intent
   // carries to services/sessions/setup.ts)
   'src/renderer/src/side/actions.ts': { kind: 'maws', verbs: { seam: 1, start: 2 }, forms: [ANCHORED, PROMOTION] },
@@ -81,7 +80,7 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/engine-host/queue.ts': { kind: 'carrier', verbs: { port: 1, prepare: 2, frame: 3 }, from: 'session.ts: the send, the steer and a queued entry released, written with the person’s origin; the content as prepared' },
   'src/engine-host/ipc.ts': { kind: 'carrier', verbs: { command: 6, port: 1, steer: 1, queue: 1 }, from: 'the host’s handlers of session.send, session.steer and session.queue.edit: content from main’s router, mawsd or a link' },
   'src/renderer/src/composer/submit/send-human-prompt.ts': { kind: 'carrier', verbs: { command: 4, seam: 5 }, from: 'the window’s human-prompt seam: content from the sites that call it (submit.ts, lane-b.ts)' },
-  'src/renderer/src/session/controls/controls-for.ts': { kind: 'carrier', verbs: { seam: 1, port: 3 }, from: '`sendToSession` and the noting port: content from QuickReply, CardThread, answering, side/actions, setup-actions' },
+  'src/renderer/src/session/controls/controls-for.ts': { kind: 'carrier', verbs: { seam: 1, port: 3 }, from: '`sendToSession` and the noting port: content from QuickReply, CardThread, side/actions, setup-actions' },
   'src/renderer/src/session/controls/lane-a.ts': { kind: 'carrier', verbs: { port: 1 }, from: 'lane A: a terminal session’s message through the sminos bridge, whose rows carry the plugin’s origin (shared/engine/sminos-delivery.ts) and are never the person’s own (named.ts `personsOwn`)' },
   'src/renderer/src/tools/agents/client.ts': { kind: 'carrier', verbs: { command: 1 }, from: 'the agents tool’s steer: relay-store.ts’s relay' },
   'src/main/lane-b/remote.ts': { kind: 'carrier', verbs: { command: 6, start: 5 }, from: 'the window’s sends, starts and forks forwarded to another machine’s endpoint' },
@@ -139,6 +138,13 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/renderer/src/lane-a/conversation/delivery-frame.ts': { kind: 'declaration', verbs: { frame: 1 }, what: 'a drawing: a lane A row shown as a queued prompt; nothing is sent' },
 };
 
+// Forms no site of this build writes any more, still read only: stored transcripts hold them, and a window of an older
+// build can still send them to this build's daemon. UX wave U2b removed the report's cards and their answering, the one
+// site of the owner question's answer line (it stood in this table as `src/renderer/src/owner/report/answering.ts`).
+const RETIRED_FORMS: readonly (readonly [string, Form])[] = [
+  ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none' }],
+];
+
 // What the list does not account for: a site it does not hold, a site whose verbs moved, an entry no longer a site.
 function unclassified(sites: readonly Site[], list: Record<string, Entry> = PERSON_SENDS): string[] {
   const found = new Map(sites.map((site) => [site.file, site.verbs]));
@@ -171,7 +177,7 @@ describe('who sends as the person', () => {
     expect(unclassified(sites.filter((site) => site.file !== 'src/main/attention/actions.ts'))).toEqual(['src/main/attention/actions.ts: listed, but no longer a site']);
   });
 
-  const forms = Object.entries(PERSON_SENDS).flatMap(([file, entry]) => (entry.kind === 'maws' ? entry.forms.map((form) => [file, form] as const) : []));
+  const forms = [...Object.entries(PERSON_SENDS).flatMap(([file, entry]) => (entry.kind === 'maws' ? entry.forms.map((form) => [file, form] as const) : [])), ...RETIRED_FORMS];
   const READ_ONLY = [{ names: false, pending: [], other: true }, { names: false, pending: [], other: true }];
   it.each(forms)('%s: its form, written by its writer, names a path for a read only, alone and joined', (_, { form, sample, positional }) => {
     const index = forms.findIndex(([, other]) => other.form === form);
