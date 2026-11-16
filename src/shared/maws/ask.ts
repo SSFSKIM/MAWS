@@ -83,7 +83,10 @@ function designSystemAnswerProblem(question: AskQuestion, answer: AskAnswer): st
 }
 // P3-D end
 
-const STEER_TAG = /^\[MAWS ask ([^\]\s]+)\] /;
+// How every envelope opens, in this build's form and an earlier build's (UX wave U6e): the reader of the person's own
+// text (src/shared/files/named.ts) claims a text that holds it anywhere, so the form keeps this one copy.
+export const ASK_STEER_OPENING = '[MAWS ask ';
+const STEER_TAG = new RegExp(`^\\[${ASK_STEER_OPENING.slice(1)}([^\\]\\s]+)\\] `);
 const BLOCK_OPEN = '\n```json\n';
 const BLOCK_CLOSE = '\n```';
 
@@ -211,7 +214,7 @@ export function askSteerText(askId: string, questions: readonly AskQuestion[], a
     return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });
   const result: AskResult = { status: 'answered', askId, answers: steered };
-  return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+  return [`${ASK_STEER_OPENING}${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
 }
 
 // The answers a steer carried, read with the ask's questions in hand: each new-form answer joined to its question by
