@@ -1036,6 +1036,24 @@ describe('a drop on a session on another machine', () => {
     await act(async () => release());
     await waitFor(() => expect(sent).toEqual([{ text: '', files: ['notes.txt'] }]));
   });
+
+  // UX wave U6e (board ticket 675, the closing wave's item 5): what a waiting Send serialises is the person's; an engine
+  // plugin's fill landing while it waits would go out in their message
+  it('refuses a plugin’s fill while a Send waits for a dropped file, and sends the file without it', async () => {
+    let release!: () => void;
+    const notes = new File(['hi'], 'notes.txt', { type: 'text/plain' });
+    const read = notes.arrayBuffer.bind(notes);
+    notes.arrayBuffer = () => new Promise<ArrayBuffer>((resolve) => (release = () => void read().then(resolve)));
+    const sent: { text: string; files: string[] }[] = [];
+    const { handle, remote } = await localThenRemote(notes, async (s, editor) => (sent.push({ text: s.text, files: attachmentsOf(editor.doc()).map((a) => a.name) }), true));
+    remote();
+    act(() => handle.current!.submit());
+    let filled = true;
+    act(() => void (filled = handle.current!.fill('the plugin’s words', 'replace')));
+    expect(filled).toBe(false);
+    await act(async () => release());
+    await waitFor(() => expect(sent).toEqual([{ text: '', files: ['notes.txt'] }]));
+  });
 });
 
 // UX wave U4a M3 (Interfaces F; decision 14): ↑ asks the composer to take a waiting message back before history walks,
