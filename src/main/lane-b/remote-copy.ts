@@ -106,6 +106,9 @@ interface FrameCopy {
  * - Each pass's first page is told to the caller (`seen`: the type and size the pass copies), and the paged read and this
  *   copy log by `label`, never by the path (A7).
  *
+ * A pass is written only when what it wrote reaches the size its first page gave (Decision Log 30), so the length answered
+ * is the length verified.
+ *
  * Asks the machine `files.read { appSessionId, path, offset, length, hash }` and nothing else: the keys the copy of Open
  * externally sends when it proves a text.
  */
@@ -130,7 +133,7 @@ export async function fetchInto(
     await sink.truncate(0);
     const pass = await readInto(link, 'files.read', asked, sink, max, true, log, frame);
     if (!pass.ok) return pass as Result<never>;
-    if (pass.value === 'written') return { ok: true, value: { written: size } };
+    if (pass.value === 'written') return { ok: true, value: { written: size } }; // a written pass ended at exactly this size
     if (pass.value === 'too-large') return { ok: true, value: 'too-large' };
     if (pass.value === 'inexact' || pass.value === 'unproven') return { ok: false, error: ipcError('invalid_input', notByteForByte(link.name)) };
     if (++tries > REMOTE_READ_TRIES) return { ok: false, error: ipcError('internal', `files.read: the file kept changing on machine ${link.name} while it was copied`) };
@@ -170,6 +173,9 @@ async function readInto(link: RemoteLink, name: 'files.read' | 'library.read', s
     await writeAll(file, bytes, page.offset);
     offset = page.offset + page.length;
     if (!page.truncated || page.length === 0 || offset >= size) {
+      // UX wave U6b-2 (Decision Log 30): written only at the size the first page gave; a copy that ends short of it (a
+      // page of no bytes, or one not marked truncated) read a file that changed, and is read again
+      if (offset !== size) return { ok: true, value: 'changed' };
       if (hashed && hash !== null && digest.digest('hex') !== hash) return { ok: true, value: 'changed' };
       return { ok: true, value: 'written' };
     }
