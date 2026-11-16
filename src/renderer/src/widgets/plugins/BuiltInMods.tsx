@@ -67,7 +67,7 @@ export function BuiltInModRow({ row, mods, appSessionId, kindWord = false, summa
   const { failure, setEnabled, setOverride, setFoldSummaries } = mods;
   const summaries = summariesSwitch ? row.summaries : undefined;
   return (
-    <li data-mod-row={row.id} className={`flex items-start border-b border-border px-2 py-2 last:border-b-0 ${summaries === undefined ? 'gap-3' : 'flex-wrap gap-x-3 gap-y-2'}`}>
+    <li data-mod-row={row.id} className={`flex items-start gap-3 border-b border-border px-2 py-2 last:border-b-0${summaries === undefined ? '' : ' flex-wrap gap-y-2'}`}>
       <ItemImage kind="mod" seed={row.name} iconUrl={null} size="row" />
       <div className="flex min-w-0 flex-1 flex-col gap-0.5 text-ui-sm text-fg-muted">
         <span className="flex min-w-0 items-center gap-2 text-ui">
