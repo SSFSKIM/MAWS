@@ -813,20 +813,18 @@ export function registerEngineIpc(hostOn: HostOn, emit: HostEmit, deps: EngineIp
     if (!session.surface.attached) throw new HostCommandError({ code: 'internal', message: `session ${id} has no engine surface (the engine did not advertise ui_surface_v1)` });
     return { session, client, address: session.surface.address };
   };
-  handleR2('session.ui.render', async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }) =>
-    bounded(async () => {
-      const { client, address } = attached(appSessionId);
-      const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
-      return renderAnswerOf(answer, props);
-    }),
-  );
+  // One render on the session's attached client, for `session.ui.render` and `session.ui.renderSite` alike.
+  const render = async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }: CommandInput<'session.ui.renderSite'>): Promise<CommandOutput<'session.ui.render'>> => {
+    const { client, address } = attached(appSessionId);
+    const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
+    return renderAnswerOf(answer, props);
+  };
+  handleR2('session.ui.render', async (input) => bounded(() => render(input)));
   // UX wave U2b: a render of a site outside the wire's closed set, checked against the host's own list
-  handleR2('session.ui.renderSite', async ({ appSessionId, component, instanceId, props, viewport, contentRows, keyed }) =>
+  handleR2('session.ui.renderSite', async (input) =>
     bounded(async () => {
-      if (!RENDER_SITE_COMPONENTS.includes(component)) throw new HostCommandError({ code: 'invalid_input', message: `session.ui.renderSite does not ask ${component}: this engine host asks ${RENDER_SITE_COMPONENTS.join(', ')}` });
-      const { client, address } = attached(appSessionId);
-      const answer = await controls.uiRender(client, { ...address, component, instance_id: instanceId, props, ...(viewport && { viewport }), ...(contentRows !== undefined && { content_rows: contentRows }), ...(keyed && { keyed }) });
-      return renderAnswerOf(answer, props);
+      if (!RENDER_SITE_COMPONENTS.includes(input.component)) throw new HostCommandError({ code: 'invalid_input', message: `session.ui.renderSite does not ask ${input.component}: this engine host asks ${RENDER_SITE_COMPONENTS.join(', ')}` });
+      return render(input);
     }),
   );
   handleR2('session.ui.press', async ({ appSessionId, plugin, handle, key, href }) =>
