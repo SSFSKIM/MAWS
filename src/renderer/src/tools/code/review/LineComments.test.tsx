@@ -1185,6 +1185,7 @@ describe('comments on lines in Review', () => {
       fireEvent.click(scopeChip('uncommitted')!);
       await painted(() => commitButton() !== null);
       const addTool = vi.spyOn(panelHost, 'addTool');
+      expect(commitButton()!.className.split(' ')).toEqual(expect.arrayContaining(['relative', 'after:absolute', 'after:inset-x-0', 'after:h-6'])); // a 24 px pressed area (D6)
       fireEvent.click(commitButton()!);
       expect(addTool.mock.calls).toEqual([['review', { appSessionId: A, params: { scope: 'commit', commit: ON, path: 'src/report.ts' } }]]);
       await painted(() => scopeChip('commit')?.getAttribute('aria-pressed') === 'true' && unsentRows('src/report.ts').length === 1);
