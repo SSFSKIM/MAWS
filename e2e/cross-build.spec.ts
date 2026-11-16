@@ -4364,14 +4364,22 @@ test('(to-human, the switch said to the peer) the peerâ€™s window on this buildâ
         await unit.request('mods.setFoldSummaries', { on });
         // the peer's own read after the write, over the connection the event came down first: it still answers
         expect(value(await invoke(run.page, 'mods.list', {})).length, `${peer.label} reads the mods after the write (on: ${on})`).toBeGreaterThan(0);
-        await expect.poll(() => drops().length, { timeout: 20_000, message: `${peer.label}'s main drops the event it does not know, said once per name` }).toBe(1);
+        // the first event's drop reached the output (a later one would only add a line, so its count waits for the drain)
+        if (!on) await expect.poll(() => drops().length, { timeout: 20_000, message: `${peer.label}'s main drops the event it does not know` }).toBeGreaterThan(0);
       }
       expect((await unit.status()).pid, 'the same daemon still serves').toBe(unit.pid);
+      await s.quit(run);
+      // The barrier: the quit waits for the process's `exit`, which can come before its pipes have handed over their last
+      // bytes; `close` comes once both have ended, so every line the peer's main wrote is in its output from here on
+      await new Promise<void>((resolve) => {
+        if ([run.child.stdout, run.child.stderr].every((pipe) => pipe === null || pipe.readableEnded || pipe.destroyed)) resolve();
+        else run.child.once('close', () => resolve());
+      });
+      expect(drops(), `${peer.label}'s main drops the event it does not know once, for both writes (logged once per name)`).toHaveLength(1);
       expect(run.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
       expect([...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => HOST_REFUSES.test(l)), `${here.label}'s daemon refuses nothing`).toEqual([]);
       expect(run.maws.consoleErrors()).toEqual([]);
       said.push(`  dropped by ${peer.label}: ${drops().map((l) => l.trim()).join(' | ')}; its mods.list answered after each write; nothing refused`);
-      await s.quit(run);
       record(said);
     });
   });
