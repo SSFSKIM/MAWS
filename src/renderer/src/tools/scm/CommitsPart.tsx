@@ -31,11 +31,10 @@ export interface CommitsPartProps {
   read: BranchRead | undefined;
   mark: MachineMark;
   ui: StoreApi<PageUi>;
-  scroller: RefObject<HTMLDivElement | null>; // the page's scrolling part, which "Show fewer" brings the heading into
   retry(): void; // asks the branch read again
 }
 
-export function CommitsPart({ appSessionId, status, serves, read, mark, ui, scroller, retry }: CommitsPartProps) {
+export function CommitsPart({ appSessionId, status, serves, read, mark, ui, retry }: CommitsPartProps) {
   const state = commitsState(serves, read, mark.offline);
   if (state.kind !== 'ready') {
     return (
@@ -52,7 +51,7 @@ export function CommitsPart({ appSessionId, status, serves, read, mark, ui, scro
       </Part>
     );
   }
-  return <CommitsList appSessionId={appSessionId} status={status} answer={state.answer} ui={ui} scroller={scroller} />;
+  return <CommitsList appSessionId={appSessionId} status={status} answer={state.answer} ui={ui} />;
 }
 
 // §H's Commits column of "Refusals told apart"; a refusal's code word is no tooltip (frames' S14).
@@ -69,7 +68,7 @@ function failureWords(failure: ReadFailure, mark: MachineMark): string {
   }
 }
 
-function CommitsList({ appSessionId, status, answer, ui, scroller }: { appSessionId: AppSessionId; status: GitStatus; answer: NonNullable<BranchRead['answer']>; ui: StoreApi<PageUi>; scroller: RefObject<HTMLDivElement | null> }) {
+function CommitsList({ appSessionId, status, answer, ui }: { appSessionId: AppSessionId; status: GitStatus; answer: NonNullable<BranchRead['answer']>; ui: StoreApi<PageUi> }) {
   const whole = useStore(ui, (s) => s.commitsWhole);
   const list = commitList(answer, status.branch, whole);
   const heading = useRef<HTMLDivElement>(null);
@@ -83,13 +82,9 @@ function CommitsList({ appSessionId, status, answer, ui, scroller }: { appSessio
   useLayoutEffect(() => {
     if (!folding.current || whole) return;
     folding.current = false;
-    const box = scroller.current;
     const top = heading.current;
-    if (!box || !top) return;
-    const room = box.scrollHeight - box.clientHeight;
-    if (room <= 0) return;
-    box.scrollTop = Math.min(room, Math.max(0, box.scrollTop + reviewLayout.offsetWithin(top, box)));
-  }, [whole, scroller]);
+    if (top) headingToTop(top);
+  }, [whole]);
 
   return (
     <Part name="commits" label={SCM_COPY.commitsPart}>
@@ -112,6 +107,16 @@ function CommitsList({ appSessionId, status, answer, ui, scroller }: { appSessio
       />
     </Part>
   );
+}
+
+// The page's scrolling part brought to the Commits heading, as far as it scrolls (frames' S2): the heading's place in the
+// content, clamped to how far the part can scroll; nothing is written where it no longer scrolls.
+function headingToTop(heading: HTMLElement): void {
+  const box = heading.closest<HTMLElement>('[data-scm-scroll]');
+  if (!box) return;
+  const room = box.scrollHeight - box.clientHeight;
+  if (room <= 0) return;
+  box.scrollTop = Math.min(room, Math.max(0, box.scrollTop + reviewLayout.offsetWithin(heading, box)));
 }
 
 // "Commits N since <base>" with "· N behind" and "Review ›" on This branch; with no base "Commits · latest on <branch>"

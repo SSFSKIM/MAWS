@@ -64,7 +64,6 @@ export function SourceControlPage({ appSessionId, directory, ui, visible }: Sour
     return useBranchReads.getState().hold({ machine, repoRoot, directory, session: appSessionId });
   }, [serves, repoRoot, visible, machine, directory, appSessionId]);
   const read = useBranchReads((s) => (repoRoot !== null ? branchReadOf(s, machine, repoRoot) : undefined));
-  const scroller = useRef<HTMLDivElement>(null);
 
   if (status === null || entry === undefined) {
     const error = entry?.error ?? null;
@@ -75,9 +74,9 @@ export function SourceControlPage({ appSessionId, directory, ui, visible }: Sour
   return (
     <div data-scm-page className="flex h-full min-h-0 flex-col bg-bg">
       <Where status={status} mark={mark} directory={directory} />
-      <div ref={scroller} data-scm-scroll className="min-h-0 flex-1 overflow-y-auto">
+      <div data-scm-scroll className="min-h-0 flex-1 overflow-y-auto">
         <Uncommitted appSessionId={appSessionId} entry={entry} status={status} />
-        <CommitsPart appSessionId={appSessionId} status={status} serves={serves} read={read} mark={mark} ui={ui} scroller={scroller} retry={retry} />
+        <CommitsPart appSessionId={appSessionId} status={status} serves={serves} read={read} mark={mark} ui={ui} retry={retry} />
         <PullRequestPart appSessionId={appSessionId} directory={directory} status={status} mark={mark} ui={ui} />
       </div>
     </div>
