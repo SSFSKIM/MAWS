@@ -25,9 +25,10 @@ const ASK = 'toolu_ask_layout';
 const envelope = (write: Writer) => write(ASK, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
 const REPLY = '<message>Grid it is: the page now lays its cards out in a grid.</message>';
 
+// the plain transcript with every turn's work open; the to-human view with the lane on and no turn folding, as its store sets it
 const stateOf = (events: SessionEvent[], lane = false): TranscriptState => {
-  const state = withAllExpanded(applyEvents(createState(null, null), events));
-  return lane ? withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }) : state;
+  const state = applyEvents(createState(null, null), events);
+  return lane ? withUi(state, { ...state.ui, ownerLane: true, noTurnFold: true, version: state.ui.version + 1, global: state.ui.global + 1 }) : withAllExpanded(state);
 };
 const users = (rows: readonly Row[]) => rows.filter((row): row is Extract<Row, { kind: 'user' }> => row.kind === 'user');
 
