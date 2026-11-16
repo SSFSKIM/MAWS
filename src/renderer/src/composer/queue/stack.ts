@@ -22,7 +22,10 @@ import type { BlockedCall } from '../../transcript/model/blocked'; // UX wave U1
 import { askAnswerCopy, askQuestionTitle, CONSENT } from '../../transcript/model/copy';
 import { entryDisplay } from './entry-text';
 
-export interface Unread { messageUuid: MessageUuid; text: string; at: string; attached?: true } // a transcript row marked `unread`; U1c (Decision Log 49): `attached` when an attachment rides beside its text
+// a transcript row marked `unread`; `text` is what the row draws (the message with MAWS's answer envelopes taken out).
+// U1c (Decision Log 53): `grant`, the call the transcript's reader found the message to grant, read from the row's own
+// consent mark, set only where that grant is everything the message holds (Decision Log 44, 49)
+export interface Unread { messageUuid: MessageUuid; text: string; at: string; grant?: BlockedCall }
 export interface Read {
   unread: readonly Unread[];
   started(messageUuid: MessageUuid): boolean;
@@ -30,15 +33,16 @@ export interface Read {
   questions(call: string): readonly AskQuestion[] | null;
 }
 
-// UX wave U1c (the U1c document, Interfaces §G; card 2): a row that has content carries `grant`, the call its whole text
-// grants when it is exactly one "Approve and retry" sentence, else null; such a row reads as the line it becomes.
+// UX wave U1c (the U1c document, Interfaces §G; card 2): every row carries `grant`, the call its message grants when that
+// message is exactly one "Approve and retry" sentence, else null; such a row reads as the line it becomes. A row with
+// content reads it from the content; a handed row takes the transcript's reading (Decision Log 53).
 export type StackRow =
   // the two waiting kinds: `answer` is the row's words when the message is an answer, else null; U1c: `grant` is the call
   // a message that is one grant sentence and nothing else approves, else null
   | { kind: 'next'; key: string; messageUuid: MessageUuid; content: SendContent; createdAt: string; answer: string | null; grant: BlockedCall | null }
   | { kind: 'after' | 'held'; key: string; queueId: string; content: SendContent; createdAt: string; answer: string | null; grant: BlockedCall | null }
   | { kind: 'uncertain'; key: string; queueId: string; content: SendContent; createdAt: string; grant: BlockedCall | null }
-  | { kind: 'sending'; key: string; text: string; createdAt: string } // a submission on its way: "Sending…"
+  | { kind: 'sending'; key: string; text: string; createdAt: string; grant: BlockedCall | null } // a submission on its way: "Sending…"
   | { kind: 'handed'; key: string; text: string; createdAt: string; grant: BlockedCall | null }; // the engine holds it and MAWS's queue does not list it: "Next step", no controls
 
 /** A row a key or a control can act on: one that waits at the next step or after the turn. */
@@ -82,16 +86,15 @@ export function answerWords(text: string, questions: Read['questions']): string 
 }
 
 const textOf = (content: SendContent): string => messageText(content as string | ContentBlock[]);
-// UX wave U1c: the call a text grants, when the whole text is exactly one grant sentence
-const grantOfText = (text: string): BlockedCall | null => {
-  const grants = readConsents(text);
+// UX wave U1c: the call a message's content grants, when its whole text is exactly one grant sentence. Decision Log 44: a
+// row is a grant's only when the sentence is everything the message holds; a message with any block that is not text (an
+// image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview. Decision Log 53: read
+// from the content, never from the text a row draws; a handed row has no content and takes `Unread.grant`
+const grantOf = (content: SendContent): BlockedCall | null => {
+  if (typeof content !== 'string' && !(content as readonly ContentBlock[]).every((block) => block.type === 'text')) return null;
+  const grants = readConsents(messageText(content as string | ContentBlock[]));
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
-// Decision Log 44: a row is a grant's only when the sentence is everything the message holds; a message with any block
-// that is not text (an image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview.
-// A handed row knows it from its transcript row's attachments (`Unread.attached`, Decision Log 49)
-const grantOf = (content: SendContent): BlockedCall | null =>
-  typeof content === 'string' || (content as readonly ContentBlock[]).every((block) => block.type === 'text') ? grantOfText(messageText(content as string | ContentBlock[])) : null;
 
 export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, read: Read): StackRow[] {
   const steers = new Set<string>(queue.steers.map((steer) => steer.messageUuid));
@@ -99,12 +102,12 @@ export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, rea
   const listed = new Set<string>(queue.entries.flatMap((entry) => (entry.state !== 'released' && entry.messageUuid !== null ? [entry.messageUuid] : [])));
   const handed: StackRow[] = read.unread
     .filter((unread) => !steers.has(unread.messageUuid) && !listed.has(unread.messageUuid))
-    .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: answerWords(unread.text, read.questions) ?? unread.text, createdAt: unread.at, grant: unread.attached === true ? null : grantOfText(unread.text) })); // Decision Log 49 (2)
+    .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: answerWords(unread.text, read.questions) ?? unread.text, createdAt: unread.at, grant: unread.grant ?? null })); // Decision Log 53
   const next: StackRow[] = queue.steers
     .filter((steer) => !read.started(steer.messageUuid))
     .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: answerWords(textOf(steer.content), read.questions), grant: grantOf(steer.content) }));
   const entries = queue.entries.flatMap((entry): StackRow[] => {
-    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: answerWords(textOf(entry.content), read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt }] : [];
+    if (entry.state === 'submitting') return lasting.has(entry.queueId) ? [{ kind: 'sending', key: entry.queueId, text: answerWords(textOf(entry.content), read.questions) ?? entryDisplay(entry.content), createdAt: entry.createdAt, grant: grantOf(entry.content) }] : [];
     if (entry.state !== 'queued') return []; // released: the running turn
     if (entry.uncertain) return [{ kind: 'uncertain', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, grant: grantOf(entry.content) }];
     return [{ kind: queue.paused ? 'held' : 'after', key: entry.queueId, queueId: entry.queueId, content: entry.content, createdAt: entry.createdAt, answer: answerWords(textOf(entry.content), read.questions), grant: grantOf(entry.content) }];
@@ -129,7 +132,6 @@ export function newestToTake(rows: readonly StackRow[]): WaitingRow | null {
 /** The row's text: an answer's words; a grant's, the line it becomes (U1c); else its content as the stack reads it, or what a row with no content carries. */
 export function rowText(row: StackRow): string {
   if ('answer' in row && row.answer !== null) return row.answer;
-  const grant = 'grant' in row ? row.grant : grantOfText(row.text);
-  if (grant !== null) return `${CONSENT.approved} ${grant.subject}`;
+  if (row.grant !== null) return `${CONSENT.approved} ${row.grant.subject}`;
   return 'content' in row ? entryDisplay(row.content) : row.text;
 }
