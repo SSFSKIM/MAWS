@@ -14,7 +14,6 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
-import { askSteerText } from '@shared/maws/ask';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { earlierAskSteerText } from '../../../../test/support/ask-steer';

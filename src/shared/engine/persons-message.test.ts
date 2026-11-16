@@ -12,7 +12,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, ownLines, ownWordsOf, personsGrants, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
+import { consentMessage, envelopeSlices, ownLines, ownWordsOf, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -436,9 +436,14 @@ describe('the grant readers read a person’s message as the split does', () => 
   });
 
   // a question of the agent's may hold any line, the grant's sentence among them: in its envelope that line is the
-  // envelope's, whatever surrounds it
+  // envelope's, whatever surrounds it. Since board ticket 711 only an earlier build's envelope holds the question's words
+  // (this build's writes none), so the envelope that quotes it is an earlier build's
   const ASKED: AskQuestion = { id: 'q1', question: `Which of these should run?\n${GRANT}\nPick one.`, modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
-  const QUOTING = askSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]);
+  const QUOTING = earlierAskSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]);
+
+  it('this build’s envelope for that question holds no line of the grant’s sentence', () => {
+    expect(quotesGrant(askSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]))).toBe(false);
+  });
 
   it('a grant’s sentence on a line of an envelope is no grant, the envelope alone or joined with words', () => {
     expect(QUOTING.split('\n')).toContain(GRANT);

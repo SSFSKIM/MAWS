@@ -20,7 +20,7 @@ import { journalToEvents } from '../../transcript/dev/journal';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import type { Row } from '../../transcript/model/rows';
-import { rowText, stackRows, type StackRow } from './stack';
+import { answerWords, rowText, stackRows, type StackRow } from './stack';
 import { readOf } from './stack-acts';
 
 type UserRow = Extract<Row, { kind: 'user' }>;
