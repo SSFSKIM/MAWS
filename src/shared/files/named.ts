@@ -6,9 +6,9 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { ANCHOR_TAG_OPENING, PROMOTION_HEAD, readAnchoredMessage } from '../anchor/message';
+import { ANCHOR_TAG_OPENING, commentsMessage, PROMOTION_HEAD, readAnchoredMessage } from '../anchor/message';
 import { neutralisePastedTags } from '../composer/pasted-framing';
-import { PASTED_BLOCK } from '../composer/pasted-content';
+import { framePasted } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
 import { quotesGrant } from '../engine/grant';
 import { BASH_INPUT_OPENING, PLAN_LEAD } from '../engine/host-prompts';
@@ -1114,49 +1114,159 @@ function* personNames(content: unknown, path: string): Steps<boolean> {
 //   command's arguments are read only (ruling C, in `CLAIMED`).
 // Every site that hands content to a send, a steer or the queue as the person's message is listed, with the reader
 // of its form, by the guard test/support/person-sends.test.ts, which fails on a site it does not list.
-const CLAIMED: readonly ((text: string) => boolean)[] = [
-  (text) => text.includes(LINKED_READ_OPENING), // an artifact's read the host attached (engine-host/linked-reads.ts)
-  (text) => text.includes(ASK_STEER_OPENING), // MAWS's answer envelope, either form (engine-host/session-maws.ts)
-  (text) => quotesGrant(text), // MAWS's consent, or any text quoting the grant's opening
-  (text) => answersOf(text).length > 0, // an owner question's answer line (renderer owner/report/answering.ts)
-  (text) => text.includes(PLAN_LEAD), // the plan handed back after a clear (engine-host/session-clear.ts)
-  (text) => text.includes(BASH_INPUT_OPENING), // the echo of a `!` command and its output (engine-host/bash-mode.ts)
-  (text) => text.includes(PROMOTION_HEAD), // a side question promoted to a thread, the model's answers in it
-  (text) => text.includes(RELAY_CONTINUE), // a relay to an agent or a peer (renderer tools/agents/model/relay.ts)
-  (text) => text.includes(COMMAND_NAME_OPENING) || TYPED_COMMAND.test(text), // a slash command, recorded or typed (ruling C)
+// Each reader charges its work to `work`: a constant's search one native pass over the text, the grant's test what it
+// counts itself, the answer lines' match two (a line's opening, then its words).
+type Work = { steps: number };
+const holds = (needle: string) => (text: string, work: Work) => {
+  work.steps += text.length + 1;
+  return text.includes(needle);
+};
+const CLAIMED: readonly ((text: string, work: Work) => boolean)[] = [
+  holds(LINKED_READ_OPENING), // an artifact's read the host attached (engine-host/linked-reads.ts)
+  holds(ASK_STEER_OPENING), // MAWS's answer envelope, either form (engine-host/session-maws.ts)
+  (text, work) => quotesGrant(text, work), // MAWS's consent, or any text quoting the grant's opening
+  (text, work) => {
+    work.steps += 2 * text.length + 1;
+    return answersOf(text).length > 0; // an owner question's answer line (renderer owner/report/answering.ts)
+  },
+  holds(PLAN_LEAD), // the plan handed back after a clear (engine-host/session-clear.ts)
+  holds(BASH_INPUT_OPENING), // the echo of a `!` command and its output (engine-host/bash-mode.ts)
+  holds(PROMOTION_HEAD), // a side question promoted to a thread, the model's answers in it
+  holds(RELAY_CONTINUE), // a relay to an agent or a peer (renderer tools/agents/model/relay.ts)
+  holds(COMMAND_NAME_OPENING), // a slash command as the engine records it (ruling C)
+  (text, work) => {
+    work.steps += text.length + 1;
+    return TYPED_COMMAND.test(text); // a slash command as typed (ruling C), anchored at the text's start
+  },
 ];
-// The passes over the person's text the meter is charged for: each reader of `CLAIMED`, then the anchored message's read
-// and the paste frames' (Decision Log 24's meter; src/shared/files/named-own.test.ts)
-export const OWN_TEXT_PASSES = CLAIMED.length + 2;
 
-function* ownTexts(content: unknown): Steps<string[]> {
+// Decision Log 24's meter on the person's own text (the closing wave's item 3). Every reader is linear by construction
+// and runs as one call, charged the work it did; before a call the reading pauses when that call's bound would carry
+// the work past the next pause, so a pause falls between the readers of a long text and no stretch passes STRETCH_MAX.
+// The costliest call is the anchored message's read, bounded by ANCHOR_READ_WORK_PER_CHAR units a character (its passes
+// over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
+// to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
+// person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
+// units a character in all (the readers' bounds sum to 41 on a text that folds to itself), the text does not count: it fails closed.
+const ANCHOR_READ_WORK_PER_CHAR = 16;
+const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
+export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
+export const OWN_WORK_PER_CHAR = 48;
+const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
+const PASTE_OPENING = '<pasted_content id="'; // the head of the opener `framePasted` writes (composer/pasted-content.ts)
+
+// One reader's call, metered as above.
+function* inOneCall<T>(m: Meter, bound: number, read: (work: Work) => T): Steps<T> {
+  if (m.work + bound > m.pause && m.work > m.pause - SCAN_STEP_CHARS) yield pauseAt(m);
+  const work = { steps: 0 };
+  const value = read(work);
+  charge(m, work.steps);
+  if (m.work >= m.pause) yield pauseAt(m);
+  return value;
+}
+
+// A part of the person's text with each paste's frame and body out (ruling A), a blank line in its place so no link
+// spans it, as the engine's own parser cuts them (`PASTED_BLOCK`, up to two newlines on each side); found by a plain
+// scan, each opener up to the first closer of its own id. Null when an opener is not the composer's or has no closer,
+// or a tag of the form is left that is not the composer's neutralised one: such a part does not count.
+function* withoutPastes(part: string, m: Meter): Steps<string | null> {
+  let out = '';
+  for (let from = 0; ; ) {
+    const at = yield* inOneCall(m, part.length - from + 1, (work) => {
+      const found = part.indexOf(PASTE_OPENING, from);
+      work.steps += (found < 0 ? part.length : found) - from + 1;
+      return found;
+    });
+    if (at < 0) {
+      out += part.slice(from);
+      break;
+    }
+    const id = part.slice(at + PASTE_OPENING.length, at + PASTE_OPENING.length + 4);
+    const [opener, closer] = framePasted(id, '\u0000').split('\u0000') as [string, string]; // the writer's own frame, either side of a body
+    if (!/^[0-9a-f]{4}$/.test(id) || !part.startsWith(opener, at)) return null;
+    const body = at + opener.length;
+    const close = yield* inOneCall(m, part.length - body + 1, (work) => {
+      const found = part.indexOf(closer, body);
+      work.steps += (found < 0 ? part.length : found + closer.length) - body + 1;
+      return found;
+    });
+    if (close < 0) return null;
+    let lead = at;
+    while (lead > from && at - lead < 2 && part.charCodeAt(lead - 1) === 10) lead -= 1;
+    let after = close + closer.length;
+    for (let n = 0; n < 2 && part.charCodeAt(after) === 10; n += 1) after += 1;
+    out += `${part.slice(from, lead)}\n\n`;
+    from = after;
+  }
+  const kept = out;
+  return (yield* inOneCall(m, 2 * kept.length + 1, (work) => {
+    work.steps += 2 * kept.length + 1;
+    return neutralisePastedTags(kept) === kept;
+  })) ? kept : null;
+}
+
+/** What the reading of the person's own text found, and why it counted nothing when it was refused. */
+export interface OwnRead {
+  texts: string[];
+  refused: 'length' | 'budget' | null;
+}
+
+function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { meter?: Meter }): Steps<OwnRead> {
+  const none: OwnRead = { texts: [], refused: null };
   const first = yield* firstTextOf(content);
-  if (first === null) return [];
-  const m = meterFor(first);
-  // one pass over the text, charged; a step between passes, the PAUSE the meter calls for
-  const pass = function* (): Steps<void> {
-    charge(m, first.length + 1);
-    yield m.work >= m.pause ? pauseAt(m) : undefined;
-  };
+  if (first === null) return none;
+  if (first.length > OWN_TEXT_MAX_CHARS) return { texts: [], refused: 'length' };
+  const m: Meter = { work: 0, budget: workPerChar * (first.length + OWN_WORK_FLOOR_CHARS), pause: SCAN_STEP_CHARS };
+  if (seen) seen.meter = m;
+  const n = first.length;
   try {
-    for (const claims of CLAIMED) {
-      yield* pass();
-      if (claims(first)) return [];
-    }
-    yield* pass();
+    for (const claims of CLAIMED) if (yield* inOneCall(m, 3 * n + 2, (work) => claims(first, work))) return none;
     let parts = [first];
-    if (first.includes(ANCHOR_TAG_OPENING)) {
-      const read = readAnchoredMessage(first);
-      if (read === null) return []; // a tag the reader does not take: MAWS's form, not read as the person's
-      parts = read.comments.map((comment) => comment.text);
+    if (yield* inOneCall(m, n + 1, (work) => holds(ANCHOR_TAG_OPENING)(first, work))) {
+      // an anchored message counts only when read whole: its read comments, written back by the same writer, are the
+      // text to the byte (a lead of the same anchor before it, or other words, read as the same comments; ruling B)
+      const read = yield* inOneCall(m, ANCHOR_READ_WORK_PER_CHAR * n, (work) => {
+        work.steps += ANCHOR_READ_WORK_PER_CHAR * n;
+        return readAnchoredMessage(first);
+      });
+      if (read === null || read.destination === null) return none; // a tag the reader does not take: MAWS's form
+      const { comments, destination } = read;
+      const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * n + 1, (work) => {
+        work.steps += ANCHOR_WRITE_WORK_PER_CHAR * n + 1;
+        return commentsMessage(comments, destination) === first;
+      });
+      if (!whole) return none;
+      parts = comments.map((comment) => comment.text);
     }
-    yield* pass();
-    // a paste's frame out, a blank line in its place so no link spans it; a part still holding a tag that is not the
-    // composer's neutralised form is read only whole
-    return parts.map((part) => part.replace(PASTED_BLOCK, '\n\n')).filter((part) => neutralisePastedTags(part) === part);
+    const texts: string[] = [];
+    for (const part of parts) {
+      const kept = yield* withoutPastes(part, m);
+      if (kept !== null) texts.push(kept);
+    }
+    return { texts, refused: null };
   } catch (error) {
-    if (error instanceof ScanRefused) return [];
+    if (error instanceof ScanRefused) return { texts: [], refused: 'budget' };
     throw error;
+  }
+}
+
+// The reading of the person's own text with its meter's count (the closing wave's item 3; named-own.test.ts): the
+// work, the most of it between two pauses (the start and the end counted as pauses) and the pauses; `workPerChar`
+// lowers the budget so a test can run the refusal.
+export function ownTextWork(content: unknown, workPerChar = OWN_WORK_PER_CHAR): OwnRead & { work: number; longest: number; pauses: number } {
+  const seen: { meter?: Meter } = {};
+  const steps = ownTexts(content, workPerChar, seen);
+  let longest = 0;
+  let last = 0;
+  let pauses = 0;
+  for (;;) {
+    const step = steps.next();
+    const work = seen.meter?.work ?? 0;
+    if (step.done) return { ...step.value, work, longest: Math.max(longest, work - last), pauses };
+    if (step.value !== PAUSE) continue;
+    pauses += 1;
+    longest = Math.max(longest, work - last);
+    last = work;
   }
 }
 
@@ -1176,7 +1286,7 @@ function* firstTextOf(content: unknown): Steps<string | null> {
 function* personClaim(row: unknown, content: unknown, path: string): Steps<RowClaim | null> {
   if (!(yield* personNames(content, path))) return null;
   if (!personsOwn(row)) return OTHER;
-  return (yield* linksTo(yield* ownTexts(content), path)) ? NAMES : OTHER;
+  return (yield* linksTo((yield* ownTexts(content)).texts, path)) ? NAMES : OTHER;
 }
 
 // The anchor form's read of a person's message (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,

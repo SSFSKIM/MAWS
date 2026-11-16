@@ -209,7 +209,7 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     const read = ownTextWork(textOf);
     expect(read.refused).not.toBe('budget');
     expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
-    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX / 2);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
     expect(read.pauses).toBeGreaterThanOrEqual(2);
   });
 
