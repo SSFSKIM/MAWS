@@ -20,7 +20,7 @@
 // list and when), the attached session's own status read, the plugin list (null until it has answered), the plugins the
 // inventory keeps for the folder, and main's posture and revision for the row.
 import { useQueryClient } from '@tanstack/react-query';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
@@ -241,14 +241,14 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
 function useAnsweredAfterReport(input: { appSessionId: AppSessionId }, reportedAt: string | null): boolean {
   const client = useQueryClient();
   const key = useMemo(() => engineReadKey('session.mcpStatus', input), [input]);
-  // the report the answers are judged against, and how many answers the read had when it moved (null: those in hand stand)
+  // the report the answers are judged against, and how many answers the read had when it moved (null: those in hand stand);
+  // taken in the render that sees the move, and the read in flight cancelled in that render's commit, so no answer can
+  // land between the two
   const [asked, setAsked] = useState({ key, reportedAt, after: null as number | null });
   if (asked.key !== key) setAsked({ key, reportedAt, after: null }); // another session's read
-  const moved = asked.key === key && asked.reportedAt !== reportedAt;
-  useEffect(() => {
-    if (!moved) return;
-    setAsked({ key, reportedAt, after: client.getQueryState(key)?.dataUpdateCount ?? 0 });
-    void client.refetchQueries({ queryKey: key, exact: true }, { cancelRefetch: true });
-  }, [moved, key, reportedAt, client]);
-  return !moved && asked.key === key && (asked.after === null || (client.getQueryState(key)?.dataUpdateCount ?? 0) > asked.after);
+  else if (asked.reportedAt !== reportedAt) setAsked({ key, reportedAt, after: client.getQueryState(key)?.dataUpdateCount ?? 0 });
+  useLayoutEffect(() => {
+    if (asked.after !== null) void client.refetchQueries({ queryKey: asked.key, exact: true }, { cancelRefetch: true });
+  }, [asked, client]);
+  return asked.key === key && asked.reportedAt === reportedAt && (asked.after === null || (client.getQueryState(key)?.dataUpdateCount ?? 0) > asked.after);
 }
