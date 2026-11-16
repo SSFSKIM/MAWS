@@ -409,17 +409,49 @@ async function seenWhileScrolling(page: Page, selector: string): Promise<{ shown
       const mounted = new Set(Array.from(scroller.querySelectorAll<HTMLElement>('[data-index]')).map((row) => row.dataset.index ?? ''));
       if ([...mountedOnce].some((index) => !mounted.has(index))) unmounted = true;
       for (const index of mounted) mountedOnce.add(index);
-      // a match in sight is read again over further frames (about a second: an ask's round trip) and counts only if it is
-      // still in sight at the end, since a turn's line is MAWS's own until the mod's answer lands (SurfaceTurnLine)
-      if (!shown && Array.from(scroller.querySelectorAll(sel)).some(inSight)) {
-        for (let frame = 0; frame < 60; frame += 1) await new Promise((done) => requestAnimationFrame(done));
-        shown = Array.from(scroller.querySelectorAll(sel)).some(inSight);
-      }
+      shown ||= Array.from(scroller.querySelectorAll(sel)).some(inSight);
       if (scroller.scrollTop >= scroller.scrollHeight - scroller.clientHeight - 1) break;
       scroller.scrollTop += Math.max(1, scroller.clientHeight / 2);
     }
     return { shown, unmounted };
   }, selector);
+}
+
+// Nothing `selector` matches in sight anywhere in the list: the list walked from its top to its end, and at each stop a
+// state-waiting assertion on that end state (expect.poll, the scene's own expect timeout), after one that a row of the
+// list is in sight at that stop (so an empty view cannot pass), since a row the mod draws
+// can show MAWS's own drawing until the mod's answer lands (a turn's line is MAWS's own while its ask is pending:
+// SurfaceTurnLine, transcript/surface/Rows.tsx) and no mark on the page tells the two apart
+async function hiddenWhileScrolling(page: Page, selector: string, message: string): Promise<void> {
+  const scroller = paneOf(page).locator('[data-transcript-scroller]');
+  await scroller.evaluate((el) => {
+    el.dispatchEvent(new WheelEvent('wheel', { bubbles: true, deltaY: -200 })); // a reader's scroll, so the list stops following the end
+    el.scrollTop = 0;
+  });
+  for (let guard = 0; guard < 400; guard += 1) {
+    const at = await scroller.evaluate((el) => Math.round(el.scrollTop));
+    // first, that the stop draws something: a row of the list in sight in the viewport, so an empty view cannot pass
+    await expect
+      .poll(() => scroller.evaluate((el) => {
+        const view = el.getBoundingClientRect();
+        const inSight = (e: Element) => !e.closest('[inert]') && [e, ...Array.from(e.querySelectorAll('*'))].some((c) => !c.closest('[inert]') && c.checkVisibility({ visibilityProperty: true }) && Array.from(c.getClientRects()).some((r) => r.width > 0 && r.height > 0 && r.bottom > view.top && r.top < view.bottom));
+        return Array.from(el.querySelectorAll('[data-index]')).some(inSight);
+      }), { message: `a row in sight where the list stopped (${at} px), before reading what is hidden there` })
+      .toBe(true);
+    await expect
+      .poll(() => scroller.evaluate((el, sel) => {
+        const view = el.getBoundingClientRect();
+        const inSight = (e: Element) => !e.closest('[inert]') && [e, ...Array.from(e.querySelectorAll('*'))].some((c) => !c.closest('[inert]') && c.checkVisibility({ visibilityProperty: true }) && Array.from(c.getClientRects()).some((r) => r.width > 0 && r.height > 0 && r.bottom > view.top && r.top < view.bottom));
+        return Array.from(el.querySelectorAll(sel)).some(inSight);
+      }, selector), { message: `${message} (the list scrolled to ${at} px)` })
+      .toBe(false);
+    const ended = await scroller.evaluate((el) => {
+      if (el.scrollTop >= el.scrollHeight - el.clientHeight - 1) return true;
+      el.scrollTop += Math.max(1, el.clientHeight / 2);
+      return false;
+    });
+    if (ended) break;
+  }
 }
 
 // ---- the first case: the trial ---------------------------------------------------------------------------------------
@@ -490,9 +522,9 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       const pane = paneOf(page);
       // the mod's drawing alone: no record line, no switch and no message drawing of MAWS's in sight (MAWS's own drawing
       // of a row the mod draws stays in the DOM, concealed: engine-surface/SurfaceRow.tsx)
-      expect((await seenWhileScrolling(page, '[data-kind="record_fold"]')).shown, 'no record line of MAWS’s in sight').toBe(false);
+      await hiddenWhileScrolling(page, '[data-kind="record_fold"]', 'no record line of MAWS’s in sight');
       await expect(pane.locator('[data-view-switch]:visible'), 'no switch of MAWS’s in sight').toHaveCount(0);
-      expect((await seenWhileScrolling(page, '.owner-message-ink')).shown, 'no message drawing of MAWS’s in sight').toBe(false);
+      await hiddenWhileScrolling(page, '.owner-message-ink', 'no message drawing of MAWS’s in sight');
       await expect(modBand(pane), 'the mod’s band with its switch').toBeVisible({ timeout: 30_000 });
       messages = messageTexts(id);
       expect(messages.length, 'at least one message').toBeGreaterThan(0);
@@ -542,8 +574,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
     await step('full', 'hidden in the mod’s report, all in sight in its full transcript, also after scrolling', async () => {
       // a shorter window for the walk, so the list holds more than its viewport and rows unmount as it scrolls
       await maws!.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]!.setContentSize(1100, 520));
-      const report: Record<string, boolean> = {};
-      for (const [name, selector] of Object.entries(HIDDEN)) report[name] = (await seenWhileScrolling(page, selector)).shown;
+      for (const [name, selector] of Object.entries(HIDDEN)) await hiddenWhileScrolling(page, selector, `the ${name} hidden in the mod’s report`);
       const band = modBand(paneOf(page));
       await band.getByRole('button', { name: /full transcript/ }).click();
       await expect(band.getByRole('button', { name: /report only/ })).toBeVisible({ timeout: 20_000 });
@@ -554,8 +585,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
         full[name] = read.shown;
         unmounted ||= read.unmounted;
       }
-      line(`full: in the report ${JSON.stringify(report)}; in the full transcript, the list walked from its top ${JSON.stringify(full)}; a row unmounted during the walk: ${unmounted}`);
-      expect(report, 'hidden in the report').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, false])));
+      line(`full: in the report each of ${JSON.stringify(Object.keys(HIDDEN))} hidden at every stop; in the full transcript, the list walked from its top ${JSON.stringify(full)}; a row unmounted during the walk: ${unmounted}`);
       expect(full, 'all in sight in the full transcript').toEqual(Object.fromEntries(Object.keys(HIDDEN).map((k) => [k, true])));
       expect(unmounted, 'the walk unmounted a row it had mounted, so what it found was found after scrolling').toBe(true);
       await band.getByRole('button', { name: /report only/ }).click();
@@ -627,8 +657,8 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       await expect.poll(async () => (await lane(page, id)).drawnBy, { timeout: 30_000 }).toBe('mod');
       const pane = paneOf(page);
       await expect.poll(async () => (await walkLines(page, 'mod')).length, { timeout: 30_000, message: 'the mod’s fold, in sight' }).toBeGreaterThan(0);
-      expect((await seenWhileScrolling(page, '.transcript-divider .transcript-disclosure')).shown, 'no turn fold of MAWS’s in sight').toBe(false);
-      expect((await seenWhileScrolling(page, '[data-kind="record_fold"]')).shown, 'no record line of MAWS’s in sight').toBe(false);
+      await hiddenWhileScrolling(page, '.transcript-divider .transcript-disclosure', 'no turn fold of MAWS’s in sight');
+      await hiddenWhileScrolling(page, '[data-kind="record_fold"]', 'no record line of MAWS’s in sight');
       await expect(pane.locator('[data-view-switch]:visible'), 'no switch of MAWS’s in sight').toHaveCount(0);
       line(`lane off: no ${NATIVE_TO_HUMAN_ENV}, drawnBy mod, the mod's lines ${JSON.stringify(await walkLines(page, 'mod'))}, no turn fold of MAWS's`);
       await stop(page, id);
