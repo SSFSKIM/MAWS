@@ -10,7 +10,7 @@ import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest
 import { at } from '../../../../../test/support/machine';
 import { resetSurfaceRegistry } from '../../engine-surface/registry';
 import { useSessions } from '../../stores/sessions';
-import { BASH_RESULT, builder } from '../../transcript/model/test-events';
+import { BASH_RESULT, builder, uuid } from '../../transcript/model/test-events';
 import type { TranscriptSource } from '../../transcript/source/types';
 import { Transcript } from '../../transcript/view/Transcript';
 
@@ -131,5 +131,66 @@ describe('a round of reads at each close of a stretch and each end of a turn, in
       () => {},
     );
     expect(rounds()).toBe(1);
+  });
+
+  // A prompt written while a turn runs: its own turn, open and not yet started (accepted), until its `turn.started`.
+  const queue = (b: ReturnType<typeof builder>, u: string, text: string) =>
+    b.emit('user.message', { messageUuid: uuid(u), content: text, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  const start = (b: ReturnType<typeof builder>, u: string) => b.emit('turn.started', { userMessageUuid: uuid(u), origin: 'human' });
+
+  /** The closed turn and the running one with its closed stretch, as `mounted` draws them; then batches, each counted. */
+  async function sequence(atRest = false) {
+    const b = builder();
+    b.turn('u0', 'Find the notes');
+    call(b, 't0', 'Find the notes');
+    b.text('m0', 0, '<message>Found the notes.</message>');
+    b.end(['u0']);
+    b.turn('u1', 'Tidy the notes');
+    call(b, 'ta', 'Read the first notes');
+    b.text('ma', 0, '<message>Read the first notes.</message>');
+    const { source, push } = sourceOf([...b.events]);
+    const moved = vi.fn();
+    const view = render(<Transcript source={source} variant="session" ownerLane atRest={atRest} summaries={{ stored: [], moved }} />);
+    await waitFor(() => expect(screen.queryAllByRole('button', { name: /^› / }).length).toBeGreaterThan(0));
+    const rounds = async (step: () => void | Promise<void>) => {
+      const before = moved.mock.calls.length;
+      await step();
+      return moved.mock.calls.length - before;
+    };
+    const batch = (add: (b: ReturnType<typeof builder>) => void) => async () => {
+      const from = b.events.length;
+      add(b);
+      await push(b.events.slice(from));
+    };
+    const rest = (resting: boolean) => () => view.rerender(<Transcript source={source} variant="session" ownerLane atRest={resting} summaries={{ stored: [], moved }} />);
+    return { rounds, batch, rest };
+  }
+
+  it('a prompt queued while a turn runs has not ended when that turn ends: one round at each turn’s end', async () => {
+    const { rounds, batch } = await sequence();
+    expect(await rounds(batch((b) => queue(b, 'u2', 'Then the rest')))).toBe(0);
+    expect(await rounds(batch((b) => b.end(['u1'])))).toBe(1);
+    expect(await rounds(batch((b) => start(b, 'u2')))).toBe(0);
+    expect(
+      await rounds(
+        batch((b) => {
+          call(b, 'tb', 'Read the rest');
+          b.text('mb', 0, '<message>Read the rest.</message>');
+        }),
+      ),
+    ).toBe(1); // its stretch closed
+    expect(await rounds(batch((b) => b.end(['u2'])))).toBe(1);
+  });
+
+  it('a session at rest whose started turn the store holds open: that turn’s end is one round; a queued prompt is not ended by it', async () => {
+    const { rounds, batch, rest } = await sequence();
+    await batch((b) => queue(b, 'u2', 'Then the rest'))();
+    expect(await rounds(rest(true))).toBe(1);
+    expect(await rounds(rest(false))).toBe(0);
+    await batch((b) => {
+      b.end(['u1']);
+      start(b, 'u2');
+    })();
+    expect(await rounds(batch((b) => b.end(['u2'])))).toBe(1);
   });
 });
