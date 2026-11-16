@@ -87,7 +87,12 @@ export function readAnswerEnvelope(text: string): Answer | null {
 export function consentMessage(kind: 'command' | 'call', subject: string): string {
   return `${consentHead(kind)}${JSON.stringify(subject)}${consentTail(kind)}`;
 }
-const consentHead = (kind: 'command' | 'call') => `Permission granted for this exact ${kind} only, as one whole string: `;
+/**
+ * The consent sentence's opening, the one definition (board ticket 711): the ask tool refuses an ask whose strings hold
+ * it (src/engine-host/tool-server/ask.ts), so a model cannot put a grant before the person in an ask of its own.
+ */
+export const GRANT_OPENING = 'Permission granted for ';
+const consentHead = (kind: 'command' | 'call') => `${GRANT_OPENING}this exact ${kind} only, as one whole string: `;
 const consentTail = (kind: 'command' | 'call') =>
   `. This does not approve any other ${kind}, any part of this one, or running it with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry this exact ${kind} if you would like.`;
 
