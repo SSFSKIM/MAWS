@@ -567,14 +567,21 @@ describe('rowClaim', () => {
     ['a Read call’s file_path, lexically normal once collapsed', assistant(call('t1', 'Read', { file_path: '/work/tmp/../out/report.md' }))],
     ['a user row’s string content', user(`Open ${LINK}`)],
     ['a user row’s text block', user([text(`Open ${LINK}`)])],
-    ['an anchored comment', user([text(anchored)])],
     ['a person’s queued prompt', queued(`Open ${LINK}`)],
     ['a person’s queued prompt in blocks', queued([text(`Open ${LINK}`)])],
+  ])('names the path: %s', (_, row) => {
+    expect(rowClaim(row, P)).toEqual(names);
+  });
+
+  // UX wave U6e, the architect's ruling B: an anchored comment's tag is MAWS's, so the anchor form names the path for a
+  // read only; the comment's own words still count (src/shared/files/named-own.test.ts)
+  it.each([
+    ['an anchored comment', user([text(anchored)])],
     ['a person’s queued anchored comment', queued(anchored)],
     ['the first of a message’s several comments (UX wave U5a)', user([text(several)])],
     ['the first of a queued message’s several comments (UX wave U5a)', queued(several)],
-  ])('names the path: %s', (_, row) => {
-    expect(rowClaim(row, P)).toEqual(names);
+  ])('names the path for a read only: %s', (_, row) => {
+    expect(rowClaim(row, P)).toEqual({ names: false, pending: [], other: true });
   });
 
   it.each([

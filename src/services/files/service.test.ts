@@ -17,6 +17,7 @@ import { summary } from '../../../test/support/index-fixture';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
+import { linkedReadBlock } from '@shared/maws/linked-read';
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
@@ -1686,6 +1687,22 @@ describe('files saves outside the folders', () => {
       expect(await shown(files, A, out('plugin.txt'))).toMatchObject({ content: 'plugin.txt as it was\n', named: true, outside: { real: out('plugin.txt'), writable: false, why: 'result' } });
       await expect(files.writeOutside({ appSessionId: A, path: out('plugin.txt'), content: 'pwned\n', expectedHash: sha('plugin.txt as it was\n'), real: out('plugin.txt') })).rejects.toThrow(new Error(OUT));
       expect(readFileSync(out('plugin.txt'), 'utf8')).toBe('plugin.txt as it was\n');
+    });
+
+    // UX wave U6e, board ticket 675: an artifact's read the host attached to the person's message is not the person's
+    // text, though the row is of the person's origin; a link in it (the artifact's content, which the agent can write)
+    // names the path for a read only. The person's own words in the same message then save it.
+    it('reads a path only an attached artifact read links, read-only, refuses its save, and saves it once the person’s own words link it (ticket 675)', async () => {
+      write(out('linked.txt'), 'linked.txt as it was\n');
+      const read = JSON.stringify({ status: 'read', artifactId: '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806', kind: 'document', title: 'Season plan', revision: 3, markdown: `# Season plan\n\n${link(out('linked.txt'))}\n` }, null, 2);
+      const message = (words: string) => ({ ...typed(''), message: { role: 'user', content: [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }] } });
+      await transcriptOf(A, [message('Make [Season plan](maws-artifact:4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806) warmer.')]);
+      const files = outsideService();
+      expect(await shown(files, A, out('linked.txt'))).toMatchObject({ content: 'linked.txt as it was\n', named: true, outside: { real: out('linked.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('linked.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('linked.txt'), 'utf8')).toBe('linked.txt as it was\n');
+      await transcriptOf(A, [message(`Make it warmer, and ${link(out('linked.txt'))}`)]);
+      expect(await saveShown(files, A, out('linked.txt'), 'the person’s edit\n')).toEqual({ status: 'ok', hash: sha('the person’s edit\n') });
     });
   });
 
