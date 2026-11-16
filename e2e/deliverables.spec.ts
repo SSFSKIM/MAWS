@@ -902,7 +902,7 @@ test('delivered files: every kind draws in its body inside and outside the sessi
 // at its entry, through one ordered writer; this scene walks those lines. It asks `layout.frameFile` through the page's
 // bridge and mounts each URL itself, so it needs nothing of the window's viewer. No byte is judged by what is drawn.
 
-type FrameLine = { kind: 'decision'; verdict: 'pass' | 'cancel'; asker: string; method: string; url: string } | { kind: 'entry'; method: string; range: string; url: string };
+type FrameLine = { kind: 'decision'; answer: 'pass' | 'cancel'; asker: string; method: string; url: string } | { kind: 'entry'; method: string; range: string; url: string };
 const withoutFragment = (url: string) => url.replace(/#.*$/s, '');
 
 /** The seam's file frame lines, in the order they were written. */
@@ -910,7 +910,7 @@ function frameLines(lines: string[]): FrameLine[] {
   const read: FrameLine[] = [];
   for (const line of lines) {
     const decision = /^frame-decision (pass|cancel) (\S+) (\S+) (.+)$/.exec(line);
-    if (decision) read.push({ kind: 'decision', verdict: decision[1] as 'pass' | 'cancel', asker: decision[2]!, method: decision[3]!, url: withoutFragment(decision[4]!) });
+    if (decision) read.push({ kind: 'decision', answer: decision[1] as 'pass' | 'cancel', asker: decision[2]!, method: decision[3]!, url: withoutFragment(decision[4]!) });
     const entry = /^frame-entry (\S+) (\S+) (.+)$/.exec(line);
     if (entry) read.push({ kind: 'entry', method: entry[1]!, range: entry[2]!, url: withoutFragment(entry[3]!) });
   }
@@ -925,7 +925,7 @@ function walkFrame(lines: FrameLine[], url: string) {
   let unmatched = 0;
   for (const line of lines.filter((l) => l.url === url)) {
     if (line.kind === 'decision') {
-      if (line.verdict === 'pass') {
+      if (line.answer === 'pass') {
         passes.set(line.method, (passes.get(line.method) ?? 0) + 1);
         passedFor.add(line.asker);
       }
@@ -1035,11 +1035,11 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     await mountFrames(second, kinds.map((kind) => ({ id: `u6b2-other-${kind}`, kind, url: urls[kind] })));
     const since = () => frameLines(seamLines(s).slice(from));
     for (const kind of kinds) {
-      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.verdict === 'cancel' && line.asker === asker), { message: `${kind}: the second window’s request cancelled` }).toBe(true);
+      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === asker), { message: `${kind}: the second window’s request cancelled` }).toBe(true);
     }
     let after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
     expect(after.filter((line) => line.kind === 'entry'), 'no entry for the second window').toEqual([]);
-    expect(after.filter((line) => line.kind === 'decision' && line.verdict === 'pass'), 'no pass for the second window').toEqual([]);
+    expect(after.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass for the second window').toEqual([]);
 
     // the capture partition: a request for each live token is cancelled there too, and none reaches a responder
     from = seamLines(s).length;
@@ -1049,11 +1049,11 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     );
     console.log(`[u6b2-record] the capture partition answered ${fromCapture.join(', ')}`);
     for (const kind of kinds) {
-      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.verdict === 'cancel' && line.asker === 'none'), { message: `${kind}: the capture partition’s request cancelled` }).toBe(true);
+      await expect.poll(() => since().some((line) => line.kind === 'decision' && line.url === urls[kind] && line.answer === 'cancel' && line.asker === 'none'), { message: `${kind}: the capture partition’s request cancelled` }).toBe(true);
     }
     after = since().filter((line) => kinds.some((kind) => line.url === urls[kind]));
     expect(after.filter((line) => line.kind === 'entry'), 'no entry for the capture partition').toEqual([]);
-    expect(after.filter((line) => line.kind === 'decision' && line.verdict === 'pass'), 'no pass on the capture partition').toEqual([]);
+    expect(after.filter((line) => line.kind === 'decision' && line.answer === 'pass'), 'no pass on the capture partition').toEqual([]);
     expect(fromCapture.filter((answer) => answer === 'answered 200' || answer === 'answered 206')).toEqual([]);
   });
 });
