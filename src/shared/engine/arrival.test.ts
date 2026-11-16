@@ -956,8 +956,7 @@ describe('the grants in a person’s message (rule R)', () => {
       const grants = personsLines(text, work)?.flatMap((line) => line.grants) ?? [];
       return { grants, work, lines: text.split('\n').length, characters: text.length };
     };
-    // step 1b (the architect's ruling 3865) adds two passes over the lines (the whole-sentence lines set aside, then each
-    // line left read once for its sentence) and the composed forms' readers, each a native pass or two over the text;
+    // step 1b (the architect's ruling 3865) adds the composed forms' readers, each a native pass or two over the text;
     // R-2 a second marking of pasted segments, on the text as it came. The constant is fitted to these shapes (a tracker
     // row says so), and the count is of lines, not of the work inside one
     const within = ({ work, lines, characters }: ReturnType<typeof counted>) => {

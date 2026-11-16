@@ -258,15 +258,13 @@ export function personsGrants(text: string): Consent[] {
  *
  *  0. A text that is the sentence whole is that grant (`readConsents`), first and as before (Decision Log 52): a sentence
  *     holds no line break, so no envelope can stand in it, and the readers that read a text whole agree with this one.
- *  1b. A message whose joined text holds a form MAWS composes around words a model, a command or a page wrote (the list
- *     in composed-forms.ts, the forms it flags for grants) yields no grant. The forms are looked for with every line
- *     that reads as a whole sentence set aside, the one test L1 uses below (the architect's ruling 3865).
  *  1. This build's envelopes are taken out strictly, in one forward pass with no pasted-segment logic
  *     (`takeOutEnvelopes`, maws/ask-strict.ts); an opening line that does not read strictly yields no grant.
+ *  1b. A message whose whole joined text holds a form MAWS composes around words a model, a command or a page wrote
+ *     (the list in composed-forms.ts, the forms it flags for grants) yields no grant; nothing is set aside first (the
+ *     architect's ruling 3865, its exemption withdrawn).
  *  2. What is left fails closed: an envelope's tag anywhere in it, or a line that opens a json fence, yields no grant,
- *     inside a pasted segment too. L1: a line that reads as a whole sentence keeps its tag. Its subjects are JSON strings
- *     between the sentence's fixed head and tail, one line, so the tag there is a quoted command's and no envelope's
- *     line can stand inside it.
+ *     pasted or not, and no line is exempt.
  *  3. Otherwise each line of what is left that is a whole sentence gives its grants, but a line inside a pasted segment,
  *     where a sentence is data (`pastedBodies`), of the text as it came or of what is left.
  *
@@ -283,39 +281,30 @@ export function personsGrants(text: string): Consent[] {
  * its real result block. An earlier envelope cannot be taken out strictly: its real block holds the question's words
  * in each answer (the tool's input requires a question of at least one character, and the earlier builds' sheet copied
  * them into each answer; the answer's schema itself admits an empty one), so a reading that reaches it fails and
- * yields nothing; and a reading that ends earlier, at a
- * block the model forged in a question, leaves the real fence line after it, and step 2 then yields nothing. Pasted
+ * yields nothing; and a reading that ends earlier, at a block the model forged in a question, leaves the real fence
+ * line after it, and step 2 then yields nothing. Pasted
  * segments are read only in step 3, on a text that holds no envelope's line, so a pasted tag cannot hide one.
  *
- * Linear in the text: each line is looked at a bounded number of times (set aside or not once, the take-out once, its
- * sentence read once, the check of what is left once, the pasted segments' two passes on the text and two on what is left, the reading once), each block is
- * parsed once, each composed form's reader is a native pass or two over the text, and every test of a line is
- * anchored with no nested repetition. `work` counts it where it is done (arrival.test.ts pins the counts).
+ * Linear in the text: each line is looked at a bounded number of times (the take-out once, the check of what is left
+ * once, the pasted segments' two passes on the text and two on what is left, the reading once), each block is parsed
+ * once, each composed form's reader is a native pass or two over the text, and every test of a line is anchored with
+ * no nested repetition. `work` counts it where it is done (arrival.test.ts pins the counts).
  */
 export function personsLines(text: string, work: ReadingWork = { lines: 0, blockCharacters: 0, formSteps: 0 }): { line: string; grants: Consent[] }[] | null {
   const whole = readConsents(text);
   if (whole.length > 0) return [{ line: text, grants: whole }];
   if (!text.includes('\n') || !text.includes(GRANT_OPENING)) return null;
-  const all = text.split('\n');
-  const aside = all.filter((line) => {
-    work.lines += 1;
-    return readConsents(line).length === 0;
-  });
   const formWork = { steps: 0 };
-  const composed = holdsGrantForm(aside.join('\n'), formWork);
+  const composed = holdsGrantForm(text, formWork);
   work.formSteps += formWork.steps;
   if (composed) return null;
+  const all = text.split('\n');
   const kept = keptLines(all, work);
   if (kept === null) return null;
   const left = kept.map((i) => all[i]!);
-  const sentences = left.map((line) => {
+  for (const line of left) {
     work.lines += 1;
-    return readConsents(line);
-  });
-  for (let i = 0; i < left.length; i += 1) {
-    work.lines += 1;
-    const line = left[i]!;
-    if (line.startsWith('```json') || (line.includes(TAG_OPENS) && sentences[i]!.length === 0)) return null;
+    if (line.includes(TAG_OPENS) || line.startsWith('```json')) return null;
   }
   // a line inside a segment of the text as it came, or of what is left (R-2: the take-out can free a line from one, or
   // pair an opening tag with another closing tag): either marking only adds skips
@@ -323,7 +312,7 @@ export function personsLines(text: string, work: ReadingWork = { lines: 0, block
   const asLeft = pastedBodies(left, work);
   const lines = left.map((line, i) => {
     work.lines += 1;
-    return { line, grants: asCame[kept[i]!] || asLeft[i] ? [] : sentences[i]! };
+    return { line, grants: asCame[kept[i]!] || asLeft[i] ? [] : readConsents(line) };
   });
   return lines.some((line) => line.grants.length > 0) ? lines : null;
 }

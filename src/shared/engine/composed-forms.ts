@@ -4,12 +4,11 @@
 // - for saves: the reader of the person's own text (src/shared/files/named.ts, `ownTexts`) names no path for a save in a
 //   text any of these readers claims;
 // - for grants: the reader of the grants in a person's message (src/shared/engine/arrival.ts, `personsLines`) reads no
-//   grant in a message whose joined text holds one, its whole-sentence lines aside.
-// The two readers use the same reader for each form; they differ in the flag and in one removal. Before the grant
-// reading asks the list, it removes every line that reads strictly as a whole consent sentence. Such a line holds its
-// subject inside one-line JSON strings between the sentence's fixed head and tail, so no constant MAWS writes can stand
-// on it: removing the line takes away only what a model chose as a subject. Without the removal, a consent whose
-// command quotes a form's constant would lose its grant beside any other message.
+//   grant in a message whose whole joined text holds one, nothing set aside.
+// The two readers ask the same reader for each form and differ in the flag alone. A consent whose own command quotes a
+// form's words is its grant alone (the sentence whole) and none joined with another message: an accepted cost (the
+// architect's ruling of 2026-11-16, which withdrew an exemption of whole-sentence lines a relay's model-written agent
+// name could forge).
 // A leaf: it imports the forms' own constants and readers, and nothing that imports arrival.ts or named.ts.
 import { ANCHOR_TAG_OPENING, PROMOTION_HEAD } from '../anchor/message';
 import { ASK_STEER_OPENING } from '../maws/ask';
@@ -80,7 +79,7 @@ export const COMPOSED_FORMS: readonly ComposedForm[] = [
 export const CLAIMED_FOR_SAVES: readonly ComposedForm['claims'][] = COMPOSED_FORMS.filter((form) => form.forSaves).map((form) => form.claims);
 
 const FOR_GRANTS = COMPOSED_FORMS.filter((form) => form.forGrants);
-/** Whether a text holds any form that counts for grants (the caller has taken its whole-sentence lines out). */
+/** Whether a text holds any form that counts for grants, anywhere in it. */
 export function holdsGrantForm(text: string, work: FormWork): boolean {
   return FOR_GRANTS.some((form) => form.claims(text, work));
 }
