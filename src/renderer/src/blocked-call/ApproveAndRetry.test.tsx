@@ -25,7 +25,7 @@ import { ChainFollower } from '../../../engine-host/fs/chain-follower';
 import { freshSource, subagentLookupOf } from '../lane-a/plane-transcript';
 import { laneAState } from '../lane-a/test-support/lane-a-state';
 import { applyRemoteSession, resetRemoteLaneBStore } from '../lane-b/remote-session';
-import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
+import { remoteUnavailableAsOf } from '../lane-b/remote-unavailable';
 import { QueueList } from '../composer/queue/QueueList';
 import { rowText, STACK_WORDS, stackRows } from '../composer/queue/stack';
 import { readOf } from '../composer/queue/stack-acts';
@@ -494,8 +494,9 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     render(<QueueList appSessionId={remote} busy queue={useQueueStore.getState().bySession.get(remote)!} />);
     const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
     expect(del.disabled).toBe(true);
-    expect(remoteUnavailableOf(remote, 'session.steer.cancel')).toContain('Update MAWS on mini');
-    expect(del.getAttribute('title')).toBe(remoteUnavailableOf(remote, 'session.steer.cancel'));
+    // the stack's words for its Delete (U4b: Edit, ↑ and Delete pass their own labels to the refusal)
+    expect(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel')).toContain('Update MAWS on mini');
+    expect(del.getAttribute('title')).toBe(remoteUnavailableAsOf('delete', remote, 'session.steer.cancel'));
     expect((within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement).disabled, 'no Send now over the link').toBe(true);
     await act(() => vi.advanceTimersByTimeAsync(SETTLE_MS * 3));
     expect(useGrantsOut.getState().out.size, 'the grant stays out').toBe(1);
