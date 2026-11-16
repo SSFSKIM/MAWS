@@ -452,8 +452,8 @@ test('an async ask: acknowledged at once, an async_input item while it waits (P2
     await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
 
     // the steer written at priority next opens as the recorded one does and then, board ticket 711, holds no text the
-    // model wrote: the question by its number, the label picked as a JSON string, the block's question empty (the
-    // recording, an earlier build's, has the question's words on its line and in its block)
+    // model wrote: the question by its number, the label picked by its place among the options, the block's question
+    // empty (the recording, an earlier build's, has the question's words and the label on its line and in its block)
     const recorded = fixtureRows(ASK_ASYNC).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && (r.frame as Frame).priority === 'next')!.frame as { message: { content: string } };
     let steer: Frame | undefined;
     await expect
@@ -464,13 +464,13 @@ test('an async ask: acknowledged at once, an async_input item while it waits (P2
     expect(content).toBe(
       [
         `[MAWS ask ${opened!.askId}] The user answered the questions you asked:`,
-        '1. "Yes"',
+        '1. option 1',
         '```json',
-        JSON.stringify({ status: 'answered', askId: opened!.askId, answers: [{ id: 'q1', question: '', status: 'answered', value: ['Yes'] }] }, null, 2),
+        JSON.stringify({ status: 'answered', askId: opened!.askId, answers: [{ id: 'q1', question: '', status: 'answered', value: ['option 1'] }] }, null, 2),
         '```',
       ].join('\n'),
     );
-    expect(content).not.toContain('Proceed?');
+    for (const words of ['Proceed?', 'Yes']) expect(content).not.toContain(words);
     expect(metaEvents(s.journal(id))).toContain('maws_ask_answered');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect.poll(items).toEqual([]); // P2-C2: retired at the committed answer
@@ -614,12 +614,12 @@ test('notes: an async ask answered with a note beside one answer and a skip with
       .toBe(true);
     const content = (steer!.message as { content: string }).content;
     // board ticket 711: each question by its number, no words of the model's on the lines or in the block
-    expect(content).toContain('1. "Yes"\n   note: "Only after the tests pass"\n2. skipped\n   note: "Pick one when you open the PR"\n```json\n');
+    expect(content).toContain('1. option 1\n   note: "Only after the tests pass"\n2. skipped\n   note: "Pick one when you open the PR"\n```json\n');
     expect(parseAskSteer(content)?.result.answers).toEqual([
-      { id: 'q1', question: '', status: 'answered', value: ['Yes'], note: 'Only after the tests pass' },
+      { id: 'q1', question: '', status: 'answered', value: ['option 1'], note: 'Only after the tests pass' },
       { id: 'q2', question: '', status: 'skipped', note: 'Pick one when you open the PR' },
     ]);
-    for (const words of ['Proceed?', 'Which branch name?']) expect(content).not.toContain(words);
+    for (const words of ['Proceed?', 'Which branch name?', 'Yes']) expect(content).not.toContain(words);
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await idle(s, id);

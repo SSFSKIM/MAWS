@@ -188,10 +188,10 @@ describe('the ask capsule', () => {
     return expandedRows(b.events);
   };
 
-  it('a steer in the new form: the capsule draws the questions’ words from the call and each answer on its question by id', () => {
+  it('a steer in the new form: the capsule draws the questions’ words and the picked label from the call, each answer on its question by id', () => {
     const content = askSteerText('toolu_a', FILLED, ANSWERS);
-    expect(content).not.toContain('Which colour?');
-    expect(content).not.toContain('Title');
+    expect(content.split('\n')[1]).toBe('1. option 2'); // the label picked, by its place among the options
+    for (const words of ['Which colour?', 'Title', 'Blue']) expect(content).not.toContain(words);
     const rows = steerAfterAsk(content);
     expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED, questions: FILLED });
     expect(answerLines(rows)).toEqual(ANSWERED_LINES);
