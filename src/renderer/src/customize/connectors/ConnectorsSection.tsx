@@ -53,11 +53,12 @@ export function usePluginList({ installed, identities }: Pick<PluginsLibraryRead
   return useMemo(() => (known ? new Map(identities.map((identity) => [identity.id, { name: displayNameOf(identity.name, identity.manifest), enabled: identity.enabledHere }])) : null), [known, identities]);
 }
 
-/** My items' connectors: the inventory's state, an add's line, the configured rows, and what the attached session has live. */
 /** What of the inventory's answer the connectors' rows are drawn from: the configured servers, the plugins' connectors
  * and every plugin it keeps for the folder (the last two absent from an engine host of an earlier build). */
 export type ConnectorsAnswer = Pick<Inventory, 'servers' | 'pluginServers' | 'plugins'>;
 
+/** My items' connectors: the inventory's state, an add's line, the configured rows and the plugins' connectors, and what
+ * the attached session has live. */
 export function ConnectorsMine({ cwd, place, inventory, pluginList, readAt, inventoryState, attached, askIn, search, onResetSearch, live }: {
   cwd: string | null; // the page's directory; null for the user configuration
   place: string | null; // the page's name for "Open a session in <place>"
