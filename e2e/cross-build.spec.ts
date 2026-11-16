@@ -127,6 +127,9 @@
 // U13a's UC-14 coverage table.
 // UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
 // other build's window as the row the build that reads the frames makes; its block is at the end of this file.
+// UX wave U2b: (to-human, from the peer) and (to-human, to the peer), the to-human view across the cutover (who draws, the
+// launch's reservation, the summaries' switch); their block is at the end of this file, and their rows are in U13a's
+// UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -174,6 +177,10 @@ import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
+import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // UX wave U2b: the advertisement's variable
+import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '../src/shared/owner/folds'; // UX wave U2b: the summaries' value
+import { installToHumanPlugin } from '../test/support/to-human-plugin'; // UX wave U2b: the plugin's style, its installation and its declaration
+import { transcriptSeed } from '../test/support/r3-surface'; // UX wave U2b: a transcript of invented rows
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1820,6 +1827,15 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
 //   |                                               |                                                       | replays; both peers keep a tab's params whole      |
 //   |                                               |                                                       | (U6b-1's row)                                      |
+//   | `owner_channel_sessions.advertised` (UX wave  | (to-human, to the peer): F opens the index, lists the | (to-human, from the peer): a launch F decided at 8 |
+//   | U2b): the launch's reservation, an added      | session, draws its own bar and record row, launches   | reads as MAWS's to draw (`drawnBy` `maws`, the     |
+//   | nullable column                               | the session again (8, no summaries value) and records | mirror); the return of (to-human, to the peer):    |
+//   |                                               | its launch; the column is left as this build wrote it | the reservation bound to an earlier launch no      |
+//   |                                               |                                                       | longer counts                                      |
+//   | `index_meta`, `toHuman.foldSummaries` (UX     | (to-human, to the peer): this build turns the switch  | the return of (to-human, to the peer): the mods    |
+//   | wave U2b): the summaries' switch, a key of    | off before it quits; F opens the index, lists the     | list's row still reads `summaries: false`, and     |
+//   | the index's own facts                         | session and launches it, and the key is left as it    | this build's next launch carries                   |
+//   |                                               | was                                                   | TO_HUMAN_FOLD_SUMMARIES=off                        |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -4044,4 +4060,161 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
       record(said);
     });
   }
+});
+
+// ---- UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §F and §H): the to-human view -------
+// From this build MAWS advertises 9 at a launch whose view the to-human mod draws (every applicable installation of the
+// mod declares it, `maws-surface.json`) and 8 where MAWS draws it, the mirror; the lane's published state says who
+// draws (`drawnBy`, an optional key an earlier build's tolerant reader drops); the launch's reservation is a column the
+// earlier builds read past (`owner_channel_sessions.advertised`), and the summaries' switch a key of the index's own
+// facts they never read (`index_meta`, `toHuman.foldSummaries`). Two scenes, each over a session whose transcript holds
+// a message and work, its lane on under the to-human plugin's style (test/support/to-human-plugin.ts):
+//   (to-human, from the peer) the peer starts the session (its launch decided at 8) and quits with keep; this build's
+//                             window attaches and draws the mirror: the record line and the switch, no bar, and no
+//                             refusal in either log (§H, rows 1 and 3);
+//   (to-human, to the peer)   this build starts it with a declaring installation (the spawn carries 9, the index holds
+//                             the bound reservation), turns new summaries off, and quits; the peer opens the profile,
+//                             draws its own bar and record row, starts the session again (8, no summaries value) and
+//                             quits; this build reads the session back as MAWS's to draw, the switch still off, and its
+//                             next launch carries the value (§H, row 4; §F's two rows in U13a's coverage table above).
+// §H's row 5 (an earlier window on a session this build launched at 9) cannot be staged with a replayed engine: one look
+// on the trial's Mac.
+const TO_HUMAN_ROWS = { prompt: 'Check the tree and tell me what you found.', call: 'toolu_01U2bXbTree', said: 'The tree is clean; nothing to commit.' };
+// The session's transcript as the engine left it: a prompt, a Bash call and its result, then a message to the person
+function seedToHumanSession(s: Scratch): void {
+  const t = transcriptSeed({ repo: s.repo, engineId: s.engineId });
+  t.user(randomUUID(), TO_HUMAN_ROWS.prompt);
+  t.tool(TO_HUMAN_ROWS.call, 'Bash', { command: 'git status --short', description: 'Check the tree' }, { stdout: '', stderr: '', interrupted: false });
+  t.text(randomUUID(), `<message>\n${TO_HUMAN_ROWS.said}\n</message>`);
+  writeFileSync(transcriptIn(s, s.repo, s.engineId), t.finish(true).map((record) => JSON.stringify(record)).join('\n') + '\n');
+}
+// A session's spawn rows in the order they were written, with the settings env each launch carried
+const spawnEnvs = (s: Scratch, id: AppSessionId) =>
+  s.journal(id).filter((r) => r.direction === 'meta' && r.frame.event === 'spawn').sort((a, b) => a.at.localeCompare(b.at)).map((r) => {
+    const args = r.frame.args as string[];
+    const settings = JSON.parse(args.includes('--settings') ? args[args.indexOf('--settings') + 1]! : '{}') as { env?: Record<string, string> };
+    return { launchId: r.frame.launchId as string, env: settings.env ?? {} };
+  });
+// A decided resume, through main's own launch path (where the to-human decision lives), in the build's own input shape
+async function startResume(run: Run, build: Build, id: AppSessionId): Promise<void> {
+  const input = fitTo(commandOf(build, 'session.start')!.input, { appSessionId: id, message: null, options: { gateway: 'direct', trust: 'accepted' } });
+  expect(value(await invoke(run.page, 'session.start', input as CommandInput<'session.start'>))).toMatchObject({ status: 'starting' });
+  const processOf = async () => { const st = await invoke(run.page, 'session.status', { appSessionId: id }); return st.ok ? st.value.process : 'released'; }; // prettier-ignore
+  await expect.poll(processOf, { timeout: 60_000, message: `${build.label} resumes the session` }).toBe('ready');
+}
+const peerBar = (page: Page) => page.locator('[data-region="main"]').getByRole('group', { name: 'Session view', exact: true }); // ReportBar's toggle (f1852de3a, owner/report/ReportBar.tsx)
+const peerRecordRow = (page: Page) => page.locator('[data-region="main"] .owner-record > button.transcript-disclosure'); // OwnerRecordRow (f1852de3a)
+
+test('(to-human, from the peer) a lane-on session the peer started and kept is drawn by this build’s window as the mirror: its record line and the switch, no bar, nothing refused', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  await withScratch('xb-to-human-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) starts and keeps a lane-on session with a message and work; ${here.label} (wire ${wireOf(here)}) attaches`];
+    trustIn(s, [s.repo]);
+    installToHumanPlugin(join(s.userData, 'claude-config')); // the plugin's style (6) and the plugin, as both builds read them
+    seedToHumanSession(s);
+    const stub = s.useStub({ rowMs: Number(ROW_MS) });
+    writeFileSync(join(stub.fixtures, `${s.engineId}.jsonl`), readFileSync(ownJournal(s, turnsJournal(s.root, 'xb-to-human-from', 1)), 'utf8')); // its resume: the handshake, then held at a prompt no one sends
+
+    // the peer: the session resumed by its own decided launch, then kept
+    const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(first.page, () => true, 60_000);
+    const id = await s.record(first.page);
+    await startResume(first, peer, id);
+    const peerLaunch = spawnEnvs(s, id).at(-1)!;
+    expect(peerLaunch.env[NATIVE_TO_HUMAN_ENV], `${peer.label}'s launch advertises 8, the lane on`).toBe('8');
+    expect(first.maws.consoleErrors()).toEqual([]);
+    await s.quit(first);
+
+    // this build: served the kept session; MAWS draws its view, by the mirror
+    const second = await launchServed(s, id);
+    const state = value(await invoke(second.page, 'ownerChannel.state', { appSessionId: id }));
+    expect([state.lane.on, state.lane.drawnBy], 'the lane on, MAWS to draw: the row holds no reservation, its launch decided at 8').toEqual([true, 'maws']);
+    await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+    const main = second.page.locator('[data-region="main"]');
+    await expect(main.getByText(TO_HUMAN_ROWS.said, { exact: true }), 'the message').toBeVisible({ timeout: 20_000 });
+    await expect(main.locator(`[data-row-id="record-fold:closed:${TO_HUMAN_ROWS.call}"]`).getByRole('button'), 'the work’s record line').toHaveText('› working record');
+    await expect(main.locator('[data-view-switch]'), 'the switch above the composer').toHaveText('to-human view · full transcript ›');
+    await expect(main.getByRole('group', { name: 'Session view', exact: true }), 'no bar').toHaveCount(0);
+    await expect(main.locator('[data-owner-bar]')).toHaveCount(0);
+    expect(first.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+    expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${here.label}'s main refuses nothing`).toEqual([]);
+    expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+    const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+    said.push(`  ${peer.label}'s launch: ${NATIVE_TO_HUMAN_ENV}=${peerLaunch.env[NATIVE_TO_HUMAN_ENV]}`, `  ${here.label}'s window: drawnBy ${state.lane.drawnBy}, the record line and the switch, no bar`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+    expect(second.maws.consoleErrors()).toEqual([]);
+    await s.quit(second);
+    record(said);
+  });
+});
+
+test('(to-human, to the peer) a session this build launched at 9, with new summaries off, is drawn by the peer as its own report and launched again at 8; back here it is MAWS’s to draw, the switch still off, and the next launch carries it', async () => {
+  test.setTimeout(360_000);
+  const { here, peer } = builds();
+  await withScratch('xb-to-human-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) launches a session at 9 and turns new summaries off; ${peer.label} (wire ${wireOf(peer)}) opens the profile, draws its report and launches it again; ${here.label} reads it back`];
+    trustIn(s, [s.repo]);
+    installToHumanPlugin(join(s.userData, 'claude-config'), { declares: true, version: '0.9.0' }); // an installation that declares it draws from 9
+    seedToHumanSession(s);
+    let id = '' as AppSessionId;
+    const resumeJournal = (name: string) => ownJournal(s, turnsJournal(s.root, name, 1)); // the handshake, then held at a prompt no one sends
+    const reservation = () => indexed(s, `select advertised from owner_channel_sessions where app_session_id = '${id}'`);
+    const launchOf = () => indexed(s, `select launch_id from owner_channel_sessions where app_session_id = '${id}'`);
+    const foldSummariesFact = () => indexed(s, "select value from index_meta where key = 'toHuman.foldSummaries'");
+
+    // this build: a decided resume at 9, its reservation bound to the launch; then the switch off, and a quit
+    const ours = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: resumeJournal('xb-to-human-to-1') });
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    id = await s.record(ours.page);
+    await startResume(ours, here, id);
+    const nine = spawnEnvs(s, id).at(-1)!;
+    expect(nine.env[NATIVE_TO_HUMAN_ENV], 'the launch advertises 9: the mod draws').toBe('9');
+    expect(nine.env[FOLD_SUMMARIES_ENV], 'summaries on: no value').toBeUndefined();
+    await expect.poll(() => JSON.parse(String(reservation() ?? 'null')) as { launchId?: string; number?: number } | null, { timeout: 30_000, message: 'the reservation bound to the launch' }).toMatchObject({ launchId: nine.launchId, number: 9 });
+    value(await invoke(ours.page, 'mods.setFoldSummaries', { on: false }));
+    expect(value(await invoke(ours.page, 'mods.list', { appSessionId: id }))[0]!.summaries).toBe(false);
+    expect(foldSummariesFact()).toBe('off');
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  ${here.label}: ${NATIVE_TO_HUMAN_ENV}=9 at launch ${nine.launchId}, the reservation bound to it; ${FOLD_SUMMARIES_ENV} unset; then the switch off (index_meta toHuman.foldSummaries = off)`);
+
+    // the peer: opens the index, lists the session and draws its own report; launches it again and records that launch
+    const theirs = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: resumeJournal('xb-to-human-to-2') }, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await showSession(theirs.page, id, `session:${await addressed(theirs.page, id)}`);
+    await expect(theirs.page.locator('[data-region="main"]').getByText(TO_HUMAN_ROWS.said, { exact: false }).first(), `${peer.label} draws the message`).toBeVisible({ timeout: 20_000 });
+    await expect(peerBar(theirs.page), `${peer.label} draws its bar`).toBeVisible({ timeout: 20_000 });
+    await expect(peerRecordRow(theirs.page).first(), `${peer.label} draws its record row`).toContainText('Working record');
+    await startResume(theirs, peer, id);
+    const eight = spawnEnvs(s, id).at(-1)!;
+    expect(eight.launchId, `${peer.label}'s own launch`).not.toBe(nine.launchId);
+    expect([eight.env[NATIVE_TO_HUMAN_ENV], eight.env[FOLD_SUMMARIES_ENV] ?? null], `${peer.label}'s launch advertises 8 and carries no summaries value`).toEqual(['8', null]);
+    await expect.poll(launchOf, { timeout: 30_000, message: `${peer.label} records its launch` }).toBe(eight.launchId);
+    expect(JSON.parse(String(reservation() ?? 'null')), `${peer.label} leaves the column as it was`).toMatchObject({ launchId: nine.launchId, number: 9 });
+    expect(foldSummariesFact(), `${peer.label} leaves the index's own fact`).toBe('off');
+    expect(theirs.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${peer.label}'s main refuses nothing`).toEqual([]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: its bar and record row drawn; ${NATIVE_TO_HUMAN_ENV}=8 at launch ${eight.launchId}, no summaries value; the reservation column and the fact left as they were`);
+
+    // this build again: the reservation bound to a launch that no longer runs counts for nothing; the switch reads off
+    // where it was left, and this build's next launch carries the value
+    const again = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: resumeJournal('xb-to-human-to-3') });
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const back = value(await invoke(again.page, 'ownerChannel.state', { appSessionId: id }));
+    expect(back.lane.drawnBy, 'MAWS draws: the reservation is bound to a launch other than the last one').toBe('maws');
+    expect(value(await invoke(again.page, 'mods.list', { appSessionId: id }))[0]!.summaries, 'the switch as this build left it').toBe(false);
+    await startResume(again, here, id);
+    const next = spawnEnvs(s, id).at(-1)!;
+    expect(next.launchId).not.toBe(eight.launchId);
+    expect([next.env[NATIVE_TO_HUMAN_ENV], next.env[FOLD_SUMMARIES_ENV]], 'this build decides again: 9, and the summaries value').toEqual(['9', FOLD_SUMMARIES_OFF]);
+    expect(again.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${here.label}'s main refuses nothing`).toEqual([]);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: drawnBy ${back.lane.drawnBy}, summaries false; its next launch ${NATIVE_TO_HUMAN_ENV}=${next.env[NATIVE_TO_HUMAN_ENV]}, ${FOLD_SUMMARIES_ENV}=${next.env[FOLD_SUMMARIES_ENV]}`);
+    record(said);
+  });
 });
