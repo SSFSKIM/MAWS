@@ -101,6 +101,7 @@ export const REVIEW_COPY = {
   // UX wave U5b-2 (§G, §I; Decision Log 37): over a comment made on a commit, in any scope but that commit's; the short hash is
   // drawn as a button that opens the commit at the comment's file (`UnplacedComments`)
   onCommit: (sha: string) => `This comment is on commit ${sha.slice(0, 7)}.`,
+  notOnThisCommit: 'This comment is not on this commit.', // UX wave U5b-2 (§G, §I; Decision Log 39): over the comments made on no commit, in a commit's scope; no link
   diffNotShown: "This file's diff is not shown here.", // over the comments whose file is in the scope while the surface draws no lines for it: its own read failed, or it is too large to draw (Decision Log 21)
   refresh: 'Refresh',
   untrackedNote: 'Untracked file · not in the diff',

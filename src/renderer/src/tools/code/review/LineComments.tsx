@@ -16,7 +16,7 @@ import { CARD_WIDTH } from '../../../side/card/placement';
 import { discardComment, editComment, passKey, useCommentCard, type PassComment } from '../../../side/card/store';
 import { SIDE_COPY } from '../../../side/copy';
 import { openCommentComposer } from '../anchor/anchor';
-import { anchorPathOf, cardOffset, isUnplaced, lineText, ofScope, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
+import { anchorPathOf, cardOffset, isUnplaced, lineText, placementOf, reviewLineAnchor, sectionStateOf, type LinePlace, type LineSide, type ScopeLines, type Unplaced } from './comment-place';
 import { reviewLayout } from './measure';
 import type { StackSection } from './Stack';
 
@@ -79,9 +79,10 @@ export function useLineComments(input: { appSessionId: AppSessionId; hostId: str
       state === 'ready'
         ? { state, commit, files: sections.map((section) => ({ path: section.file.path, absolute: anchorPathOf(section.file, repoRoot, commit), blocks: section.blocks, state: sectionStateOf(section) })) }
         : { state, commit, files: [] };
-    // UX wave U5b-2 (§G, Decision Log 37): a commit's scope draws no comment made on no commit; a comment made on another
-    // commit than the scope's is unplaced by its own reason (`placementOf`), in the row under the toolbar
-    const comments = pass.comments.filter(isFileLine).filter((comment) => ofScope(comment.anchor, commit)).sort((a, b) => Number(a.id) - Number(b.id));
+    // UX wave U5b-2 (§G, Decision Logs 37 and 39): every comment of the pass is drawn; one made on another commit than the
+    // scope's, or on none while the scope is a commit's, is unplaced by its own reason (`placementOf`), in the row under
+    // the toolbar
+    const comments = pass.comments.filter(isFileLine).sort((a, b) => Number(a.id) - Number(b.id));
     for (const comment of comments) {
       const at = placementOf(comment, lines, madeIn.get(comment.id));
       if (comment.id === ours && 'path' in at && at.path !== null) holdPath = at.path;
