@@ -9,6 +9,7 @@ import { TOOL_ERRORS, type AskAnswer, type AskQuestion } from '@shared/maws/tool
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { artifactHeading, askAnswerCopy, deliveryHeading } from './copy'; // E11; P3-D askAnswerCopy
+import { serializeRows } from './serialize'; // board ticket 711
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -33,6 +34,8 @@ const ANSWERS: AskAnswer[] = [
   { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
   { id: 'q2', question: 'What title?', status: 'skipped' },
 ];
+// the answers as a steer carries them: every question empty (board ticket 711), the capsule drawing the words from the call
+const STEERED: AskAnswer[] = ANSWERS.map((answer) => ({ ...answer, question: '' }));
 const json = (value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }];
 
 function askCall(b: Builder, id: string, input: Record<string, unknown> = { title: 'Setup', questions: QUESTIONS }) {
@@ -122,7 +125,7 @@ describe('the ask capsule', () => {
     later.emit('user.message', { messageUuid: uuid('u3'), content: steer, isReplay: false, isSynthetic: false, origin: 'human', bash: null }, { id: 'late-2' });
     state = applyEvents(state, later.events);
     const rows = rowsOf(state);
-    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS, turnId: 'turn:u1' });
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED, turnId: 'turn:u1' });
     // the card says Answered with the answers; the envelope the engine received (the tag and the result's JSON) is no
     // "Your message" bubble
     expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1', 'turn:u2']);
@@ -138,7 +141,7 @@ describe('the ask capsule', () => {
     b.toolUse('t1', 'Bash', { command: 'sleep 1' });
     b.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     const pending = rowsOf(applyEvents(createState(null, null), b.events)); // its own pending turn until the engine takes it
-    expect(capsule(pending)).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(capsule(pending)).toMatchObject({ state: 'answered', answers: STEERED });
     expect(ofKind(pending, 'user').map((row) => row.text)).toEqual(['prompt u1']);
     b.result('t1', 'ok');
     b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
@@ -147,7 +150,7 @@ describe('the ask capsule', () => {
     const state = applyEvents(createState(null, null), b.events);
     expect(state.order).toEqual(['turn:u1']); // folded
     for (const rows of [rowsOf(state), rowsOf(withAllExpanded(state))]) {
-      expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS });
+      expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED });
       expect(ofKind(rows, 'user').map((row) => [row.text, row.steer])).toEqual([['prompt u1', false]]);
     }
   });
@@ -164,9 +167,49 @@ describe('the ask capsule', () => {
     later.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' }, { id: 'late-1' });
     later.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null }, { id: 'late-2' });
     const after = applyEvents(before, later.events);
-    expect(capsule(rowsOf(after))).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(capsule(rowsOf(after))).toMatchObject({ state: 'answered', answers: STEERED });
     expect(capsule(rowsOf(before))).toMatchObject({ state: 'asked', answers: null });
     expect(capsule(rowsOf(withAllExpanded(before)))).toMatchObject({ state: 'asked', answers: null }); // a fresh derivation of the old snapshot too
+  });
+
+  // Board ticket 711: the steer holds no text the model wrote, so the capsule's words come from the call alone: each
+  // question's header (else its text) from the ask's input, each answer joined to it by the question's id, which the
+  // steer's block keeps (an answer's question is empty there). Drawn the same for an envelope the earlier builds wrote.
+  const ANSWERED_LINES = ['- Which colour?: Blue', `- Title: ${askAnswerCopy({ id: 'q2', question: '', status: 'skipped' })}`]; // under the capsule's heading
+  const answerLines = (rows: Row[]) => serializeRows([capsule(rows)]).split('\n').slice(1);
+  const steerAfterAsk = (content: string, askId = 'toolu_a', questions: AskQuestion[] = QUESTIONS) => {
+    const b = builder();
+    b.turn('u1');
+    askCall(b, askId, { title: 'Setup', blocking: false, questions });
+    b.result(askId, json({ status: 'asked', askId }));
+    b.end(['u1']);
+    b.turn('u2', content);
+    b.end(['u2']);
+    return expandedRows(b.events);
+  };
+
+  it('a steer in the new form: the capsule draws the questions’ words from the call and each answer on its question by id', () => {
+    const content = askSteerText('toolu_a', FILLED, ANSWERS);
+    expect(content).not.toContain('Which colour?');
+    expect(content).not.toContain('Title');
+    const rows = steerAfterAsk(content);
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED, questions: FILLED });
+    expect(answerLines(rows)).toEqual(ANSWERED_LINES);
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1']); // the envelope is no bubble
+    // the answers in another order still land on their own questions: the join is by id, not by place
+    const reversed = steerAfterAsk(askSteerText('toolu_a', FILLED, [...ANSWERS].reverse()));
+    expect(answerLines(reversed)).toEqual(ANSWERED_LINES);
+  });
+
+  it('a recorded envelope of an earlier build (pass3/p1-maws-ask-async) answers the capsule as before', () => {
+    const recorded = loadJournal('pass3', 'p1-maws-ask-async').find((row) => row.direction === 'out' && (row.frame as { type?: string; priority?: string }).type === 'user' && (row.frame as { priority?: string }).priority === 'next')!;
+    const content = (recorded.frame as { message: { content: string } }).message.content;
+    const askId = /^\[MAWS ask (\S+)\]/.exec(content)![1]!;
+    expect(content).toContain('1. Proceed? — Yes'); // the old form: the question's words on its line
+    const rows = steerAfterAsk(content, askId, [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }]);
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
+    expect(answerLines(rows)).toEqual(['- Proceed?: Yes']);
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1']);
   });
 
   it('a steer naming another ask, or carrying no answered block, answers nothing', () => {

@@ -385,7 +385,8 @@ describe('the reader, on an answer to a question asked without waiting', () => {
   it('MAWS’s own envelope, from its prompt and from its text alone; any other text is none', () => {
     const answers = [{ id: 'q1', question: 'Which color do you prefer?', status: 'answered' as const, value: ['Blue'] }];
     const text = askSteerText('toolu_f', QUESTIONS.map((q) => ({ ...q, modality: 'choice' as const })), answers);
-    const expected = { class: 'answer', tool: 'maws', call: 'toolu_f', summary: text, answers, dismissed: false };
+    // the envelope's block carries every answer's question empty (board ticket 711: no text the model wrote)
+    const expected = { class: 'answer', tool: 'maws', call: 'toolu_f', summary: text, answers: answers.map((answer) => ({ ...answer, question: '' })), dismissed: false };
     expect(readAnswerEnvelope(text)).toEqual(expected);
     expect(readArrivals({ type: 'user', uuid: 'u-steer', origin: { kind: 'human' }, message: { role: 'user', content: text } })).toEqual([expected]);
     expect(readArrivals({ type: 'attachment', uuid: 'u-q', attachment: { type: 'queued_command', prompt: text, source_uuid: 'u-steer', commandMode: 'prompt', origin: { kind: 'human' } } })).toEqual([expected]);
