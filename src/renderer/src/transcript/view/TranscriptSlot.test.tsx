@@ -52,10 +52,12 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // still evaluating (lazy.tsx's comment), and the slot then drew nothing in any case (the U4a landing's unit shard).
 // After that, everything a render or an event sets off is promise-chained (the fake IPC's answers, the store's batches,
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
-// read once, so load can slow a case but not fail it.
+// read once, so load can slow a case but not fail it. The hook's own work is the chunk's first load (real module loading
+// and transform), which in a full unit shard has taken 6 to 10 seconds under the compiled project, at the hook's
+// 10-second default: it gets a limit of its own, 60 seconds, and a load that never settles still fails there.
 beforeAll(async () => {
   await Promise.all([chunksSettled, import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
-});
+}, 60_000);
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 const disposers: (() => void)[] = [];
