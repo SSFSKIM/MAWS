@@ -11,8 +11,15 @@
 // Uncommitted is `git.diff` as before and This branch is off. A target's key holds its read and what it is against, so a
 // merge base that moves, or a machine found to serve the reads, is a new target and the scope is read again.
 //
+// What a tab has loaded, it keeps (the branch's max panel, the document's Decision Log 49; §G): a listed commit's read is
+// held by the tab (its view state), not by its mounted body, from its first read until the tab closes or its selection
+// names another commit or none, so a tab shown again reads nothing again. A machine that stops serving the reads (a
+// disconnect, or the reads no longer listed) stops new reads of the three only (the store's `may`): what they answered
+// stays drawn, and a read owed meanwhile is asked once they are served again. A disconnect leaves a drawn surface's
+// scopes on the reads they were made with.
+//
 // The status and the watch that keeps it current are C8a's `useGit`; the surfaces hold its watch while mounted.
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { create, type StoreApi, type UseBoundStore } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { type MawsBridge } from '@shared/ipc/schema';
@@ -22,11 +29,12 @@ import { useMachineMark } from '../../../app/machine-mark';
 import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { useGit } from '../../../stores/git';
+import { useMachines } from '../../../stores/machines';
 import { useTranscriptStore, type TurnActivity, type TurnId } from '../../../transcript';
 import { REVIEW_COPY } from '../copy';
 import { branchReadOf, useBranchReads } from './branch-read';
 import { createHeldDiffs, diffKeys, followGitStatus, HELD_DIFF_REFRESH_MS, mapWith, mapWithout, settled, type DiffRead, type FileDiff, type ScopeDiff } from './held-diffs';
-import { readFailure, useServesReads, type ReadError } from './reads';
+import { readFailure, servesReads, useServesReads, type ReadError } from './reads';
 import { gitScopeFiles, indexDiffers, dividerOf, turnScopeFiles, type ReviewFile, type ReviewScope } from './review-model';
 
 export type { FileDiff, ScopeDiff } from './held-diffs';
@@ -56,6 +64,11 @@ export interface ReviewStore {
   retryFile(target: DiffTarget, path: string, untracked?: boolean): void; // UX wave U5b: Retry, a file's own read that failed
   retryFailed(target: DiffTarget): void; // UX wave U5b-2 (§G): the target's read, or its files' own reads, that failed
   checkMembership(target: DiffTarget): void; // UX wave U5b-2 (§G): a commit's `onHead` asked again, with `patch: false`
+  // Decision Log 49: the tab's listed commit (`tab`, the tab's own object), held from its first read (`read`: it may be
+  // asked now) until the tab's selection names another commit or none (`target` null), or the tab closes (`releaseTab`)
+  keepCommit(tab: object, target: DiffTarget | null, read: boolean): void;
+  commitHead(tab: object, head: string | null): void; // the status's head as the tab saw it: a move asks one membership check
+  releaseTab(tab: object): void; // the tab closed
   reset(): void; // tests
 }
 
@@ -81,18 +94,26 @@ function readOf(t: DiffTarget, path?: string): DiffRead {
 
 export function createReviewStore(
   client: MawsBridge,
-  options: { git?: typeof useGit } = {},
+  options: { git?: typeof useGit; machines?: typeof useMachines } = {},
 ): UseBoundStore<StoreApi<ReviewStore>> {
+  const { machines } = options;
+  // Decision Log 49: the three reads are asked only of a machine that serves them now (`git.diff` always); without the
+  // machines store (a test's own store) every read may be asked
+  const may = (t: DiffTarget): boolean => machines === undefined || t.read === 'git.diff' || servesReads(t.machine, machines.getState().machines) === true;
   const store = create<ReviewStore>()((set, get) => {
     // a commit's diff is kept (decision 17): read once, and asked again only where it failed
-    const heldDiffs = createHeldDiffs(client, set, { keys, input: diffInput, read: readOf, kept: (t) => t.read === 'git.commitDiff' });
+    const heldDiffs = createHeldDiffs(client, set, { keys, input: diffInput, read: readOf, kept: (t) => t.read === 'git.commitDiff', may });
     const checking = new Map<string, { again: boolean }>(); // a membership check in flight, by the commit's diffKey
+    const owedChecks = new Map<string, DiffTarget>(); // Decision Log 49: a membership check `may` refused, by the commit's diffKey
+    const kept = new Map<object, { key: string; target: DiffTarget; release: () => void; head: string | null }>(); // by tab
     // M9 fix 2 (Decision Log 38, 2): a commit's membership belongs to the holds that asked it: the last release forgets it
     // and drops a check still out, as it forgets the diff, so the next full read's `onHead` stands until HEAD moves again
     const commitHolds = new Map<string, number>();
 
     const check = async (target: DiffTarget): Promise<void> => {
       const key = keys.diff(target);
+      if (!may(target)) return void owedChecks.set(key, target);
+      owedChecks.delete(key);
       const inFlight = checking.get(key);
       if (inFlight) {
         inFlight.again = true;
@@ -106,6 +127,13 @@ export function createReviewStore(
       if (result.ok) set((s) => ({ onHead: mapWith(s.onHead, key, result.value.onHead) }));
       if (mine.again) void check(target);
     };
+
+    // The reads served again (Decision Log 49): what was refused meanwhile is asked
+    machines?.subscribe((state, prev) => {
+      if (state.machines === prev.machines) return;
+      heldDiffs.resume();
+      for (const target of [...owedChecks.values()]) if (may(target)) void check(target);
+    });
 
     return {
       diffs: new Map(),
@@ -125,6 +153,7 @@ export function createReviewStore(
           const left = (commitHolds.get(key) ?? 1) - 1;
           if (left > 0) return void commitHolds.set(key, left);
           commitHolds.delete(key);
+          owedChecks.delete(key);
           checking.delete(key); // its answer, when it comes, is dropped
           if (get().onHead.has(key)) set((s) => ({ onHead: mapWithout(s.onHead, (k) => k === key) }));
         };
@@ -153,9 +182,36 @@ export function createReviewStore(
         if (target.read === 'git.commitDiff' && target.against !== null) void check(target);
       },
 
+      keepCommit(tab, target, read) {
+        const was = kept.get(tab);
+        if (was && (target === null || was.key !== keys.diff(target))) {
+          kept.delete(tab); // the selection changed: what the tab loaded for the other commit goes
+          was.release();
+        }
+        if (target === null || !read || kept.has(tab)) return;
+        kept.set(tab, { key: keys.diff(target), target, release: get().hold(target), head: null });
+      },
+
+      commitHead(tab, head) {
+        const entry = kept.get(tab);
+        if (!entry || head === null) return;
+        const before = entry.head;
+        entry.head = head;
+        if (before !== null && before !== head) get().checkMembership(entry.target);
+      },
+
+      releaseTab(tab) {
+        const was = kept.get(tab);
+        if (!was) return;
+        kept.delete(tab);
+        was.release();
+      },
+
       reset() {
         heldDiffs.clear();
         checking.clear();
+        owedChecks.clear();
+        kept.clear();
         commitHolds.clear();
         set({ diffs: new Map(), files: new Map(), onHead: new Map() });
       },
@@ -167,7 +223,7 @@ export function createReviewStore(
   return store;
 }
 
-export const useReview = createReviewStore(ipc, { git: useGit });
+export const useReview = createReviewStore(ipc, { git: useGit, machines: useMachines });
 
 // ---- what a Review surface shows for a session's directory and a scope ----------------------------------------------
 
@@ -190,7 +246,7 @@ export type ReviewList =
 
 // UX wave U5b-2 (§E, §G): the commit a chip is listed for, as its kept read answered (null until it did)
 export interface ReviewCommit {
-  target: DiffTarget | null; // held while the chip is listed, whichever scope is shown; null where the reads are not served
+  target: DiffTarget | null; // the listed commit's, held by the tab while the chip is listed, whichever scope is shown (Decision Log 49)
   commit: GitCommit | null;
   onHead: boolean | null; // HEAD holds it: the read's answer, then each membership check's
 }
@@ -233,20 +289,26 @@ function branchOf(status: GitStatus | null, serves: boolean | null, read: Return
     : { settled: true, base: base.ref, mergeBase: base.mergeBase, reason: null, failure: null };
 }
 
-// Holds C8a's git watch on the directory, the branch read while in view, and the scope's read (and a listed commit's) while
-// mounted; Last turn reads the transcript store.
-export function useReviewData(input: { appSessionId: AppSessionId; directory: string; scope: ReviewScope | null; turnId: TurnId | null; commit?: string | null; visible?: boolean }): ReviewData {
-  const { appSessionId, directory, scope, turnId, commit = null, visible = true } = input;
+// Holds C8a's git watch on the directory, the branch read while in view, and the scope's read while mounted; a listed
+// commit's read is the tab's (`tab`, kept until it closes: Decision Log 49). Last turn reads the transcript store.
+export function useReviewData(input: { appSessionId: AppSessionId; directory: string; scope: ReviewScope | null; turnId: TurnId | null; commit?: string | null; visible?: boolean; tab: object }): ReviewData {
+  const { appSessionId, directory, scope, turnId, commit = null, visible = true, tab } = input;
   const machine = machineFor(appSessionId);
   const mark = useMachineMark(appSessionId);
   const machineWords = mark.local ? null : mark.name;
   const serves = useServesReads(machine);
+  // Decision Log 49: a disconnect (whether the machine serves the reads no longer known) leaves this surface's scopes on
+  // the reads they were made with, so nothing drawn is dropped and nothing is read in its place; the reads themselves are
+  // not asked meanwhile (the store's `may`). The reads no longer listed is an answer, and the scopes follow §E's table.
+  const [lastKnown, setLastKnown] = useState(serves);
+  if (serves !== null && serves !== lastKnown) setLastKnown(serves);
+  const reads = serves ?? lastKnown;
   const entry = useGit((s) => s.entries.get(checkoutKey(machine, directory)));
   const status = entry?.status ?? null;
   const gitError = entry?.error ?? null;
   const repoRoot = status?.repoRoot ?? null;
   const read = useBranchReads((s) => (repoRoot !== null ? branchReadOf(s, machine, repoRoot) : undefined));
-  const branch = useMemo(() => branchOf(status, serves, read, machineWords), [status, serves, read, machineWords]);
+  const branch = useMemo(() => branchOf(status, reads, read, machineWords), [status, reads, read, machineWords]);
 
   useEffect(() => useGit.getState().watch(machine, directory, appSessionId), [machine, directory, appSessionId]); // P5 O7 M4: made from the session
   // UX wave U5b-2 (§E): the branch read is held while the surface is in view, and only where the machine serves it
@@ -257,33 +319,32 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
 
   const known = status !== null;
   const mergeBase = branch.mergeBase;
-  const target = useMemo<DiffTarget | null>(() => {
-    if (!known || scope === null || scope === 'turn') return null;
-    const of = (read: ScopeRead, against: string | null): DiffTarget => ({ machine, directory, scope, read, against, session: appSessionId });
-    if (scope === 'branch') return mergeBase === null ? null : of('git.changesSince', mergeBase);
-    if (scope === 'commit') return serves === true && commit !== null ? of('git.commitDiff', commit) : null;
-    if (scope === 'uncommitted' && serves === true) return of('git.changesSince', 'HEAD');
-    return of('git.diff', null);
-  }, [known, scope, machine, directory, mergeBase, serves, commit, appSessionId]);
-  useEffect(() => (target ? useReview.getState().hold(target) : undefined), [target]);
-  const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
 
   // UX wave U5b-2 (§G): a listed commit's diff is held while its chip is, whichever scope is shown, so choosing it again
-  // reads nothing; when HEAD moves, one membership check is asked for it
+  // reads nothing; when HEAD moves, one membership check is asked for it. Decision Log 49: it is the tab's, held from the
+  // first moment it may be read (the status known, the reads served) until the tab's selection changes or the tab closes,
+  // so the tab hidden and shown again, or the reads lost, keep what it loaded; the head the tab last saw is kept with it.
   const commitTarget = useMemo<DiffTarget | null>(
-    () => (known && serves === true && commit !== null ? { machine, directory, scope: 'commit', read: 'git.commitDiff', against: commit, session: appSessionId } : null),
-    [known, serves, commit, machine, directory, appSessionId],
+    () => (commit !== null ? { machine, directory, scope: 'commit', read: 'git.commitDiff', against: commit, session: appSessionId } : null),
+    [commit, machine, directory, appSessionId],
   );
-  useEffect(() => (commitTarget ? useReview.getState().hold(commitTarget) : undefined), [commitTarget]);
+  const mayRead = known && serves === true;
+  useEffect(() => useReview.getState().keepCommit(tab, commitTarget, mayRead), [tab, commitTarget, mayRead]);
   const commitDiff = useReview((s) => (commitTarget ? diffOf(s, commitTarget) : undefined));
   const checkedOnHead = useReview((s) => (commitTarget ? onHeadOf(s, commitTarget) : undefined));
   const head = status?.head ?? null;
-  const headSeen = useRef<{ target: DiffTarget | null; head: string | null }>({ target: null, head: null });
-  useEffect(() => {
-    const seen = headSeen.current;
-    headSeen.current = { target: commitTarget, head };
-    if (commitTarget !== null && seen.target === commitTarget && head !== null && seen.head !== null && head !== seen.head) useReview.getState().checkMembership(commitTarget);
-  }, [commitTarget, head]);
+  useEffect(() => useReview.getState().commitHead(tab, head), [tab, commitTarget, mayRead, head]); // after the keep, which starts a held commit's head afresh
+
+  const target = useMemo<DiffTarget | null>(() => {
+    if (!known || scope === null || scope === 'turn') return null;
+    if (scope === 'commit') return commitTarget; // the tab's own hold reads it
+    const of = (read: ScopeRead, against: string | null): DiffTarget => ({ machine, directory, scope, read, against, session: appSessionId });
+    if (scope === 'branch') return mergeBase === null ? null : of('git.changesSince', mergeBase);
+    if (scope === 'uncommitted' && reads === true) return of('git.changesSince', 'HEAD');
+    return of('git.diff', null);
+  }, [known, scope, machine, directory, mergeBase, reads, commitTarget, appSessionId]);
+  useEffect(() => (target && target.read !== 'git.commitDiff' ? useReview.getState().hold(target) : undefined), [target]);
+  const diff = useReview((s) => (target ? diffOf(s, target) : undefined));
   const commitInfo = useMemo<ReviewCommit>(() => {
     const answered = commitDiff?.status === 'ok' ? (commitDiff.commit ?? null) : null;
     return { target: commitTarget, commit: answered?.commit ?? null, onHead: checkedOnHead ?? answered?.onHead ?? null };
@@ -318,8 +379,9 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
       const failed = commitFailure(branch.failure, offline, machineWords, mark.name);
       return { phase: 'unavailable', message: failed.message, ...(failed.retry && repoRoot !== null && { retry: () => useBranchReads.getState().retry(machine, repoRoot) }) };
     }
-    // a commit where the machine does not serve the reads (§E's last column; S20): nothing is asked
-    if (scope === 'commit' && serves === false) return { phase: 'unavailable', message: REVIEW_COPY.commitNeedsReads(machineWords) };
+    // a commit where the machine does not serve the reads (§E's last column; S20): nothing is asked; one the tab has
+    // loaded stays drawn (Decision Log 49)
+    if (scope === 'commit' && serves === false && diff?.status !== 'ok') return { phase: 'unavailable', message: REVIEW_COPY.commitNeedsReads(machineWords) };
     if (!diff || diff.status === 'loading') return { phase: 'pending' };
     if (diff.status === 'error') {
       if (scope !== 'commit') return { phase: 'unavailable', message: REVIEW_COPY.unavailable(diff.message) };
@@ -330,7 +392,7 @@ export function useReviewData(input: { appSessionId: AppSessionId; directory: st
   }, [scope, turn, status, gitError, branch, serves, diff, offline, machineWords, mark.name, machine, repoRoot, target]);
 
   const pastCap = diff?.status === 'ok' && diff.patch === null;
-  return { status, gitFailed: status === null && gitError !== null, servesReads: serves, machine: machineWords, branch, staged: indexDiffers(status), target, commit: commitInfo, pastCap, list };
+  return { status, gitFailed: status === null && gitError !== null, servesReads: reads, machine: machineWords, branch, staged: indexDiffers(status), target, commit: commitInfo, pastCap, list };
 }
 
 // §H's refusals told apart, for a commit's diff in Review, the scope's read or one file's: the sentence, and whether Retry

@@ -94,11 +94,14 @@ export type CommitsState = { kind: 'outstanding' } | { kind: 'ready'; answer: Gi
 
 /**
  * `serves`: the machine serves the reads (`servesReads`); `read`: the branch read's entry; `offline`: the machine's phase.
- * Outstanding while nothing is known; older, with nothing asked and no refresh, for a machine that lists its capabilities
- * without the reads; an offline failure keeps what was last read; every other failure is said, with a refresh where a new
+ * An answer in hand stays shown when the machine stops serving the reads, by a disconnect or by no longer listing them
+ * (the branch's max panel, Decision Log 49: what a tab has loaded, it keeps). With no answer: outstanding while nothing is
+ * known; older, with nothing asked and no refresh, for a machine that lists its capabilities without the reads. While the
+ * reads are served, an offline failure keeps what was last read; every other failure is said, with a refresh where a new
  * read can change the answer.
  */
 export function commitsState(serves: boolean | null, read: BranchRead | undefined, offline: boolean): CommitsState {
+  if (serves !== true && read?.answer) return { kind: 'ready', answer: read.answer };
   if (serves === false) return { kind: 'failed', failure: { kind: 'older' }, refresh: false };
   if (serves === null || read === undefined) return { kind: 'outstanding' };
   if (read.failure === null) return read.answer === null ? { kind: 'outstanding' } : { kind: 'ready', answer: read.answer };

@@ -12,19 +12,24 @@ import { useLayout } from '../../../stores/layout';
 import { allTabs } from '../../../stores/layout-model';
 import { REVIEW_COPY } from '../copy';
 import { parseRef } from './review-model';
+import { useReview } from './review-store';
 import { ReviewShell } from './ReviewShell';
 import { createReviewUi, type ReviewUi } from './view-state';
 
 type DiffTabRef = Extract<TabRef, { kind: 'diff' }>;
 
 // One view state per diff tab, created on first render and dropped as soon as the layout no longer holds the tab, so a
-// tab closed and opened again starts from its ref.
+// tab closed and opened again starts from its ref; the commit's read the tab kept goes with it (Decision Log 49).
 const views = new Map<string, StoreApi<ReviewUi>>();
 let following: (() => void) | null = null;
 
 function prune(): void {
   const open = new Set(allTabs(useLayout.getState().main).map((t) => t.id)); // W12: every project's tab set
-  for (const id of views.keys()) if (!open.has(id)) views.delete(id);
+  for (const [id, view] of views) {
+    if (open.has(id)) continue;
+    views.delete(id);
+    useReview.getState().releaseTab(view);
+  }
 }
 
 type Ref = NonNullable<ReturnType<typeof parseRef>>;
@@ -53,8 +58,11 @@ function viewOf(tab: DiffTabRef, ref: Ref, directory: string): StoreApi<ReviewUi
   return view;
 }
 
-// Tests: forget every tab's view state.
-export const resetDiffTabs = () => views.clear();
+// Tests: forget every tab's view state, and what each kept.
+export function resetDiffTabs(): void {
+  for (const view of views.values()) useReview.getState().releaseTab(view);
+  views.clear();
+}
 
 function Unavailable({ message, detail }: { message: string; detail: string }) {
   return (

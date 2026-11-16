@@ -1652,7 +1652,8 @@ describe('review tool', () => {
     const events = journalToEvents(loadSyntheticJournal('edit-and-receipt'));
     await act(() => useTranscriptStore.getState().attach(A, { subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve(events) }));
     const divider = changedTurn();
-    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: divider.turnId! }));
+    const tab = {};
+    const { result } = renderHook(() => useReviewData({ appSessionId: A, directory: '/repo', scope: 'turn', turnId: divider.turnId!, tab }));
     const before = result.current.list;
     expect(before).toMatchObject({ phase: 'ready', files: [
       { path: '/tmp/maws-synth-edit-and-receipt/src/app.ts', kind: 'modified', added: 1, removed: 1 },

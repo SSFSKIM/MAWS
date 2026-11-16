@@ -90,7 +90,7 @@ export function ReviewShell({ appSessionId, directory, ui, hostId, hostMode, chi
   const redecide = useStore(ui, (s) => s.redecide);
   const requested = useStore(ui, (s) => s.request !== null); // an open() the tool applies next: decide nothing before it
   const listed = useStore(ui, (s) => s.commit?.sha ?? null); // UX wave U5b-2: the commit whose chip is listed
-  const data = useReviewData({ appSessionId, directory, scope, turnId, commit: listed, visible });
+  const data = useReviewData({ appSessionId, directory, scope, turnId, commit: listed, visible, tab: ui }); // the tab's view state: what the tab keeps (Decision Log 49)
   const files = data.list.phase === 'ready' ? data.list.files : null;
 
   // The default scope, once the status and This branch's availability are known (a new tool, a pinned tool's new

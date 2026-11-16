@@ -10,6 +10,11 @@
 // files' counts or the commit; and a target may be kept (a commit's diff, decision 17): once it answered, neither a new
 // status nor a refresh reads it again, and a failed one, or a failed file of it, is asked again only by `retryFailed`
 // and a file's Retry.
+//
+// The branch's max panel (the document's Decision Log 49 and 50): a read may be refused for now (`may`: the machine does
+// not serve the command at present); the refusal asks nothing and changes nothing drawn, and the read is owed until
+// `resume` finds it allowed. A target held by several holders is read for the earliest still holding it, so a holder
+// that left does not go on addressing its reads (its session, gone with it, would be named on another machine's reads).
 import type { CommandName, CommandResult, IpcError, MawsBridge } from '@shared/ipc/schema';
 import type { GitChangesSinceInput, GitCommit, GitCommitDiffInput, GitDiff, GitDiffFile, GitDiffInput, GitUntrackedCount } from '@shared/ipc/schema/git';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -59,6 +64,8 @@ export interface HeldDiffSpec<T> {
   read?(target: T, path?: string): DiffRead;
   // UX wave U5b-2 (decision 17): a target whose answer is kept once it answered: `reread` and `refresh` leave it
   kept?(target: T): boolean;
+  // Decision Log 49: whether a new read of the target may be asked now; absent, always. A read it refuses is owed (`resume`)
+  may?(target: T): boolean;
 }
 
 export interface HeldDiffs<T> {
@@ -72,17 +79,19 @@ export interface HeldDiffs<T> {
   // UX wave U5b-2 (§G): a held target that failed is read again, and each file of it whose own read failed (Review shown
   // again; its machine heard again); a target, or a file, that answered is not asked
   retryFailed(target: T): void;
+  resume(): void; // Decision Log 49: every read `may` refused, of a target still held, asked now where it allows it
   clear(): void; // forgets every hold and file load; the store's reset empties its maps
 }
 
 interface Held<T> {
-  target: T;
-  count: number;
+  target: T; // the earliest holder's still holding it: what its reads are addressed by (Decision Log 50)
+  holders: { target: T }[]; // in the order they came
   timer: ReturnType<typeof setTimeout> | null;
   reading: boolean;
   again: boolean;
   answered: boolean; // it answered once: a kept target is not read again (UX wave U5b-2)
   failed: boolean; // its last read failed (UX wave U5b-2: what `retryFailed` and a kept target's refresh ask again)
+  owed: boolean; // a read `may` refused (Decision Log 49), asked by `resume`
 }
 
 // A bridge that throws (not a command's failure answer) is a failure too, so nothing stays in flight.
@@ -131,10 +140,12 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
   const held = new Map<string, Held<T>>();
   const fileLoads = new Map<string, symbol>();
   const failedFiles = new Map<string, { path: string; read: DiffRead }>(); // by file key: an own read that failed, for `retryFailed`
+  const owedFiles = new Map<string, { path: string; read: DiffRead }>(); // by file key: an own read `may` refused, for `resume`
   const fileOf = (key: string) => (k: string) => k.startsWith(`${key}${keys.fileSep}`);
 
   const readOf = (target: T, path?: string): DiffRead => spec.read?.(target, path) ?? { name: 'git.diff', input: spec.input(target, path) };
   const keeps = (h: Held<T>): boolean => spec.kept?.(h.target) ?? false;
+  const allowed = (target: T): boolean => spec.may?.(target) ?? true;
 
   const read = async (key: string) => {
     const h = held.get(key);
@@ -143,6 +154,11 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
       h.again = true;
       return;
     }
+    if (!allowed(h.target)) {
+      h.owed = true; // nothing asked and nothing drawn changes: what it answered stays
+      return;
+    }
+    h.owed = false;
     h.reading = true;
     const result = await settled(invokeRead(client, readOf(h.target), pathTarget(h.target.machine, h.target.session)));
     h.reading = false;
@@ -154,6 +170,7 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
     set((s) => ({ diffs: mapWith(s.diffs, key, next), files: mapWithout(s.files, ofKey) }));
     for (const k of [...fileLoads.keys()]) if (ofKey(k)) fileLoads.delete(k);
     for (const k of [...failedFiles.keys()]) if (ofKey(k)) failedFiles.delete(k);
+    for (const k of [...owedFiles.keys()]) if (ofKey(k)) owedFiles.delete(k);
     if (h.again) {
       h.again = false;
       if (!(keeps(h) && h.answered)) void read(key);
@@ -170,13 +187,19 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
 
   const loadFile = (target: T, path: string, input?: GitDiffInput | DiffRead): void => {
     const key = keys.file(target, path);
-    if (!held.has(keys.diff(target)) || fileLoads.has(key)) return;
+    const h = held.get(keys.diff(target));
+    if (!h || fileLoads.has(key)) return;
+    const own = input === undefined ? readOf(h.target, path) : asRead(input);
+    if (!allowed(h.target)) {
+      owedFiles.set(key, { path, read: own });
+      return;
+    }
     const generation = Symbol();
     fileLoads.set(key, generation);
     failedFiles.delete(key);
-    const own = input === undefined ? readOf(target, path) : asRead(input);
+    owedFiles.delete(key);
     set((s) => ({ files: mapWith(s.files, key, { status: 'loading' }) }));
-    void settled(invokeRead(client, own, pathTarget(target.machine, target.session))).then((result) => {
+    void settled(invokeRead(client, own, pathTarget(h.target.machine, h.target.session))).then((result) => {
       if (fileLoads.get(key) !== generation) return; // the scope re-read or was released meanwhile
       const next: FileDiff = result.ok ? { status: 'ok', file: splitPatch(result.value.patch)[0] ?? null } : failedWith(result.error);
       if (!result.ok) failedFiles.set(key, { path, read: own });
@@ -187,10 +210,11 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
   return {
     hold(target) {
       const key = keys.diff(target);
+      const holder = { target };
       let h = held.get(key);
-      if (h) h.count += 1;
+      if (h) h.holders.push(holder);
       else {
-        h = { target, count: 1, timer: null, reading: false, again: false, answered: false, failed: false };
+        h = { target, holders: [holder], timer: null, reading: false, again: false, answered: false, failed: false, owed: false };
         held.set(key, h);
         set((s) => ({ diffs: mapWith(s.diffs, key, { status: 'loading' }) }));
         void read(key);
@@ -200,12 +224,18 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
       return () => {
         if (released) return;
         released = true;
-        if (--mine.count > 0) return;
+        mine.holders.splice(mine.holders.indexOf(holder), 1);
+        if (mine.holders.length > 0) {
+          mine.target = mine.holders[0].target; // addressed by a holder still there (Decision Log 50)
+          return;
+        }
         if (mine.timer !== null) clearTimeout(mine.timer);
+        if (held.get(key) !== mine) return; // forgotten meanwhile (`clear`): a later hold of the key is not this one
         held.delete(key);
         const ofKey = fileOf(key);
         for (const k of [...fileLoads.keys()]) if (ofKey(k)) fileLoads.delete(k);
         for (const k of [...failedFiles.keys()]) if (ofKey(k)) failedFiles.delete(k);
+        for (const k of [...owedFiles.keys()]) if (ofKey(k)) owedFiles.delete(k);
         set((s) => ({ diffs: mapWithout(s.diffs, (k) => k === key), files: mapWithout(s.files, ofKey) }));
       };
     },
@@ -243,11 +273,20 @@ export function createHeldDiffs<T extends { machine: MachineRef; session?: AppSe
       }
     },
 
+    resume() {
+      for (const [key, h] of held) {
+        if (!allowed(h.target)) continue;
+        if (h.owed) void read(key);
+        for (const [fileKey, owed] of [...owedFiles]) if (fileOf(key)(fileKey)) loadFile(h.target, owed.path, owed.read);
+      }
+    },
+
     clear() {
       for (const h of held.values()) if (h.timer !== null) clearTimeout(h.timer);
       held.clear();
       fileLoads.clear();
       failedFiles.clear();
+      owedFiles.clear();
     },
   };
 }
