@@ -7,7 +7,8 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { ArrivalEntry, CarriedArrival } from '@shared/engine/arrival-schema';
 import type { SessionId } from '@shared/graph/ids';
 import { describe, expect, it } from 'vitest';
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, personsGrants, readAnswerEnvelope } from '@shared/engine/arrival';
+import { askSteerText } from '@shared/maws/ask';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
@@ -728,6 +729,30 @@ describe('a person’s message that carries grants (U1c)', () => {
     expect(rows.map((row) => row.attachments.length)).toEqual([1, 0, 0]);
     expect(rows[0]).not.toHaveProperty('consent');
     expect(said(rows.slice(1))).toEqual(['approved: make build', 'approved: make check']);
+  });
+
+  // The chain merge (U4b's joined answer beside U1c's grant split): the engine joins MAWS's answer envelope with a grant
+  // waiting beside it, and the host marks the grant line. The envelope is MAWS's, never the person's words: its capsule
+  // takes the answers, so the bubble draws neither the envelope's raw text nor an empty row.
+  describe('an answer envelope joined with a grant', () => {
+    const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const ENVELOPE = askSteerText('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+    const GRANT = consentMessage('command', 'make build');
+
+    it.each([
+      ['the envelope first', `${ENVELOPE}\n${GRANT}`],
+      ['the grant first', `${GRANT}\n${ENVELOPE}`],
+    ])('with no other words, %s: the approval row alone, under the message’s own id', (_, content) => {
+      expect(readAnswerEnvelope(content), 'the host reads no whole envelope').toBeNull();
+      expect(personsGrants(content), 'the host marks the grant line').toEqual([consent('make build')]);
+      const rows = message(content, ['make build']);
+      expect(said(rows)).toEqual(['approved: make build']);
+      expect(rows[0]).toMatchObject({ id: rowId.user(uuid('j1')), messageUuid: 'j1' });
+    });
+
+    it('with other words: their bubble, then the approval row', () => {
+      expect(said(message(`${ENVELOPE}\n${GRANT}\n${OTHER}`, ['make build']))).toEqual([`says: ${OTHER}`, 'approved: make build']);
+    });
   });
 
   it('hides all rows of a mixed grant message when it is withdrawn back into the queue, and of a message of several grants', () => {
