@@ -7,7 +7,7 @@
 // no layout here the boxes are given as a layout would measure them, and the pixels are the scene's (M6).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { cleanup, fireEvent, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, within } from '@testing-library/react';
 import type { JsonObject } from 'desk-hub/protocol';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
@@ -33,15 +33,16 @@ async function fromFileRows(name: string): Promise<CommandRow[]> {
 }
 const starting = (rows: CommandRow[], text: string) => rows.find((row) => row.text.startsWith(text))!;
 
-// The line boxes a layout would measure in an output: `tall` ones draw seven 18 px lines, the rest one.
-const measured = vi.hoisted((): { tall: (element: HTMLElement) => boolean } => ({ tall: () => false }));
+// The line boxes a layout would measure in an output: `tall` ones draw seven 18 px lines, the rest one; `boxes`, when a
+// case gives it, says what is drawn instead.
+const measured = vi.hoisted((): { tall: (element: HTMLElement) => boolean; boxes: (() => { top: number; bottom: number }[]) | null } => ({ tall: () => false, boxes: null }));
 vi.mock('./command-bound', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./command-bound')>();
-  return { ...actual, drawnLineBoxes: (element: HTMLElement) => (measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top, bottom: top + 18 })) };
+  return { ...actual, drawnLineBoxes: (element: HTMLElement) => measured.boxes?.() ?? (measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top, bottom: top + 18 })) };
 });
 function renderedOutputs(tall: (element: HTMLElement) => boolean) {
   measured.tall = tall;
-  onTestFinished(() => { measured.tall = () => false; });
+  onTestFinished(() => { measured.tall = () => false; measured.boxes = null; });
 }
 /** Longer than two lines at the column the scenes use: /cost's seven lines and /context's sixty-one, not a one-line output. */
 const longOutput = (element: HTMLElement) => (element.textContent ?? '').length > 100;
@@ -183,5 +184,41 @@ describe('a command’s output, drawn', () => {
     cleanup();
     const underBubble = renderRow({ ...base, run: { command: 'usage', args: '' } });
     expect(underBubble.container.querySelector('.transcript-command-name')).toBeNull();
+  });
+  // The branch panel's finding 3 (ruled 2026-11-15 (UTC)): closed, an output is never drawn taller than its bound,
+  // whatever it holds and whenever its content finishes loading; the measure runs again on any change of its size,
+  // height included. An output that draws no text line (an image) grows after mount, at the same width.
+  it('an output whose drawing grows after mount is measured again and bounded at two lines of its type, with Show more', () => {
+    renderedOutputs(() => false);
+    measured.boxes = () => []; // an image: no text line to measure
+    const observers: { callback: ResizeObserverCallback; targets: Element[] }[] = [];
+    vi.stubGlobal('ResizeObserver', class {
+      private readonly entry: { callback: ResizeObserverCallback; targets: Element[] };
+      constructor(callback: ResizeObserverCallback) {
+        this.entry = { callback, targets: [] };
+        observers.push(this.entry);
+      }
+      observe(target: Element) { this.entry.targets.push(target); }
+      unobserve() {}
+      disconnect() { this.entry.targets.length = 0; }
+    });
+    let height = 0; // the image not yet loaded
+    const isOutput = (element: Element) => element instanceof HTMLElement && element.classList.contains('transcript-command-output');
+    vi.spyOn(HTMLElement.prototype, 'scrollHeight', 'get').mockImplementation(function (this: HTMLElement) { return isOutput(this) ? height : 0; });
+    const computed = window.getComputedStyle.bind(window);
+    vi.spyOn(window, 'getComputedStyle').mockImplementation((element, pseudo) => (isOutput(element) ? ({ lineHeight: '18px', fontSize: '12px' } as CSSStyleDeclaration) : computed(element, pseudo)));
+    onTestFinished(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+
+    const row: CommandRow = { id: 'local:o-chart' as CommandRow['id'], turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'local_command', messageUuid: null, text: '![Usage by day](data:image/png;base64,iVBORw0KGgo=)' };
+    const { container } = renderRow(row, { disclosures: new Disclosures() });
+    const output = container.querySelector<HTMLElement>('.transcript-command-output')!;
+    expect(within(container).queryByRole('button', { name: 'Show more' })).toBeNull();
+    expect(output.style.getPropertyValue('--command-bound')).toBe('');
+
+    height = 240; // the image has loaded: taller, at the same width
+    act(() => { for (const { callback, targets } of observers) if (targets.length > 0) callback(targets.map((target) => ({ target }) as ResizeObserverEntry), {} as ResizeObserver); });
+    expect(within(container).getByRole('button', { name: 'Show more' })).toBeTruthy();
+    expect(output.style.getPropertyValue('--command-bound')).toBe('36px');
+    expect(output.hasAttribute('data-collapsed')).toBe(true);
   });
 });
