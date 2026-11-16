@@ -913,7 +913,7 @@ export function createViewerStore(client: MawsBridge) {
 
       reset() {
         for (const entry of get().entries.values()) release(heldToken(entry.frame)); // UX wave U6b-2 (M5, decision 10)
-        for (const out of asks.values()) Object.assign(out, { obsolete: true, again: false }); // answered, then released
+        asks.clear(); // the store forgets everything (tests, a hot reload): an answer still out finds no slot and is released
         for (const hold of holds.values()) hold.release();
         holds.clear();
         generations.clear();
