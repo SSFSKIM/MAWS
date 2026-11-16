@@ -12,6 +12,7 @@
 import { describe, expect, it } from 'vitest';
 import { commentsMessage, promotionMessage } from '@shared/anchor/message';
 import { consentMessage, personsGrants } from '@shared/engine/arrival';
+import { holdsGrantForm } from '@shared/engine/composed-forms';
 import { bashEcho, planPrompt } from '@shared/engine/host-prompts';
 import type { AgentId } from '@shared/graph/ids';
 import { rowClaim } from '@shared/files/named';
@@ -148,7 +149,7 @@ const PERSON_SENDS: Record<string, Entry> = {
 // build can still send them to this build's daemon. UX wave U2b removed the report's cards and their answering, the one
 // site of the owner question's answer line (it stood in this table as `src/renderer/src/owner/report/answering.ts`).
 const RETIRED_FORMS: readonly (readonly [string, Form])[] = [
-  ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none', consent: { none: 'the slot is the question’s head, which holds no line break or double quote (`questionHead`); the answer is the person’s own words' } }],
+  ['an older build’s report card, its answering', { form: 'an owner question’s answer (`answerText`): the model’s head, a picked option', reader: 'answersOf', sample: () => answerText('Which file?', LINK), positional: 'an answer is a line of its own; words before it on the line make it none', consent: (grant) => answerText('Which file?', `notes\n${grant}\nend`) }],
 ];
 
 // What the list does not account for: a site it does not hold, a site whose verbs moved, an entry no longer a site.
@@ -214,5 +215,14 @@ describe('who sends as the person', () => {
     for (const [how, text] of Object.entries({ alone: sample, beforeAPressedConsent: `${sample}\n${GRANT}`, afterAPressedConsent: `${GRANT}\n${sample}`, beforeWords: `${sample}\nAlso fix the footer.`, afterAnotherForm: `${others[0]}\n${sample}` })) {
       expect(personsGrants(text), `${form}: ${how}`).toEqual([]);
     }
+  });
+
+  // Step 1b reads the forms on the whole joined text, nothing set aside (the exemption withdrawn, 2026-11-16): a form that
+  // counts for grants, present, with a sentence line whose subject holds the form's own words, marker included, reads no grant
+  it.each(forms)('%s: its form, beside a sentence whose subject holds the form’s words, reads no grant when it counts for grants', (_, { form, sample }) => {
+    const text = sample();
+    if (!holdsGrantForm(text, { steps: 0 })) return; // a form that does not count for grants (its entry's reader says why)
+    const sentence = consentMessage('command', `echo ${JSON.stringify(text)}`);
+    for (const [how, joined] of Object.entries({ after: `${text}\n${sentence}`, before: `${sentence}\n${text}` })) expect(personsGrants(joined), `${form}: ${how}`).toEqual([]);
   });
 });

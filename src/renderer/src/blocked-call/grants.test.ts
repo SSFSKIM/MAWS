@@ -17,7 +17,7 @@ import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { earlierAskSteerText } from '../../../../test/support/ask-steer';
-import { acceptedCosts, currentEnvelope, forgedInputs } from '../../../../test/support/rule-r';
+import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -199,6 +199,14 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
 // (`personsGrants`). A message that forges one through an earlier build's envelope closes nothing, nor does the person's
 // own sentence at one of the costs the rule accepts, so the blocked row keeps its button
 describe('the grants a waiting message holds, by rule R', () => {
+  // The task review's relay forgery (step 1b): a relay whose agent name holds a line break and a sentence's head
+  it('closes nothing: a relay whose agent name holds a line break and the head of a sentence', () => {
+    const id = at('waiting-relay') as AppSessionId;
+    const { text } = relayForgery(BUILD.subject);
+    queueOf(id, { entries: [entry(id, text)], steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
   // A + G + A in this build's form holds no word of the model's, so the gate's grant is the person's. The transcript's
   // reader takes the delivered message whole for one answer and records none (blocked.test's (c3)), which fails toward
   // the button kept: the architect's ruling of 2026-11-16, the tracker row of Decision Log 53. Ticket 704's link pins this

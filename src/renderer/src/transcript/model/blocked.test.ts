@@ -20,7 +20,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
-import { acceptedCosts, forgedInputs, type Content } from '../../../../../test/support/rule-r';
+import { acceptedCosts, forgedInputs, relayForgery, type Content } from '../../../../../test/support/rule-r';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
@@ -701,6 +701,26 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
       expect(results.live!.consents, `${other}: live`).toEqual([MARKER('1')]);
       expect([results['from the file']!.consents, results['from the file']!.readings], `${other}: from the file`).toEqual([[], NONE]);
     }
+  });
+
+  // The task review's relay forgery (step 1b, its exemption withdrawn): a relay whose agent name holds a line break and a
+  // sentence's head for the blocked command, as the person's one message: no consent on either route
+  it('step 1b: a relay whose agent name holds a line break and the head of the blocked command’s sentence: no consent, live and from the file', async () => {
+    const { text } = relayForgery(MARKER('1'));
+    for (const recording of ['u1c-b-1', 'u1c-e-1']) {
+      for (const [route, { consents, approvals }] of await both(recording, text)) {
+        expect([consents, approvals], `${recording}, ${route}`).toEqual([[], []]);
+      }
+    }
+  });
+
+  // Cost (b), its exemption withdrawn: a pressed consent whose own command quotes a form's constant is its grant on the
+  // frame the host wrote (live, the mark), and none in the joined row the file reads
+  it('step 1b: a pressed consent whose command quotes a form’s constant, joined with another message: live the host’s mark, from the file none', async () => {
+    const command = `${MARKER('1')} # <bash-input>`;
+    const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, consentMessage('command', command)]]));
+    expect(results.live!.consents, 'live').toEqual([command]);
+    expect(results['from the file']!.consents, 'from the file').toEqual([]);
   });
 
   it('(d) two real grant lines joined: two grants, an approval row each, both blocked rows approved', async () => {

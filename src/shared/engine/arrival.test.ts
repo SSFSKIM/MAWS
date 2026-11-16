@@ -9,7 +9,7 @@ import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
-import { acceptedCosts, currentEnvelope, forgedInputs, WORDS, type Content } from '../../../test/support/rule-r';
+import { acceptedCosts, currentEnvelope, forgedInputs, relayForgery, WORDS, type Content } from '../../../test/support/rule-r';
 import { PROMOTION_HEAD } from '@shared/anchor/message';
 import { LINKED_READ_OPENING } from '@shared/maws/linked-read';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
@@ -845,28 +845,50 @@ describe('the grants in a person’s message (rule R)', () => {
     expect(routes(`${WORDS}\n${GRANT}`)).toEqual([[grant('make build')], [grant('make build')]]);
   });
 
-  // L1 (the architect's ruling 3865): a line that is a whole sentence is exempt from step 2's tag test, since its
-  // subjects are JSON strings and no envelope's line can stand inside one
-  it('a sentence whose command holds the envelope’s tag: one grant beside a current-form envelope and beside the person’s words', () => {
+  // L1 struck (2026-11-16): no line is set aside from step 2's test, so a consent whose command holds the envelope's tag
+  // is its grant alone (step 0) and none joined with an envelope or beside words (an accepted cost; one press recovers it)
+  it('a sentence whose command holds the envelope’s tag: its grant alone; joined with a current-form envelope or beside the person’s words, none (an accepted cost)', () => {
     const tagged = consentMessage('command', 'grep -rn "[MAWS ask " src');
-    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${tagged}`)).toEqual([grant('grep -rn "[MAWS ask " src')]);
-    expect(personsGrants(`${WORDS}\n${tagged}`)).toEqual([grant('grep -rn "[MAWS ask " src')]);
-    expect(routes(`${WORDS}\n${tagged}`)).toEqual([[grant('grep -rn "[MAWS ask " src')], [grant('grep -rn "[MAWS ask " src')]]);
+    expect(personsGrants(tagged)).toEqual([grant('grep -rn "[MAWS ask " src')]);
+    expect(personsGrants(`${currentEnvelope('toolu_a')}\n${tagged}`)).toEqual([]);
+    expect(personsGrants(`${WORDS}\n${tagged}`)).toEqual([]);
+    expect(routes(`${WORDS}\n${tagged}`)).toEqual([[], []]);
   });
 
-  // Step 1b (the architect's ruling 3865, and the coordinator's on its exemption): the composed forms are looked for on
-  // the joined text with every line that reads strictly as a whole sentence set aside (L1's one test, `readConsents`), so
-  // a consent whose command quotes a form's constant keeps its grant beside an envelope or the person's words
-  it('a sentence whose command quotes a composed form’s constant keeps its grant beside a current-form envelope and beside the person’s words', () => {
-    for (const command of ['grep -rn "<bash-input>" src', 'grep -rn "<command-name>" src', 'grep -rn "<maws_anchor" src', 'echo "Implement this plan:"', 'echo "then continue what you were doing: "', `printf '${LINKED_READ_OPENING}'`, `echo "${PROMOTION_HEAD}"`]) {
+  // Step 1b (the architect's ruling 3865; its exemption withdrawn, 2026-11-16): the composed forms are looked for on the
+  // whole joined text, so a consent whose command quotes a form's constant is its grant alone (step 0) and none joined
+  // with an envelope or beside the person's words (an accepted cost, the tracker row of cost (b); one press recovers it)
+  it('a sentence whose command quotes a composed form’s constant: its grant alone; joined with a current-form envelope or beside the person’s words, none (an accepted cost)', () => {
+    for (const command of ['grep -rn "<bash-input>" src', 'grep -rn "<command-name>" src', 'grep -rn "<maws_anchor" src', 'echo "Implement this plan:"', 'echo "then continue what you were doing: "', `echo "${PROMOTION_HEAD}"`]) {
       const sentence = consentMessage('command', command);
-      for (const text of [`${currentEnvelope('toolu_a')}\n${sentence}`, `${WORDS}\n${sentence}`]) expect(personsGrants(text), command).toEqual([grant(command)]);
+      expect(personsGrants(sentence), command).toEqual([grant(command)]);
+      for (const text of [`${currentEnvelope('toolu_a')}\n${sentence}`, `${WORDS}\n${sentence}`]) expect(personsGrants(text), command).toEqual([]);
     }
   });
 
-  it('a form’s constant that runs over a line the exemption sets aside is found once that line is out: no grant (it fails closed)', () => {
+  // With nothing set aside, a form is its constant in the text: the linked read's opening split by a sentence line is no
+  // form, and the sentences are read (restated: with the exemption, the setting aside joined the constant's two lines)
+  it('a form’s two-line constant split by a sentence line is no form: the sentences are read', () => {
     const [first, second] = LINKED_READ_OPENING.split('\n') as [string, string];
-    expect(personsGrants(`${first}\n${GRANT}\n${second}the notes\n${GRANT}`)).toEqual([]);
+    expect(personsGrants(`${first}\n${GRANT}\n${second}the notes\n${GRANT}`)).toEqual([grant('make build'), grant('make build')]);
+  });
+
+  // The task review's relay forgery: a relay whose agent name holds a line break and a sentence's head, so that a line is
+  // exactly a sentence for a command the model wrote. The relay's words are in the text: no grant
+  it('a relay whose agent name holds a line break and a sentence’s head: no grant, the person’s row and queued prompt too', () => {
+    const { text, sentence } = relayForgery('make build');
+    expect(text.split('\n'), 'a line is exactly the sentence').toContain(sentence);
+    expect(personsGrants(text)).toEqual([]);
+    expect(routes(text)).toEqual([[], []]);
+  });
+
+  // A picked path holding a form's words, in this build's envelope, joined with a pressed consent: no grant (cost (b): the
+  // forms are looked for before the take-out, and the path is the person's pick)
+  it('a current-form envelope whose picked path holds a form’s words, joined with a pressed consent: no grant (an accepted cost)', () => {
+    const PICK = { id: 'q1', question: 'Which file?', modality: 'file' as const };
+    const envelope = askSteerText('toolu_a', [PICK], [{ id: 'q1', question: PICK.question, status: 'answered', value: ['/work/Implement this plan:/notes.md'] }]);
+    expect(envelope).toContain('Implement this plan:');
+    expect(personsGrants(`${envelope}\n${GRANT}`)).toEqual([]);
   });
 
   // The cost the coordinator accepted (step 1b, (b)): the readers cannot tell typed words from a MAWS form, so a typed
