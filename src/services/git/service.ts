@@ -39,8 +39,8 @@ export class GitService {
 
   constructor(options: GitServiceOptions = {}) {
     this.run = createGitRunner({ env: options.env, execFile: options.execFile });
-    this.countHooks = options.countHooks;
     this.read = createGitReader({ env: options.env });
+    this.countHooks = options.countHooks;
     // P5 O3-E M1: the watcher's prune on Linux reads what git ignores through this runner (`ls-files`, `check-ignore`).
     this.watcher = new GitWatcher({ status: (directory) => this.status(directory), emit: options.emit ?? (() => {}), watch: options.watch, ignored: (root) => gitIgnored(this.run, root, this.read), log: options.log });
   }
@@ -90,11 +90,12 @@ export class GitService {
     return this.diffOf(directory, range, path, context);
   }
 
-  // The patch and the counts of one `git diff` range, as every scope reads them.
-  private async diffOf(directory: string, range: string[], path: string | undefined, context: number | undefined): Promise<GitDiff> {
+  // The patch and the counts of one `git diff` range, as every scope reads them. `ended`: the range is closed with `--`
+  // even with no path (U5b-2's reads, whose revisions are whole ids a file could be named like).
+  private async diffOf(directory: string, range: string[], path: string | undefined, context: number | undefined, ended = false): Promise<GitDiff> {
     const [patch, numstat] = await Promise.all([
-      this.run(directory, [...DIFF, `-U${context ?? 3}`, ...range, ...pathspec(path)]),
-      this.run(directory, [...DIFF, '--numstat', '-z', ...range, ...pathspec(path)]),
+      this.run(directory, [...DIFF, `-U${context ?? 3}`, ...range, ...pathspec(path, ended)]),
+      this.run(directory, [...DIFF, '--numstat', '-z', ...range, ...pathspec(path, ended)]),
     ]);
     return { patch, files: parseNumstat(numstat) };
   }
@@ -149,7 +150,7 @@ export class GitService {
     // a root commit has no parent to diff against; `log --root` shows it as created, which needs no empty tree's id
     // (that id differs between a SHA-1 and a SHA-256 repository)
     const diff = read.parents.length > 0
-      ? await this.diffOf(directory, [read.parents[0], commit], path, context)
+      ? await this.diffOf(directory, [read.parents[0], commit], path, context, true)
       : await this.rootDiff(directory, commit, path, context);
     return { commit: read, onHead, ...diff };
   }
@@ -161,7 +162,7 @@ export class GitService {
   async changesSince({ directory, against, path, context }: GitChangesSinceInput): Promise<GitChangesSince> {
     requireAbsolute(directory);
     const [diff, untracked] = await Promise.all([
-      this.diffOf(directory, [against], path, context),
+      this.diffOf(directory, [against], path, context, true),
       path === undefined ? this.untrackedCounts(directory) : [],
     ]);
     return { ...diff, untracked };
