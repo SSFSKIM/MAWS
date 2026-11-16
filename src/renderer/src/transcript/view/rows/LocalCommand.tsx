@@ -3,7 +3,8 @@
 // on its side, with no frame and no heading: a dim `⎿`, then the output in muted small text, in `--danger` where all of it
 // came in the error tag. The output is drawn once, through the transcript's markdown or, for a terminal's text
 // (`plain`), preformatted, and that one drawing is clipped to two lines of the row's type while the disclosure
-// `line:<row id>` is closed, at the bottom of its second drawn line (ruling R19). "Show more" is offered when the drawing
+// `line:<row id>` is closed, at the bottom of its second drawn line (ruling R19), or at two lines of its type where it
+// draws what is not text lines (the branch panel's finding 3). "Show more" is offered when the drawing
 // is measured as cut and opens it; "Show less" closes it. So both states hold the same text. A line with no bubble of
 // its command in its turn names the command first, where the engine said which it ran. Line ends are kept (ruling R4) by
 // the transcript's markdown itself, whose remark-breaks draws each source line break as a break.
@@ -12,31 +13,28 @@ import { COMMAND_LINE, commandLead } from '../../model/copy';
 import type { Row } from '../../model/rows';
 import { useDisclosure } from '../context';
 import { Markdown } from '../markdown/Markdown';
-import { closedBound, drawnLineBoxes } from './command-bound';
+import { closedBound, drawnLineBoxes, lineHeightOf } from './command-bound';
 
 export function LocalCommandRow({ row }: { row: Extract<Row, { kind: 'local_command' }> }) {
   const [open, toggle] = useDisclosure(`line:${row.id}`);
   const output = useRef<HTMLDivElement>(null);
   const [bound, setBound] = useState<number | null>(null);
 
-  // Ruling R19: closed, the output is cut at the bottom of its second drawn line, read from its line boxes at mount and
-  // whenever its width changes (a narrower column wraps a line onto a third). Measured while closed only: open stays in
-  // the transcript-wide disclosures while the measurement is this mount's, so an open line always offers Show less, and
-  // closing measures again. An output that draws two lines or fewer has no bound and no Show more.
+  // Ruling R19 and the branch panel's finding 3: closed, the output is never drawn taller than its bound (the bottom of
+  // its second drawn line, or two lines of its type where what it draws is not text lines), measured at mount and again
+  // on any change of its size: a narrower column wraps a line onto a third, an image finishes loading. The drawing inside
+  // is observed as well as the output, whose own box the bound caps. Measured while closed only: open stays in the
+  // transcript-wide disclosures while the measurement is this mount's, so an open line always offers Show less, and
+  // closing measures again. An output no taller than its bound has none and no Show more.
   useLayoutEffect(() => {
     const element = output.current;
     if (!element || open) return;
-    let width: number | null = null;
-    const measure = () => {
-      const now = element.getBoundingClientRect().width;
-      if (now === width) return;
-      width = now;
-      setBound(closedBound(drawnLineBoxes(element)));
-    };
+    const measure = () => setBound(closedBound(drawnLineBoxes(element), element.scrollHeight, lineHeightOf(element)));
     measure();
     if (typeof ResizeObserver === 'undefined') return;
     const observer = new ResizeObserver(measure);
     observer.observe(element);
+    if (element.firstElementChild) observer.observe(element.firstElementChild);
     return () => observer.disconnect();
   }, [open, row.text, row.plain]);
   const cut = bound !== null;
