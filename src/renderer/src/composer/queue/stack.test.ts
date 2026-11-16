@@ -155,9 +155,16 @@ describe('a grant’s row', () => {
     ]);
   });
 
-  it('a row with only text (handed, sending) whose whole text is one grant reads so too', () => {
-    const rows = stackRows(queue({ entries: [entry('q-s', 1, { content: GRANT, state: 'submitting', submittedAt: at(1) })] }), new Set(['q-s']), read([{ messageUuid: U3, text: GRANT, at: at(3) }]));
+  it('a row with only text (handed, sending) whose message is one grant reads so too: a handed one as its transcript row records it', () => {
+    const rows = stackRows(queue({ entries: [entry('q-s', 1, { content: GRANT, state: 'submitting', submittedAt: at(1) })] }), new Set(['q-s']), read([{ messageUuid: U3, text: GRANT, at: at(3), grant: { kind: 'command', subject: 'make build' } }]));
     expect(rows.map((row) => [row.kind, rowText(row)])).toEqual([['handed', 'You approved make build'], ['sending', 'You approved make build']]);
+  });
+
+  // Decision Log 53: no row reads a grant from the text it draws, which is the message with MAWS's envelopes taken out
+  it('a handed row whose drawn text is the sentence and whose transcript row records no grant reads as its text', () => {
+    const [row] = stackRows(queue(), NONE, read([{ messageUuid: U3, text: GRANT, at: at(3) }]));
+    expect(row).toMatchObject({ kind: 'handed', grant: null });
+    expect(rowText(row!)).toBe(GRANT);
   });
 
   it('a message that holds a grant line among other words is the person’s own message: no grant, its own words', () => {

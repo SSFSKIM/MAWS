@@ -38,7 +38,16 @@ const NOTHING_READ: Read = { unread: [], started: () => false, questions: () => 
 function readOfEntry(entry: TranscriptEntry | undefined): Read {
   if (entry === undefined) return NOTHING_READ;
   const unread: Unread[] = [];
-  for (const row of entry.rows) if (row.kind === 'user' && row.unread === true && row.messageUuid !== null) unread.push({ messageUuid: row.messageUuid, text: row.text, at: row.at, ...(row.attachments.length > 0 && { attached: true as const }) }); // U1c (Decision Log 49)
+  // U1c (Decision Log 53): a message's grant as the transcript's reader recorded it on the original message, its own row's
+  // consent mark (the row draws the message's text with MAWS's envelopes taken out, which is never read for a grant). One
+  // grant only where it is everything the message holds: no other grant's row stands beside the message, no attachment
+  // rides with it (Decision Log 44, 49)
+  const besides = new Set(entry.rows.flatMap((row) => (row.kind === 'user' && row.beside !== undefined ? [row.beside] : [])));
+  for (const row of entry.rows) {
+    if (row.kind !== 'user' || row.unread !== true || row.messageUuid === null) continue;
+    const grant = row.consent !== undefined && row.attachments.length === 0 && !besides.has(row.messageUuid) ? { kind: row.consent.kind, subject: row.consent.subject } : null;
+    unread.push({ messageUuid: row.messageUuid, text: row.text, at: row.at, ...(grant !== null && { grant }) });
+  }
   const { state } = entry;
   return {
     unread,
