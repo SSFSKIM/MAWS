@@ -1,0 +1,72 @@
+UX wave U5b-2, P5: the cost of the three reads (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md,
+"Probes" P5 and Concrete Steps 4a; the child's file's P5, rescoped by the architect's ruling to a large public repository
+on the build VM; decision 26; 2026-11-15 UTC)
+
+Question. On a repository of the size class "hundreds of thousands of commits, tens of thousands of files", with a branch
+of some hundreds of changed files and some hundreds of new ones: what do this build's `git.changesSince` (against the
+merge base), `git.branchCommits` (limit 50, as its two-minute tick asks it) and `git.commitDiff` (a small, a large and a
+merge commit) cost, and how large is each answer? Does `UNTRACKED_COUNT_FILES` stay 200, and can the branch read's two
+minutes stand?
+
+Verdict.
+  - UNTRACKED_COUNT_FILES stays 200. The working-tree read with 200 new files counted answers in 0.50 to 0.56 s (median)
+    with typical source files, and in 0.8 to 2.1 s with 200 new files of nearly the cap each (1 MiB, the worst the cap
+    lets through, 200 MiB read), against the command's budget of 30 s and git's 10 s a run. The count alone is about
+    0.85 ms a typical file (500 files in 0.41 to 0.42 s). The margin is more than tenfold, so the cap stays where it
+    started; nothing in the numbers asks for a smaller one, and a larger one is not this probe's question.
+  - The branch read's two minutes stand. It answers in 0.46 s (median) where the repository has a commit-graph (what
+    `git gc` and `git maintenance` write) and 2.15 s where it has none (a fresh clone), once per two minutes per
+    repository in view: at most about 2 % of one core. Two of its git runs walk history, the merge base and `behind`
+    (about 2.6 s each with no commit-graph, 0.15 s and 0.55 s with one); the first build asked them one after the
+    other (5.1 s median); they are now asked side by side, which this build measures. Risk left: a repository of the
+    Linux kernel's size with no commit-graph could bring one of those walks near git's 10 s run limit, which answers
+    `timeout`; not measured here.
+  - The commit read is cheap at every size measured: 25 to 35 ms for one file, 113 to 117 ms for 200 files, 30 to 35 ms
+    for a merge read against its first parent (six files), 14 to 18 ms for `patch: false` (the ask when HEAD moves).
+Confidence: high for the orders of magnitude (seven runs a read; three passes, the first before the branch read's change); the
+absolute times carry the VM's load, which another landing's build held at a load average of 5 to 12 on 8 cores
+throughout, so they are upper rather than lower values.
+
+Where it ran and how. The wave's build VM (8 cores, 31 GiB, Ubuntu, git 2.43.0, Node 26.13.1), in a scratch folder
+outside any checkout of MAWS. The repository: rust-lang/rust, cloned anonymously over https with no credentials
+(`git clone --single-branch --no-tags`): its default branch's whole history with every blob, so every read runs as it
+would on a working checkout; a blobless clone was not used, because the git service's environment forbids every
+transport (GIT_ALLOW_PROTOCOL empty), so a read that met a missing blob would fail rather than fetch. 339,590 commits
+reachable from the branch, 62,739 tracked files. uxwave-u5b-reads-cost.sh made the branch: 300 merges back along the
+default branch's first parent (so the base is 7,516 commits ahead, `behind` 7,516), five commits (one file, 200 files,
+three of 20) and 139 files edited and left uncommitted (400 changed files against the merge base), 500 new files beside
+tracked files (copies of tracked Rust files' text), and an upstream holding the first two commits. The run of
+uxwave-u5b-reads-cost.test.ts (its own vitest configuration, outside the suites) timed this build's GitService, seven
+runs a read, the first kept apart (the cache could be cold for it; it never differed much), once with no commit-graph
+and once with one written by `git commit-graph write --reachable`. Medians of runs 2 to 7, in milliseconds; sizes are
+of the JSON answer (what the machine link would carry).
+
+                                                       no commit-graph        with a commit-graph     answer
+  git status (the watcher's read, for scale)           195 (186-207)          183 (177-188)           75 KB (639 entries)
+  git.branchCommits, limit 50                          2153 (2021-2179)       460 (445-493)           1.4 KB (5 rows, behind 7516)
+    the first build, the two walks one after the other 5145 (4690-5249)       -                       -
+  git.changesSince against the merge base,             559 (459-591)          501 (439-581)           297 KB (400 files, 223 KB
+    200 of 500 new files counted                                                                        of patch, 200 counted)
+  git.changesSince against HEAD                        607 (542-991)          472 (430-478)           112 KB (139 files)
+  git.changesSince, one path                           120 (104-130)          111 (103-116)           0.7 KB
+  git.changesSince against the merge base,             800 (752-834)          2147 (1323-2499)        298 KB (200 counted)
+    200 new files of nearly 1 MiB each
+  git.commitDiff, one file                             25 (21-26)             32 (28-35)              1 KB
+  git.commitDiff, 200 files                            117 (110-120)          113 (112-114)           140 KB (112 KB of patch)
+  git.commitDiff, a merge (first parent, six files)    30 (28-44)             35 (33-36)              16 KB
+  git.commitDiff, patch: false                         14 (13-15)             18 (17-18)              0.3 KB
+  the count alone, 500 typical new files               422 (343-509)          414 (253-468)           -
+
+  The heavy case's spread between the two passes is the VM's load (the second pass ran with the load average at 11.5),
+  not the commit-graph, which that read does not use.
+
+What follows for the design. The answers the window asks every two minutes or on every status (the branch read, the
+working-tree read against HEAD) are 1.4 KB and about 100 to 300 KB for a branch of this size; the commit read of a large
+commit about 140 KB once, since it is kept (decision 17). Over the machine link those sizes are what the link's own
+budget sees; the link itself was not timed.
+
+Not measured. A repository larger than this (the Linux kernel's 1.3 million commits), a slow disk, macOS (Apple Git and
+O_NOFOLLOW_ANY's open), the read over the machine link, and the window's own handling of a 300 KB answer.
+
+Nothing of a person's was read: the repository is public and the branch, its commits and its new files were made for
+the run. The scratch clone was deleted after it.
