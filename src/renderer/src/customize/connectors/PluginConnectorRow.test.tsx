@@ -414,6 +414,11 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
       const { row } = await signedInFrom();
       changed('done', { where: 'here' });
       await reads(row, 'Signed in · connected here');
+      // read again with nothing changed: the revision is the same, and the result stays
+      const postureReads = asked('catalog.postures').length;
+      await readAgain();
+      await waitFor(() => expect(asked('catalog.postures').length).toBeGreaterThan(postureReads));
+      await reads(row, 'Signed in · connected here');
       pluginList = () => ({ plugins: [listed(KEY, { enabled: false })] });
       await readAgain();
       await reads(row, 'Plugin turned off');
