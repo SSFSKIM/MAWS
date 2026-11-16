@@ -590,6 +590,47 @@ describe('the three reads', () => {
       expect(after).toMatchObject({ base: { ref: 'origin/main', mergeBase: made[1] }, counts: { all: 2, notPushed: 0, pushed: 2 }, behind: 1 });
       expect(after.commits.map((c) => c.sha)).toEqual([made[3], made[2]]);
     });
+    // The branch's max panel, ruling 4 (Decision Log 52): one snapshot of HEAD and the upstream for every subprocess of
+    // the read. HEAD moves while the read runs (after the whole range is counted, before the upstream's half is listed),
+    // by more commits than the upstream holds, so a read that asked HEAD again would count more not pushed than in all.
+    it('reads one snapshot of HEAD and the upstream: HEAD moving during the read leaves all = pushed + notPushed, none negative', async () => {
+      await originAt('main', initial);
+      await repo.git('checkout', '-q', '-b', 'feature');
+      const made = await emptyCommits(10, 'step');
+      await originAt('feature', made[1]); // the first two are pushed
+      await track('feature');
+      const tree = await rev('HEAD^{tree}');
+      const real = execFile as unknown as ExecFileFn;
+      let counted!: () => void;
+      const wholeCounted = new Promise<void>((resolve) => (counted = resolve));
+      let moved = false;
+      const spawn: ExecFileFn = (file, args, options, callback) => {
+        const revList = args.indexOf('rev-list');
+        const whole = revList !== -1 && args.includes('--count') && args.includes(`^${initial}`);
+        const notPushed = revList !== -1 && !args.includes('--count');
+        if (whole) return real(file, args, options, (error, stdout, stderr) => (callback(error, stdout, stderr), counted()));
+        if (!notPushed) return real(file, args, options, callback);
+        void wholeCounted.then(async () => {
+          let at = await rev('HEAD');
+          for (let i = 1; i <= 5; i++) at = (await repo.git('commit-tree', tree, '-p', at, '-m', `moved ${i}`)).trim();
+          await repo.git('reset', '-q', '--soft', at);
+          moved = true;
+          real(file, args, options, callback);
+        });
+      };
+      const spied = new GitService({ execFile: spawn, env: repo.serviceEnv() });
+      try {
+        const read = await spied.branchCommits({ directory: repo.root, limit: 50 });
+        expect(moved).toBe(true);
+        expect(await rev('HEAD')).not.toBe(made[9]); // HEAD did move during the read
+        expect(read.counts).toEqual({ all: 10, notPushed: 8, pushed: 2 });
+        expect(read.counts!.all).toBe(read.counts!.notPushed! + read.counts!.pushed!);
+        expect(read.commits.map((c) => c.sha)).toEqual([...made].reverse());
+        expect(read.commits.map((c) => c.pushed)).toEqual([...made].reverse().map((sha) => made.indexOf(sha) < 2));
+      } finally {
+        spied.dispose();
+      }
+    });
   });
 
   describe('git.commitDiff', () => {
@@ -698,6 +739,37 @@ describe('the three reads', () => {
   });
 
   describe('git.changesSince', () => {
+    // The branch's max panel, ruling 4's sibling (Decision Log 52): the working tree against HEAD names one commit in both
+    // its subprocesses. HEAD moves between the patch and the counts (to a commit holding the working tree's edit), so a
+    // read that asked HEAD again would list no file beside a patch that shows one.
+    it('reads HEAD once against HEAD: HEAD moving between the patch and the counts leaves them agreeing', async () => {
+      await commit('a.txt', 'one\n');
+      await repo.write('a.txt', 'one\ntwo\n');
+      const real = execFile as unknown as ExecFileFn;
+      let patched!: () => void;
+      const patchRead = new Promise<void>((resolve) => (patched = resolve));
+      let moved = false;
+      const spawn: ExecFileFn = (file, args, options, callback) => {
+        const diff = args.includes('diff');
+        if (diff && !args.includes('--numstat')) return real(file, args, options, (error, stdout, stderr) => (callback(error, stdout, stderr), patched()));
+        if (!(diff && args.includes('--numstat'))) return real(file, args, options, callback);
+        void patchRead.then(async () => {
+          await repo.git('commit', '-q', '-am', 'the edit, committed meanwhile');
+          moved = true;
+          real(file, args, options, callback);
+        });
+      };
+      const spied = new GitService({ execFile: spawn, env: repo.serviceEnv() });
+      try {
+        const read = await spied.changesSince({ directory: repo.root, against: 'HEAD' });
+        expect(moved).toBe(true);
+        expect(read.patch).toContain('+two');
+        expect(read.files.map((f) => [f.path, f.insertions, f.deletions])).toEqual([['a.txt', 1, 0]]);
+      } finally {
+        spied.dispose();
+      }
+    });
+
     // Review fix 1, the same three for the working-tree read
     it('reads an option-shaped path as a literal path, a file named like a whole id as a file, and answers nothing for a path outside the repository', async () => {
       await repo.write('--output=x', 'option-shaped\n');

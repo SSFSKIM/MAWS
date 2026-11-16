@@ -179,6 +179,21 @@ describe('the Commits part’s state over the branch read (frames’ S9)', () =>
   it('is the answer once read', () => {
     expect(commitsState(true, { answer, failure: null }, false)).toEqual({ kind: 'ready', answer });
   });
+
+  // The branch's max panel, ruling 1 (Decision Log 49): an answer in hand stays shown when the machine stops serving the
+  // reads; "older" and "outstanding" are for a list with no answer
+  it('keeps an answer in hand when the machine no longer serves the reads or is not known to, whatever failed last', () => {
+    const down = { status: 'error' as const, message: 'the link dropped', code: 'host_unavailable' };
+    const unknown = { status: 'error' as const, message: 'unknown', code: 'unknown_command' };
+    for (const serves of [false, null] as const) {
+      expect(commitsState(serves, { answer, failure: null }, false), String(serves)).toEqual({ kind: 'ready', answer });
+      expect(commitsState(serves, { answer, failure: null }, true), String(serves)).toEqual({ kind: 'ready', answer });
+      expect(commitsState(serves, { answer, failure: down }, true), String(serves)).toEqual({ kind: 'ready', answer });
+      expect(commitsState(serves, { answer, failure: unknown }, false), String(serves)).toEqual({ kind: 'ready', answer });
+    }
+    expect(commitsState(false, { answer: null, failure: null }, false)).toEqual({ kind: 'failed', failure: { kind: 'older' }, refresh: false });
+    expect(commitsState(null, { answer: null, failure: down }, false)).toEqual({ kind: 'outstanding' });
+  });
 });
 
 describe('the pull request’s state line and checks (S5, S6; frames’ S11)', () => {

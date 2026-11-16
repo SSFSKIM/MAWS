@@ -4,7 +4,9 @@
 // held; nothing while no holder is in view, the last answer kept; a failure keeps the last answer and says its kind.
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GitBranchCommits } from '@shared/ipc/schema/git';
-import { TEST_MACHINE } from '../../../../../../test/support/machine';
+import type { AppSessionId } from '@shared/graph/ids';
+import { addressOf } from '@shared/machine/address';
+import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { createClient } from '../../../ipc/client';
 import { connectPanelEvents } from '../../../ipc/events';
 import { deferred, installFakeMain, ok } from '../../../test-support/code';
@@ -116,5 +118,27 @@ describe('the branch read (UX wave U5b-2)', () => {
     held.resolve(ok(answer()));
     await new Promise((resolve) => setTimeout(resolve, 0));
     expect(branchReadOf(store.getState(), TEST_MACHINE, '/repo')).toBeUndefined();
+  });
+
+  // The branch's max panel, ruling 2 (Decision Log 50): an entry is addressed by a holder still there. A holder on a
+  // subdirectory came first and leaves; the read goes on in the root's holder's directory, for its session.
+  it('addresses the read by a holder still there: the subdirectory’s holder leaves, and the next ask goes to the root’s', async () => {
+    const asked: unknown[] = [];
+    const main = installFakeMain((name, input, target) => {
+      if (name !== 'git.branchCommits') return ok();
+      asked.push([input.directory, target]);
+      return ok(answer());
+    });
+    const store = createBranchReads(createClient(() => main.bridge));
+    const session = (id: string) => addressOf(OTHER_MACHINE, id as AppSessionId);
+    const sub = store.getState().hold({ machine: OTHER_MACHINE, repoRoot: '/work', directory: '/work/packages/app', session: session('app-sub') });
+    await vi.waitFor(() => expect(branchReadOf(store.getState(), OTHER_MACHINE, '/work')?.answer).not.toBeUndefined());
+    const root = store.getState().hold({ machine: OTHER_MACHINE, repoRoot: '/work', directory: '/work', session: session('app-root') });
+    await vi.waitFor(() => expect(asked).toHaveLength(2));
+    sub();
+    store.getState().changed(OTHER_MACHINE, '/work');
+    await vi.waitFor(() => expect(asked).toHaveLength(3));
+    expect(asked[2]).toEqual(['/work', { machine: OTHER_MACHINE, session: 'app-root' }]);
+    root();
   });
 });

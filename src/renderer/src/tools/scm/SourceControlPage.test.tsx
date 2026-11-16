@@ -200,6 +200,32 @@ describe('when the branch read is asked (S3; S21’s page half)', () => {
   });
 });
 
+// The branch's max panel, ruling 1 (Decision Log 49): what a tab has loaded, it keeps. The list in hand stays shown when
+// the machine stops serving the reads, by a disconnect or by no longer listing them; nothing is asked meanwhile, and the
+// read is asked again once they are served
+describe('the commit list in hand when the reads are lost (Decision Log 49)', () => {
+  for (const [loss, lost] of [
+    ['a disconnect', { state: 'down' as const }],
+    ['the reads no longer listed', { capabilities: ['rl2.project-acts'] }],
+  ] as const)
+    it(`keeps the list shown through ${loss}, asks nothing meanwhile, and asks once the reads are served again`, async () => {
+      serves();
+      mount();
+      await waitFor(() => expect(commitRows()).toHaveLength(4));
+      expect(branchAsks()).toBe(1);
+      act(() => roster([lost]));
+      await flush();
+      expect(commitRows()).toHaveLength(4);
+      expect(part('commits')?.querySelector('[data-scm-failure]')).toBeNull();
+      act(() => main.emit('git.changed', { repoRoot: DIR, status: FEATURE, reason: 'head' }));
+      await flush();
+      expect(branchAsks()).toBe(1);
+      act(() => serves());
+      await waitFor(() => expect(branchAsks()).toBe(2));
+      expect(commitRows()).toHaveLength(4);
+    });
+});
+
 describe('the commit list and its rows (frames’ S1, S2, S12; S13’s row)', () => {
   it('says "Show 50 of 60 commits", then lists fifty with "10 older commits not shown" and "Show fewer" directly after', async () => {
     serves();
