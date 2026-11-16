@@ -192,7 +192,7 @@ export function placementOf(comment: { anchor: FileLineAnchor; quote?: string | 
     case 'pending':
       return { kind: answer, path: file.path };
     default:
-      return { kind: answer }; // not reached: a file's case answers one of the four above
+      return { kind: 'not-in-scope' }; // not reached: a file's case answers one of the four above
   }
 }
 
