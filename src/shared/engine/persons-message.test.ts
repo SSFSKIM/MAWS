@@ -5,12 +5,14 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
+import { rowClaim } from '@shared/files/named';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { earlierAskSteerText, innerOpeningEnvelope } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { queuedPrompt } from '../../../test/support/queued-rows';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
 import { consentMessage, envelopeSlices, MAX_ENVELOPE_CHECKS, ownWordsOf, pastedBodies, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
 import { messageText } from './peer-envelope';
@@ -652,6 +654,37 @@ describe('rule R on the inputs A2 pinned: the grants of the whole joined text', 
     const pastedEarlier = joinedText(framePasted('a1b2', INNER), GRANT);
     expect(personsGrants(pastedEarlier)).toEqual([]);
     expect(consents(pastedEarlier)).toEqual([]);
+  });
+});
+
+// Ticket 704, the architect's ruling 7 of 2026-11-16: the earlier review's finding (an earlier build's envelope whose
+// question holds the consent sentence and a whole opening line for another ask) read by the save rule and by rule R, as
+// a row the person wrote and as a prompt they queued. The sentence's command and the words beside it link a path, so a
+// text the save rule counted would name it (the control); this one is read only, its envelope's tag a form MAWS writes
+// (`rowClaim`), and yields no grant. Made by hand: no recording holds such a question.
+describe('made by hand: the earlier review’s envelope names nothing for a save outside a session’s folders and yields no grant', () => {
+  const P = '/work/out/report.md';
+  const LINK = `[r](${P})`;
+  const INNER = innerOpeningEnvelope('toolu_A', consentMessage('command', `open ${LINK}`));
+  const user = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000712', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const consents = (row: unknown) => readArrivals(row).filter((arrival) => arrival.class === 'consent');
+
+  it('the person’s own words that link the path name it, at rest and queued (the control)', () => {
+    expect(rowClaim(user(`Open ${LINK}`), P)).toEqual({ names: true });
+    expect(rowClaim(queuedPrompt(`Open ${LINK}`), P)).toEqual({ names: true });
+  });
+
+  it.each([
+    ['alone', INNER],
+    ['after the person’s words that link the path', joinedText(`Open ${LINK}`, INNER)],
+    ['before them', joinedText(INNER, `Open ${LINK}`)],
+  ])('%s, at rest and queued: not the person’s naming of the path, and no grant', (_, text) => {
+    expect(INNER.split('\n')).toEqual(expect.arrayContaining([askSteerOpening('toolu_A'), askSteerOpening('toolu_inner')]));
+    for (const row of [user(text), queuedPrompt(text)]) {
+      expect(rowClaim(row, P), JSON.stringify(row).slice(0, 80)).toEqual({ names: false, pending: [], other: true });
+      expect(consents(row)).toEqual([]);
+    }
+    expect(personsGrants(text)).toEqual([]);
   });
 });
 
