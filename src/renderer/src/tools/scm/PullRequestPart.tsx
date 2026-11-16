@@ -132,7 +132,8 @@ function SignedOut({ appSessionId, directory, mark, rights, sentence, detail }: 
 }
 
 // The answer's pull request: the title, the state line (broken only between its phrases, each whole: frames' S5), a merge
-// state GitHub adds later in a muted line under it, the checks of an open pull request, and "Open on GitHub ↗".
+// state GitHub adds later in a muted line under it, the checks of an open pull request (the counts line only where a row
+// is listed or nothing folds, Decision Log 41), and "Open on GitHub ↗".
 function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreApi<PageUi> }) {
   const phrases = stateLine(pr);
   const merge = mergeWords(pr);
@@ -160,18 +161,20 @@ function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreA
       )}
       {checks !== null && (
         <>
-          <p data-scm-checks className="m-0 flex flex-wrap items-baseline gap-x-1 pt-1 text-ui-sm text-fg-muted">
-            <span>{SCM_COPY.checks}</span>{' '}
-            {checks.countParts.map((count, i) => (
-              <span key={count}>
-                <span className="whitespace-nowrap">
-                  <span data-scm-check-count>{count}</span>
-                  {i < checks.countParts.length - 1 && ' ·'}
+          {checks.countsLine && (
+            <p data-scm-checks className="m-0 flex flex-wrap items-baseline gap-x-1 pt-1 text-ui-sm text-fg-muted">
+              <span>{SCM_COPY.checks}</span>{' '}
+              {checks.countParts.map((count, i) => (
+                <span key={count}>
+                  <span className="whitespace-nowrap">
+                    <span data-scm-check-count>{count}</span>
+                    {i < checks.countParts.length - 1 && ' ·'}
+                  </span>
+                  {i < checks.countParts.length - 1 && ' '}
                 </span>
-                {i < checks.countParts.length - 1 && ' '}
-              </span>
-            ))}
-          </p>
+              ))}
+            </p>
+          )}
           {checks.attention.map((check, i) => (
             <CheckRow key={`${check.name}\0${i}`} check={check} />
           ))}

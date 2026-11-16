@@ -162,6 +162,7 @@ const countsOf = (items: readonly Check[], buckets: readonly Check['bucket'][]) 
   });
 
 export interface Checks {
+  countsLine: boolean; // the counts line is drawn: not when nothing is listed and the folded line can stand in its place (Decision Log 41)
   counts: string; // the counts line, in the card's bucket words and order ("3 passed · 1 failed · 1 pending")
   countParts: string[]; // the same, one count apiece (the line wraps between them)
   attention: Check[]; // failed, cancelled and pending, in that order
@@ -169,17 +170,23 @@ export interface Checks {
   foldWords: string | null; // the folded line ("3 passed · 1 skipped"); null with nothing to fold
 }
 
-/** An open pull request's checks; null for a merged or a closed one, which lists none. */
+/**
+ * An open pull request's checks; null for a merged or a closed one, which lists none. With no check to list (none failed,
+ * was cancelled or is pending) the counts line is not drawn and the folded line stands in its place, its words the same
+ * counts (Decision Log 41); where nothing folds either (no checks yet, checks unavailable) the counts line says so.
+ */
 export function checksOf(pr: Pr): Checks | null {
   if (!isOpen(pr)) return null;
   const { summary, items } = pr.checks;
   const countParts = summary === 'unknown' ? [SUMMARY_COPY.checksUnavailable] : items.length === 0 ? [SUMMARY_COPY.noChecks] : countsOf(items, ['pass', 'fail', 'cancel', 'pending', 'skipping']);
   const folded = items.filter((item) => item.bucket === 'pass' || item.bucket === 'skipping');
   const fold = countsOf(items, ['pass', 'skipping']);
+  const attention = ATTENTION.flatMap((bucket) => items.filter((item) => item.bucket === bucket));
   return {
+    countsLine: attention.length > 0 || fold.length === 0,
     counts: countParts.join(' · '),
     countParts,
-    attention: ATTENTION.flatMap((bucket) => items.filter((item) => item.bucket === bucket)),
+    attention,
     folded,
     foldWords: fold.length === 0 ? null : fold.join(' · '),
   };
