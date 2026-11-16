@@ -2,6 +2,10 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open, type FileHandle } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
+import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 704: the envelope's reader, run from its source
+import { envelopeSlices } from '@shared/engine/arrival';
+import { answerOutsideTranscript } from '@shared/engine/persons-message';
+import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 
 // At worst JSON escaping costs six bytes per UTF-16 code unit: a page is < 1 MiB,
@@ -44,14 +48,40 @@ const PAGE_CHARS = ${PAGE_CHARS};
 const FINGERPRINT_BYTES = ${FINGERPRINT_BYTES};
 const isMadeUpFinalAnswer = ${isMadeUpFinalAnswer}; // the to-human plugin's answer after a final message, which said nothing
 const fingerprint = ${fingerprint};
-// The text blocks a line holds, or null when it is not JSON.
+// Ticket 704 (ruling A): MAWS's answer envelopes inside a person's text, read as the window reads them, each function
+// from its own source (each uses its arguments alone), the block checked by the envelope's own checks.
+const askSteerOpening = ${askSteerOpening};
+const PASTED_BLOCK = ${PASTED_BLOCK};
+const answeredBlock = ${answeredBlock};
+const envelopeSlices = ${envelopeSlices};
+const answerOutsideTranscript = ${answerOutsideTranscript};
+// A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after
+// the person's words; read again until a reading takes nothing out, as the split does (an envelope's lines can stand
+// around another's). White space left beside an envelope is no words of the person's. Null when nothing is left.
+function searchableText(text) {
+  let own = text;
+  const answers = [];
+  for (;;) {
+    const { members, rest } = envelopeSlices(own, askSteerOpening, PASTED_BLOCK, answeredBlock);
+    if (members.length === 0) break;
+    for (const member of members) answers.push(answerOutsideTranscript(member.text));
+    own = rest;
+  }
+  if (answers.length === 0) return text;
+  const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');
+  return parts.length === 0 ? null : parts.join('\n');
+}
+// The text blocks a line holds, or null when it is not JSON. A person's row (a user row with no origin, or the person's:
+// the row's form of the split's gate) has its envelopes read out; a text left empty yields nothing.
 function blocksOf(line) {
   let row;
   try { row = JSON.parse(line.toString('utf8')); } catch { return null; }
   if (row && ['user', 'assistant'].includes(row.type) && row.isMeta !== true && !isMadeUpFinalAnswer(row)) {
     const content = row.message?.content;
-    return typeof content === 'string' ? [content] : Array.isArray(content)
+    const texts = typeof content === 'string' ? [content] : Array.isArray(content)
       ? content.filter((b) => b && b.type === 'text' && typeof b.text === 'string').map((b) => b.text) : [];
+    const persons = row.type === 'user' && (row.origin == null || typeof row.origin !== 'object' || row.origin.kind === 'human');
+    return persons ? texts.map(searchableText).filter((text) => text !== null) : texts;
   }
   return [];
 }
