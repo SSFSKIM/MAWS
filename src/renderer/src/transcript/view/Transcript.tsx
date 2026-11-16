@@ -628,9 +628,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const rows = useMemo(() => compactingRow(shown, compacting) as Row[], [shown, compacting]);
   // UX wave U3b (decision 12, Interfaces §C): which drawn answers carry Copy, Fork from here and the time, placed once per
   // change of the list and published to the rows through this mount's store; a rewound branch's rows are skipped, revealed
-  // or not (the branch panel's finding 1)
+  // or not (the branch panel's finding 1); in the to-human view, told the rows before its fold, so a closed stretch's head
+  // text carries its turn's folded answer (statement 13)
   const discarded = useTranscriptStore((state) => state.entries[storeKey]?.state.hidden?.turns ?? NO_TURNS);
-  const placement = useMemo(() => answerActionsOf(rows, discarded), [rows, discarded]);
+  const placement = useMemo(() => answerActionsOf(rows, discarded, mirrored ? queued : undefined), [rows, discarded, mirrored, queued]);
   const [answerActions] = useState(() => new AnswerActionsStore());
   useLayoutEffect(() => answerActions.publish(placement), [answerActions, placement]);
   const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);

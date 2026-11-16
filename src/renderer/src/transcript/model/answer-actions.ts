@@ -31,6 +31,11 @@ function opensOwnersTurn(row: Row): row is UserRow {
 const isAnswer = (row: Row): row is Extract<Row, { kind: 'assistant_text' }> & { turnId: TurnId } =>
   row.kind === 'assistant_text' && row.phase === 'answer' && !row.live && row.cut !== true && row.turnId !== null;
 
+// A closed stretch's head text in U2b's to-human view (the mirror's `reportOnly`), of a turn with an answer block among
+// the rows before the view's fold: the turn's answer may be folded under it whole (statement 13)
+const isAnswersHead = (row: Row, answered: ReadonlySet<TurnId>): row is Extract<Row, { kind: 'assistant_text' }> & { turnId: TurnId } =>
+  row.kind === 'assistant_text' && row.reportOnly === true && !row.live && row.cut !== true && row.turnId !== null && answered.has(row.turnId);
+
 const lastCompactions = new WeakMap<readonly Row[], number>();
 function lastCompaction(rows: readonly Row[]): number {
   let at = lastCompactions.get(rows);
@@ -66,10 +71,16 @@ export function aboveLastCompaction(rows: readonly Row[], index: number): boolea
  *
  * The branch panel's finding 1: the rows of `discarded` turns (a rewound branch, drawn muted while its rewind is
  * revealed) are read as if they were not in the list: they get no action row and are never a target.
+ *
+ * Statement 13: in U2b's to-human view a turn's answer blocks can be folded under a closed stretch whose head text is
+ * drawn; given the rows before the view's fold (`unfolded`), a closed head text of a turn that has an answer block there
+ * is placed as an answer block is. Without them no head text is.
  */
-export function answerActionsOf(allRows: readonly Row[], discarded: readonly TurnId[] = []): Map<RowId, AnswerAction> {
+export function answerActionsOf(allRows: readonly Row[], discarded: readonly TurnId[] = [], unfolded?: readonly Row[]): Map<RowId, AnswerAction> {
   const gone = new Set(discarded);
   const rows = gone.size === 0 ? allRows : allRows.filter((row) => row.turnId === null || !gone.has(row.turnId));
+  const answered = new Set<TurnId>();
+  for (const row of unfolded ?? []) if (isAnswer(row)) answered.add(row.turnId);
   const running = new Set<TurnId>();
   // a turn runs while its turn line says working or a row of it is live: on every projection, an answer of a turn not
   // ended gets none (the branch panel's finding 5). U2b's to-human view always draws the running turn's line, beside the
@@ -85,7 +96,7 @@ export function answerActionsOf(allRows: readonly Row[], discarded: readonly Tur
     if (opensOwnersTurn(row)) {
       if (answer >= 0) placed.push({ at: answer, next: i });
       answer = -1;
-    } else if (isAnswer(row)) answer = i;
+    } else if (isAnswer(row) || isAnswersHead(row, answered)) answer = i;
   });
   if (answer >= 0) placed.push({ at: answer, next: rows.length });
 
