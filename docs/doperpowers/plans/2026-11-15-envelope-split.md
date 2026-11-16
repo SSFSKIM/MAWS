@@ -23,7 +23,7 @@ How to see it working: the unit tests named under each milestone, which run the 
 - [x] (2026-11-15) The architect's rulings on the probes' findings recorded in place ("Engine facts", "Probes", decisions 6 and 7, M1's and M3's tests; Decision Log).
 - [x] (2026-11-15 UTC) M1 — One reading of a person's message, and the window that reads it once. Commits `6ad59e796`..`a29982f21`, fix `60af4bc4f`; task review clean.
 - [x] (2026-11-15 UTC) M2 — The producers: the live wire, the file, another machine's rows, a rewind's text. Commits `5cc75f108`..`215b7d2c4`; task review clean.
-- [ ] M3 — Outside the transcript: the search text, the resume preview, the title; the scene, the record, the last run.
+- [x] (2026-11-16 UTC) M3 — Outside the transcript: the search text, the resume preview, the title; the scene, the record, the last run. Commits `a0962e67a`..`0a4426537`, fix `1d26b91a7` (the scene asserts the bubble's text exactly); task review clean. The scene is written and typechecked, not run; the charter's line at X1 is the architect's.
 
 ## What this landing is built on
 
@@ -605,4 +605,14 @@ Found while reading the code for this document.
 
 ## Outcomes & Retrospective
 
-Pending — written at finish.
+**2026-11-16 (UTC), at the end of M3** (the plan executor; the branch's xhigh panel and class 1a follow and may refresh this).
+
+*What landed.* The split is one pure function, `splitPersonsMessage` (`src/shared/engine/persons-message.ts`), with one gate. The normaliser's emitter, the end of `recordToEvents` and the undone input call it, and so does the reducer once where a person's message enters a window (ruling B). U4b's four reader calls are gone: `derive.ts` and `user-text.ts` are master's again. A joined message is now the person's message followed, under the same uuid, by one event per envelope, of today's shape, on every route. The reader's slicing is one argument-pure function (`envelopeSlices`), and the built host's search-text worker runs it from its own source. A rewind's prefill and its boundary's tooltip, the search text, the resume preview, the title and Regenerate's description hold no envelope. The architect's added rule for the queue stack is built: a waiting message with an attachment is never the answer row. No wire file, minor, manifest, stored key or schema changed (wire tests 44/44 with `src/shared/ipc` untouched).
+
+*How it was shown.* Every recorded join ran through the real producers: 13 probe recordings and 10 of U4b's, the journals through the normaliser and the files through the chain follower and the reader of rows. The model drew build G's frozen events, the window and the desk drew the same rows, and the real worker read the recorded files. Each milestone ran red first; the failing case names are in the plan executor's report. The proof on the build VM at M3's head: `pnpm typecheck`, `pnpm build`, eslint over the landing's 33 changed files, the script tests (588/588), the desk's web app (typecheck, build, tests) and the whole unit suite once: 2649 files passed and 32 failed. Of the 32, 31 fail the same way at `ea51e3e8f` or pass alone. One, `src/mawsd/process-park-race.test.ts`, failed 5 of 7 runs at M3's head against 5 of 5 passes at the base and at M2's head. The measurements point to its 8 s discovery bound, which counts a spine load of 9 to 11 s on the VM at either head; M3 adds no module to that graph. That is not proven, and class 1a's `unit` job settles it.
+
+*Not verified here.* The scene (`e2e/composer.spec.ts`, "ticket 704, a joined answer") is written and typechecked but not run. Other runs not made here: the Mac's e2e groups, class 1a, and the whole suite under Node 22.
+
+*Against the purpose.* A person no longer sees `[MAWS ask` or the answer's JSON in a bubble, a title, a snippet, a preview, a prefilled box or a tooltip. That holds for any pairing of builds where the window is this build's. A window of build G or F on a host of this build draws the person's words and records the answers with no change to that build.
+
+*Lessons.* Recording the engine's file whole was what made the file route testable. It also exposed three facts the design had not foreseen: `mergedSendUuids`, a `last-prompt` row that does not follow every join, and a rewind's one-line row cut inside the envelope's opening sentence. Two of these changed code (`flatPersonsWords`' cut-head reading, and its fix at the bracket). Freezing build G's producers' output before any edit gave every later milestone an exact control.
