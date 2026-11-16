@@ -214,6 +214,23 @@ describe('a grant’s row', () => {
     expect(rowText(row!)).toBe(answerWords(ANSWER, read().questions));
   });
 
+  // board ticket 704 at the chain's merge: a waiting message is read as the split reads a person's message, so the grant
+  // that is the person's whole part is the row's grant, and the envelopes beside it are answers of their own
+  it('an answer, the grant and the answer again, as one text or as text blocks: the grant’s row, no answer, whichever wait it is in', () => {
+    const joined = `${ANSWER}\n${GRANT}\n${ANSWER}`;
+    const blocks = [{ type: 'text' as const, text: ANSWER }, { type: 'text' as const, text: GRANT }, { type: 'text' as const, text: ANSWER }];
+    const rows = stackRows(queue({ steers: [steer(U1, 1, joined)], entries: [entry('q-1', 2, { content: blocks }), entry('q-u', 3, { content: joined, uncertain: true })] }), NONE, read());
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, 'grant' in row ? row.grant : undefined, rowText(row)])).toEqual([
+      ['next', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['after', null, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+      ['uncertain', undefined, { kind: 'command', subject: 'make build' }, 'You approved make build'],
+    ]);
+    // an attachment beside them keeps the message the person's own (Decision Log 44), as beside the grant alone
+    const image = { type: 'image' as const, source: { type: 'base64' as const, media_type: 'image/png' as const, data: 'iVBORw0KGgo=' } };
+    const [row] = stackRows(queue({ entries: [entry('q-i', 4, { content: [...blocks, image] })] }), NONE, read());
+    expect(row).toMatchObject({ kind: 'after', answer: null, grant: null });
+  });
+
   it('↑ never takes a grant (an edited grant is no grant); Esc still sends it', () => {
     const rows = stackRows(queue({ steers: [steer(U1, 5)], entries: [entry('q-g', 9, { content: GRANT })] }), NONE, read());
     expect(newestToTake(rows)?.key).toBe(U1);

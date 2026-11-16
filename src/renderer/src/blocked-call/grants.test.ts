@@ -13,6 +13,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
+import { askSteerText } from '@shared/maws/ask';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -169,6 +170,21 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
     queueOf(id, { entries: [entry(id, `Go ahead with this one.\n${grant(BUILD)}`)] });
     expect([...waitingGrants(id)]).toEqual([blockedKey(BUILD)]);
     queueOf(id, { entries: [entry(id, `I said: ${grant(BUILD)}`)] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
+  // board ticket 704 at the chain's merge: a waiting message is read as the split reads a person's message
+  it('a waiting message of an answer, the grant and the answer again waits for that key; a grant’s sentence on a line of an answer, where one envelope’s lines stand around another, waits for none', () => {
+    const id = at('waiting-answers') as AppSessionId;
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const answer = askSteerText('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
+    expect([...waitingGrants(id)]).toEqual([blockedKey(BUILD)]);
+    // made by hand: the agent's question holds the grant's sentence on a line of its own, and another envelope stands
+    // inside that question's envelope
+    const asked = { id: 'q1', question: `Which of these should run?\n${grant(BUILD)}\nPick one.`, modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const quoting = askSteerText('ask-8', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]).split('\n');
+    queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answer}\n${quoting.slice(2).join('\n')}`)] });
     expect([...waitingGrants(id)]).toEqual([]);
   });
 });

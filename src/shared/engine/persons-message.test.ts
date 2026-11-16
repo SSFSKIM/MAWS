@@ -11,7 +11,7 @@ import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@sh
 import type { AskQuestion } from '@shared/maws/tools';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, readAnswerEnvelopes, readArrivals } from './arrival';
+import { consentMessage, envelopeSlices, ownLines, personsGrants, readAnswerEnvelopes, readArrivals } from './arrival';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -395,5 +395,54 @@ describe('answerEnvelopeOf: a content is an answer envelope only where the split
       });
     }
     expect(envelopes).toBeGreaterThan(contents.length / 3); // the corpus splits envelopes out, not only plain texts
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// U1c's grant readers at the chain's merge (the UX wave's U1c, "Approve and retry", met this landing at the merge of the
+// chain head): the grants in a person's message are read in the part the split leaves the person, so a grant is never
+// read on an envelope's line, and the envelopes beside it are the answers the split splits out. Made by hand (no
+// recording holds a grant joined with an envelope): the grant is the sentence U1c sends, the envelopes MAWS's own.
+
+describe('the grant readers read a person’s message as the split does', () => {
+  const GRANT = consentMessage('command', 'pnpm test');
+  const consent = { class: 'consent', kind: 'command', subject: 'pnpm test' };
+  const answerOf = (envelope: string) => {
+    const steer = parseAskSteer(envelope)!;
+    return { class: 'answer', tool: 'maws', call: steer.askId, summary: envelope, answers: steer.result.answers, dismissed: false };
+  };
+  const row = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000708', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000708' as MessageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+  const ownText = (text: string) => ownLines(text).map(({ line }) => line).join('\n');
+
+  it('an answer, the grant and an answer again: three parts, the grant the person’s and an answer each for the envelopes, read alike by the split, the grant readers and the arrivals', () => {
+    const text = joinedText(A1, GRANT, A1); // the tracker's A + G + A: the same envelope again
+    expect(splitPersonsMessage(message(text)).map((part) => part.content)).toEqual([GRANT, A1, A1]);
+    expect(personsParts(text)).toEqual({ own: GRANT, envelopes: [A1, A1] });
+    expect(ownText(text)).toBe(GRANT);
+    expect(personsGrants(text)).toEqual([consent]);
+    expect(readArrivals(row(text))).toEqual([answerOf(A1), answerOf(A1), consent]);
+  });
+
+  // a question of the agent's may hold any line, the grant's sentence among them: in its envelope that line is the
+  // envelope's, whatever surrounds it
+  const ASKED: AskQuestion = { id: 'q1', question: `Which of these should run?\n${GRANT}\nPick one.`, modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+  const QUOTING = askSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]);
+
+  it('a grant’s sentence on a line of an envelope is no grant, the envelope alone or joined with words', () => {
+    expect(QUOTING.split('\n')).toContain(GRANT);
+    for (const text of [QUOTING, joinedText('Keep these notes.', QUOTING)]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
+      expect(readArrivals(row(text)).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    }
+  });
+
+  it('made by hand: where that envelope’s lines stand around another whole envelope, the grant readers take both out as the split does, and read no grant', () => {
+    const lines = QUOTING.split('\n');
+    const text = `Keep these notes.\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
+    expect(personsParts(text)).toEqual({ own: 'Keep these notes.', envelopes: [A2, QUOTING] });
+    expect(ownText(text)).toBe('Keep these notes.');
+    expect(personsGrants(text)).toEqual([]);
+    expect(readArrivals(row(text))).toEqual([answerOf(A2), answerOf(QUOTING)]);
   });
 });

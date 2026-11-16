@@ -20,7 +20,7 @@ import { journalToEvents } from '../../transcript/dev/journal';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import type { Row } from '../../transcript/model/rows';
-import { answerWords, rowText, stackRows, type StackRow } from './stack';
+import { rowText, stackRows, type StackRow } from './stack';
 import { readOf } from './stack-acts';
 
 type UserRow = Extract<Row, { kind: 'user' }>;
@@ -34,8 +34,9 @@ const GRANT = consentMessage('command', MARKER);
 // an invented async ask's answer envelope, as MAWS writes it
 const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
 const ENVELOPE = askSteerText('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
-// A, a line break, G, a line break, A: the reader takes the whole text for one answer (`parseAskSteer` pairs the first
-// tag with the last result block, and G falls inside), while the text the transcript draws is G alone
+// A, a line break, G, a line break, A: three parts, as the split reads a person's message (board ticket 704, at the
+// chain's merge): the person's part G, and each envelope an answer of its own; so the transcript records the approval,
+// and every row of the stack reads the grant
 const SPANNING = `${ENVELOPE}\n${GRANT}\n${ENVELOPE}`;
 
 const uuid = (loadUxwaveJournal(RECORDING).find((row) => row.seq === WRITTEN)!.frame as { uuid: MessageUuid }).uuid;
@@ -77,29 +78,28 @@ describe('a handed row reads as a grant exactly where the transcript records one
     expect(rows.map((row) => [row.kind, row.key, grantOf(row), rowText(row)])).toEqual([['handed', uuid, { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
   });
 
-  it('A + G + A, handed: the transcript records no approval and the handed row is no grant, its text the one the transcript draws', () => {
+  it('A + G + A, handed: three parts, the transcript records the approval, and the handed row reads “You approved …” as the grant alone does', () => {
     const { consents, own, approvals } = transcriptOf(SPANNING, WAITING);
-    expect(consents, 'the reader: no consent').toEqual([]);
-    expect(approvals, 'the transcript: no approval row').toEqual([]);
-    expect(own.map((row) => [row.unread, row.text]), 'the bubble draws G alone, unread').toEqual([[true, GRANT]]);
+    expect(consents, 'the reader: the grant, on the person’s part').toEqual([{ class: 'consent', kind: 'command', subject: MARKER }]);
+    expect(own.map((row) => [row.unread, row.text, row.consent]), 'the person’s part is the grant, unread; the envelopes draw no bubble').toEqual([[true, GRANT, { kind: 'command', subject: MARKER }]]);
+    expect(approvals).toHaveLength(1);
     const rows = stackRows(queue(), new Set(), readOf(APP));
-    expect(rows.map((row) => [row.kind, row.key, grantOf(row), rowText(row)])).toEqual([['handed', uuid, null, own[0]!.text]]);
+    expect(rows.map((row) => [row.kind, row.key, grantOf(row), rowText(row)])).toEqual([['handed', uuid, { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
   });
 
-  it('A + G + A, queued at the next step: the queue’s steer is the row, an answer and no grant, as the transcript records no approval', () => {
+  it('A + G + A, queued at the next step: the queue’s steer is the row, read as the split reads it, the grant and no answer, as the transcript records the approval', () => {
     const { approvals } = transcriptOf(SPANNING, WAITING);
-    expect(approvals).toEqual([]);
+    expect(approvals).toHaveLength(1);
     const rows = stackRows(queue({ steers: [{ messageUuid: uuid, content: SPANNING, createdAt: '2026-11-15T10:00:00.000Z' }] }), new Set(), readOf(APP));
-    expect(rows.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['next', null, answerWords(SPANNING, readOf(APP).questions)]]);
-    expect(rowText(rows[0]!)).not.toMatch(/^You approved /);
+    expect(rows.map((row) => [row.kind, 'answer' in row ? row.answer : undefined, grantOf(row), rowText(row)])).toEqual([['next', null, { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
   });
 
-  it('A + G + A, waiting after the turn and on its way: no grant on either row, and once delivered the transcript records no approval', () => {
+  it('A + G + A, waiting after the turn and on its way: the grant on either row, and once delivered the transcript records the approval', () => {
     const rows = stackRows(queue({ entries: [entry(SPANNING), entry(SPANNING, { queueId: 'q-s', state: 'submitting', submittedAt: '2026-11-15T10:00:01.000Z' })] }), new Set(['q-s']), readOf(APP));
-    expect(rows.map((row) => [row.kind, grantOf(row)])).toEqual([['after', null], ['sending', null]]);
-    for (const row of rows) expect(rowText(row)).not.toMatch(/^You approved /);
+    expect(rows.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['after', { kind: 'command', subject: MARKER }, `You approved ${MARKER}`], ['sending', { kind: 'command', subject: MARKER }, `You approved ${MARKER}`]]);
     const { consents, approvals } = transcriptOf(SPANNING);
-    expect([consents, approvals]).toEqual([[], []]);
+    expect(consents).toEqual([{ class: 'consent', kind: 'command', subject: MARKER }]);
+    expect(approvals).toHaveLength(1);
   });
 
   it('two grant lines in one message, handed: the transcript draws an approval row for each, and the handed row is no single grant', () => {
