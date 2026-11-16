@@ -19,6 +19,7 @@ import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
+import { acceptedCosts, forgedInputs, type Content } from '../../../../../test/support/rule-r';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
@@ -516,19 +517,26 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   const typed = (write: Writer) => write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: GRANT }]);
   type Swaps = [string, string][];
   const swap = (text: string, swaps: Swaps) => swaps.reduce((acc, [from, to]) => acc.split(from).join(to), text);
+  // Rule R: the grant changed for the input under test, a string or text blocks: a content that is exactly the grant
+  // takes the blocks, and any other text (a queue operation's content) the blocks joined as the reader joins them
+  type Change = Swaps | Content;
+  const joinedText = (input: Content) => (typeof input === 'string' ? input : input.map((block) => block.text).join('\n'));
+  const changed = (content: string, change: Change): unknown => (isSwaps(change) ? swap(content, change) : typeof change !== 'string' && content === GRANT ? change : swap(content, [[GRANT, joinedText(change)]]));
+  const changedText = (content: string, change: Change): string => (isSwaps(change) ? swap(content, change) : swap(content, [[GRANT, joinedText(change)]]));
+  const isSwaps = (change: Change): change is Swaps => Array.isArray(change) && change.every((item) => Array.isArray(item));
   /** Live: the journal with every string content swapped (MAWS's writes and the engine's replays). */
-  const live = (name: string, swaps: Swaps): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
+  const live = (name: string, swaps: Change): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
     const message = (row.frame as { message?: { content?: unknown } }).message;
-    return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
+    return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: changed(message.content, swaps) } } } as JournalRow) : row;
   }));
   /** From the file: the transcript's records with every string content swapped (the user lines, the queue's and a queued_command's prompt). */
-  const fromFile = async (name: string, swaps: Swaps): Promise<SessionEvent[]> => {
+  const fromFile = async (name: string, swaps: Change): Promise<SessionEvent[]> => {
     const lines = readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').map((line) => {
       if (line.trim() === '') return line;
       const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown; attachment?: { prompt?: unknown } };
-      if (typeof record.message?.content === 'string') record.message.content = swap(record.message.content, swaps);
-      if (typeof record.content === 'string') record.content = swap(record.content, swaps);
-      if (typeof record.attachment?.prompt === 'string') record.attachment.prompt = swap(record.attachment.prompt, swaps); // a mid-turn message's queued_command
+      if (typeof record.message?.content === 'string') record.message.content = changed(record.message.content, swaps);
+      if (typeof record.content === 'string') record.content = changedText(record.content, swaps);
+      if (typeof record.attachment?.prompt === 'string') record.attachment.prompt = changed(record.attachment.prompt, swaps); // a mid-turn message's queued_command
       return JSON.stringify(record);
     });
     const events: SessionEvent[] = [];
@@ -550,7 +558,7 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const answers = [...new Set(events.flatMap((event) => (event.kind === 'user.message' && messageText(event.content).includes('[MAWS ask ') ? [said(readAnswerEnvelope(messageText(event.content)))] : [])))];
     return { consents, approvals, answers, readings: readings(state) };
   };
-  const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
+  const both = async (name: string, swaps: Change) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
 
   // an earlier build wrote the header on the envelope's line; this build's writes no header at all
@@ -626,6 +634,32 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
       }
     }
   });
+
+  // Rule R (the architect's ruling of 2026-11-16): inputs an earlier build's envelope lets a model forge, each as the one
+  // message the person sent in probe B's `u1c-b-1` (a grant at the next step: on the file a queued_command's prompt) and
+  // in `u1c-e-1` (a grant sent while idle: on the file the person's row): no consent, no approval row, and the blocked
+  // row keeps its button, live and from the file
+  for (const [name, content] of forgedInputs(GRANT)) {
+    it(`rule R, no grant on either route: ${name}`, async () => {
+      for (const recording of ['u1c-b-1', 'u1c-e-1']) {
+        for (const [route, { consents, approvals, readings: drawnReadings }] of await both(recording, content)) {
+          expect(consents, `${recording}, ${route}`).toEqual([]);
+          expect(approvals, `${recording}, ${route}`).toEqual([]);
+          expect(drawnReadings, `${recording}, ${route}`).toEqual(NONE);
+        }
+      }
+    });
+  }
+
+  for (const [name, content] of acceptedCosts(GRANT)) {
+    it(`rule R, no grant on either route, an accepted cost: ${name}`, async () => {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', content)) {
+        expect(consents, route).toEqual([]);
+        expect(approvals, route).toEqual([]);
+        expect(drawnReadings, route).toEqual(NONE);
+      }
+    });
+  }
 
   it('(d) two real grant lines joined: two grants, an approval row each, both blocked rows approved', async () => {
     for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-twoend-1', [])) {

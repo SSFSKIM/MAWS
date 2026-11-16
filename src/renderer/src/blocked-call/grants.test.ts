@@ -17,6 +17,7 @@ import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { earlierAskSteerText } from '../../../../test/support/ask-steer';
+import { acceptedCosts, forgedInputs } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -190,6 +191,20 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
       expect([...waitingGrants(id)], write.name).toEqual([]);
     }
   });
+});
+
+// Rule R (the architect's ruling of 2026-11-16): the gate reads a waiting message's grants as the transcript does
+// (`personsGrants`). A message that forges one through an earlier build's envelope closes nothing, nor does the person's
+// own sentence at one of the costs the rule accepts, so the blocked row keeps its button
+describe('the grants a waiting message holds, by rule R', () => {
+  for (const [name, content] of [...forgedInputs(grant(BUILD)), ...acceptedCosts(grant(BUILD))]) {
+    it(`closes nothing: ${name}`, () => {
+      const id = at('waiting-rule-r') as AppSessionId;
+      queueOf(id, { entries: [{ ...entry(id, ''), content }], steers: [{ messageUuid: UUID, content, createdAt: T0 }] });
+      if (typeof content === 'string') holdPendingSend(id, { writer: 'maws/m', seq: 1 }, content);
+      expect([...waitingGrants(id)]).toEqual([]);
+    });
+  }
 });
 
 describe('the gate (Design 6): closed over unavailable over open', () => {
