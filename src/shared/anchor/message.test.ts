@@ -566,7 +566,7 @@ describe('a quoted line (UX wave U5b)', () => {
 // written as before, to the byte.
 describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
   const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
-  const SHA256 = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f7081';
+  const SHA256 = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708';
   const onNew: Anchor = { kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', path: 'src/berth-csv.ts', line: 32, side: 'new', commit: SHA };
   const onOld: Anchor = { ...onNew, side: 'old' };
 
