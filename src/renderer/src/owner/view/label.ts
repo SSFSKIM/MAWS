@@ -77,15 +77,18 @@ export function keptIdsOf(row: Row, turn: TurnState | undefined): string[] {
   }
 }
 
-// A row's ids, read once for each row and turn: the rows of a settled turn keep their identity across derivations.
-const keptMemo = new WeakMap<Row, { turn: TurnState | undefined; ids: readonly string[] }>();
-function idsOf(row: Row, turns: Turns): readonly string[] {
+// A row's ids, with the key each is compared by, read once for each row and turn: the rows of a settled turn keep their
+// identity across derivations.
+interface Kept { turn: TurnState | undefined; ids: readonly string[]; keys: readonly string[] }
+const keptMemo = new WeakMap<Row, Kept>();
+function keptOf(row: Row, turns: Turns): Kept {
   const turn = row.turnId === null ? undefined : turns?.get(row.turnId);
   const known = keptMemo.get(row);
-  if (known !== undefined && known.turn === turn) return known.ids;
+  if (known !== undefined && known.turn === turn) return known;
   const ids = keptIdsOf(row, turn);
-  keptMemo.set(row, { turn, ids });
-  return ids;
+  const kept = { turn, ids, keys: ids.map(rowKey) };
+  keptMemo.set(row, kept);
+  return kept;
 }
 
 // A call as its turn's records hold it: its tool, its raw input and whether its result has come. Built once for each
@@ -128,13 +131,12 @@ function placesOf(rows: readonly Row[], turns: Turns): Places {
   let at = 0;
   for (const row of rows) {
     places.ofRow.set(row, at);
-    const ids = idsOf(row, turns);
-    for (const id of ids) {
-      const key = rowKey(id);
+    const { keys } = keptOf(row, turns);
+    for (const key of keys) {
       if (!places.ofId.has(key)) places.ofId.set(key, at);
       at += 1;
     }
-    if (ids.length === 0) at += 1;
+    if (keys.length === 0) at += 1;
   }
   places.size = at;
   placesMemo.set(rows, { turns, places });
@@ -158,7 +160,8 @@ function indexOf(places: Places, runs: readonly StoredRun[]): RunIndex {
     return first !== undefined && last !== undefined ? [{ run, first, last }] : [];
   });
   const cover: (StoredRun | undefined)[] = new Array(places.size);
-  const next = Int32Array.from({ length: places.size + 1 }, (_, i) => i);
+  const next = new Int32Array(places.size + 1);
+  for (let i = 0; i < next.length; i += 1) next[i] = i;
   const unpainted = (i: number): number => {
     let root = i;
     while (next[root] !== root) root = next[root]!;
@@ -279,6 +282,16 @@ export function lineOf(tool: string, input: unknown): string {
 // ---------------------------------------------------------------------------------------------------------------------
 // The label.
 
+// Whether a turn of the stretch holds a call with no result.
+function holdsOpenCall(stretch: Stretch, turns: Turns): boolean {
+  if (turns === undefined) return false;
+  for (const id of stretch.turns) {
+    const turn = turns.get(id);
+    if (turn !== undefined && callsOf(turn).open) return true;
+  }
+  return false;
+}
+
 /**
  * The live half of `labelFor` (folds.tsx 526: the run's line before its summary while the run is live). To MAWS a
  * stretch is live while one of its calls has no result, or while it is the rows' last stretch and the session's turn
@@ -289,12 +302,13 @@ export function lineOf(tool: string, input: unknown): string {
 export function liveLine(stretch: Stretch, covered: StoredRun | undefined, last: boolean, running: boolean, turns?: ReadonlyMap<TurnId, TurnState>): string | undefined {
   const lastRunning = last && running;
   // a settled stretch, the most of them, is told by its turns alone: none holds a call with no result
-  if (!lastRunning && ![...stretch.turns].some((id) => { const turn = turns?.get(id); return turn !== undefined && callsOf(turn).open; })) return undefined;
-  const kept: { id: string; call: CallRecord | undefined }[] = [];
+  if (!lastRunning && !holdsOpenCall(stretch, turns)) return undefined;
+  const kept: { key: string; call: CallRecord | undefined }[] = [];
   for (const row of stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]) {
     const turn = row.turnId === null ? undefined : turns?.get(row.turnId);
     const calls = turn === undefined ? undefined : callsOf(turn).records;
-    for (const id of idsOf(row, turns)) kept.push({ id, call: calls?.get(id) });
+    const { ids, keys } = keptOf(row, turns);
+    ids.forEach((id, i) => kept.push({ key: keys[i]!, call: calls?.get(id) }));
   }
   const live = lastRunning || kept.some(({ call }) => call !== undefined && !call.done);
   if (!live) return undefined;
@@ -302,7 +316,7 @@ export function liveLine(stretch: Stretch, covered: StoredRun | undefined, last:
   let from = 0;
   if (covered !== undefined) {
     const coveredKey = rowKey(covered.last);
-    const at = kept.findLastIndex(({ id }) => rowKey(id) === coveredKey);
+    const at = kept.findLastIndex(({ key }) => key === coveredKey);
     from = at < 0 ? kept.length : at + 1;
   }
   const newest = kept.slice(from).findLast(({ call }) => call !== undefined)?.call;
