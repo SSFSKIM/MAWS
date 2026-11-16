@@ -6,6 +6,7 @@
 // closed origin vocabulary on the wire (`human`); the normaliser marks its event `bash_echo` from the out row, and the
 // empty `result` that follows is the echo receipt. No output within 30 s posts a warning notice and writes no echo.
 import { randomUUID } from 'node:crypto';
+import { bashEcho } from '@shared/engine/host-prompts'; // UX wave U6e: the echo's one copy
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { StdinFrame } from '@shared/wire/frames';
@@ -124,7 +125,7 @@ export class BashMode {
     if (!this.deps.canWrite()) return;
     const frame: StdinFrame = {
       type: 'user', uuid: randomUUID(), shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' },
-      message: { role: 'user', content: `<bash-input>${entry.command}</bash-input>\n${stdout}` },
+      message: { role: 'user', content: bashEcho(entry.command, stdout) },
     };
     this.deps.write(frame).catch((error: unknown) => this.deps.log(`! echo for ${entry.uuid} not written: ${error instanceof Error ? error.message : String(error)}`));
   }
