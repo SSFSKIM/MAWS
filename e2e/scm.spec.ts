@@ -12,13 +12,18 @@
 // its four parts over the scratch, follows a commit and a push made in the checkout, and at 360 and 280 px holds the
 // frames' measured rulings (S4 to S7, S12, S13; Decision Log 30, 31 and 44), each by a measured rectangle, with a
 // measured word (a span that draws its text by `::before`) asserted by its rectangle at each width, and two states the
-// frames did not draw: a part whose first read is still out, and "Commits · latest on <a long branch>" at 280 px. *A
+// frames did not draw: a part whose first read is still out, and "Commits · latest on <a long branch>" at 280 px. Each
+// measured pass first requires the states it measures drawn (a pull request with four phrases and five check counts, a
+// commit 1,003 days old, gh's failure on a pass of its own for S7); the machine's label (S4) is measured where one is
+// drawn, on B's page in e2e/remote.spec.ts. *A
 // commit opens in Review* from its row. The pull request, untrusted and tokens scenes read the page; main still refuses
 // a stage in an untrusted checkout, since the services keep serving the ten `scm.*` commands for a window of an older
 // build.
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
+import { isolatedGitEnv } from '../test/support/git-env';
 import { menu, otherThemeColours } from './support/code-product';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { CHARTER } from './support/panel-support';
@@ -129,14 +134,20 @@ async function columnAt(p: Scm, width: 360 | 280): Promise<void> {
 // uncommitted entries, its upstream `origin/feature/page` at `main`'s commit ahead of the old `origin/main`, and two
 // commits not pushed, each one new note. A path-limited commit takes only its own path, so the staged file stays staged.
 const NOTES = ['Add the first note', 'Add the second note', 'Add the third note'];
-function noteCommit(scratch: ScmScratch, n: number): string {
+// `at`: the commit's author and committer date, for a commit made long ago (the age column's widest age, frames' S12).
+function noteCommit(scratch: ScmScratch, n: number, at?: Date): string {
   const path = `notes/note-${n + 1}.md`;
   mkdirSync(scratch.path('notes'), { recursive: true });
   writeFileSync(scratch.path(path), `# Note ${n + 1}\n\nAn invented note for the page.\n`);
   scratch.git('add', path);
-  scratch.git('commit', '--quiet', '--no-verify', '-m', NOTES[n]!, '--', path);
+  const args = ['commit', '--quiet', '--no-verify', '-m', NOTES[n]!, '--', path];
+  if (at === undefined) scratch.git(...args);
+  else execFileSync('git', args, { cwd: scratch.dir, env: { ...isolatedGitEnv(), GIT_AUTHOR_DATE: at.toISOString(), GIT_COMMITTER_DATE: at.toISOString() } });
   return scratch.git('rev-parse', 'HEAD');
 }
+// The first note's age: 1,003 days and two hours back, so it reads "1003d", five characters, the widest age drawn
+const OLD_AGE = '1003d';
+const OLD_DAYS = 1003;
 function featureBranch(scratch: ScmScratch): void {
   scratch.git('switch', '--quiet', '-c', 'upstream-change', 'origin/main');
   scratch.git('commit', '--quiet', '--no-verify', '--allow-empty', '-m', 'An upstream change');
@@ -145,9 +156,24 @@ function featureBranch(scratch: ScmScratch): void {
   scratch.git('branch', '--quiet', '-D', 'upstream-change');
   scratch.git('switch', '--quiet', '-c', 'feature/page');
   scratch.git('push', '--quiet', '-u', 'origin', 'feature/page');
-  noteCommit(scratch, 0);
+  noteCommit(scratch, 0, new Date(Date.now() - (OLD_DAYS * 24 + 2) * 3_600_000));
   noteCommit(scratch, 1);
 }
+
+// The pull request the page scene reads (frames' S5, S6): open on feature/page with a review decision and a merge state,
+// so its state line holds four phrases, and checks in all five of gh's buckets, so its counts line holds five counts;
+// at 280 px each line wraps, and the rulings hold where it breaks.
+const PAGE_PR = {
+  number: 7, url: 'https://github.com/o/r/pull/7', title: 'Page PR', state: 'OPEN', isDraft: false, reviewDecision: 'CHANGES_REQUESTED',
+  baseRefName: 'main', headRefName: 'feature/page', mergeStateStatus: 'BLOCKED',
+};
+const PAGE_PR_PHRASES = 'Open · into main · Changes requested · Merging is blocked';
+const pageCheck = (name: string, bucket: string, state: string) => ({ name, bucket, state, link: `https://github.com/o/r/actions/runs/1/job/${name}`, workflow: 'CI' });
+const PAGE_CHECKS = [
+  pageCheck('typecheck', 'pass', 'SUCCESS'), pageCheck('lint', 'pass', 'SUCCESS'), pageCheck('test', 'fail', 'FAILURE'),
+  pageCheck('e2e', 'cancel', 'CANCELLED'), pageCheck('docs', 'pending', 'IN_PROGRESS'), pageCheck('deploy', 'skipping', 'SKIPPED'),
+];
+const PAGE_CHECK_COUNTS = '2 passed · 1 failed · 1 cancelled · 1 pending · 1 skipped';
 
 // ---- the measured rulings (frames' S4 to S7, S12, S13), read off the page as drawn ------------------------------------------
 
@@ -163,10 +189,10 @@ interface Measures {
   where: { line: Box; branch: Sized; branchMin: number; measuredBranch: number; measuredBranchText: string; worktree: Sized | null; machine: Box | null; below: Box | null };
   uncommitted: { line: Box | null; counts: Sized | null; conflicts: (Sized & { rects: number }) | null };
   heading: { line: Box; since: (Sized & { fit: string; text: string }) | null; sinceMin: number; measuredSince: number; behind: (Sized & { rects: number }) | null; latest: (Sized & { text: string }) | null; review: boolean };
-  phrases: { text: string; rects: number }[];
-  checkCounts: { text: string; rects: number }[];
+  phrases: { text: string; rects: number; top: number }[];
+  checkCounts: { text: string; rects: number; top: number }[];
   messages: (Box & { full: number; client: number })[];
-  ages: { box: Box; textRight: number }[];
+  ages: { text: string; box: Box; textLeft: number; textRight: number; textWidth: number }[];
   fourDigits: number;
   controls: { name: string; height: number }[];
 }
@@ -193,7 +219,8 @@ function measure(p: Scm): Promise<Measures> {
     const ages = Array.from(root.querySelectorAll<HTMLElement>('[data-scm-age]')).map((age) => {
       const range = document.createRange();
       range.selectNodeContents(age);
-      return { box: box(age), textRight: range.getBoundingClientRect().right };
+      const text = range.getBoundingClientRect();
+      return { text: age.textContent ?? '', box: box(age), textLeft: text.left, textRight: text.right, textWidth: text.width };
     });
     // four digits in the age's own type: the column's least width (frames' S12)
     const firstAge = root.querySelector<HTMLElement>('[data-scm-age]');
@@ -238,8 +265,8 @@ function measure(p: Scm): Promise<Measures> {
         latest: latest === null ? null : { ...box(latest), full: latest.scrollWidth, text: latest.textContent ?? '' },
         review: Array.from(headingLine.querySelectorAll('button')).some((b) => (b.textContent ?? '').trim() === 'Review ›'),
       },
-      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length })),
-      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length })),
+      phrases: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-phrase]')).map((el) => ({ text: el.textContent ?? '', rects: el.getClientRects().length, top: Math.round(el.getBoundingClientRect().top) })),
+      checkCounts: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-check-count]')).map((el) => ({ text: (el.parentElement!.textContent ?? '').trim(), rects: el.parentElement!.getClientRects().length, top: Math.round(el.parentElement!.getBoundingClientRect().top) })),
       messages: Array.from(root.querySelectorAll<HTMLElement>('[data-scm-pr-line], [data-scm-failure]')).map((el) => ({ ...box(el), full: el.scrollWidth, client: el.clientWidth })),
       ages,
       fourDigits,
@@ -251,11 +278,32 @@ function measure(p: Scm): Promise<Measures> {
 const inside = (inner: Box, outer: Box) => inner.left >= outer.left - 1 && inner.right <= outer.right + 1;
 const drawnWhole = (el: Sized) => el.full <= el.right - el.left + 1; // as wide as its words: nothing of it cut
 
+// What a pass stages and so requires drawn before it measures it, so no ruling holds over a state that is absent: the
+// state line's phrases and the checks' counts (S5, S6), the git or GitHub CLI messages (S7), the widest age's words
+// (S12), and whether the state line and the counts line must break at this width. A pass that leaves a part out (the
+// "latest on" pass) names nothing for it, and those loops then read whatever is drawn.
+interface Staged {
+  phrases?: number;
+  checkCounts?: number;
+  messages?: number;
+  widestAge?: string;
+  wraps?: boolean;
+}
+
 // The frames' measured rulings at one width (Decision Log 30, 31 and 44), by rectangles; each holds whichever way the
 // line chose to give way. Answers what was read, for the report.
-async function expectMeasuredRulings(p: Scm, width: 360 | 280): Promise<string> {
+async function expectMeasuredRulings(p: Scm, width: 360 | 280, staged: Staged = {}): Promise<string> {
   const m = await measure(p);
   const at = `at ${width} px`;
+  // The staged states, present before anything of them is measured
+  if (staged.phrases !== undefined) expect(m.phrases.map((phrase) => phrase.text).length, `${at}: the state line's phrases drawn`).toBe(staged.phrases);
+  if (staged.checkCounts !== undefined) expect(m.checkCounts.length, `${at}: the checks' counts drawn`).toBe(staged.checkCounts);
+  if (staged.messages !== undefined) expect(m.messages.length, `${at}: the messages drawn`).toBe(staged.messages);
+  if (staged.widestAge !== undefined) expect(m.ages.map((age) => age.text), `${at}: the widest age drawn`).toContain(staged.widestAge);
+  if (staged.wraps) {
+    expect(new Set(m.phrases.map((phrase) => phrase.top)).size, `${at}: the state line breaks (between its phrases)`).toBeGreaterThan(1);
+    expect(new Set(m.checkCounts.map((count) => count.top)).size, `${at}: the counts line breaks (between its counts)`).toBeGreaterThan(1);
+  }
   // Decision Log 44: a measured word, drawn by its ::before, is as wide as the words it measures: the Where line's
   // branch word against the branch drawn in full (the drawn span's scroll width), and "since <base>" where it is whole
   expect(m.where.measuredBranch, `${at}: the measured branch word is laid out`).toBeGreaterThan(0);
@@ -295,11 +343,22 @@ async function expectMeasuredRulings(p: Scm, width: 360 | 280): Promise<string> 
     expect(message.full, `${at}: a message wraps inside its box`).toBeLessThanOrEqual(message.client + 1);
     expect(inside(message, m.page), `${at}: a message inside the page`).toBe(true);
   }
-  // S12: the age column as wide as the widest age drawn, at least four characters, right-aligned
+  // S12: the age column as wide as the widest age drawn, at least four characters, right-aligned. Each age's own words
+  // (a Range over its text) stand inside the column's rectangle, so a column narrower than the widest age fails here
+  // (its overflow would leave by the left edge); and the column is no wider than the widest words or four characters
+  // need, within half a character, so a column fixed wider fails too
   if (m.ages.length > 0) {
     expect(new Set(m.ages.map((age) => Math.round(age.box.right - age.box.left))).size, `${at}: one width for every age`).toBe(1);
-    expect(m.ages[0]!.box.right - m.ages[0]!.box.left, `${at}: the age column fits four characters`).toBeGreaterThanOrEqual(m.fourDigits - 1);
-    for (const age of m.ages) expect(Math.abs(age.textRight - age.box.right), `${at}: an age right-aligned`).toBeLessThanOrEqual(1);
+    const column = m.ages[0]!.box.right - m.ages[0]!.box.left;
+    const widest = Math.max(...m.ages.map((age) => age.textWidth));
+    const char = m.fourDigits / 4;
+    for (const age of m.ages) {
+      expect(age.textLeft, `${at}: the age "${age.text}" inside its column on the left`).toBeGreaterThanOrEqual(age.box.left - 0.5);
+      expect(age.textRight, `${at}: the age "${age.text}" inside its column on the right`).toBeLessThanOrEqual(age.box.right + 0.5);
+      expect(Math.abs(age.textRight - age.box.right), `${at}: the age "${age.text}" right-aligned`).toBeLessThanOrEqual(1);
+    }
+    expect(column, `${at}: the age column at least four characters`).toBeGreaterThanOrEqual(m.fourDigits - 0.5);
+    expect(column - Math.max(widest, m.fourDigits), `${at}: the age column as wide as the widest age (${Math.round(widest)} px) or four characters, no wider`).toBeLessThanOrEqual(char / 2);
   }
   // S13: every control's hit area at least 24 px tall
   for (const control of m.controls) expect(control.height, `${at}: "${control.name}" is at least 24 px tall`).toBeGreaterThanOrEqual(23.5);
@@ -315,8 +374,11 @@ test.describe('source control over a scratch repository', () => {
       {
         setup: (scratch) => {
           featureBranch(scratch);
-          // gh's answer for a message that must break inside its box (frames' S7): a long word with no break in it
-          scratch.gh('view.fail', `GraphQL: Could not resolve to a PullRequest for the branch, in a repository named ${'x'.repeat(120)} (pullRequest)`);
+          // the branch's pull request, open, with checks in every bucket (frames' S5, S6); gh exits 1 when one failed
+          scratch.gh('view.none', null);
+          scratch.gh('view.json', JSON.stringify(PAGE_PR));
+          scratch.gh('checks.json', JSON.stringify(PAGE_CHECKS));
+          scratch.gh('checks.exit', '1');
           scratch.holdReads();
         },
       },
@@ -351,8 +413,13 @@ test.describe('source control over a scratch repository', () => {
         for (const [i, subject] of [NOTES[1]!, NOTES[0]!, 'ahead'].entries()) await expect(commitRows(p).nth(i)).toContainText(subject);
         await expect.poll(() => words(group(p, 'not-pushed'))).toBe('Not pushed 2');
         await expect.poll(() => words(group(p, 'pushed'))).toBe('Pushed to origin/feature/page 1');
-        // Pull request: gh's failure, said in the card's words
-        await expect(part(p, 'pr').locator('[data-scm-pr-line]')).toContainText('PR state unavailable · GraphQL: Could not resolve');
+        // The first note was made 1,003 days ago: its age is five characters, the widest the column draws (frames' S12)
+        await expect(commitRows(p).nth(1).locator('[data-scm-age]')).toHaveText(OLD_AGE);
+        // Pull request: #7, its four phrases and its five counts
+        const pr = part(p, 'pr');
+        await expect(pr.locator('[data-scm-pr-number]')).toHaveText('#7', { timeout: 20_000 });
+        await expect.poll(() => words(pr.locator('[data-scm-pr-state]'))).toBe(PAGE_PR_PHRASES);
+        await expect.poll(() => words(pr.locator('[data-scm-checks]'))).toBe(`Checks ${PAGE_CHECK_COUNTS}`);
 
         // A commit made in the checkout appears first, without a reload; a push moves the branch's commits under
         // "Pushed to …" (one group when the other is empty)
@@ -369,13 +436,25 @@ test.describe('source control over a scratch repository', () => {
         scratch.conflict('conflicted.txt');
         await expect(part(p, 'uncommitted').locator('[data-scm-conflicts]')).toHaveText('· 1 conflict', { timeout: 20_000 });
 
-        // The frames' measured rulings, at 360 and at 280 px
+        // The frames' measured rulings, at 360 and at 280 px, over the staged pull request (S5, S6), the old commit's age
+        // (S12) and no message; at 280 px the state line and the counts line each break
         for (const width of [360, 280] as const) {
           await columnAt(p, width);
           await expect(commitRows(p).first()).toBeVisible();
-          said.push(await expectMeasuredRulings(p, width));
+          said.push(await expectMeasuredRulings(p, width, { phrases: 4, checkCounts: 5, messages: 0, widestAge: OLD_AGE, wraps: width === 280 }));
           await shot(surface(p.page, 'source-control'), `scm-page-${width}.png`);
         }
+
+        // S7 on its own pass: gh's message, a long word with no break in it, breaks inside its box at 280 and at 360 px
+        scratch.gh('view.fail', `GraphQL: Could not resolve to a PullRequest for the branch, in a repository named ${'x'.repeat(120)} (pullRequest)`);
+        await pr.getByRole('button', { name: 'Refresh PR state' }).click();
+        await expect(pr.locator('[data-scm-pr-line]')).toContainText('PR state unavailable · GraphQL: Could not resolve', { timeout: 20_000 });
+        for (const width of [280, 360] as const) {
+          await columnAt(p, width);
+          said.push(await expectMeasuredRulings(p, width, { phrases: 0, checkCounts: 0, messages: 1 }));
+          await shot(surface(p.page, 'source-control'), `scm-page-${width}-message.png`);
+        }
+        await columnAt(p, 280);
 
         // "Commits · latest on <a long branch>" at 280 px (frames' S8): a branch that shares no commit with the default
         // branch has no base. The heading names the branch, shortened at its end, inside the heading, with no "Review ›";

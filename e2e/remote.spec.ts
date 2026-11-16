@@ -814,6 +814,56 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(uncommittedCount, 'and in B’s status').toHaveText('3', { timeout: 60_000 });
     });
 
+    // UX wave U5b-2 (frames' S4; Decision Log 30, 31 and 44): B's label on the page's Where line, the one place a
+    // machine's label is drawn (this Mac's page draws none). At 360 and at 280 px it is required drawn, on the first line
+    // or moved whole to the second, then measured: one unbroken rectangle inside the Where line, its words not cut at
+    // the line's edge, and on the first line as wide as its measured word (a span that draws `· B` by `::before`).
+    await test.step('UX wave U5b-2: B’s label on the Where line, measured at 360 and 280 px (frames’ S4)', async () => {
+      const divider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+      const columnAt = async (width: number) => {
+        const now = Number(await divider.getAttribute('aria-valuenow'));
+        const grip = (await divider.boundingBox())!;
+        const [x, y] = [grip.x + grip.width / 2, grip.y + grip.height / 2];
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x - (width - now), y, { steps: 8 });
+        await page.mouse.up();
+        await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow')), `the column at ${width} px`).toBe(width);
+      };
+      const before = Number(await divider.getAttribute('aria-valuenow'));
+      const whereLine = scm.locator('[data-scm-where]');
+      const label = whereLine.locator('[data-scm-where-machine], [data-scm-where-below]');
+      const measured: string[] = [];
+      for (const width of [360, 280]) {
+        await columnAt(width);
+        await expect(label, `${width} px: B's label drawn, once`).toHaveCount(1);
+        await expect(label).toHaveText(/^(· )?B$/);
+        const m = await whereLine.evaluate((line) => {
+          const box = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width });
+          const el = line.querySelector<HTMLElement>('[data-scm-where-machine], [data-scm-where-below]')!;
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return {
+            below: el.hasAttribute('data-scm-where-below'),
+            line: box(line.getBoundingClientRect()),
+            label: box(el.getBoundingClientRect()),
+            words: box(range.getBoundingClientRect()),
+            rects: el.getClientRects().length,
+            measuredWord: line.querySelector('[data-scm-measure="machine"]')?.getBoundingClientRect().width ?? 0,
+          };
+        });
+        const inLine = (b: { left: number; right: number; top: number; bottom: number }) => b.left >= m.line.left - 0.5 && b.right <= m.line.right + 0.5 && b.top >= m.line.top - 0.5 && b.bottom <= m.line.bottom + 0.5;
+        expect(m.rects, `${width} px: the label unbroken, one rectangle`).toBe(1);
+        expect(inLine(m.label), `${width} px: the label inside the Where line`).toBe(true);
+        expect(inLine(m.words), `${width} px: the label's words not cut at the line's edge`).toBe(true);
+        expect(m.measuredWord, `${width} px: the measured word laid out`).toBeGreaterThan(0);
+        if (!m.below) expect(Math.abs(m.measuredWord - m.label.width), `${width} px: the label as wide as its measured word`).toBeLessThanOrEqual(1);
+        measured.push(`${width} px: ${m.below ? 'second line' : 'first line'}, ${Math.round(m.words.width)} px, measured word ${Math.round(m.measuredWord)} px`);
+      }
+      test.info().annotations.push({ type: 'measured (S4, B’s label)', description: measured.join('; ') });
+      await columnAt(before); // the column as the steps after this one found it
+    });
+
     await test.step('UX wave U5b-2: a commit made on B is first under Not pushed on the page, and opens in Review read on B', async () => {
       // the commit is made on B by git itself, as the agent would make it: the window commits nothing
       git(checkout, 'add', NOTES);
