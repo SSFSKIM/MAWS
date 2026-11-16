@@ -11,7 +11,7 @@ import { assistantDrawingKey, useAssistantDrawings } from './assistant-drawings'
 import { ipc } from '../ipc/client';
 import { useSessions } from '../stores/sessions';
 import { useTranscriptStore } from '../stores/transcript';
-import { forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
+import { forgetRenderSiteRefusal, forgetSession, hookKey, invalidateSession, retainSite, setSiteProps, siteKey, useSurfaceAnswers, type SiteAnswer } from './registry';
 
 // Attached and live: the only state in which a site asks the engine.
 export function useSurfaceAttached(appSessionId: AppSessionId | null): boolean {
@@ -78,7 +78,13 @@ export function connectEngineSurface(client: MawsBridge = ipc): () => void {
       observed.set(id, status.pluginsObservedAt);
       if (before !== undefined && before !== status.pluginsObservedAt) invalidateSession(id);
     }
-    for (const id of observed.keys()) if (!engine.has(id)) observed.delete(id);
+    for (const id of observed.keys()) {
+      if (engine.has(id)) continue;
+      // UX wave U2b (panel finding 2): a status gone from the store is a departed engine host's (`engine.hostState`
+      // leaving ready, ipc/events.ts), which sends no `session.status` of the session's: its refusal goes with it
+      observed.delete(id);
+      forgetRenderSiteRefusal(id);
+    }
   };
   look(useSessions.getState().engine);
   const offSessions = useSessions.subscribe((s, prev) => { if (s.engine !== prev.engine) look(s.engine); });

@@ -168,6 +168,12 @@ export function forgetSession(appSessionId: AppSessionId): void {
   }));
 }
 
+// UX wave U2b (panel finding 2): the session's surface went without a word of its own (its engine host left ready, which
+// takes its status along): its host's `unknown_command` was that host's, and a later attach may be to another.
+export function forgetRenderSiteRefusal(appSessionId: AppSessionId): void {
+  renderSiteUnknown.delete(appSessionId);
+}
+
 // Tests.
 export function resetSurfaceRegistry(): void {
   entries.clear();
