@@ -83,11 +83,19 @@ test('a direct channel draws its transcript; a response streams per block, settl
   expect(await occurrences(depth, ANSWER)).toBe(1);
 });
 
-/** Plays into the final answer until `prefix` of it is drawn as streaming text. */
+/**
+ * Plays into the final answer until `prefix` of it is drawn as streaming text. The row read is the answer's own, by the
+ * id its first chunk gives it: an earlier block's text can hold the same words, and the last streaming row drawn is that
+ * earlier block for as long as the page is still drawing what was played before the answer.
+ */
 async function midAnswer(player: DepthPlayer, depth: Locator, prefix: string): Promise<void> {
   player.advanceTo((item) => item.kind === 'chunk' && item.body.chunk.kind === 'text' && String(item.body.chunk.text).startsWith('<message>'));
+  const first = player.script[player.playhead];
+  if (first?.kind !== 'chunk' || first.body.chunk.kind !== 'text') throw new Error('the script holds no final answer');
+  const answer = depth.locator(`[data-row-id="desk-stream:${first.body.turnId}:${first.body.agentId ?? 'main'}:${first.body.step}:${first.body.chunk.index}"]`);
   player.advance(1);
-  while (!(await streamingRows(depth).last().textContent())?.includes(prefix)) {
+  await expect(answer).toHaveCount(1);
+  while (!(await answer.textContent())?.includes(prefix)) {
     player.advance(1);
     await new Promise((resolve) => setTimeout(resolve, 20));
   }
