@@ -1576,7 +1576,7 @@ describe('files admission of named files', () => {
       const open = vi.spyOn(fs.promises, 'open');
       points['before-open'] = () => swapToLink(out('notes.txt'), out('unnamed.txt'));
       points['after-open'] = () => restore(out('notes.txt'));
-      await expect(service({ named: async () => true, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true, raw: true })).rejects.toThrow(OUT);
+      await expect(service({ named: async () => 'counted' as const, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true, raw: true })).rejects.toThrow(OUT);
       expect(points['after-open']).toBeDefined(); // no descriptor was opened
       await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
       restore(out('notes.txt'));
