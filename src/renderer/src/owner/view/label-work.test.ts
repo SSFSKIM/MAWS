@@ -62,3 +62,48 @@ describe('the labels’ work on a change of the rows', () => {
     expect(labelWork()).toEqual(before);
   });
 });
+
+// Panel finding 4: a text row's kept id is its ask's (`assistantInput`), which reads the turn's live blocks. The turn's
+// blocks are indexed once for the turn, not walked again for each text row: the visits to the turn's live blocks stay
+// within one pass of them however many text rows the turn holds. Counted on the turn's own map, never timed.
+describe('the text rows’ kept ids in a long turn', () => {
+  // A map whose every iteration counts the entries it hands out.
+  function counting<K, V>(map: Map<K, V>): { map: Map<K, V>; visits: () => number } {
+    let visits = 0;
+    const counted = new Map(map);
+    const each = <T>(source: Iterable<T>) => (function* () { for (const item of source) { visits += 1; yield item; } })();
+    Object.defineProperty(counted, 'values', { value: () => each(Map.prototype.values.call(counted)) });
+    Object.defineProperty(counted, 'keys', { value: () => each(Map.prototype.keys.call(counted)) });
+    Object.defineProperty(counted, 'entries', { value: () => each(Map.prototype.entries.call(counted)) });
+    Object.defineProperty(counted, Symbol.iterator, { value: () => each(Map.prototype.entries.call(counted)) });
+    Object.defineProperty(counted, 'forEach', { value: (fn: (value: V, key: K, m: Map<K, V>) => void) => Map.prototype.forEach.call(counted, (value: V, key: K) => { visits += 1; fn(value, key, counted); }) });
+    return { map: counted, visits: () => visits };
+  }
+
+  function longTurn(steps: number) {
+    const b = builder();
+    b.turn('u1', 'Tidy the notes');
+    for (let n = 1; n <= steps; n += 1) {
+      b.toolUse(`t${n}`, 'Bash', { command: `ls part${n}`, description: `List part ${n}` });
+      b.result(`t${n}`, 'a.md', { structured: BASH_RESULT('a.md') });
+      b.text(`m${n}`, 0, `Step ${n} is done.`);
+    }
+    b.end(['u1']);
+    const state = lane(applyEvents(createState(null, null), b.events));
+    return { state, rows: rowsOf(state) };
+  }
+
+  for (const steps of [50, 100, 200]) {
+    it(`${steps} text rows: the labels visit the turn’s live blocks once each, not once for each row`, () => {
+      const { state, rows } = longTurn(steps);
+      const texts = rows.filter((row) => row.kind === 'assistant_text').length;
+      expect(texts).toBeGreaterThanOrEqual(steps);
+      const [turnId, turn] = [...state.turns].at(-1)!;
+      const live = counting(turn.live);
+      const turns = new Map(state.turns).set(turnId, { ...turn, live: live.map });
+      const lines = mirrorRows(rows, {}, liveMarkedRowIds(state), labelsOf(rows, { stored: [], running: false, turns })).filter((row) => row.kind === 'record_fold');
+      expect(lines.length).toBeGreaterThan(0);
+      expect(live.visits()).toBeLessThanOrEqual(turn.live.size);
+    });
+  }
+});
