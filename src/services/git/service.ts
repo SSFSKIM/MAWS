@@ -145,13 +145,14 @@ export class GitService {
   // combined diff), a root commit with every line added; `onHead` is whether HEAD holds it. `patch: false` reads no diff.
   async commitDiff({ directory, commit, path, context, patch = true }: GitCommitDiffInput): Promise<GitCommitDiff> {
     requireAbsolute(directory);
-    const [read, onHead] = await Promise.all([this.commitOf(directory, commit), this.holdsCommit(directory, commit)]);
-    if (!patch) return { commit: read, onHead, patch: '', files: [] };
+    const read = await this.commitOf(directory, commit); // first: a hash that names no commit is refused as that
+    if (!patch) return { commit: read, onHead: await this.holdsCommit(directory, commit), patch: '', files: [] };
     // a root commit has no parent to diff against; `log --root` shows it as created, which needs no empty tree's id
     // (that id differs between a SHA-1 and a SHA-256 repository)
-    const diff = read.parents.length > 0
-      ? await this.diffOf(directory, [read.parents[0], commit], path, context, true)
-      : await this.rootDiff(directory, commit, path, context);
+    const [onHead, diff] = await Promise.all([
+      this.holdsCommit(directory, commit),
+      read.parents.length > 0 ? this.diffOf(directory, [read.parents[0], commit], path, context, true) : this.rootDiff(directory, commit, path, context),
+    ]);
     return { commit: read, onHead, ...diff };
   }
 
