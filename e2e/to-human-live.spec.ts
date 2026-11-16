@@ -506,7 +506,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       messages = messageTexts(id);
       await drawnOnce(page, messages);
       artifactId = /maws-artifact:([A-Za-z0-9_-]+)/.exec(messages.join('\n'))?.[1] ?? null;
-      labels = await settledLines(page, 'mod', (lines) => summarised(() => page, id)(lines) && lines.length >= 2, 'two closed lines, each reading a summary');
+      labels = await settledLines(page, 'mod', async (lines) => lines.length >= 2 && (await summarised(() => page, id)(lines)), 'two closed lines, each reading a summary');
       line(`turn 2: the mod's lines, settled ${JSON.stringify(labels)}; ${messages.length} message(s), each drawn once; artifact_create ${calls(id, 'mcp__maws__artifact_create').length} call(s), mentioned as ${artifactId ?? 'NOTHING'}`);
       expect(artifactId, 'the final message mentions the artifact it made').not.toBeNull();
     });
