@@ -16,6 +16,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 - [x] (2026-11-15) The fullest cut applied to a scratch branch at the pin; before and after pictures of the real app; the owner's round-one calls (47 screens, 45 items brought back).
 - [x] (2026-11-15) The scratch branch revised to those calls; a second set of pictures for the states round one never reached.
 - [x] (2026-11-16) The owner's round-two calls (68 screens, 18 items brought back, nothing further cut); the decisions in `2026-11-16-word-cut/items.json`.
+- [x] (2026-11-16) The adversarial review of this document; its eight findings resolved in the text and in six rows (Decision Log).
 - [x] (2026-11-16) This document and its tables.
 - [ ] The UX wave lands (board #573).
 - [x] (2026-11-16) Board #720 registered, blocked by #573.
@@ -27,7 +28,7 @@ How to see it working: open the build beside today's build on the same fixtures 
 
 The work closes when all of these hold on one build.
 
-1. **The scenes the owner ruled on read as ruled.** On the fixtures the pictures used (a tool-heavy finished session, a session with two running agents and a background shell, the approval and question cards, Settings, Customize, the Artifacts library, an opened document):
+1. **The scenes the owner ruled on read as ruled.** On the scenes of `2026-11-16-word-cut/scenes.md` (among them `shell-tools`, a tool-heavy finished session; `r2-run-transcript`, two running agents and a background shell; `session-approval` and `session-question`; the `settings-*`, `customize-*` and `artifacts-*` scenes; `artifact-document`), as M0 carried them onto master:
    - a finished turn's line reads its duration and what it did, "3s · Ran an agent", with no "Worked for"; a stopped or failed turn keeps its word;
    - a running agent's line in the conversation is a spinner and the description its parent gave when it started the agent, and nothing else at rest;
    - the Agents card reads "Agents" and a bare count, and a running agent's row keeps its second line ("Working", or what it is doing);
@@ -37,8 +38,8 @@ The work closes when all of these hold on one build.
    - the document editor's header ends with "All changes saved" after a save;
    - the Projects page has its title, each project's folder path under its name and a "Hide from sidebar" button, and has no sentence at its top.
 2. **Every changed surface has a picture pair the owner has called.** For each surface a milestone changes, a before and an after picture of the real app on the same fixture exist, and the owner has either called the after good or named what comes back, and that is built. This binds hardest for the items whose basis is `pattern` (see "How firm each decision is"): the owner has never seen them, and in the two rounds the owner brought back about one in four, then one in six, of what was shown.
-3. **Every `stays` item reads as today.** The 304 items the tables mark `stays` are unchanged, the consent and safety texts among them.
-4. **Nothing is reachable by the pointer alone.** Whatever leaves the resting surface for a pointed row also shows on keyboard focus, and is in the row's accessible description at all times. Every control whose word became a glyph keeps the word as its accessible name and as its tooltip.
+3. **What was to stay, stayed.** Every `stays` row that M0 found still present on master reads as it did on master before this work; M0's record says which those are. A `stays` text the UX wave itself rewrote or removed is the wave's, and is not put back. A consent, permission or destructive-step text the wave rewrote is still protected: it does not become a candidate.
+4. **Nothing is reachable by the pointer alone.** Whatever leaves the resting surface for a pointed row also shows on keyboard focus, and is in the row's accessible description at all times. Every control whose word became a glyph keeps the word as its accessible name and as its tooltip. The tests include the cases a plain row does not cover: the reason on a greyed control, a read-only field, and a native select's options, each revealed with the keyboard alone.
 5. **Nothing is blank that used to say something.** An empty list says it is empty; an empty page or panel also says what to do; a wait of more than half a second shows a spinner.
 6. **Nothing gated got worse.** The build passes class 1a through `scripts/ci-gate.sh` and the Electron e2e groups on a Mac, with every test and scene that asserted on a cut text changed to assert on what the surface now shows (or on its accessible name), not deleted.
 
@@ -66,9 +67,11 @@ These five rules are the owner's calls generalised. They decide every item the o
 2. **Keep what orients.** Which machine, branch, model and effort, account and project; a message's time and how long a turn took; a row's age and who did what to it; counts of what waits, works, is connected or is loaded; and a status that confirms something that could have failed (Connected, All changes saved). A unit stays with its number ("1,403 tokens", "autocompact at 167,000"). *From:* every one of these was cut on the scratch branch and brought back by the owner.
 3. **Keep the structure and the ways in.** Section and group headings, the heading of a popover, navigation rows and links, view switches, the strip for making something new, and buttons that name where they lead. A named way in is never replaced by "press this other thing". Nothing is left blank: an empty area says it is empty, an empty page or panel also says what to do, and a wait shows a spinner, because a blank reads as "not loaded" (the owner's reason for keeping "Nothing running"). *From:* the Projects row and the PROJECTS heading in the sidebar, "Needs you", "Context window", "Files" and "Session info" on the session card.
 4. **Shorten in plain words, never invented ones.** The short form must mean the same out of context ("Untracked", not "new"; "Zoom to board", not "Zoom to"). A known term stays beside its plain name ("Connectors" with "MCP servers"). A glyph replaces a word only where nobody can misread it: editor toolbar icons, a switch for a setting, ↑1 for commits ahead, a check. A glyph never stands for a number or a badge, and never replaces the action word of a control: Dismiss, Mark viewed, Remove, Export, Hide from sidebar and the message box's key hint all stay words, and a worded button does not become a switch. *From:* the owner's reversals of "new", "In use", the dot badges, and each of those buttons.
-5. **What waits for the pointer appears where you point.** A row's description shows in the row itself, at once, not in the system's delayed tooltip, and equally on keyboard focus. The facts people use to tell rows apart stay on the row at rest (a project's folder path, a connector's scope and path, an artifact's edit line). A fold keeps its count and its kinds ("Working record · 1 tool call · 1 message", a caption's "+6") and the names that matter (the skill or connector a turn used). An error keeps its way out (the failed page's tips), and a state the person must act on keeps its reason (why the queue paused). *From:* the plugin rows, the Projects page, the caption rule the owner stated twice, and round two's bring-backs.
+5. **What waits for the pointer appears where you point.** A row's description or helper sentence shows in the row itself, after a short delay on pointing and at once on keyboard focus, never in the system's tooltip. (A secondary fact about one word or glyph, such as an identifier, a full path or a shortcut, may be that word's tooltip, provided the word takes keyboard focus.) The facts people use to tell rows apart stay on the row at rest (a project's folder path, a connector's scope and path, an artifact's edit line). A fold keeps its count and its kinds ("Working record · 1 tool call · 1 message", a caption's "+6") and the names that matter (the skill or connector a turn used). An error keeps its way out (the failed page's tips), and a state the person must act on keeps its reason (why the queue paused). *From:* the plugin rows, the Projects page, the caption rule the owner stated twice, and round two's bring-backs.
 
 Where two rules meet, 2 and 3 win over 1: a text that orients or is a way in stays even if it also explains.
+
+**Which text wins when two disagree.** A `seen`, `brought back` or `ruled` row wins over a rule: the owner looked at it. Three such rows are exceptions a builder would otherwise "correct", and they stand as the owner saw them: the question card shows its position among several questions as dots (C103), though rule 4 bars a dot for a number; the design system page's three header actions are icons (G558), though two of the icons are not conventional; the Settings index has no group headings, only a gap between the two runs of names (G3), though rule 3 keeps headings. A rule wins over a `pattern` row: such a row that breaks a rule is a defect in the tables, to be corrected in `items.json` with a Decision Log line (the review of this document found two, T205 and G615). This document's "What the cut builds" wins over any row's description of how a note or a line is revealed.
 
 ### Rulings on particular surfaces
 
@@ -79,15 +82,15 @@ The owner's own additions and the cases where the pattern alone would have gone 
 | Turn line | The duration alone and what the turn did: "3s · Ran an agent". "Worked for" goes. Stopped, Failed and "Ended for your message" keep their words. A caption folded to "+N" still names every skill and connector the folded part used. | T1, T2 |
 | Agent line in the conversation | A spinner while it runs, then the description the parent gave at spawn. What the agent is doing now, and for how long, shows on pointing. Never the agent type in the description's place. | T86, T87 |
 | Agents panel and card | "Agents", not "Subagents". A bare count. A running row keeps "Working" or its current activity. "Status is known only while the session runs here" stays shown. | T152, T161, T159 |
-| Background | "Nothing running" stays, so that an empty panel is not read as one that failed to load. | T206 |
+| Background | "Nothing running" stays, so that an empty panel is not read as one that failed to load. The Done heading keeps its kinds. | T206, T205 |
 | Sidebar | The Projects row, the PROJECTS heading, "Needs you" with each row's project, and each session row's age stay. | W37, W45, W44, W61 |
-| Question card | Keeps its state: "Answered", "Partially answered", "Not answered". "Dismiss" stays a worded button. A separate × that closes the card while the question keeps waiting is board #705, not this work. | T96, C106 |
+| Question card | Keeps its state: "Answered", "Partially answered", "Not answered". "Dismiss" stays a worded button, and the cut adds no × to the card: a × that closes the card while the question keeps waiting is board #705. | T96, C106 |
 | Approval card | Only what the owner brought back changes from the cut version; nothing else on it is restored. | see `session.md` |
 | Review | "Mark viewed" stays as a worded button. | T360 |
 | Model chip | Model and effort, "Sonnet 5 High". Because the chip carries both, `/config` no longer lists Model and Effort under Applied. | C36, C37, P609 |
 | Context popover and `/context` | The popover keeps its heading and "Not observed yet". The dialog keeps "tokens" on each row and "autocompact at N" on its top line. | C45, C47, P603, P600 |
 | Connectors dialog | Keeps "MCP servers" beside its title. | P559 |
-| Messages to you | The fold above a message keeps "Working record · N tool calls · N messages". The Settings row for the view explains itself on pointing, with both sentences. | P509, G27 |
+| Messages to you | The fold above a message is not reworded to an invented count ("2 steps"): at the pin it keeps "Working record · N tool calls · N messages". The UX wave replaces that row; see "Meeting the UX wave". The Settings row for the view explains itself on pointing, with both sentences. | P509, G27 |
 | Projects page | Keeps its title in the title bar, the folder path under each name and the "Hide from sidebar" button. Its top sentence goes and its group headings shorten ("In sidebar"). | W6, W131, W132, W129, W130 |
 | Plugin, skill and mod rows | Name at rest; description in the row on pointing or focus. | G216, G218, G225, G248, P683 |
 | Editors | "All changes saved" stays in the header. Version history keeps "Export" on every version. The design inspector keeps its board heading, its "Board" section and "Board name". The design system's Type table keeps "Deck (shown at half size)". | G369, G536, G571 |
@@ -100,10 +103,10 @@ Every row of the tables has a basis. A builder treats them differently.
 
 | Basis | Count | What it means | What the builder owes |
 |---|---|---|---|
-| `seen` | 186 | The owner saw the surface with this cut in a picture and left it. | Build it as the picture showed. |
-| `brought back` | 63 | The owner saw it cut and asked for it back: 58 stay as today, 5 come back in a changed form. | Leave it, or build the changed form the row states. |
+| `seen` | 186 | The owner saw the surface with this cut in a picture and left it. | Build it as the row's After states; the picture is not needed. |
+| `brought back` | 63 | The owner saw it cut and asked for it back: 59 stay as today, 4 come back in a changed form. | Leave it, or build the changed form the row states. |
 | `ruled` | 7 | The owner stated it in words. | Build it as stated. |
-| `pattern` | 622 | Decided by the five rules; the owner has not seen it. 548 are cuts, 15 rewordings, 59 stay. | Build it, then show the owner the before and after (Acceptance 2). Expect some to come back. |
+| `pattern` | 622 | Decided by the five rules; the owner has not seen it. 546 are cuts, 16 rewordings, 60 stay. | Build it, then show the owner the before and after (Acceptance 2). Expect some to come back. |
 | `unseen` | 93 | The pattern did not settle it and no picture reached it. Stays as today. | Leave it. If a later picture reaches it, ask. |
 | `consent` | 33 | Text of a consent, permission or destructive step. Never a candidate. | Leave it. |
 | `not a cut` | 56 | The proposal was a rename or a redesign, not a removal; it belongs to the visual renewal. | Leave it. |
@@ -122,7 +125,9 @@ Most rows are a string removed or shortened in a `copy.ts`. A minority need a me
 - **The counted fold.** A block that folds to one line keeps a count and opens in place ("Listed 9 agents"; a caption's "+N").
 - **Hidden headings.** A heading cut from view because the tab or the sidebar row already names the place stays in the document for assistive technology.
 
-Two placements were shown to the owner and accepted as shown, and each has a cost the builder should try to remove, showing the owner the result: the Settings note opens under its row and pushes the following rows down while it is open; the plugin row reserves the height of its second line at rest, so the list is taller than a list of names needs to be. One behaviour for both is wanted: the rows under the pointer do not move, and no height is spent at rest.
+**Every hidden fact has an owner that takes keyboard focus.** A greyed button, a greyed field and a heading do not take focus, and a native select's options show nothing on hover that the keyboard can reach. So the reason a control is greyed (the slide limit on New slide, G423; the shadow restriction on Spread and Inset, G450; "Write a commit message" beside Commit, T391) belongs to an enabled owner: the control drawn as `aria-disabled` and still focusable, or its row. An explanation moved to a heading (G130) belongs to a row note under that heading. A fact moved to an option's hover (G609) shows for the selected value instead. The rows this concerns end with a sentence pointing here.
+
+Two placements were shown to the owner and accepted as shown; they are the required baseline. The Settings note opens under its row and pushes the following rows down while it is open. The plugin row reserves the height of its second line at rest, so the list is taller than a list of names needs to be. Each has a cost, and one behaviour for both would be better: the rows under the pointer do not move, and no height is spent at rest. That is an optional attempt inside M1: if a prototype achieves it, it is shown to the owner beside the baseline and built only on the owner's call; otherwise the baseline is built.
 
 ### Seen on the scratch build and to be put right
 
@@ -138,8 +143,16 @@ Two placements were shown to the owner and accepted as shown, and each has a cos
 The cut was decided on `2c7044231`. By the time it is built, the UX wave (board #573) will have rewritten transcript rows, request cards, the composer, the side panels, Settings, Customize and the library. Three things follow.
 
 - **A row's text may be gone or different.** M0 re-reads every row against master then. A row whose surface the wave removed is closed as moot. A row whose text the wave rewrote is decided again by the pattern, as a `pattern` row. A row whose text only moved is built as written.
-- **The wave already settles some rows.** Known on 2026-11-16: the wave's U11b removes the model menu's "Default" row, so C42 (the line under it) and C40 ("For this session only", which stops being true once a pick writes the default) need no work; U1b draws requests in the transcript, which the question and approval card rows must be read against; U2b draws the to-human view by the mod, which P509 and the rows around it must be read against.
-- **The wave adds text.** Every string the wave added after the pin is outside the tables. M0 lists them and applies the pattern; all of them are `pattern` rows.
+- **Where the wave's design and a row here disagree, the wave's text stands.** The wave's children were designed with the owner on the surfaces as they will be; the owner's calls here were made on pictures of the pin. A row that would change a text the wave's design fixed, or restore one the wave removed, is not built as written: M0 records it, and it is put to the owner again as a picture pair on the wave's surface. Known on 2026-11-16, from the wave's documents:
+  - **The working record (P509).** U2's O-30 replaces the pin's counted row with the mod's own fold, one `› working record` line per stretch with no count, drawn by the mod where a mod can draw and mirrored by MAWS elsewhere (wave law 2, a pure mods client). MAWS does not add a count over the mod's line. P509 closes as moot once U2b has landed; what remains of the owner's call is that the fold is not reworded to an invented form.
+  - **Background and Agents (P66, P67, P72, T205).** U8's O-09 names the panel "Background tasks", heads its sections "Running N" and "Done N" with the kinds counted, and keeps "Nothing running". Here the owner called good "Agents" for "Subagents", "Background" for "Background tasks" and a bare count for "N running" on the cards. T205 is corrected to the wave's wording. The other three are shown again on U8's column.
+  - **Source control (T371, T379 to T405, P228 to P250).** U5 makes Source control a page to read with no action in it (its S2: no text field, no checkbox, no action element). The rows about Push, Open PR, the group actions, the commit form and the Output are moot where U5 removed their surface.
+  - **The Artifacts card (T562).** U8 removes it from the column; the row is moot.
+  - **The library's make-new strip (G291).** U10's l6-artifacts-08 redraws "Make something new" as four cards that ask, in place of a card per kind with "New" and "Ask Claude". The `stays` row is the wave's to change.
+  - **Customize (G216, G225, G248).** U11's combined list mixes plugins, skills, connectors and mods in one list with a kind word on each row and a Show control (`src/renderer/src/customize/copy.ts`, added after the pin). "Name alone at rest" then means the name and its kind word: the kind is how mixed rows are told apart (rule 5).
+  - **The model menu (C40, C42).** U11b removes the "Default" row and writes the default on a pick, so the line under "Default" and "For this session only" need no work.
+  - **Requests (the question and approval card rows).** U1b draws requests in the transcript; the rows are read against that drawing.
+- **The wave adds text, in new files too.** Every string added after the pin is outside the tables, and some are in modules that did not exist at the pin, so no row's Source leads to them. M0 lists them from the whole diff of the renderer and the artifact editors between the pin and master, and applies the pattern; all of them are `pattern` rows.
 
 ### Not in this work
 
@@ -154,17 +167,19 @@ One file per area under `docs/doperpowers/specs/2026-11-16-word-cut/`, written b
 
 | File | Area | Items | Cut | Reworded | Stay |
 |---|---|---|---|---|---|
-| `session.md` | The conversation and the message box | 172 | 114 | 4 | 54 |
-| `beside.md` | Panels beside the conversation | 314 | 210 | 6 | 98 |
+| `session.md` | The conversation and the message box | 172 | 114 | 3 | 55 |
+| `beside.md` | Panels beside the conversation | 314 | 209 | 6 | 99 |
 | `window.md` | Window, sidebar, sheets and overview | 105 | 72 | 1 | 32 |
 | `typed.md` | Dialogs opened by typed commands | 52 | 43 | 0 | 9 |
 | `settings.md` | Settings | 115 | 90 | 1 | 24 |
 | `customize.md` | Customize | 81 | 40 | 5 | 36 |
 | `artifacts.md` | Artifacts: the library and an opened artifact | 62 | 33 | 1 | 28 |
-| `editors.md` | Artifact editors | 159 | 132 | 4 | 23 |
-| | | 1,060 | 734 | 22 | 304 |
+| `editors.md` | Artifact editors | 159 | 131 | 5 | 23 |
+| | | 1,060 | 732 | 22 | 306 |
 
-Each item in `items.json` has: `id`; `area`, `place`, `surface`, `where`; `today` (the text at the pin, an example value where the text is built from data); `decision` (`cut`, `reword`, `stays`); `basis`; `after` (what the surface shows afterwards, as built on the scratch branch); `why`; `round` (which round of calls last touched it); `source` (file and line at the pin); and `scratch_files` (the files the scratch branch changed for it, as a pointer to how much the item involves, not as a recipe).
+Each item in `items.json` has: `id`; `area`, `place`, `surface`, `where`; `today` (the text at the pin, an example value where the text is built from data); `decision` (`cut`, `reword`, `stays`); `basis`; `after` (what the surface shows afterwards, as built on the scratch branch); `why`; `round` (which round of calls last touched it); `source` (file and line at the pin); and `scratch_files` (the files the scratch branch changed for it, as a pointer to how much the item involves, not as a recipe). M0 adds its own field beside these (unchanged, moved, rewritten by the wave, gone, moot) and the current source; it does not overwrite `today`, `decision` or `source`, which stay the record of what the owner decided on.
+
+`scenes.md` in the same directory lists the 107 scenes the pictures were taken of: what each is, how it is reached and the state it shows. `rig/words-shots.spec.ts.txt` is the Playwright spec that reached them at the pin, kept as text so that no gate reads it.
 
 ## Plan of Work
 
@@ -172,7 +187,7 @@ This is the cut the design implies, for whoever takes the board ticket to confir
 
 ### M0 — The list against master, and the fixtures
 
-Re-read all 1,060 rows against master: find each by its text and its source, and mark it unchanged, moved, rewritten or gone. List the strings the wave added in the same files and decide each by the pattern. Extend the screenshot fixtures toward the states "How firm each decision is" names. At the end, `items.json` and the tables describe master as it is, every row has a current source, and the rig produces today's pictures for every surface M1 to M5 will change. Proof: the regenerated tables, and a set of "before" pictures.
+Re-read all 1,060 rows against master: find each by its text and its source, and mark it unchanged, moved, rewritten by the wave, gone or moot, starting from the list in "Meeting the UX wave". Read the whole diff of `src/renderer/src` and `src/artifacts` between the pin and master for visible strings, in new modules as well as old, and add a `pattern` row for each. Bring the rig into the repository's e2e support from `rig/words-shots.spec.ts.txt`, repair its scenes against master (it finds elements by data attributes and positions, which the wave will have moved), and extend its fixtures toward the states "How firm each decision is" names. Assign every surviving and every new row to one of M1 to M5 and to a scene, or record why no scene can reach it. At the end the record describes master as it is, and the rig produces the "before" picture of every surface M1 to M5 will change. Proof: the regenerated tables with M0's field filled on every row; the scene list; the set of "before" pictures.
 
 ### M1 — The mechanisms, and Settings as their first use
 
@@ -184,7 +199,7 @@ Build the row note, the pointed-row line, the named glyph, the bare count, the q
 
 ### M3 — Panels beside the conversation
 
-`beside.md`: session cards, Agents, Background, Source control, Review, Files, Browser, Session info, Channel. The largest file and the one with the most unseen rows (169 of 216 changes). Proof: picture pairs, with the extended fixtures of M0.
+`beside.md`: session cards, Agents, Background, Source control, Review, Files, Browser, Session info, Channel. The largest file and the one with the most unseen rows (168 of 215 changes). Proof: picture pairs, with the extended fixtures of M0.
 
 ### M4 — Window, typed dialogs, Customize
 
@@ -203,10 +218,10 @@ Build the row note, the pointed-row line, the named glyph, the bare count, the q
 
 ## Reference material outside the repository
 
-Kept by the session that wrote this document (sminos alias `design-experiment`, project MAWS, on the MacBook), in its lab folder and in the architect checkout; ask that session or the owner for them. None of it is needed to build from this document; all of it saves time.
+Kept by the session that wrote this document (sminos alias `design-experiment`, project MAWS, on the MacBook), in its lab folder and in the architect checkout; ask that session or the owner for them. None of it is needed: each row's After is the contract, the scenes and the rig are in the repository, and the pictures can be taken again. All of it saves time.
 
 - **The scratch branch** `words-cut` (local, not pushed), three commits on `2c7044231`, head `d8f74401c`: the cut as the owner saw it in round two. It is a drawing, not a change: no typecheck, no tests, mechanisms built twice. **It is never merged or rebased onto master.**
-- **The screenshot rig**: a Playwright spec that opens 107 screens on fixtures and a script that builds a worktree and runs it. M0 should bring it into the repository's e2e support in a form the gates accept.
+- **The rig's runner**: the script that builds a worktree, copies the spec into its `e2e/` and runs it. The spec itself is in the repository (`rig/`).
 - **The pictures**: 107 screens from each build, and the two pages the owner judged on.
 - **The owner's calls**, both rounds, as written.
 - **The inventory**: all 2,019 items with both readings where two readers met, and the 23 rules.
@@ -231,6 +246,7 @@ Kept by the session that wrote this document (sminos alias `design-experiment`, 
 - 2026-11-15. **The approval card restores only what the owner named.** The owner's answer when offered further restorations on it.
 - 2026-11-16. **Items no picture reached and the pattern did not settle stay as today** (93). Alternative rejected: applying each one's lean; 82 leaned to cut, with nothing to check them against.
 - 2026-11-16. **`pattern` cuts are built, then shown.** They are not held back for a third round first, because the surfaces will have changed under the wave and pictures taken now would be of the wrong app.
+- 2026-11-16. **After the review of this document.** Six rows corrected in `items.json`: T205 from cut to stays (rule 5 and U8's O-09); G615 from cut to reword (rule 3: an empty panel says what to do); C106 from reword to stays (the × it described is #705's); G13 to G15 rewritten to the in-row note the owner saw, where they had described the first pass's floating card. P509 is recorded as moot after U2b (the wave's uncounted fold stands; alternative rejected: a count added by MAWS over the mod's line, against wave law 2). The scene manifest and the rig's spec were brought into the repository so that acceptance does not depend on material outside it. Totals after the corrections: 732 cut, 22 reworded, 306 stay.
 - 2026-11-16. **Verification.** This document: one adversarial review of its buildability. The build: the rung the taking session names per milestone, and the owner's call on every picture pair.
 
 ## Outcomes & Retrospective

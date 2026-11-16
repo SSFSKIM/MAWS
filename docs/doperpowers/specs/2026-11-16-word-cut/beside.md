@@ -2,7 +2,7 @@
 
 > Part of `docs/doperpowers/specs/2026-11-16-word-cut-design.md`; read that first. This file is written by `render.py` from `items.json` beside it; a decision changes there and in the root document's Decision Log.
 
-314 items: 210 cut, 6 reworded, 98 stay. Of the 216 that change, the owner saw 47 in a picture or ruled on them; 169 follow the pattern and were not seen.
+314 items: 209 cut, 6 reworded, 99 stay. Of the 215 that change, the owner saw 47 in a picture or ruled on them; 168 follow the pattern and were not seen.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin.
 
@@ -184,7 +184,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | P60 | third card, folded by default: its heading with a count at the right end; "N last reported" when the session is not running | Connectors 3 connected | stays | Stays. brought back on session-running-cards | brought back | `src/renderer/src/panel/summary/Connectors.tsx:16` |
 | P61 | inside the opened card, at the right of each connector's name: the engine's status word | connected | stays | Stays. "connected" on each connector, which the owner brought back in Customize (G253) and on this card's head (P60) | pattern | `src/renderer/src/panel/summary/Connectors.tsx:25` |
 | P62 | inside the opened card: "Connector status not reported" when nothing is known (the heading already says "Not reported"), and "Last reported by this session" when it is not running (the heading already says "N last reported") | Connector status not reported | cut | "Connector status not reported" and "Last reported by this session" are gone from the opened card. | seen | `src/renderer/src/panel/summary/Connectors.tsx:19` |
-| P63 | inside the opened card: two buttons, "Manage connectors…" and "Plugins…"; under the pointer "Manage this session's MCP servers" and "Manage plugins and skills" | Manage connectors… | cut | The buttons read "Manage…" and "Plugins…" with no enabled-state tooltips (the disabled-state reason stays; "Manage connectors…" stays the accessible name). | seen | `src/renderer/src/panel/summary/Connectors.tsx:31` |
+| P63 | inside the opened card: two buttons, "Manage connectors…" and "Plugins…"; under the pointer "Manage this session's MCP servers" and "Manage plugins and skills" | Manage connectors… | cut | The buttons read "Manage…" and "Plugins…" with no enabled-state tooltips (the disabled-state reason stays; "Manage connectors…" stays the accessible name). The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | seen | `src/renderer/src/panel/summary/Connectors.tsx:31` |
 | P65 | inside the opened card, under a rule: a line counting the plugins, then "Loaded now" or "Loaded last time, 2 days ago", then the two reload buttons (listed with the Plugins dialog) | Plugins · 3 loaded Loaded now | cut | The plugins line reads "3 plugins"; "Loaded now" is gone, the age shows only when it is not now. | seen | `src/renderer/src/panel/copy.ts:80` |
 
 ### Session cards, Subagents
@@ -304,7 +304,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source |
 |---|---|---|---|---|---|---|
-| T205 | after the Done head's count; state: finished tasks exist | · 1 workflow · 2 shells · 1 monitor | cut | The Done heading reads Done 4, with no kinds after it. | pattern | `src/renderer/src/tools/agents/copy.ts:122` |
+| T205 | after the Done head's count; state: finished tasks exist | · 1 workflow · 2 shells · 1 monitor | stays | Stays. a fold keeps its count and its kinds (rule 5), and the UX wave words this heading by kind (U8, O-09: "Done 14 · 3 workflows · 9 shells · 2 monitors"); the scratch branch cut the kinds, which the review of this document found against both | pattern | `src/renderer/src/tools/agents/copy.ts:122` |
 | T206 | where the Running section would be, while nothing runs; state: nothing running | Nothing running | stays | Stays. brought back on panel-background | brought back | `src/renderer/src/tools/agents/copy.ts:166` |
 | T207 | one line at the top of the panel for a session that is not running here; state: session not live | Shells and monitors are known only while the session runs here | stays | Stays. the sentence that says why a non-local session's shells are not listed; the owner's T206 note (empty versus not loading) bears on it; lean keep \| no picture reached it in either round: today's words stay (was leaning keep) | unseen | `src/renderer/src/tools/agents/copy.ts:165` |
 | T209 | top of the panel after following a link to a run the app has not read yet (also the body of that run's page); state: run not read yet | Run not found yet | cut | Following a link to a run not read yet shows a spinner (at the panel's top and on the run's page); Loading run… is its accessible name and tooltip. | pattern | `src/renderer/src/tools/agents/copy.ts:179` |
@@ -572,7 +572,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source |
 |---|---|---|---|---|---|---|
-| P288 | tooltip of the disabled Staged chip | Index matches HEAD | cut | The disabled Staged chip's tooltip reads "Nothing staged". | pattern | `src/renderer/src/tools/code/copy.ts:67` |
+| P288 | tooltip of the disabled Staged chip | Index matches HEAD | cut | The disabled Staged chip's tooltip reads "Nothing staged". The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | pattern | `src/renderer/src/tools/code/copy.ts:67` |
 
 ## Source control
 
@@ -617,7 +617,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source |
 |---|---|---|---|---|---|---|
 | T390 | a checkbox with its label, left of the Commit button, always | Skip hooks (--no-verify) | cut | The Skip hooks checkbox is gone; a ⌄ beside Commit opens a menu with "Commit without hooks", which commits once with --no-verify. | seen | `src/renderer/src/tools/scm/CommitForm.tsx:63` |
-| T391 | faint words left of the greyed Commit button; the button's tooltip says the same | Write a commit message | cut | "Write a commit message" no longer stands beside Commit; it is the greyed button's tooltip. | seen | `src/renderer/src/tools/scm/CommitForm.tsx:69` |
+| T391 | faint words left of the greyed Commit button; the button's tooltip says the same | Write a commit message | cut | "Write a commit message" no longer stands beside Commit; it is the greyed button's tooltip. The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | seen | `src/renderer/src/tools/scm/CommitForm.tsx:69` |
 
 ### Source control panel, Output
 
@@ -699,7 +699,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 
 | Id | Where | Today | Decision | After | Basis | Source |
 |---|---|---|---|---|---|---|
-| P243 | faint text beside the disabled Commit button, always there until a commit is possible; the other is "Write a commit message". Both are also the button's tooltip | Nothing staged | cut | "Nothing staged" no longer stands beside Commit; it is the greyed button's tooltip. | pattern | `src/renderer/src/tools/scm/copy.ts:103` |
+| P243 | faint text beside the disabled Commit button, always there until a commit is possible; the other is "Write a commit message". Both are also the button's tooltip | Nothing staged | cut | "Nothing staged" no longer stands beside Commit; it is the greyed button's tooltip. The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | pattern | `src/renderer/src/tools/scm/copy.ts:103` |
 
 ### Source control, Push sheet
 

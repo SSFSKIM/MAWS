@@ -2,7 +2,7 @@
 
 > Part of `docs/doperpowers/specs/2026-11-16-word-cut-design.md`; read that first. This file is written by `render.py` from `items.json` beside it; a decision changes there and in the root document's Decision Log.
 
-172 items: 114 cut, 4 reworded, 54 stay. Of the 118 that change, the owner saw 25 in a picture or ruled on them; 93 follow the pattern and were not seen.
+172 items: 114 cut, 3 reworded, 55 stay. Of the 117 that change, the owner saw 24 in a picture or ruled on them; 93 follow the pattern and were not seen.
 
 Columns: **Id** is the item's id in `items.json`. **Where** is the place on the surface. **Today** is the text at the pin `2c7044231` (an example value where the text is built from data). **Decision** is `cut` (the text leaves the resting surface), `reword` (it changes) or `stays` (today's text is kept; the row is here so that nobody proposes it again). **After** says what the surface shows afterwards, as it was built on the scratch branch and shown in the pictures. **Basis** is how firm the decision is, in the words of the root document's "How firm each decision is". **Source** is the file and line at the pin.
 
@@ -250,7 +250,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | Id | Where | Today | Decision | After | Basis | Source |
 |---|---|---|---|---|---|---|
 | C103 | right of the question's short header when there are several, between two arrows | 1 of 3 | cut | With several questions the card shows one dot per question between the arrows, the current one darker; the position stays in words for screen readers. | seen | `src/renderer/src/request-card/variants/Question.tsx:249` |
-| C106 | left end of the button row | Dismiss | reword | The question card's button row has "Dismiss" at its left again, and the × stays at the right of the question's header row. | brought back | `src/renderer/src/request-card/variants/Question.tsx:263` |
+| C106 | left end of the button row | Dismiss | stays | Stays. "Dismiss" stays a worded button, as today. The cut adds no × to the card: a × that closes the card while the question keeps waiting is board #705, not this work | brought back | `src/renderer/src/request-card/variants/Question.tsx:263` |
 
 ### Questions from the agent (the app's own question sheet), as a card
 
@@ -441,7 +441,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 | P535 | either view, a quiet status line while the model list is being read (state: reading) | Reading the models… | cut | While the models are read (or the session starts) the status line is a spinner. | pattern | `src/renderer/src/widgets/copy.ts:375` |
 | P537 | either view, in amber when the typed command named something unknown (state: /model or /effort typed with a wrong name); the other is "No effort level named {word}" | No model named {name} in the engine's catalogue | cut | A wrong /model name says "No model named <name>". | pattern | `src/renderer/src/widgets/copy.ts:285` |
 | P541 | effort view, the quiet line under "Fast mode" when there is nothing else to say; "Off until turned on here" is the same line for a session where it was never turned on | On / Off | cut | The fast-mode row has no On/Off line when there is nothing else to say. | pattern | `src/renderer/src/widgets/copy.ts:316` |
-| P543 | effort view, tooltip of the fast-mode switch; it repeats the label beside it ("Fast mode is for Opus" replaces it on a model without fast mode, and that one is kept) | Fast mode | cut | The fast-mode switch has no tooltip unless it is greyed (its reason stays). | pattern | `src/renderer/src/widgets/ModelSelector.tsx:584` |
+| P543 | effort view, tooltip of the fast-mode switch; it repeats the label beside it ("Fast mode is for Opus" replaces it on a model without fast mode, and that one is kept) | Fast mode | cut | The fast-mode switch has no tooltip unless it is greyed (its reason stays). The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | pattern | `src/renderer/src/widgets/ModelSelector.tsx:584` |
 | P544 | model view (one step in, from the model's name), the heading beside the back chevron | Select model | cut | The model view's heading reads "Model" (its group name stays "Select model"). | seen | `src/renderer/src/widgets/copy.ts:360` |
 | P549 | model view, at the right of the checked row while the change is on its way (state: change pending) | setting… | cut | The checked model row shows a small spinner in place of its check while the change is on its way. | pattern | `src/renderer/src/widgets/copy.ts:374` |
 | P551 | model view, in place of the rows when the engine listed none (state: empty list) | The engine listed no models | cut | An empty model list says "No models". | pattern | `src/renderer/src/widgets/copy.ts:284` |

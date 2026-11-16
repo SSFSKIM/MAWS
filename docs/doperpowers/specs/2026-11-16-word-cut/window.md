@@ -47,7 +47,7 @@ Columns: **Id** is the item's id in `items.json`. **Where** is the place on the 
 |---|---|---|---|---|---|---|
 | W96 | first line of the card titled "Relay not answering" | ClaudeUsage’s relay is not answering | cut | The relay card no longer repeats its title in a first line. | pattern | `src/renderer/src/sessions/RelayCard.tsx:55` |
 | W97 | second line, in grey | Waiting for the relay · checked 5s ago · http://127.0.0.1:8787/api/hello · HTTP 503 | cut | The relay card's grey line reads "Checked 5s ago"; the address and HTTP status are under the pointer on that line. | pattern | `src/renderer/src/sessions/RelayCard.tsx:57` |
-| W98 | three grey lines that each explain one of the buttons below them | Run direct: the engine’s own login for this session; no gateway models, and switching back later restarts the session. | cut | The relay card's three explaining lines are gone; each sentence is its button's tooltip (Run direct keeps "Pick a Claude model first" while it is greyed). | pattern | `src/renderer/src/sessions/RelayCard.tsx:62` |
+| W98 | three grey lines that each explain one of the buttons below them | Run direct: the engine’s own login for this session; no gateway models, and switching back later restarts the session. | cut | The relay card's three explaining lines are gone; each sentence is its button's tooltip (Run direct keeps "Pick a Claude model first" while it is greyed). The reason for a greyed control needs an owner that takes keyboard focus; see "What the cut builds" in the root document. | pattern | `src/renderer/src/sessions/RelayCard.tsx:62` |
 
 ## Title bar and tabs
 
