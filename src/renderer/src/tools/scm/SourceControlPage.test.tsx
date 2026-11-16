@@ -204,10 +204,11 @@ describe('when the branch read is asked (S3; S21’s page half)', () => {
 // the machine stops serving the reads, by a disconnect or by no longer listing them; nothing is asked meanwhile, and the
 // read is asked again once they are served
 describe('the commit list in hand when the reads are lost (Decision Log 49)', () => {
-  for (const [loss, lost] of [
-    ['a disconnect', { state: 'down' as const }],
+  const losses: [string, Partial<MachineState>][] = [
+    ['a disconnect', { state: 'down' }],
     ['the reads no longer listed', { capabilities: ['rl2.project-acts'] }],
-  ] as const)
+  ];
+  for (const [loss, lost] of losses)
     it(`keeps the list shown through ${loss}, asks nothing meanwhile, and asks once the reads are served again`, async () => {
       serves();
       mount();

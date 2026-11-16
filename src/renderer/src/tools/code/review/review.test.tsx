@@ -2118,8 +2118,8 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
   // A tab that has loaded a commit's read keeps it until the tab closes or its selection changes; a capability lost stops
   // new reads only, and they resume when it returns; showing another tab and coming back reads nothing again. Counted in
   // reads asked, never in time.
-  const roster = (state: 'up' | 'down', capabilities?: string[]) =>
-    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state, since: '2026-11-16T10:00:00.000Z', generation: 1, ...(capabilities ? { capabilities } : {}) }]));
+  const roster = (state: 'up' | 'down', capabilities?: readonly string[]) =>
+    act(() => useMachines.getState().applyRoster([{ ref: TEST_MACHINE, name: 'This Mac', local: true, state, since: '2026-11-16T10:00:00.000Z', generation: 1, ...(capabilities ? { capabilities: [...capabilities] } : {}) }]));
   const fullReads = () => main().callsOf('git.commitDiff').filter((input) => input.patch !== false).length;
   const checks = () => main().callsOf('git.commitDiff').filter((input) => input.patch === false).length;
   const reviewTab = () => panelOf(A)!.tabs.find((tab) => tab.toolId === 'review')!.id;
