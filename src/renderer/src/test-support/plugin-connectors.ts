@@ -20,6 +20,7 @@ import type { CommandOutput } from '@shared/ipc/schema';
 import type { CustomizationInventory } from '@shared/ipc/schema/customization';
 import { REGISTRY } from '@shared/ipc/registry';
 import { validateEventPayload } from '@shared/ipc/validate';
+import { ReloadPluginsResponseSchema } from '@shared/wire/control';
 import { addressingOf } from '@shared/machine/address';
 import { readCustomizationInventory, readServerEndpoints } from '../../../engine-host/customization/inventory';
 import { SessionStatusTracker } from '../../../engine-host/session-status';
@@ -104,13 +105,17 @@ const spec = (appSessionId: string, cwd: string) =>
 
 /**
  * A ready session MAWS runs in `cwd`, as the window holds its status: with `plugins`, after its main lane's `system/init`
- * listed them with these servers (each `[name, status]`); with `plugins: null`, before any (no message sent: no list
- * reported, and its status lists no server, P7 run 43386195217).
+ * listed them with these servers (each `[name, status]`) at `at`; with `plugins: null`, before any (no message sent: no
+ * list reported, and its status lists no server, P7 run 43386195217). `reloaded`: then a `reload_plugins` answer listing
+ * these plugins and servers, as the engine answers it once a plugin changed (pass3/p2-no-prompt-resume-1 seq 30).
  */
-export function reportingStatus(bare: string, cwd: string, { plugins, servers = [], at = '2026-11-14T22:39:19.282Z' }: { plugins: ReturnType<typeof loaded>[] | null; servers?: [string, string][]; at?: string }): EngineSessionStatus {
+export function reportingStatus(bare: string, cwd: string, { plugins, servers = [], at = '2026-11-14T22:39:19.282Z', reloaded }: { plugins: ReturnType<typeof loaded>[] | null; servers?: [string, string][]; at?: string; reloaded?: { plugins: ReturnType<typeof loaded>[]; servers: [string, string][] } }): EngineSessionStatus {
   const tracker = new SessionStatusTracker(spec(bare, cwd), () => {});
   if (plugins !== null) {
     tracker.observe({ type: 'system', subtype: 'init', cwd, session_id: '00000000-0000-4000-8000-000000000030', model: 'claude-test', claude_code_version: '2.1.322', permissionMode: 'default', plugins, mcp_servers: servers.map(([name, state]) => ({ name, status: state, source: 'plugin' })) }, at);
+  }
+  if (reloaded) {
+    tracker.applyReload(ReloadPluginsResponseSchema.parse({ commands: [], agents: [], plugins: reloaded.plugins, mcpServers: reloaded.servers.map(([name, state]) => ({ name, status: state, scope: 'dynamic', source: 'plugin' })), error_count: 0 }));
   }
   const snapshot = tracker.snapshot();
   const payload = { appSessionId: bare, status: { ...fullStatus(bare), cwd, process: 'ready', plugins: snapshot.plugins, pluginErrors: snapshot.pluginErrors, pluginWarnings: snapshot.pluginWarnings, pluginsObservedAt: snapshot.pluginsObservedAt, mcpServers: snapshot.mcpServers } };

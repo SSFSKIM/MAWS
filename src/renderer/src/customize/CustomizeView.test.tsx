@@ -530,6 +530,23 @@ describe('Connectors', () => {
       expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
     });
 
+    // UX wave U11h, the branch panel's ruling (2026-11-16, UTC): the attached session's answer, once it exists, is its list
+    // whole; the init's list counts only before it
+    it('a server the attached session’s mcp_status no longer lists is not read from its init’s list: the session that holds it signs it in', async () => {
+      const bare = holding('bare', '/one', ['fx-own']); // the page's attached session, whose init listed it
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[bare.appSessionId, bare], [holder.appSessionId, holder]]) });
+      backend.script('session.mcpStatus', () => ({ mcpServers: [] })); // its answer does not
+      ownPosture('rev-1');
+      const client = fresh();
+      mountWith(client);
+      const row = await ownRow();
+      await waitFor(() => expect(client.getQueryCache().getAll().some((query) => query.queryKey[1] === 'session.mcpStatus' && query.state.data !== undefined)).toBe(true));
+      await act(async () => {});
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'holder', entry: { revision: 'rev-1' } }]));
+    });
+
     it('offers no Sign in while the row has no revision', async () => {
       const holder = holding('holder', '/two', ['fx-own']);
       useSessions.setState({ engine: new Map([[holder.appSessionId, holder]]) });

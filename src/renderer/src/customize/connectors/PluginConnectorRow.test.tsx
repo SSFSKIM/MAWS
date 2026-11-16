@@ -490,6 +490,135 @@ describe('a plugin’s connector in My items (UX wave U11h)', () => {
     });
   });
 
+  // The branch panel's rulings (2026-11-16, UTC), finding 1: a session's servers are its latest report, whole. The attached
+  // session's own status read, once answered, replaces the list its init frame seeded; the seed counts only while no
+  // answer exists. A seed is read again when it moves (an init, or a reload once a plugin changed).
+  describe('a session’s servers are its latest report, whole', () => {
+    it('a connector the attached session’s answer omits is not read from its init’s list: the session that holds it is admitted', async () => {
+      const scene = await sceneOf([TIDES]);
+      const attached = reportingStatus('attached', scene.cwd, { plugins: [loaded(KEY, MANIFEST)], servers: [[NAME, 'needs-auth']] });
+      live.set('attached', []); // its answer no longer lists the server
+      sessions(attached, holding('second', '/elsewhere'));
+      mount();
+      const row = await rowOf('tides-http');
+      await waitFor(() => expect(asked('session.mcpStatus')).toContainEqual({ appSessionId: 'attached' }));
+      await waitFor(() => expect(row.querySelector('[data-not-in-attached]')?.textContent).toBe('Not in the attached session'));
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'second', entry: { revision: revisionOf(scene) } }]));
+    });
+
+    it('a reload after a plugin changed moves the attached session’s list: its status read is asked again, and its answer is the list', async () => {
+      const scene = await sceneOf([TIDES]);
+      sessions(reportingStatus('attached', scene.cwd, { plugins: [], servers: [] })); // started before the plugin was installed
+      live.set('attached', []);
+      mount();
+      const row = await rowOf('tides-http');
+      await reads(row, 'Sign in needed');
+      expect(row.querySelector('[data-sign-in-needs-session]')?.textContent).toBe('Open a session, then sign in');
+      const statusReads = asked('session.mcpStatus').length;
+      // the plugin's install reloads the session: the engine answers its plugins and its servers, the plugin's among them
+      live.set('attached', [served(NAME, TIDES_URL)]);
+      act(() => sessions(reportingStatus('attached', scene.cwd, { plugins: [], servers: [], reloaded: { plugins: [loaded(KEY, MANIFEST)], servers: [[NAME, 'needs-auth']] } })));
+      await waitFor(() => expect(asked('session.mcpStatus').length).toBeGreaterThan(statusReads));
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([{ name: NAME, appSessionId: 'attached', entry: { revision: revisionOf(scene) } }]));
+    });
+  });
+
+  // Finding 2: a success is overtaken by a later report, from the session it came through, that the server needs a sign-in
+  // or failed; the time is when that session's servers were observed (`pluginsObservedAt`, an init's or a reload's). A
+  // report from before the success never overtakes it, and a session the row does not read from is not heard.
+  describe('a success through a session that is not the attached one', () => {
+    const SUCCESS = Date.parse('2026-11-14T22:40:00.000Z');
+    const report = (bare: string, at: string, state = 'needs-auth') => reportingStatus(bare, '/elsewhere', { plugins: [loaded(KEY, MANIFEST)], servers: [[NAME, state]], at });
+    async function signedInThrough(where: 'here' | 'new_sessions'): Promise<HTMLElement> {
+      await sceneOf([TIDES]);
+      sessions(report('admitted', '2026-11-14T22:39:00.000Z'));
+      mount();
+      const row = await rowOf('tides-http');
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toEqual([expect.objectContaining({ appSessionId: 'admitted' })]));
+      act(() => heard({ opId: 'op-1', name: NAME, state: 'done', reason: null, message: null, where }, SUCCESS));
+      return row;
+    }
+
+    it('a report from that session older than the success leaves it standing; a later one that the server needs a sign-in overtakes it', async () => {
+      const row = await signedInThrough('here');
+      await reads(row, 'Signed in · connected here');
+      act(() => sessions(report('admitted', '2026-11-14T22:39:59.000Z')));
+      await reads(row, 'Signed in · connected here');
+      act(() => sessions(report('admitted', '2026-11-14T22:41:00.000Z')));
+      await reads(row, 'Sign in needed');
+      expect(signIn(row)).not.toBeNull();
+    });
+
+    it('a later report of a failure overtakes it too; a later report that it is connected keeps it', async () => {
+      const row = await signedInThrough('here');
+      act(() => sessions(report('admitted', '2026-11-14T22:41:00.000Z', 'connected')));
+      await reads(row, 'Signed in · connected here');
+      act(() => sessions(report('admitted', '2026-11-14T22:42:00.000Z', 'failed')));
+      await reads(row, 'Failed');
+    });
+
+    it('a later report from a different session, which the row does not read from, leaves it standing', async () => {
+      const row = await signedInThrough('here');
+      act(() => sessions(report('admitted', '2026-11-14T22:39:00.000Z'), report('other', '2026-11-14T22:41:00.000Z')));
+      await reads(row, 'Signed in · connected here');
+      expect(asked('connectors.signInDynamicServer')).toHaveLength(1);
+    });
+
+    it('a success for new sessions is not overtaken by its own session’s later report that it needs a sign-in', async () => {
+      const row = await signedInThrough('new_sessions');
+      const said = stateOf(row);
+      expect(said).not.toBeNull();
+      act(() => sessions(report('admitted', '2026-11-14T22:41:00.000Z')));
+      await reads(row, said);
+    });
+  });
+
+  // Finding 3: an operation under way is bound to the row it was started on; its step and Cancel stay there until it ends,
+  // whatever the row's engine name reads now (§E: "An operation under way shows its step and Cancel, whatever the table
+  // says now"). A finished result keeps today's rule: shown only for the revision it was made for.
+  describe('a sign-in under way stays on the row it was started on', () => {
+    async function waitingOn(change: Partial<ScenePlugin>): Promise<HTMLElement> {
+      const scene = await sceneOf([TIDES]);
+      sessions(holding('admitted', '/elsewhere'));
+      mount();
+      const row = await rowOf('tides-http');
+      fireEvent.click(await within(row).findByRole('button', { name: SIGN_IN }));
+      await waitFor(() => expect(asked('connectors.signInDynamicServer')).toHaveLength(1));
+      changed('waiting_callback');
+      await reads(row, 'Finish signing in in your browser…');
+      const postureReads = asked('catalog.postures').length;
+      answered = await scene.reread({ plugins: [{ ...TIDES, ...change }] });
+      expect(revisionOf(answered)).not.toBe(revisionOf(scene));
+      await readAgain();
+      await waitFor(() => expect(asked('catalog.postures').length).toBeGreaterThan(postureReads));
+      return rowOf('tides-http');
+    }
+
+    it('its plugin’s manifest becomes unreadable: the step and Cancel stay, Cancel reaches the operation; when it ends the line for the unread name stands', async () => {
+      const row = await waitingOn({ manifest: null });
+      await reads(row, 'Finish signing in in your browser…');
+      fireEvent.click(within(row).getByRole('button', { name: 'Cancel' }));
+      await waitFor(() => expect(asked('connectors.signInCancel')).toEqual([{ opId: 'op-1' }]));
+      changed('cancelled');
+      await reads(row, 'Its plugin’s name can’t be read, so it can’t be matched to a session.');
+      expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+      expect(signIn(row)).toBeNull();
+    });
+
+    it('its plugin’s manifest is renamed: the step and Cancel stay; its success is not shown on the row it no longer matches', async () => {
+      const row = await waitingOn({ manifest: 'mani-tides-renamed' });
+      await reads(row, 'Finish signing in in your browser…');
+      expect(within(row).getByRole('button', { name: 'Cancel' })).toBeTruthy();
+      changed('done', { where: 'here' });
+      await reads(row, 'Sign in needed');
+      expect(row.querySelector('[data-sign-in-needs-session]')?.textContent).toBe('Open a session, then sign in');
+      expect(within(row).queryByRole('button', { name: 'Cancel' })).toBeNull();
+    });
+  });
+
   it('a retained success, and a retained failure, are dropped when the connector becomes a local command: no sign-in words, the local command’s state', async () => {
     for (const ending of ['done', 'failed'] as const) {
       const scene = await sceneOf([TIDES]);
