@@ -118,6 +118,16 @@ describe('runOf: §M’s one rule, and nothing more', () => {
     expect(runOf(stretches[0]!, rows, [run('a', 'b', 'Built the site and checked its links')], turns)).toBeUndefined();
   });
 
+  it('of the runs that hold the line’s row, the newest; else the run that begins nearest after it, the earlier in the file on a tie', () => {
+    const { stretches, rows, turns } = scene(['prompt', 'note', { id: 'a', description: 'Read the notes', done: true }, { id: 'b', description: 'Fix a link', done: true }, { id: 'c', description: 'Check the links', done: true }, 'message']);
+    const stretch = stretches[0]!;
+    // the stretch's first row is the note, n1
+    expect(runOf(stretch, rows, [run('n1', 'c', 'older and wider'), run('n1', 'a', 'newer and narrower')], turns)?.summary).toBe('newer and narrower');
+    expect(runOf(stretch, rows, [run('n1', 'a', 'older'), run('n1', 'c', 'newer')], turns)?.summary).toBe('newer');
+    expect(runOf(stretch, rows, [run('c', 'c', 'nearest but later in the file is not nearest'), run('b', 'c', 'begins at b'), run('b', 'b', 'also at b, later in the file')], turns)?.summary).toBe('begins at b');
+    expect(runOf(stretch, rows, [run('b', 'a', 'bounds the wrong way round: holds no row, begins at b')], turns)?.summary).toBe('bounds the wrong way round: holds no row, begins at b');
+  });
+
   it('compares a row’s uuid by its first 24 characters and any other id whole (the mod’s rowKey)', () => {
     const { stretches, rows, turns } = scene(['prompt', { id: 'toolu_a', description: 'Read cache.ts', done: true }, 'message']);
     expect(runOf(stretches[0]!, rows, [run('toolu_', 'toolu_a', 'A prefix of a call’s id is not its id')], turns)).toBeUndefined();

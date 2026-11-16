@@ -91,8 +91,9 @@ function idsOf(row: Row, turns: Turns): readonly string[] {
 // A call as its turn's records hold it: its tool, its raw input and whether its result has come. Built once for each
 // turn's event list, which the reducer replaces whenever it changes.
 interface CallRecord { tool: string; input: unknown; done: boolean }
-const callsMemo = new WeakMap<readonly SessionEvent[], ReadonlyMap<string, CallRecord>>();
-function callsOf(turn: TurnState): ReadonlyMap<string, CallRecord> {
+interface TurnCalls { records: ReadonlyMap<string, CallRecord>; open: boolean } // open: a call of the turn has no result
+const callsMemo = new WeakMap<readonly SessionEvent[], TurnCalls>();
+function callsOf(turn: TurnState): TurnCalls {
   const known = callsMemo.get(turn.events);
   if (known !== undefined) return known;
   const records = new Map<string, CallRecord>();
@@ -103,8 +104,9 @@ function callsOf(turn: TurnState): ReadonlyMap<string, CallRecord> {
       if (record !== undefined) record.done = true;
     }
   }
-  callsMemo.set(turn.events, records);
-  return records;
+  const calls = { records, open: [...records.values()].some((record) => !record.done) };
+  callsMemo.set(turn.events, calls);
+  return calls;
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -116,12 +118,13 @@ function callsOf(turn: TurnState): ReadonlyMap<string, CallRecord> {
 interface Places {
   ofRow: Map<Row, number>;
   ofId: Map<string, number>; // by `rowKey`: the first place an id is kept at
+  size: number; // how many places the rows hold
 }
 const placesMemo = new WeakMap<readonly Row[], { turns: Turns; places: Places }>();
 function placesOf(rows: readonly Row[], turns: Turns): Places {
   const known = placesMemo.get(rows);
   if (known !== undefined && known.turns === turns) return known.places;
-  const places: Places = { ofRow: new Map(), ofId: new Map() };
+  const places: Places = { ofRow: new Map(), ofId: new Map(), size: 0 };
   let at = 0;
   for (const row of rows) {
     places.ofRow.set(row, at);
@@ -133,54 +136,84 @@ function placesOf(rows: readonly Row[], turns: Turns): Places {
     }
     if (ids.length === 0) at += 1;
   }
+  places.size = at;
   placesMemo.set(rows, { turns, places });
   return places;
 }
 
-// The stored runs whose both bounds the rows place, in the file's order (oldest first): `labelOf`'s placed runs
-// (folds.tsx 547). Each stored run is looked up once at each change of the rows or of the runs.
+// The stored runs whose both bounds the rows place (`labelOf`'s placed runs, folds.tsx 547), indexed once at each change
+// of the rows or of the runs for the two clauses that read them, so a line's run is found without a pass over the runs:
+// `cover`, for each place, the newest run with first <= place <= last (clause 3), painted newest first with each place
+// painted once (`next`: the first place at or after an index not yet painted); `byFirst`, the runs by their first's
+// place and then in the file's order (clause 4).
 interface Placed { run: StoredRun; first: number; last: number }
-const placedMemo = new WeakMap<readonly StoredRun[], { places: Places; placed: readonly Placed[] }>();
-function placedOf(places: Places, runs: readonly StoredRun[]): readonly Placed[] {
-  const known = placedMemo.get(runs);
-  if (known !== undefined && known.places === places) return known.placed;
+interface RunIndex { cover: (StoredRun | undefined)[]; byFirst: Placed[] }
+const indexMemo = new WeakMap<readonly StoredRun[], { places: Places; index: RunIndex }>();
+function indexOf(places: Places, runs: readonly StoredRun[]): RunIndex {
+  const known = indexMemo.get(runs);
+  if (known !== undefined && known.places === places) return known.index;
   const placed = runs.flatMap((run): Placed[] => {
     const first = places.ofId.get(rowKey(run.first));
     const last = places.ofId.get(rowKey(run.last));
     return first !== undefined && last !== undefined ? [{ run, first, last }] : [];
   });
-  placedMemo.set(runs, { places, placed });
-  return placed;
+  const cover: (StoredRun | undefined)[] = new Array(places.size);
+  const next = Int32Array.from({ length: places.size + 1 }, (_, i) => i);
+  const unpainted = (i: number): number => {
+    let root = i;
+    while (next[root] !== root) root = next[root]!;
+    for (let at = i; next[at] !== root; ) { // the path, compressed
+      const up = next[at]!;
+      next[at] = root;
+      at = up;
+    }
+    return root;
+  };
+  for (let i = placed.length - 1; i >= 0; i -= 1) {
+    const { run, first, last } = placed[i]!;
+    for (let at = unpainted(first); at <= last; at = unpainted(at)) {
+      cover[at] = run;
+      next[at] = at + 1;
+    }
+  }
+  const byFirst = placed.toSorted((a, b) => a.first - b.first); // stable: the file's order among equal firsts
+  const index = { cover, byFirst };
+  indexMemo.set(runs, { places, index });
+  return index;
 }
 
 // `labelOf` (folds.tsx 547), §M's one rule, clauses 1 and 3 to 5. Clause 2, the open run, never applies for MAWS: the
 // mod alone holds it, and its file holds an open run's summary as a run bounded by the last row it covered, which
 // clause 3 or 4 finds.
-function runAt(stretch: Stretch, places: Places, placed: readonly Placed[]): StoredRun | undefined {
+function runAt(stretch: Stretch, places: Places, index: RunIndex): StoredRun | undefined {
   // 1. `at` is the place of the stretch's head, else of its first row
   const head = stretch.head ?? stretch.rows[0];
   const at = head === undefined ? undefined : places.ofRow.get(head);
   if (at === undefined) return undefined;
   // 3. the newest closed run with both bounds placed and first <= at <= last
-  for (let i = placed.length - 1; i >= 0; i -= 1) {
-    const { run, first, last } = placed[i]!;
-    if (first <= at && at <= last) return run;
-  }
+  const covering = index.cover[at];
+  if (covering !== undefined) return covering;
   // 4. else, of the runs with both bounds placed, the one whose first lies after `at` and at or before the place of the
   // stretch's last row, nearest first; on a tie the earlier in the file's order
-  const tail = stretch.rows.at(-1) ?? head;
-  const end = places.ofRow.get(tail);
+  const end = places.ofRow.get(stretch.rows.at(-1) ?? head);
   if (end === undefined) return undefined;
-  let nearest: Placed | undefined;
-  for (const candidate of placed) if (candidate.first > at && candidate.first <= end && (nearest === undefined || candidate.first < nearest.first)) nearest = candidate;
+  const { byFirst } = index;
+  let low = 0;
+  let high = byFirst.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    if (byFirst[mid]!.first > at) high = mid;
+    else low = mid + 1;
+  }
+  const nearest = byFirst[low];
   // 5. else none: the line reads `working record`
-  return nearest?.run;
+  return nearest !== undefined && nearest.first <= end ? nearest.run : undefined;
 }
 
 /** §M's one rule from a line's stretch to its stored run, over the runs in the file's order; no fallback of MAWS's own. */
 export function runOf(stretch: Stretch, rows: readonly Row[], runs: readonly StoredRun[], turns?: ReadonlyMap<TurnId, TurnState>): StoredRun | undefined {
   const places = placesOf(rows, turns);
-  return runAt(stretch, places, placedOf(places, runs));
+  return runAt(stretch, places, indexOf(places, runs));
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
@@ -254,13 +287,16 @@ export function lineOf(tool: string, input: unknown): string {
  * its tool-use id in its turn's records.
  */
 export function liveLine(stretch: Stretch, covered: StoredRun | undefined, last: boolean, running: boolean, turns?: ReadonlyMap<TurnId, TurnState>): string | undefined {
+  const lastRunning = last && running;
+  // a settled stretch, the most of them, is told by its turns alone: none holds a call with no result
+  if (!lastRunning && ![...stretch.turns].some((id) => { const turn = turns?.get(id); return turn !== undefined && callsOf(turn).open; })) return undefined;
   const kept: { id: string; call: CallRecord | undefined }[] = [];
   for (const row of stretch.head === null ? stretch.rows : [stretch.head, ...stretch.rows]) {
     const turn = row.turnId === null ? undefined : turns?.get(row.turnId);
-    const calls = turn === undefined ? undefined : callsOf(turn);
+    const calls = turn === undefined ? undefined : callsOf(turn).records;
     for (const id of idsOf(row, turns)) kept.push({ id, call: calls?.get(id) });
   }
-  const live = (last && running) || kept.some(({ call }) => call !== undefined && !call.done);
+  const live = lastRunning || kept.some(({ call }) => call !== undefined && !call.done);
   if (!live) return undefined;
   // after the row the stored run's last names; a last no row of the stretch holds stands past it, so no call is newer
   let from = 0;
