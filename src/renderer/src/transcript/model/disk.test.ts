@@ -7,6 +7,7 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
+import { askSteerText } from '@shared/maws/ask'; // board ticket 711
 import { AgentMetaSchema } from '@shared/wire/transcript';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
 import { loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
@@ -260,6 +261,29 @@ describe('a maws ask read from disk', () => {
     expect(state.order).toHaveLength(2);
     expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
     await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-ask-async.rows.json'));
+  });
+
+  // Board ticket 711: the same transcript with its steer as this build writes it (the pick by its place among the
+  // options, no words of the model's), the disk's only record of the answers: the capsule draws the label from the call
+  it('p1-maws-ask-async with its steer in the new form: the capsule draws the picked label from the call, and the steer is no bubble', async () => {
+    const ASK_ID = 'toolu_016zBCDTWVXbAqbGdLyd1Zzj';
+    const text = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'p1-maws-ask-async.jsonl'), 'utf8');
+    const contentOf = (line: string): unknown => (JSON.parse(line) as { message?: { content?: unknown } }).message?.content;
+    const old = text.split('\n').filter(Boolean).map(contentOf).find((content): content is string => typeof content === 'string' && content.startsWith(`[MAWS ask ${ASK_ID}]`));
+    expect(old).toContain('1. Proceed? — Yes'); // the recording's form
+    const question = { id: 'q1', question: 'Proceed?', modality: 'choice' as const, options: [{ label: 'Yes' }, { label: 'No' }] };
+    const fresh = askSteerText(ASK_ID, [question], [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }]);
+    expect(fresh.split('\n')[1]).toBe('1. option 1');
+    const swapped = text.replaceAll(JSON.stringify(old).slice(1, -1), JSON.stringify(fresh).slice(1, -1));
+    expect(swapped).not.toBe(text);
+    const disk = await backfill(Buffer.from(swapped), 'ccd2c390-f412-47ce-a480-87c2524d643e');
+    expect(disk.filter((event) => event.kind.startsWith('maws.'))).toEqual([]);
+    const state = stateOf(disk);
+    const rows = rowsOf(withAllExpanded(state));
+    const [ask] = ofKind(rows, 'ask');
+    expect(ask).toMatchObject({ state: 'answered', askId: ASK_ID, answers: [{ id: 'q1', question: '', status: 'answered', value: ['Yes'] }] });
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(state.order.slice(0, 1));
+    expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
   });
 });
 
