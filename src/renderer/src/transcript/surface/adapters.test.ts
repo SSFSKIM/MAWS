@@ -335,6 +335,16 @@ describe('transcript surface adapters', () => {
     expect(commandInput(row, state)?.props).toEqual({ command: 'model', args: 'haiku', text: 'Set model', isErrored: false });
   });
 
+  // The branch panel's finding 2: on the live route a typed /compact draws its bubble, the boundary, then its output,
+  // which stands alone, so the opener's fallback does not cross the boundary (the recordings replayed).
+  it.each(['u3b-forkcmd-source-compact', 'u3-commands-r1'])('%s, live: asks with no command for the /compact output drawn under the boundary', (name) => {
+    const state = applyEvents(createState(null, null), journalToEvents(loadUxwaveJournal(name)));
+    const drawn = rowsOf(state);
+    const separated = drawn.filter((row, i): row is Extract<Row, { kind: 'local_command' }> => row.kind === 'local_command' && drawn[i - 1]?.kind === 'boundary');
+    expect(separated.length).toBeGreaterThan(0);
+    for (const row of separated) expect(commandInput(row, state)?.props).toEqual({ command: '', args: '', text: row.text, isErrored: false });
+  });
+
   it('asks with no command for an output that stands alone with no run', () => {
     const b = builder();
     b.emit('user.message', { messageUuid: uuid('o1'), content: '<local-command-stdout>Loose output</local-command-stdout>', isReplay: false, isSynthetic: false, origin: 'local-command', bash: null });

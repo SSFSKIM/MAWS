@@ -8,7 +8,6 @@ import { commandEntry } from '@shared/engine/arrival';
 import { describe, expect, it } from 'vitest';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
-import { commandInput } from '../surface/adapters';
 import { rowsOf, withAllExpanded } from './derive';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
@@ -154,15 +153,13 @@ describe('a command output’s row', () => {
 
     for (const name of ['u3b-forkcmd-source-compact', 'u3-commands-r1']) {
       it(`${name}, live: a /compact that compacted draws its output alone under the boundary, in the drawn row and in its copy`, () => {
-        const state = live(name);
-        const drawn = rowsOf(state);
+        const drawn = rowsOf(live(name));
         const separated = compactions(drawn).filter((rows) => rows.some((row) => row.kind === 'boundary'));
         expect(separated.length).toBeGreaterThan(0);
         for (const rows of separated) {
           expect(shape(rows)).toEqual(['user', 'boundary compaction', 'output Compacted lone']);
           const output = rows.at(-1) as Extract<Row, { kind: 'local_command' }>;
           expect(serializeRows([output])).toBe(`⎿ ${output.text}`); // the standalone form; no run is recorded for it (Engine facts, 7)
-          expect(commandInput(output, state)?.props).toMatchObject({ command: '', args: '' }); // the opener's fallback does not cross the boundary
         }
       });
     }
