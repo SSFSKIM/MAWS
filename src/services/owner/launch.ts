@@ -17,17 +17,26 @@
 // settings (the mismatch check): a mismatch makes the next decisions resolve by the engine's name until a launch's init
 // agrees with the resolver's own reading again. Each record is published as the session's owner channel state
 // (`ownerChannel.changed`), which the report and the mods library read again on.
+//
+// The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A and §M; decisions 1 to
+// 4 and 26): the advertisement follows who will draw the view: 9 where every applicable installation of the mod declares
+// it draws MAWS's view (its declaration read at each install path), 8 where MAWS draws it, nothing with the lane off. The
+// decision's last act reserves it in the index before the launch is sent; a 9 that cannot be reserved goes as 8. The
+// record at `launching` binds the reservation to the host's launch id. The summaries' switch is read once here, and a
+// launch decided while it is off carries TO_HUMAN_FOLD_SUMMARIES=off.
 import { homedir } from 'node:os';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
-import { TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { TO_HUMAN_MOD_ROUTE, TO_HUMAN_SUPPLEMENT_VERSION } from '@shared/owner/contract';
+import { advertisementFor, type Advertisement } from '@shared/owner/draws';
 import type { ContractSource, LaneOverride } from '@shared/owner/state';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import type { SessionStore } from '../index/sessions';
 import type { HostDispatch } from '@shared/host/host-supervisor';
 import { hostCall, transcriptPathOf } from '../sessions/context';
 import { withOwnerChannel, type AppendedText } from '../sessions/launch-mapping';
+import { readDeclaration } from './declaration';
 import { recordedState, type RecordedState } from './prompt-state';
 import { lookupStyle, resolveStyle, type ResolvedStyle, type StyleContext } from './resolve-style';
 import type { OwnerChannelStore } from './store';
@@ -46,6 +55,10 @@ export interface LaunchDecision {
   style: string; // the resolver's style name, read from the settings: the mismatch check compares the engine's with it
   decidedBy: string; // the style name the desired state was decided by: the resolver's, or the engine's while a mismatch stands
   styleUnresolved: string | null; // why the deciding style could not be found, when it could not
+  advertised: Advertisement; // U2b: what MAWS_NATIVE_TO_HUMAN carries: 9, 8, or nothing
+  plugin: boolean; // U2b: an applicable, enabled installation of the mod whose hooks load was found
+  reserved: boolean; // U2b: the reservation was written before the send (the record at `launching` binds it)
+  summariesOff: boolean; // U2b: the summaries' switch was off, so the launch carries TO_HUMAN_FOLD_SUMMARIES=off
 }
 
 // The lane's effective value: the session's override when set, else the app's switch.
@@ -99,6 +112,11 @@ export interface OwnerChannelLaunchDeps {
   subscribe?: (listener: (appSessionId: AppSessionId, events: readonly SessionEvent[]) => void) => void;
   // the session's owner channel changed (a launch recorded, a style observed): its state is published again
   changed?: (appSessionId: AppSessionId) => void;
+  // U2b: a decided launch was bound to the host's launch id (who draws follows that launch from here)
+  bound?: (appSessionId: AppSessionId, launchId: string) => void;
+  modRoute?: boolean; // U2b, the tests' seam: the cutover's switch (TO_HUMAN_MOD_ROUTE)
+  readDeclaration?: (installPath: string) => Promise<boolean>; // U2b, the tests' seam: ./declaration.ts
+  now?: () => string; // U2b, the tests' seam: the reservation's time
 }
 
 // The decided launches' bookkeeping: the record at `launching`, and the mismatch check at the launch's first init.
@@ -118,11 +136,13 @@ export class OwnerChannelLaunches {
       this.deps.store.recordLaunch(decision.appSessionId, {
         launchId: launch.launchId, at: launch.at, laneOn: decision.laneOn, desired: decision.desired, recorded: decision.recorded,
         appended: decision.appended, snapshotOff: decision.snapshotOff, offUnavailable: decision.offUnavailable, applied: decision.applied, style: decision.style,
+        reserved: decision.reserved,
       });
     } catch (error) {
       this.deps.log(`the owner channel could not record the launch of ${decision.appSessionId}: ${messageOf(error)}`);
       return;
     }
+    this.deps.bound?.(decision.appSessionId, launch.launchId);
     this.deps.changed?.(decision.appSessionId);
   }
 
@@ -163,6 +183,13 @@ export async function ownerChannelLaunch(
   }
   const override = row?.override ?? 'inherit';
   const on = laneOn(owner.deps.appEnabled(), override);
+  // U2b: the summaries' switch, read once for this launch; a write while it is decided is the next launch's
+  let summariesOff = false;
+  try {
+    summariesOff = !owner.deps.store.foldSummaries();
+  } catch (error) {
+    s.log(`the owner channel could not read the summaries' switch for ${appSessionId}: ${messageOf(error)}`); // absent reads as on
+  }
   const styleContext: StyleContext = {
     configHome: claudeConfigDir(s.env, s.env.HOME || homedir()),
     cwd: spec.cwd,
@@ -178,13 +205,32 @@ export async function ownerChannelLaunch(
   let flags = decideFlags(desired, recorded, true);
   if (flags.off) flags = decideFlags(desired, recorded, await declaresSnapshotFlag(s)); // the binary is asked only when "off" is wanted
   if (on && style.unresolved !== null) s.log(`${appSessionId}: ${style.unresolved}; the to-human lane is off`);
+  // U2b: who will draw. P4-R7z: the advertisement goes only where the lane carries the plugin's tool; under any other
+  // style the lane is off. The installations are the settings' (the resolver's own reading, whatever a mismatch decided)
+  const installations = await declarationsOf(owner.deps, resolved.toHuman.paths);
+  const plugin = resolved.toHuman.paths.length > 0 && resolved.toHuman.hooksLoad;
+  let advertised = advertisementFor(desired !== 'off', installations, owner.deps.modRoute ?? TO_HUMAN_MOD_ROUTE);
+  // the decision's last act: the reservation, before the send (R2). A 9 that cannot be reserved is never sent
+  let reserved = true;
+  try {
+    owner.deps.store.reserveLaunch(appSessionId, { launchId: null, number: advertised, plugin, at: (owner.deps.now ?? nowIso)() });
+  } catch (error) {
+    reserved = false;
+    s.log(`the owner channel could not reserve ${appSessionId}'s launch${advertised === 9 ? '; it advertises 8' : ''}: ${messageOf(error)}`);
+    if (advertised === 9) advertised = 8;
+  }
   const record: LaunchDecision = {
     appSessionId, kind: ctx.kind, laneOn: on, override, desired, recorded, appended: flags.append !== null, snapshotOff: flags.off,
     offUnavailable: flags.offUnavailable, applied: flags.applied, style: resolved.name, decidedBy: style.name, styleUnresolved: style.unresolved,
+    advertised, plugin, reserved, summariesOff,
   };
-  // P4-R7z: the advertisement goes only where the lane carries the plugin's tool; under any other style the lane is off
-  return { spec: withOwnerChannel(spec, { laneOn: desired !== 'off', append: flags.append, snapshotOff: flags.off }), record };
+  return { spec: withOwnerChannel(spec, { advertisement: advertised, append: flags.append, snapshotOff: flags.off, summariesOff }), record };
 }
+
+// U2b: each applicable installation's declaration, read at its install path
+const declarationsOf = (deps: OwnerChannelLaunchDeps, paths: readonly string[]): Promise<{ declares: boolean }[]> =>
+  Promise.all(paths.map(async (path) => ({ declares: await (deps.readDeclaration ?? readDeclaration)(path) })));
+const nowIso = () => new Date().toISOString();
 
 // The host answered `launching` for a decided launch (nothing to record for an undecided one).
 export function ownerChannelLaunched(s: Pick<OwnerLaunchSetup, 'owner'>, record: LaunchDecision | null, launch: { launchId: string; at: string }): void {

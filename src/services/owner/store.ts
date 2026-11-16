@@ -4,7 +4,13 @@
 // resolved style) and the style the engine reported at that launch's first `session.init` (the mismatch check).
 // `owner_channel_marks`: per question and essential its state, answer and times (Design §5, §6). Both go with the
 // session's record. The attention items of the two owner kinds are a projection of the marks, never the truth.
+// The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A, §F and §M): the session
+// row's added column `advertised`, the launch's reservation (JSON), and the summaries' switch, one key of the index's own
+// facts (`index_meta`, `toHuman.foldSummaries`: `off`, or absent for on). An earlier build reads the row with `SELECT *`
+// by column name and updates only the columns it names, so it leaves both as they are.
+import * as z from 'zod';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { Reservation } from '@shared/owner/draws';
 import type { AnswerMember, ContractSource, LaneOverride } from '@shared/owner/state';
 import type { Db, Value } from '../index/db';
 import type { StoredAnswer } from './answers';
@@ -25,6 +31,7 @@ export interface OwnerSessionRow {
   style: string | null; // the resolver's style name for it (read from the settings, whatever a mismatch decided by)
   observedStyle: string | null; // the engine's, at its first session.init
   styleMismatch: boolean;
+  advertised: Reservation | null; // U2b: the last reserved launch's advertisement, bound to its id once the host answered
 }
 
 // What a decided launch writes when the host answers `launching`.
@@ -39,6 +46,7 @@ export interface LaunchRecord {
   offUnavailable: boolean;
   applied: ContractSource;
   style: string;
+  reserved?: boolean; // U2b: this launch's reservation was written before the send, so the record binds it to the launch
 }
 
 export type OwnerMarkState = 'unanswered' | 'queued' | 'unconfirmed' | 'delivered' | 'unread' | 'read' | 'retired';
@@ -84,6 +92,7 @@ interface SessionRow {
   style: string | null;
   observed_style: string | null;
   style_mismatch: number;
+  advertised: string | null;
 }
 
 interface MarkRow {
@@ -123,7 +132,21 @@ const toSession = (row: SessionRow): OwnerSessionRow => ({
   style: row.style,
   observedStyle: row.observed_style,
   styleMismatch: row.style_mismatch === 1,
+  advertised: reservationOf(row.advertised),
 });
+
+// The stored reservation; a value that does not parse is no reservation.
+const ReservationSchema = z.strictObject({ launchId: z.string().min(1).nullable(), number: z.union([z.literal(9), z.literal(8), z.null()]), plugin: z.boolean(), at: z.string() });
+function reservationOf(stored: string | null): Reservation | null {
+  if (stored === null) return null;
+  try {
+    const parsed = ReservationSchema.safeParse(JSON.parse(stored));
+    return parsed.success ? parsed.data : null;
+  } catch {
+    return null;
+  }
+}
+const FOLD_SUMMARIES_KEY = 'toHuman.foldSummaries';
 
 const toMark = (row: MarkRow): OwnerMarkRow => ({
   id: row.id,
@@ -185,19 +208,49 @@ export class OwnerChannelStore {
   }
 
   // A decided launch the host answered `launching` for. The watermark is set at a lane-on launch when it is unset, and
-  // cleared at a lane-off one (Design §5); the override and the observed style are kept.
+  // cleared at a lane-off one (Design §5); the override and the observed style are kept. U2b: a launch whose reservation
+  // was written binds it to its id (a resume's second attempt binds it again); one whose reservation could not be written
+  // binds nothing, so what is stored stays another launch's and the advertisement is read from `desired` (§A).
   recordLaunch(appSessionId: AppSessionId, launch: LaunchRecord): void {
     this.db.transaction(() => {
       this.known(appSessionId);
       this.db.run('INSERT INTO owner_channel_sessions (app_session_id) VALUES (?) ON CONFLICT (app_session_id) DO NOTHING', appSessionId);
+      const row = this.session(appSessionId);
       const values: Record<string, Value> = {
         launch_id: launch.launchId, launched_at: launch.at, desired: launch.desired, recorded: launch.recorded, appended: launch.appended,
         snapshot_off: launch.snapshotOff, off_unavailable: launch.offUnavailable, applied: launch.applied, style: launch.style,
       };
       if (!launch.laneOn) values.enabled_at = null;
-      else if ((this.session(appSessionId)?.enabledAt ?? null) === null) values.enabled_at = launch.at;
+      else if ((row?.enabledAt ?? null) === null) values.enabled_at = launch.at;
+      if (launch.reserved === true && row?.advertised) values.advertised = JSON.stringify({ ...row.advertised, launchId: launch.launchId });
       this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, values);
     });
+  }
+
+  // U2b: a launch's advertisement, written before the launch is sent, unbound; it replaces any earlier reservation (one
+  // that never ran included). Throws when it cannot be written, which the launch reads as "advertise 8".
+  reserveLaunch(appSessionId: AppSessionId, reservation: Reservation): void {
+    this.db.transaction(() => {
+      this.known(appSessionId);
+      this.db.run('INSERT INTO owner_channel_sessions (app_session_id) VALUES (?) ON CONFLICT (app_session_id) DO NOTHING', appSessionId);
+      this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify(reservation) });
+    });
+  }
+
+  // U2b: the daemon's start found the reserved launch running (the host accepted it, the bind was never written).
+  bindReservation(appSessionId: AppSessionId, launchId: string): void {
+    const reserved = this.session(appSessionId)?.advertised;
+    if (reserved) this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify({ ...reserved, launchId }) });
+  }
+
+  // U2b (§M, "The switch"): whether new fold summaries are made in the launches MAWS decides. On unless `off` is stored.
+  foldSummaries(): boolean {
+    return this.db.get<{ value: string }>('SELECT value FROM index_meta WHERE key = ?', FOLD_SUMMARIES_KEY)?.value !== 'off';
+  }
+
+  setFoldSummaries(on: boolean): void {
+    if (on) this.db.run('DELETE FROM index_meta WHERE key = ?', FOLD_SUMMARIES_KEY);
+    else this.db.run("INSERT INTO index_meta (key, value) VALUES (?, 'off') ON CONFLICT (key) DO UPDATE SET value = excluded.value", FOLD_SUMMARIES_KEY);
   }
 
   // The style the engine reported at a decided launch's first `session.init`, and whether it differs from the resolver's.

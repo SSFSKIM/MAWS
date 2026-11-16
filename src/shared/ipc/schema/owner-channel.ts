@@ -2,9 +2,12 @@
 // session's lane and its stored marks with their states, and `changed` carries the same whole on every change. The
 // card's send goes through the seam (X22), and the renderer then reports the seam's result with `answered`, from which
 // main follows the answer; `cancel` withdraws an answer still in the queue or still a pending steer; `markRead` reads
-// essentials. All owned by main.
+// essentials. All owned by main. The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md,
+// Interfaces §M): `folds` answers the runs of the to-human mod's file of fold summaries for a session of this machine,
+// `runs: null` when a file is there that is not of the contract's shape or cannot be read (keep what you had).
 import * as z from 'zod';
 import { AppSessionIdSchema, MessageUuidSchema } from '../../graph/ids';
+import { STORED_RUNS_MAX, StoredRunSchema } from '../../owner/folds';
 import { MarkIdSchema } from '../../owner/marks';
 import { AnswerOriginSchema, OwnerChannelStateSchema } from '../../owner/state';
 import type { CommandSpec } from './common';
@@ -37,6 +40,7 @@ export const commands = {
     owner: 'machine',
   },
   'ownerChannel.markRead': { input: z.strictObject({ appSessionId: AppSessionIdSchema, markIds: z.union([z.array(MarkIdSchema), z.literal('all')]) }), output: z.void(), owner: 'machine' },
+  'ownerChannel.folds': { input: z.strictObject({ appSessionId: AppSessionIdSchema }), output: z.strictObject({ runs: z.array(StoredRunSchema).max(STORED_RUNS_MAX).nullable() }), owner: 'machine' }, // U2b
 } as const satisfies Record<`ownerChannel.${string}`, CommandSpec<z.ZodType, z.ZodType>>;
 
 export const events = {

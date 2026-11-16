@@ -35,6 +35,7 @@ import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { SessionRecord } from '@shared/graph/session';
 import { answersOf, answerText } from '@shared/owner/answer';
 import { markIdOf, type MarkId } from '@shared/owner/marks';
+import type { DrawnBy } from '@shared/owner/draws';
 import type { AnswerMember, OwnerChannelState, OwnerMark, QuestionState } from '@shared/owner/state';
 import { TO_HUMAN_GRAMMAR_VERSION } from '@shared/owner/to-human-parser';
 import type { SessionStore } from '../index/sessions';
@@ -75,6 +76,9 @@ export interface OwnerChannelServiceDeps {
   now?: () => string; // ISO-8601; the tests' clock
   log?: (message: string) => void;
   recoveryRetryMs?: number; // the first retry's delay after a failed recovery read
+  // the UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §A): who draws the session's
+  // to-human view, published with every state (./drawn-by.ts); absent, MAWS
+  drawnBy?: (appSessionId: AppSessionId) => DrawnBy;
 }
 
 // A send of a question's answer that did not go out, as the seam said (X22): refused in its words, or held by a trust or
@@ -347,6 +351,7 @@ export class OwnerChannelService {
       lane: {
         on: effective, override, applied: row?.applied ?? null, pending: pendingOf(row, on),
         mismatch: row?.styleMismatch && row.style !== null && row.observedStyle !== null ? { resolved: row.style, observed: row.observedStyle } : null,
+        drawnBy: this.deps.drawnBy?.(appSessionId) ?? 'maws', // U2b: always sent
       },
       marks: this.deps.store.marks(appSessionId).map((mark) => ownerMarkOf(mark, unsent?.get(mark.id as MarkId), this.unreadable(appSessionId, mark.id as MarkId))),
     };
@@ -359,6 +364,11 @@ export class OwnerChannelService {
       this.project(id, true);
       this.emitState(id);
     }
+  }
+
+  // U2b: who draws the session's view moved (a status, a declaration read, a bound launch): its state is published again.
+  drawnByChanged(appSessionId: AppSessionId): void {
+    this.emitState(appSessionId);
   }
 
   // ---------------------------------------------------------------------------------------------------------------------

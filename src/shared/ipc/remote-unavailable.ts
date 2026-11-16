@@ -55,6 +55,7 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   // per window (P5 O8 M6a: a member's drafts are offered, kept per member on the machine)
   'session.setVisible': notYet('the machine’s own windows'),
   'session.ui.render': notYet('mod surfaces'),
+  'session.ui.renderSite': notYet('mod surfaces'), // UX wave U2b: as session.ui.render
   'session.ui.press': notYet('mod surfaces'),
   'session.ui.input': notYet('mod surfaces'),
   'session.ui.select': notYet('mod surfaces'),
@@ -76,10 +77,12 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'ownerChannel.answered': notYet('the owner channel'),
   'ownerChannel.cancel': notYet('the owner channel'),
   'ownerChannel.markRead': notYet('the owner channel'),
+  'ownerChannel.folds': notYet('the owner channel'), // UX wave U2b: as ownerChannel.state
   'side.thread.open': notYet('side threads'),
   'side.sendToMain': notYet('sending a side answer to the main conversation'),
   'mods.list': notYet('the mods that machine runs'),
   'mods.setSessionOverride': notYet('turning a mod on or off for one session'),
+  'mods.setFoldSummaries': notYet('the mods that machine runs'), // UX wave U2b: that machine's own switch
   // UX wave U11a M8 (docs/doperpowers/plans/2026-11-12-ux-wave-U11a-settings-connectors-org.md, §A): until U11f
   'connectors.signInDynamicServer': notYet('signing in to a connector from a plugin or from MAWS’s own list'),
 };
