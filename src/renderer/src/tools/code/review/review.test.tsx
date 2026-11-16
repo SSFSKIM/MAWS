@@ -2177,6 +2177,27 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     expect([fullReads(), checks()]).toEqual([1, 1]);
   });
 
+  // §G's "Review being shown again": a kept commit's read that failed is asked again when its tab is drawn again
+  it('asks a commit’s failed read again when its tab is shown again, once, and nothing once it answered', async () => {
+    serveReads();
+    let fails = true;
+    main().state.commits = () => (fails ? fail('the disk is busy') : commitAnswer(SHA));
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe('Diff unavailable: the disk is busyRetry'));
+    await hideReview();
+    fails = false;
+    showAgain();
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect(fullReads()).toBe(2);
+    await hideReview();
+    showAgain();
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    await act(tick);
+    expect(fullReads()).toBe(2);
+  });
+
   it('asks a read owed while the reads were lost once they return, and nothing it has', async () => {
     serveReads();
     main().state.commits = notOnHead;
