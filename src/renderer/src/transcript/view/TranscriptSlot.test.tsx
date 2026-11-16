@@ -372,7 +372,7 @@ describe('TranscriptSlot', () => {
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
-    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers: answers.map((answer) => ({ ...answer, question: '' })) }); // the steer's block: no question's words (board ticket 711)
     const heldTexts = [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent ?? '');
     expect(heldTexts).toHaveLength(2);
     expect(heldTexts[0]).toBe('Then run the tests');
@@ -397,7 +397,7 @@ describe('TranscriptSlot', () => {
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} waiting="stacked" />);
     await settle();
-    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers: answers.map((answer) => ({ ...answer, question: '' })) }); // the steer's block: no question's words (board ticket 711)
     expect(document.querySelectorAll('[data-pending="held"]')).toHaveLength(0);
     expect(document.body.textContent).not.toContain('Then run the tests');
     expect(document.body.textContent).not.toContain('[MAWS ask');
