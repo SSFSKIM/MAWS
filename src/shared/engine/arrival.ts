@@ -107,6 +107,22 @@ type AskSteer = NonNullable<ReturnType<typeof parseAskSteer>>;
  * each envelope gone; a text that is all envelope has an empty rest. Each member is the slice's bytes and what `read`
  * made of it. It uses its arguments alone: the search text's worker runs its source (ticket 704, decision 8), so its
  * helpers live inside it.
+ *
+ * Past the bound (ticket 704, the architect's ruling of 2026-11-16 on the cascade reviews, A): an earlier build wrote
+ * the model's question verbatim, so an envelope's own lines may hold another ask's whole opening line, which bounds it
+ * out, while that inner line's slice ends at a block naming the outer ask, which `read` refuses. Only where the bounded
+ * reading takes nothing, one reading past the bound: the shortest slice from an opening line that `read` takes whole,
+ * the inner opening lines ignored, tried from the last opening line to the first, and one taken. The reader's loop
+ * (`takeEnvelopesOut`) reads again until a reading takes nothing, so every bounded reading runs before any reading past
+ * the bound. That order keeps three things:
+ * 1. Decision 17's nested case is unchanged: an envelope whole inside another's lines is taken by the bound first, so
+ *    the reading past it never runs there; the next reading takes the outer one.
+ * 2. A later valid member is never swallowed: a member the bound can read is taken before any reading past the bound,
+ *    and the openings are tried from the last, so a slice taken past the bound holds only opening lines that read
+ *    nothing from themselves. A malformed member before a valid one is left as text: once the valid one is out, no
+ *    block names the malformed one's ask.
+ * 3. Such an envelope reads as one answer, and nothing of it is the person's.
+ * A slice still ends only at a block naming its opening's ask (`read`), and never inside a pasted segment.
  */
 export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: RegExp, read: (slice: string) => T | null): { members: { text: string; read: T }[]; rest: string } {
   if (!text.includes('[MAWS ask ')) return { members: [], rest: text }; // read on every user text the transcript draws
@@ -132,10 +148,11 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
   // The shortest run of lines from `start` that reads whole as an envelope, and the line after it; null where none does.
   // A run ends before the next opening line: `parseAskSteer` pairs the first tag with the last result block, so a
   // malformed member would otherwise run over the words and the envelope after it (the joined answer's task review).
-  const envelopeAt = (start: number): { member: { text: string; read: T }; next: number } | null => {
+  // Past the bound (`bounded` false), a later opening line does not end the run.
+  const envelopeAt = (start: number, bounded: boolean): { member: { text: string; read: T }; next: number } | null => {
     for (let last = start; last < lines.length; last++) {
       if (inPasted[last]) continue; // a slice may hold a pasted segment whole, never end inside one
-      if (last > start && opens(lines[last]!)) return null;
+      if (bounded && last > start && opens(lines[last]!)) return null;
       if (!lines[last]!.endsWith('```')) continue; // the result block's close ends every envelope
       const slice = lines.slice(start, last + 1).join('\n');
       const value = read(slice);
@@ -145,9 +162,12 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
   };
   const members: { text: string; read: T }[] = [];
   const kept: string[] = [];
+  const starts: number[] = [];
   for (let i = 0; i < lines.length; ) {
-    const found = !inPasted[i] && opens(lines[i]!) ? envelopeAt(i) : null;
+    const isOpening = !inPasted[i] && opens(lines[i]!);
+    const found = isOpening ? envelopeAt(i, true) : null;
     if (found === null) {
+      if (isOpening) starts.push(i);
       kept.push(lines[i]!);
       i += 1;
       continue;
@@ -155,7 +175,13 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
     members.push(found.member);
     i = found.next;
   }
-  return { members, rest: kept.join('\n') };
+  if (members.length > 0) return { members, rest: kept.join('\n') };
+  // The bound took nothing, so every opening line is still in the text: one reading past it, from the last
+  for (const start of starts.reverse()) {
+    const found = envelopeAt(start, false);
+    if (found !== null) return { members: [found.member], rest: [...lines.slice(0, start), ...lines.slice(found.next)].join('\n') };
+  }
+  return { members, rest: text };
 }
 
 /** The envelopes inside a text as `parseAskSteer` reads them, and the rest: `envelopeSlices` with the writer's opening line,
