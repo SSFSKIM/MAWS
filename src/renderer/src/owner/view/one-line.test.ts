@@ -3,7 +3,7 @@
 // on every input, whitespace-heavy ones included, and one visit to each character, however long a run of spaces is.
 // Counted, never timed. Every text is invented.
 import { describe, expect, it } from 'vitest';
-import { labelWork, lineOf } from './label';
+import { joinedChars, lineOf } from './label';
 
 // The rule as the mod writes it, and as MAWS ran it before this fix: the reference.
 const LINE_MAX = 120;
@@ -42,8 +42,9 @@ describe('a call’s line, joined in one pass', () => {
     }
   });
 
-  it('reads as the mod’s pattern on long runs of spaces, with and without a line break after them', () => {
-    for (const run of [1, 4000, 16000]) {
+  // the reference is the quadratic pattern, so its runs stay short enough for it; the count below takes the long ones
+  it('reads as the mod’s pattern on runs of spaces, with and without a line break after them', () => {
+    for (const run of [1, 300, 1500]) {
       for (const text of [`a${' '.repeat(run)}b`, `a${' '.repeat(run)}\nb`, `a\n${' '.repeat(run)}b`, `${' '.repeat(run)}\n`, `a${'\t  '.repeat(run)}b`]) {
         expect(lineOf('Bash', { description: text })).toBe(referenceLine(text));
       }
@@ -53,9 +54,9 @@ describe('a call’s line, joined in one pass', () => {
   it('visits each character of the line once, however long its runs of spaces', () => {
     for (const run of [4000, 8000, 16000]) {
       const pattern = `a${' '.repeat(run)}b`;
-      const before = labelWork().charsJoined;
+      const before = joinedChars();
       expect(lineOf('Grep', { pattern })).toBe(referenceOneLine(`Search "${pattern}"`));
-      expect(labelWork().charsJoined - before).toBe(`Search "${pattern}"`.length);
+      expect(joinedChars() - before).toBe(`Search "${pattern}"`.length);
     }
   });
 });
