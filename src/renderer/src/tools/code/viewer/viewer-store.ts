@@ -299,10 +299,11 @@ export function createViewerStore(client: MawsBridge) {
   const stale = new Map<string, LoadCause>(); // tabs to read at their next mount, and why (an event's reason wins)
   const used = new Map<string, number>();
   const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
-  // UX wave U6b-2: each key's ask in flight, from a counter that only grows; whether a read landed while it was out (one
-  // more ask after its answer); and whether what asked has given its frame up (`obsolete`: the answer is released on
-  // arrival). The slot is held until the answer comes, whatever happened to the entry meanwhile, so a key never has two
-  // asks in flight (decision 5), across a kind change, a refusal or a replaced entry alike.
+  // UX wave U6b-2: each living entry's ask in flight, from a counter that only grows; whether a read landed while it was
+  // out (one more ask after its answer); and whether the entry has given its frame up (`obsolete`: the answer is released
+  // on arrival). Through a kind change or a refusal of the same entry the slot is held until the answer comes, so an entry
+  // never has two asks in flight (decision 5). An entry removed or replaced lets its slot go: its ask goes on alone and its
+  // answer, matching no slot, is released when it comes (the table's X row), so the next entry under the key asks at once.
   const asks = new Map<string, { id: number; again: boolean; obsolete: boolean }>();
   let lastAsk = 0;
   let clock = 0;
@@ -333,18 +334,19 @@ export function createViewerStore(client: MawsBridge) {
       if (token !== null) void settled(client.invoke('layout.releaseFrame', { token }));
     };
     // The entry's frame is given up: its token released, and its ask in flight, if any, made obsolete (its answer released
-    // on arrival), its slot kept until then.
-    const dropFrame = (tabId: string) => {
+    // on arrival). The entry itself going (`gone`: removed, or replaced under its key) lets the slot go as well.
+    const dropFrame = (tabId: string, gone = false) => {
       release(heldToken(get().entries.get(tabId)?.frame ?? null));
       const out = asks.get(tabId);
-      if (out) {
+      if (gone) asks.delete(tabId);
+      else if (out) {
         out.obsolete = true;
         out.again = false;
       }
     };
 
     const remove = (tabId: string) => {
-      dropFrame(tabId);
+      dropFrame(tabId, true);
       holds.get(tabId)?.release();
       holds.delete(tabId);
       generations.delete(tabId);
@@ -710,7 +712,7 @@ export function createViewerStore(client: MawsBridge) {
           patch(tabId, { appSessionId, ...(line !== entry.line ? { line, pendingJump: line } : {}) });
           watchThenRead('change');
         } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
-          dropFrame(tabId); // UX wave U6b-2: the entry replaced gives its token up
+          dropFrame(tabId, true); // UX wave U6b-2: the entry replaced gives its token up, and its ask goes on alone
           holds.get(tabId)?.release();
           views.delete(tabId);
           stale.delete(tabId);
