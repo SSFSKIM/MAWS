@@ -97,14 +97,37 @@ function resultBlock(text: string): string | null {
 }
 
 // Board ticket 711: the steer is a user-role message, which the engine (its auto-mode permission classifier among its
-// readers) takes for the person's words; a probe on 2.1.322 recorded that classifier allowing a blocked call's retry on
-// the engine's consent sentence where it stood in a question's header. So the steer holds no text the model wrote: only
-// MAWS's own words, the ask's id, each question's number, and what the person gave or picked, each such value written
-// as a JSON string, so no line break or quote in it can shape a line. The model holds its questions in its own call.
+// readers) takes for the person's words; probes on 2.1.322 recorded that classifier allowing a blocked call's retry on
+// the engine's consent sentence where it stood in a question's header, and again where it stood in the label the
+// person picked, written as a JSON string. So the steer holds no text the model wrote: only MAWS's own words, the ask's
+// id, each question's number, a picked option by its place (`option <k>`), and what the person typed or chose from the
+// machine, each such value a JSON string, so no line break or quote in it can shape a line. The model holds its
+// questions and their options in its own call.
 
-// One answer as the steer's line reads it: the chosen labels (and what was typed under Other), the text, the paths one
-// per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design system's
-// `<name> (<id>)` (P3-D), each value a JSON string; or MAWS's own words: the build request and the two non-answers.
+const OPTION = /^option ([1-9]\d*)$/;
+
+// A choice's picks as the steer writes them: `option <k>`, k the 1-based place of the picked label among the question's
+// options (the first, where two options share a label). A value that is none of its labels is not written at all: the
+// host admits any string as a pick (askAnswersProblem checks the shape alone), and no text of it may reach the steer.
+function picksOf(question: AskQuestion, values: readonly string[]): string[] {
+  const labels = (question.options ?? []).map((option) => option.label);
+  return values.flatMap((value) => {
+    const k = labels.indexOf(value);
+    return k === -1 ? [] : [`option ${k + 1}`];
+  });
+}
+
+// An answer as the steer's block carries it: its question empty, and a choice's picks by their place
+function steeredAnswer(question: AskQuestion | undefined, answer: AskAnswer): AskAnswer {
+  const steered = { ...answer, question: '' };
+  if (question?.modality === 'choice' && Array.isArray(answer.value)) steered.value = picksOf(question, answer.value);
+  return steered;
+}
+
+// One answer as the steer's line reads it: the picks by their place (and what was typed under Other), the text, the
+// paths one per line indented three spaces (so the text starts with a newline), `<name> (<directory>)`, a design
+// system's `<name> (<id>)` (P3-D), each value a JSON string; or MAWS's own words: the build request and the two
+// non-answers. `answer` is the steered one (steeredAnswer).
 function answerText(question: AskQuestion, answer: AskAnswer | undefined): string {
   if (answer === undefined || answer.status === 'skipped') return 'skipped';
   if (answer.status === 'decide_for_me') return 'decide for me';
@@ -112,7 +135,7 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
   const quoted = values.map((value) => JSON.stringify(value)).join(', ');
   switch (question.modality) {
     case 'choice':
-      return [quoted, answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
+      return [values.join(', '), answer.otherText !== undefined ? `Other: ${JSON.stringify(answer.otherText)}` : ''].filter((part) => part !== '').join('; ');
     case 'text':
       return JSON.stringify(values.join('\n'));
     case 'file':
@@ -130,22 +153,41 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined): strin
 
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
 // `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the
-// AskResult of status `answered` as a fenced JSON block. Neither a question's header nor its words are on its line, nor
-// its id (model text too). In the block every answer keeps its `id`, which the readers of this build and of the builds
-// before it join an answer to its question by (the capsule's AnswerLine, the read-only sheet's QuestionSection, the
-// transcript's markdown), and its `question` is written as the empty string: AskAnswerSchema, as the earlier builds
-// have it, requires the key, and a block they could not parse would draw the envelope as raw text. No reader takes a
-// question's words from a steer: they come from the ask's call, by the question's id.
+// AskResult of status `answered` as a fenced JSON block. Neither a question's header, its words, its labels nor its id
+// (model text too) are on its line. In the block every answer keeps its `id`, which the readers of this build and of
+// the builds before it join an answer to its question by (the capsule's AnswerLine, the read-only sheet's
+// QuestionSection, the transcript's markdown); its `question` is written as the empty string (AskAnswerSchema, as the
+// earlier builds have it, requires the key, and a block they could not parse would draw the envelope as raw text), and
+// a choice's `value` holds the picks by their place. No reader takes a question's words from a steer: they come from
+// the ask's call, by the question's id, and so do the labels (askAnswersFromSteer).
 export function askSteerText(askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]): string {
-  const byId = new Map(answers.map((answer) => [answer.id, answer]));
+  const asked = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
+  const steered = answers.map((answer) => steeredAnswer(asked.get(answer.id), answer));
+  const byId = new Map(steered.map((answer) => [answer.id, answer]));
   const lines = questions.map((question, index) => {
     const answer = byId.get(askQuestionId(question, index));
     const text = answerText(question, answer);
     const note = answer?.note !== undefined ? `\n   note: ${JSON.stringify(answer.note)}` : '';
     return `${index + 1}.${text === '' || text.startsWith('\n') ? '' : ' '}${text}${note}`;
   });
-  const result: AskResult = { status: 'answered', askId, answers: answers.map((answer) => ({ ...answer, question: '' })) };
+  const result: AskResult = { status: 'answered', askId, answers: steered };
   return [`[MAWS ask ${askId}] The user answered the questions you asked:`, ...lines, '```json', JSON.stringify(result, null, 2), '```'].join('\n');
+}
+
+// The answers a steer carried, read with the ask's questions in hand (ids filled or by position): a new-form choice
+// answer's `option <k>` back to its question's k-th label, so a reader draws the label the person picked. An answer is
+// of the new form when its `question` is empty (an earlier build's always holds the question's words, which the schema
+// makes non-empty), and that alone is touched: an earlier build's envelope, a value that names no option of the call,
+// and every other modality come back as they are. A reader with no call in hand shows `option <k>`.
+export function askAnswersFromSteer(questions: readonly AskQuestion[], answers: AskAnswer[]): AskAnswer[] {
+  if (!answers.some((answer) => answer.question === '')) return answers;
+  const asked = new Map(questions.map((question, index) => [askQuestionId(question, index), question]));
+  return answers.map((answer) => {
+    const question = asked.get(answer.id);
+    if (answer.question !== '' || question?.modality !== 'choice' || !Array.isArray(answer.value)) return answer;
+    const labels = (question.options ?? []).map((option) => option.label);
+    return { ...answer, value: answer.value.map((value) => labels[Number(OPTION.exec(value)?.[1] ?? 0) - 1] ?? value) };
+  });
 }
 
 // The steer recognised back from a user message's text: its ask id and answered result, or null for any other text (an

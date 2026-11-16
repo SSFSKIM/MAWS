@@ -3217,20 +3217,25 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
 // The answer to an asynchronous `mcp__maws__ask` reaches the engine as a user-role message, its envelope
 // (src/shared/maws/ask.ts, askSteerText), which the session's journal and the engine's transcript keep and every build
 // that opens the session reads (parseAskSteer: the transcript's capsule and bubbles, the queue's row, the arrivals
-// reader). From this landing it holds no text the model wrote: each question by its number, the answers as JSON
-// strings, the block's `question` empty and each answer's `id` kept (the capsule joins an answer to its question by
-// it). The builds before it write the question's words on its line and in its block. Both scenes play the recorded
-// async ask (pass3/p1-maws-ask-async) on the stub engine under a session host, answer it through `maws.ask.answer` as
-// the Question sheet does, and quit with the session kept; the other build opens the session.
-//   (envelope, to the peer)    this build's host writes the new form; the peer draws the answer on the question's row,
-//                              whole, and no "[MAWS ask" text in the session's transcript.
-//   (envelope, from the peer)  the peer's host writes its form; this build draws it the same. Run only with a peer that
-//                              writes the earlier form (its ask.ts keeps the question's words in the block); skipped
-//                              otherwise, saying so.
-// On this route the capsule may take its answers from the host's `maws.ask.answered` event, which wins over the steer
-// (derive.ts, askRow); the envelope is read all the same, since only a reader that parsed it draws it as no bubble. The
-// steer as the answers' only source (a session read from the engine's transcript alone) is held by the unit tests
-// (src/renderer/src/transcript/model/maws.test.ts). Its row is in UC-14's coverage table (U13a's block).
+// reader). From this landing it holds no text the model wrote: each question by its number, a picked option by its
+// place (`option <k>`), the other answers as JSON strings, the block's `question` empty and each answer's `id` kept
+// (the capsule joins an answer to its question by it). The builds before it write the question's words and the label on
+// its line and in its block. Both scenes play the recorded async ask (pass3/p1-maws-ask-async) on the stub engine under
+// a session host, answer it through `maws.ask.answer` as the Question sheet does, and quit with the session kept; the
+// other build opens the session.
+//   (envelope, to the peer)   this build's host writes the new form; the peer draws the answer on the question's row,
+//                             whole, and no "[MAWS ask" text in the session's transcript. Its row reads the label
+//                             ("Yes") where it holds the host's `maws.ask.answered` event, which wins over the steer,
+//                             or `option 1` where the steer is its only source (a build before this one cannot read the
+//                             place back); the scene says which it met and fails on any third.
+//   (envelope, from the peer) the peer's host writes its form; this build draws the label ("Yes") the same. Run only
+//                             with a peer that writes the earlier form (its ask.ts keeps the question's words in the
+//                             block); skipped otherwise, saying so.
+// This build's window draws "Yes" either way: from the event, or from the steer read back with the call
+// (askAnswersFromSteer). The envelope is read all the same, since only a reader that parsed it draws it as no bubble.
+// The steer as the answers' only source (a session read from the engine's transcript alone) is held by the unit tests
+// (src/renderer/src/transcript/model/maws.test.ts and disk.test.ts). Its row is in UC-14's coverage table (U13a's
+// block).
 const ASK_ASYNC_FIXTURE = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
 const ENVELOPE_ANSWERS = [{ id: 'q1', question: 'Proceed?', status: 'answered' as const, value: ['Yes'] }]; // as the sheet sends them
 const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes("question: '' }))");
@@ -3266,9 +3271,10 @@ async function answerAsyncAsk(page: Page, s: Scratch, id: AppSessionId): Promise
   return { askId: opened!.askId, envelope: envelope! };
 }
 
-// The session as `run`'s window draws it: its tab shown, the ask's capsule answered with "Proceed?" → "Yes" on its one
-// question's row, and no "[MAWS ask" text in its transcript (an envelope no reader parsed would be a bubble of it)
-async function drawsAnswered(run: Run, id: AppSessionId, askId: string): Promise<void> {
+// The session as `run`'s window draws it: its tab shown, the ask's capsule answered on its one question's row,
+// "Proceed?" → one of `answers` (the label, or the pick by its place), and no "[MAWS ask" text in its transcript (an
+// envelope no reader parsed would be a bubble of it). Returns what the row read.
+async function drawsAnswered(run: Run, id: AppSessionId, askId: string, answers: readonly string[] = ['Yes']): Promise<string> {
   await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
   const main = run.page.locator('[data-region="main"]');
   const capsule = main.locator(`section.transcript-ask[data-ask-id="${askId}"]`);
@@ -3276,10 +3282,12 @@ async function drawsAnswered(run: Run, id: AppSessionId, askId: string): Promise
   const line = capsule.locator('[data-ask-answer]');
   await expect(line, 'one row, the question’s').toHaveCount(1);
   await expect(line.locator('.transcript-question-label'), 'the question’s words, from the call').toHaveText('Proceed?');
-  await expect(line.locator('.transcript-question-answer'), 'the answer on its question’s row').toHaveText('Yes');
-  await expect(line.locator('.transcript-question-answer')).not.toHaveAttribute('data-answer', 'none');
+  const answer = line.locator('.transcript-question-answer');
+  await expect(answer).not.toHaveAttribute('data-answer', 'none');
+  await expect.poll(async () => answers.includes((await answer.textContent()) ?? ''), { message: `the answer on its question’s row, whole: one of ${answers.join(', ')}` }).toBe(true);
   await expect(main.locator('[data-transcript-scroller]').getByText('[MAWS ask', { exact: false }), 'the envelope is drawn as no text').toHaveCount(0);
   expect(run.maws.consoleErrors()).toEqual([]);
+  return (await answer.textContent()) ?? '';
 }
 
 test('(envelope, to the peer) this build’s host delivers an async ask’s answer by the question’s number alone; the peer draws it on the question’s row, whole, and never the envelope as raw text', async () => {
@@ -3293,16 +3301,16 @@ test('(envelope, to the peer) this build’s host delivers an async ask’s answ
     const id = await s.record(run.page);
     await s.launchSession(run.page, id, ASK_ASYNC_FIXTURE, { cwd: s.repo });
     const { askId, envelope } = await answerAsyncAsk(run.page, s, id);
-    expect(envelope.split('\n').slice(0, 3), 'this build’s host wrote the new form').toEqual([`[MAWS ask ${askId}] The user answered the questions you asked:`, '1. "Yes"', '```json']);
-    expect(envelope, 'with no words of the model’s').not.toContain('Proceed?');
+    expect(envelope.split('\n').slice(0, 3), 'this build’s host wrote the new form').toEqual([`[MAWS ask ${askId}] The user answered the questions you asked:`, '1. option 1', '```json']);
+    for (const words of ['Proceed?', 'Yes']) expect(envelope, 'with no words of the model’s').not.toContain(words);
     await drawsAnswered(run, id, askId);
     await s.quit(run);
     said.push(`  ${here.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn here answered`);
 
     const old = await launchServed(s, id, peer.root);
-    await drawsAnswered(old, id, askId);
+    const read = await drawsAnswered(old, id, askId, ['Yes', 'option 1']);
     await s.quit(old);
-    said.push(`  ${peer.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
+    said.push(`  ${peer.label}: the capsule answered, "Proceed?" → ${JSON.stringify(read)} on its row (${read === 'Yes' ? 'the label, from the host’s event' : 'the pick by its place, from the steer'}), no envelope drawn`);
     record(said);
   });
 });
@@ -3321,7 +3329,7 @@ test('(envelope, from the peer) the peer’s host delivers an async ask’s answ
     expect(value(await invoke(old.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
     await expect.poll(async () => value(await invoke(old.page, 'session.status', { appSessionId: id })).process, { timeout: 30_000 }).toBe('ready');
     const { askId, envelope } = await answerAsyncAsk(old.page, s, id);
-    expect(envelope.split('\n')[1], 'the peer’s host wrote the earlier form, the question’s words on its line').toBe('1. Proceed? — Yes');
+    expect(envelope.split('\n')[1], 'the peer’s host wrote the earlier form, the question’s words and the label on its line').toBe('1. Proceed? — Yes');
     await drawsAnswered(old, id, askId);
     await s.quit(old);
     said.push(`  ${peer.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn there answered`);
