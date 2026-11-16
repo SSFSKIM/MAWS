@@ -169,7 +169,7 @@ function bounded(value: unknown, depth = 1): Sized | null {
 // other ask does, for the run as a whole: a run that is the target or holds it asks nothing. `revealed` is not handed to
 // `toolInputs`, since an ask that left the revealed call out would name another first call, and the instance id is
 // made from the first call. The open state sent is the run's own.
-export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
+export function groupInput(row: Pick<RowOf<'group'>, 'id' | 'cells' | 'expanded'>, turn: TurnState | undefined, pending: TranscriptState['pending'], revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
   if (revealed !== undefined && (row.id === revealed || row.cells.some((cell) => cell.id === revealed))) return null;
   const tools = row.cells.flatMap((cell) => toolInputs(cell, turn));
   if (!tools.length) return null;
@@ -200,7 +200,7 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
 export function standaloneRunInput(cell: RowOf<'cell'>, turn: TurnState | undefined, state: TranscriptState, revealed?: RowId | CellId): RowInput<'ToolGroup'> | null {
   if (!cell.classification.groupable) return null;
   const id = rowId.group(cell.id);
-  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) } as RowOf<'group'>, turn, state.pending, revealed);
+  return groupInput({ id, cells: [cell], expanded: state.ui.expandedGroups.has(id) }, turn, state.pending, revealed);
 }
 
 // UX wave U3b (decision 5): the command is the run the output's event carries, else, for an output under its command's
