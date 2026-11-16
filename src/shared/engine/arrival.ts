@@ -224,13 +224,27 @@ function quotedStrings(text: string, from: number): string[] | null {
 
 /**
  * The grants in the person's own text (rule 1): the whole text's, else, for a text that holds a line break, those of
- * each line that is a whole sentence, in order. The engine joins waiting messages with one line break, and a sentence
- * holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c document, Design 2).
+ * each of the person's own lines that is a whole sentence, in order. The engine joins waiting messages with one line
+ * break, and a sentence holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c
+ * document, Design 2). A grant is read only in the person's own words (Decision Log 52): never on a line of MAWS's
+ * answer envelope nor inside a pasted segment, where a sentence is data; one MAWS does not read leaves its blocked row
+ * with its button.
  */
 export function personsGrants(text: string): Consent[] {
   const whole = readConsents(text);
   if (whole.length > 0 || !text.includes('\n') || !text.includes(GRANT_OPENING)) return whole;
-  return text.split('\n').flatMap((line) => readConsents(line));
+  return ownLines(text).flatMap(({ line, pasted }) => (pasted ? [] : readConsents(line)));
+}
+
+/**
+ * The lines of a text with MAWS's answer envelopes taken out (`readAnswerEnvelopes`'s rest), each marked when it starts
+ * inside a pasted segment. The person's words are the lines not marked; joined back, every line is the rest.
+ */
+export function ownLines(text: string): { line: string; pasted: boolean }[] {
+  const { rest } = readAnswerEnvelopes(text);
+  const lines = rest.split('\n');
+  const pasted = pastedLines(rest, lines);
+  return lines.map((line, i) => ({ line, pasted: pasted[i]! }));
 }
 
 type Read = { arrivals: Arrival[]; open: OpenArrivals };
