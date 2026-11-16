@@ -13,7 +13,7 @@ import {
   type GitChangesSinceInput, type GitCommitDiff, type GitCommitDiffInput, type GitDiff, type GitDiffFile, type GitDiffInput, type GitLog, type GitLogInput, type GitStatus,
 } from '@shared/ipc/schema/git';
 import { countAddedLines, type CountHooks } from '../fs/count-lines';
-import { defaultBase, headCommit } from './default-base';
+import { defaultBaseRef, headCommit, mergeBaseWithHead } from './default-base';
 import { gitIgnored } from './ignored';
 import { parseBranches, parseCurrentUpstream, parseLog, parseNumstat, parseRevParse, parseStatus, upstreamRemote } from './porcelain';
 import { createGitReader, createGitRunner, GitCommandError, GitTimeoutError, type ExecFileFn, type GitRead, type GitRun } from './runner';
@@ -117,16 +117,22 @@ export class GitService {
   // when the upstream is configured and git cannot resolve it. `counts` and `behind` are of the whole range.
   async branchCommits({ directory, limit }: GitBranchCommitsInput): Promise<GitBranchCommits> {
     requireAbsolute(directory);
-    const [base, upstream, head] = await Promise.all([defaultBase(this.run, directory), this.currentUpstream(directory), headCommit(this.run, directory)]);
+    const [ref, upstream, head] = await Promise.all([defaultBaseRef(this.run, directory), this.currentUpstream(directory), headCommit(this.run, directory)]);
     if (head === null) return { base: null, upstream: upstream.name, commits: [], counts: null, behind: null };
+    // the merge base beside `behind`: each walks the history, seconds apiece in a large repository with no commit-graph (P5)
+    const [mergeBase, behindRef] = ref === null ? [null, null] : await Promise.all([
+      mergeBaseWithHead(this.run, directory, ref.commit),
+      this.run(directory, ['rev-list', '--count', ref.commit, '^HEAD', '--']).then(Number),
+    ]);
+    const base = ref === null || mergeBase === null ? null : { ...ref, mergeBase };
     const range = base === null ? ['HEAD'] : ['HEAD', `^${base.mergeBase}`];
-    const [rows, notPushed, all, behind] = await Promise.all([
+    const [rows, notPushed, all] = await Promise.all([
       this.run(directory, ['log', '--no-show-signature', LOG_FORMAT, '-z', '-n', String(limit), ...range, '--']).then(parseLog),
       // the range's commits the upstream does not hold: few on a branch, and never more than the range
       upstream.ref === null || upstream.gone ? null : this.run(directory, ['rev-list', ...range, `^${upstream.ref}`, '--']).then(shas),
       base === null ? null : this.run(directory, ['rev-list', '--count', ...range, '--']).then(Number),
-      base === null ? null : this.run(directory, ['rev-list', '--count', base.commit, '^HEAD', '--']).then(Number),
     ]);
+    const behind = base === null ? null : behindRef;
     const pushedOf = (sha: string) => (upstream.ref === null ? false : notPushed === null ? null : !notPushed.has(sha));
     return {
       base: base === null ? null : { ref: base.ref, mergeBase: base.mergeBase },

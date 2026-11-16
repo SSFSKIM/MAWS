@@ -42,6 +42,14 @@ export async function remoteHeadBranch(read: GitRun, directory: string, remote: 
 // HEAD, and when it is the local branch HEAD is on (the default branch with no remote copy). A detached HEAD is compared
 // like any other.
 export async function defaultBase(read: GitRun, directory: string): Promise<DefaultBase | null> {
+  const ref = await defaultBaseRef(read, directory);
+  const mergeBase = ref === null ? null : await mergeBaseWithHead(read, directory, ref.commit);
+  return ref === null || mergeBase === null ? null : { ...ref, mergeBase };
+}
+
+// The rule's ref, before its merge base is asked: a caller can ask the merge base beside another read of the ref (the
+// branch read's `behind`), since without a commit-graph each walks the history (P5).
+export async function defaultBaseRef(read: GitRun, directory: string): Promise<Omit<DefaultBase, 'mergeBase'> | null> {
   const [names, onBranch, head] = await Promise.all([remoteNames(read, directory), currentBranchRef(read, directory), headCommit(read, directory)]);
   if (head === null) return null;
   const remote = names.length === 0 ? null : await defaultRemote(read, directory, names);
@@ -54,9 +62,12 @@ export async function defaultBase(read: GitRun, directory: string): Promise<Defa
   const commits = await commitsNamed(read, directory, candidates);
   const chosen = candidates.find((ref) => commits.has(ref));
   if (chosen === undefined || chosen === onBranch) return null;
-  const mergeBase = (await read(directory, ['merge-base', commits.get(chosen)!, head], { acceptExitCodes: [1] })).trim();
-  if (mergeBase === '') return null; // exit 1: no commit in common
-  return { ref: shortName(chosen), commit: commits.get(chosen)!, mergeBase };
+  return { ref: shortName(chosen), commit: commits.get(chosen)! };
+}
+
+// `git merge-base <commit> HEAD`, or null when they share no commit (git exits 1 and prints nothing).
+export async function mergeBaseWithHead(read: GitRun, directory: string, commit: string): Promise<string | null> {
+  return (await read(directory, ['merge-base', commit, 'HEAD'], { acceptExitCodes: [1] })).trim() || null;
 }
 
 // Every configured remote with a URL, by name (git exits 1 when there is none).
