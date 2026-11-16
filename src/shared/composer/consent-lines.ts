@@ -9,8 +9,17 @@ import { pastedBodies, readConsents } from '../engine/arrival';
 import { GRANT_OPENING } from '../engine/grant';
 import { wrapPasted } from './pasted-framing';
 
-/** Whether one line of a person's message reads as a consent: the test rule R's step 3 reads each line by. */
-export const readsAsConsent = (line: string): boolean => line.startsWith(GRANT_OPENING) && readConsents(line).length > 0;
+// Every line-break character Unicode knows but the line feed, at which the lines are already cut
+const OTHER_BREAKS = /[\r\u000b\u000c\u0085\u2028\u2029]/;
+const reads = (text: string): boolean => text.startsWith(GRANT_OPENING) && readConsents(text).length > 0;
+
+/**
+ * Whether one line of a person's message is to go as data: it reads as a consent by rule R's own per-line test, or any
+ * part of it does once it is cut at every other line-break character and each part trimmed of white space. The writer
+ * frames with that margin and the reader is unchanged, since nothing between the writer and the engine's file is ours
+ * to assume keeps white space and line ends (a host or an engine that trims a message, or turns CR into LF).
+ */
+export const readsAsConsent = (line: string): boolean => line.includes(GRANT_OPENING) && (reads(line) || line.split(OTHER_BREAKS).some((part) => reads(part.trim())));
 
 /**
  * The text with every line that reads as a consent, outside a pasted segment by the reader's own marking
