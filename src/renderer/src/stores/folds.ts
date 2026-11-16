@@ -210,13 +210,14 @@ export interface FoldMoments {
  * turns' own state, since a turn of text alone draws no turn line (fix wave 2). Every record line's stretch has closed
  * but the last one's, which has closed once a row the person reads stands after it (`lastStretchClosed`). A turn has
  * ended once its state is closed; while the session runs no turn (`working` false: its turn ended, or a session at
- * rest), no turn of it is running.
+ * rest), no started turn of it is running. A prompt queued behind the running turn has its own turn, open and not yet
+ * started (`accepted` false): it has not ended (fix wave 3).
  */
 export function foldMoments(drawn: readonly Row[], turns: ReadonlyMap<TurnId, TurnState> | undefined, working: boolean): FoldMoments {
   const lines = drawn.flatMap((row) => (row.kind === 'record_fold' ? [row.stretch] : []));
   const closed = lastStretchClosed(drawn) ? lines : lines.slice(0, -1);
   const ended: TurnId[] = [];
-  for (const turn of turns?.values() ?? []) if (!working || turn.state === 'closed') ended.push(turn.id);
+  for (const turn of turns?.values() ?? []) if (turn.state === 'closed' || (!working && turn.accepted)) ended.push(turn.id);
   return { closed, ended };
 }
 

@@ -659,8 +659,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
       return;
     }
     watch.current ??= momentWatch();
-    if (watch.current(foldMoments(merged, useTranscriptStore.getState().entries[storeKey]?.state.turns, working))) foldsMoved();
-  }, [mirrored, loaded, foldsMoved, merged, working, storeKey]);
+    // the turns and whether one runs, read from one entry of the store as the effect runs; `working` is its trigger
+    const entry = useTranscriptStore.getState().entries[storeKey];
+    if (watch.current(foldMoments(merged, entry?.state.turns, (entry?.working ?? false) && !atRest))) foldsMoved();
+  }, [mirrored, loaded, foldsMoved, merged, working, atRest, storeKey]);
   const shown = useMemo(() => {
     if (startAt === undefined) return merged;
     const start = startAt(merged, loaded);
