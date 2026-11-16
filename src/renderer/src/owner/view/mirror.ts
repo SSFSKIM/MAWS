@@ -343,7 +343,9 @@ export function stretchHolding(rows: readonly Row[], id: RowId | CellId, liveMar
   return span === undefined || span.head === at ? null : span.stretch.key;
 }
 
-const recordFold = (stretch: string, open: boolean, at: Row): Row => ({ id: rowId.recordFold(stretch, open), turnId: at.turnId, at: at.at, kind: 'record_fold', stretch, open });
+// UX wave U2b (M7; §M): a closed line's `label`, which its id never takes, so a line whose words change is the same row.
+const recordFold = (stretch: string, open: boolean, at: Row, label?: string): Row =>
+  ({ id: rowId.recordFold(stretch, open), turnId: at.turnId, at: at.at, kind: 'record_fold', stretch, open, ...(label !== undefined && { label }) });
 
 /**
  * The rows of the to-human view: each stretch closed (its head with only its messages, then `› working record` in the
@@ -355,8 +357,12 @@ const recordFold = (stretch: string, open: boolean, at: Row): Row => ({ id: rowI
  * inside a closed stretch, or directly before one) directly after that stretch's record line (ruling 5); a separator is
  * drawn when the row after it is drawn, a record line counting for its stretch's first row. A line whose place is
  * inside a closed stretch is drawn after its record line.
+ *
+ * UX wave U2b (M7; §M; decision 28): `label`, where the mount hands one in, gives each closed stretch's line its words
+ * (`last`: the stretch is the rows' last), written on the line as `label`; with none, or where it answers nothing, the
+ * line reads `› working record`.
  */
-export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStretches'>, liveMarked?: string): Row[] {
+export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStretches'>, liveMarked?: string, label?: (stretch: Stretch, last: boolean) => string | undefined): Row[] {
   const { classes, spans, spanAt } = layoutOf(rows, liveMarked, ui.openStretches);
   const opened = (span: Span) => ui.openStretches?.has(span.stretch.key) ?? false;
   const openTurns = new Set<TurnId>();
@@ -397,7 +403,7 @@ export function mirrorRows(rows: readonly Row[], ui: Pick<TranscriptUi, 'openStr
     }
     const open = opened(span);
     if (span.head === i) out.push(open || row.kind !== 'assistant_text' ? row : { ...row, reportOnly: true });
-    if (!open && span.first === i) out.push(recordFold(span.stretch.key, false, row), ...(after.get(i) ?? []));
+    if (!open && span.first === i) out.push(recordFold(span.stretch.key, false, row, label?.(span.stretch, spanAt[i] === spans.length - 1)), ...(after.get(i) ?? []));
     else if (open && span.head !== i) out.push(row);
     if (open && span.last === i) out.push(recordFold(span.stretch.key, true, row));
   });

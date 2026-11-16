@@ -400,7 +400,8 @@ function drawnIds(rows: readonly Row[]): ReadonlySet<RowId> {
 }
 
 // The message a line stands for: a peer's by its companion's uuid, a subagent's the envelope its `subagent.message` was read from.
-function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessageEvent | null {
+// Exported for the record line's label (M7; §M), which places a row under the id its ask names.
+export function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessageEvent | null {
   const messages = turn.events.filter((e): e is UserMessageEvent => e.kind === 'user.message');
   if (row.peer !== undefined) return row.peer.sender === null || row.peer.messageUuid === null ? null : (messages.find((e) => e.messageUuid === row.peer!.messageUuid) ?? null);
   const at = turn.events.findIndex((e) => e.kind === 'subagent.message' && e.direction === 'from_child' && rowId.agentMessage(e.id) === row.id);
@@ -415,15 +416,15 @@ function messageCarrier(row: RowOf<'agent_message'>, turn: TurnState): UserMessa
 }
 
 // The synthetic message whose arrival the notice draws, the first that gives its id, as the derivation keeps the first;
-// with the notices it draws, in its order (the ids it gives that no earlier message gave).
-function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
+// with the notices it draws, in its order (the ids it gives that no earlier message gave). Exported as `messageCarrier` is.
+export function noticeCarrier(row: RowOf<'notice'>, turn: TurnState): NoticeCarrier | null {
   return noticeIndex(turn.events).get(row.id) ?? null;
 }
 
 // The whole-branch review's finding 6: every notice's carrier in a turn, built once per turn's event list (a turn's list
 // is a new array whenever the reducer changes it) and read by every row of the turn, so a streaming update that leaves
 // the list untouched builds nothing for it.
-interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
+export interface NoticeCarrier { carrier: UserMessageEvent; ids: RowId[] }
 const noticeIndexMemo = new WeakMap<readonly SessionEvent[], ReadonlyMap<RowId, NoticeCarrier>>();
 let indexBuilds = 0;
 /** How many times a turn's notice-to-carrier index was built: for tests, which count builds rather than time them. */

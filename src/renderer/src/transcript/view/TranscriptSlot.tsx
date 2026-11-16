@@ -21,6 +21,7 @@
 // from its machine's plane. 2026-11-06: a subagent's own transcript there draws through
 // `lane-a/view/RemoteAgentTranscript.tsx`, where its machine's endpoint carries it; elsewhere its port's gap is said in
 // its place.
+// UX wave U2b (M7): a session's slot hands its transcript what the record lines read (`useSummaries`, below).
 import type { AgentId, AppSessionId } from '@shared/graph/ids';
 import { useWorkingFolder } from '../../sessions/working-folder';
 import { lazy, Suspense, useEffect, useMemo } from 'react';
@@ -28,6 +29,7 @@ import { useShallow } from 'zustand/react/shallow';
 import { useShownEffort } from '../../composer/effective-effort';
 import { isAddress, machineOf } from '@shared/machine/address'; // UX wave U2b
 import type { OwnerChannelState } from '@shared/owner/state'; // UX wave U2b
+import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
 import { ipc } from '../../ipc/client'; // UX wave U2b
 import { useOwnerChannel, useOwnerChannelStore } from '../../stores/owner-channel'; // P2-C; UX wave U2b (M5): the store, for who draws
 import { useSurfaceAttached } from '../../engine-surface/site'; // UX wave U2b (M5)
@@ -36,6 +38,8 @@ import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
 import { useCompactingSince } from '../../stores/compacting'; // UX wave U3b (M4)
+import { foldsMoved, useStoredFolds } from '../../stores/folds'; // UX wave U2b (M7)
+import { mirrorsView } from '../../owner/view/mirror'; // UX wave U2b (M7)
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
@@ -169,6 +173,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const modDraws = useModDraws(agentId === undefined ? appSessionId : null); // UX wave U2b (M5): a session's, never a child's
   const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
   const compacting = useCompactingSince(agentId === undefined ? appSessionId : null); // UX wave U3b (M4): a session's, never a child's
+  const summaries = useSummaries(agentId === undefined ? appSessionId : null, storeKey);
   return (
     <Transcript
       source={source}
@@ -191,6 +196,26 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       promptAuthor={promptAuthor}
       waiting={waiting}
       compacting={compacting}
+      summaries={summaries}
     />
   );
+}
+
+const NO_RUNS: readonly StoredRun[] = [];
+/** What the record lines of a session on another machine read: no stored summary, each growing line its newest call. */
+export const LIVE_LINE_ALONE: { stored: readonly StoredRun[] } = { stored: NO_RUNS };
+
+// UX wave U2b (M7; §M, "The reads"; decisions 28 and 32): what a session's record lines read. This machine's session
+// reads the mod's stored summaries while the mirror is in force for the tab (the reads end when it is not), and starts
+// a round at each close of a stretch and end of a turn; a session on another machine reads its live line alone (no
+// summary is read from another machine in this landing); a child's transcript reads none.
+function useSummaries(appSessionId: AppSessionId | null, storeKey: string): { stored: readonly StoredRun[]; moved?: () => void } | undefined {
+  const elsewhere = appSessionId !== null && isAddress(appSessionId) && machineOf(appSessionId) !== ipc.localMachine;
+  const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
+  const stored = useStoredFolds(elsewhere ? null : appSessionId, mirrored);
+  return useMemo(() => {
+    if (appSessionId === null) return undefined;
+    if (elsewhere) return LIVE_LINE_ALONE;
+    return { stored: stored ?? NO_RUNS, moved: () => foldsMoved(appSessionId) };
+  }, [appSessionId, elsewhere, stored]);
 }

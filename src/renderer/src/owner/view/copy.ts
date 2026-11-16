@@ -6,6 +6,7 @@
 export const RECORD = {
   closed: '› working record',
   open: '‹ fold to report',
+  labelled: (label: string) => `› ${label}`, // M7 (§M): a closed line's label, its newest call or the mod's summary
 } as const;
 
 // A message's label (`STYLE.message`, 555; `spanRows`, 1411): the bullet `● ` before the first message of a text block

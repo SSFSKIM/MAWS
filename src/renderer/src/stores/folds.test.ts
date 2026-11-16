@@ -359,7 +359,7 @@ describe('lastStretchClosed: whether a row the person reads stands after the dra
     ['an opened stretch’s line, then a prompt', [r('user'), r('cell'), line(true), r('user')], true],
     ['a closed line, then a message waiting in the queue', [r('user'), line(false), r('user', { pending: 'held' })], false],
     ['an earlier line closed, the last one open-ended', [line(false), r('assistant_text'), line(false)], false],
-  ])('%s: %s', (_name, rows, closed) => {
+  ])('%s', (_name, rows, closed) => {
     expect(lastStretchClosed(rows)).toBe(closed);
   });
 });

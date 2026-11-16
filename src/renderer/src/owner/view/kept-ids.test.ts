@@ -165,7 +165,7 @@ describe('keptIdsOf: the id the row asks its site under, kind by kind', () => {
     ['time', {}, []], ['divider', {}, []], ['receipt', {}, []], ['record_fold', { stretch: 't1', open: false }, []], ['activity', {}, []],
     ['gap', {}, []], ['boundary', {}, []], ['error', {}, []], ['side_thread', {}, []], ['request_slot', { toolUseId: 't1' }, []],
     ['browser_activity', { toolUseId: 't1' }, []], ['bash', { command: 'ls' }, []],
-  ])('%s asks no site of its own: kept under %j', (kind, fields, ids) => {
+  ])('%s asks no site of its own', (kind, fields, ids) => {
     const row = { id: `${kind}:1`, turnId: null, at: '2026-09-28T10:00:00.000Z', kind, ...fields } as unknown as Row;
     expect(keptIdsOf(row, undefined)).toEqual(ids);
     covered.add(kind);

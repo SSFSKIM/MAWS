@@ -3,7 +3,9 @@
 // opened, `‹ fold to report` under its last. One button, whose accessible name is its text; the stretch's state is the
 // tab's, in the store. The two lines stand at the two ends of the stretch, so a press hands focus to the other line of
 // the same transcript as it is drawn (`handoff.ts`; the list may not have it mounted: then focus rests where the browser
-// leaves it). The press resolves that line from the stretch it toggled, as the store gives its keys back.
+// leaves it). The press resolves that line from the stretch it toggled, as the store gives its keys back. M7 (§M): a
+// closed line reads its label where the mirror wrote one, on one line that the column cuts with an ellipsis; the
+// button's accessible name is its whole text.
 import { useLayoutEffect, useRef } from 'react';
 import { useTranscriptStore } from '../../stores/transcript';
 import { rowId } from '../../transcript/model/keys';
@@ -28,7 +30,7 @@ export function RecordFold({ row }: { row: Extract<Row, { kind: 'record_fold' }>
   return (
     <div className="owner-record-fold" data-open={row.open ? '' : undefined}>
       <button ref={button} type="button" aria-expanded={row.open} onClick={toggle}>
-        {row.open ? RECORD.open : RECORD.closed}
+        {row.open ? RECORD.open : row.label !== undefined ? RECORD.labelled(row.label) : RECORD.closed}
       </button>
     </div>
   );

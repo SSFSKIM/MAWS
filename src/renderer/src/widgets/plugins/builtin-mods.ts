@@ -8,7 +8,9 @@
 // kept in main's words for the section to say, and the rows read again show what holds.
 // P5 O7 M8: the mods a session on another machine runs are that machine's (`mods.list` is declared not offered there,
 // lane-b/remote-unavailable.ts): nothing is asked, and the section says why.
-import { useCallback, useEffect, useState } from 'react';
+// UX wave U2b (M7; the execution document, §M, "The switch"): the summaries' switch, this machine's one fact, written by
+// `mods.setFoldSummaries`; one write at a time, a refused one kept as the others are, the rows read again after it.
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
 import type { ModId, ModRow } from '@shared/mods/registry';
@@ -24,6 +26,7 @@ export interface BuiltInModsState {
   failure: string | null; // why this surface's last write was refused (main's words); cleared by the next write
   setEnabled(id: ModId, enabled: boolean): Promise<void>; // the app's switch
   setOverride(id: ModId, value: LaneOverride): Promise<void>; // this session's
+  setFoldSummaries(on: boolean): Promise<void>; // UX wave U2b (M7): this machine's; a press while one is out does nothing
 }
 
 export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBridge = ipc): BuiltInModsState {
@@ -74,5 +77,18 @@ export function useBuiltInMods(appSessionId: AppSessionId | null, client: MawsBr
     },
     [again, appSessionId, client],
   );
-  return { read, failure, setEnabled, setOverride };
+  const writingSummaries = useRef(false);
+  const setFoldSummaries = useCallback(
+    async (on: boolean) => {
+      if (writingSummaries.current) return;
+      writingSummaries.current = true;
+      setFailure(null);
+      const result = await client.invoke('mods.setFoldSummaries', { on }, { machine: client.localMachine });
+      writingSummaries.current = false;
+      if (!result.ok) setFailure(result.error.message);
+      again();
+    },
+    [again, client],
+  );
+  return { read, failure, setEnabled, setOverride, setFoldSummaries };
 }

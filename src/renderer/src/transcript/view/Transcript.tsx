@@ -35,6 +35,9 @@ import { withBrowserActivityRows, type BrowserActivityAttachment } from '../mode
 import type { TranscriptState } from '../model/reduce';
 import type { AppSessionId } from '@shared/graph/ids'; // E13
 import { holdsMessage, liveMarkedRowIds, liveMarksOf, mirrorRows, mirrorsView } from '../../owner/view/mirror'; // UX wave U2b
+import { labelsOf } from '../../owner/view/label'; // UX wave U2b (M7)
+import { lastStretchClosed } from '../../stores/folds'; // UX wave U2b (M7)
+import type { StoredRun } from '@shared/owner/folds'; // UX wave U2b (M7)
 import { followsOf, publishFollows } from '../surface/follow'; // UX wave U2b (M5)
 import './transcript.css';
 
@@ -512,6 +515,11 @@ export interface TranscriptProps {
   // (its published `drawnBy` is `mod` and its surface is attached here): MAWS draws no mirror, no switch and no message
   // of its own beside the mod's, and folds no turn once the session holds a message; absent, the store's stays
   modDraws?: boolean;
+  // UX wave U2b (M7, §M), additive: what the record lines read where MAWS draws the view: the runs the mod's file holds,
+  // as the window last read them (none for a session another machine runs: its lines read their live call alone), and
+  // what to tell when a stretch closes or the turn ends (a round of reads). Absent (the desk, a child's transcript),
+  // every closed line reads `working record`
+  summaries?: { stored: readonly StoredRun[]; moved?: () => void };
 }
 
 const NO_ROWS: Row[] = [];
@@ -559,7 +567,7 @@ const queuedRows = (rows: Row[], { activity, withdrawn, tail, waiting }: Omit<Co
 const outsideMessages = new Map<string, Map<symbol, boolean>>();
 const outsideHolds = (key: string) => [...(outsideMessages.get(key)?.values() ?? [])].some(Boolean);
 
-export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null, modDraws }: TranscriptProps) {
+export function Transcript({ source, variant, actions, rewind, renderRequest, onFollowChange, className, handle, sessionDirectory, sessionCwd, tail = NO_TAIL, withdrawn = NOTHING_WITHDRAWN, effort = null, startAt, presentation, ownerLane, atRest = false, browserActivity = true, placed = NO_TAIL, promptAuthor, waiting, compacting = null, modDraws, summaries }: TranscriptProps) {
   const storeKey = storeKeyOf(source);
   const stored = useTranscriptStore((state) => state.entries[storeKey]?.rows ?? NO_ROWS);
   const derived = useMemo(() => {
@@ -626,10 +634,27 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const mirrored = useTranscriptStore((state) => mirrorsView(state.entries[storeKey]?.state.ui));
   const openStretches = useTranscriptStore((state) => state.entries[storeKey]?.state.ui.openStretches);
   const storedMarks = useTranscriptStore((state) => (mirrored ? liveMarkedRowIds(state.entries[storeKey]?.state) : ''));
-  const merged = useMemo(
-    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail)) : queued),
-    [queued, mirrored, openStretches, storedMarks, tail],
+  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
+  // UX wave U2b (M7; §M): each closed line's words, from the rows the mirror runs over and the session's turns (read when
+  // the rows change, as the rows are), the stored runs and whether the turn runs
+  const labels = useMemo(
+    () => (mirrored && summaries !== undefined ? labelsOf(queued, { stored: summaries.stored, running: working, turns: useTranscriptStore.getState().entries[storeKey]?.state.turns }) : undefined),
+    [mirrored, summaries, queued, working, storeKey],
   );
+  const merged = useMemo(
+    () => (mirrored ? mirrorRows(queued, { openStretches }, liveMarksOf(storedMarks, tail), labels) : queued),
+    [queued, mirrored, openStretches, storedMarks, tail, labels],
+  );
+  // UX wave U2b (M7; §M, "The reads"): a round of reads of the mod's summaries at each close of a stretch (a row the
+  // person reads comes after the last record line) and at each end of a turn, the two moments at which the mod asks
+  const moved = summaries?.moved;
+  const closed = useMemo(() => mirrored && moved !== undefined && lastStretchClosed(merged), [mirrored, moved, merged]);
+  const was = useRef({ closed, working });
+  useEffect(() => {
+    const turned = (closed && !was.current.closed) || (!working && was.current.working);
+    was.current = { closed, working };
+    if (turned) moved?.();
+  }, [closed, working, moved]);
   // P2-E1: a mount that starts later in the session shows the rows from `startAt`'s index, none while it answers null
   const loaded = useTranscriptStore((state) => state.entries[storeKey]?.phase === 'live');
   const shown = useMemo(() => {
@@ -648,7 +673,6 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   const [answerActions] = useState(() => new AnswerActionsStore());
   useLayoutEffect(() => answerActions.publish(placement), [answerActions, placement]);
   const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);
-  const working = useTranscriptStore((state) => state.entries[storeKey]?.working ?? false) && !atRest;
   const jump = useTranscriptStore((state) => state.entries[storeKey]?.jump ?? null);
   const failed = useTranscriptStore((state) => (state.entries[storeKey]?.phase === 'failed' ? (state.entries[storeKey].error ?? '') : null));
   // The UX wave, U9 (O-39, A3): a read with nothing to draw says so once it has been out 300 ms, on every route
