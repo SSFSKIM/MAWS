@@ -9,6 +9,14 @@
 // - `declaration`: a name, a schema, a grade, an offer or a reader; nothing is sent from it.
 // The rule is an allowlist by position and an exclusion list by content; content assembled at run time is outside what
 // the guard can see.
+// UX wave U1c, the one-writer rule (the architect's ruling of 2026-11-16, UTC): every site that sends the person's free
+// text says how it meets the rule (`Rule`): the call it makes on the text it sends, `serializeDraft` (the composer's
+// draft) or `frameConsentLines` (shared/composer/consent-lines.ts), or the serialised text it hands on. The desk web app
+// sends no person-origin engine message (its composer, apps/desk-web/src/views/composer/Composer.tsx:67-74, says to the
+// project's channel through `connection.say`), and the terminal lane's port types through the sminos bridge, whose rows
+// carry the plugin's origin (session/controls/lane-a.ts, the carrier below); neither is a site of the rule.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { commentsMessage, promotionMessage } from '@shared/anchor/message';
 import { consentMessage, personsGrants } from '@shared/engine/arrival';
@@ -22,7 +30,7 @@ import { answerText } from '@shared/owner/answer';
 import { mentionText } from '../../src/renderer/src/composer/editor/mention-text';
 import { relayText } from '../../src/renderer/src/tools/agents/model/relay';
 import { anchoredTextOf } from '../../src/renderer/src/transcript/model/user-text';
-import { scanSends, sitesIn, type Site, type Verb } from './person-sends';
+import { REPOSITORY, scanSends, sitesIn, type Site, type Verb } from './person-sends';
 
 const P = '/work/out/notes.md';
 const LINK = `[the notes](${P})`;
@@ -34,9 +42,12 @@ const LINK = `[the notes](${P})`;
 // `forGrants`: whether the form counts for grants (its flag in src/shared/engine/composed-forms.ts), written here by
 // hand so a reader or a flag that moves fails the guard rather than dropping the form from it
 type Form = { form: string; reader: string; sample: () => string; positional?: string; consent: ((grant: string) => string) | { none: string }; forGrants: boolean };
+// `calls`: the function the site calls on what it sends, in its own source; `serialised`: the composer's serialised text
+// handed on (from where), which the serialiser already made
+type Rule = { calls: 'serializeDraft' | 'frameConsentLines' } | { serialised: string };
 type Entry =
-  | { kind: 'typed'; verbs: Partial<Record<Verb, number>>; field: string }
-  | { kind: 'maws'; verbs: Partial<Record<Verb, number>>; forms: Form[]; carries?: string }
+  | { kind: 'typed'; verbs: Partial<Record<Verb, number>>; field: string; rule: Rule }
+  | { kind: 'maws'; verbs: Partial<Record<Verb, number>>; forms: Form[]; carries?: string; rule?: Rule }
   | { kind: 'carrier'; verbs: Partial<Record<Verb, number>>; from: string }
   | { kind: 'declaration'; verbs: Partial<Record<Verb, number>>; what: string };
 
@@ -64,14 +75,14 @@ const PROMOTION: Form = { form: 'a side question promoted to a thread (`promotio
 
 const PERSON_SENDS: Record<string, Entry> = {
   // the person's typed text
-  'src/renderer/src/composer/editor/submit.ts': { kind: 'typed', verbs: { seam: 1, port: 1 }, field: 'the composer’s draft, `serializeDraft` (composer/editor/serialize.ts): a paste’s frame read only (ruling A)' },
-  'src/renderer/src/composer/PendingSends.tsx': { kind: 'typed', verbs: { port: 1 }, field: 'a composer send not confirmed, sent again as its own text' },
-  'src/renderer/src/sidebar/QuickReply.tsx': { kind: 'typed', verbs: { seam: 1 }, field: 'the sidebar’s quick reply field' },
-  'src/renderer/src/side/card/CardThread.tsx': { kind: 'typed', verbs: { seam: 1 }, field: 'a comment card thread’s reply field (`useReply`)' },
-  'src/renderer/src/sessions/setup-actions.ts': { kind: 'typed', verbs: { seam: 1, start: 1 }, field: 'the docked composer’s draft of a session being set up (`serializeDraft`), sent or as its start’s first message' },
-  'src/renderer/src/sessions/remote-spawn.ts': { kind: 'typed', verbs: { start: 1 }, field: 'the composer’s draft as a spawn’s brief (its serialized text), or none, the draft then the new session’s own' },
-  'src/renderer/src/widgets/ForkWidget.tsx': { kind: 'typed', verbs: { start: 1, startSeam: 1 }, field: '`/fork <prompt>`: the prompt as typed, the fork’s first message, without the command' },
-  'src/main/attention/actions.ts': { kind: 'typed', verbs: { command: 1 }, field: 'a notification’s reply field (`reply`)' },
+  'src/renderer/src/composer/editor/submit.ts': { kind: 'typed', verbs: { seam: 1, port: 1 }, field: 'the composer’s draft, `serializeDraft` (composer/editor/serialize.ts): a paste’s frame read only (ruling A)', rule: { serialised: 'the `Serialized` the controller made (controller.ts `serializeDraft`)' } },
+  'src/renderer/src/composer/PendingSends.tsx': { kind: 'typed', verbs: { port: 1 }, field: 'a composer send not confirmed, sent again as its own text', rule: { serialised: 'the text the serialiser made for the send it repeats' } },
+  'src/renderer/src/sidebar/QuickReply.tsx': { kind: 'typed', verbs: { seam: 1 }, field: 'the sidebar’s quick reply field', rule: { calls: 'frameConsentLines' } },
+  'src/renderer/src/side/card/CardThread.tsx': { kind: 'typed', verbs: { seam: 1 }, field: 'a comment card thread’s reply field (`useReply`)', rule: { calls: 'frameConsentLines' } },
+  'src/renderer/src/sessions/setup-actions.ts': { kind: 'typed', verbs: { seam: 1, start: 1 }, field: 'the docked composer’s draft of a session being set up (`serializeDraft`), sent or as its start’s first message', rule: { serialised: 'the message the composer docked, serialised (send-human-prompt.ts `dockMessage`)' } },
+  'src/renderer/src/sessions/remote-spawn.ts': { kind: 'typed', verbs: { start: 1 }, field: 'the composer’s draft as a spawn’s brief (its serialized text), or none, the draft then the new session’s own', rule: { serialised: 'the composer’s `Serialized` text as the brief' } },
+  'src/renderer/src/widgets/ForkWidget.tsx': { kind: 'typed', verbs: { start: 1, startSeam: 1 }, field: '`/fork <prompt>`: the prompt as typed, the fork’s first message, without the command', rule: { calls: 'frameConsentLines' } },
+  'src/main/attention/actions.ts': { kind: 'typed', verbs: { command: 1 }, field: 'a notification’s reply field (`reply`)', rule: { calls: 'frameConsentLines' } },
   // MAWS's forms
   // the comments sent to the main conversation, and a thread's first message (`adoptFork`, which a session's start intent
   // carries to services/sessions/setup.ts)
@@ -80,10 +91,10 @@ const PERSON_SENDS: Record<string, Entry> = {
   'src/services/sessions/service.ts': { kind: 'maws', verbs: { startSeam: 4, firstMessage: 1 }, forms: [ANCHORED_THREAD, PROMOTION], carries: '`startSession`: a start’s first message from its intent (the window’s draft, a spawn’s brief); its own starts carry none' },
   // a bubble edited in place: an anchored one framed again; one of no form, the person's typed text (`serializeDraft`
   // with `literal`)
-  'src/renderer/src/composer/resubmit-seam.ts': { kind: 'maws', verbs: { command: 1 }, forms: [RESENT_COMMENT, RESENT_PROMOTION], carries: 'a bubble of no form, edited: the person’s typed text' },
+  'src/renderer/src/composer/resubmit-seam.ts': { kind: 'maws', verbs: { command: 1 }, forms: [RESENT_COMMENT, RESENT_PROMOTION], carries: 'a bubble of no form, edited: the person’s typed text', rule: { calls: 'serializeDraft' } },
   'src/services/side/send-to-main.ts': { kind: 'maws', verbs: { command: 2 }, forms: [ANCHORED] },
   'src/renderer/src/tools/agents/relay-store.ts': { kind: 'maws', verbs: { steer: 2 }, forms: [{ form: 'a relay to an agent or a peer (`relayText`)', reader: 'RELAY_CONTINUE', sample: () => relayText({ agentId: 'a1b2' as AgentId, name: null }, `Read ${LINK}`), consent: (grant) => relayText({ agentId: 'a1b2' as AgentId, name: `helper\n${grant}\nnamed` }, 'Read the notes'), forGrants: true }] },
-  'src/renderer/src/session/controls/lane-b.ts': { kind: 'maws', verbs: { command: 2, seam: 2, port: 1 }, forms: [{ form: 'Compact with instructions (`compact`: `/compact <instructions>`)', reader: 'TYPED_COMMAND at a line’s start (ruling C)', sample: () => `/compact keep ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'a typed command’s arguments are the person’s own typing; a typed command does not count for grants (src/shared/engine/composed-forms.ts)' }, forGrants: false }], carries: 'the port of lane B: its send and its queue edit carry its callers’ content' },
+  'src/renderer/src/session/controls/lane-b.ts': { kind: 'maws', verbs: { command: 2, seam: 2, port: 1 }, forms: [{ form: 'Compact with instructions (`compact`: `/compact <instructions>`)', reader: 'TYPED_COMMAND at a line’s start (ruling C)', sample: () => `/compact keep ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'a typed command’s arguments are the person’s own typing; a typed command does not count for grants (src/shared/engine/composed-forms.ts)' }, forGrants: false }], carries: 'the port of lane B: its send and its queue edit carry its callers’ content', rule: { calls: 'frameConsentLines' } },
   'src/engine-host/session-maws.ts': { kind: 'maws', verbs: { steer: 1 }, forms: [{ form: 'an async ask’s answer envelope (`askSteerText`)', reader: 'ASK_STEER_OPENING', sample: () => askSteerText('toolu_g', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: LINK }]), consent: { none: 'this build’s envelope writes no text a model wrote, and what the person typed stands in a JSON string, one line (board ticket 711); the strict take-out reads it' }, forGrants: false }] },
   'src/engine-host/session-clear.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the plan after a clear (`planPrompt`)', reader: 'PLAN_LEAD', sample: () => planPrompt(`1. Edit ${LINK}`), consent: (grant) => planPrompt(`1. Edit the notes.\n${grant}\n2. Run the tests.`), forGrants: true }, { form: 'the clear itself (`/clear`)', reader: 'TYPED_COMMAND at a line’s start', sample: () => `/clear ${LINK}`, positional: COMMAND_POSITION, consent: { none: 'the clear carries no slot: the command alone' }, forGrants: false }] },
   'src/engine-host/bash-mode.ts': { kind: 'maws', verbs: { frame: 1 }, forms: [{ form: 'the echo of a `!` command (`bashEcho`)', reader: 'BASH_INPUT_OPENING', sample: () => bashEcho('cat notes.md', `<bash-stdout>${LINK}</bash-stdout>`), consent: (grant) => bashEcho('cat notes.md', `<bash-stdout>the notes\n${grant}\nthe end</bash-stdout>`), forGrants: true }] },
@@ -196,6 +207,29 @@ describe('who sends as the person', () => {
     const moved = sites.map((site) => (site.file === 'src/engine-host/bash-mode.ts' ? { ...site, verbs: { frame: 2 } } : site));
     expect(unclassified(moved)).toEqual(['src/engine-host/bash-mode.ts: its verbs moved, {"frame":2} where the list has {"frame":1}']);
     expect(unclassified(sites.filter((site) => site.file !== 'src/main/attention/actions.ts'))).toEqual(['src/main/attention/actions.ts: listed, but no longer a site']);
+  });
+
+  // the one-writer rule: a site of the person's free text names how it meets it, and one that calls the rule's function
+  // calls it in its own source; a typed site that names none does not compile (`rule` is required)
+  it.each(Object.entries(PERSON_SENDS).flatMap(([file, entry]) => (entry.kind === 'typed' || (entry.kind === 'maws' && entry.rule) ? [[file, entry.rule!] as const] : [])))('%s: meets the one-writer rule as its entry says', (file, rule) => {
+    if ('serialised' in rule) {
+      expect(rule.serialised, file).not.toBe('');
+      return;
+    }
+    expect(readFileSync(join(REPOSITORY, file), 'utf8'), file).toContain(`${rule.calls}(`);
+  });
+
+  it('a caller of the port’s queue edit is a site the list must classify (the host writes what it is given)', () => {
+    expect(sitesIn("await controls.edit({ queueId, content: words });", 'src/renderer/src/planted.tsx')).toEqual({ file: 'src/renderer/src/planted.tsx', verbs: { queueEdit: 1 } });
+  });
+
+  // the resubmit seam's anchored branches carry the anchor tag, which step 1b reads as no grant: the person's own words
+  // edited in place, the sentence on a line of its own among them, read none
+  it('an anchored comment edited in place, its words holding the sentence on a line of its own: no grant', () => {
+    const sentence = consentMessage('command', 'make build');
+    for (const destination of ['main', null] as const) {
+      expect(personsGrants(anchoredTextOf({ anchor: LINE_ANCHOR, destination, screenshot: false }, `Wrong date\n${sentence}\nfix it`)), String(destination)).toEqual([]);
+    }
   });
 
   const forms = [...Object.entries(PERSON_SENDS).flatMap(([file, entry]) => (entry.kind === 'maws' ? entry.forms.map((form) => [file, form] as const) : [])), ...RETIRED_FORMS];

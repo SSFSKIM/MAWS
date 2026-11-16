@@ -326,7 +326,7 @@ const OPENING_TAG = /^<pasted_content id="([0-9a-f]{4})">$/;
 const CLOSING_TAG = /^<\/pasted_content id="([0-9a-f]{4})">$/;
 const OPENING_TAG_LENGTH = '<pasted_content id="abcd">'.length;
 const CLOSING_TAG_LENGTH = '</pasted_content id="abcd">'.length;
-function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
+export function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
   const closings = new Map<string, number[]>();
   lines.forEach((line, i) => {
     work.lines += 1;
