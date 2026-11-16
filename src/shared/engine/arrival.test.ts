@@ -10,6 +10,8 @@ import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { acceptedCosts, currentEnvelope, forgedInputs, WORDS, type Content } from '../../../test/support/rule-r';
+import { PROMOTION_HEAD } from '@shared/anchor/message';
+import { LINKED_READ_OPENING } from '@shared/maws/linked-read';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { consentMessage, GRANT_OPENING, MAX_ENVELOPE_CHECKS, nothingOpen, personsGrants, personsLines, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, readConsents, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
@@ -852,6 +854,30 @@ describe('the grants in a person’s message (rule R)', () => {
     expect(routes(`${WORDS}\n${tagged}`)).toEqual([[grant('grep -rn "[MAWS ask " src')], [grant('grep -rn "[MAWS ask " src')]]);
   });
 
+  // Step 1b (the architect's ruling 3865, and the coordinator's on its exemption): the composed forms are looked for on
+  // the joined text with every line that reads strictly as a whole sentence set aside (L1's one test, `readConsents`), so
+  // a consent whose command quotes a form's constant keeps its grant beside an envelope or the person's words
+  it('a sentence whose command quotes a composed form’s constant keeps its grant beside a current-form envelope and beside the person’s words', () => {
+    for (const command of ['grep -rn "<bash-input>" src', 'grep -rn "<command-name>" src', 'grep -rn "<maws_anchor" src', 'echo "Implement this plan:"', 'echo "then continue what you were doing: "', `printf '${LINKED_READ_OPENING}'`, `echo "${PROMOTION_HEAD}"`]) {
+      const sentence = consentMessage('command', command);
+      for (const text of [`${currentEnvelope('toolu_a')}\n${sentence}`, `${WORDS}\n${sentence}`]) expect(personsGrants(text), command).toEqual([grant(command)]);
+    }
+  });
+
+  it('a form’s constant that runs over a line the exemption sets aside is found once that line is out: no grant (it fails closed)', () => {
+    const [first, second] = LINKED_READ_OPENING.split('\n') as [string, string];
+    expect(personsGrants(`${first}\n${GRANT}\n${second}the notes\n${GRANT}`)).toEqual([]);
+  });
+
+  // The cost the coordinator accepted (step 1b, (b)): the readers cannot tell typed words from a MAWS form, so a typed
+  // message that holds a form's constant reads no grant beside the sentence, here in one message on every route
+  it('the person’s own words holding a composed form’s constant, in one message with the sentence: no grant, an accepted cost', () => {
+    for (const words of ['Implement this plan: first the footer, then the header', 'Relay this, then continue what you were doing: the footer']) {
+      expect(personsGrants(`${words}\n${GRANT}`), words).toEqual([]);
+      expect(routes(`${words}\n${GRANT}`), words).toEqual([[], []]);
+    }
+  });
+
   // Step 1b's three forms that do not count for grants: a typed slash command (its arguments are the person's typing), the
   // answer envelope's opening (the strict take-out and step 2 read envelopes) and the grant's own test
   it('beside a typed slash command at a line’s start, the grant is read', () => {
@@ -884,13 +910,16 @@ describe('the grants in a person’s message (rule R)', () => {
   describe('its work grows with the text, by its own count', () => {
     const N = 20_000;
     const counted = (text: string) => {
-      const work = { lines: 0, blockCharacters: 0 };
+      const work = { lines: 0, blockCharacters: 0, formSteps: 0 };
       const grants = personsLines(text, work)?.flatMap((line) => line.grants) ?? [];
       return { grants, work, lines: text.split('\n').length, characters: text.length };
     };
+    // step 1b (the architect's ruling 3865) adds two passes over the lines (the whole-sentence lines set aside, then each
+    // line left read once for its sentence) and the composed forms' readers, each a native pass or two over the text
     const within = ({ work, lines, characters }: ReturnType<typeof counted>) => {
-      expect(work.lines, 'lines looked at').toBeLessThanOrEqual(6 * lines);
+      expect(work.lines, 'lines looked at').toBeLessThanOrEqual(10 * lines);
       expect(work.blockCharacters, 'block characters parsed').toBeLessThanOrEqual(characters);
+      expect(work.formSteps, 'the composed forms’ steps').toBeLessThanOrEqual(10 * (characters + 1));
     };
 
     it('tens of thousands of envelopes, each taken out: the sentence after them is read', () => {
@@ -978,6 +1007,17 @@ describe('the answer envelopes inside a joined text: the work one text costs is 
     expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [parseAskSteer(envelope(2))!], rest: prompt });
     expect(reading.cost.checks).toBe(1);
     expect(reading.cost.markingSteps).toBeGreaterThanOrEqual(lines);
-    expect(reading.cost.markingSteps).toBeLessThanOrEqual(lines + segments);
+    // the architect's ruling 3865: the marking is rule R's `pastedBodies` (its two passes over the lines, a step for each
+    // closing line a segment passes, a step for each line a segment marks), no longer the pattern's search
+    expect(reading.cost.markingSteps).toBeLessThanOrEqual(4 * lines);
+  });
+
+  it('20,000 pasted openings that never close, then a real envelope: the marking counts at most four steps a line, the envelope read', () => {
+    const prompt = Array.from({ length: 20_000 }, (_, i) => `Log ${i}:\n<pasted_content id="abcd">`).join('\n');
+    const text = `${prompt}\n${envelope(2)}`;
+    const lines = text.split('\n').length;
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [parseAskSteer(envelope(2))!], rest: prompt });
+    expect(reading.cost.markingSteps).toBeLessThanOrEqual(4 * lines);
   });
 });

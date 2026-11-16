@@ -6,6 +6,7 @@
 // B's joined grants (Acceptance 14's blocked rows).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { promotionMessage } from '@shared/anchor/message';
 import { framePasted } from '@shared/composer/pasted-content';
 import { consentMessage, readAnswerEnvelope } from '@shared/engine/arrival';
 import { messageText } from '@shared/engine/peer-envelope';
@@ -689,6 +690,18 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
       }
     });
   }
+
+  // Step 1b (the architect's ruling 3865): a pressed consent the engine joins with a form MAWS composed around others'
+  // words (here a promoted side question) reads approved live from the host's own mark, and none from the file, whose
+  // joined row holds the form; and so for the person's own words holding a form's constant (the coordinator's ruling,
+  // an accepted cost): after a reload the blocked row offers its button again (the tracker rows beside rule R's)
+  it('step 1b: a pressed consent joined with a composed form, or with the person’s words holding a form’s constant: live the host’s mark, from the file none', async () => {
+    for (const other of [promotionMessage([{ question: 'Where?', response: 'In the notes folder.' }], null), 'Implement this plan: first the footer, then the header', 'Relay this, then continue what you were doing: the footer']) {
+      const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[OTHER, other]]));
+      expect(results.live!.consents, `${other}: live`).toEqual([MARKER('1')]);
+      expect([results['from the file']!.consents, results['from the file']!.readings], `${other}: from the file`).toEqual([[], NONE]);
+    }
+  });
 
   it('(d) two real grant lines joined: two grants, an approval row each, both blocked rows approved', async () => {
     for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-twoend-1', [])) {

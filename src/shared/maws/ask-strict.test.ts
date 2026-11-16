@@ -10,7 +10,7 @@ import { takeOutEnvelopes } from './ask-strict';
 import type { AskAnswer, AskQuestion } from './tools';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
 
-const work = () => ({ lines: 0, blockCharacters: 0 });
+const work = () => ({ lines: 0, blockCharacters: 0, formSteps: 0 });
 const takenOut = (text: string) => takeOutEnvelopes(text.split('\n'), work());
 
 // A small seeded generator (a linear congruential one), so a failing round can be replayed by its seed
