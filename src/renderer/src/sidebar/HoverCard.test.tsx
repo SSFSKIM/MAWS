@@ -400,6 +400,20 @@ describe('request preview', () => {
     ]);
   });
 
+  // The branch panel's finding 4 (ruled, fail closed): the hover card offers no Approve for a fetch by a user's HTTP
+  // server named `web`, nor for one whose server says plugin: no recording tells the web plugin's server apart by name.
+  it('offers no Approve for a fetch named mcp__web__fetch, whatever server it came from', () => {
+    for (const source of ['user', 'plugin']) {
+      const fetch = ev('permission.requested', { requestId: 'req-synthetic-read-9a1d4262', toolName: 'mcp__web__fetch', input: { url: 'https://example.com' }, mcpServer: { name: 'web', source } });
+      const { unmount } = render(<RequestPreview item={readAttention.items[0]} request={fetch} placement="hover" paneIndex={null} />);
+      expect(screen.queryByRole('button', { name: 'Approve' }), source).toBeNull();
+      expect(screen.getByRole('button', { name: 'Open session' }), source).toBeTruthy();
+      unmount();
+    }
+    render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="hover" paneIndex={null} />);
+    expect(screen.getByRole('button', { name: 'Approve' })).toBeTruthy(); // the same item with its read is still offered
+  });
+
   it('never offers Approve outside the hover placement', () => {
     render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement="card" paneIndex={null} />);
     expect(screen.queryByRole('button', { name: 'Approve' })).toBeNull();

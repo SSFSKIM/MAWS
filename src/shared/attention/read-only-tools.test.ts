@@ -15,11 +15,15 @@ describe('read-only tools', () => {
     for (const tool of ['Read', 'Glob', 'Grep', 'WebFetch']) expect(isReadOnlyRequest(permission(tool)), tool).toBe(true);
   });
 
-  // UX wave U3b, M5 (acceptance 12): the web plugin's fetch is read-only as WebFetch is, so a hover card or a
-  // notification can allow it in one click
-  it('lets the web plugin’s fetch be answered outside the pane, as WebFetch', () => {
-    for (const [label, call] of webFetchCases()) expect(isReadOnlyRequest(permission(call.toolName)), label).toBe(true);
-    for (const tool of ['mcp__web__search', 'mcp__docs__fetch']) expect(isReadOnlyRequest(permission(tool)), tool).toBe(false);
+  // The branch panel's finding 4 (ruled 2026-11-15 (UTC), fail closed): the read-only offer would need the server's
+  // identity, not its name, and no recording under spikes/protocol-probe/fixtures tells the web plugin's server from a
+  // user's HTTP server named `web` (whose fetch tool is `mcp__web__fetch` too). So neither is offered outside the pane.
+  it('does not let a fetch named mcp__web__fetch be answered outside the pane, a user’s HTTP server named web or the web plugin’s', () => {
+    const fetchBy = (source: string) => ({ ...permission('mcp__web__fetch'), mcpServer: { name: 'web', source } }) as unknown as SessionEvent;
+    expect(isReadOnlyRequest(fetchBy('user')), 'a user’s HTTP server named web').toBe(false);
+    expect(isReadOnlyRequest(fetchBy('plugin')), 'one whose server says plugin').toBe(false);
+    for (const [label, call] of webFetchCases()) expect(isReadOnlyRequest(permission(call.toolName)), label).toBe(false); // the recorded calls' name
+    expect(isReadOnlyRequest(permission('WebFetch'))).toBe(true); // the engine's own fetch is unchanged
   });
 
   it('never treats writes, shells, agents, MCP tools or unknown names as read-only', () => {

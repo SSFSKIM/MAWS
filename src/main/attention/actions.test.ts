@@ -119,6 +119,17 @@ describe('a permission’s notification actions', () => {
     expect(answered(dispatch)).toHaveLength(1);
   });
 
+  // The branch panel's finding 4 (ruled, fail closed): a user's HTTP server named `web` has a fetch tool named as the web
+  // plugin's; the notification offers it Deny alone and never sends an allow for it.
+  it('never allows a fetch by a user’s HTTP server named web, and denies it', async () => {
+    const { dispatch, actions } = setup(permission('mcp__web__fetch', { url: 'https://example.com' }, { mcpServer: { name: 'web', source: 'user' } }));
+    expect(await actions.offer(request)).toEqual({ allowOnce: false, deny: true, body: null });
+    await expect(actions.allow(request)).rejects.toThrow('Open the session');
+    expect(answered(dispatch)).toEqual([]);
+    await actions.deny(request);
+    expect(answered(dispatch)).toEqual([{ appSessionId: SESSION, requestId: request.request.requestId, answer: { kind: 'permission', decision: 'deny' } }]);
+  });
+
   it('says so when the answer was not delivered', async () => {
     await expect(setup(read, [request], 'not_pending').actions.deny(request)).rejects.toThrow('not delivered');
     await expect(setup(read, [request], 'not_pending').actions.allow(request)).rejects.toThrow('not delivered');
