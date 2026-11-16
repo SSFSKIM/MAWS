@@ -1218,7 +1218,7 @@ test.describe('sessions', () => {
       await expect.poll(() => readFileSync(file('notes.txt'), 'utf8'), { timeout: 20_000, message: 'File › Save file wrote the typed text' }).toBe(EDITED);
       await expect(notes).toHaveAttribute('data-dirty', 'false');
       await expect(notes).toHaveAttribute('data-pending', '0');
-      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name)), `${name} untouched`).toEqual(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'));
 
       // A9: the file changed on disk meanwhile (no watch outside the folders): the next Save meets the merge view, and the
       // disk's version stays until the person resolves
@@ -1271,7 +1271,7 @@ test.describe('sessions', () => {
       expect(await saveOutside(t!, 'notes.txt'), 'a save under a session that links nothing').toMatchObject(refusal);
       expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: sha256Of(readFileSync(file('notes.txt'))) }), 'files.write takes the folders alone').toMatchObject(refusal);
       expect(readFileSync(file('notes.txt'), 'utf8')).toBe(THEIRS);
-      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name)), `${name} untouched`).toEqual(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'));
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });
