@@ -8,6 +8,7 @@ import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import type { AskQuestion } from '@shared/maws/tools';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
 import { consentMessage } from '../../src/shared/engine/arrival';
 import { REPO_ROOT } from './launch';
@@ -181,6 +182,33 @@ export function steerStopJournal(dir: string, name: string, releases: 1 | 2 = 1)
     return writeJournal(dir, `${name}-steer-stop-2`, [...kept, ...turn]);
   }
   return writeJournal(dir, `${name}-steer-stop`, rows);
+}
+
+// UX wave U4b (M4, the waiting answer's scene; the architect's ruling after the cascade merge with board ticket 711):
+// `steerStopJournal` with the agent's async ask in its running turn, so the window holds the ask's row and a waiting
+// answer to it reads through the ask's questions. The ask is `pass3/p1-maws-ask-async`'s: its call (seq 95, the
+// assistant's `mcp__maws__ask` tool use) and the host's acknowledgement as the engine echoes it (107, `asked`), placed
+// after the prompt's echo (9) and before the turn's first message starts (10), under this recording's session. The host
+// serves no call here (the `tools/call` and its permission are not replayed): the transcript reads the ask from the call
+// and its result, as a session read from the engine's transcript does.
+const ASK_ASYNC = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const asyncAskRows = () => {
+  const rows = rowsOf(ASK_ASYNC);
+  return [rows.find((r) => r.seq === 95)!, rows.find((r) => r.seq === 107)!];
+};
+/** The recorded async ask's id (its call's tool use id) and questions, as its call holds them. */
+export function asyncAsk(): { askId: string; questions: AskQuestion[] } {
+  const [call] = asyncAskRows();
+  const use = (call!.frame.message as { content: { id: string; input: { questions: AskQuestion[] } }[] }).content[0]!;
+  return { askId: use.id, questions: use.input.questions };
+}
+export function askedSteerStopJournal(dir: string, name: string): string {
+  const rows = (readFileSync(steerStopJournal(dir, name), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Row));
+  const echo = rows.findIndex((r) => r.seq === 9);
+  const session = rows.find((r) => r.seq === 150)!.frame.session_id;
+  const asked = asyncAskRows().map((r, k): Row => ({ ...r, seq: 9 * 100 + k, at: rows[echo]!.at, frame: { ...r.frame, session_id: session } }));
+  rows.splice(echo + 1, 0, ...asked);
+  return writeJournal(dir, `${name}-asked-steer-stop`, rows);
 }
 
 // UX wave U4a (M8, the Send now scene): Send now behind a running command, as `uxwave/u4p2-a-1` recorded it on engine

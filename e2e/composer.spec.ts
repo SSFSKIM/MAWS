@@ -21,7 +21,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { CardsHarnessApi, HarnessIntent, HarnessPane } from '../src/renderer/src/harness/composer/api';
 import type { EditorHarnessApi, EditorPane } from '../src/renderer/src/harness/composer/editor-api';
 import { consentMessage } from '../src/shared/engine/arrival';
-import { blockedTurnJournal, invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
+import { askedSteerStopJournal, asyncAsk, blockedTurnJournal, invoke, joinedAnswerJournal, joinedAnswerRecorded, launchReady, queueInterruptJournal, recordedBlockJournal, rewindJournal, sendNowAfterJournal, sendNowJournal, steerStopJournal, stopPendingJournal, turnsJournal, value, type RewindReplay } from './support/c7-replay';
 import { clickRevealed } from './support/hover';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools'; // UX wave U4b (M4): the waiting answer's envelope
 import { askSteerText } from '../src/shared/maws/ask';
@@ -925,26 +925,37 @@ test('U4a, Stop: the square holds both waiting messages, the stack reads Held un
 });
 
 // UX wave U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, M4; Acceptance 1 and 3): a question
-// the agent asked without waiting, answered while a turn runs, waits in the stack as what it is. The envelope MAWS sends
-// the model for one invented question is handed to the running turn through `session.steer`, as the answered sheet hands
-// it (the replay matches a user write by its type, not its text, so `steerStopJournal`'s steer at seq 146 takes it). The
-// window holds no row of the ask, so the row's title is the answer's own copy of the question. It offers Send now alone;
-// ↑ in the empty box skips it and walks the history; after the square's Stop it reads the same, marked Held.
-const ASKED: AskQuestion = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
-const ANSWERED: AskAnswer = { id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] };
-const ANSWER_ROW = `Answer to ${ASKED.question}: Grid`; // Interfaces A: `answer(title, words)`, the title the answer's own question here
+// the agent asked without waiting, answered while a turn runs, waits in the stack as what it is. The running turn holds
+// the agent's recorded async ask (`askedSteerStopJournal`: `pass3/p1-maws-ask-async`'s call and acknowledgement), so the
+// window holds the ask's row, as it does whenever a person answers an ask of the session they watch. The envelope the
+// host writes for that ask's questions (the real `askSteerText`: since board ticket 711 each question by its place and a
+// pick by `option <k>`, no text the model wrote) is handed to the running turn through `session.steer`, as the answered
+// sheet hands it (the replay matches a user write by its type, not its text, so the journal's steer at seq 146 takes
+// it); the row reads it back through the ask's questions (`askAnswersFromSteer`) as "Answer to <header, else the
+// question>: <label>". It offers Send now alone; ↑ in the empty box skips it and walks the history; then an answer to an
+// ask the window does not hold waits after the turn and reads the bare words, the pick by its place; after the square's
+// Stop both read the same, marked Held.
+const ANSWER_ROW = (question: AskQuestion, label: string) => `Answer to ${question.header ?? question.question}: ${label}`; // Interfaces A: `answer(title, words)`
+const NO_CALL_ROW = 'Answer: option 1'; // Interfaces A: `answerBare(words)`, no ask's questions in hand
 
 test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers Send now alone, ↑ walks the history past it, and after Stop it reads the same, Held', async ({ editor }) => {
   const { page } = editor;
   const id = 'u4b-answer';
-  await countRunning(page, id, steerStopJournal(scratch, id));
+  await countRunning(page, id, askedSteerStopJournal(scratch, id));
+  const { askId, questions } = asyncAsk();
+  const [question] = questions as [AskQuestion];
+  const label = question.options![0]!.label;
+  await expect(transcriptOf(page, 0).locator(`section.transcript-ask[data-ask-id="${askId}"]`), 'the window holds the ask’s row').toHaveAttribute('data-ask-state', 'asked');
   const list = stackOf(page, 0);
-  const envelope = askSteerText('u4b-ask-1', [ASKED], [ANSWERED]);
+  const answered: AskAnswer = { id: question.id ?? 'q1', question: question.question, status: 'answered', value: [label] };
+  const envelope = askSteerText(askId, questions, [answered]);
+  expect(envelope, 'the host’s new form: no text the model wrote').not.toContain(question.question);
   value(await invoke(page, 'session.steer', { appSessionId: id as never, content: envelope, priority: 'next' }));
 
   const row = list.locator('li[data-queue-state="next"]');
-  await expect(row.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
-  await expect(row.locator('[data-row-text]'), 'the whole line in its hover title').toHaveAttribute('title', ANSWER_ROW);
+  const rowText = ANSWER_ROW(question, label);
+  await expect(row.locator('[data-row-text]')).toHaveText(rowText);
+  await expect(row.locator('[data-row-text]'), 'the whole line in its hover title').toHaveAttribute('title', rowText);
   await expect(row.locator('[data-mark]')).toHaveText('Next step');
   await expect(list, 'not the envelope’s opening words').not.toContainText('[MAWS ask');
   await expect(row.getByRole('button', { name: 'Send now' })).toHaveCount(1);
@@ -956,19 +967,34 @@ test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers
   await expect(messageIn(page, 0)).toHaveText('');
   await page.keyboard.press('ArrowUp');
   await expect(messageIn(page, 0), 'the history’s newest entry, the running turn’s prompt').toHaveText(COUNT);
-  await expect(row.locator('[data-row-text]'), 'the answer still waits').toHaveText(ANSWER_ROW);
+  await expect(row.locator('[data-row-text]'), 'the answer still waits').toHaveText(rowText);
   await page.keyboard.press('ArrowDown'); // back to the empty draft the walk began from
   await expect(messageIn(page, 0)).toHaveText('');
   expect((await outFrames(page, id)).some((f) => f.request?.subtype === 'cancel_async_message'), 'nothing was taken back').toBe(false);
 
-  // the square: the answer is held into MAWS's paused queue before the interrupt, and reads the same, marked Held
+  // the no-call reading: an answer to an ask the window holds no row of, sent while the turn runs, waits after the turn
+  // in MAWS's queue (nothing is written to the engine) and reads the bare words, the pick by its place
+  const elsewhere = askSteerText('u4b-ask-elsewhere', questions, [answered]);
+  expect(value(await invoke(page, 'session.send', { appSessionId: id as never, content: elsewhere }))).toMatchObject({ disposition: 'queued' });
+  const after = list.locator('li[data-queue-state="after"]');
+  await expect(after.locator('[data-row-text]')).toHaveText(NO_CALL_ROW);
+  await expect(after.getByRole('button', { name: 'Send now' })).toHaveCount(1);
+  await expect(after.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(list, 'neither row shows an envelope').not.toContainText('[MAWS ask');
+  expect((await outFrames(page, id)).some((f) => f.type === 'user' && f.message?.content === elsewhere), 'it was not written').toBe(false);
+
+  // the square: the answer is held into MAWS's paused queue before the interrupt, and both read the same, marked Held
   await expect(control(page, 0)).toHaveAttribute('data-submit-state', 'stop');
   await control(page, 0).click();
   await expect.poll(async () => (await statusOf(page, id)).turn).toBeNull();
   const held = list.locator('li[data-queue-state="held"]');
-  await expect(held.locator('[data-row-text]')).toHaveText(ANSWER_ROW);
-  await expect(held.locator('[data-mark]')).toHaveText('Held');
-  await expect(held.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  await expect(held).toHaveCount(2);
+  for (const text of [rowText, NO_CALL_ROW]) {
+    const one = held.filter({ has: page.locator('[data-row-text]', { hasText: text }) });
+    await expect(one.locator('[data-row-text]')).toHaveText(text);
+    await expect(one.locator('[data-mark]')).toHaveText('Held');
+    await expect(one.getByRole('button', { name: 'Delete' })).toHaveCount(0);
+  }
   await expect(list.locator('header')).toContainText('Queue paused because you interrupted');
   expect((await queueOf(page, id)).paused).toBe(true);
   expect(editor.consoleErrors()).toEqual([]);
@@ -980,7 +1006,10 @@ test('U4b, a waiting answer: the stack’s row reads “Answer to …”, offers
 // `u704-end-prompt-first-1`). The host splits it where it becomes an event: the person's bubble holds the prompt alone,
 // nothing on the page begins `[MAWS ask` or shows the answer's JSON, and the ask's capsule reads answered. The ask is
 // the recording's real call, answered by the host's own `maws` server; the answer goes through `maws.ask.answer`, as
-// the Question sheet's Submit sends it.
+// the Question sheet's Submit sends it. Since board ticket 711 the host writes that envelope in its new form (no text the
+// model wrote), while the recording's joined replay holds the envelope the probe wrote, in the earlier form: the replay
+// matches a write by its type, so the window draws the recording's joined line, split as any is, and the capsule keeps
+// the answers of the host's own write, which came first. Nothing asserted here reads the envelope's lines.
 test('ticket 704, a joined answer: the prompt and the answer the engine joined draw as the person’s prompt alone and an answered capsule', async ({ editor }) => {
   const { page } = editor;
   const id = 'u704-joined-answer';

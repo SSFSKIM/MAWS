@@ -20,7 +20,7 @@ import { journalToEvents } from '../../transcript/dev/journal';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import type { Row } from '../../transcript/model/rows';
-import { rowText, stackRows, type StackRow } from './stack';
+import { answerWords, rowText, stackRows, type StackRow } from './stack';
 import { readOf } from './stack-acts';
 
 type UserRow = Extract<Row, { kind: 'user' }>;
@@ -117,5 +117,20 @@ describe('a handed row reads as a grant exactly where the transcript records one
     expect(rows.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['sending', null, GRANT]]);
     const { consents, approvals } = transcriptOf(spaced);
     expect([consents, approvals]).toEqual([[], []]);
+  });
+
+  // The cascade merge of U4b into U1c: the person typed the exact grant sentence as a text answer, and this build writes
+  // the envelope's new form (board ticket 711). The sentence stands on a line of MAWS's envelope, as a JSON string, and
+  // in its block: an answer, never the person's own line (Decision Log 52), so no row of the stack reads it as a grant
+  it('an envelope whose typed text answer is the exact sentence, handed and queued at the next step: an answer, no grant, as the transcript records none', () => {
+    const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
+    const TYPED = askSteerText('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: GRANT }]);
+    const { consents, approvals } = transcriptOf(TYPED, WAITING);
+    expect([consents, approvals]).toEqual([[], []]);
+    const handed = stackRows(queue(), new Set(), readOf(APP));
+    expect(handed.map((row) => [row.kind, grantOf(row)])).toEqual([['handed', null]]);
+    const next = stackRows(queue({ steers: [{ messageUuid: uuid, content: TYPED, createdAt: '2026-11-15T10:00:00.000Z' }] }), new Set(), readOf(APP));
+    expect(next.map((row) => [row.kind, grantOf(row), rowText(row)])).toEqual([['next', null, answerWords(TYPED, readOf(APP).questions)]]);
+    for (const row of [...handed, ...next]) expect(rowText(row)).not.toMatch(/^You approved /);
   });
 });

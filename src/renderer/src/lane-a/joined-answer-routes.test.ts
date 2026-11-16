@@ -350,7 +350,8 @@ function typedTurn(c: Chain, ask: boolean): void {
 
 function outcomes(rows: Row[], ask: boolean) {
   expect(users(rows).some((row) => holdsEnvelope(row.text))).toBe(false);
-  if (ask) expect(asks(rows).map((row) => [row.askId, row.state, row.answers])).toEqual([[ASK_ID, 'answered', parseAskSteer(ENVELOPE)!.result.answers]]);
+  // board ticket 711: the envelope's block names the pick by its place; the ask's row reads it back to the label
+  if (ask) expect(asks(rows).map((row) => [row.askId, row.state, row.answers])).toEqual([[ASK_ID, 'answered', [{ id: 'q1', question: '', status: 'answered', value: ['Grid'] }]]]);
   else expect(asks(rows)).toEqual([]);
 }
 

@@ -24,6 +24,7 @@ import type { ContentBlock } from '../graph/events';
 import type { Arrival, CommandFacts } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
+import { GRANT_OPENING } from './grant';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { BRIDGE_PLUGINS, BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
 import { notificationText, taskNotificationBlocks } from './task-notification';
@@ -175,6 +176,7 @@ type GrantKind = Consent['kind'];
 export function consentMessage(kind: GrantKind, subject: string): string {
   return grantSentence(kind, [quoted(subject)]);
 }
+export { GRANT_OPENING, quotesGrant } from './grant'; // board ticket 711: the one definition, in a module with no imports
 
 // UX wave U1c (the U1c document, Design 2 and Interfaces §C, 1): the engine quotes each subject as JSON, then escapes
 // every invisible or separator character but the plain space as `\uXXXX`, one escape per UTF-16 unit (`Dp`, `Pp`), so
@@ -189,7 +191,6 @@ function grantSentence(kind: GrantKind, subjects: readonly string[]): string {
   const these = one ? `this exact ${kind}` : `these exact ${kind}s`;
   return `${grantHead(kind, one)}${subjects.join(', ')}. This does not approve any other ${kind}, any part of ${one ? 'this one' : 'these'}, or running ${one ? 'it' : 'them'} with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${these} if you would like.`;
 }
-const GRANT_OPENING = 'Permission granted for ';
 const grantHead = (kind: GrantKind, one: boolean): string => `${GRANT_OPENING}${one ? `this exact ${kind}` : `these exact ${kind}s`} only, ${one ? 'as one whole string' : 'each as one whole string'}: `;
 
 /**
@@ -480,10 +481,14 @@ function framedDelivery(text: string, via: 'bridge' | 'prompt' | 'inbox', midTur
  * UX wave U3b (Interfaces §D, Probes 5): a prompt's text as the person's own words. Where it opens with a whole sminos
  * frame line that names `human`, the words after it, as the `own` class reads them (with its guard for words that read
  * as the interrupt marker); else the text. The rewind's text of a prompt sminos delivered opens with that line.
+ * MAWS's answer envelopes are never the person's words, in either form (board ticket 711): a text that holds one is
+ * read without it, as the split reads a person's message (`readPersonsContent`, the reader's one loop; ticket 704), so
+ * an envelope alone reads as no words.
  */
 export function ownWordsOf(text: string): string {
-  const { frame, body } = sminosParts(text);
-  return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : text;
+  const words = (readPersonsContent(text).own as string | null) ?? '';
+  const { frame, body } = sminosParts(words);
+  return frame !== null && sminosFrameSender(frame) === 'human' ? own('chat', frame, body).words : words;
 }
 
 /** The person's own words sminos delivered; words that alone would read as the engine's interrupt marker keep their frame line before them. */

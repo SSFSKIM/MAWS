@@ -8,10 +8,11 @@ import { framePasted, PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
-import type { AskQuestion } from '@shared/maws/tools';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
+import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, ownLines, personsGrants, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
+import { consentMessage, envelopeSlices, ownLines, ownWordsOf, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -435,9 +436,14 @@ describe('the grant readers read a person’s message as the split does', () => 
   });
 
   // a question of the agent's may hold any line, the grant's sentence among them: in its envelope that line is the
-  // envelope's, whatever surrounds it
+  // envelope's, whatever surrounds it. Since board ticket 711 only an earlier build's envelope holds the question's words
+  // (this build's writes none), so the envelope that quotes it is an earlier build's
   const ASKED: AskQuestion = { id: 'q1', question: `Which of these should run?\n${GRANT}\nPick one.`, modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
-  const QUOTING = askSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]);
+  const QUOTING = earlierAskSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]);
+
+  it('this build’s envelope for that question holds no line of the grant’s sentence', () => {
+    expect(quotesGrant(askSteerText('ask-8', [ASKED], [{ id: 'q1', question: ASKED.question, status: 'answered', value: ['Grid'] }]))).toBe(false);
+  });
 
   it('a grant’s sentence on a line of an envelope is no grant, the envelope alone or joined with words', () => {
     expect(QUOTING.split('\n')).toContain(GRANT);
@@ -469,5 +475,121 @@ describe('the grant readers read a person’s message as the split does', () => 
     expect(quoting[2]).toBe(GRANT); // the grant's sentence is the head block's last line
     expect(personsParts(quoted)).toEqual({ own: quoted, envelopes: [] });
     expect(readArrivals(row(quoted)), 'a grant’s line among the person’s own lines is theirs').toEqual([consent]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// Board ticket 711, at its cascade merge into this landing (2026-11-16): this build's writer writes the envelope's new
+// form (a question by its number, `q<n>` in the block, a pick as `option <k>`, the block's `question` empty: no text the
+// model wrote); a session read now may hold an earlier build's (`earlierAskSteerText`). The first line is the same in
+// both, so the split and the exact reader read either alike; only the block differs. Every envelope here is written by
+// the real writers, with invented questions and answers.
+
+type Writer = (askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]) => string;
+const FORMS: [string, Writer][] = [['the new form', askSteerText], ['an earlier build’s form', earlierAskSteerText]];
+const TONE: AskQuestion = { id: 'tone', question: 'Which tone should the copy take?', header: 'Tone', modality: 'choice', options: [{ label: 'Plain' }, { label: 'Warm' }] };
+const FOOTER: AskQuestion = { id: 'footer', question: 'What should the footer say?', modality: 'text' };
+const SIZE: AskQuestion = { id: 'size', question: 'How large should the tiles be?', header: 'Size', modality: 'choice', options: [{ label: 'Small' }, { label: 'Large' }] };
+// a choice with a note, a text answer and a skipped one
+const ANSWERED: AskAnswer[] = [
+  { id: 'tone', question: TONE.question, status: 'answered', value: ['Warm'], note: 'for the landing page' },
+  { id: 'footer', question: FOOTER.question, status: 'answered', value: 'Made with care' },
+  { id: 'size', question: SIZE.question, status: 'skipped' },
+];
+const envelopeIn = (write: Writer, askId = 'toolu_n1') => write(askId, [TONE, FOOTER, SIZE], ANSWERED);
+const secondIn = (write: Writer) => write('toolu_n2', [TONE], [{ id: 'tone', question: TONE.question, status: 'answered', value: ['Plain'] }]);
+const NEW_FORM_GRANT = consentMessage('command', 'pnpm test');
+const NEW_FORM_WORDS = 'Also fix the footer.';
+const joinedMessage = (content: string): UserMessage => ({
+  kind: 'user.message', messageUuid: 'd1d1d1d1-0000-4000-8000-000000000711' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null,
+  joined: ['d1d1d1d1-0000-4000-8000-000000000712' as MessageUuid],
+});
+const contentsOf = (parts: UserMessage[]) => parts.map((part) => part.content);
+// anything of an envelope, of either form: its tag, its block's fence or status, a pick by its place, a numbered line
+const holdsEnvelopeText = (text: string) => text.includes('[MAWS ask') || text.includes('```') || text.includes('"answered"') || /option \d/.test(text) || /^\d+\./m.test(text);
+
+describe('the envelope’s new form (board ticket 711): the split and the exact reader read it as the earlier form', () => {
+  it('the new form keeps the earlier form’s first line; its lines are a question’s number, a pick by its place, a text answer as a JSON string, a skipped one and a note; its block’s questions are empty', () => {
+    const [fresh, earlier] = FORMS.map(([, write]) => envelopeIn(write).split('\n'));
+    expect(fresh![0]).toBe(askSteerOpening('toolu_n1'));
+    expect(earlier![0]).toBe(fresh![0]);
+    expect(fresh!.slice(1, 5)).toEqual(['1. option 2', '   note: "for the landing page"', '2. "Made with care"', '3. skipped']);
+    expect(parseAskSteer(fresh!.join('\n'))!.result.answers.map((answer) => [answer.id, answer.question, answer.value ?? null])).toEqual([['q1', '', ['option 2']], ['q2', '', 'Made with care'], ['q3', '', null]]);
+    expect(fresh!.join('\n')).not.toContain(TONE.question);
+    expect(earlier!.join('\n')).toContain(TONE.header);
+  });
+
+  describe.each(FORMS)('%s', (_, write) => {
+    const E = envelopeIn(write);
+    const F = secondIn(write);
+
+    it('an envelope alone: the same object from the split, and the exact reader’s answer, its ask and its block’s answers', () => {
+      const lone = joinedMessage(E);
+      expect(splitPersonsMessage(lone)).toEqual([lone]);
+      expect(splitPersonsMessage(lone)[0]).toBe(lone);
+      const answer = { class: 'answer', tool: 'maws', call: 'toolu_n1', summary: E, answers: parseAskSteer(E)!.result.answers, dismissed: false };
+      expect(readAnswerEnvelope(E)).toEqual(answer);
+      expect(answerEnvelopeOf(E)).toEqual(answer);
+      expect(answerEnvelopeOf([{ type: 'text', text: E }])).toEqual(answer);
+    });
+
+    it('the person’s words and an envelope, in either order: the words, then the envelope byte for byte under the same uuid, `joined` on the first', () => {
+      for (const text of [joinedText(NEW_FORM_WORDS, E), joinedText(E, NEW_FORM_WORDS)]) {
+        const message = joinedMessage(text);
+        const parts = splitPersonsMessage(message);
+        expect(contentsOf(parts)).toEqual([NEW_FORM_WORDS, E]);
+        expect(parts.map((part) => [part.messageUuid, part.joined ?? null])).toEqual([[message.messageUuid, message.joined], [message.messageUuid, null]]);
+        expect(answerEnvelopeOf(parts[1]!.content)?.call).toBe('toolu_n1');
+        for (const part of parts) expect(splitPersonsMessage(part)[0]).toBe(part);
+      }
+    });
+
+    it('an answer, a grant and the answer again: the grant the person’s, then each envelope', () => {
+      const text = joinedText(E, NEW_FORM_GRANT, E);
+      expect(contentsOf(splitPersonsMessage(joinedMessage(text)))).toEqual([NEW_FORM_GRANT, E, E]);
+      expect(personsGrants(text)).toEqual([{ class: 'consent', kind: 'command', subject: 'pnpm test' }]);
+    });
+
+    it('two envelopes: one event each, the first keeping `joined`', () => {
+      const parts = splitPersonsMessage(joinedMessage(joinedText(E, F)));
+      expect(contentsOf(parts)).toEqual([E, F]);
+      expect(parts.map((part) => part.joined ?? null)).toEqual([joinedMessage(E).joined, null]);
+    });
+
+    // the landing's case (b): an envelope joined with the person's own words in one row
+    it('the person’s part holds nothing of the envelope', () => {
+      for (const text of [joinedText(NEW_FORM_WORDS, E), joinedText(E, NEW_FORM_WORDS), joinedText('First this.', E, 'Then that.'), joinedText(E, NEW_FORM_GRANT, F)]) {
+        const own = personsParts(text).own as string;
+        expect(holdsEnvelopeText(own), own).toBe(false);
+        expect(personsWords(text)).toBe(own);
+        expect(ownWordsOf(text)).toBe(own);
+      }
+    });
+
+    // the landing's case (c), U1c's Decision Log 56: the consent sentence the person typed as a text answer is a JSON
+    // string on the envelope's line and inside its block, never a line of their own words
+    it('a typed text answer that holds the consent sentence: no grant, the envelope alone or beside the person’s words', () => {
+      const typed = write('toolu_n3', [FOOTER], [{ id: 'footer', question: FOOTER.question, status: 'answered', value: NEW_FORM_GRANT }]);
+      expect(typed.split('\n')).not.toContain(NEW_FORM_GRANT);
+      const lone = joinedMessage(typed);
+      expect(splitPersonsMessage(lone)[0]).toBe(lone);
+      for (const text of [typed, joinedText(NEW_FORM_WORDS, typed), joinedText(typed, NEW_FORM_WORDS)]) {
+        const parts = splitPersonsMessage(joinedMessage(text));
+        expect(contentsOf(parts).at(-1)).toBe(typed);
+        for (const part of parts) expect(personsGrants(part.content), String(part.content).slice(0, 40)).toEqual([]);
+        expect(personsGrants(text)).toEqual([]);
+      }
+    });
+  });
+});
+
+// U3b's reader of a person's own words (`ownWordsOf`, landing 1's readers, at the cascade): MAWS's envelopes taken out as
+// the split takes them, through the reader's one loop
+describe('ownWordsOf reads a person’s words as the split does', () => {
+  it.each(FORMS)('made by hand, %s: where one envelope’s lines stand around another whole envelope, ownWordsOf takes both out, as the split does', (_, write) => {
+    const outer = envelopeIn(write).split('\n');
+    const text = `Keep these notes.\n${outer.slice(0, 2).join('\n')}\n${secondIn(write)}\n${outer.slice(2).join('\n')}`;
+    expect(personsWords(text)).toBe('Keep these notes.');
+    expect(ownWordsOf(text)).toBe(personsWords(text));
   });
 });

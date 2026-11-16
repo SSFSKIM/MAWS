@@ -8,14 +8,17 @@
 // reads as before.
 import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
+import { consentMessage } from '@shared/engine/arrival';
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText, parseAskSteer } from '@shared/maws/ask';
-import type { AskQuestion } from '@shared/maws/tools';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import type { JournalRow } from '@shared/wire/journal';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { rowsOf, withAllExpanded } from './derive';
+import { turnId as turnIdOf } from './keys';
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { builder, uuid } from './test-events';
@@ -197,10 +200,11 @@ describe('the joined answer, the architect\'s review', () => {
     });
   });
 
-  // (3) the member boundary is the writer's whole first line
+  // (3) the member boundary is the writer's whole first line. Board ticket 711: only an earlier build's envelope holds the
+  // question's words, so the case is one an earlier build wrote
   describe('a question whose second line begins with the tag', () => {
     const TAGGED: AskQuestion = { id: 'q1', question: 'Which marker should the log use?\n[MAWS ask lines] keep their own prefix', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
-    const envelope = envelopeOf('toolu_ask_t', TAGGED);
+    const envelope = earlierAskSteerText('toolu_ask_t', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Grid'] }]);
 
     it('its envelope alone answers the ask, and draws no bubble', () => {
       const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], envelope);
@@ -212,6 +216,140 @@ describe('the joined answer, the architect\'s review', () => {
       const rows = rowsAfter([{ askId: 'toolu_ask_t', question: TAGGED }], `Also fix the footer.\n${envelope}`);
       expect(asksOf(rows)).toEqual([['toolu_ask_t', 'answered']]);
       expect(promptOf(rows)?.text).toBe('Also fix the footer.');
+    });
+  });
+
+  // board ticket 711: the host writes the new form (each question by its place, a pick by `option <k>`); joined or alone
+  // it answers the capsule with the labels the person picked, under the question's own id, and draws no envelope
+  describe('the new form', () => {
+    const PLAN: AskQuestion = { id: 'page-layout', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice', options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('toolu_ask_n', [PLAN], [{ id: 'page-layout', question: PLAN.question, status: 'answered', value: ['List'], note: 'for small screens' }]);
+    const answered = { askId: 'toolu_ask_n', state: 'answered', answers: [{ id: 'page-layout', question: '', status: 'answered', value: ['List'], note: 'for small screens' }] };
+
+    it('is the new form', () => {
+      expect(envelope).not.toContain(PLAN.question);
+      expect(envelope.split('\n')[1]).toBe('1. option 2');
+    });
+
+    it('alone: the capsule Answered with the label, and no bubble', () => {
+      const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }], envelope);
+      expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject(answered);
+      expect(promptOf(rows)).toBeUndefined();
+    });
+
+    it('joined with a prompt, in either order: the capsule Answered, the bubble the prompt alone', () => {
+      for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
+        const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }], text);
+        expect(rows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject(answered);
+        expect(promptOf(rows)).toMatchObject({ text: 'Also fix the footer.', attachments: [] });
+        expect(copiedUserText(promptOf(rows)!)).toBe('Also fix the footer.');
+      }
+    });
+
+    it('two new-form envelopes joined, both asks answered here: no bubble', () => {
+      const other = askSteerText('toolu_ask_m', [PLAN], [{ id: 'page-layout', question: PLAN.question, status: 'skipped' }]);
+      const rows = rowsAfter([{ askId: 'toolu_ask_n', question: PLAN }, { askId: 'toolu_ask_m', question: PLAN }], `${envelope}\n${other}`);
+      expect(asksOf(rows)).toEqual([['toolu_ask_n', 'answered'], ['toolu_ask_m', 'answered']]);
+      expect(promptOf(rows)).toBeUndefined();
+    });
+  });
+});
+
+// Board ticket 711, at its cascade merge into ticket 704 (2026-11-16): the host writes the envelope's new form (a question
+// by its number, `q<n>` in the block, a pick as `option <k>`, the block's `question` empty); a session read now may hold
+// an earlier build's (`earlierAskSteerText`). Each case goes through the reducer and derive, in both forms, every
+// envelope written by the real writers with invented questions and answers. The ask's row is the one place that reads a
+// steer's answers back to the questions' own ids and labels (`askAnswersFromSteer`, in derive's ask row).
+describe('ticket 704 at the cascade of board ticket 711: both envelope forms', () => {
+  type Writer = (askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]) => string;
+  const TONE: AskQuestion = { id: 'tone', question: 'Which tone should the copy take?', header: 'Tone', modality: 'choice', options: [{ label: 'Plain' }, { label: 'Warm' }] };
+  const FOOTER: AskQuestion = { id: 'footer', question: 'What should the footer say?', modality: 'text' };
+  const SIZE: AskQuestion = { id: 'size', question: 'How large should the tiles be?', header: 'Size', modality: 'choice', options: [{ label: 'Small' }, { label: 'Large' }] };
+  const QUESTIONS = [TONE, FOOTER, SIZE];
+  // a choice with a note, a text answer and a skipped one
+  const ANSWERED: AskAnswer[] = [
+    { id: 'tone', question: TONE.question, status: 'answered', value: ['Warm'], note: 'for the landing page' },
+    { id: 'footer', question: FOOTER.question, status: 'answered', value: 'Made with care' },
+    { id: 'size', question: SIZE.question, status: 'skipped' },
+  ];
+  // what the capsule holds: the new form's answers back under the questions' own ids with the picked labels, its
+  // questions' words still empty; an earlier build's as it wrote them
+  const READ_BACK: AskAnswer[] = [
+    { id: 'tone', question: '', status: 'answered', value: ['Warm'], note: 'for the landing page' },
+    { id: 'footer', question: '', status: 'answered', value: 'Made with care' },
+    { id: 'size', question: '', status: 'skipped' },
+  ];
+  const FORMS: [string, Writer, AskAnswer[]][] = [['the new form', askSteerText, READ_BACK], ['an earlier build’s form', earlierAskSteerText, ANSWERED]];
+  const joinedText = (...members: string[]) => members.join('\n');
+  const WORDS = 'Also fix the footer.';
+  const GRANT = consentMessage('command', 'pnpm test');
+  const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+
+  /** The person's first turn raises each ask without waiting; the message under test opens the next turn. */
+  function stateAfter(asks: { askId: string; questions: AskQuestion[] }[], content: string | ContentBlock[]) {
+    const b = builder();
+    b.turn('u0');
+    for (const { askId, questions } of asks) b.toolUse(askId, 'mcp__maws__ask', { blocking: false, questions });
+    for (const { askId } of asks) b.result(askId, [{ type: 'text', text: JSON.stringify({ status: 'asked', askId }) }]);
+    b.end(['u0']);
+    b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.end(['u1']);
+    return applyEvents(createState(null, null), b.events);
+  }
+  const rowsIn = (state: ReturnType<typeof stateAfter>) => rowsOf(withAllExpanded(state));
+  const recordedFor = (state: ReturnType<typeof stateAfter>, askId: string) => [...state.turns.values()].flatMap((turn) => turn.askSteers?.get(askId) ?? []);
+  const capsule = (rows: Row[], askId: string) => rows.find((r): r is AskRow => r.kind === 'ask' && r.askId === askId);
+  const ownRows = (rows: Row[]) => users(rows).filter((r) => r.messageUuid === uuid('u1'));
+  const holdsEnvelopeText = (text: string) => text.includes('[MAWS ask') || text.includes('```') || /option \d/.test(text);
+
+  describe.each(FORMS)('%s', (_, write, readBack) => {
+    const E = write('toolu_ask_n1', QUESTIONS, ANSWERED);
+    const F = write('toolu_ask_n2', [TONE], [{ id: 'tone', question: TONE.question, status: 'answered', value: ['Plain'] }]);
+    const O = write('toolu_ask_orphan', [TONE], [{ id: 'tone', question: TONE.question, status: 'answered', value: ['Plain'] }]); // no call for it in the session
+
+    it('the capsule: recordAskSteer records the block’s answers as written, and the ask’s row reads them back once, alone or joined with words or a grant', () => {
+      for (const content of [E, joinedText(WORDS, E), joinedText(E, WORDS), joinedText(E, GRANT, E), [{ type: 'text', text: `${E}\n` }, IMAGE] as ContentBlock[]]) {
+        const state = stateAfter([{ askId: 'toolu_ask_n1', questions: QUESTIONS }], content);
+        expect(recordedFor(state, 'toolu_ask_n1')).toEqual(parseAskSteer(E)!.result.answers);
+        const rows = rowsIn(state);
+        expect(capsule(rows, 'toolu_ask_n1')).toMatchObject({ state: 'answered', answers: readBack });
+        for (const row of users(rows)) expect(holdsEnvelopeText(row.text), row.text.slice(0, 60)).toBe(false);
+      }
+    });
+
+    it('the person’s words joined with an envelope in one row: the bubble is the words alone, in either order', () => {
+      for (const text of [joinedText(WORDS, E), joinedText(E, WORDS)]) expect(ownRows(rowsIn(stateAfter([{ askId: 'toolu_ask_n1', questions: QUESTIONS }], text))).map((r) => r.text)).toEqual([WORDS]);
+    });
+
+    it('two envelopes, both asks held: both capsules answered with their labels, and no bubble', () => {
+      const rows = rowsIn(stateAfter([{ askId: 'toolu_ask_n1', questions: QUESTIONS }, { askId: 'toolu_ask_n2', questions: [TONE] }], joinedText(E, F)));
+      expect(capsule(rows, 'toolu_ask_n1')).toMatchObject({ state: 'answered', answers: readBack });
+      expect(capsule(rows, 'toolu_ask_n2')?.answers?.map((answer) => [answer.id, answer.value])).toEqual([['tone', ['Plain']]]);
+      expect(ownRows(rows)).toEqual([]);
+    });
+
+    // The landing's case of an orphan envelope ("Reported to the architect", C 1, with M1's decisions): an orphan is
+    // drawn only where it is the first event of its message, as a lone orphan is, and otherwise nothing of it is drawn.
+    // What a lone orphan draws is master's drawing, kept: its text in a bubble, the opener of its turn. Whether a lone
+    // orphan should open a turn, or draw its text, the landing does not rule.
+    it('an orphan alone: one bubble of its text, the opener of its turn, and no answer recorded for it', () => {
+      const state = stateAfter([], O);
+      expect(ownRows(rowsIn(state)).map((r) => [r.text, r.turnId])).toEqual([[O, turnIdOf.ofMessage(uuid('u1'))]]);
+      expect(recordedFor(state, 'toolu_ask_orphan')).toEqual([]);
+    });
+
+    it('an orphan first of its message, then an envelope answered here: the orphan’s bubble alone, as a lone orphan’s is', () => {
+      const rows = rowsIn(stateAfter([{ askId: 'toolu_ask_n1', questions: QUESTIONS }], joinedText(O, E)));
+      expect(ownRows(rows).map((r) => r.text)).toEqual([O]);
+      expect(capsule(rows, 'toolu_ask_n1')?.state).toBe('answered');
+    });
+
+    it('an orphan not first of its message: after an envelope answered here, beside the person’s words in either order, beside an image: nothing of it is drawn', () => {
+      const held = [{ askId: 'toolu_ask_n1', questions: QUESTIONS }];
+      expect(ownRows(rowsIn(stateAfter(held, joinedText(E, O))))).toEqual([]);
+      for (const text of [joinedText(WORDS, O), joinedText(O, WORDS)]) expect(ownRows(rowsIn(stateAfter(held, text))).map((r) => r.text)).toEqual([WORDS]);
+      expect(ownRows(rowsIn(stateAfter(held, [IMAGE, { type: 'text', text: O }]))).map((r) => [r.text, r.attachments.map((a) => a.kind)])).toEqual([['', ['image']]]);
     });
   });
 });
