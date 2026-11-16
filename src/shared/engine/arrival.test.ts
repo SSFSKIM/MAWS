@@ -6,7 +6,7 @@
 import { describe, expect, it } from 'vitest';
 import { askSteerText } from '@shared/maws/ask';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, GRANT_OPENING, nothingOpen, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, nothingOpen, quotesGrant, readAnswerEnvelope, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -401,6 +401,14 @@ describe('the reader, on MAWS’s consent message (U1, l4-approvals-12)', () => 
   it('opens with GRANT_OPENING, the one definition the ask tool’s guard reads', () => {
     expect(GRANT_OPENING).toBe('Permission granted for ');
     for (const kind of ['command', 'call'] as const) expect(consentMessage(kind, 'x').startsWith(GRANT_OPENING)).toBe(true);
+  });
+
+  // addition B (2026-11-16): the one test of one string, which the ask tool's guard and the steer's writer both call
+  it('quotesGrant: the sentence quotes the grant, read with tags removed or with their brackets' words kept', () => {
+    for (const kind of ['command', 'call'] as const) expect(quotesGrant(consentMessage(kind, 'x'))).toBe(true);
+    expect(quotesGrant('**Permission** granted <b>for</b> it')).toBe(true);
+    expect(quotesGrant('Permission granted <for it>')).toBe(true);
+    expect(quotesGrant('Was permission granted by the reviewer?')).toBe(false);
   });
 
   it('is one template with two words, the subject quoted as one JSON string', () => {

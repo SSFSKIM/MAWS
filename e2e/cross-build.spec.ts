@@ -3247,8 +3247,10 @@ const CHOSEN_ID = 'proceed-or-stop';
 const CHOSEN_ASK = { blocking: false, questions: [{ id: CHOSEN_ID, question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
 const CHOSEN_ANSWERS = [{ ...ENVELOPE_ANSWERS[0]!, id: CHOSEN_ID }];
 const NOT_ANSWERED = 'Not answered'; // transcript/model/copy.ts ASK.notAnswered, in this build and in build F
-const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes("question: '' }))");
-const writesNewEnvelopeWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) writes the envelope this build writes (its src/shared/maws/ask.ts empties the block's question): no earlier form to read; the run of record is the merge-base peer's or build F's, --peer-exact f1852de3a`;
+// a peer whose writer is this landing's or later: its ask.ts reads the new form back (askAnswersFromSteer, which no
+// build before this landing has: 0 at f1852de3a and at 2c7044231)
+const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes('export function askAnswersFromSteer');
+const writesNewEnvelopeWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) writes the envelope this build writes (its src/shared/maws/ask.ts has askAnswersFromSteer): no earlier form to read; the run of record is the merge-base peer's or build F's, --peer-exact f1852de3a`;
 
 // The envelope the session's host wrote for the ask: the `user` frame it sent opening with the ask's tag
 function envelopeIn(s: Scratch, id: AppSessionId, askId: string): string | null {
