@@ -4,6 +4,7 @@
 // the plan goes out as a new prompt. While staged it holds the session's queue like an open turn. The session owns the
 // process; the sequence asks it through `ClearAndImplementHost`.
 import { randomUUID } from 'node:crypto';
+import { planPrompt } from '@shared/engine/host-prompts'; // UX wave U6e: the prompt's one copy
 import type { PermissionMode } from '@shared/graph/enums';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { UserInputFrame } from '@shared/wire/frames';
@@ -112,7 +113,7 @@ export class ClearAndImplementSequence {
       // Keep the queue held until the out row registers the prompt with the normalizer. A further resume or
       // queue save must not write a second implementation while this write is in flight.
       clear.phase = 'writing_implementation';
-      void this.writeUser(`Implement this plan:\n\n${clear.plan}`)
+      void this.writeUser(planPrompt(clear.plan))
         .catch((error: unknown) => this.host.log(`plan prompt not written: ${messageOf(error)}`))
         .finally(() => {
           if (this.clear === clear) {
