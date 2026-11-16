@@ -521,12 +521,14 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
   it('says the GitHub CLI is missing with Install, naming the machine when it is not this Mac', async () => {
     servesRemote();
     main.state.scm = scmStatusOf({ gh: { state: 'missing' } });
+    main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', gh: { state: 'missing' }, error: 'gh_missing' }));
     mount(REMOTE);
     await waitFor(() => expect(text(part('pr'))).toBe('Pull request GitHub CLI not installed on berth-mini · Install'));
   });
 
   it('on another machine signed out: Sign in by the shell right, the second line without it, and neither while the rights are not known', async () => {
     const signedOut = scmStatusOf({ gh: { state: 'unauthenticated', detail: 'gh auth status: not logged in' } });
+    main.state.answers['scm.pr.state'] = () => ok(prStateOf({ branch: 'feature/x', gh: signedOut.gh, error: 'gh_unauthenticated' }));
     const lines = () => [...part('pr')!.querySelectorAll('[data-scm-pr-line]')].map(text);
     servesRemote({ rights: ['spawn', 'shell'] });
     main.state.scm = signedOut;

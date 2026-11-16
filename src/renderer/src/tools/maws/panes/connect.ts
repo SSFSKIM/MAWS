@@ -25,6 +25,8 @@
 // the strip behind them. The calls that reach the layout store run inside `quietly`; every `addTool` says `asked`, which
 // the host keeps across its own deferral, and the one made after an await (the browser's open) carries it across its
 // own, where no `quietly` scope reaches.
+//
+// UX wave U5b-2 (decision 20): `source-control` with a target opens Review at that file (`showReviewAt`).
 import { validateBrowserUrl } from '@shared/browser/url'; // E4a
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -64,11 +66,23 @@ export function showPane({ appSessionId, requestId, pane, target, line }: MawsPa
     if (target === null) return { ok: false, error: TOOL_ERRORS.targetRequired(pane) }; // the host resolves one for `file`
     return showFile(appSessionId, target, line);
   }
+  if (pane === 'source-control' && target !== null) return showReviewAt(appSessionId, target); // UX wave U5b-2 (decision 20)
   const tool = panelHost.tools().find((candidate) => candidate.id === where.toolId);
   if (!tool) return { ok: false, error: TOOL_ERRORS.paneUnavailable(pane) };
   if (pane === 'browser') return showBrowser(tool, appSessionId, requestId, target, client); // E4a; U12a: client
   const opened = (pane === 'terminal' ? selectTerminal(tool, appSessionId) : null) ?? panelHost.addTool(tool.id, { appSessionId, params: paramsOf(pane, target), activate: true, asked: 'agent' });
   return { ok: true, opened: { kind: 'panel-tool', toolId: tool.id, tabId: opened, title: tool.title } };
+}
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, decision 20 and §H): Source
+// control is a page with no file of its own, so a request for it that names a file opens Review at that file, as the
+// agent asked it, and the answer names Review's tab; with no file the page opens as any panel pane.
+function showReviewAt(appSessionId: AppSessionId, target: string): MawsPaneAnswerResult {
+  const diff = PANES.diff;
+  const review = 'toolId' in diff ? panelHost.tools().find((candidate) => candidate.id === diff.toolId) : undefined;
+  if (!review) return { ok: false, error: TOOL_ERRORS.paneUnavailable('source-control') };
+  const tabId = panelHost.addTool(review.id, { appSessionId, params: { path: target }, activate: true, asked: 'agent' });
+  return { ok: true, opened: { kind: 'panel-tool', toolId: review.id, tabId, title: review.title } };
 }
 
 // UX wave U6b-1 (R2, Decision 10): the file where `openFile` puts it, the answer naming the tab that holds it. Before the
