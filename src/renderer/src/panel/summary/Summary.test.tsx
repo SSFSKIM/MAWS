@@ -27,6 +27,7 @@ import { filesTool } from '../../tools/code/files/FilesTool'; // UX wave U6b-1
 import { useHasSources } from './Sources';
 import { Summary } from './Summary';
 import { preloadOf } from '../../test-support/preload-of';
+import { connectRequestCard } from '../../request-card'; // UX wave U1b
 
 const P = at('project-a' as ProjectId);
 const Q = at('project-b' as ProjectId);
@@ -175,6 +176,18 @@ describe('floating session cards', () => {
     expect(cardNames()).toEqual(['Waiting requests', 'Environment', 'Context', 'Connectors']);
     setAttention([{ ...waiting(A), state: 'confirmed' as const }]);
     expect(screen.queryByRole('region', { name: 'Waiting requests' })).toBeNull();
+  });
+
+  // UX wave U1b (M5, §E): the request card's own card in that slot, registered as the app registers it.
+  it('draws the request card module’s Waiting for you first, above Environment, with the count past one', () => {
+    offs.push(connectRequestCard());
+    const second = { ...waiting(A, 'req-2'), id: `${waiting(A).id}-2` as ReturnType<typeof waiting>['id'] };
+    setAttention([waiting(A), second]);
+    mount();
+    expect(cardNames()).toEqual(['Waiting for you', 'Environment', 'Context', 'Connectors']);
+    expect(within(region('Waiting for you')).getByRole('heading').textContent).toBe('Waiting for you · 2');
+    setAttention([]);
+    expect(screen.queryByRole('region', { name: 'Waiting for you' })).toBeNull();
   });
 
   it('with nothing registered in the two slots, neither draws an element', () => {

@@ -40,6 +40,7 @@ import { connectStatusLine } from './statusline';
 import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
 import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
 // C7 end
+import { registerBlockedCalls } from './blocked-call'; // UX wave U1c
 // C8c start
 import { connectCodeEvents } from './ipc/events';
 import { codeTranscriptActions, registerCodeTools } from './tools/code';
@@ -227,6 +228,7 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => connectInlineEdit(), []); // W3 (B6): a bubble's Edit, and a blocked prompt's Edit prompt (W1), edit the bubble in place
   // C7 end
+  useEffect(() => registerBlockedCalls(), []); // UX wave U1c: "Approve and retry" under a call auto mode blocked
   // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
   // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks
   // (K3), registered after C6's `connectTranscript` so they win over its file-tab default.
@@ -282,7 +284,8 @@ export function App() {
   // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
   useEffect(() => connectPaneShows(), []);
   useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
-  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that open it
+  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that feed its
+  // store (UX wave U1b: an ask opens no sheet; the person opens it)
   useEffect(() => {
     registerPanelTool(askSheetTool);
   }, []);

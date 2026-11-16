@@ -52,6 +52,7 @@ const cellShape = {
   status: z.enum(['running', 'done', 'error', 'denied', 'stopped']), label: z.string(), summary: z.string().optional(), moved: z.literal(true).optional(), paths: z.array(z.string()), startedAt: z.string(), endedAt: nullable(z.string()),
   detail: CellDetailSchema, expanded: z.boolean(), agent: nullable(SubagentRefSchema),
   background: z.boolean(), doneLabel: z.string().optional(), error: z.string().optional(), // UX wave U2
+  blocked: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional(), // UX wave U1c
 };
 export const CellSchema = z.strictObject(cellShape);
 
@@ -75,7 +76,7 @@ const AttachmentSchema = z.strictObject({ kind: z.enum(['image', 'file', 'text']
 
 export const RowSchema = z.discriminatedUnion('kind', [
   z.strictObject({ ...base, kind: z.literal('time'), label: z.string() }),
-  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), unread: z.literal(true).optional() /* U4a */, anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, comments: z.array(z.strictObject({ anchor: AnchorSchema, text: z.string(), attachment: z.number().int().nonnegative().optional() })).optional() /* UX wave U5a */, commentsTo: z.literal('thread').optional() /* UX wave U5a */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional() /* U3 */ }),
+  z.strictObject({ ...base, kind: z.literal('user'), messageUuid: nullable(z.string()), text: z.string(), attachments: z.array(AttachmentSchema), placeholders: z.array(z.number().int()), lines: z.number(), editable: z.boolean(), steer: z.boolean(), dropped: z.boolean(), pending: z.enum(['next', 'held']).optional(), unread: z.literal(true).optional() /* U4a */, anchor: AnchorSchema.optional() /* E3 */, anchorFrame: z.strictObject({ destination: nullable(z.enum(['thread', 'main'])), screenshot: z.boolean() }).optional() /* E11 */, comments: z.array(z.strictObject({ anchor: AnchorSchema, text: z.string(), attachment: z.number().int().nonnegative().optional() })).optional() /* UX wave U5a */, commentsTo: z.literal('thread').optional() /* UX wave U5a */, consent: z.strictObject({ kind: z.enum(['command', 'call']), subject: z.string() }).optional(), beside: z.string().optional() /* UX wave U1c */, started: z.literal(true).optional() /* UX wave U1c */ /* U3 */ }),
   z.strictObject({ ...base, kind: z.literal('assistant_text'), messageUuid: nullable(z.string()), blockIndex: z.number(), markdown: z.string(), live: z.boolean(), phase: z.enum(['answer', 'commentary']), model: nullable(z.string()), cut: z.literal(true).optional(), partway: z.literal(true).optional() }),
   z.strictObject({
     ...base, kind: z.literal('divider'), state: z.enum(['working', 'completed', 'stopped', 'failed']), cause: z.enum(['crash', 'message']).optional() /* E11; UX wave U4a */, origin: z.enum(['human', 'engine', 'peer']), startedAt: z.string(), endedAt: nullable(z.string()),
@@ -90,14 +91,14 @@ export const RowSchema = z.discriminatedUnion('kind', [
     ...base, kind: z.literal('receipt'), files: z.array(z.strictObject({ path: z.string(), change: z.enum(['create', 'update', 'delete']), added: z.number(), removed: z.number(), cellId: z.string() })),
     added: z.number(), removed: z.number(), state: z.enum(['applied', 'undoing', 'undone', 'reapplying']), canUndo: z.boolean(), canReapply: z.boolean(),
   }),
-  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), overflow: z.number() }),
+  z.strictObject({ ...base, kind: z.literal('subagent'), agents: z.array(SubagentRefSchema), sentence: z.string(), status: z.enum(['started', 'working', 'finished', 'finished_with_errors', 'stopped']), exited: z.literal(true).optional() /* UX wave U3b */, overflow: z.number() }),
   z.strictObject({
     ...base, kind: z.literal('agent_message'), direction: z.enum(['to_child', 'from_child', 'between']), from: nullable(SubagentRefSchema), to: nullable(SubagentRefSchema), text: z.string(),
     peer: PeerMessageSchema.optional(), report: z.string().optional(), body: z.string().optional(), // E7
   }),
   z.strictObject({ ...base, kind: z.literal('thinking'), messageUuid: nullable(z.string()), text: z.string(), live: z.boolean(), durationMs: nullable(z.number()), recordedMs: nullable(z.number()), clock: z.literal('wall').optional() }),
-  z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()) }),
-  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */ }),
+  z.strictObject({ ...base, kind: z.literal('plan'), toolUseId: z.string(), plan: z.string(), outcome: nullable(z.enum(PLAN_OUTCOMES)), feedback: nullable(z.string()), waiting: z.literal(true).optional() /* UX wave U1b */ }),
+  z.strictObject({ ...base, kind: z.literal('question'), toolUseId: z.string(), questions: z.array(QuestionSchema), answers: nullable(z.record(z.string(), z.string())), error: nullable(z.string()) /* E1 */, waiting: z.literal(true).optional(), dismissed: z.literal(true).optional() /* UX wave U1b */ }),
   z.strictObject({
     ...base, kind: z.literal('request_slot'), requestId: z.string(), toolUseId: nullable(z.string()), requestKind: z.enum(['permission', 'question', 'plan', 'dialog', 'elicitation']), toolName: nullable(z.string()), requestedAt: z.string(),
   }),
@@ -114,11 +115,15 @@ export const RowSchema = z.discriminatedUnion('kind', [
     text: z.string(), durationMs: nullable(z.number()), detail: nullable(z.string()), taskId: nullable(z.string()), toolUseId: nullable(z.string()), outputFile: nullable(z.string()),
   }),
   // U3 end
-  z.strictObject({ ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string() }),
+  z.strictObject({
+    ...base, kind: z.literal('local_command'), messageUuid: nullable(z.string()), text: z.string(),
+    error: z.literal(true).optional(), run: z.strictObject({ command: z.string(), args: z.string() }).optional(), plain: z.literal(true).optional(), lone: z.literal(true).optional(), // UX wave U3b
+  }),
   // E1 start
   z.strictObject({
     ...base, kind: z.literal('ask'), toolUseId: z.string(), askId: z.string(), title: nullable(z.string()), context: nullable(z.string()), blocking: z.boolean(), questions: z.array(AskQuestionSchema),
     state: z.enum(['pending', 'asked', 'answered', 'cancelled', 'error']), answers: nullable(z.array(AskAnswerSchema)), error: nullable(z.string()), cancelReason: nullable(AskCancelReasonSchema),
+    waiting: z.literal(true).optional(), // UX wave U1b
   }),
   z.strictObject({
     ...base, kind: z.literal('delivery'), toolUseId: z.string(), files: z.array(z.strictObject({ path: z.string(), name: z.string(), id: nullable(z.string()) })), caption: nullable(z.string()),
@@ -155,4 +160,5 @@ export const RowSchema = z.discriminatedUnion('kind', [
   // E4c end
   z.strictObject({ ...base, kind: z.literal('browser_activity'), toolUseId: nullable(z.string()), appSessionId: z.string(), tabId: z.string(), activity: BrowserActivitySchema }), // E13
   z.strictObject({ ...base, kind: z.literal('to_human'), toolUseId: z.string(), text: z.string().min(1), pending: z.boolean() }), // P4-R7
+  z.strictObject({ ...base, kind: z.literal('activity'), activity: z.literal('compacting'), since: z.string() }), // UX wave U3b (decision 17)
 ]);

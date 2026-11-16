@@ -8,13 +8,16 @@
 // (from its link's `down` until the next snapshot, through an `up` before it): a greyed partition's items are drawn and
 // never counted (`selectGreyedNeedsYou` beside `selectNeedsYou`). Greying is main's word alone, never read from the roster.
 import { create } from 'zustand';
+import type { RequestAnswer } from '@shared/engine/answers';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
+import type { AgentId, AppSessionId, AttentionId, ToolUseId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import type { EventPayload, MawsBridge } from '@shared/ipc/schema';
+import { ipcError } from '@shared/ipc/errors';
+import type { CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import type { MachineRef } from '@shared/machine/ref';
 import { waitingAgents, waitingByCall, waits } from '@shared/attention/kinds';
+import { waitingForms, waitingRequests } from '@shared/attention/waiting'; // UX wave U1b
 import { needsYou, type NeedsYouRow } from '../attention/derive';
 import type { QuestionDraft } from '../request-card/question-steps';
 import type { ListedSession } from './sessions';
@@ -34,8 +37,35 @@ export interface AttentionState {
   // W4: a question card's answers in progress, beside its request, so a remount or a move between placements resumes
   // them (`request-card/question-steps.ts`); dropped once the item no longer waits (UC-1: at the answer).
   drafts: Map<AttentionId, QuestionDraft>;
+  // UX wave U1b (the branch review's ruling of 2026-11-15 UTC): beside them, by the same lifetime, the text a card's box
+  // holds: a prompt's reason for denying, a plan's feedback. Present: the box is open with that text; absent: closed.
+  textDrafts: Map<AttentionId, string>;
   // P5 O7 M6: the sessions of every machine whose attention main holds greyed.
   greyed: ReadonlySet<AppSessionId>;
+  // UX wave U1b (Interfaces §G, decisions 8 and 21): what is known of a question's answer before the transcript's own row
+  // carries it, by the addressed session and the call: the answers this window sent, a dismissal, or a settlement's
+  // words. Memory, per window. The ruling of 2026-11-15 on M1's D-2: a receipt lasts until the row carries its own
+  // answers (the row then reads its own) or the session leaves this window (`forgetReceipts`, called by the card's
+  // follower, `request-card/receipts.ts`); a session's list emptied or dropped by a snapshot is no leaving.
+  receipts: ReadonlyMap<AppSessionId, ReadonlyMap<ToolUseId, Receipt>>;
+  recordReceipt(appSessionId: AppSessionId, call: ToolUseId, receipt: Receipt): void; // a `settled` receipt never replaces an `answers` or a `dismissed` one
+  forgetReceipts(appSessionId: AppSessionId): void; // the session left: its receipts go, and only its own
+  // UX wave U1b (Interfaces §G "The delivery", decision 17): a card's answer, held by the request so that a card mounted
+  // again, or another placement of the same item, reads the one state. One answer in flight per item; `sent` until the
+  // item leaves the session's list; `not_pending` for NOT_PENDING_MS, then `closed` (drawn by no placement) until the
+  // item leaves; `failed` with the answer a Retry sends again. An entry goes when its item leaves the list.
+  deliveries: ReadonlyMap<AttentionId, Delivery>;
+  deliver(item: AttentionItem, answer: RequestAnswer): Promise<Outcome>; // the card's submit: the session's port (`connectAnswers`), its outcome, the receipt
+  // UX wave U1b M3 (the architect's ruling of 2026-11-15): the test reset's (`fillStores`), which no `setState` reaches:
+  // the answers held in flight, so a case that left one out keeps no later case's answer from being sent. The app never
+  // calls it.
+  forgetAnswersInFlight(): void;
+  // UX wave U1b (Interfaces §G "The settling receipt", decision 20): a terminal session's request answered first elsewhere
+  // says so for SETTLED_MS where it stood, held here (the end row leaves with its last request). Written and removed by
+  // the card's follower (`request-card/receipts.ts`); never a waiting request: no list, count or key reads it.
+  settling: ReadonlyMap<AppSessionId, readonly Settling[]>;
+  holdSettling(appSessionId: AppSessionId, entry: Settling): void;
+  releaseSettling(appSessionId: AppSessionId, id: AttentionId): void;
   // P5 O6 M4: per machine. A machine's snapshot replaces its sessions' lists only, and buffers only its changes; begun
   // again (a new generation of its link) it drops what it had buffered.
   beginSnapshot(machine: MachineRef): void;
@@ -53,6 +83,55 @@ export interface AttentionState {
   loadRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // once per item; a failed read is retried once
   retryRequest(client: MawsBridge, item: AttentionItem): Promise<void>; // an unreadable item's read, asked again (the card's Retry)
   setDraft(id: AttentionId, draft: QuestionDraft): void;
+  setTextDraft(id: AttentionId, text: string | null): void; // null: the box closed, its text gone
+}
+
+/** UX wave U1b (Interfaces §G): what is known of a question's answer before the transcript's own row carries it. */
+export type Receipt = { answers: Record<string, string> } | { dismissed: true } | { settled: string };
+
+/** UX wave U1b (Interfaces §G "The delivery"): where a card's answer stands, by its item. `closed`: answered elsewhere and
+ * said so for NOT_PENDING_MS; no placement draws the card again until its item leaves the list. */
+export type Delivery = { phase: 'answering' | 'sent' | 'not_pending' | 'closed' } | { phase: 'failed'; detail: string | null; answer: RequestAnswer };
+export type Outcome = 'delivered' | 'not_pending' | 'write_failed';
+export const NOT_PENDING_MS = 2_000;
+/** What a card says while its answer was too late (`not_pending`), and, after (decision 8a), its question's receipt. */
+export const ANSWERED_ELSEWHERE = 'Already answered elsewhere';
+
+/** UX wave U1b (Interfaces §G "The settling receipt"): one request its terminal, or another client, answered first. */
+export interface Settling { id: AttentionId; call: ToolUseId | null; agentId: AgentId | null; summary: string; words: string; until: number }
+
+/** The way an answer reaches its session, given by the card's module (`request-card/RequestCard.tsx`): the session's
+ * controls port and lane A's race. Both import MAWS's IPC client, which this store must not: a row's view imports the
+ * store, and desk web bundles the rows. */
+export interface AnswerPort {
+  send(item: AttentionItem, answer: RequestAnswer): Promise<CommandResult<'session.answer'>>;
+  terminalOnly(item: AttentionItem): boolean; // a request the terminal alone answers now: answered elsewhere puts it back to pending
+}
+const NOT_CONNECTED: CommandResult<'session.answer'> = { ok: false, error: ipcError('internal', 'No answer path is connected') };
+const NO_PORT: AnswerPort = { send: () => Promise.resolve(NOT_CONNECTED), terminalOnly: () => false };
+let answerPort: AnswerPort = NO_PORT;
+/** Gives the store its answer path; the returned function takes it back. */
+export function connectAnswers(port: AnswerPort): () => void {
+  answerPort = port;
+  return () => {
+    if (answerPort === port) answerPort = NO_PORT;
+  };
+}
+
+// A question's call, for the receipts a delivery writes: the engine's or a bridge's question (kind `question`, or
+// `async_input` for a terminal's asynchronous question) with a call id; null for any other request.
+const questionCall = (item: AttentionItem): ToolUseId | null => (item.kind === 'question' || item.kind === 'async_input' ? item.request.toolUseId : null);
+// Decision 8b: a plan's row keeps the known answer too, so the answered-elsewhere receipt is written for a plan's call as
+// well as a question's.
+const answeredCall = (item: AttentionItem): ToolUseId | null => (item.kind === 'plan' ? item.request.toolUseId : questionCall(item));
+
+// What a delivered answer says of its question (M1's D-5, moved here with the delivery): the answers sent, or a dismissal
+// for the decline; nothing for an answer to any other request. A question's item, the engine's or a bridge's, is of kind
+// `question`, or `async_input` for a terminal's asynchronous question.
+function receiptOfAnswer(item: AttentionItem, answer: RequestAnswer): Receipt | null {
+  if (questionCall(item) === null) return null;
+  if (answer.kind === 'question') return { answers: { ...answer.answers } };
+  return answer.kind === 'permission' && answer.decision !== 'allow' ? { dismissed: true } : null;
 }
 
 export const REQUEST_RETRY_MS = 1_000; // the wait before a failed `attention.request` read is retried, once
@@ -72,13 +151,25 @@ function forgetSettled(state: Pick<AttentionState, 'requests' | 'unreadable'>, b
   return { requests, unreadable };
 }
 
-// The drafts of items that no longer wait (answered, retired, gone) are dropped.
-function forgetClosedDrafts(drafts: Map<AttentionId, QuestionDraft>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
-  if (drafts.size === 0) return {};
+// The drafts of items that no longer wait (answered, retired, gone) are dropped: a question's answers in progress and a
+// box's text (UX wave U1b) alike.
+function forgetClosedDrafts(state: Pick<AttentionState, 'drafts' | 'textDrafts'>, bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (state.drafts.size === 0 && state.textDrafts.size === 0) return {};
   const open = new Set([...bySession.values()].flatMap((items) => items.filter(waits).map((item) => item.id)));
-  const kept = new Map([...drafts].filter(([id]) => open.has(id)));
-  return kept.size === drafts.size ? {} : { drafts: kept };
+  const drafts = new Map([...state.drafts].filter(([id]) => open.has(id)));
+  const textDrafts = new Map([...state.textDrafts].filter(([id]) => open.has(id)));
+  return { ...(drafts.size !== state.drafts.size && { drafts }), ...(textDrafts.size !== state.textDrafts.size && { textDrafts }) };
 }
+
+// UX wave U1b (§G "The delivery"): the deliveries of items that no longer wait (answered, retired, gone) go, as drafts do.
+function forgetClosedDeliveries(deliveries: AttentionState['deliveries'], bySession: Map<AppSessionId, AttentionItem[]>): Partial<AttentionState> {
+  if (deliveries.size === 0) return {};
+  const open = new Set([...bySession.values()].flatMap((items) => items.filter(waits).map((item) => item.id)));
+  const kept = new Map([...deliveries].filter(([id]) => open.has(id)));
+  return kept.size === deliveries.size ? {} : { deliveries: kept };
+}
+
+const sameReceipt = (a: Receipt | undefined, b: Receipt): boolean => a !== undefined && JSON.stringify(a) === JSON.stringify(b);
 
 // P5 O6 M4: a machine's part of the store, the sessions whose lists the calls naming it wrote (never parsed from ids), and
 // its changes buffered while its snapshot is outstanding.
@@ -95,6 +186,12 @@ interface Partition {
 
 export function createAttentionStore() {
   const inFlight = new Map<AttentionId, Promise<void>>();
+  const answering = new Map<AttentionId, Promise<Outcome>>(); // U1b: the one answer in flight per item
+  // U1b (M2's review, on the ruling on M1's D-2): how many times each session left this window (`forgetReceipts`). A
+  // delivery writes its receipt only when its session has not left since the answer went out: the leaving is said once,
+  // at its edge, and an outcome arriving after it would otherwise write the session's receipts again.
+  const departures = new Map<AppSessionId, number>();
+  const departuresOf = (id: AppSessionId) => departures.get(id) ?? 0;
   const partitions = new Map<MachineRef, Partition>();
   const partition = (machine: MachineRef): Partition => {
     let p = partitions.get(machine);
@@ -136,7 +233,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
       }
       p.buffer = null;
-      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+      set({ bySession, version: get().version + 1, loaded: true, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
     };
     return {
       loaded: false,
@@ -147,7 +244,11 @@ export function createAttentionStore() {
       requests: new Map(),
       unreadable: new Map(),
       drafts: new Map(),
+      textDrafts: new Map(),
       greyed: new Set(),
+      receipts: new Map(),
+      deliveries: new Map(),
+      settling: new Map(),
       beginSnapshot(machine) {
         const p = partition(machine);
         if (p.fed) return; // fix wave 1: the feed's changes apply as they come
@@ -166,7 +267,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
-        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       applyMirrored({ appSessionId, items }, machine) {
         const p = partition(machine);
@@ -175,7 +276,7 @@ export function createAttentionStore() {
         p.sessions.add(appSessionId);
         const bySession = new Map(get().bySession).set(appSessionId, items);
         const greyed = p.greyed && !get().greyed.has(appSessionId) ? greyedAfter(p, []) : get().greyed;
-        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+        set({ bySession, greyed, version: get().version + 1, ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       // Main's word, newer than anything an `attention.list` of the machine still outstanding could say (an RL2 machine's
       // roster can come up before its rows say it is listed): from here the feed alone speaks for the partition (`fed`),
@@ -188,7 +289,7 @@ export function createAttentionStore() {
         p.buffer = null;
         p.fed = true;
         p.greyed = grey;
-        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get().drafts, bySession) });
+        set({ bySession, version: get().version + 1, pendingReplacements: buffered(), greyed: greyedAfter(p, before), ...forgetSettled(get(), bySession), ...forgetClosedDrafts(get(), bySession), ...forgetClosedDeliveries(get().deliveries, bySession) });
       },
       applyNotified({ delivery }) {
         if (delivery !== 'in-app') set({ notificationDelivery: delivery });
@@ -233,6 +334,86 @@ export function createAttentionStore() {
       setDraft(id, draft) {
         set({ drafts: new Map(get().drafts).set(id, draft) });
       },
+      setTextDraft(id, text) {
+        const textDrafts = new Map(get().textDrafts);
+        if (text === null) textDrafts.delete(id);
+        else textDrafts.set(id, text);
+        set({ textDrafts });
+      },
+      recordReceipt(appSessionId, call, receipt) {
+        const held = get().receipts.get(appSessionId)?.get(call);
+        if (sameReceipt(held, receipt) || ('settled' in receipt && held !== undefined && !('settled' in held))) return;
+        set({ receipts: new Map(get().receipts).set(appSessionId, new Map(get().receipts.get(appSessionId)).set(call, receipt)) });
+      },
+      forgetReceipts(appSessionId) {
+        departures.set(appSessionId, departuresOf(appSessionId) + 1);
+        if (!get().receipts.has(appSessionId)) return;
+        const receipts = new Map(get().receipts);
+        receipts.delete(appSessionId);
+        set({ receipts });
+      },
+      holdSettling(appSessionId, entry) {
+        const held = (get().settling.get(appSessionId) ?? []).filter((s) => s.id !== entry.id);
+        set({ settling: new Map(get().settling).set(appSessionId, [...held, entry]) });
+      },
+      releaseSettling(appSessionId, id) {
+        const held = get().settling.get(appSessionId);
+        if (held === undefined || !held.some((s) => s.id === id)) return;
+        const rest = held.filter((s) => s.id !== id);
+        const settling = new Map(get().settling);
+        if (rest.length > 0) settling.set(appSessionId, rest);
+        else settling.delete(appSessionId);
+        set({ settling });
+      },
+      forgetAnswersInFlight() {
+        answering.clear();
+      },
+      deliver(item, answer) {
+        const out = answering.get(item.id);
+        if (out) return out; // one answer in flight per item: a second call sends nothing
+        const held = get().deliveries.get(item.id);
+        if (held !== undefined && held.phase !== 'failed') return Promise.resolve(held.phase === 'sent' ? 'delivered' : 'not_pending'); // answered already
+        const entry: Delivery = { phase: 'answering' };
+        const write = (next: Delivery | null) => {
+          if (get().deliveries.get(item.id) !== entry) return; // the item left the list meanwhile, and its entry with it
+          const deliveries = new Map(get().deliveries);
+          if (next === null) deliveries.delete(item.id);
+          else deliveries.set(item.id, next);
+          set({ deliveries });
+        };
+        set({ deliveries: new Map(get().deliveries).set(item.id, entry) });
+        const departed = departuresOf(item.appSessionId);
+        const sent = (async (): Promise<Outcome> => {
+          const result = await answerPort.send(item, answer);
+          answering.delete(item.id);
+          const outcome: Outcome = result.ok ? result.value.outcome : 'write_failed';
+          const call = questionCall(item);
+          const stayed = departuresOf(item.appSessionId) === departed; // its session has not left this window meanwhile
+          if (outcome === 'delivered') {
+            // the receipt is the answer's, whether or not its item is still listed (an asynchronous question's leaves at once)
+            const receipt = receiptOfAnswer(item, answer);
+            if (call !== null && receipt !== null && stayed) get().recordReceipt(item.appSessionId, call, receipt);
+            write({ phase: 'sent' });
+          } else if (outcome === 'not_pending') {
+            if (answerPort.terminalOnly(item)) write(null); // P5 O9 M6: the terminal's to answer, still pending
+            else {
+              // decisions 8a and 8b: the question's or plan's row says so past the card's two seconds, until its own
+              // answers or outcome arrive; a receipt already held (a settlement's own words, an answer, a dismissal)
+              // says more and stays
+              const elsewhere = answeredCall(item);
+              if (elsewhere !== null && stayed && get().receipts.get(item.appSessionId)?.get(elsewhere) === undefined) get().recordReceipt(item.appSessionId, elsewhere, { settled: ANSWERED_ELSEWHERE });
+              const said: Delivery = { phase: 'not_pending' };
+              write(said);
+              setTimeout(() => {
+                if (get().deliveries.get(item.id) === said) set({ deliveries: new Map(get().deliveries).set(item.id, { phase: 'closed' }) });
+              }, NOT_PENDING_MS);
+            }
+          } else write({ phase: 'failed', detail: result.ok ? null : result.error.message, answer });
+          return outcome;
+        })();
+        answering.set(item.id, sent);
+        return sent;
+      },
     };
   });
 }
@@ -262,6 +443,26 @@ export function selectWaitingByCall(state: Pick<AttentionState, 'bySession'>, ap
   let calls = callsCache.get(items);
   if (!calls) callsCache.set(items, (calls = waitingByCall(items)));
   return calls;
+}
+
+// UX wave U1b (Interfaces §A): the session's waiting requests oldest first, and the calls its transcript marks as
+// waiting rows, by the shared rule, memoised per list as the readings above.
+const requestsCache = new WeakMap<AttentionItem[], AttentionItem[]>();
+export function selectWaitingRequests(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): AttentionItem[] {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return EMPTY;
+  let requests = requestsCache.get(items);
+  if (!requests) requestsCache.set(items, (requests = waitingRequests(items)));
+  return requests;
+}
+const NO_FORMS: ReadonlySet<ToolUseId> = new Set();
+const formsCache = new WeakMap<AttentionItem[], ReadonlySet<ToolUseId>>();
+export function selectWaitingForms(state: Pick<AttentionState, 'bySession'>, appSessionId: AppSessionId): ReadonlySet<ToolUseId> {
+  const items = state.bySession.get(appSessionId);
+  if (!items) return NO_FORMS;
+  let forms = formsCache.get(items);
+  if (!forms) formsCache.set(items, (forms = waitingForms(items)));
+  return forms;
 }
 
 const NO_AGENTS: ReadonlySet<string> = new Set();

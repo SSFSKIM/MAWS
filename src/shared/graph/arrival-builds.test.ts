@@ -7,7 +7,7 @@ import { describe, expect, it } from 'vitest';
 import { readTolerant } from '../ipc/tolerant';
 import { REGISTRY } from '../ipc/registry';
 import { codecOf } from '../ipc/validate';
-import { carriedOf } from '../engine/arrival';
+import { carriedOf, commandEntry, commandOf } from '../engine/arrival';
 import { ContentBlockSchema, EventBaseSchema, SessionEventSchema } from './events';
 import { AppSessionIdSchema, MessageUuidSchema, TaskIdSchema, ToolUseIdSchema } from './ids';
 
@@ -62,6 +62,43 @@ describe('user.message’s arrival, between builds', () => {
     expect(SessionEventSchema.safeParse(message({ arrival: [{ class: 7 }] })).success).toBe(false);
     // Across the machine link, a later build's new field on a known class is dropped as any unknown key is.
     expect(readTolerant(SessionEventSchema, message({ arrival: [{ ...TASK, extra: 1 }] }))).toEqual({ ok: true, value: message({ arrival: [TASK] }), dropped: ['arrival.0.extra'] });
+  });
+});
+
+// UX wave U3b (M1; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, Acceptance 14 and Interfaces
+// H): the one entry landing 1 newly sends, on a command's output, between this build and the two older builds. Build F
+// has no field and drops it; build G passes it through the member that takes a class outside its closed set. G's
+// `arrival-schema.ts` holds the same schema as this build's (its carried classes, its loose member and `carriedOf`
+// unchanged from `2c7044231`; this landing adds only `commandEntry` and `commandOf` beside them), so this build's
+// schema is G's for the field.
+describe('a command output’s `command` entry, between builds', () => {
+  const output = (fields: Record<string, unknown> = {}) => message({ messageUuid: 'out-1', content: '<local-command-stdout>Total cost: $0.0020</local-command-stdout>', isSynthetic: false, origin: 'local-command', ...fields });
+  const sent = [commandEntry({ run: { command: 'usage', args: '' }, plain: false }), commandEntry({ run: { command: 'context', args: '' }, plain: true }), commandEntry({ run: null, plain: true })];
+
+  it('is exactly the entry this landing sends: a run, a plain mark, or both', () => {
+    expect(sent).toEqual([[{ class: 'command', run: { command: 'usage', args: '' } }], [{ class: 'command', run: { command: 'context', args: '' }, plain: true }], [{ class: 'command', plain: true }]]);
+  });
+
+  it('build F keeps the event and drops the field', () => {
+    for (const arrival of sent) {
+      expect(BUILD_F_USER_MESSAGE.safeParse(output({ arrival })).success).toBe(false);
+      expect(readTolerant(BUILD_F_USER_MESSAGE, output({ arrival }))).toEqual({ ok: true, value: output(), dropped: ['arrival'] });
+    }
+  });
+
+  it('build G keeps it whole, and its carried classes give nothing of it', () => {
+    for (const arrival of sent) {
+      const read = SessionEventSchema.parse(output({ arrival }));
+      expect(read).toEqual(output({ arrival }));
+      expect(read.kind === 'user.message' && carriedOf(read.arrival)).toEqual([]);
+      expect(readTolerant(SessionEventSchema, output({ arrival }))).toEqual({ ok: true, value: output({ arrival }), dropped: [] });
+    }
+  });
+
+  it('this build reads an older build’s output, which carries no entry: no run, not plain', () => {
+    const read = SessionEventSchema.parse(output());
+    expect(read).toEqual(output());
+    expect(read.kind === 'user.message' && commandOf(read.arrival)).toEqual({ run: null, plain: false });
   });
 });
 

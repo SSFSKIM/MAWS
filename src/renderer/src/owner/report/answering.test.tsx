@@ -19,8 +19,10 @@ import { mainShowing } from '../../test-support/panel';
 import { resetShellStores } from '../../test-support/shell-stores';
 import { connectTranscript } from '../../transcript/shell';
 
+// the page's `ipc` answers before a case sets its client: a module the transcript's shell imports reads `localMachine`
+// as it loads (the terminals store reads the registry's host; the shell reaches it since U3b), before any machine is known
 const hold = vi.hoisted(() => ({ client: null as ReturnType<typeof import('../../../../../test/support/fake-client').fakeClient>['client'] | null }));
-vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: unknown[]) => (hold.client!.invoke as (...a: unknown[]) => unknown)(...args), on: (...args: unknown[]) => (hold.client!.on as (...a: unknown[]) => unknown)(...args), get localMachine() { return hold.client!.localMachine; } } }));
+vi.mock('../../ipc/client', () => ({ ipc: { invoke: (...args: unknown[]) => (hold.client!.invoke as (...a: unknown[]) => unknown)(...args), on: (...args: unknown[]) => (hold.client!.on as (...a: unknown[]) => unknown)(...args), get localMachine() { return hold.client?.localMachine ?? null; } } }));
 
 // P5 O6 M2: `ipc` is mocked at the page's level, so the session is its address; main's mark ids are built on the bare id
 const MAIN_APP = 'app-answer' as AppSessionId;

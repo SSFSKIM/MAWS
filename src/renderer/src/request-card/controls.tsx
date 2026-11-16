@@ -1,6 +1,10 @@
 // The card's buttons and small shared pieces, in tokens only (X7), so every variant's controls look the same.
 import type { ButtonHTMLAttributes, ReactNode } from 'react';
+import type { AttentionTone } from '@shared/attention/headings';
 import { formatChord, parseChord } from '@shared/keymap/chord';
+
+// A kind's glyph in its tone (C5's table), as the card's kind line, the end's lines and the question form's header draw it.
+export const TONE_CLASS: Record<AttentionTone, string> = { warning: 'text-warning', info: 'text-info', danger: 'text-danger', accent: 'text-accent' /* P2-C */ };
 
 const TONES = {
   primary: 'border-fg bg-fg text-bg hover:bg-fg-muted disabled:border-fg-faint disabled:bg-fg-faint',
@@ -33,8 +37,13 @@ function ariaKeys(accelerator: string): string {
   return [...modifiers, last.length === 1 ? last : chord.key].join('+');
 }
 
-export function Controls({ children }: { children: ReactNode }) {
-  return <div className="flex flex-wrap items-center justify-end gap-2">{children}</div>;
+// `decisions`: the row of a permission prompt's decision buttons, which its guard watches (UX wave U1b M4)
+export function Controls({ children, decisions = false }: { children: ReactNode; decisions?: boolean }) {
+  return (
+    <div className="flex flex-wrap items-center justify-end gap-2" data-decision-buttons={decisions ? '' : undefined}>
+      {children}
+    </div>
+  );
 }
 
 export function Muted({ children, className = '' }: { children: ReactNode; className?: string }) {

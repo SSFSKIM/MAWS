@@ -10,7 +10,7 @@ import { slashCommandLine } from '@shared/wire/local-command';
 import { denialKindOf, INTERRUPT_MARKER } from '../normalizer-support';
 import { apiRetryOfApiError } from '../normalizer-system';
 import { messageText, parsePeerMessage, peerEventsOf } from '@shared/engine/peer-envelope'; // E7
-import { nothingOpen, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { commandEntry, commandFactsOf, nothingOpen, readConsents, readNext, type Arrival, type OpenArrivals } from '@shared/engine/arrival'; // UX wave U3 (UC-2); U1c, readConsents
 import { localCommandText } from '@shared/engine/engine-markers';
 import { isBridgeRow, isMirrorLine } from '@shared/engine/sminos-delivery';
 import { notificationText, taskNotificationBlocks, type TaskNotificationBlock } from '@shared/engine/task-notification';
@@ -64,6 +64,12 @@ export interface BackfillContext {
   idle: boolean;
   unanswered: boolean;
   readonly waitingWords: Waiting[];
+  // UX wave U1c (M4, §C 8; Decision Log 38): the approvals the bridge appended into the running turn whose message is
+  // drawn and whose `started` waits for the engine's read (withHeldApprovals, below)
+  readonly heldApprovals: MessageUuid[];
+  // UX wave U1c (Decision Log 43): the main loop's latest model response, by its API message id, and those of its calls
+  // that have no result yet: the round whose last result is the held approvals' read boundary (roundCompleted, below)
+  readonly round: { message: string | null; readonly open: Set<string> };
   // P5 O9 (the M10 sitting): the latest `<local-command-caveat>` record, whose child is a command the terminal ran
   // (localCommandTurn, below)
   localCaveat: MessageUuid | null;
@@ -78,7 +84,9 @@ export interface BackfillContext {
 
 // What the bridge delivered while no turn ran (withWaitingWords), placed when a turn starts: the owner's words (`words`
 // null when they were drawn at their row already, desk-web's older steer), or a peer's delivery as its events.
-type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | null } | { kind: 'peer'; events: SessionEvent[] };
+// UX wave U1c (M4, Interfaces §C, 8): `grants`, the consent marks of words the bridge appended, which their message carries.
+type Waiting = { kind: 'own'; uuid: MessageUuid; words: string | ContentBlock[] | null; grants?: Consent[] } | { kind: 'peer'; events: SessionEvent[] };
+type Consent = Extract<Arrival, { class: 'consent' }>;
 
 export function createBackfillContext(init: {
   sessionId: SessionId;
@@ -106,6 +114,8 @@ export function createBackfillContext(init: {
     idle: false,
     unanswered: false,
     waitingWords: [],
+    heldApprovals: [],
+    round: { message: null, open: new Set() },
     localCaveat: null,
     arrivals: init.arrivals ?? nothingOpen,
     appendedLast: false,
@@ -173,7 +183,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
       if (taskNotificationAttachment(record, uuid, arrivals, ctx, base, events)) break;
       if (peerQueuedMessage(record, uuid, arrivals, ctx, base, events)) break; // E7
       if (arrivalAttachment(record, uuid, arrivals, base, events)) break;
-      if (ctx.agentId === null) steeredPrompt(record, arrivals, base, events);
+      if (ctx.agentId === null) steeredPrompt(record, arrivals, ctx, base, events);
       else coordinatorMessage(record, uuid, ctx, base, events);
       break;
     case 'progress': // never on the chain; the follower keeps only its skeleton
@@ -181,7 +191,7 @@ export function recordToEvents(record: TranscriptRecord, ctx: BackfillContext): 
     default:
       events.push({ ...base(), kind: 'frame.unknown', frameType: `transcript:${record.type}`, subtype: null });
   }
-  return withWaitingWords(record.type === 'user' && arrivals.some((arrival) => arrival.class === 'wake'), events, ctx, base);
+  return withWaitingWords(record.type === 'user' && arrivals.some((arrival) => arrival.class === 'wake'), withHeldApprovals(record, events, ctx, base), ctx, base);
 }
 
 type Base = () => EventBase;
@@ -207,19 +217,30 @@ function coordinatorMessage(record: TranscriptRecord, uuid: MessageUuid, ctx: Ba
 // (`source_uuid`, the uuid it was written with), then the engine's `started` for it, which folds it into the open turn
 // at this point (the reducer's `next` path), so a reloaded session places the steer where the live one did. A queued
 // command of another origin (a task notification, a coordinator's) or a meta one is a context injection, as before.
-function humanQueuedPrompt(record: TranscriptRecord): { messageUuid: MessageUuid; content: string | ContentBlock[] } | null {
+// UX wave U1c (M4, Decision Log 38): `drawn` when the record is MAWS's drawing of a row the bridge appended
+// (`mawsDrawn`, set by `asQueuedPrompt` for another machine's rows), which the engine reads at its next request, not one
+// the engine wrote as it took the prompt.
+function humanQueuedPrompt(record: TranscriptRecord): { messageUuid: MessageUuid; content: string | ContentBlock[]; drawn: boolean } | null {
   if (record.type !== 'attachment') return null;
-  const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; commandMode?: unknown; origin?: { kind?: unknown }; isMeta?: unknown } | undefined;
+  const attachment = record.attachment as { type?: unknown; prompt?: unknown; source_uuid?: unknown; commandMode?: unknown; origin?: { kind?: unknown }; isMeta?: unknown; mawsDrawn?: unknown } | undefined;
   if (attachment?.type !== 'queued_command' || attachment.origin?.kind !== 'human' || attachment.commandMode !== 'prompt' || attachment.isMeta === true) return null;
   if (typeof attachment.source_uuid !== 'string' || attachment.source_uuid.length === 0) return null;
   const content = typeof attachment.prompt === 'string' ? attachment.prompt : Array.isArray(attachment.prompt) ? attachment.prompt.filter(isContentBlock) : null;
-  return content === null ? null : { messageUuid: attachment.source_uuid as MessageUuid, content };
+  return content === null ? null : { messageUuid: attachment.source_uuid as MessageUuid, content, drawn: attachment.mawsDrawn === true };
 }
 
-function steeredPrompt(record: TranscriptRecord, arrivals: Arrival[], base: Base, events: SessionEvent[]): void {
+function steeredPrompt(record: TranscriptRecord, arrivals: Arrival[], ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
   const prompt = humanQueuedPrompt(record);
   if (prompt === null) return;
   const { messageUuid, content } = prompt;
+  // an approval the bridge appended, as MAWS draws it: it waits for the running turn's read, or with no turn running
+  // for the turn that starts next, as the file route's mirror line has it (sminosDelivery)
+  const grants = consentOf(arrivals).arrival ?? [];
+  if (prompt.drawn && grants.length > 0) {
+    if (ctx.running) heldApproval(messageUuid, content, grants, ctx, base, events);
+    else if (!isWaiting(ctx, messageUuid)) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid, words: content, grants });
+    return;
+  }
   events.push({ ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(arrivals) });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
@@ -570,16 +591,77 @@ function carried(messageUuid: MessageUuid, content: string | ContentBlock[], arr
 }
 
 // The owner's words taken into the running turn: what the live stream shows for a prompt folded in there.
-function steered(messageUuid: MessageUuid, words: string, base: Base, events: SessionEvent[]): void {
-  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+function steered(messageUuid: MessageUuid, words: string, base: Base, events: SessionEvent[], grants: Consent[] = []): void {
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(grants) });
   events.push({ ...base(), kind: 'command.lifecycle', commandUuid: messageUuid, state: 'started' });
 }
 
+// UX wave U1c (M4, §C 8; Decision Log 38): an approval the bridge appended into the running turn, which the engine reads
+// at its next model request, not where the row lands: its message, with its marks, and its `started` held for that read
+// (withHeldApprovals), so until then the message waits for the running turn, as a steer at the next step does.
+function heldApproval(messageUuid: MessageUuid, words: string | ContentBlock[], grants: Consent[], ctx: BackfillContext, base: Base, events: SessionEvent[]): void {
+  events.push({ ...base(), kind: 'user.message', messageUuid, content: words, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(grants) });
+  ctx.heldApprovals.push(messageUuid);
+}
+
+const isWaiting = (ctx: BackfillContext, messageUuid: MessageUuid) => ctx.waitingWords.some((row) => row.kind === 'own' && row.uuid === messageUuid);
+
+// The engine's flat refusal of a call the person rejected (`u1c-t-esc-1` line 54: the Esc during the running call):
+// the interrupt's marker follows it and no model request does (every such result in the fixtures, 5 of 5), so it is no
+// read boundary.
+const REJECTED_BY_PERSON = 'User rejected tool use';
+// The result the engine writes for a call whose session ended before its result was recorded (`toolDenialKind`
+// `interrupted`; `pass3/p1-side-thread-live-resume`, the snapshot's records 27 and 28: the result, then "No response
+// requested.", then the next prompt): no model request follows it either (Decision Log 49 (3)). The engine's other
+// interruption results (`cancelled`, and `interrupted` for a turn ended to deliver a message) are in no recorded
+// transcript file and are not read here.
+const noRequestFollows = (record: TranscriptRecord): boolean => record.toolUseResult === REJECTED_BY_PERSON || record.toolDenialKind === 'interrupted';
+
+// The read boundary of the approvals held (Decision Log 38, its boundary as Decision Log 43 replaced it): the result
+// that completes the running turn's round, the engine's next request carrying the rows appended before it, so their
+// `started` follow that result's events; a turn that ends, is interrupted or gives way to another first leaves them
+// waiting as words already drawn, which the next turn's start or the bridge's wake takes (withWaitingWords). Nothing
+// else clears them: late by one call, never early.
+function withHeldApprovals(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
+  const completes = roundCompleted(record, events, ctx);
+  if (ctx.heldApprovals.length === 0) return events;
+  const ends = events.some((event) => event.kind === 'turn.ended' || event.kind === 'turn.started' || (event.kind === 'user.message' && event.origin === 'interrupt-marker'));
+  if (ends) {
+    for (const uuid of ctx.heldApprovals.splice(0)) ctx.waitingWords.push({ kind: 'own', uuid, words: null });
+    return events;
+  }
+  if (!completes) return events;
+  return [...events, ...ctx.heldApprovals.splice(0).map((uuid): SessionEvent => ({ ...base(), kind: 'command.lifecycle', commandUuid: uuid, state: 'started' }))];
+}
+
+// The round (Decision Log 43): the calls the main loop's latest model response made, known by its API message id. The
+// engine sends its next request only once every call of the round has its result (`u3-tasks-r2` lines 156 to 161: an
+// Agent call answered at once, a parallel Bash call thirty seconds later, then the request), so a result that leaves a
+// call of the round open is no read boundary, nor is a result for a call outside the round, a subagent's (its own
+// context, or a sidechain record here), or a result no request follows (the refusal an Esc writes for the running call,
+// the interruption a resume writes).
+function roundCompleted(record: TranscriptRecord, events: SessionEvent[], ctx: BackfillContext): boolean {
+  if (ctx.agentId !== null || record.isSidechain === true) return false;
+  const round = ctx.round;
+  let answered = false;
+  for (const event of events) {
+    if ((event.kind === 'assistant.block.complete' || event.kind === 'tool.use') && event.apiMessageId !== round.message) {
+      round.message = event.apiMessageId;
+      round.open.clear();
+    }
+    if (event.kind === 'tool.use') round.open.add(event.toolUseId);
+    else if (event.kind === 'tool.result' && round.open.delete(event.toolUseId)) answered = true;
+  }
+  return answered && round.open.size === 0 && !noRequestFollows(record);
+}
+
 // A slash command's output (class `command`): the engine's own tag around it, its terminal escapes removed, in the turn
-// that runs, which is its command's.
+// that runs, which is its command's. UX wave U3b (Interfaces A): the event carries the command the engine ran, where the
+// row named it (`commandRun`), and that the text was a terminal's, in a `command` entry.
 function commandOutput(messageUuid: MessageUuid, arrivals: Arrival[], base: Base): SessionEvent {
   const content = localCommandText(arrivals.flatMap((arrival) => (arrival.class === 'command' ? [arrival] : [])));
-  return { ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'local-command', bash: null };
+  const entry = commandEntry(commandFactsOf(arrivals));
+  return { ...base(), kind: 'user.message', messageUuid, content, isReplay: false, isSynthetic: false, origin: 'local-command', bash: null, ...(entry.length > 0 && { arrival: entry }) };
 }
 
 // A notification already mapped (the same delivery in a queued command and in a row): nothing again. Old records lack a
@@ -872,8 +954,12 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
   const row = ctx.bridgeRows.get(key);
   if (row === undefined) return false;
   ctx.bridgeRows.delete(key);
-  if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid, words: row.content });
-  else steered(row.uuid, row.content, base, events);
+  // UX wave U1c (M4, Interfaces §C, 8): words that are the grant whole are the person's grant, which a terminal
+  // session's bridge carried for "Approve and retry" during a turn or after a Stop; their message carries its mark
+  const grants = readConsents(row.content);
+  if (ctx.idle) ctx.waitingWords.push({ kind: 'own', uuid: row.uuid, words: row.content, grants });
+  else if (grants.length > 0 && ctx.running) heldApproval(row.uuid, row.content, grants, ctx, base, events); // Decision Log 38
+  else steered(row.uuid, row.content, base, events, grants);
   return true;
 }
 
@@ -891,7 +977,8 @@ function sminosDelivery(record: TranscriptRecord, ctx: BackfillContext, base: Ba
 // delivery at its row, as one into a running turn.)
 function withWaitingWords(wake: boolean, events: SessionEvent[], ctx: BackfillContext, base: Base): SessionEvent[] {
   const start = events.findIndex((event) => event.kind === 'turn.started');
-  const said = (row: Extract<Waiting, { kind: 'own' }>): SessionEvent[] => (row.words === null ? [] : [{ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null }]);
+  const said = (row: Extract<Waiting, { kind: 'own' }>): SessionEvent[] =>
+    row.words === null ? [] : [{ ...base(), kind: 'user.message', messageUuid: row.uuid, content: row.words, isReplay: false, isSynthetic: false, origin: 'human', bash: null, ...consentOf(row.grants ?? []) }];
   const taken = (rows: Waiting[]) => rows.flatMap((row): SessionEvent[] => (row.kind === 'peer' ? row.events : [...said(row), { ...base(), kind: 'command.lifecycle', commandUuid: row.uuid, state: 'started' }]));
   let out = events;
   if (start >= 0 && ctx.waitingWords.length > 0) {
@@ -927,7 +1014,7 @@ const MODEL_RUNS = new Set<SessionEvent['kind']>(['assistant.block.complete', 't
  * mapping reads as a prompt queued into the turn.
  */
 export function waitForTurn(ctx: BackfillContext, messageUuid: MessageUuid): void {
-  if (!ctx.running) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid, words: null });
+  if (!ctx.running && !isWaiting(ctx, messageUuid)) ctx.waitingWords.push({ kind: 'own', uuid: messageUuid, words: null }); // U1c: an approval may wait already (steeredPrompt)
 }
 
 // P5 O9 (the M10 sitting): the sminos bridge's mirror of an interrupt's rows for the terminal (`<plugin>: interrupt: …`)

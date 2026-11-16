@@ -494,6 +494,11 @@ export const OFFERS: Offers = {
     'attention.acknowledge': laneBMachine('act'),
     'session.steer.cancel': laneB('act'),
     'maws.pane.answer': laneB('act'),
+    // The UX wave (U4b; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C), behind
+    // `rl2.send-now` (capabilities.ts): a message waiting at the next step sent now (`converse`: it carries no content and
+    // adds only what an interrupt allows, ending the running turn), on the session's live launch; the engine host's queue
+    // answers `nothing_waiting` for any uuid that is not a pending steer of that session.
+    'session.steer.sendNow': laneB('act'),
     // M2: a fork in place (graded `spawn`, a right on the machine), the machine's owners' alone, who must also view the
     // source (authorize.ts): a fork names no starter, so it is the owners'. Composed by the services under the operation,
     // answered at its setup's `launching` and held there to the machine's ceiling on the record it copies its mode from.

@@ -801,7 +801,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       await send(page, 'Use the Write tool to create a file named c12-deep.txt containing the single line DEEP, then reply with exactly the word CREATED.');
       await log.idle(180_000);
       await showTool(page, 'Review');
-      await expect(panel(page).locator('[role="option"] button[data-path="c12-deep.txt"]')).toBeVisible({ timeout: 30_000 });
+      await expect(panel(page).locator('[data-review-file="c12-deep.txt"]')).toBeVisible({ timeout: 30_000 }); // UX wave U5b: a section of the stack
       const uncommitted = { header: await panel(page).locator('[data-review-header]').innerText(), footer: await panel(page).locator('[data-review-footer]').innerText() };
       const shotsUncommitted = await shoot(page, '10.4-review');
       git(worktree!, 'add', 'c12-deep.txt');
@@ -1486,7 +1486,7 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       }
       await send(page, 'Use the Bash tool to run exactly this command and nothing else: mkdir c12-lost');
       await expect(main(page).getByRole('group', { name: 'Approval needed' })).toBeVisible({ timeout: 120_000 });
-      await page.keyboard.press('Meta+.'); // app-level: the card has replaced the composer
+      await page.keyboard.press('Meta+.'); // app-level: Stop, with the keyboard in the composer beside the card at the transcript's end (UX wave U1b)
       rec.note('10.9.lost.interruptSentAt', new Date().toISOString());
       await page.waitForTimeout(5_000);
       const s = await statusOf(page, d);

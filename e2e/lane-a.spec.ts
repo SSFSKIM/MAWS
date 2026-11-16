@@ -8,6 +8,10 @@
 // UX wave U8d (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, acceptance 2, 3, 4 and 8): the
 // session's subagents with the statuses main derives from its transcript, its sidecars and the bridge's agents, on the
 // Subagents card and in the panel, the rows the engine writes at an agent's end as probes P1 and P2 recorded them.
+// UX wave U1b (docs/doperpowers/plans/2026-11-15-ux-wave-U1b-requests-in-transcript.md, Proof 1's `e2e:lane-a` row): those
+// cards are drawn in the session's transcript now, a question's form in the row of its call (when the transcript holds
+// it) and every other request at the transcript's end; an asynchronous question's answer and dismissal stand on its row,
+// before and after a reload; a prompt its terminal settles leaves its receipt at the end for SETTLED_MS.
 import { randomUUID } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { join } from 'node:path';
@@ -16,10 +20,14 @@ import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schem
 import { FULL_CAPABILITIES, startFakeBridge, type FakeBridge, type FakeBridgeOptions } from '../test/support/fake-bridge';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
-import { launchMaws, test, type MawsLaunch } from './support/launch';
-import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
+import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
+import { consentMessage } from '../src/shared/engine/arrival';
+import { agentNotificationRecord, assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, nestedAgentRecords, pluginStopNoteRecord, probeTerminalRecords, queuedNotificationRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
+import { menu } from './support/menu';
 import { openSurface, sessionCard, showSessionCards, surface } from './support/shell';
+import { END_ROW, rowOf } from './support/request-keys';
+import { stopRecord } from './support/stop-record';
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -54,11 +62,63 @@ const sentence = (text: string) => text.charAt(0).toUpperCase() + text.slice(1);
 // The fake's commands of one op, their bodies in order.
 const bodies = (bridge: FakeBridge, op: string) => bridge.commands.filter((c) => c.op === op).map((c) => c.body);
 
-// M6: the pane's request card (docked in the composer's place), and the decisions the fake took, each with its request.
+// M6: the pane's request card, and the decisions the fake took, each with its request. UX wave U1b: the card is drawn in
+// the session's transcript (in its call's row, or at the end), never in the composer's place.
 const card = (page: Page) => main(page).locator('[data-request-card]');
+// UX wave U1b: the transcript's end (§E `EndRegion`), and the row the transcript draws for a question's call.
+const end = (page: Page) => main(page).locator('[data-request-end]');
+const questionRow = (page: Page, call: string) => main(page).locator(`[data-row-id="question:${call}"] .transcript-row`);
+// A question receipt's lines as the row reads them: "header→answer" each (the arrow is the row's own glyph).
+const receiptLines = (row: Locator) => row.locator('[data-question]').allTextContents();
 const decided = (bridge: FakeBridge) => bridge.decisions.map((d) => ({ request: d.request, ...d.body }));
 const AS_MAWS = { by: 'maws', launch: 'launch-1' }; // every decision MAWS posts names itself and the launch it was read under
 const badge = (maws: MawsLaunch) => maws.app.evaluate(({ app }) => app.dock?.getBadge() ?? '');
+
+// UX wave U1b: rows of a terminal session's file, chained after `after`, as the engine writes them (the recorded shapes of
+// spikes/protocol-probe/fixtures/uxwave/u3-sminos-r1-terminal.transcript.jsonl and of the arrivals reader's tests,
+// src/shared/engine/arrival.test.ts; the content invented). The stand-in bridge writes nothing into the transcript
+// (test/support/fake-bridge.ts), so a scene writes the call a question names, and later the answer's delivery, itself.
+function fileRows(sessionId: string, cwd: string, after: string, at: string) {
+  let last = after;
+  let tick = Date.parse(at);
+  const next = (row: Record<string, unknown>): Record<string, unknown> => {
+    const uuid = randomUUID();
+    const record = { cwd, sessionId, timestamp: new Date((tick += 1_000)).toISOString(), isSidechain: false, userType: 'external', version: '2.1.300', ...row, uuid, parentUuid: last };
+    last = uuid;
+    return record;
+  };
+  const message = (content: unknown[], stop: string) => ({ id: `msg_${randomUUID().slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content, stop_reason: stop, stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } });
+  return {
+    prompt: (text: string) => next({ type: 'user', message: { role: 'user', content: text } }),
+    call: (id: string, name: string, input: Record<string, unknown>) => next({ type: 'assistant', message: message([{ type: 'tool_use', id, name, input }], 'tool_use') }),
+    result: (id: string, text: string, toolUseResult: unknown = text) => next({ type: 'user', toolUseResult, message: { role: 'user', content: [{ type: 'tool_result', tool_use_id: id, content: text }] } }),
+    text: (text: string) => next({ type: 'assistant', message: message([{ type: 'text', text }], 'end_turn') }),
+    turnEnd: () => [
+      next({ type: 'system', subtype: 'stop_hook_summary', hookCount: 0, hookInfos: [], hookErrors: [], preventedContinuation: false, stopReason: '', hasOutput: false, level: 'suggestion' }),
+      next({ type: 'system', subtype: 'turn_duration', durationMs: 1200, isMeta: false }),
+    ],
+    // The two ways the ask mod's delivery is held in the file: the session idle, a prompt the plugin submits, which opens
+    // a turn (the engine's framing around the plugin's text); a turn running, a hook's context on the next call's result.
+    pluginPrompt: (text: string) =>
+      next({ type: 'user', origin: { kind: 'plugin', name: 'sminos' }, message: { role: 'user', content: `The sminos plugin sent a message:\n${text}\n\nThis is how Claude Code surfaces a prompt a plugin submits between turns — it starts this turn in the user's place. Address the message above.` } }),
+    hookContext: (text: string, call: string) => next({ type: 'attachment', attachment: { type: 'hook_additional_context', content: [text], hookName: 'tool.call', toolUseID: `${call}-context`, hookEvent: 'PostToolUse' } }),
+    // a recorded row's own fields (its kind, message, origin and flags), chained here (probe 9b's records)
+    recorded: (row: Record<string, unknown>) => next(Object.fromEntries(Object.entries(row).filter(([key]) => RECORDED_FIELDS.has(key)))),
+  };
+}
+const RECORDED_FIELDS = new Set(['type', 'message', 'isMeta', 'origin', 'subtype', 'content', 'level', 'toolUseResult']);
+
+// UX wave U1b, probe 9b: what the two Stop scenes stage is read from the records by `stopRecord` (e2e/support/stop-record.ts,
+// checked on both records by test/support/stop-record.test.ts).
+
+// The ask mod's asynchronous call (sminos 1.47.0): its tool, what it returns at once, and its delivery's sentences.
+const ASK_TOOL = 'mcp__sminos__AskUserQuestion';
+const ASYNC_RESULT = 'Your questions are waiting for the human; this call does not wait for them. Their answer will reach you in a later message that quotes each question. Go on with work that does not depend on it.';
+const DISMISSED = 'The human dismissed these questions without answering them; no answer will come. Do not wait for one.';
+const delivery = (call: string, summary: string) => `The human responded to your async AskUserQuestion (call ${call}): ${summary}`;
+const answered = (answers: Record<string, string>) =>
+  `Your questions have been answered: ${Object.entries(answers).map(([question, answer]) => `"${question}"="${answer}"`).join(', ')}. You can now continue with these answers in mind.`;
+const single = (question: string, header: string, labels: string[]) => ({ question, header, options: labels.map((label) => ({ label })), multiSelect: false });
 
 // MAWS's answer went: the bridge settles the request as MAWS's, and the card leaves at once (only another's win lingers).
 async function settledHere(page: Page, bridge: FakeBridge, request: string, outcome = 'allow'): Promise<void> {
@@ -82,18 +142,19 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
   });
 
   // A launch over an engine store holding the session's transcript (one exchange, then the rows `more` gives after its
-  // answer), the session in the sidebar.
-  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => []): Promise<Case> {
+  // answer; or, UX wave U1c, the rows `seed` gives in their place), the session in the sidebar.
+  async function begin(more: (sid: string, cwd: string, after: string) => Record<string, unknown>[] = () => [], seed?: (sid: string, cwd: string) => Record<string, unknown>[]): Promise<Case> {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
     const sid = randomUUID();
     const prompt = randomUUID();
     const answer = randomUUID();
-    const transcript = await store.addTranscript(repo.root, sid, [
-      JSON.stringify(userRecord(sid, repo.root, prompt, null, 'Tell me a story.', T0)),
-      JSON.stringify(assistantRecord(sid, repo.root, answer, prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z')),
-      ...more(sid, repo.root, answer).map((row) => JSON.stringify(row)),
-    ]);
+    const rows = seed?.(sid, repo.root) ?? [
+      userRecord(sid, repo.root, prompt, null, 'Tell me a story.', T0),
+      assistantRecord(sid, repo.root, answer, prompt, 'A short one, then.', '2026-10-28T10:00:02.000Z'),
+      ...more(sid, repo.root, answer),
+    ];
+    const transcript = await store.addTranscript(repo.root, sid, rows.map((row) => JSON.stringify(row)));
     const maws = await launchMaws({ env: { CLAUDE_CONFIG_DIR: store.configHome } });
     const { page } = maws;
     await expect(main(page)).toBeVisible({ timeout: 60_000 });
@@ -767,7 +828,8 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const sidebar = sidebarOf(page);
 
     bridge.raise({ request: 'toolu_allow', tool: 'Bash', input: { command: 'ls -la' } });
-    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true }), 'docked in the pane within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(end(page).locator('[data-request-card]').getByRole('button', { name: 'Allow once', exact: true }), 'at the transcript’s end within 1 s').toBeVisible({ timeout: 1_000 });
+    await expect(editor(page), 'U1b: the composer stays beside it').toBeEditable();
     await expect(sidebar.getByRole('heading', { name: 'Needs you · 1' }), 'in Needs you within 1 s').toBeVisible({ timeout: 1_000 });
     await expect(sidebar.getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Approval needed$/);
     await expect(card(page), 'the terminal asks it too (Q3)').toContainText('Also asked in the terminal: the first answer wins');
@@ -803,13 +865,44 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect(sidebar.getByRole('heading', { name: /^Needs you/ })).toHaveCount(0);
     expect(await badge(maws)).toBe('');
 
-    // answered in the terminal first: the card settles in place as such, stays a moment, then leaves
+    // answered in the terminal first, the only request at the end (UX wave U1b, acceptance 12; decision 20): the card goes
+    // and its receipt stands where it stood, "<summary> · <the settlement's words>", a status line with no control that
+    // nothing counts as waiting (no Needs you, no badge), held by the store past the card; then it goes, and the end with it
     bridge.raise({ request: 'toolu_term', tool: 'Bash', input: { command: 'git status' } });
-    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
+    await expect(end(page).locator('[data-request-card]').getByRole('button', { name: 'Allow once', exact: true })).toBeVisible({ timeout: 1_000 });
+    // how long the receipt stands, read by the page itself (its own clock, from its drawing to its going): a lower bound
+    // only, and a staging limit as much as a measure: the store's timer starts at its write, a little before the DOM shows
+    // the line, so the drawn span can fall short of SETTLED_MS by that delay; 2.5 s leaves it room
+    await page.evaluate(() => {
+      const seen: { shown: number | null; gone: number | null } = { shown: null, gone: null };
+      (window as unknown as { __u1bSettling: typeof seen }).__u1bSettling = seen;
+      const look = () => {
+        const held = document.querySelector('[data-settling]') !== null;
+        if (held && seen.shown === null) seen.shown = performance.now();
+        if (!held && seen.shown !== null && seen.gone === null) seen.gone = performance.now();
+      };
+      new MutationObserver(look).observe(document.body, { childList: true, subtree: true });
+    });
     bridge.settle('toolu_term', 'terminal', 'allow');
-    await expect(card(page).getByRole('status')).toHaveText('Answered in the terminal: Allowed', { timeout: 2_000 });
-    await expect(card(page).getByRole('button', { name: 'Allow once', exact: true })).toHaveCount(0);
-    await expect(card(page)).toHaveCount(0, { timeout: 5_000 });
+    const receipt = end(page).locator('[data-settling]');
+    await expect(receipt).toHaveText('Bash: git status · Answered in the terminal: Allowed', { timeout: 2_000 });
+    await expect(receipt).toHaveRole('status');
+    await expect(card(page), 'the card went with its request').toHaveCount(0);
+    await expect(end(page).getByRole('button'), 'the receipt has no control').toHaveCount(0);
+    await expect(sidebar.getByRole('heading', { name: /^Needs you/ }), 'nothing counts it as waiting').toHaveCount(0);
+    await expect.poll(() => badge(maws)).toBe('');
+    await expect(receipt, 'still held').toHaveCount(1);
+    await expect(main(page).getByRole('button', { name: 'Needs your input. Scroll to the request' }), 'nor the jump button').toHaveCount(0);
+    await expect(end(page), 'the receipt goes after SETTLED_MS, and the end row with it').toHaveCount(0, { timeout: 8_000 });
+    await expect(main(page).locator(END_ROW)).toHaveCount(0);
+    const stood = await page.evaluate(() => {
+      const seen = (window as unknown as { __u1bSettling: { shown: number | null; gone: number | null } }).__u1bSettling;
+      return seen.shown === null || seen.gone === null ? null : seen.gone - seen.shown;
+    });
+    expect(stood, 'the receipt was drawn and went').not.toBeNull();
+    // SETTLED_MS is 3 s (lane-a/race.ts), its timer started when the follower wrote the receipt, a frame or so before it
+    // was drawn: it stood near three seconds, never a blink
+    expect(stood!, 'the receipt stood for its three seconds').toBeGreaterThanOrEqual(2_500);
 
     // an answer the bridge refuses because another won reads as that settlement, never an error
     bridge.raise({ request: 'toolu_late', tool: 'Bash', input: { command: 'rm notes.md' } });
@@ -830,9 +923,11 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const { bridge } = await drive(c);
     const one = { type: 'addRules', rules: [{ toolName: 'Bash', ruleContent: 'npm test' }], behavior: 'allow', destination: 'localSettings' };
 
-    // U1a §D: a localSettings suggestion puts "Always allow in <project>" third, and the session scope in the menu on Allow once
+    // U1a §D: a localSettings suggestion puts "Always allow in <project>" third, and the session scope in the menu on Allow once.
+    // U1b: each prompt here is a card at the transcript's end (the session's file holds none of these calls)
+    await expect(end(page)).toHaveCount(0);
     bridge.raise({ request: 'toolu_scoped', tool: 'Bash', input: { command: 'npm test' }, suggestions: [one] });
-    await expect(card(page).getByRole('button', { name: /^Always allow in / })).toBeVisible({ timeout: 5_000 });
+    await expect(end(page).locator('[data-request-card]').getByRole('button', { name: /^Always allow in / })).toBeVisible({ timeout: 5_000 });
     await card(page).getByRole('button', { name: 'More allow options' }).click();
     await page.getByRole('menuitem', { name: 'Allow for this session' }).click();
     await expect.poll(() => decided(bridge)).toEqual([{ request: 'toolu_scoped', behavior: 'allow', updatedPermissions: [{ ...one, destination: 'session' }], ...AS_MAWS }]);
@@ -874,25 +969,35 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     expect(c.maws.consoleErrors()).toEqual([]);
   });
 
+  // UX wave U1b: the first question's call is in the session's file, so its form stands in that call's row and its
+  // answer reads there after; the others name no call the file holds and are cards at the transcript's end.
   test('questions and plans: answers, a native question skipped as a decline, an async one answered and never skipped; a plan implemented, kept with feedback and without, its clear and implement closed', async () => {
     test.setTimeout(150_000);
-    const c = await begin();
+    const asked = (question: string, labels: string[]) => ({ questions: [{ question, header: question.slice(0, 8), options: labels.map((label) => ({ label })), multiSelect: false }] });
+    const c = await begin((sid, cwd, after) => {
+      const rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return [rows.prompt('Ask me which colour to use.'), rows.call('toolu_q1', 'AskUserQuestion', asked('Which colour?', ['Red', 'Blue']))];
+    });
     const { page } = c;
     const { bridge } = await drive(c);
-    const asked = (question: string, labels: string[]) => ({ questions: [{ question, header: question.slice(0, 8), options: labels.map((label) => ({ label })), multiSelect: false }] });
     const pick = async (question: string, label: string) => card(page).getByRole('radiogroup', { name: question }).getByRole('radio', { name: label }).click();
     let n = 0;
     const lastDecision = () => decided(bridge).slice(n);
 
     bridge.raise({ request: 'toolu_q1', tool: 'AskUserQuestion', input: asked('Which colour?', ['Red', 'Blue']) });
+    const q1 = questionRow(page, 'toolu_q1');
+    await expect(q1.locator('[data-request-card]'), 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    await expect(end(page), 'and nothing at the end').toHaveCount(0);
     await pick('Which colour?', 'Red');
     await card(page).getByRole('button', { name: 'Submit', exact: true }).click();
     await expect.poll(lastDecision).toEqual([{ request: 'toolu_q1', behavior: 'allow', updatedInput: { answers: { 'Which colour?': 'Red' } }, ...AS_MAWS }]);
     await settledHere(page, bridge, 'toolu_q1');
+    await expect.poll(() => receiptLines(q1), { message: 'the row reads the answer this window gave' }).toEqual(['Which co→Red']);
     n = 1;
 
     // every question skipped on a native question: the request declined
     bridge.raise({ request: 'toolu_q2', tool: 'AskUserQuestion', input: asked('Which size?', ['Small', 'Large']) });
+    await expect(end(page).locator('[data-request-card]'), 'no row holds its call: a card at the end').toBeVisible({ timeout: 5_000 });
     await card(page).getByRole('button', { name: 'Skip', exact: true }).click();
     await expect.poll(lastDecision).toEqual([{ request: 'toolu_q2', behavior: 'deny', ...AS_MAWS }]);
     await settledHere(page, bridge, 'toolu_q2', 'deny');
@@ -944,14 +1049,17 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
       const controls = { ...FULL_CAPABILITIES.controls, ...(declared && { 'decide.dismiss': { available: true } }) };
       const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
       bridge.raise({ request: 'toolu_async', tool: 'mcp__plugin_sminos_ask__ask', async: true, input: { questions: [{ question: 'Ship it today?', header: 'Ship it', options: [{ label: 'Yes' }, { label: 'Not yet' }], multiSelect: false }] } });
-      const dismiss = card(page).getByRole('button', { name: 'Dismiss', exact: true }); // the docked card's own: every question card has one
+      const dismiss = card(page).getByRole('button', { name: 'Dismiss', exact: true }); // the form's own: every question card has one
       await expect(dismiss).toBeVisible({ timeout: 5_000 });
       const row = await sidebarRow(page, { appSessionId: c.appId });
       await expect(row.getByRole('img', { name: 'Question waiting' }), 'the calm tone on its row').toBeVisible();
       await expect(sidebarOf(page).getByRole('list', { name: 'Needs you' }).getByRole('button')).toHaveAccessibleName(/ · Question waiting$/);
 
-      // Esc on the docked form sends nothing (O-22)
-      await main(page).locator('[data-docked-frame]').focus();
+      // Esc on the form sends nothing (O-22). UX wave U1b: the keyboard on the transcript row that holds it, which owns
+      // the card's keys (the session's file holds no call for it, so it is the end row)
+      await expect(end(page).locator('[data-request-card]')).toBeVisible();
+      await rowOf(card(page)).focus();
+      await expect(rowOf(card(page))).toBeFocused();
       await page.keyboard.press('Escape');
       await page.waitForTimeout(300);
       expect(decided(bridge), 'Esc sends nothing').toEqual([]);
@@ -969,4 +1077,512 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
       expect(c.maws.consoleErrors()).toEqual([]);
     });
   }
+
+  // UX wave U1b (acceptance 4, 5 and 8; Interfaces §D "A waiting row", "A question's receipt", §G "The receipt"; decisions
+  // 8 and 10; the owner's "Form header", "Two lines"; ruling A2). Four asynchronous questions the agent asked in its file,
+  // each raised by the bridge in turn: its form stands in its call's row, the composer free beside it; then the row reads
+  // what is known, by the first source that has it: answered here ("header→answer" at once), answered in the terminal
+  // (the settlement's words until the delivery), dismissed here or in the terminal ("Dismissed"). The deliveries are
+  // written in both shapes the file holds (the plugin's prompt carrying an answer and a dismissal; a hook's context on a
+  // tool result, one each), and the rows read them; after a reload the rows read the same from the file alone (this
+  // window's own receipts are gone with the reload: the answer given here would otherwise read "Answered in MAWS").
+  test('an asynchronous question’s form stands in its call’s row under its two-line header, the composer free; answered here or in the terminal, or dismissed, its row says so at once, after the delivery and after a reload', async () => {
+    test.setTimeout(180_000);
+    const week = 'Which day should the printed week start on?';
+    const cover = 'Which colour for the cover?';
+    const door = 'Which finish for the shed door?';
+    const ASKS = {
+      notes: { call: 'toolu_u1b_notes', questions: [single(week, 'Week start', ['Monday', 'Sunday']), single(cover, 'Cover', ['Blue', 'Green'])] },
+      door: { call: 'toolu_u1b_door', questions: [single(door, 'Door finish', ['Oil paint', 'Wood stain'])] },
+      window: { call: 'toolu_u1b_window', questions: [single('Should the reopening dates go in the newsletter?', 'Release window', ['Yes', 'No'])] },
+      rota: { call: 'toolu_u1b_rota', questions: [single('Who takes the first rota slot?', 'Rota', ['Ana', 'Ben'])] },
+    };
+    let rows!: ReturnType<typeof fileRows>;
+    const c = await begin((sid, cwd, after) => {
+      rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return [
+        rows.prompt('Lay out the garden notes; ask me what you cannot decide.'),
+        ...Object.values(ASKS).flatMap((ask) => [rows.call(ask.call, ASK_TOOL, { questions: ask.questions, async: true }), rows.result(ask.call, ASYNC_RESULT)]),
+        rows.text('I will go on with the layout while you decide.'),
+        ...rows.turnEnd(),
+      ];
+    });
+    const { page } = c;
+    const controls = { ...FULL_CAPABILITIES.controls, 'decide.dismiss': { available: true } }; // sminos 1.47.0: Dismiss is sent
+    const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
+    const raise = (ask: (typeof ASKS)[keyof typeof ASKS]) => bridge.raise({ request: ask.call, tool: ASK_TOOL, async: true, input: { questions: ask.questions, async: true } });
+    const formIn = (call: string) => questionRow(page, call).locator('[data-request-card]');
+    const pickIn = (form: Locator, question: string, label: string) => form.getByRole('radiogroup', { name: question }).getByRole('radio', { name: label }).click();
+    for (const ask of Object.values(ASKS)) {
+      await expect.poll(() => receiptLines(questionRow(page, ask.call)), { timeout: 15_000, message: `${ask.call}: its row before any request` }).toEqual(ask.questions.map((q) => `${q.header}→Not answered`));
+    }
+
+    // answered here: the form in its row, nothing at the end, the session reading "Question waiting", the composer free
+    raise(ASKS.notes);
+    const notes = formIn(ASKS.notes.call);
+    await expect(notes, 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    await expect(notes).toHaveRole('group');
+    await expect(notes).toHaveAccessibleName('Question waiting');
+    await expect(end(page), 'nothing at the end').toHaveCount(0);
+    await expect((await sidebarRow(page, { appSessionId: c.appId })).getByRole('img', { name: 'Question waiting' })).toBeVisible();
+    await editor(page).click();
+    await editor(page).pressSequentially('A note while it waits');
+    await expect(editor(page), 'the composer takes text beside the form').toHaveText('A note while it waits');
+    await clear(editor(page));
+
+    // The owner's form header (2026-11-15, "Two lines"): above the step, two lines, each one line high: the kind line with
+    // the count, and the terminal note; no heading, no "asks" line, no "from" for the session's own question; nothing in
+    // the card above the form's body
+    const header = await notes.evaluate((card) => {
+      const step = card.querySelector('[data-question-step]');
+      const head = card.querySelector('[data-form-header]');
+      const lines = Array.from(head?.children ?? []).map((child) => {
+        const box = child.getBoundingClientRect();
+        const style = getComputedStyle(child);
+        const line = parseFloat(style.lineHeight) || parseFloat(style.fontSize) * 1.5;
+        return { text: child.textContent, top: Math.round(box.top), oneLine: box.height > 0 && box.height < 2 * line };
+      });
+      return { bodyFirst: card.firstElementChild === step, headerFirst: step !== null && step.firstElementChild === head, headings: card.querySelectorAll('h1, h2, h3, h4').length, lines };
+    });
+    expect(header.bodyFirst, 'nothing in the card above the form’s body').toBe(true);
+    expect(header.headerFirst, 'the form opens on its header').toBe(true);
+    expect(header.headings, 'no title line').toBe(0);
+    expect(header.lines.map((l) => l.text), 'the kind line with the count, then the terminal note').toEqual(['?Question waiting· 2 questions', 'Also asked in the terminal: the first answer wins']);
+    expect(new Set(header.lines.map((l) => l.top)).size, 'two lines').toBe(2);
+    expect(header.lines.every((l) => l.oneLine), 'each one line high').toBe(true);
+
+    await pickIn(notes, week, 'Monday');
+    await notes.getByRole('button', { name: 'Next', exact: true }).click();
+    await pickIn(notes, cover, 'Blue');
+    await notes.getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: ASKS.notes.call, behavior: 'allow', updatedInput: { answers: { [week]: 'Monday', [cover]: 'Blue' } }, ...AS_MAWS }]);
+    await expect(notes, 'the form goes at the bridge’s 200').toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => receiptLines(questionRow(page, ASKS.notes.call)), { message: 'the answer this window gave, at once' }).toEqual(['Week start→Monday', 'Cover→Blue']);
+    bridge.settle(ASKS.notes.call, 'web', 'answered');
+
+    // answered in the terminal: a Skip that would leave every question unanswered is closed with its reason; the row
+    // reads the settlement's words, and the end draws none (the row says it)
+    raise(ASKS.door);
+    const doorForm = formIn(ASKS.door.call);
+    const skip = doorForm.getByRole('button', { name: 'Skip', exact: true });
+    await expect(skip).toBeDisabled({ timeout: 5_000 });
+    await expect(skip).toHaveAttribute('title', 'An async question needs an answer');
+    bridge.settle(ASKS.door.call, 'terminal', 'answered');
+    await expect(doorForm).toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => receiptLines(questionRow(page, ASKS.door.call))).toEqual(['Door finish→Answered in the terminal']);
+    await expect(end(page), 'its receipt is the row’s, not the end’s').toHaveCount(0);
+
+    // dismissed here: "Dismissed" at the press; the header whole beside it, on the real layout (ruling A2)
+    raise(ASKS.window);
+    const windowForm = formIn(ASKS.window.call);
+    await windowForm.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect.poll(() => decided(bridge).slice(1)).toEqual([{ request: ASKS.window.call, behavior: 'dismiss', ...AS_MAWS }]);
+    await expect(windowForm).toHaveCount(0, { timeout: 2_000 });
+    const windowRow = questionRow(page, ASKS.window.call);
+    await expect.poll(() => receiptLines(windowRow)).toEqual(['Release window→Dismissed']);
+    const label = windowRow.locator('[data-question-label]');
+    await expect(label).toHaveText('Release window');
+    expect(await label.evaluate((element) => element.scrollWidth <= element.clientWidth), 'the header is not cut beside Dismissed').toBe(true);
+    bridge.settle(ASKS.window.call, 'web', 'withdrawn', 'maws');
+
+    // dismissed in the terminal
+    raise(ASKS.rota);
+    await expect(formIn(ASKS.rota.call)).toBeVisible({ timeout: 5_000 });
+    bridge.settle(ASKS.rota.call, 'terminal', 'withdrawn', 'terminal');
+    await expect(formIn(ASKS.rota.call)).toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => receiptLines(questionRow(page, ASKS.rota.call))).toEqual(['Rota→Dismissed']);
+    expect(decided(bridge), 'the terminal’s answers sent nothing from here').toHaveLength(2);
+
+    // the deliveries, in both shapes: the plugin's prompt (the session idle) carrying this window's answer and dismissal,
+    // then, in the turn it opens, a hook's context on each of two results, the terminal's answer and its dismissal
+    const bash = (id: string) => [rows.call(id, 'Bash', { command: 'ls notes', description: 'List the notes' }), rows.result(id, 'garden.md', { stdout: 'garden.md', stderr: '', interrupted: false, isImage: false })];
+    await c.store.appendLines(
+      c.transcript,
+      [
+        rows.pluginPrompt(`${delivery(ASKS.notes.call, answered({ [week]: 'Monday', [cover]: 'Blue' }))}\n\n${delivery(ASKS.window.call, DISMISSED)}`),
+        ...bash('toolu_u1b_ls1'),
+        rows.hookContext(delivery(ASKS.door.call, answered({ [door]: 'Oil paint' })), 'toolu_u1b_ls1'),
+        ...bash('toolu_u1b_ls2'),
+        rows.hookContext(delivery(ASKS.rota.call, DISMISSED), 'toolu_u1b_ls2'),
+        rows.text('Noted: Monday, a blue cover, oil paint on the door.'),
+        ...rows.turnEnd(),
+      ].map((row) => JSON.stringify(row)),
+    );
+    const delivered = [
+      [ASKS.notes.call, ['Week start→Monday', 'Cover→Blue']],
+      [ASKS.door.call, ['Door finish→Oil paint']],
+      [ASKS.window.call, ['Release window→Dismissed']],
+      [ASKS.rota.call, ['Rota→Dismissed']],
+    ] as const;
+    for (const [call, lines] of delivered) await expect.poll(() => receiptLines(questionRow(page, call)), { timeout: 15_000, message: `${call}: its row after the delivery` }).toEqual(lines);
+    await expect(main(page).getByText('The sminos plugin sent a message'), 'no bubble holds the engine’s framing').toHaveCount(0);
+    await expect(main(page).getByText(/The human responded to your async AskUserQuestion/)).toHaveCount(0);
+
+    // acceptance 5's fold (decision 9, with the ruling on D-7 (b)): the delivery's turn has other work (two commands and a
+    // reply), so its "answered: …" lines (U3a's notice, still derived) fold with it: folded, none stands outside the fold,
+    // and the questions' rows above still read their answers; opened, the lines are there
+    const answerLines = main(page).locator('.transcript-row[data-kind="notice"]').filter({ hasText: /answered: / });
+    const turnLine = main(page).locator('.transcript-row[data-kind="divider"] button.transcript-disclosure').filter({ hasText: /^Worked for / }).last();
+    await expect(turnLine, 'the delivery’s turn reads Worked for: it has other work').toBeVisible({ timeout: 15_000 });
+    if ((await turnLine.getAttribute('aria-expanded')) === 'true') await turnLine.click();
+    await expect(turnLine).toHaveAttribute('aria-expanded', 'false');
+    await expect(answerLines, 'folded, no answer line stands outside the fold').toHaveCount(0);
+    for (const [call, lines] of delivered) expect(await receiptLines(questionRow(page, call)), `${call}: its row, the turn folded`).toEqual(lines);
+    await turnLine.click();
+    await expect(turnLine).toHaveAttribute('aria-expanded', 'true');
+    await expect(answerLines, 'opened, the answer’s own lines are there').not.toHaveCount(0);
+
+    // after a reload, the rows read the same from the file
+    await page.reload();
+    await expect(main(page)).toBeVisible({ timeout: 60_000 });
+    await open(c);
+    for (const [call, lines] of delivered) await expect.poll(() => receiptLines(questionRow(page, call)), { timeout: 15_000, message: `${call}: its row after the reload` }).toEqual(lines);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+  // UX wave U1b, decision 8a (the architect's ruling of 2026-11-15): a question MAWS answers that was answered elsewhere
+  // first. The bridge refuses the answer with 404 and names no settlement (no request pending under that id: its own
+  // record of the request has gone ahead of its stream), so the driver says not pending with no winner and lane A's
+  // controls inject no settlement; the card says "Already answered elsewhere" for its two seconds and closes, while the
+  // bridge still lists the request. Through that gap the row draws no form and no control, and each line reads the
+  // existing sentence, past the two seconds and through a remount, until the row carries its own answers. The column's
+  // card still lists the item; its line goes to a request that is closed, so it says the request is gone and moves the
+  // keyboard nowhere that answers (decision 19).
+  test('a question answered elsewhere while its row waits: Already answered elsewhere on each line, no form and no control, past two seconds and a remount; the column’s line says it is gone; then the row’s own answers', async () => {
+    test.setTimeout(150_000);
+    const week = 'Which day should the printed week start on?';
+    const cover = 'Which colour for the cover?';
+    const ask = { call: 'toolu_u1b_elsewhere', questions: [single(week, 'Week start', ['Monday', 'Sunday']), single(cover, 'Cover', ['Blue', 'Green'])] };
+    let rows!: ReturnType<typeof fileRows>;
+    const c = await begin((sid, cwd, after) => {
+      rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return [rows.prompt('Lay out the garden notes; ask me what you cannot decide.'), rows.call(ask.call, ASK_TOOL, { questions: ask.questions, async: true }), rows.result(ask.call, ASYNC_RESULT), rows.text('I will go on with the layout.'), ...rows.turnEnd()];
+    });
+    const { page } = c;
+    const { bridge } = await drive(c);
+    const row = questionRow(page, ask.call);
+    const form = row.locator('[data-request-card]');
+    const elsewhere = ['Week start→Already answered elsewhere', 'Cover→Already answered elsewhere'];
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'its row before any request' }).toEqual(['Week start→Not answered', 'Cover→Not answered']);
+
+    // the bridge takes no answer for it: 404, no settlement named
+    bridge.answer(`decision:${ask.call}`, () => ({ status: 404, body: { error: `no request ${ask.call} is pending in this session` } }));
+    bridge.raise({ request: ask.call, tool: ASK_TOOL, async: true, input: { questions: ask.questions, async: true } });
+    await expect(form, 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    await form.getByRole('radiogroup', { name: week }).getByRole('radio', { name: 'Monday' }).click();
+    await form.getByRole('button', { name: 'Next', exact: true }).click();
+    await form.getByRole('radiogroup', { name: cover }).getByRole('radio', { name: 'Blue' }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(decided(bridge), 'the bridge recorded no decision').toEqual([]);
+
+    // past the card's two seconds: no form, no control, each line the sentence; the bridge still lists the request
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'each line says it was answered elsewhere' }).toEqual(elsewhere);
+    await expect(form, 'no form').toHaveCount(0);
+    await expect(row.getByRole('button'), 'no control').toHaveCount(0);
+    await expect(row.getByRole('radio'), 'no option').toHaveCount(0);
+    const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((i) => i.request.requestId === ask.call).map((i) => i.state);
+    expect(await listed(), 'the premise: the item is still listed').not.toEqual([]);
+    await expect(end(page), 'nothing at the end for it').toHaveCount(0);
+
+    // the column's card still lists it; its line finds the request closed: gone, said once, the keyboard moved nowhere that answers
+    const column = (await showSessionCards(page)).getByRole('region', { name: 'Waiting for you', exact: true });
+    const line = column.locator(`[data-waiting-card-line="${await addressed(page, value(await invoke(page, 'attention.list', undefined)).find((i) => i.request.requestId === ask.call)!.id)}"]`);
+    await expect(line).toBeVisible();
+    await line.click();
+    const toasts = page.locator('[data-toast-viewport]');
+    await expect(toasts.getByText('That request is no longer waiting'), 'said once').toHaveCount(1);
+    const held = await page.evaluate(() => {
+      const element = document.activeElement;
+      if (element === null || element === document.body) return 'nothing';
+      if (element.closest('[data-request-card], .transcript-row') !== null) return 'a request or a row';
+      return element.hasAttribute('data-waiting-card-line') ? 'the line' : 'elsewhere';
+    });
+    expect(held, 'the keyboard is on nothing that answers').not.toBe('a request or a row');
+    expect(await receiptLines(row), 'and the row unchanged').toEqual(elsewhere);
+
+    // remounted: the pane shows another tab, then the session again; the row reads the same
+    await menu(c.maws.app, 'diagnostics.open');
+    await expect(row, 'the transcript left the page').toHaveCount(0);
+    await open(c);
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'after the remount' }).toEqual(elsewhere);
+    await expect(form, 'still no form').toHaveCount(0);
+
+    // the delivery of the answer that won: the row reads its own answers
+    await c.store.appendLines(c.transcript, [rows.pluginPrompt(delivery(ask.call, answered({ [week]: 'Sunday', [cover]: 'Green' }))), rows.text('Noted: Sunday, a green cover.'), ...rows.turnEnd()].map((r) => JSON.stringify(r)));
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'the row’s own answers win' }).toEqual(['Week start→Sunday', 'Cover→Green']);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // UX wave U1b, acceptance 4's last sentence ("Stop ends the turn and leaves the question open"; probe 9b, the architect's
+  // ruling of 2026-11-15): Stop posts the interrupt; the bridge ends the turn (`aborted`) and keeps the sminos
+  // asynchronous question pending, and nobody writes a settlement. So the form stays in its call's row and answers. Staged
+  // from the record (`stopRecord`): the file's rows to the running Bash call, the bridge's turn and its raise, its answer to
+  // the interrupt, and the interrupt's rows and the turn's end as the engine and the bridge wrote them.
+  async function stoppedWhileAsked(then: 'answer' | 'dismiss') {
+    const record = stopRecord(then, REPO_ROOT);
+    let rows!: ReturnType<typeof fileRows>;
+    const c = await begin((sid, cwd, after) => {
+      rows = fileRows(sid, cwd, after, '2026-10-28T10:00:03.000Z');
+      return record.before.map((row) => rows.recorded(row));
+    });
+    const { page } = c;
+    const controls = { ...FULL_CAPABILITIES.controls, 'decide.dismiss': { available: true } }; // sminos 1.47.0: Dismiss is sent
+    const { bridge } = await drive(c, { bridge: { capabilities: { ...FULL_CAPABILITIES, controls } } });
+    bridge.answer('interrupt', () => ({ status: 200, body: record.interrupted }));
+    const row = questionRow(page, record.call);
+    const form = row.locator('[data-request-card]');
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'its row before any request' }).toEqual([`${record.question.header}→Not answered`]);
+    bridge.emit(record.turn);
+    bridge.raise(record.raised);
+    await expect(form, 'the form in its call’s row').toBeVisible({ timeout: 5_000 });
+    const stop = main(page).getByRole('button', { name: 'Stop', exact: true });
+    await expect(stop, 'the turn runs').toBeVisible({ timeout: 10_000 });
+
+    await stop.click();
+    await expect.poll(() => bodies(bridge, 'interrupt')).toEqual([{ op: 'interrupt' }]);
+    await c.store.appendLines(c.transcript, record.afterStop.map((r) => JSON.stringify(rows.recorded(r))));
+    bridge.emit(record.aborted);
+    await expect(stop, 'the turn ended').toHaveCount(0, { timeout: 10_000 });
+
+    // the question is still open: its form in its row, nothing at the end, the item listed, no decision posted
+    await expect(form, 'the form stays in its row after Stop').toBeVisible();
+    await expect(end(page), 'nothing at the end').toHaveCount(0);
+    const listed = async () => value(await invoke(page, 'attention.list', undefined)).filter((i) => i.request.requestId === record.call).map((i) => i.state);
+    expect(await listed(), 'the item still waits').toEqual(['pending']);
+    expect(decided(bridge), 'nothing decided').toEqual([]);
+    return { c, bridge, rows, record, row, form, listed };
+  }
+
+  test('Stop while a terminal session’s asynchronous question waits ends the turn and leaves the question open: its form stays in its row and answers, and the row reads the answer once delivered (probe 9b, stop then answer)', async () => {
+    test.setTimeout(150_000);
+    const { c, bridge, rows, record, row, form, listed } = await stoppedWhileAsked('answer');
+    const { page } = c;
+    const answer = record.answer!; // the record's answer, as its delivery quotes it (the staging test pins it)
+    await form.getByRole('radiogroup', { name: record.question.question }).getByRole('radio', { name: answer }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'allow', updatedInput: { answers: { [record.question.question]: answer } }, ...AS_MAWS }]);
+    expect(bridge.requestReads, 'read at its request URL first, still pending there').toContain(record.call);
+    await expect(form).toHaveCount(0, { timeout: 2_000 });
+    await expect.poll(() => receiptLines(row), { message: 'the answer this window gave, at once' }).toEqual([`${record.question.header}→${answer}`]);
+    bridge.settle(record.call, record.settled.winner, record.settled.outcome, record.settled.by);
+    await expect.poll(listed, { message: 'it leaves the list at its settlement' }).toEqual([]);
+
+    // the delivery as recorded: the plugin's prompt opens a new turn on the idle session, and the reply
+    await c.store.appendLines(c.transcript, record.afterAnswer.map((r) => JSON.stringify(rows.recorded(r))));
+    await expect(main(page).getByText(/The answer reached me/).first(), 'the delivery’s turn is drawn').toBeVisible({ timeout: 15_000 });
+    expect(await receiptLines(row), 'the row reads the answer after the delivery').toEqual([`${record.question.header}→${answer}`]);
+    await expect(main(page).getByText('The sminos plugin sent a message'), 'no bubble holds the engine’s framing').toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('Stop while a terminal session’s asynchronous question waits, then Dismiss: the bridge settles it withdrawn by MAWS and nothing reaches the session; the row reads Dismissed from the settlement, after a reload too (probe 9b, stop then dismiss)', async () => {
+    test.setTimeout(150_000);
+    const { c, bridge, record, row, form, listed } = await stoppedWhileAsked('dismiss');
+    const { page } = c;
+    expect(record.settled, 'the record: withdrawn, by MAWS').toMatchObject({ winner: 'web', outcome: 'withdrawn', by: 'maws' });
+    expect(record.afterAnswer, 'the record: no row reached the session').toEqual([]);
+    // a premise of the staging: the stand-in bridge writes no row on a decision, so the file's length only says the scene
+    // wrote none; what MAWS sends is read at the bridge (below)
+    const linesBefore = readFileSync(c.transcript, 'utf8').trim().split('\n').length;
+    const commandsAtDismiss = bridge.commands.length;
+    await form.getByRole('button', { name: 'Dismiss', exact: true }).click();
+    await expect.poll(() => decided(bridge)).toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
+    await expect(form).toHaveCount(0, { timeout: 2_000 });
+    bridge.settle(record.call, record.settled.winner, record.settled.outcome, record.settled.by);
+    await expect.poll(listed, { message: 'it leaves the list at its settlement' }).toEqual([]);
+    await expect.poll(() => receiptLines(row)).toEqual([`${record.question.header}→Dismissed`]);
+
+    // this window's own dismissal goes with a reload; the bridge's snapshot still lists the settlement, and no row came
+    await page.reload();
+    await expect(main(page)).toBeVisible({ timeout: 60_000 });
+    await open(c);
+    await expect.poll(() => receiptLines(row), { timeout: 15_000, message: 'from the settlement alone' }).toEqual([`${record.question.header}→Dismissed`]);
+    expect(readFileSync(c.transcript, 'utf8').trim().split('\n').length, 'the staging wrote no row').toBe(linesBefore);
+    // the delivery boundary: MAWS's whole say after the Stop is the one dismissal; it posted no message, steer or
+    // other control that could reach the session
+    expect(decided(bridge), 'one decision, the dismissal').toEqual([{ request: record.call, behavior: 'dismiss', ...AS_MAWS }]);
+    expect(bridge.commands.slice(commandsAtDismiss).map((cmd) => cmd.op).filter((op) => op !== 'read' && op !== 'ping'), 'no command after the dismissal').toEqual([]);
+    await expect(end(page)).toHaveCount(0);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  // ---- UX wave U1c: "Approve and retry" on a terminal session (S4) -----------------------------------------------------
+  // (docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md, §H S4, Acceptance 7a to 7c; Decision Log 11, 36 to
+  // 39.) Probe T's recorded transcripts (`probeTerminalRecords`): the session's file holds a run to the moment of the press,
+  // the press reaches the fake bridge, and the scene writes the rows the bridge and the engine wrote after it, as recorded,
+  // in that state, in steps that stop at the state's read boundary (findings-uxwave-u1c-terminal-grant.txt; Decision Log 38
+  // and 39): idle, the row the bridge submitted; running, the running call's result; stopped, the bridge's wake. Every
+  // state is offered (`TERMINAL_OFFERED`, M4), and each part first asserts the state the window recognises. The run's
+  // lines are the findings' numbers.
+  const BLOCKED_MARKER = 'curl -s -o marker-1.txt "https://example.com/?maws-probe-marker-1"'; // run 1 of each state
+  const APPROVE = 'Approve and retry';
+  const labelOf = (cell: Locator) => cell.locator('.transcript-cell-label');
+  const recordLines = (records: Record<string, unknown>[], from: number, to: number) => records.slice(from - 1, to).map((row) => JSON.stringify(row));
+  // the call auto mode blocked (its result row carries `toolDenialKind: "automode-blocked"`), and the marker's call after the grant
+  const blockedId = (records: Record<string, unknown>[]) => (records.find((row) => row.toolDenialKind === 'automode-blocked')!.message as { content: { tool_use_id: string }[] }).content[0]!.tool_use_id;
+  const retryId = (records: Record<string, unknown>[], after: number) => records.slice(after).flatMap((row) => (row.type === 'assistant' ? (row.message as { content: { type: string; id?: string; input?: { command?: string } }[] }).content : [])).find((block) => block.type === 'tool_use' && block.input?.command === BLOCKED_MARKER)!.id!;
+  // the bridge enters each delivery as the row the recording names, as the bridge's stream tells it (`delivered`, `entered`)
+  const entersAs = (bridge: FakeBridge, uuid: unknown) =>
+    bridge.answer('deliver', (body) => {
+      bridge.emit({ type: 'delivered', key: body.key, outcome: 'submitted' });
+      bridge.emit({ type: 'delivered', key: body.key, outcome: 'entered', uuid });
+      return { status: 200, body: { ok: true, result: { submitted: true } } };
+    });
+  // The blocked row, its turn's count clicked (the ended turn folds its work).
+  async function openBlocked(page: Page, toolUseId: string): Promise<Locator> {
+    const count = main(page).getByRole('link', { name: '1 auto-denied' });
+    await expect(count).toBeVisible({ timeout: 15_000 });
+    await count.click();
+    const row = main(page).locator(`[data-cell-id="cell:${toolUseId}"]`);
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    return row;
+  }
+  // The state the window gives the session, as `terminalStateOf` reads it: the bridge's word on the main loop's turn
+  // (`laneA.state`), and, when no turn runs, whether the newest turn's line reads stopped.
+  async function recognisedAs(page: Page, appId: string, state: 'idle' | 'running' | 'stopped'): Promise<void> {
+    await expect.poll(async () => value(await invoke(page, 'laneA.state', { appSessionId: appId }))?.turn, { timeout: 10_000 }).toEqual({ running: state === 'running', unknown: false });
+    if (state !== 'running') await expect(main(page).locator('.transcript-divider .transcript-disclosure').last(), `the newest turn's line reads ${state === 'stopped' ? 'stopped' : 'not stopped'}`).toHaveText(state === 'stopped' ? /^You stopped after/ : /^Worked for/);
+  }
+  // The newest line the session's follower has read, as the window hears it: each `fs.followState` names its chain's
+  // leaf, reported whenever the chain grows. A positive sign of a read where the lines read draw nothing.
+  async function followerLeaves(page: Page, appId: string): Promise<() => Promise<(string | null)[]>> {
+    await page.evaluate((id) => {
+      const w = window as unknown as { __u1cLeaves: (string | null)[] };
+      w.__u1cLeaves = [];
+      window.maws.on('fs.followState', (e) => {
+        if (e.appSessionId === id && e.agentId === null) w.__u1cLeaves.push(e.leafUuid);
+      });
+    }, appId);
+    return () => page.evaluate(() => (window as unknown as { __u1cLeaves: (string | null)[] }).__u1cLeaves);
+  }
+  // At its read boundary: the row reads approved and offers nothing, the grant is the approval's line.
+  async function approvedAt(page: Page, row: Locator): Promise<void> {
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER} · approved`, { timeout: 15_000 });
+    await expect(row.getByRole('button', { name: APPROVE })).toHaveCount(0);
+    await expect(main(page).locator('.transcript-consent')).toHaveText(`You approved ${BLOCKED_MARKER}`);
+  }
+  // After the retry's turn has ended: the retry, in the newest turn (folded when it ended), ran.
+  async function retried(page: Page, retry: string): Promise<void> {
+    const cell = main(page).locator(`[data-cell-id="cell:${retry}"]`);
+    await expect(async () => {
+      const line = main(page).locator('.transcript-divider .transcript-disclosure').last();
+      if ((await line.getAttribute('aria-expanded')) === 'false') await line.click();
+      await expect(cell).toBeVisible({ timeout: 1_000 });
+    }, 'the newest turn opened to the retry').toPass();
+    await expect(cell, 'the retry ran').toHaveAttribute('data-status', 'done');
+  }
+
+  test('U1c S4, idle (u1c-t-idle-1): held in the holder’s words before the bridge is live, then offered; the press is one delivery of the grant, and the row the bridge submitted draws the line, the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-idle-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 49)); // to the block's turn end (48, 49)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+
+    // the terminal holds it and no bridge answers: read-only, the button held in the holder's words, nothing sent
+    c.terminal = await terminalSession({ store: c.store, sminosHome: c.maws.sminosHome, sessionId: c.sid, cwd: c.repo.root, bridged: false });
+    await expect.poll(async () => value(await invoke(page, 'session.get', { appSessionId: c.appId }))?.holder.kind, { timeout: 10_000 }).toBe('terminal');
+    await (await sidebarRow(page, { appSessionId: c.appId })).click();
+    await expect(notice(page)).toContainText('read-only');
+    const row = await openBlocked(page, blockedId(records));
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeDisabled();
+    await expect(button).toHaveAttribute('title', /^Held by /);
+    await test.info().attach('u1c-s4-held', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    // its bridge comes up, the session idle: offered
+    const bridge = await startFakeBridge({ home: c.maws.sminosHome, session: c.sid, pid: c.terminal.pid, sessionInfo: { session: c.sid, cwd: c.repo.root, model: 'claude-opus-4-5', version: '2.1.300' } });
+    bridge.emit({ type: 'catalog', ...CATALOG });
+    const registryOnly = c.terminal;
+    c.terminal = { bridge, pid: registryOnly.pid, close: async () => (await bridge.close(), await registryOnly.close()) };
+    await expect(editor(page)).toBeVisible({ timeout: 15_000 });
+    await recognisedAs(page, c.appId, 'idle');
+    await expect(button).toBeEnabled();
+    await test.info().attach('u1c-s4-idle-offered', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    entersAs(bridge, records[52]!.uuid); // line 53, the row the bridge submitted as the user
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await c.store.appendLines(c.transcript, recordLines(records, 50, 53)); // the bridge's submit: the queue's rows (50, 51), a snapshot, the row it submitted (53)
+    await approvedAt(page, row); // read at the row the bridge submitted, which opens its turn
+    await c.store.appendLines(c.transcript, recordLines(records, 54, 61)); // the retry (56, 57), the reply, the turn's end
+    await retried(page, retryId(records, 53));
+    await test.info().attach('u1c-s4-idle-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('U1c S4, running (u1c-t-busy-1): offered while a turn runs; the grant the bridge appended waits in the stack at the next step with the button greyed until the running call’s result, then the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-busy-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 51)); // to the 30 s call (51)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+    const { bridge } = await drive(c);
+    bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-wait' }); // the bridge says a turn runs
+    const row = await openBlocked(page, blockedId(records));
+    await recognisedAs(page, c.appId, 'running');
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeEnabled();
+
+    entersAs(bridge, records[51]!.uuid); // line 52, the row the bridge appended into the turn
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await c.store.appendLines(c.transcript, recordLines(records, 52, 53)); // the appended row and the bridge's mirror line
+    const waiting = main(page).getByRole('region', { name: 'Queued messages' }).locator('li');
+    await expect(waiting.locator('[data-row-text]'), 'the approval waits above the composer as the line it becomes').toHaveText(`You approved ${BLOCKED_MARKER}`, { timeout: 15_000 });
+    await expect(waiting.locator('[data-mark]')).toHaveText('Next step');
+    await expect(button, 'greyed while it waits').toBeDisabled();
+    await expect(labelOf(row), 'not approved before the engine reads it').toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    await test.info().attach('u1c-s4-running-waiting', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    await c.store.appendLines(c.transcript, recordLines(records, 54, 54)); // the running call's result (54): the engine reads the grant in the request after it
+    await approvedAt(page, row);
+    await expect(main(page).getByRole('region', { name: 'Queued messages' }), 'nothing waits').toHaveCount(0);
+    await c.store.appendLines(c.transcript, recordLines(records, 55, records.length)); // the request (55), the retry (58, 59), the reply, the turn's end
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-wait' });
+    await retried(page, retryId(records, 53));
+    await test.info().attach('u1c-s4-running-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
+
+  test('U1c S4, stopped (u1c-t-esc-1): offered after an Esc; the grant the bridge appended is read at the bridge’s wake, then the row reads approved and the retry runs', async () => {
+    test.setTimeout(120_000);
+    const run = 'u1c-t-esc-1';
+    const c = await begin(undefined, (sid, cwd) => probeTerminalRecords(run, sid, cwd).slice(0, 55)); // to the rejected call (54) and the interruption line (55)
+    const { page } = c;
+    const records = probeTerminalRecords(run, c.sid, c.repo.root);
+    const { bridge } = await drive(c);
+    bridge.emit({ type: 'turn', phase: 'start', turnId: 'turn-esc' });
+    bridge.emit({ type: 'turn', phase: 'complete', turnId: 'turn-esc', reason: 'aborted' }); // the Esc: no turn runs, the newest reads stopped
+    const row = await openBlocked(page, blockedId(records));
+    await recognisedAs(page, c.appId, 'stopped');
+    const button = row.getByRole('button', { name: APPROVE });
+    await expect(button).toBeEnabled();
+    await test.info().attach('u1c-s4-stopped-offered', { body: await main(page).screenshot(), contentType: 'image/png' });
+
+    entersAs(bridge, records[55]!.uuid); // line 56, the row the bridge appended after the Stop
+    await button.click();
+    await expect.poll(() => bodies(bridge, 'deliver').map((b) => b.text), { timeout: 10_000 }).toEqual([consentMessage('command', BLOCKED_MARKER)]);
+    await expect(button, 'the grant is out').toBeDisabled();
+    const leaves = await followerLeaves(page, c.appId);
+    await c.store.appendLines(c.transcript, recordLines(records, 56, 60)); // the appended row (56), the mirror line (57), the queue's rows (58, 59), 60
+    // Lines 56 to 60 draw nothing after a Stop (the grant waits for the wake, the mirror is its second carrier, the rest
+    // carry nothing), so the checkpoint is the follower's: its chain has grown to the mirror line, the last line with a uuid
+    // before the wake, and 58 to 60 came in the same write.
+    await expect.poll(async () => (await leaves()).at(-1), { timeout: 10_000, message: 'the follower has read to the mirror line (57)' }).toBe(String(records[56]!.uuid));
+    // Read, and nothing reads approved: no approval row comes, so the grant out ends by its clock (SETTLE_MS after the
+    // delivery's outcome) and the button is back, the row unapproved and no "You approved" line drawn
+    await expect(button, 'no approval before the wake').toBeEnabled({ timeout: 15_000 });
+    await expect(labelOf(row)).toHaveText(`Auto mode blocked: ${BLOCKED_MARKER}`);
+    await expect(main(page).locator('.transcript-consent')).toHaveCount(0);
+    await test.info().attach('u1c-s4-stopped-before-wake', { body: await main(page).screenshot(), contentType: 'image/png' });
+    await c.store.appendLines(c.transcript, recordLines(records, 61, 61)); // the bridge's wake (61), whose turn reads the grant
+    await approvedAt(page, row);
+    await c.store.appendLines(c.transcript, recordLines(records, 62, records.length)); // the request (62), the retry (70, 71), the reply, the turn's end
+    await retried(page, retryId(records, 56));
+    await test.info().attach('u1c-s4-stopped-approved', { body: await main(page).screenshot(), contentType: 'image/png' });
+    expect(bodies(bridge, 'deliver'), 'one delivery').toHaveLength(1);
+    expect(c.maws.consoleErrors()).toEqual([]);
+  });
 });

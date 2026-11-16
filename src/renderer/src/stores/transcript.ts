@@ -5,7 +5,7 @@
 // no row, and the live row reads its buffer through `liveBuffer`, so a token re-renders one component.
 import { create } from 'zustand';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, MessageUuid } from '@shared/graph/ids';
+import type { AgentId, MessageUuid, ToolUseId } from '@shared/graph/ids';
 import { turnActivity, type TurnActivity } from '../transcript/model/activity';
 import { expandedTurnRows, rowsOf, turnRows } from '../transcript/model/derive';
 import { marksOfText } from '../transcript/model/owner-marks';
@@ -84,6 +84,10 @@ export interface TranscriptStore {
   attach(key: string, source: TranscriptSource, options?: { agentId?: AgentId | null }): Promise<void>;
   retry(key: string): Promise<void>; // hydrate a failed key again from its source, keeping its attachments
   detach(key: string): void;
+  // UX wave U1c (M3's review, finding 3): keeps the key's attachment, whatever its source, as one more holder, so what
+  // follows it lives on when its last view detaches; nothing when no source is attached. The returned function lets go
+  // once, and lets go of nothing when another source has replaced that attachment since.
+  hold(key: string): () => void;
   drop(key: string): void; // release every attachment and forget the state, and the key's agent lookup
   // L197: the agents the host knows beyond the key's loaded turns (MAWS: the session's task graph, transcript/view/
   // agent-lookup.ts; the desk: its tree), naming a message to or from one no loaded turn launched. Kept for the key
@@ -117,6 +121,10 @@ export interface TranscriptStore {
   mountView(key: string, compose: ComposeView): () => void;
   setView(key: string, view: 'report' | 'transcript'): void;
   toggleStretch(key: string, stretch: string): readonly string[]; // the keys the stretch's other record line can carry
+  // UX wave U1b (the U1b document, Interfaces §B): the calls whose row holds a waiting form, as the session's list says
+  // them. An equal set changes nothing; else the turns holding a call that entered or left it derive again, every other
+  // turn keeping its rows. A key whose state starts over is told again by its transcript.
+  setWaitingForms(key: string, calls: ReadonlySet<ToolUseId>): void;
   // M6 (2026-10-10): a jump to the assistant text with this message uuid and block index (a mark's anchor), wherever its
   // turn has it; false when the key has no such text (not attached, not hydrated yet, or another session's)
   jumpToMessage(key: string, anchor: MessageAnchor): boolean;
@@ -132,6 +140,7 @@ export interface TranscriptStore {
 }
 
 const NO_ROWS: Row[] = [];
+const NO_CALLS: ReadonlySet<ToolUseId> = new Set(); // UX wave U1b
 const NO_ACTIVITY: TurnActivity[] = [];
 
 // The buffer of a live text or thinking row: its block identity is the row id after the kind prefix (keys.ts).
@@ -176,6 +185,7 @@ function copyUi(ui: TranscriptUi, turns: Iterable<TurnId> | 'all'): TranscriptUi
     ...(ui.ownerLane !== undefined && { ownerLane: ui.ownerLane }), ...(ui.view !== undefined && { view: ui.view }), // P2-C
     openStretches: new Set(ui.openStretches), ...(ui.tailMessage !== undefined && { tailMessage: ui.tailMessage }), ...(ui.noTurnFold !== undefined && { noTurnFold: ui.noTurnFold }), ...(ui.modDraws !== undefined && { modDraws: ui.modDraws }), // UX wave U2b
     ...(ui.revealed !== undefined && { revealed: ui.revealed }), // UX wave U3
+    ...(ui.waitingForms !== undefined && { waitingForms: ui.waitingForms }), // UX wave U1b
   };
 }
 
@@ -520,6 +530,18 @@ export function createTranscriptStore() {
         set({}); // UX wave U5a (Decision Log 52): `attached(key)` changed, so a selector that reads it is asked again
       },
 
+      hold(key) {
+        const attached = attachments.get(key);
+        if (!attached) return () => {};
+        attached.count += 1;
+        let held = true;
+        return () => {
+          if (!held) return;
+          held = false;
+          if (attachments.get(key) === attached) get().detach(key);
+        };
+      },
+
       drop(key) {
         const attached = attachments.get(key);
         if (attached) release(attached);
@@ -663,6 +685,16 @@ export function createTranscriptStore() {
           mounted.delete(compose);
           if (mounted.size === 0 && views.get(key) === mounted) views.delete(key);
         };
+      },
+      // UX wave U1b
+      setWaitingForms(key, calls) {
+        const current = entry(key);
+        if (!current) return;
+        const held = current.state.ui.waitingForms ?? NO_CALLS;
+        const changed = [...calls].filter((call) => !held.has(call)).concat([...held].filter((call) => !calls.has(call)));
+        if (changed.length === 0) return;
+        const turns = new Set(changed.flatMap((call) => current.state.index.toolUses.get(call) ?? []));
+        changeUi(key, () => turns, (ui) => void (ui.waitingForms = new Set(calls)));
       },
       attached: (key) => attachments.has(key),
 
