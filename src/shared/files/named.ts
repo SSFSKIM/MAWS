@@ -6,8 +6,17 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { readAnchoredMessage } from '../anchor/message';
+import { ANCHOR_TAG_OPENING, PROMOTION_HEAD, readAnchoredMessage } from '../anchor/message';
+import { neutralisePastedTags } from '../composer/pasted-framing';
+import { PASTED_BLOCK } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
+import { quotesGrant } from '../engine/grant';
+import { BASH_INPUT_OPENING, PLAN_LEAD } from '../engine/host-prompts';
+import { ASK_STEER_OPENING } from '../maws/ask';
+import { LINKED_READ_OPENING } from '../maws/linked-read';
+import { RELAY_CONTINUE } from '../maws/relay-text';
+import { answersOf } from '../owner/answer';
+import { COMMAND_NAME_OPENING, TYPED_COMMAND } from '../wire/local-command';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1007,8 +1016,9 @@ export interface PendingCall {
   toolUseId: string;
   when: 'mcp' | 'edit';
 }
-// `other`: a `user` row whose text links the path but that someone other than the person wrote (UX wave U6e, Decision
-// Log 8): a result form already resolved, which names the path for a read and admits no save.
+// `other`: a `user` row or a queued prompt whose text names the path, in text that is not the person's own (UX wave U6e,
+// Decision Log 8; ticket 675: `ownTexts`): a result form already resolved, which names the path for a read and admits no
+// save. The anchor form is such a text (ruling B): it names the path for a read only.
 export type RowClaim = { names: true } | { names: false; pending: PendingCall[]; other?: true };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
@@ -1078,11 +1088,95 @@ function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
   return false;
 }
 
-// A person's message names the path by a link in its text, or by its anchored comment's tag; the window joins the text
-// blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
+// Some text of a person's message names the path, for a read: a link in any of its texts, or its anchored comment's
+// tag; the window joins the text blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
 function* personNames(content: unknown, path: string): Steps<boolean> {
   const texts = yield* textsOf(content);
   return (yield* linksTo(texts, path)) || (yield* anchorNames(texts.join('\n\n'), path));
+}
+
+// UX wave U6e, board ticket 675 (the write rule's line 1; the architect's ruling D, with A, B and C): which texts of a
+// person's message are the person's own, the only texts that name a path for a save. Both carriers ask it, the `user`
+// row and the queued prompt, after `personsOwn` has placed the row as the person's.
+//
+// The rule is an allowlist by position and an exclusion list by content; content assembled at run time is outside what
+// the guard can see.
+// - By position: at most one text is the person's, the content when it is a string, else its first text block. The
+//   window's composer writes one text block, after its images and documents (composer/editor/serialize.ts); every block
+//   after it is read only, whatever its kind: the engine host's attached artifact reads (engine-host/linked-reads.ts),
+//   a second message the engine joined into the row, and any kind added later, with nobody touching this function.
+// - By content: that text counts only when no reader of a form MAWS writes as the person's claims any part of it,
+//   anywhere in the text: `CLAIMED` below, each reader sharing its one constant with its writer. A text one of them
+//   claims is read only whole, the person's words beside the form included (a joined message fails closed: no reader
+//   can tell where the form ends within one text).
+// - Inside a text no reader claims: a paste's frame and body are read only and the typed words around them count
+//   (ruling A); an anchored comment's own words count, its lead, passage and tag are read only (ruling B); a typed slash
+//   command's arguments are read only (ruling C, in `CLAIMED`).
+// Every site that hands content to a send, a steer or the queue as the person's message is listed, with the reader
+// of its form, by the guard test/support/person-sends.test.ts, which fails on a site it does not list.
+const CLAIMED: readonly ((text: string) => boolean)[] = [
+  (text) => text.includes(LINKED_READ_OPENING), // an artifact's read the host attached (engine-host/linked-reads.ts)
+  (text) => text.includes(ASK_STEER_OPENING), // MAWS's answer envelope, either form (engine-host/session-maws.ts)
+  (text) => quotesGrant(text), // MAWS's consent, or any text quoting the grant's opening
+  (text) => answersOf(text).length > 0, // an owner question's answer line (renderer owner/report/answering.ts)
+  (text) => text.includes(PLAN_LEAD), // the plan handed back after a clear (engine-host/session-clear.ts)
+  (text) => text.includes(BASH_INPUT_OPENING), // the echo of a `!` command and its output (engine-host/bash-mode.ts)
+  (text) => text.includes(PROMOTION_HEAD), // a side question promoted to a thread, the model's answers in it
+  (text) => text.includes(RELAY_CONTINUE), // a relay to an agent or a peer (renderer tools/agents/model/relay.ts)
+  (text) => text.includes(COMMAND_NAME_OPENING) || TYPED_COMMAND.test(text), // a slash command, recorded or typed (ruling C)
+];
+// The passes over the person's text the meter is charged for: each reader of `CLAIMED`, then the anchored message's read
+// and the paste frames' (Decision Log 24's meter; src/shared/files/named-own.test.ts)
+export const OWN_TEXT_PASSES = CLAIMED.length + 2;
+
+function* ownTexts(content: unknown): Steps<string[]> {
+  const first = yield* firstTextOf(content);
+  if (first === null) return [];
+  const m = meterFor(first);
+  // one pass over the text, charged; a step between passes, the PAUSE the meter calls for
+  const pass = function* (): Steps<void> {
+    charge(m, first.length + 1);
+    yield m.work >= m.pause ? pauseAt(m) : undefined;
+  };
+  try {
+    for (const claims of CLAIMED) {
+      yield* pass();
+      if (claims(first)) return [];
+    }
+    yield* pass();
+    let parts = [first];
+    if (first.includes(ANCHOR_TAG_OPENING)) {
+      const read = readAnchoredMessage(first);
+      if (read === null) return []; // a tag the reader does not take: MAWS's form, not read as the person's
+      parts = read.comments.map((comment) => comment.text);
+    }
+    yield* pass();
+    // a paste's frame out, a blank line in its place so no link spans it; a part still holding a tag that is not the
+    // composer's neutralised form is read only whole
+    return parts.map((part) => part.replace(PASTED_BLOCK, '\n\n')).filter((part) => neutralisePastedTags(part) === part);
+  } catch (error) {
+    if (error instanceof ScanRefused) return [];
+    throw error;
+  }
+}
+
+// The content's string, or its first text block's text; a step per block passed.
+function* firstTextOf(content: unknown): Steps<string | null> {
+  if (typeof content === 'string') return content;
+  for (const value of listOf(content)) {
+    yield;
+    const block = record(value);
+    if (block.type === 'text') return typeof block.text === 'string' ? block.text : null;
+  }
+  return null;
+}
+
+// What a person's message, in a row `personsOwn` may place, answers for the path: null when no text of it names the
+// path; else NAMES when the person's own text links it, and OTHER (a read only) for any other text that names it.
+function* personClaim(row: unknown, content: unknown, path: string): Steps<RowClaim | null> {
+  if (!(yield* personNames(content, path))) return null;
+  if (!personsOwn(row)) return OTHER;
+  return (yield* linksTo(yield* ownTexts(content), path)) ? NAMES : OTHER;
 }
 
 // The anchor form's read of a person's message (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,
@@ -1090,7 +1184,7 @@ function* personNames(content: unknown, path: string): Steps<boolean> {
 // text, as the link pass's loops are, and then a step and the path's compare for each comment read, at most
 // MESSAGE_COMMENTS_MAX, since the reader reads no more.
 function* anchorNames(text: string, path: string): Steps<boolean> {
-  if (!text.includes('<maws_anchor')) return false;
+  if (!text.includes(ANCHOR_TAG_OPENING)) return false;
   const m = meterFor(text);
   try {
     charge(m, text.length + 1);
@@ -1132,9 +1226,10 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8): the person's
-      // own text names the path; someone else's names it for a read only (`personsOwn`)
-      if (yield* personNames(content, path)) return personsOwn(row) ? NAMES : OTHER;
+      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8; ticket 675):
+      // the person's own text names the path; any other text names it for a read only (`personClaim`)
+      const claim = yield* personClaim(row, content, path);
+      if (claim !== null) return claim;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const value of listOf(content)) {
@@ -1151,8 +1246,8 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
       const attachment = record(fields.attachment);
       const human = attachment.type === 'queued_command' && record(attachment.origin).kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
       if (!human || typeof attachment.source_uuid !== 'string' || attachment.source_uuid === '') return NOTHING;
-      // U6e (the panel's finding 2): as the `user` row's text, a queued answer or consent text of MAWS's names it for a read only
-      return (yield* personNames(attachment.prompt, path)) ? (personsOwn(row) ? NAMES : OTHER) : NOTHING;
+      // U6e (the panel's finding 2; ticket 675): as the `user` row's text, the one rule of the person's own text
+      return (yield* personClaim(row, attachment.prompt, path)) ?? NOTHING;
     }
     default:
       return NOTHING;
