@@ -389,13 +389,18 @@ describe('a press from a plugin’s row (UX wave U11h, M2)', () => {
       expect(s.authenticated()).toEqual([]);
     });
 
-    it('a declared address past the endpoints’ bound is refused, a session whose live address is its first 4096 characters included', async () => {
+    // the architect's ruling of 2026-11-15: such a connector is not listed, so a row drawn before its address grew past the
+    // bound presses a revision the host no longer answers (the check's own refusal of a remote entry with no address is
+    // sign-in-entry.test.ts's)
+    it('a declared address past the endpoints’ bound is not listed, so a press is refused as changed, a session whose live address is its first 4096 characters included', async () => {
+      const s = await tidesSession();
       const long = `https://tides.example.com/${'a'.repeat(4100)}`;
-      const s = await tidesSession(long);
+      await tidesPlugin(long);
+      await expect(s.revisionOf(join(root, 'work-a'))).rejects.toThrow('no revision');
       s.session.serve(SESSION, [served(long.slice(0, 4096))]);
       const opId = s.press(s.revision);
       await s.ended(opId);
-      expect(s.last(opId)?.message).toBe(DIFFERENT());
+      expect(s.last(opId)).toEqual(expect.objectContaining({ state: 'failed', reason: 'other_entry', message: CHANGED() }));
       expect(s.authenticated()).toEqual([]);
     });
   });
