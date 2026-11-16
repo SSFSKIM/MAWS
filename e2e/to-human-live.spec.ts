@@ -25,7 +25,7 @@
 //   jump        the must-read's Needs-you row lands on its text, in sight;
 //   links       the path link inside a mod-drawn message, and every link the mod's messages hold: what each opens;
 //   second      a second window on the running session reads the same record lines (MAWS has no gesture that opens a
-//               second window: the trial opens one through Electron with the first window's preload and page);
+//               second window: the trial opens a further app window through main's e2e seam, as e2e/artifacts-store does);
 //   lane off    the session's lane off (its override), resumed with no prompt: no advertisement, drawn by the mod with
 //               no turn fold of MAWS's;
 //   at rest     the app quit and reopened, the session at rest: drawn by the mirror, the same messages and the same
@@ -442,12 +442,7 @@ test('U2b trial: the mod draws the view of a session MAWS runs, nothing twice, a
       const app = maws!.app;
       const [second] = await Promise.all([
         app.waitForEvent('window'),
-        app.evaluate(({ BrowserWindow }) => {
-          const first = BrowserWindow.getAllWindows()[0]!;
-          const preferences = first.webContents.getLastWebPreferences();
-          const window = new BrowserWindow({ width: 1200, height: 900, webPreferences: { preload: preferences?.preload, contextIsolation: preferences?.contextIsolation, sandbox: preferences?.sandbox } });
-          void window.loadURL(first.webContents.getURL());
-        }),
+        app.evaluate(() => (globalThis as unknown as { __maws_documents: { openWindow(): number } }).__maws_documents.openWindow()), // main's e2e seam: a further app window (src/main/artifacts/index.ts)
       ]);
       await expect(second.locator('[data-region="main"]')).toBeVisible({ timeout: 30_000 });
       await (await sidebarRow(second, { appSessionId: id })).click();
