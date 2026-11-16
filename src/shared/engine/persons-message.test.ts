@@ -713,3 +713,64 @@ describe('made by hand: the reader’s bound, with no reading past it', () => {
     for (const text of [pastedWhole, pastedTail]) expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
   });
 });
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The reader's one loop reads at most 16 passes (ticket 704, the architect's ruling 4 of 2026-11-16), pinned by a count
+// of the slicer's calls. Made by hand: no recording nests one envelope inside another.
+
+describe('made by hand: takeEnvelopesOut reads at most 16 passes', () => {
+  const WORDS = 'Keep these notes.';
+  const slicesOf = (text: string) => envelopeSlices(text, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const answerOf = (n: number) => askSteerText(`ask-n${n}`, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  // `depth` envelopes after the person's words, each one's first two lines and its block around the next one, so a pass
+  // takes the innermost whole envelope and leaves the one around it whole for the next pass
+  const nested = (depth: number) => {
+    let inner = answerOf(depth);
+    for (let n = depth - 1; n >= 1; n -= 1) {
+      const lines = answerOf(n).split('\n');
+      inner = [...lines.slice(0, 2), inner, ...lines.slice(2)].join('\n');
+    }
+    return joinedText(WORDS, inner);
+  };
+  const counting = <T>(slice: (text: string) => { members: { text: string; read: T }[]; rest: string }) => {
+    const count = { calls: 0 };
+    return { count, slice: (text: string) => {
+      count.calls += 1;
+      if (count.calls > 64) throw new Error('the loop read past 64 passes'); // a failing case fails in bounded time
+      return slice(text);
+    } };
+  };
+  const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000711' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+
+  it('15 envelopes nested: each taken, the innermost first, in 16 passes, the last of which takes nothing', () => {
+    const { count, slice } = counting(slicesOf);
+    const read = takeEnvelopesOut(nested(15), slice);
+    expect(read.own).toBe(WORDS);
+    expect(read.envelopes.map((envelope) => envelope.text)).toEqual(Array.from({ length: 15 }, (_, i) => answerOf(15 - i)));
+    expect(count.calls).toBe(16);
+  });
+
+  it('16 envelopes nested: the 16th pass still takes one, so the text is over the bound and left whole, no envelope taken; the split hands the message on as it came', () => {
+    const text = nested(16);
+    const { count, slice } = counting(slicesOf);
+    expect(takeEnvelopesOut(text, slice)).toEqual({ own: text, envelopes: [] });
+    expect(count.calls).toBe(16);
+    expect(personsParts(text)).toEqual({ own: text, envelopes: [] });
+    const lone = message(text);
+    expect(splitPersonsMessage(lone)).toEqual([lone]);
+    expect(splitPersonsMessage(lone)[0]).toBe(lone);
+  });
+
+  it('a slicer that takes a member on every pass and never shortens the text: called 16 times, the text left whole', () => {
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text }));
+    expect(takeEnvelopesOut('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
+    expect(count.calls).toBe(16);
+  });
+
+  it('the bound holds from the loop’s own source too, as the search text’s worker runs it', () => {
+    const again = isolated(takeEnvelopesOut);
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text }));
+    expect(again('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
+    expect(count.calls).toBe(16);
+  });
+});
