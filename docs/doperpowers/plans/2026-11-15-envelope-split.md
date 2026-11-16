@@ -23,6 +23,7 @@ How to see it working: the unit tests named under each milestone, which run the 
 - [x] (2026-11-15) The architect's rulings on the probes' findings recorded in place ("Engine facts", "Probes", decisions 6 and 7, M1's and M3's tests; Decision Log).
 - [x] (2026-11-15 UTC) M1 — One reading of a person's message, and the window that reads it once. Commits `6ad59e796`..`a29982f21`, fix `60af4bc4f`; task review clean.
 - [x] (2026-11-15 UTC) M2 — The producers: the live wire, the file, another machine's rows, a rewind's text. Commits `5cc75f108`..`215b7d2c4`; task review clean.
+- [x] (2026-11-16 UTC) The branch panel's fix wave (three findings, one fault): `d6ded5e4e`..`5d05eefd9`; task review clean.
 - [x] (2026-11-16 UTC) M3 — Outside the transcript: the search text, the resume preview, the title; the scene, the record, the last run. Commits `a0962e67a`..`0a4426537`, fix `1d26b91a7` (the scene asserts the bubble's text exactly); task review clean. The scene is written and typechecked, not run; the charter's line at X1 is the architect's.
 
 ## What this landing is built on
@@ -466,7 +467,7 @@ What must exist at the end, by name. An executor who needs to change a name or a
     /** The one reading of "this content is an answer envelope" (added 2026-11-16, the panel's ruling): a string, or a single
      *  text block, that is one whole envelope by the writer's exact opening line, as the split reads it; never a content
      *  with any other block. Every reader that records an answer or hides an event takes it. */
-    export function answerEnvelopeOf(content: string | ContentBlock[]): AskSteer | null;
+    export function answerEnvelopeOf(content: string | ContentBlock[]): Extract<Arrival, { class: 'answer' }> | null;   // the reader's `answer` (`call` the ask's id, `answers`)
 
 `personsParts`: a string is read by `envelopeSlices` (with `askSteerOpening`, `PASTED_BLOCK` and `parseAskSteer`); `own` is its `rest`, null when empty, and `envelopes` its members' texts. The part is read again until a reading takes nothing out (decision 17), the envelopes in the order they were taken, reading by reading. Blocks: each text block is read so, a block left empty goes, every other block stays in place; `own` is null when no block is left (decision 7).
 
