@@ -16,7 +16,7 @@ import { answerText } from '@shared/owner/answer';
 import { withLinkedReads } from '../../engine-host/linked-reads';
 import { relayText } from '../../renderer/src/tools/agents/model/relay';
 import type { AgentId } from '@shared/graph/ids';
-import { OWN_TEXT_PASSES, PAUSE, rowClaim, rowClaimSteps } from './named';
+import { OWN_TEXT_MAX_CHARS, OWN_WORK_PER_CHAR, ownTextWork, rowClaim, STRETCH_MAX } from './named';
 
 const P = '/work/out/notes.md';
 const LINK = `[the notes](${P})`;
@@ -154,15 +154,66 @@ describe('the person’s own text: pastes, comments, commands (the architect’s
   });
 });
 
-// Decision Log 24's meter: the readers of the person's own text are charged against it, one pass each, with a step
-// between passes at which the daemon's search can give the event loop back
-describe('the person’s own text: the readers’ cost is metered', () => {
-  it('a long own text pauses once more for each reader pass than the link scan alone', () => {
-    const long = `${'word '.repeat(200_000)}${LINK}`;
-    const pauses = (row: unknown) => [...rowClaimSteps(row, P)].filter((step) => step === PAUSE).length;
-    const scanOnly = pauses({ type: 'assistant', uuid: 'a1', message: { role: 'assistant', content: [text(long)] } });
-    expect(rowClaim(user(long), P)).toEqual(NAMES);
-    expect(OWN_TEXT_PASSES).toBeGreaterThan(0);
-    expect(pauses(user(long)) - 2 * scanOnly).toBeGreaterThanOrEqual(OWN_TEXT_PASSES);
+// The closing wave's item 2: an anchored message counts only as a whole reading, one the writer gives back byte for
+// byte; text before it, or a second message joined to it, leaves the lead (the label, the locator, the passage, which
+// a page or an artifact controls) inside what a partial reading would take for the comment's words
+describe('the person’s own text: an anchored message counts only when read whole', () => {
+  const linkedLabel = { kind: 'file-line' as const, label: LINK, locator: '/work/out/plan.md:1', path: '/work/out/plan.md', line: 1 };
+  const plain = { kind: 'file-line' as const, label: 'plan.md', locator: '/work/out/plan.md:2', path: '/work/out/plan.md', line: 2 };
+  const one = (anchor: typeof plain) => anchoredMessage({ anchor, text: 'Wrong date here', destination: 'main', screenshot: false });
+  it.each([
+    ['other words, then an anchored message', () => `Look at this.\n${one(linkedLabel)}`],
+    ['two anchored messages joined by a newline', () => `${one(linkedLabel)}\n${one(plain)}`],
+    ['other words, then a framed message of several comments', () => `Look.\n${commentsMessage([{ anchor: linkedLabel, text: 'This', screenshot: false }, { anchor: plain, text: 'That', screenshot: false }], 'main')}`],
+    ['a newline before an anchored message', () => `\n${one(linkedLabel)}`],
+    ['a space before an anchored message', () => ` ${one(linkedLabel)}`],
+  ])('a link only in the lead names it for a read only: %s', (_, text) => {
+    expect(both(text())).toEqual([OTHER, OTHER]);
+  });
+
+  it('the same messages whole still count the comments’ own words', () => {
+    expect(both(anchoredMessage({ anchor: plain, text: `Compare ${LINK}`, destination: 'main', screenshot: false }))).toEqual([NAMES, NAMES]);
+    expect(both(commentsMessage([{ anchor: plain, text: `Compare ${LINK}`, screenshot: true }, { anchor: linkedLabel, text: 'That', screenshot: false }], 'thread'))).toEqual([NAMES, NAMES]);
+  });
+});
+
+// Decision Log 24's meter, the closing wave's item 3: every reader of the person's own text is linear by construction and
+// charged for the work it does; a pause can fall inside a long text; a text over OWN_TEXT_MAX_CHARS does not count for
+// a save at all; and the work past the own pass's budget fails closed
+describe('the person’s own text: the readers’ work is metered and bounded', () => {
+  const near = (filler: string, head = `Fix ${LINK} `) => head + filler.repeat(Math.floor((OWN_TEXT_MAX_CHARS - head.length) / filler.length));
+
+  it('a text at the length bound counts; one character past it names the path for a read only', () => {
+    const at = `${LINK} ${'a'.repeat(OWN_TEXT_MAX_CHARS - LINK.length - 1)}`;
+    expect(at.length).toBe(OWN_TEXT_MAX_CHARS);
+    expect(both(at)).toEqual([NAMES, NAMES]);
+    expect(both(`${at}a`)).toEqual([OTHER, OTHER]);
+    expect(ownTextWork(`${at}a`).refused).toBe('length');
+  });
+
+  it('the over-budget branch runs and fails closed', () => {
+    expect(ownTextWork(`Fix ${LINK}`)).toMatchObject({ texts: [`Fix ${LINK}`], refused: null });
+    expect(ownTextWork(`Fix ${LINK}`, 1)).toMatchObject({ texts: [], refused: 'budget' });
+  });
+
+  it.each([
+    ['unclosed paste openers', () => near('<pasted_content id="ab12">\n')],
+    ['many < with no >', () => near('<')],
+    ['alternating < and >', () => near('<>')],
+    ['plain words', () => near('word ')],
+    ['many answer-shaped lines', () => near('Answering "x\n')],
+    ['many anchor-tag openings', () => near('\n<maws_anchor kind="x"')],
+  ])('linear work, bounded between pauses, with a pause inside the text: %s', (_, shape) => {
+    const textOf = shape();
+    expect(textOf.length).toBeLessThanOrEqual(OWN_TEXT_MAX_CHARS);
+    const read = ownTextWork(textOf);
+    expect(read.refused).not.toBe('budget');
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX / 2);
+    expect(read.pauses).toBeGreaterThanOrEqual(2);
+  });
+
+  it('a paste opener with no closer makes the text not count', () => {
+    expect(both(`Fix ${LINK}\n\n<pasted_content id="ab12">\nnever closed`)).toEqual([OTHER, OTHER]);
   });
 });
