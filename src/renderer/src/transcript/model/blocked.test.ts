@@ -542,14 +542,13 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const state = stateOf(events);
     const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
-    // An answer as its tool, its call and how many answers it holds. `answers`: what the arrival reader reads each of the
-    // person's messages that holds an envelope as, whole (`readAnswerEnvelope`, the reading the file reader carries and
-    // the transcript's derivation applies on every route); `carried`: the answer arrivals the events carry, which only
-    // the file route records (the live host carries its consent marks alone)
+    // What the arrival reader reads each of the person's messages that holds an envelope as, whole (`readAnswerEnvelope`,
+    // which `personsText` applies before any grant is looked for), as its tool, its call and how many answers it holds;
+    // null where it is no answer. The events carry no answer arrival on either route here (the live host carries its
+    // consent marks alone), so the reading is taken from each message as the route delivered it
     const said = (answer: { tool: string; call: string; answers: unknown[] | null } | null) => JSON.stringify(answer === null ? null : [answer.tool, answer.call, answer.answers?.length ?? null]);
     const answers = [...new Set(events.flatMap((event) => (event.kind === 'user.message' && messageText(event.content).includes('[MAWS ask ') ? [said(readAnswerEnvelope(messageText(event.content)))] : [])))];
-    const carried = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'answer' ? [said(entry)] : [])) : [])))];
-    return { consents, approvals, answers, carried, readings: readings(state) };
+    return { consents, approvals, answers, readings: readings(state) };
   };
   const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
@@ -603,10 +602,8 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   it('(c3) one message of an answer, a grant and an answer again: one answer, no consent, no approval row, the blocked row not approved, in either form', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
-      for (const [route, { consents, approvals, answers, carried, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
-        const one = JSON.stringify(['maws', 'toolu_a', 1]);
-        expect(answers, `${form}, ${route}: the reader takes the message whole for one answer to the ask`).toEqual([one]);
-        expect(carried, `${form}, ${route}: the file reader carries that answer`).toEqual(route === 'from the file' ? [one] : []);
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        expect(answers, `${form}, ${route}: the reader takes the message whole for one answer to the ask`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
         expect(consents, `${form}, ${route}`).toEqual([]);
         expect(approvals, `${form}, ${route}`).toEqual([]);
         expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
