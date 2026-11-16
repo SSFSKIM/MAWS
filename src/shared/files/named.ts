@@ -1150,7 +1150,10 @@ const CLAIMED: readonly ((text: string, work: Work) => boolean)[] = [
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
 // person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
-// units a character in all (the readers' bounds sum to 41 on a text that folds to itself), the text does not count: it fails closed.
+// units a character in all (the readers' bounds sum to 41), the text does not count: it fails closed. The one call
+// whose work the length does not bound is the grant's test, which reads the text after compatibility folding (NFKC
+// can make one character up to 18): it is charged what it counted, against the same budget, and on a text of such
+// characters its one stretch can pass STRETCH_MAX (at most about 37 units a character: the text, then twice its fold).
 const ANCHOR_READ_WORK_PER_CHAR = 16;
 const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;

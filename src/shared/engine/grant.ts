@@ -25,7 +25,7 @@ for (let k = 0; k < FOLDED_GRANT.length; k += 1) {
   AT[code] = AT[code]! | (1 << k);
 }
 const LETTER = /[\p{L}\p{N}]/uy; // a letter or digit beyond ASCII: it moves no beginning, and ends every one but 0
-const isAsciiLetter = (c: number): boolean => (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7a) || (c >= 0x41 && c <= 0x5a); // A to Z only before the case folding
+const isAsciiLetter = (c: number): boolean => (c >= 0x30 && c <= 0x39) || (c >= 0x61 && c <= 0x7a); // a digit or a letter, after the case folding
 
 /**
  * Whether a string quotes the grant's opening, in any reading of it: the one test the ask tool's guard
