@@ -321,3 +321,45 @@ describe('one scroll of the person’s on the stack', () => {
     expect(counted.searches).toBe(0);
   });
 });
+
+// The gate's Mac run (the diff tab opened at a ref's file): a stack mounts with its data already read, and brings the
+// first file into view before the library has drawn that file's rows (it builds them after its first paint, so the body
+// weighs next to nothing until then). Read there, the edge under the header falls in the next file: the counter would
+// name the first file's last hunk, and the place the second file's top. The request is reached once the body settles:
+// the counter names the first hunk, and the first file stays at the top.
+describe('the counter where a file is brought into view before its rows draw', () => {
+  afterEach(() => {
+    document.body.replaceChildren();
+    vi.restoreAllMocks();
+  });
+
+  it('counts the first hunk at the first file’s top while its body has no rows yet, and again once they draw', () => {
+    const page = pageOf(3, 0);
+    const body = page.el.querySelector<HTMLElement>('[data-review-file="src/part-000.ts"] [data-review-body]')!;
+    const table = body.querySelector('table')!;
+    const rows = table.querySelector('tbody')!;
+    rows.remove(); // the block drawn, its line rows not yet
+    const full = page.heights.get(body)!;
+    page.heights.set(body, 0);
+    const counted: number[] = [];
+    const saved: StackPlace[] = [];
+    const placer: StackPlacer = new StackPlacer({ band: (band) => placer.drawn(band), saved: (place) => saved.push(place), counted: (index) => counted.push(index) });
+    page.el.addEventListener('scroll', () => placer.scrolled());
+    placer.update({ sections: page.sections, order: page.order, current: 0 });
+    placer.attach(page.el, null);
+    placer.revealSection('src/part-000.ts');
+    placer.relayout();
+    placer.relayout(); // the band drawn: the first file's section at the scroller's top, its body still settling
+    expect.soft(page.el.scrollTop).toBe(0);
+    expect.soft(counted, 'no hunk passed before the file’s rows draw').toEqual([]);
+    expect.soft(saved.map((place) => place.path), 'no place read in the next file').not.toContain('src/part-001.ts');
+    table.append(rows); // the library draws the rows: a layout change
+    page.heights.set(body, full);
+    placer.relayout();
+    placer.relayout(); // the band it moved drawn
+    // Once the rows draw: the live place the first file's top, the scroller there, the counter on the first hunk.
+    expect(saved.at(-1), 'the place saved: the first file, its first row at the edge').toEqual({ path: 'src/part-000.ts', row: { block: 0, side: 'new', line: 1 }, offset: 0 });
+    expect(page.el.scrollTop, 'the first file still at the top').toBe(0);
+    expect(counted, 'the first hunk, read on the drawn rows').toEqual([]);
+  });
+});
