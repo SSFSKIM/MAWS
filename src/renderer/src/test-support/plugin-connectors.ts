@@ -3,8 +3,9 @@
 // session's status entry to a plugin's row by the engine name, a retained record to a row's revision, the collision's
 // prefix test over the inventory's plugins) runs over the names those derivations build.
 // - The inventory and the endpoints are the engine host's own readers over a scratch config home holding invented
-//   plugins; `catalog.postures` is main's own derivation over those endpoints (no directory record matches, so a posture
-//   is the test's to state).
+//   plugins; `catalog.postures` is answered row for row with those endpoints, carrying each one's revision, as main's
+//   `posturesOf` and `pluginPosturesOf` answer them (src/main/catalog/postures.ts, outside the window's project; no
+//   directory record matches here, so a posture is the test's to state, and no fingerprint is needed by a plugin's row).
 // - A session's status is what the engine host's status tracker derives from a `system/init` shaped as 2.1.322 sends it
 //   (spikes/protocol-probe/fixtures/uxwave/u11-plugin-conn-names.jsonl seq 30: `plugins` with the manifest name, the
 //   plugin's folder in its marketplace, the key as `source`, the version; `mcp_servers` with name, status and source),
@@ -22,7 +23,6 @@ import { validateEventPayload } from '@shared/ipc/validate';
 import { addressingOf } from '@shared/machine/address';
 import { readCustomizationInventory, readServerEndpoints } from '../../../engine-host/customization/inventory';
 import { SessionStatusTracker } from '../../../engine-host/session-status';
-import { configurationFingerprint, pluginPosturesOf, posturesOf } from '../../../main/catalog/postures';
 import { status as fullStatus } from '../../../../test/support/builders';
 import { TEST_MACHINE } from '../../../../test/support/machine';
 
@@ -60,7 +60,6 @@ export async function pluginScene(plugins: ScenePlugin[], opts: { configured?: R
   await Promise.all([mkdir(home), mkdir(userData), mkdir(cwd)]);
   if (opts.configured) await json(join(configHome, '.claude.json'), { mcpServers: opts.configured });
   const deps = { userData, captureEnv: () => Promise.resolve({ HOME: home, CLAUDE_CONFIG_DIR: configHome }) };
-  const fingerprint = configurationFingerprint();
   const install = async (list: ScenePlugin[]) => {
     const installed: Record<string, unknown[]> = {};
     for (const plugin of list) {
@@ -73,10 +72,10 @@ export async function pluginScene(plugins: ScenePlugin[], opts: { configured?: R
   };
   const read = async () => {
     const [inventory, endpoints] = await Promise.all([readCustomizationInventory(cwd, deps), readServerEndpoints(cwd, deps)]);
-    const stated = (server: string, found: 'auth_required' | 'no_auth' | null) => opts.posture?.[server] ?? found;
+    const stated = (name: string) => opts.posture?.[name] ?? null;
     const postures = {
-      servers: posturesOf(endpoints.servers, [], fingerprint).map((row) => ({ ...row, authPosture: stated(row.name, row.authPosture) })),
-      plugins: pluginPosturesOf(endpoints.pluginServers, [], fingerprint).map((row) => ({ ...row, authPosture: stated(row.server, row.authPosture) })),
+      servers: endpoints.servers.map(({ name, scope, path, url, revision }) => ({ name, scope, path, authPosture: stated(name), fingerprint: url === null ? null : `print:${name}`, revision: revision ?? null, iconUrl: null })),
+      plugins: endpoints.pluginServers.map(({ plugin, server, path, url, revision }) => ({ plugin, server, path, authPosture: stated(server), fingerprint: url === null ? null : `print:${plugin}:${server}`, revision, iconUrl: null })),
     };
     return { inventory, postures };
   };
