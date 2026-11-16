@@ -724,6 +724,166 @@ describe('review store', () => {
     }
   });
 
+  // ---- who a read names (the fix wave's review, Decision Log 54) ------------------------------------------------------------
+  // Every read the store asks, now, later or again, is addressed by a holder that is there when it is asked; what a tab
+  // keeps goes when the tab closes, its selection changes or its session is gone; a session changed with the commit kept
+  // rebinds the hold. Two sessions of another machine share one checkout here, so the session each read names is seen.
+  describe('who a read names (Decision Log 54)', () => {
+    const ONE = addressOf(OTHER_MACHINE, 'app-one' as AppSessionId);
+    const TWO = addressOf(OTHER_MACHINE, 'app-two' as AppSessionId);
+    const named = { [ONE]: { machine: OTHER_MACHINE, session: 'app-one' }, [TWO]: { machine: OTHER_MACHINE, session: 'app-two' } };
+    const on = (session: AppSessionId, over: Partial<DiffTarget> = {}): DiffTarget => ({ machine: OTHER_MACHINE, directory: '/work', scope: 'uncommitted', read: 'git.changesSince', against: 'HEAD', session, ...over });
+    const commitOn = (session: AppSessionId) => on(session, { scope: 'commit', read: 'git.commitDiff', against: SHA });
+    const roster = (capabilities?: string[]) =>
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'berth-mini', local: false, state: 'up', since: '2026-11-16T10:00:00.000Z', generation: 0, ...(capabilities ? { capabilities } : {}) }]);
+    let fileFails = false;
+    const setup = () => {
+      const main = installFakeMain((name, input) => {
+        if (typeof input.path === 'string' && fileFails) return fail('the disk is busy');
+        if (name === 'git.changesSince') return ok({ patch: typeof input.path === 'string' ? APP_PATCH : 'x'.repeat(REVIEW_SCOPE_BYTES_CAP + 1), files: APP_FILES, untracked: [] });
+        if (name === 'git.commitDiff') return ok({ commit: COMMIT, onHead: input.patch !== false, patch: input.patch === false ? '' : APP_PATCH, files: input.patch === false ? [] : APP_FILES });
+        return ok();
+      });
+      const store = createReviewStore(createClient(() => main.bridge), { machines: useMachines, sessions: useSessions });
+      return { main, store };
+    };
+    beforeEach(() => {
+      fileFails = false;
+      roster(['rl2.git-reads']);
+      useSessions.setState((s) => ({ records: new Map(s.records).set(ONE, record(ONE, { directory: '/work' })).set(TWO, record(TWO, { directory: '/work' })) }));
+    });
+    afterEach(() => {
+      useMachines.setState({ roster: 'unread', machines: new Map(), loaded: new Set() });
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(ONE);
+        records.delete(TWO);
+        return { records };
+      });
+    });
+    const drop = (session: AppSessionId) =>
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(session);
+        return { records };
+      });
+
+    it('a held scope’s read, a file’s read and their retries name the earliest holder still holding it once another lets go', async () => {
+      const { main, store } = setup();
+      const first = store.getState().hold(on(ONE));
+      const second = store.getState().hold(on(TWO));
+      await tick();
+      first();
+      store.getState().refresh(on(ONE)); // asked by a surface that left: addressed by the one still there
+      await tick();
+      fileFails = true;
+      store.getState().loadFile(on(ONE), 'src/app.ts');
+      await tick();
+      fileFails = false;
+      store.getState().retryFile(on(TWO), 'src/app.ts');
+      await tick();
+      expect(main.targetsOf('git.changesSince')).toEqual([named[ONE], named[TWO], named[TWO], named[TWO]]);
+      expect(fileDiffOf(store.getState(), on(TWO), 'src/app.ts')?.status).toBe('ok');
+      second();
+    });
+
+    it('a read owed while the reads were lost, the scope’s or a file’s, is asked through the holder there when they return', async () => {
+      vi.useFakeTimers();
+      const { main, store } = setup();
+      const first = store.getState().hold(on(ONE));
+      const second = store.getState().hold(on(TWO));
+      await vi.advanceTimersByTimeAsync(0);
+      roster();
+      store.getState().statusChanged(checkoutKey(OTHER_MACHINE, '/work'));
+      store.getState().loadFile(on(ONE), 'src/app.ts');
+      await vi.advanceTimersByTimeAsync(REVIEW_REFRESH_MS * 2);
+      expect(main.targetsOf('git.changesSince')).toHaveLength(1);
+      first();
+      roster(['rl2.git-reads']);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(main.targetsOf('git.changesSince')).toEqual([named[ONE], named[TWO], named[TWO]]);
+      second();
+    });
+
+    it('an owed membership check is asked through a holder still there when the reads return, and not at all once none is (finding c)', async () => {
+      const { main, store } = setup();
+      const first = store.getState().hold(commitOn(ONE));
+      const second = store.getState().hold(commitOn(TWO));
+      await tick();
+      roster();
+      store.getState().checkMembership(commitOn(ONE));
+      first();
+      roster(['rl2.git-reads']);
+      await tick();
+      expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toHaveLength(1);
+      expect(main.targetsOf('git.commitDiff').at(-1)).toEqual(named[TWO]);
+      roster();
+      store.getState().checkMembership(commitOn(TWO));
+      second();
+      roster(['rl2.git-reads']);
+      await tick();
+      expect(main.callsOf('git.commitDiff').filter((input) => input.patch === false)).toHaveLength(1); // none holds it: nothing asked
+    });
+
+    it('a tab retargeted to another session on the same commit keeps its answer and names the new session from then on (finding b)', async () => {
+      const { main, store } = setup();
+      const tab = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      store.getState().keepCommit(tab, commitOn(TWO), true);
+      await tick();
+      expect(main.callsOf('git.commitDiff')).toHaveLength(1); // the loaded answer kept
+      expect(diffOf(store.getState(), commitOn(TWO))?.status).toBe('ok');
+      fileFails = true;
+      store.getState().loadFile(commitOn(TWO), 'src/app.ts');
+      await tick();
+      fileFails = false;
+      store.getState().retryFailed(commitOn(TWO));
+      store.getState().checkMembership(commitOn(TWO));
+      await tick();
+      expect(main.targetsOf('git.commitDiff')).toEqual([named[ONE], named[TWO], named[TWO], named[TWO]]);
+      act(() => drop(ONE)); // the first session gone: the tab holds the commit for the second
+      expect(diffOf(store.getState(), commitOn(TWO))?.status).toBe('ok');
+      store.getState().releaseTab(tab);
+      expect(diffOf(store.getState(), commitOn(TWO))).toBeUndefined();
+    });
+
+    it('a tab whose session is gone lets go of its commit, and nothing is asked for it after (finding a)', async () => {
+      const { main, store } = setup();
+      const tab = {};
+      const other = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      roster();
+      store.getState().checkMembership(commitOn(ONE)); // owed
+      act(() => drop(ONE));
+      expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
+      roster(['rl2.git-reads']);
+      store.getState().checkMembership(commitOn(ONE));
+      store.getState().keepCommit(other, commitOn(ONE), true); // a tab for a session that is gone keeps nothing
+      await tick();
+      expect(main.callsOf('git.commitDiff')).toHaveLength(1);
+      expect(diffOf(store.getState(), commitOn(ONE))).toBeUndefined();
+    });
+
+    it('a release that arrives after a reset deletes no newer hold, a tab’s included', async () => {
+      const { store } = setup();
+      const late = store.getState().hold(on(ONE));
+      const tab = {};
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      store.getState().reset();
+      const newer = store.getState().hold(on(ONE));
+      store.getState().keepCommit(tab, commitOn(ONE), true);
+      await tick();
+      late();
+      expect(diffOf(store.getState(), on(ONE))?.status).toBe('ok');
+      expect(diffOf(store.getState(), commitOn(ONE))?.status).toBe('ok');
+      newer();
+      store.getState().releaseTab(tab);
+    });
+  });
+
   it('checks a commit’s membership with patch: false, one more when HEAD moves twice during a check (async 3)', async () => {
     const answers: ((onHead: boolean) => void)[] = [];
     const main = installFakeMain(async (name, input) => {
@@ -2272,6 +2432,64 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
     expect(chipOf('branch')?.disabled).toBe(false);
     expect(footer()).toBe('feature/x · Since origin/main');
     expect(asked()).toEqual(before);
+  });
+
+  // ---- who a read names, through the mounted surfaces (the fix wave's review, Decision Log 54) ---------------------------
+  const dropRecord = (session: AppSessionId) =>
+    act(() =>
+      useSessions.setState((s) => {
+        const records = new Map(s.records);
+        records.delete(session);
+        return { records };
+      }),
+    );
+
+  it('lets go of a commit’s read once its session is gone, and asks nothing for it or for the branch after (finding a)', async () => {
+    serveReads();
+    main().state.commits = notOnHead;
+    openCommitted(SHA);
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    const asked = () => [main().callsOf('git.commitDiff').length, main().callsOf('git.branchCommits').length];
+    const before = asked();
+    dropRecord(A);
+    await waitFor(() => expect(keptDiff(SHA)).toBeUndefined());
+    moveHead();
+    act(() => main().emit('git.changed', { repoRoot: '/repo', status: FEATURE, reason: 'refs' }));
+    await act(tick);
+    expect(asked()).toEqual(before);
+  });
+
+  it('a diff tab whose session is gone lets go of its commit (finding a)', async () => {
+    serveReads();
+    main().state.commits = () => commitAnswer(SHA);
+    act(() => useLayout.getState().openTab({ kind: 'diff', appSessionId: A, ref: `commit:${SHA}` }));
+    const tab = currentSet(useLayout.getState().main).panes[0].tabs.find((t) => t.kind === 'diff') as Parameters<typeof DiffTab>[0]['tab'];
+    render(<DiffTab tab={tab} />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    dropRecord(A);
+    await waitFor(() => expect(keptDiff(SHA)).toBeUndefined());
+    expect(document.querySelector('[data-review]')).toBeNull();
+  });
+
+  it('a pinned Review retargeted to another session on the same commit keeps its diff and names that session from then on (finding b)', async () => {
+    serveReads();
+    useSessions.setState((s) => ({ records: new Map(s.records).set(B, record(B, { directory: '/repo' })) }));
+    main().state.commits = notOnHead;
+    act(() => void panelHost.addTool('review', { appSessionId: A, pin: true, params: { scope: 'commit', commit: SHA } }));
+    render(<TestHost />);
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    act(() => void panelHost.addTool('review', { appSessionId: B, params: { scope: 'commit', commit: SHA } })); // the pin, retargeted
+    await waitFor(() => expect(main().callsOf('git.watch').length).toBeGreaterThanOrEqual(2)); // B's own watch of the same folder
+    await waitFor(() => expect(paths()).toEqual(COMMIT_PATHS));
+    expect(fullReads()).toBe(1); // the loaded answer kept
+    dropRecord(A); // the first session gone: the tab holds the commit for B
+    expect(keptDiff(SHA)?.status).toBe('ok');
+    moveHead();
+    await waitFor(() => expect(checks()).toBe(1));
+    expect(main().targetsOf('git.commitDiff').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' }));
+    await waitFor(() => expect(footer()).toBe('Commit 3f9a1c2 · Quote the berth names · not on feature/x now'));
+    expect(main().targetsOf('git.branchCommits').at(-1)).toEqual(expect.objectContaining({ session: 'app-b' })); // HEAD's move asked the branch read too
   });
 });
 

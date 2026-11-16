@@ -13,11 +13,13 @@ export const fail = (message: string): Answer => ({ ok: false, error: { code: 'i
 
 export function installFakeMain(handler: Handler) {
   const calls: { name: CommandName; input: Record<string, unknown> }[] = [];
+  const targets: { name: CommandName; target: unknown }[] = []; // the machine (and session) each call names, beside `calls`
   const listeners = new Map<string, Set<(payload: unknown, machine?: MachineRef) => void>>();
   const bridge = {
     localMachine: TEST_MACHINE,
     async invoke(name: CommandName, input: Record<string, unknown>, machine?: MachineRef) {
       calls.push({ name, input });
+      targets.push({ name, target: machine });
       return handler(name, input, machine); // P5 O6 M4: the handler hears the machine a call names
     },
     on(name: string, listener: (payload: unknown, machine?: MachineRef) => void) {
@@ -32,6 +34,7 @@ export function installFakeMain(handler: Handler) {
     bridge,
     calls,
     callsOf: (name: CommandName) => calls.filter((c) => c.name === name).map((c) => c.input),
+    targetsOf: (name: CommandName) => targets.filter((c) => c.name === name).map((c) => c.target), // what each call of `name` was addressed to
     // P5 O17 M10: from `machine` when it names one (main's bare ids lifted with it), else from this Mac
     emit<N extends EventName>(name: N, payload: EventPayload<N>, machine?: MachineRef) {
       listeners.get(name)?.forEach((listener) => listener(payload, machine));
