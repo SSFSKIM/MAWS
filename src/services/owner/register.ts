@@ -8,7 +8,7 @@
 // The UX wave, U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A and §M; M4): who draws
 // each session's to-human view, published as the lane's `drawnBy`, follows the engine host's statuses (./drawn-by.ts):
 // the subscription beside the event batches', and a read of every live status at the start and at each reconnect, which
-// also binds a reservation the host accepted and the daemon never bound (it stopped between the two). `ownerChannel.folds`
+// binds nothing (§A, A4). `ownerChannel.folds`
 // answers the runs of the to-human mod's file for a session (./folds.ts); `mods.setFoldSummaries` writes the switch.
 import { homedir } from 'node:os';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -21,7 +21,7 @@ import type { Index } from '../index/index';
 import type { HostDispatch } from '@shared/host/host-supervisor';
 import type { ServicesBus } from '@shared/spine/bus';
 import { hostCall, transcriptPathOf, type HostEvents } from '../sessions/context';
-import { readDeclaration } from './declaration';
+import { declarationOf } from './declaration';
 import { WhoDraws } from './drawn-by';
 import { storedFolds } from './folds';
 import { OwnerChannelLaunches } from './launch';
@@ -67,7 +67,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
         return null;
       }
     },
-    declares: readDeclaration,
+    declares: declarationOf,
     changed: (appSessionId) => service.drawnByChanged(appSessionId),
   });
   const launches = new OwnerChannelLaunches({
@@ -114,18 +114,11 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     log,
     drawnBy: (appSessionId) => whoDraws.drawnBy(appSessionId), // U2b
   });
-  // U2b: every live status read once, at the start and at each reconnect. A reservation not yet bound that §A reads as
-  // the running launch's (the host accepted it, the daemon stopped before the bind) is bound then.
-  const reconcile = (status: EngineSessionStatus) => {
-    const appSessionId = status.appSessionId as AppSessionId;
-    try {
-      const row = deps.index.ownerChannel.session(appSessionId);
-      if (row?.advertised && row.advertised.launchId === null && status.launchId !== row.launchId) deps.index.ownerChannel.bindReservation(appSessionId, status.launchId);
-    } catch (error) {
-      log(`the owner channel could not bind ${appSessionId}'s reservation to its running launch: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  };
+  // U2b: every live status read once, at the start and at each reconnect, and applied where no newer event came since
+  // the read was sent (§A, C4). It binds nothing: an unbound reservation is no evidence of what an unrecorded launch
+  // carried (A4).
   const readLive = async () => {
+    const since = whoDraws.mark();
     let statuses: EngineSessionStatus[];
     try {
       statuses = await hostCall(deps.dispatch, 'engine.sessions', undefined);
@@ -133,11 +126,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
       log(`the owner channel could not read the live sessions: ${error instanceof Error ? error.message : String(error)}`); // read again at the next reconnect
       return;
     }
-    for (const status of statuses) {
-      reconcile(status);
-      whoDraws.status(status);
-    }
-    whoDraws.primed();
+    whoDraws.listed(statuses, since);
   };
   const reads = new Set<Promise<void>>();
   const track = (read: Promise<void>) => {

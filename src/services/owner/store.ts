@@ -31,7 +31,7 @@ export interface OwnerSessionRow {
   style: string | null; // the resolver's style name for it (read from the settings, whatever a mismatch decided by)
   observedStyle: string | null; // the engine's, at its first session.init
   styleMismatch: boolean;
-  advertised: Reservation | null; // U2b: the last reserved launch's advertisement, bound to its id once the host answered
+  advertised: Reservation | null; // U2b: the reservation's two slots: the last bound, or the one not yet bound with the bound one as its `prior`
 }
 
 // What a decided launch writes when the host answers `launching`.
@@ -135,8 +135,12 @@ const toSession = (row: SessionRow): OwnerSessionRow => ({
   advertised: reservationOf(row.advertised),
 });
 
-// The stored reservation; a value that does not parse is no reservation.
-const ReservationSchema = z.strictObject({ launchId: z.string().min(1).nullable(), number: z.union([z.literal(9), z.literal(8), z.null()]), plugin: z.boolean(), at: z.string() });
+// The stored reservation; a value that does not parse is no reservation. A prior is a bound slot, kept only beside an
+// unbound reservation (§A, "Two slots").
+const NumberSchema = z.union([z.literal(9), z.literal(8), z.null()]);
+const ReservationSchema = z
+  .strictObject({ launchId: z.string().min(1).nullable(), number: NumberSchema, plugin: z.boolean(), at: z.string(), prior: z.strictObject({ launchId: z.string().min(1), number: NumberSchema, plugin: z.boolean() }).optional() })
+  .refine((reservation) => reservation.launchId === null || reservation.prior === undefined);
 function reservationOf(stored: string | null): Reservation | null {
   if (stored === null) return null;
   try {
@@ -209,8 +213,9 @@ export class OwnerChannelStore {
 
   // A decided launch the host answered `launching` for. The watermark is set at a lane-on launch when it is unset, and
   // cleared at a lane-off one (Design §5); the override and the observed style are kept. U2b: a launch whose reservation
-  // was written binds it to its id (a resume's second attempt binds it again); one whose reservation could not be written
-  // binds nothing, so what is stored stays another launch's and the advertisement is read from `desired` (§A).
+  // was written binds it to its id, moving it into the bound slot (a resume's second attempt binds it again); one whose
+  // reservation could not be written binds nothing, so both slots stay as they were and the advertisement is read from
+  // `desired` (§A, A3).
   recordLaunch(appSessionId: AppSessionId, launch: LaunchRecord): void {
     this.db.transaction(() => {
       this.known(appSessionId);
@@ -222,25 +227,26 @@ export class OwnerChannelStore {
       };
       if (!launch.laneOn) values.enabled_at = null;
       else if ((row?.enabledAt ?? null) === null) values.enabled_at = launch.at;
-      if (launch.reserved === true && row?.advertised) values.advertised = JSON.stringify({ ...row.advertised, launchId: launch.launchId });
+      if (launch.reserved === true && row?.advertised) {
+        const { prior: _bound, ...reservation } = row.advertised;
+        values.advertised = JSON.stringify({ ...reservation, launchId: launch.launchId });
+      }
       this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, values);
     });
   }
 
-  // U2b: a launch's advertisement, written before the launch is sent, unbound; it replaces any earlier reservation (one
-  // that never ran included). Throws when it cannot be written, which the launch reads as "advertise 8".
+  // U2b: a launch's advertisement, written before the launch is sent, unbound (§A, "Two slots"). It replaces only the
+  // reservation not yet bound (one that never ran, or whose bind was lost), never the bound one, which it carries as its
+  // `prior`. Throws when it cannot be written, which the launch reads as "advertise 8".
   reserveLaunch(appSessionId: AppSessionId, reservation: Reservation): void {
     this.db.transaction(() => {
       this.known(appSessionId);
       this.db.run('INSERT INTO owner_channel_sessions (app_session_id) VALUES (?) ON CONFLICT (app_session_id) DO NOTHING', appSessionId);
-      this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify(reservation) });
+      const stored = this.session(appSessionId)?.advertised ?? null;
+      const prior = stored === null ? undefined : stored.launchId !== null ? { launchId: stored.launchId, number: stored.number, plugin: stored.plugin } : stored.prior;
+      const { prior: _given, ...unbound } = reservation;
+      this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify({ ...unbound, launchId: null, ...(prior && { prior }) }) });
     });
-  }
-
-  // U2b: the daemon's start found the reserved launch running (the host accepted it, the bind was never written).
-  bindReservation(appSessionId: AppSessionId, launchId: string): void {
-    const reserved = this.session(appSessionId)?.advertised;
-    if (reserved) this.db.update('owner_channel_sessions', 'app_session_id', appSessionId, { advertised: JSON.stringify({ ...reserved, launchId }) });
   }
 
   // U2b (§M, "The switch"): whether new fold summaries are made in the launches MAWS decides. On unless `off` is stored.

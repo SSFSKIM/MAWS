@@ -1,18 +1,22 @@
 // Who draws each session's to-human view, as the owner service publishes it in the lane's `drawnBy` (the UX wave, U2b:
-// docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A, decisions 3 and 4; M4's sequences).
-// It follows each session's running launch through the engine host's statuses (the subscription, and one read of every
-// live status at the service's start and at each reconnect), reads the to-human plugin's declaration at the path the
-// engine reports for it when a status first shows the plugins observed at a new time, and computes the published value
-// from those facts and the stored row (`advertisementOf`, `drawnBy` in @shared/owner/draws). It calls `changed` when the
-// value a session would publish moves from the one it gave out last, so the owner service publishes its state again.
-// - A status of a launch older than the session's newest known launch (seen in a status, or bound by a decided launch)
-//   is ignored.
-// - A declaration's read in flight when a later observation of the plugins arrives is dropped; until a read answers, the
-//   earlier fact stands (for a launch's first report: nothing reported yet).
-// - Until the live statuses have been read once, a session with no status reads as if the row's newest launch ran with
-//   its plugins not yet reported: an advertisement that cannot be known is never read as "MAWS draws". A session at
-//   rest that so reads `mod` is drawn by the mirror all the same: no surface is attached to it (§A, "What a window
-//   draws").
+// docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, Interfaces §A, "Who draws: the table the code and its
+// tests are checked against"). It follows each session's running launch through the engine host's statuses (the
+// subscription, and a read of every live status at the service's start and at each reconnect) by table C, reads the
+// to-human plugin's declaration at the path the engine reports for it at each new observation of the plugins, and
+// computes the published value by tables A and B (`advertisementOf`, `drawnBy` in @shared/owner/draws). It calls
+// `changed` when the value a session would publish moves from the one it gave out last.
+// - The running launch (C): a status of it is applied; another launch's exit never puts it at rest; a launch not seen
+//   before becomes the running one only with a live process and a start time after the running one's (the engine's
+//   `launchedAt`; for a launch bound before its first status, the bind's time, which follows its start); a read of the
+//   live statuses is not applied to a session with a newer event since the read was sent.
+// - The engine's state of it (B): at rest when its status says exiting or exited, or a read of the live statuses did not
+//   list it; otherwise live, its plugins reported or not. A launch bound before its first status, and every session
+//   before the first read, count as live with their plugins not reported. Before that read the running launch is the
+//   row's recorded one; while a reservation waits unbound, the launch it was made for may run instead, unrecorded (A4),
+//   so the session reads `mod`. A session at rest so read is drawn by the mirror all the same: no surface is attached
+//   to it (§A, "What a window draws").
+// - The declaration (B): read at each new observation of the plugins, replacing the read outstanding. Outstanding or
+//   failed, it counts as declaring (B5); a missing file or another shape is "no".
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { TO_HUMAN_PLUGIN } from '@shared/owner/contract';
@@ -25,75 +29,91 @@ export interface DrawRow {
   advertised: Reservation | null;
 }
 
-export type DrawStatus = Pick<EngineSessionStatus, 'appSessionId' | 'launchId' | 'process' | 'plugins' | 'pluginsObservedAt'>;
+export type DrawStatus = Pick<EngineSessionStatus, 'appSessionId' | 'launchId' | 'launchedAt' | 'process' | 'plugins' | 'pluginsObservedAt'>;
 
 export interface WhoDrawsDeps {
   row: (appSessionId: AppSessionId) => DrawRow | null; // null: no row, or the row cannot be read
-  declares: (installPath: string) => Promise<boolean>; // ./declaration.ts
+  declares: (installPath: string) => Promise<boolean | null>; // ./declaration.ts's declarationOf; null: the read failed
   changed: (appSessionId: AppSessionId) => void;
+  now?: () => string; // the tests' seam: the time a decided launch is bound
+}
+
+interface Running {
+  launchId: string;
+  startedBy: string; // the engine's launchedAt, or the bind's time until the launch's first status
+  process: EngineSessionStatus['process'];
 }
 
 interface Loaded {
   observedAt: string;
   present: boolean;
-  declares: boolean;
+  declaration: 'yes' | 'no' | 'outstanding' | 'failed';
+  token: number;
 }
 
 interface Session {
-  launches: string[]; // every launch id seen, in the order first seen; the last is the newest
-  status: { launchId: string; process: EngineSessionStatus['process'] } | null; // the newest launch's last status
-  loaded: Loaded | null; // the newest launch's plugins, once reported and read
-  reading: { observedAt: string; token: number } | null; // the declaration's read in flight
+  running: Running | null;
+  seen: Set<string>; // every launch id that was the running one
+  loaded: Loaded | null; // the running launch's plugins at their latest observation
+  touched: number; // the clock at the session's latest event applied (a status, a bind)
   published: DrawnBy; // the value given out last (a state read, or a change published)
 }
 
-// A provisional launch id for a row whose reservation is not bound: no host launch id is empty.
-const UNBOUND = '';
+const atRest = (process: EngineSessionStatus['process']) => process === 'exiting' || process === 'exited';
 
 export class WhoDraws {
   private readonly sessions = new Map<AppSessionId, Session>();
   private isPrimed = false;
+  private clock = 0;
   private token = 0;
   private readonly pending = new Set<Promise<unknown>>();
   private stopped = false;
 
   constructor(private readonly deps: WhoDrawsDeps) {}
 
-  // The live statuses were read once: from here a session with no status is at rest.
-  primed(): void {
-    if (this.isPrimed) return;
+  // Taken before a read of the live statuses is sent; the read's answer is applied against it (`listed`).
+  mark(): number {
+    return this.clock;
+  }
+
+  // The answer of a read of every live status sent at `since` (C4): applied to each session with no event since, and a
+  // session it does not list is at rest. Returns the statuses applied.
+  listed(statuses: readonly DrawStatus[], since: number): DrawStatus[] {
+    if (this.stopped) return [];
+    const listed = new Set<AppSessionId>();
+    const applied: DrawStatus[] = [];
+    for (const status of statuses) {
+      const appSessionId = status.appSessionId as AppSessionId;
+      listed.add(appSessionId);
+      if ((this.sessions.get(appSessionId)?.touched ?? 0) > since) continue;
+      if (this.apply(status)) applied.push(status);
+    }
+    for (const [appSessionId, session] of this.sessions) {
+      if (listed.has(appSessionId) || session.touched > since || session.running === null || atRest(session.running.process)) continue;
+      session.running.process = 'exited'; // the host has no live process for it
+    }
     this.isPrimed = true;
     for (const appSessionId of this.sessions.keys()) this.publish(appSessionId);
+    return applied;
   }
 
-  // A status of a session's process, from the subscription or from the read of every live status.
+  // A status from the subscription.
   status(status: DrawStatus): void {
     if (this.stopped) return;
-    const appSessionId = status.appSessionId as AppSessionId;
-    const session = this.sessionOf(appSessionId);
-    const known = session.launches.indexOf(status.launchId);
-    if (known !== -1 && known < session.launches.length - 1) return; // an older launch's, after a newer one
-    if (known === -1) {
-      session.launches.push(status.launchId);
-      session.loaded = null;
-      session.reading = null;
-    }
-    session.status = { launchId: status.launchId, process: status.process };
-    if (status.pluginsObservedAt !== null && status.pluginsObservedAt !== session.loaded?.observedAt && status.pluginsObservedAt !== session.reading?.observedAt) {
-      this.observe(appSessionId, session, status.launchId, status.pluginsObservedAt, status.plugins);
-    }
-    this.publish(appSessionId);
+    if (this.apply(status)) this.sessionOf(status.appSessionId as AppSessionId).touched = ++this.clock;
   }
 
-  // A decided launch was bound to its id: it is the session's newest, and a status of an earlier one is stale.
+  // A decided launch the host accepted: the session's running launch, live with its plugins not reported until its
+  // first status.
   bound(appSessionId: AppSessionId, launchId: string): void {
     if (this.stopped) return;
     const session = this.sessionOf(appSessionId);
-    if (session.launches.includes(launchId)) return;
-    session.launches.push(launchId);
-    session.status = null;
-    session.loaded = null;
-    session.reading = null;
+    session.touched = ++this.clock;
+    if (session.running?.launchId !== launchId) {
+      session.seen.add(launchId);
+      session.running = { launchId, startedBy: (this.deps.now ?? (() => new Date().toISOString()))(), process: 'starting' };
+      session.loaded = null;
+    }
     this.publish(appSessionId);
   }
 
@@ -102,16 +122,6 @@ export class WhoDraws {
     const now = this.compute(appSessionId);
     this.sessionOf(appSessionId).published = now;
     return now;
-  }
-
-  private compute(appSessionId: AppSessionId): DrawnBy {
-    const row = this.deps.row(appSessionId);
-    const session = this.sessions.get(appSessionId);
-    if (session?.status) return drawnBy(advertisementOf(row, session.status.launchId), session.status, session.loaded);
-    if (this.isPrimed || row === null) return 'maws';
-    // not yet read: the row's newest launch, as if it ran with nothing reported
-    const live = row.advertised !== null ? (row.advertised.launchId ?? UNBOUND) : row.launchId;
-    return live === null ? 'maws' : drawnBy(advertisementOf(row, live), { launchId: live, process: 'ready' }, null);
   }
 
   busy(): boolean {
@@ -126,38 +136,74 @@ export class WhoDraws {
     this.stopped = true;
   }
 
+  private compute(appSessionId: AppSessionId): DrawnBy {
+    const row = this.deps.row(appSessionId);
+    const session = this.sessions.get(appSessionId);
+    const running = session?.running ?? null;
+    if (running !== null) {
+      const loaded = session?.loaded ?? null;
+      return drawnBy(advertisementOf(row, running.launchId), running, loaded === null ? null : { present: loaded.present, declares: loaded.declaration !== 'no' });
+    }
+    if (this.isPrimed) return 'maws'; // B1: the read of the live statuses listed none, and no status or bind since
+    // not yet discovered: live with its plugins not reported, the recorded launch, or the unrecorded one a reservation
+    // waiting unbound was made for (A4, B12)
+    if (row !== null && row.advertised !== null && row.advertised.launchId === null) return 'mod';
+    return drawnBy(advertisementOf(row, row?.launchId ?? ''), { launchId: row?.launchId ?? '', process: 'starting' }, null);
+  }
+
+  // Table C: whether the status counts for the session's running launch; when it does, it is applied.
+  private apply(status: DrawStatus): boolean {
+    const appSessionId = status.appSessionId as AppSessionId;
+    const session = this.sessionOf(appSessionId);
+    const running = session.running;
+    if (running === null || running.launchId !== status.launchId) {
+      if (running !== null) {
+        if (atRest(status.process)) return false; // C2: another launch's exit
+        if (session.seen.has(status.launchId) || status.launchedAt <= running.startedBy) return false; // C3: a launch replaced, or started before the running one
+      }
+      session.seen.add(status.launchId);
+      session.running = { launchId: status.launchId, startedBy: status.launchedAt, process: status.process };
+      session.loaded = null;
+    } else {
+      running.process = status.process; // C1
+      running.startedBy = status.launchedAt;
+    }
+    if (status.pluginsObservedAt !== null && status.pluginsObservedAt !== session.loaded?.observedAt) this.observe(appSessionId, session, status.launchId, status.pluginsObservedAt, status.plugins);
+    this.publish(appSessionId);
+    return true;
+  }
+
   private sessionOf(appSessionId: AppSessionId): Session {
     let session = this.sessions.get(appSessionId);
     if (session === undefined) {
-      session = { launches: [], status: null, loaded: null, reading: null, published: 'maws' };
+      session = { running: null, seen: new Set(), loaded: null, touched: 0, published: 'maws' };
       this.sessions.set(appSessionId, session);
     }
     return session;
   }
 
-  // The plugins were reported at a new time: the to-human plugin's declaration is read at its reported path.
+  // The plugins were reported at a new time: the to-human plugin's presence is known at once, and its declaration is read
+  // at its reported path, replacing any read outstanding.
   private observe(appSessionId: AppSessionId, session: Session, launchId: string, observedAt: string, plugins: DrawStatus['plugins']): void {
     const plugin = plugins.find((entry) => entry.name === TO_HUMAN_PLUGIN);
+    const token = ++this.token;
     if (plugin === undefined) {
-      session.reading = null;
-      session.loaded = { observedAt, present: false, declares: false };
+      session.loaded = { observedAt, present: false, declaration: 'no', token };
       return;
     }
-    const token = ++this.token;
-    session.reading = { observedAt, token };
+    session.loaded = { observedAt, present: true, declaration: 'outstanding', token };
     const read = this.deps.declares(plugin.path).then(
-      (declares) => this.read(appSessionId, launchId, token, observedAt, declares),
-      () => this.read(appSessionId, launchId, token, observedAt, false),
+      (declares) => this.answered(appSessionId, launchId, token, declares === true ? 'yes' : declares === false ? 'no' : 'failed'),
+      () => this.answered(appSessionId, launchId, token, 'failed'),
     );
     this.pending.add(read);
     void read.finally(() => this.pending.delete(read));
   }
 
-  private read(appSessionId: AppSessionId, launchId: string, token: number, observedAt: string, declares: boolean): void {
+  private answered(appSessionId: AppSessionId, launchId: string, token: number, declaration: Loaded['declaration']): void {
     const session = this.sessions.get(appSessionId);
-    if (this.stopped || session === undefined || session.reading?.token !== token || session.status?.launchId !== launchId) return; // dropped
-    session.reading = null;
-    session.loaded = { observedAt, present: true, declares };
+    if (this.stopped || session === undefined || session.loaded?.token !== token || session.running?.launchId !== launchId) return; // replaced
+    session.loaded.declaration = declaration;
     this.publish(appSessionId);
   }
 
