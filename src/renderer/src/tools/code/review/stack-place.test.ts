@@ -333,6 +333,32 @@ describe('the counter where a file is brought into view before its rows draw', (
     vi.restoreAllMocks();
   });
 
+  it('reads the first place at the first file while its body has no rows yet: once they draw, the first file stays at the top', () => {
+    const page = pageOf(3, 0);
+    const body = page.el.querySelector<HTMLElement>('[data-review-file="src/part-000.ts"] [data-review-body]')!;
+    const table = body.querySelector('table')!;
+    const rows = table.querySelector('tbody')!;
+    rows.remove(); // the block drawn, its line rows not yet
+    const full = page.heights.get(body)!;
+    page.heights.set(body, 0);
+    const counted: number[] = [];
+    const saved: StackPlace[] = [];
+    const placer: StackPlacer = new StackPlacer({ band: (band) => placer.drawn(band), saved: (place) => saved.push(place), counted: (index) => counted.push(index) });
+    page.el.addEventListener('scroll', () => placer.scrolled());
+    placer.update({ sections: page.sections, order: page.order, current: 0 });
+    placer.attach(page.el, null); // mounted with no saved place: the first layout reads the place where the scroller stands
+    placer.relayout();
+    placer.relayout();
+    expect.soft(saved.map((place) => place.path), 'no place read in the next file').not.toContain('src/part-001.ts');
+    table.append(rows);
+    page.heights.set(body, full);
+    placer.relayout();
+    placer.relayout();
+    expect(page.el.scrollTop, 'the first file still at the top').toBe(0);
+    expect(saved.at(-1)?.path, 'the place the first file’s').toBe('src/part-000.ts');
+    expect(counted).toEqual([]);
+  });
+
   it('counts the first hunk at the first file’s top while its body has no rows yet, and again once they draw', () => {
     const page = pageOf(3, 0);
     const body = page.el.querySelector<HTMLElement>('[data-review-file="src/part-000.ts"] [data-review-body]')!;
