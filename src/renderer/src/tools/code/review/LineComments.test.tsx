@@ -1147,6 +1147,38 @@ describe('comments on lines in Review', () => {
       ]);
     });
 
+    // M9 fix 3 (Decision Log 39): a comment made on no commit, while a commit's scope is shown
+    it('opens a comment made on no commit from U5a’s chip in the row under “This comment is not on this commit.” while a commit’s scope is shown, and places it under its line again in Uncommitted', async () => {
+      await mounted();
+      addOn('src/report.ts', 'new', 12); // in Uncommitted
+      await painted(() => card() !== null);
+      type('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unsentRows('src/report.ts').length === 1);
+      openOn(ON);
+      await drawn('src/report.ts');
+      const words = () => [...document.querySelectorAll<HTMLElement>('[data-review-unplaced-words="not-on-commit"]')].map((each) => each.textContent);
+      await painted(() => words().length === 1);
+      expect(words()).toEqual(['This comment is not on this commit.']);
+      expect(document.querySelector('[data-review-unplaced] [data-review-unplaced-commit]')).toBeNull(); // no link in it
+      expect(unsentRows()).toEqual([]); // not under the commit's line, though its text is the quote
+      expect(unplacedRows()).toHaveLength(1);
+      expect(within(unplacedRows()[0]).getByRole('button', { name: 'Remove comment' })).toBeTruthy();
+      expect(chip()?.textContent).toBe('1 unsent comment');
+      fireEvent.click(chip()!);
+      await painted(() => card() !== null);
+      expect(lineLeft()!.contains(card())).toBe(true);
+      expect(cardRow()?.dataset.reviewCardRow).toBe('away');
+      expect(field().value).toBe('Quote only where a comma is.');
+      leave();
+      await painted(() => card() === null && unplacedRows().length === 1);
+      fireEvent.click(scopeChip('uncommitted')!);
+      await drawn('src/report.ts');
+      await painted(() => unsentRows('src/report.ts').length === 1);
+      expect(lineLeft()).toBeNull();
+      expect(lineRow('src/report.ts', 'new', 12)!.nextElementSibling?.contains(unsentRows('src/report.ts')[0])).toBe(true);
+    });
+
     it('opens Review on that commit at the comment’s file from the hash, by the act R8’s chip uses; there it stands under its line', async () => {
       await mounted();
       await commentOnCommit();

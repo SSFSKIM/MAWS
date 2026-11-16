@@ -134,7 +134,7 @@ describe('whether a comment can be placed (Decision Log 21): the table, row by r
             }
     expect([...seen].sort()).toEqual([...SECTION_STATES].sort()); // and no state is a dead row
     const rows = Object.keys(PLACEMENT_TABLE).sort();
-    const cases = ['on-commit', 'scope-reading', 'scope-empty', 'not-in-scope', ...SECTION_STATES.filter((state) => state !== 'lines'), 'line-found', 'line-not-found'].sort(); // UX wave U5b-2: on-commit
+    const cases = ['on-commit', 'not-on-commit', 'scope-reading', 'scope-empty', 'not-in-scope', ...SECTION_STATES.filter((state) => state !== 'lines'), 'line-found', 'line-not-found'].sort(); // UX wave U5b-2: on-commit
     expect(rows).toEqual(cases);
     expect(sectionStateOf({ hunks: null, binary: false, failed: null, folded: true, fetch: false })).toBe('folded-unread');
     expect(sectionStateOf({ hunks: null, binary: false, failed: null, folded: true, fetch: true })).toBe('reading');
@@ -143,12 +143,13 @@ describe('whether a comment can be placed (Decision Log 21): the table, row by r
   });
 
   it('names the sentence over each unplaceable kind, and stands the kinds in one order', () => {
-    expect(UNPLACED_WORDS).toEqual({ 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope, 'diff-not-shown': REVIEW_COPY.diffNotShown, 'on-commit': REVIEW_COPY.onCommit });
+    expect(UNPLACED_WORDS).toEqual({ 'line-left': REVIEW_COPY.lineLeftDiff, 'not-in-scope': REVIEW_COPY.fileNotInScope, 'no-files': REVIEW_COPY.fileNotInScope, 'diff-not-shown': REVIEW_COPY.diffNotShown, 'not-on-commit': REVIEW_COPY.notOnThisCommit, 'on-commit': REVIEW_COPY.onCommit });
     expect(REVIEW_COPY.lineLeftDiff).toBe('The line this comment was on is no longer in this diff.');
     expect(REVIEW_COPY.fileNotInScope).toBe('The file this comment is on is not in this diff.');
     expect(REVIEW_COPY.diffNotShown).toBe("This file's diff is not shown here.");
-    expect(UNPLACED_ORDER.map((sentence) => sentence.name)).toEqual(['line-left', 'not-in-diff', 'diff-not-shown', 'on-commit']); // UX wave U5b-2: a commit's comments last
+    expect(UNPLACED_ORDER.map((sentence) => sentence.name)).toEqual(['line-left', 'not-in-diff', 'diff-not-shown', 'not-on-commit', 'on-commit']); // UX wave U5b-2: a commit's comments last, those on none just before
     expect(REVIEW_COPY.onCommit('a1b2c3d4e5f60718293a4b5c6d7e8f9012345678')).toBe('This comment is on commit a1b2c3d.');
+    expect(REVIEW_COPY.notOnThisCommit).toBe('This comment is not on this commit.');
   });
 });
 
@@ -181,6 +182,16 @@ describe('a comment made on a commit, in another scope (UX wave U5b-2)', () => {
   it('wins over a scope still being read or holding no files', () => {
     expect(placementOf(onA, { state: 'reading', files: [] })).toEqual({ kind: 'on-commit', commit: A });
     expect(placementOf(onA, { state: 'none', files: [] })).toEqual({ kind: 'on-commit', commit: A });
+  });
+
+  // M9 fix 3 (Decision Log 39): a comment made on no commit, in a commit's scope, is never placed by its quote there
+  it('a comment made on no commit, in a commit’s scope: not on this commit, even where its file and quoted line are there, and while the scope is read', () => {
+    const working = { anchor: reviewLineAnchor('src/report.ts', 12, 'new'), quote: 'return quoted(value);' };
+    expect(PLACEMENT_TABLE['not-on-commit']).toBe('not-on-commit');
+    expect(placementOf(working, scope(A, report, other))).toEqual({ kind: 'not-on-commit' }); // the same path and quoted line as the commit's
+    expect(placementOf(working, scope(A, other))).toEqual({ kind: 'not-on-commit' });
+    expect(placementOf(working, { state: 'reading', commit: A, files: [] })).toEqual({ kind: 'not-on-commit' });
+    expect(placementOf(working, { state: 'none', commit: A, files: [] })).toEqual({ kind: 'not-on-commit' });
   });
 
   it('in its own commit’s scope is placed as any comment is', () => {
