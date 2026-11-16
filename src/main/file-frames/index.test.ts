@@ -21,7 +21,7 @@ import type { MachineRef } from '@shared/machine/ref';
 import { STORE_FRAME_CSP } from '../../services/artifacts/scheme/scheme-handler';
 import { createFilesService, type FilesService } from '../../services/files/service';
 import { fetchInto } from '../lane-b/remote-copy';
-import { REMOTE_READ_PAGE_BYTES } from '../lane-b/remote-files-read';
+import { REMOTE_READ_PAGE_BYTES, REMOTE_READ_TRIES } from '../lane-b/remote-files-read';
 import type { RemoteLink } from '../machines/remote/link';
 import { FRAME_HEAD_BYTES } from './charset';
 import type { RawRead } from './source';
@@ -335,6 +335,35 @@ describe('layout.frameFile for another machine', () => {
     ]);
     expect((await stat(join(l.userData, FRAME_COPIES_DIR))).mode & 0o777).toBe(0o700);
     await vi.waitFor(() => expect(l!.sinks[0]!.fd).toBe(-1)); // the release closed the copy's descriptor
+  });
+
+  // Decision Log 30: a copy is written only when it reaches the size its first page gave
+  it('a link that keeps the size and sends no bytes on a later page leads to no token, and an empty file is still issued one', async () => {
+    const size = REMOTE_READ_PAGE_BYTES + 4096;
+    const calls: Array<Record<string, unknown>> = [];
+    const short = {
+      machine: MINI,
+      name: 'mini',
+      call: async (_name: string, input: { offset?: number; length?: number }) => {
+        calls.push(input);
+        const offset = input.offset ?? 0;
+        const length = offset === 0 ? Math.min(input.length ?? size, size) : 0; // the size kept, no hash, then no bytes
+        return { ok: true, output: { encoding: 'base64', content: Buffer.alloc(length, 0x61).toString('base64'), bytes: size, offset, length, truncated: true, mime: 'application/pdf', hash: null, utf8: null } };
+      },
+    } as unknown as RemoteLink;
+    const l = await lab({ link: short });
+    const issue = vi.spyOn(l.started.tokens, 'issue');
+    expect(await l.frameFile('/w/invented/ledger.pdf', l.pageOf(7), MINI)).toEqual({ ok: false, error: ipcError('internal', 'files.read: the file kept changing on machine mini while it was copied') });
+    expect(calls).toHaveLength(2 * REMOTE_READ_TRIES);
+    expect(issue).not.toHaveBeenCalled();
+    await vi.waitFor(() => expect(l.sinks[0]!.fd).toBe(-1));
+    expect(await l.copies()).toEqual([]);
+
+    const { link } = machine();
+    const there = await lab({ link });
+    const empty = join(there.root, 'empty.pdf');
+    await writeFile(empty, Buffer.alloc(0));
+    expect((await there.ready(empty, there.pageOf(7), MINI)).framed).toBe('pdf'); // a token: the copy of no bytes is whole
   });
 
   it('a sink whose name cannot be removed fetches nothing', async () => {

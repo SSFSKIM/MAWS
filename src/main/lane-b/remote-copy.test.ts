@@ -363,3 +363,65 @@ describe('fetchInto', () => {
     }
   });
 });
+
+// UX wave U6b-2 (Decision Log 30): for every caller of the inner read, a pass is written only when what it wrote reaches
+// the size its first page gave. A machine that keeps the size and stops sending (a later page of no bytes, or a page
+// not marked truncated that ends before the size) is read again within the tries and then refused as a file that kept
+// changing; an empty file is still copied. Every byte here is invented.
+describe('a copy ends at the size its first page gave', () => {
+  const SOURCE = { appSessionId: 'app-session-lark-91', path: '/remote/quillon-orchard-5c1/ledger.pdf' } as never;
+  const SIZE = REMOTE_READ_PAGE_BYTES + 4096;
+
+  /** A machine that answers SIZE bytes and no hash, then ends short: a later page of no bytes, or one not marked truncated. */
+  function shortMachine(end: 'empty' | 'unmarked') {
+    const reads: Array<Record<string, unknown>> = [];
+    const link = {
+      machine: 'FarMachineRef000000000',
+      name: 'mini',
+      call: async (_name: string, input: { offset?: number; length?: number }) => {
+        reads.push(input);
+        const offset = input.offset ?? 0;
+        const length = offset === 0 ? Math.min(input.length ?? SIZE, SIZE) : end === 'empty' ? 0 : 1024;
+        const truncated = offset === 0 ? offset + length < SIZE : end === 'empty';
+        return { ok: true, output: { encoding: 'base64', content: Buffer.alloc(length, 0x61).toString('base64'), bytes: SIZE, offset, length, truncated, mime: 'application/pdf', hash: null, utf8: null } };
+      },
+    } as unknown as RemoteLink;
+    return { link, reads };
+  }
+  const keptChanging = { ok: false, error: expect.objectContaining({ code: 'internal', message: 'files.read: the file kept changing on machine mini while it was copied' }) };
+
+  it.each(['empty', 'unmarked'] as const)('a frame’s copy whose later page ends short of the size (%s) is copied again and refused as kept changing', async (end) => {
+    const dir = await scratch();
+    const sink = await open(join(dir, 'sink'), 'wx+', 0o600);
+    try {
+      const { link, reads } = shortMachine(end);
+      expect(await fetchInto(link, SOURCE, sink, 64 * 1024 * 1024, () => {}, { label: 'file frame (pdf)', seen: () => {} })).toEqual(keptChanging);
+      expect(reads).toHaveLength(2 * REMOTE_READ_TRIES);
+    } finally {
+      await sink.close();
+    }
+  });
+
+  it.each(['empty', 'unmarked'] as const)('Open externally’s copy whose later page ends short of the size (%s) is refused, leaving no file', async (end) => {
+    const dir = await scratch();
+    const { link, reads } = shortMachine(end);
+    expect(await fetch(link, join(dir, 'copy.pdf'))).toEqual(keptChanging);
+    expect(reads).toHaveLength(2 * REMOTE_READ_TRIES);
+    expect(await readdir(dir)).toEqual([]);
+  });
+
+  it('an empty file is still copied, by either copy', async () => {
+    const dir = await scratch();
+    const empty = join(dir, 'empty.pdf');
+    await writeFile(empty, Buffer.alloc(0));
+    const sink = await open(join(dir, 'sink'), 'wx+', 0o600);
+    try {
+      expect(await fetchInto(machineOver(empty).link, SOURCE, sink, 64 * 1024 * 1024, () => {}, { label: 'file frame (pdf)', seen: () => {} })).toEqual({ ok: true, value: { written: 0 } });
+      expect((await sink.stat()).size).toBe(0);
+    } finally {
+      await sink.close();
+    }
+    expect(await fetch(machineOver(empty).link, join(dir, 'copy.pdf'))).toEqual({ ok: true, value: 'written' });
+    expect(await readFile(join(dir, 'copy.pdf'))).toEqual(Buffer.alloc(0));
+  });
+});
