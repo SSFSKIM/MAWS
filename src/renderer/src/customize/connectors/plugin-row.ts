@@ -52,11 +52,14 @@ export const pluginNameShown = (key: string, list: PluginList): string => list?.
 
 type Live = { status: string; error: string | null };
 
-/** A ready session MAWS runs on this Mac, with what it reported: the servers its status lists, its plugin list and when. */
+/** A ready session MAWS runs on this Mac, with what it reported: its servers as last reported, whole (the attached
+ * session's own status read once it has answered, else its status's list) and when they were observed, its plugin list
+ * and when. */
 export interface ReportingSession {
   appSessionId: string;
   cwd: string;
   servers: ReadonlyMap<string, Live>;
+  serversAt: number | null; // when `servers` were observed (ms); null: never reported
   plugins: readonly SessionPlugin[];
   pluginsObservedAt: string | null;
 }
@@ -66,7 +69,6 @@ export interface PluginRowFacts {
   sessions: readonly ReportingSession[];
   attached: string | null;
   attachedServers: ReadonlySet<string> | null; // what the attached session's status read answered; null: not answered
-  attachedReadAt: number | null;
   cwd: string | null;
   list: PluginList;
   kept: NonNullable<CustomizationInventory['plugins']>; // every plugin the inventory keeps for the folder
@@ -81,7 +83,7 @@ export interface PluginRowState {
   signIn: string | null; // the session Sign in runs through (row 9, with the plugin list answered and a revision)
   openSession: boolean; // row 11
   notInAttached: boolean;
-  live: SignInFacts['live']; // the admitted session's entry, and when it was read, for a success it contradicts
+  live: SignInFacts['live']; // the admitted session's entry, and when it was observed, for a success a later report contradicts
   liveRead: SignInFacts['liveRead'];
 }
 
@@ -109,7 +111,8 @@ export function pluginRowStateOf(row: PluginRowModel, facts: PluginRowFacts): Pl
   const admitted = listing.find((session) => verdictOf(session) === 'ok') ?? null;
   // a live state only from an admitted session: a server of the name elsewhere may be another plugin's
   const live = admitted === null ? undefined : (admitted.servers.get(name) ?? null);
-  const liveRead = admitted !== null && admitted.appSessionId === attached && facts.attachedReadAt !== null ? { appSessionId: admitted.appSessionId, at: facts.attachedReadAt } : null;
+  // when the admitted session's servers were observed, attached or not, so its report after a success can overtake it
+  const liveRead = admitted !== null && admitted.serversAt !== null ? { appSessionId: admitted.appSessionId, at: admitted.serversAt } : null;
   const said = { ...NOTHING, live, liveRead, blocking: false };
   const words = live ? connectorStatusWords(live.status) || null : null; // the dialog's status words
   if (!SIGNS_IN.has(row.transport)) return { ...said, text: words, tone: 'muted' }; // row 5: a local command never signs in

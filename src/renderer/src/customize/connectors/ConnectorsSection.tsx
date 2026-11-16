@@ -16,10 +16,11 @@
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, §D): a custom add's line stands at the head of the
 // list while it works or after it failed; a succeeded add draws nothing there, its row being the result. UX wave U11h
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M3, §E): the plugins' connectors follow the
-// configured rows, each with §E's facts: this Mac's ready sessions with what each reported (its servers, its plugin list
-// and when), the attached session's own status read, the plugin list (null until it has answered), the plugins the
+// configured rows, each with §E's facts: this Mac's ready sessions with what each reported (its servers and when, its plugin
+// list and when), the attached session's own status read, the plugin list (null until it has answered), the plugins the
 // inventory keeps for the folder, and main's posture and revision for the row.
 import { useEffect, useMemo, type ReactNode } from 'react';
+import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import type { CatalogItem } from '@shared/ipc/schema/catalog';
@@ -31,7 +32,7 @@ import { Gone, useManage, type Manage } from '../../widgets/plugins/manage';
 import { displayNameOf } from '../../widgets/plugins/library';
 import { factsOf } from '../../widgets/plugins/operation';
 import type { PluginsLibraryReads } from '../../widgets/PluginsWidget';
-import { useEngineRead } from '../../widgets/read';
+import { MOVES_READS, useEngineRead } from '../../widgets/read';
 import { DiscoverPane } from '../discover/DiscoverPane';
 import type { Inventory } from '../inventory';
 import { useCatalogPostures, useCatalogRefresh, useCatalogSources } from '../discover/read';
@@ -44,6 +45,8 @@ import { connectorRows, connectorRowsMatching, type ConnectorRowModel } from './
 import { useSignIns } from './sign-in';
 
 const DIRECTORY_SERVERS = 'directory:servers';
+// what moves the attached session's status read: what moves any read, and a new report of its servers
+const SERVERS_REPORTED = (status: EngineSessionStatus): string => `${MOVES_READS(status)}|${status.pluginsObservedAt ?? ''}`;
 
 /** What the plugin list says of each plugin, by its key (the name its row shows, whether it is enabled here); null until
  * it has answered, and while its latest read has failed (U11h: Sign in waits for it, §E "While the plugin list is
@@ -155,40 +158,46 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
   const engine = useSessions((s) => s.engine);
   // P5 O7 M5c: this Mac's ready sessions alone (the architect's ruling): a sign-in keeps its credential on the machine it
   // runs on, and this Mac's Customize signs in on this Mac; another machine's are configured from its Connectors sheet
-  const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null });
+  // U11h: read again whenever the attached session's init or a reload reports its servers anew (`pluginsObservedAt`), as
+  // well as when it moves (a reload after a plugin change moves nothing else), so its answer is never older than its seed
+  const read = useEngineRead('session.mcpStatus', { appSessionId: attached ?? ('' as AppSessionId) }, { enabled: attached !== null, refreshOn: SERVERS_REPORTED });
   // U11a M8 (§A): the servers each ready session holds, for a row of MAWS's own list. The store's list is the engine's
   // init frame's, which a session started with no message has not sent (P7 run 43386195217); for the attached session
   // the page's own mcp_status read says it too. A ready session that is not the attached one and has had no first turn
-  // is still not found (ticket 619).
+  // is still not found (ticket 619). U11h (the branch panel's ruling of 2026-11-16): a session's servers are its latest
+  // report, whole: the attached session's answer, once it exists, replaces its seed, so a server the answer omits is not
+  // read from the seed.
   const attachedServers = read.data?.mcpServers;
-  const ready = useMemo<HoldingSession[]>(
+  const attachedReadAt = read.readAt;
+  const local = useMemo(() => [...engine.values()].filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine), [engine]);
+  // each session's servers as it last reported them, and when they were observed (ms; null: never)
+  const reported = useMemo(
     () =>
-      [...engine.values()]
-        .filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine)
-        .map((status) => {
-          const listed = status.mcpServers.map((server) => server.name);
-          const answered = status.appSessionId === attached && attachedServers ? attachedServers.map((server) => server.name) : [];
-          return { appSessionId: status.appSessionId, cwd: status.cwd, servers: [...new Set([...listed, ...answered])] };
-        }),
-    [engine, attached, attachedServers],
+      local.map((status) => {
+        if (status.appSessionId === attached && attachedServers) return { status, servers: attachedServers.map((server) => ({ name: server.name, status: server.status, error: typeof server.error === 'string' ? server.error : null })), at: attachedReadAt };
+        return { status, servers: status.mcpServers.map((server) => ({ name: server.name, status: server.status, error: null })), at: status.pluginsObservedAt === null ? null : Date.parse(status.pluginsObservedAt) };
+      }),
+    [local, attached, attachedServers, attachedReadAt],
   );
+  const ready = useMemo<HoldingSession[]>(() => reported.map(({ status, servers }) => ({ appSessionId: status.appSessionId, cwd: status.cwd, servers: servers.map((server) => server.name) })), [reported]);
   const liveOf = (name: string) => {
     if (attached === null || !read.data) return undefined;
     const entry = read.data.mcpServers.find((server) => server.name === name);
     return entry ? { status: entry.status, error: typeof entry.error === 'string' ? entry.error : null } : null;
   };
   const liveRead = attached !== null && read.readAt !== null ? { appSessionId: attached, at: read.readAt } : null; // when its answer arrived
-  // U11h: this Mac's ready sessions with what each reported, the attached one's own read beside its status
+  // U11h: this Mac's ready sessions with what each reported (its servers and when, its plugin list and when)
   const reporting = useMemo<ReportingSession[]>(
     () =>
-      [...engine.values()]
-        .filter((status) => status.process === 'ready' && machineOf(status.appSessionId) === ipc.localMachine)
-        .map((status) => {
-          const listed = new Map<string, { status: string; error: string | null }>(status.mcpServers.map((server) => [server.name, { status: server.status, error: null }]));
-          if (status.appSessionId === attached) for (const server of attachedServers ?? []) listed.set(server.name, { status: server.status, error: typeof server.error === 'string' ? server.error : null });
-          return { appSessionId: status.appSessionId, cwd: status.cwd, servers: listed, plugins: status.plugins.map(({ name, source, version }) => ({ name, source, version })), pluginsObservedAt: status.pluginsObservedAt };
-        }),
-    [engine, attached, attachedServers],
+      reported.map(({ status, servers, at }) => ({
+        appSessionId: status.appSessionId,
+        cwd: status.cwd,
+        servers: new Map(servers.map(({ name, ...live }) => [name, live] as const)),
+        serversAt: at,
+        plugins: status.plugins.map(({ name, source, version }) => ({ name, source, version })),
+        pluginsObservedAt: status.pluginsObservedAt,
+      })),
+    [reported],
   );
   const attachedNames = useMemo(() => (attached !== null && attachedServers ? new Set(attachedServers.map((server) => server.name)) : null), [attached, attachedServers]);
   const postureRead = useCatalogPostures(cwd, inventory, readAt).data;
@@ -208,7 +217,7 @@ export function useConnectorRowFacts({ inventory, pluginList, readAt, cwd, attac
     if (row.kind === 'plugin') {
       // by the plugin, the server and the file that declares it: main's list is row for row with the inventory's
       const posture = postureRead?.plugins.find((p) => p.plugin === row.plugin && p.server === row.server && p.path === row.path) ?? null;
-      const facts = { sessions: reporting, attached, attachedServers: attachedNames, attachedReadAt: read.readAt, cwd, list: pluginList, kept: inventory.plugins ?? [], posture: posture?.authPosture ?? null, revision: posture?.revision ?? null };
+      const facts = { sessions: reporting, attached, attachedServers: attachedNames, cwd, list: pluginList, kept: inventory.plugins ?? [], posture: posture?.authPosture ?? null, revision: posture?.revision ?? null };
       const state = pluginRowStateOf(row, facts);
       return { shadow: null, session: state.signIn, live: state.live, liveRead: state.liveRead, posture: facts.posture, fingerprint: null, revision: facts.revision, iconUrl: posture?.iconUrl ?? null, plugin: { state, name: pluginNameShown(row.plugin, pluginList), revisionRead } };
     }
