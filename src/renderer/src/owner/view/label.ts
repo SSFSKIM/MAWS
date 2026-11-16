@@ -26,6 +26,12 @@ export interface StretchLabels {
 
 type Turns = ReadonlyMap<TurnId, TurnState> | undefined;
 
+// The work the labels do, counted for tests, which count it rather than time it (as `noticeIndexBuilds` does): the turns
+// whose rows are placed, the rows whose ids are read, the turns whose events are indexed for their calls.
+const work = { turnsPlaced: 0, rowsRead: 0, turnsIndexed: 0 };
+/** What the labels have done so far, cumulatively. */
+export const labelWork = (): Readonly<typeof work> => ({ ...work });
+
 // `rowKey` (message.tsx, 194): an id shaped as a row's uuid is known by its first 24 characters, since the engine can
 // draw a kept row under another form of it; any other id (a call's) whole.
 const ROW_ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
@@ -85,6 +91,7 @@ function keptOf(row: Row, turns: Turns): Kept {
   const turn = row.turnId === null ? undefined : turns?.get(row.turnId);
   const known = keptMemo.get(row);
   if (known !== undefined && known.turn === turn) return known;
+  work.rowsRead += 1;
   const ids = keptIdsOf(row, turn);
   const kept = { turn, ids, keys: ids.map(rowKey) };
   keptMemo.set(row, kept);
@@ -99,6 +106,7 @@ const callsMemo = new WeakMap<readonly SessionEvent[], TurnCalls>();
 function callsOf(turn: TurnState): TurnCalls {
   const known = callsMemo.get(turn.events);
   if (known !== undefined) return known;
+  work.turnsIndexed += 1;
   const records = new Map<string, CallRecord>();
   for (const e of turn.events) {
     if (e.kind === 'tool.use') records.set(e.toolUseId, { tool: e.toolName, input: e.input, done: false });
@@ -129,7 +137,10 @@ function placesOf(rows: readonly Row[], turns: Turns): Places {
   if (known !== undefined && known.turns === turns) return known.places;
   const places: Places = { ofRow: new Map(), ofId: new Map(), size: 0 };
   let at = 0;
+  let turnId: TurnId | null = null;
   for (const row of rows) {
+    if (row.turnId !== null && row.turnId !== turnId) work.turnsPlaced += 1;
+    turnId = row.turnId;
     places.ofRow.set(row, at);
     const { keys } = keptOf(row, turns);
     for (const key of keys) {
