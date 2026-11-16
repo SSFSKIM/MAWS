@@ -13,7 +13,7 @@
 // a plugin's connector is the second kind: its server's name, "from <plugin>" (which opens the plugin's detail) and its
 // transport, no file line and no Remove; its state's place and its Sign in come from §E's table (./plugin-row.ts), a
 // retained sign-in giving words alone, and its record is shown against the row's revision, not main's fingerprint.
-import { useEffect, useRef, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CustomizationServer } from '@shared/ipc/schema/customization';
 import type { PluginsScope } from '@shared/plugins/cli';
@@ -85,8 +85,8 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   const machine = signInMachineOf(row.kind === 'plugin' ? (plugin?.state.signIn ?? null) : session);
   const latest = useSignIns((s) => (kept === null ? null : (s.byServer.get(signInKeyOf({ ...kept, machine })) ?? null)));
   // a plugin's row shows a finished result against its revision (§E, "What a retained record is kept by")
-  const record = resultFor(latest, row.kind === 'plugin' ? revision : fingerprint);
-  useForgottenOnRevision(row.kind === 'plugin' ? kept : null, machine, revision, latest);
+  const known = useKnownRevision(row.kind === 'plugin' ? kept : null, machine, revision, latest);
+  const record = resultFor(latest, row.kind === 'plugin' ? known : fingerprint);
   const last = record?.event ?? null;
   const pluginView = row.kind === 'plugin' && plugin !== undefined ? pluginRowViewOf(plugin.state, record) : null;
   const state: SignInView | null =
@@ -178,17 +178,20 @@ export function ConnectorRow({ row, askIn, shadow, cwd, place, session, live, li
   );
 }
 
-// A plugin's row whose revision changed (the plugin's key, installation, name, transport or address moved) drops the
-// ended record it was showing (§E): the record was for what the row declared then. Only a change this row saw, and only a
-// record started from it, so another row of the same engine name, and the session's dialog, keep theirs. A revision not
-// known (main's answer for a re-read still out) is no change: the record waits for the next answer.
-function useForgottenOnRevision(kept: Omit<SignInServer, 'machine'> | null, machine: SignInServer['machine'], revision: string | null, latest: SignInRecord | null): void {
-  const seen = useRef(revision);
+// A plugin's row's revision as last known: one not known (main's answer for a re-read still out) changes nothing, so a
+// result is not hidden while it is read again. A revision that changed (the plugin's key, installation, name, transport
+// or address moved) drops the ended record the row was showing (§E): the record was for what the row declared then. Only
+// a change this row saw, and only a record started from it, so another row of the same engine name, and the session's
+// dialog, keep theirs.
+function useKnownRevision(kept: Omit<SignInServer, 'machine'> | null, machine: SignInServer['machine'], revision: string | null, latest: SignInRecord | null): string | null {
+  const [known, setKnown] = useState(revision);
+  if (revision !== null && revision !== known) setKnown(revision);
+  const seen = useRef(known);
   useEffect(() => {
-    if (revision === null) return;
     const before = seen.current;
-    seen.current = revision;
-    if (kept === null || before === null || before === revision || latest === null) return;
+    seen.current = known;
+    if (kept === null || before === null || before === known || latest === null) return;
     if (latest.fingerprint === before && !RUNNING.has(latest.event.state)) forgetSignIn({ ...kept, machine });
-  }, [kept, machine, revision, latest]);
+  }, [kept, machine, known, latest]);
+  return known;
 }
