@@ -8,7 +8,7 @@ import { framePasted } from '@shared/composer/pasted-content';
 import { askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import { earlierAskSteerText } from '../../../test/support/ask-steer';
 import { loadUxwaveJournal, loadUxwaveTranscript } from '../../../test/support/fixtures';
-import { consentMessage, GRANT_OPENING, nothingOpen, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
+import { consentMessage, GRANT_OPENING, MAX_ENVELOPE_CHECKS, nothingOpen, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, readNext, turnOriginOf, type Arrival, type OpenArrivals } from './arrival';
 
 /** One arrival in a line: its class and what tells it apart. */
 function said(arrival: Arrival): string {
@@ -604,5 +604,50 @@ describe('the answer envelopes inside a joined text: the member boundary is the 
   it('a line that begins with the tag but is not the writer\'s first line opens nothing: it stays text', () => {
     const text = `[MAWS ask ask-1] is how the answers start\n${envelope}`;
     expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [parseAskSteer(envelope)!], rest: '[MAWS ask ask-1] is how the answers start' });
+  });
+});
+
+// The architect's ruling of 2026-11-16 (the Decision Log): the reader's work on one text is bounded. A slice is checked
+// whole only at a line that ends in a fence, at most MAX_ENVELOPE_CHECKS times a text, and the lines inside pasted
+// segments are marked in one walk over the lines and the segments together. Pinned by the counts the reading reports.
+describe('the answer envelopes inside a joined text: the work one text costs is bounded', () => {
+  const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+  const envelope = (n: number) => askSteerText(`ask-${n}`, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  const members = (count: number) => Array.from({ length: count }, (_, i) => envelope(i + 1));
+
+  it('the cap is 64 checks a text', () => {
+    expect(MAX_ENVELOPE_CHECKS).toBe(64);
+  });
+
+  it('64 writer-made envelopes joined: one check each, every one read as before', () => {
+    const joined = members(64);
+    const text = joined.join('\n');
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: joined.map((member) => parseAskSteer(member)!), rest: '' });
+    expect(readAnswerEnvelopesWithCost(text).cost.checks).toBe(64);
+  });
+
+  it('65 writer-made envelopes joined: left whole, no member taken and the rest the text unchanged', () => {
+    const text = members(65).join('\n');
+    expect(readAnswerEnvelopes(text)).toEqual({ envelopes: [], rest: text });
+    expect(readAnswerEnvelopesWithCost(text).cost.checks).toBe(64);
+  });
+
+  it('one opening line and 20,000 fence lines: exactly 64 checks, the text whole', () => {
+    const text = [askSteerOpening('ask-1'), ...Array.from({ length: 20_000 }, () => '```')].join('\n');
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect(reading.cost.checks).toBe(64);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [], rest: text });
+  });
+
+  it('2,000 pasted segments, each holding an envelope, then a real one: one walk of at most lines plus segments steps', () => {
+    const segments = 2_000;
+    const prompt = Array.from({ length: segments }, (_, i) => `Log ${i}:\n${framePasted(i.toString(16).padStart(4, '0'), envelope(1))}`).join('\n');
+    const text = `${prompt}\n${envelope(2)}`;
+    const lines = text.split('\n').length;
+    const reading = readAnswerEnvelopesWithCost(text);
+    expect({ envelopes: reading.envelopes, rest: reading.rest }).toEqual({ envelopes: [parseAskSteer(envelope(2))!], rest: prompt });
+    expect(reading.cost.checks).toBe(1);
+    expect(reading.cost.markingSteps).toBeGreaterThanOrEqual(lines);
+    expect(reading.cost.markingSteps).toBeLessThanOrEqual(lines + segments);
   });
 });
