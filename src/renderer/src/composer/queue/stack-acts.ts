@@ -24,7 +24,7 @@ const NOTHING_READ: Read = { unread: [], started: () => false };
 function readOfEntry(entry: TranscriptEntry | undefined): Read {
   if (entry === undefined) return NOTHING_READ;
   const unread: Unread[] = [];
-  for (const row of entry.rows) if (row.kind === 'user' && row.unread === true && row.messageUuid !== null) unread.push({ messageUuid: row.messageUuid, text: row.text, at: row.at });
+  for (const row of entry.rows) if (row.kind === 'user' && row.unread === true && row.messageUuid !== null) unread.push({ messageUuid: row.messageUuid, text: row.text, at: row.at, ...(row.attachments.length > 0 && { attached: true as const }) }); // U1c (Decision Log 49)
   const { state } = entry;
   return {
     unread,

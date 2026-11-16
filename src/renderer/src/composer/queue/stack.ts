@@ -17,7 +17,7 @@ import type { BlockedCall } from '../../transcript/model/blocked'; // UX wave U1
 import { CONSENT } from '../../transcript/model/copy'; // UX wave U1c
 import { entryDisplay } from './entry-text';
 
-export interface Unread { messageUuid: MessageUuid; text: string; at: string } // a transcript row marked `unread`
+export interface Unread { messageUuid: MessageUuid; text: string; at: string; attached?: true } // a transcript row marked `unread`; U1c (Decision Log 49): `attached` when an attachment rides beside its text
 export interface Read { unread: readonly Unread[]; started(messageUuid: MessageUuid): boolean }
 
 // UX wave U1c (the U1c document, Interfaces §G; card 2): a row that has content carries `grant`, the call its whole text
@@ -27,7 +27,7 @@ export type StackRow =
   | { kind: 'after' | 'held'; key: string; queueId: string; content: SendContent; createdAt: string; answer: boolean; grant: BlockedCall | null }
   | { kind: 'uncertain'; key: string; queueId: string; content: SendContent; createdAt: string; grant: BlockedCall | null }
   | { kind: 'sending'; key: string; text: string; createdAt: string } // a submission on its way: "Sending…"
-  | { kind: 'handed'; key: string; text: string; createdAt: string }; // the engine holds it and MAWS's queue does not list it: "Next step", no controls
+  | { kind: 'handed'; key: string; text: string; createdAt: string; grant: BlockedCall | null }; // the engine holds it and MAWS's queue does not list it: "Next step", no controls
 
 /** A row a key or a control can act on: one that waits at the next step or after the turn. */
 export type WaitingRow = Extract<StackRow, { kind: 'next' | 'after' | 'held' }>;
@@ -52,7 +52,8 @@ const grantOfText = (text: string): BlockedCall | null => {
   return grants.length === 1 ? { kind: grants[0]!.kind, subject: grants[0]!.subject } : null;
 };
 // Decision Log 44: a row is a grant's only when the sentence is everything the message holds; a message with any block
-// that is not text (an image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview
+// that is not text (an image, a PDF) is the person's own message, with its ordinary controls and its ordinary preview.
+// A handed row knows it from its transcript row's attachments (`Unread.attached`, Decision Log 49)
 const grantOf = (content: SendContent): BlockedCall | null =>
   typeof content === 'string' || (content as readonly ContentBlock[]).every((block) => block.type === 'text') ? grantOfText(messageText(content as string | ContentBlock[])) : null;
 
@@ -62,7 +63,7 @@ export function stackRows(queue: SessionQueue, lasting: ReadonlySet<string>, rea
   const listed = new Set<string>(queue.entries.flatMap((entry) => (entry.state !== 'released' && entry.messageUuid !== null ? [entry.messageUuid] : [])));
   const handed: StackRow[] = read.unread
     .filter((unread) => !steers.has(unread.messageUuid) && !listed.has(unread.messageUuid))
-    .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: unread.text, createdAt: unread.at }));
+    .map((unread) => ({ kind: 'handed', key: unread.messageUuid, text: unread.text, createdAt: unread.at, grant: unread.attached === true ? null : grantOfText(unread.text) })); // Decision Log 49 (2)
   const next: StackRow[] = queue.steers
     .filter((steer) => !read.started(steer.messageUuid))
     .map((steer) => ({ kind: 'next', key: steer.messageUuid, messageUuid: steer.messageUuid, content: steer.content, createdAt: steer.createdAt, answer: isAnswer(steer.content), grant: grantOf(steer.content) }));
@@ -91,7 +92,7 @@ export function newestToTake(rows: readonly StackRow[]): WaitingRow | null {
 
 /** The row's text: its content as the stack reads it, or what a row with no content carries; a grant's, the line it becomes (U1c). */
 export function rowText(row: StackRow): string {
-  const grant = 'content' in row ? row.grant : grantOfText(row.text);
+  const grant = 'grant' in row ? row.grant : grantOfText(row.text);
   if (grant !== null) return `${CONSENT.approved} ${grant.subject}`;
   return 'content' in row ? entryDisplay(row.content) : row.text;
 }
