@@ -7,7 +7,7 @@
 // is opened by writing it into layout.json and reloading (C5's restore path). UX wave U6b-1
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file a session opens is a tab of
 // its side column, beside the chat, with Files' tree at its left; the main strip gains a file tab only on ⌘-click.
-import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Frame, type Locator, type Page } from '@playwright/test';
@@ -22,7 +22,8 @@ import {
   selectReviewFile, shortWindow, sideFileTab, treeRow, withProduct, type Product,
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
-import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // UX wave U6b-2
+import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav, type Rgb } from './support/media-fixtures'; // UX wave U6b-2
+import { created } from './support/nothing-created'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
@@ -56,7 +57,8 @@ const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'; // Ch
 const UNLABELLED_WORDS = 'Café, naïve, Ελληνικά, 東京'; // an invented line of non-ASCII text, in a page that declares no charset
 
 // What Chromium's PDF viewer draws under the frame of `url` (a token's URL, no fragment): per viewer frame beneath it, its
-// toolbar's height (0 when the viewer draws none) and its document's title, read in the viewer's own page.
+// toolbar's height (0 when hidden: the viewer always builds the element) and its document's title, read in the viewer's
+// own page. A viewer frame without its `pdf-viewer` or its toolbar throws, so a poll on it fails rather than reads 0.
 async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<{ toolbar: number; title: string }[]> {
   return maws.app.evaluate(
     async ({ BrowserWindow }, { url, viewer }) => {
@@ -64,15 +66,23 @@ async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<{ toolbar: nu
       const script = `(() => {
         const element = document.querySelector('pdf-viewer');
         const toolbar = element && element.shadowRoot && element.shadowRoot.querySelector('viewer-toolbar');
-        return JSON.stringify({ toolbar: toolbar ? toolbar.getBoundingClientRect().height : 0, title: document.title });
+        return JSON.stringify({ missing: !element ? 'pdf-viewer' : !toolbar ? 'viewer-toolbar' : null, toolbar: toolbar ? toolbar.getBoundingClientRect().height : 0, title: document.title });
       })()`;
       const shown: { toolbar: number; title: string }[] = [];
-      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) shown.push(JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string });
+      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) {
+        const read = JSON.parse(String(await frame.executeJavaScript(script, true))) as { missing: string | null; toolbar: number; title: string };
+        if (read.missing !== null) throw new Error(`the viewer frame ${frame.url} has no ${read.missing}`);
+        shown.push({ toolbar: read.toolbar, title: read.title });
+      }
       return shown;
     },
     { url, viewer: PDF_VIEWER },
   );
 }
+
+// How many pixels of a PDF frame are its page's square of `mark` (`minimalPdf`): drawn, not just framed.
+const drawnMark = (p: Product, frame: Locator, mark?: Rgb) => markPixels(p.maws.app, p.page, frame, mark);
+const DRAWN = 2_000; // pixels of the square, on a page fitted to a tab's width: tens of thousands; none on an error or blank page
 
 // The page drawn in a file viewer's HTML frame, as Playwright reaches it (its own document, another origin).
 async function frameOfViewer(page: Page, viewer: Locator): Promise<Frame> {
@@ -85,13 +95,15 @@ async function frameOfViewer(page: Page, viewer: Locator): Promise<Frame> {
 // What the open seam received, less the file frames' own lines (`frame-decision`, `frame-entry`), which share its log.
 const openedFiles = (p: Product) => readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' }).split('\n').filter((line) => line !== '' && !line.startsWith('frame-'));
 
-// The Library's artifact ids, and every file under a folder, as a case compares them before and after.
-const libraryIds = (page: Page) =>
-  page.evaluate(async () => {
-    const listed = await window.maws.invoke('library.list', {});
-    return listed.ok ? listed.value.rows.map((row) => row.id).sort() : `refused: ${listed.error.message}`;
-  });
-const filesIn = (dir: string) => (existsSync(dir) ? readdirSync(dir, { recursive: true }).map(String).sort() : []);
+// What the case compares before and after, to show the file's frame created nothing (B8; support/nothing-created.ts).
+const snapshot = (p: Product) => created(p.page, p.maws.userData, p.scratch.appSessionId);
+
+// The responder's entries for `url` (the e2e seam's `frame-entry <method> <range|-> <url>` lines): each request's range.
+const entryRanges = (p: Product, url: string) =>
+  readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' })
+    .split('\n')
+    .filter((line) => line.startsWith('frame-entry ') && line.endsWith(` ${url}`))
+    .map((line) => line.split(' ')[2]!);
 
 // The themes' scan (`otherThemeColours`) and the stub-mode product helpers live in `support/code-product.ts` (E5 M4),
 // shared with the editor spec.
@@ -578,8 +590,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
     await withProduct(
       async (p) => {
         const path = p.scratch.path('doc.pdf');
-        const artifactsFolder = join(p.maws.userData, 'artifacts');
-        const before = { library: await libraryIds(p.page), artifacts: filesIn(artifactsFolder) };
+        const before = await snapshot(p);
         const viewer = await openInViewer(p, 'doc.pdf');
         await expect(viewer).toHaveAttribute('data-kind', 'frame');
         await expect(viewer).toHaveAttribute('data-frame', 'pdf');
@@ -590,6 +601,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const side = (await frame.getAttribute('src'))!;
         const url = side.slice(0, side.indexOf('#'));
         await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => shown.toolbar), { message: 'Chromium’s viewer in the frame, drawing no toolbar beside the chat' }).toEqual([0]);
+        await expect.poll(() => drawnMark(p, frame), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(DRAWN);
 
         // Open externally in the bar, above the frame, handing the file itself to the system
         const open = viewer.getByRole('button', { name: 'Open externally', exact: true });
@@ -606,13 +618,13 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(moved, 'the same token, the main area’s fragment').toHaveAttribute('src', `${url}#navpanes=0`, { timeout: 20_000 });
         expect(await moved.evaluate((element) => (element as unknown as { u6b2Side?: boolean }).u6b2Side === true), 'a new frame element').toBe(false);
         await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => [shown.toolbar > 0, shown.title]), { message: 'the viewer’s toolbar, titled with the file’s name' }).toEqual([[true, 'doc.pdf']]);
+        await expect.poll(() => drawnMark(p, moved), { timeout: 15_000, message: 'the page drawn in the main area' }).toBeGreaterThan(DRAWN);
 
-        // nothing created: the Library lists what it listed, and nothing was written under the profile's artifacts folder
-        expect(await libraryIds(p.page), 'the Library as it was').toEqual(before.library);
-        expect(filesIn(artifactsFolder), 'nothing written under the artifacts folder').toEqual(before.artifacts);
+        // nothing created: the Library, the session's artifacts and every artifact as they were, and nothing written
+        // under the profile's artifacts folder
+        expect(await snapshot(p), 'nothing created').toEqual(before);
       },
       (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
-      { frames: true },
     );
   });
 
@@ -623,6 +635,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
     await withProduct(
       async (p) => {
         const besideFiles = (viewer: Locator) => viewer.locator('[data-beside-files]');
+        const before = await snapshot(p);
         const page = await openInViewer(p, 'web/page.html');
         await expect(page).toHaveAttribute('data-frame', 'html');
         const pageFrame = await frameOfViewer(p.page, page);
@@ -643,6 +656,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(besideFiles(unlabelled)).toHaveCount(0);
         const labelled = await openInViewer(p, 'web/labelled.html');
         await expect((await frameOfViewer(p.page, labelled)).locator('#words'), 'a labelled page decoded by its own label').toHaveText('Café naïve');
+        expect(await snapshot(p), 'nothing created').toEqual(before);
       },
       (scratch) => {
         mkdirSync(scratch.path('web'));
@@ -653,59 +667,86 @@ test.describe('the product in stub mode over a scratch repository', () => {
         writeFileSync(scratch.path('web/unlabelled.html'), `<!doctype html><html><head><title>Unlabelled</title></head><body><p id="words">${UNLABELLED_WORDS}</p></body></html>`);
         writeFileSync(scratch.path('web/labelled.html'), Buffer.from('<!doctype html><html><head><meta charset="windows-1252"><title>Labelled</title></head><body><p id="words">Café naïve</p></body></html>', 'latin1'));
       },
-      { frames: true },
+      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the stylesheet '[^']*\/style\.css' because it violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the script '[^']*\/app\.js' because it violates the following Content Security Policy directive: "script-src /] },
     );
   });
 
   // UX wave U6b-2 (M6; B2): a video by a path plays and seeks in the artifact store's player and starts by itself never;
-  // its position is the tab's, so moved to the main area the new element is at the time it left, paused; a sound plays.
-  test('a video by a path plays and seeks, and a sound plays; moved to the main area it is at the time it left', async () => {
-    await withProduct(
-      async (p) => {
-        writeFileSync(p.scratch.path('clip.webm'), await recordedWebm(p.page));
-        writeFileSync(p.scratch.path('tone.wav'), silentWav(2));
-        const path = p.scratch.path('clip.webm');
-        const viewer = await openInViewer(p, 'clip.webm');
-        await expect(viewer).toHaveAttribute('data-frame', 'video');
-        const video = viewer.locator('video[data-artifact-media="video"]');
-        await expect(video).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/clip\.webm$/);
-        await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
-        expect(await video.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'it does not start by itself').toEqual([true, 0]);
-        await video.evaluate(async (v: HTMLVideoElement) => {
-          v.muted = true;
-          await v.play();
-        });
-        await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'it plays' }).toBeGreaterThan(1.2);
-        const seeked = await video.evaluate(
-          (v: HTMLVideoElement) =>
-            new Promise<number>((resolve) => {
-              v.pause();
-              v.addEventListener('seeked', () => resolve(v.currentTime), { once: true });
-              v.currentTime = 1;
-            }),
-        );
-        expect(seeked).toBeCloseTo(1, 1);
+  // its position is the tab's, so moved to the main area the new element is at the time it left, paused. A sound plays,
+  // and seeks to a time it has not loaded: two minutes of WAV at 44.1 kHz (10.6 MB, as the scene of record's), of which
+  // the player, preloading metadata, holds the start; the seek near its end is answered by a ranged request for it.
+  test('a video by a path plays and seeks, and a sound plays and seeks to a time not yet loaded by a ranged request; moved to the main area the video is at the time it left', async () => {
+    await withProduct(async (p) => {
+      writeFileSync(p.scratch.path('clip.webm'), await recordedWebm(p.page));
+      writeFileSync(p.scratch.path('long.wav'), silentWav(120, 44_100));
+      const before = await snapshot(p);
+      const path = p.scratch.path('clip.webm');
+      const viewer = await openInViewer(p, 'clip.webm');
+      await expect(viewer).toHaveAttribute('data-frame', 'video');
+      const video = viewer.locator('video[data-artifact-media="video"]');
+      await expect(video).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/clip\.webm$/);
+      await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+      expect(await video.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'it does not start by itself').toEqual([true, 0]);
+      await video.evaluate(async (v: HTMLVideoElement) => {
+        v.muted = true;
+        await v.play();
+      });
+      await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'it plays' }).toBeGreaterThan(1.2);
+      const seeked = await video.evaluate(
+        (v: HTMLVideoElement) =>
+          new Promise<number>((resolve) => {
+            v.pause();
+            v.addEventListener('seeked', () => resolve(v.currentTime), { once: true });
+            v.currentTime = 1;
+          }),
+      );
+      expect(seeked).toBeCloseTo(1, 1);
 
-        await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
-        const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] video[data-artifact-media="video"]`);
-        await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
-        await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'at the time it left' }).toBeCloseTo(1, 1);
-        expect(await moved.evaluate((v: HTMLVideoElement) => v.paused), 'paused').toBe(true);
+      await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+      const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] video[data-artifact-media="video"]`);
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'at the time it left' }).toBeCloseTo(1, 1);
+      expect(await moved.evaluate((v: HTMLVideoElement) => v.paused), 'paused').toBe(true);
 
-        const sound = await openInViewer(p, 'tone.wav');
-        await expect(sound).toHaveAttribute('data-frame', 'audio');
-        const audio = sound.locator('audio[data-artifact-media="audio"]');
-        await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(2, 1);
-        expect(await audio.evaluate((a: HTMLAudioElement) => a.paused), 'it does not start by itself').toBe(true);
-        await audio.evaluate(async (a: HTMLAudioElement) => {
-          a.muted = true;
-          await a.play();
-        });
-        await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'it plays' }).toBeGreaterThan(0);
-      },
-      undefined,
-      { frames: true },
-    );
+      const sound = await openInViewer(p, 'long.wav');
+      await expect(sound).toHaveAttribute('data-frame', 'audio');
+      const audio = sound.locator('audio[data-artifact-media="audio"]');
+      const src = (await audio.getAttribute('src'))!;
+      expect(src).toMatch(/^maws-artifact:\/\/[0-9a-f]{32}\/long\.wav$/);
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(120, 0);
+      expect(await audio.evaluate((a: HTMLAudioElement) => a.paused), 'it does not start by itself').toBe(true);
+      await audio.evaluate(async (a: HTMLAudioElement) => {
+        a.muted = true;
+        await a.play();
+      });
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'it plays' }).toBeGreaterThan(0);
+
+      // staged: paused, and the target outside every range the element holds
+      const target = 108;
+      const held = await audio.evaluate((a: HTMLAudioElement, target) => {
+        a.pause();
+        const ranges: [number, number][] = [];
+        for (let k = 0; k < a.buffered.length; k++) ranges.push([a.buffered.start(k), a.buffered.end(k)]);
+        return { ranges, holds: ranges.some(([start, end]) => start <= target && target <= end) };
+      }, target);
+      expect(held.holds, `the target, ${target} s, is not loaded yet: ${JSON.stringify(held.ranges)}`).toBe(false);
+      const landed = await audio.evaluate(
+        (a: HTMLAudioElement, target) =>
+          new Promise<number>((resolve) => {
+            a.addEventListener('seeked', () => resolve(a.currentTime), { once: true });
+            a.currentTime = target;
+          }),
+        target,
+      );
+      expect(landed, 'the seek succeeded').toBeCloseTo(target, 0);
+      // a ranged request from at least 90 s into the file's bytes (44-byte header, 88,200 bytes a second)
+      const from = 44 + 90 * 88_200;
+      await expect
+        .poll(() => entryRanges(p, src).some((range) => Number(/^bytes=(\d+)-/.exec(range)?.[1] ?? -1) >= from), { message: `a ranged request from byte ${from} or later reached the responder` })
+        .toBe(true);
+      expect(await snapshot(p), 'nothing created').toEqual(before);
+    });
   });
 
   // UX wave U6b-2 (M6; B16): a clip the player cannot play is no disabled player: its row says so and keeps Open
@@ -713,6 +754,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
   test('a clip the player cannot play shows its sentence and Open externally', async () => {
     await withProduct(
       async (p) => {
+        const before = await snapshot(p);
         const viewer = await openInViewer(p, 'broken.mp4');
         await expect(viewer).toHaveAttribute('data-kind', 'frame');
         await expect(viewer, 'the row in the player’s place').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
@@ -721,32 +763,37 @@ test.describe('the product in stub mode over a scratch repository', () => {
         await expect(viewer.locator('video, [data-artifact-media]')).toHaveCount(0);
         await row.getByRole('button', { name: 'Open externally', exact: true }).click();
         await expect.poll(() => openedFiles(p)).toEqual([p.scratch.path('broken.mp4')]);
+        expect(await snapshot(p), 'nothing created').toEqual(before);
       },
       (scratch) => writeFileSync(scratch.path('broken.mp4'), Buffer.from('These invented bytes are no video at all.\n'.repeat(64))),
-      { frames: true },
     );
   });
 
   // UX wave U6b-2 (M6; B7): a PDF replaced on disk is read again on its folder's event, which asks for a new token: the
-  // frame is made again from it and the bar flashes Updated.
+  // frame is made again from it, the bar flashes Updated, and the new version is what is drawn (its square red, the first's
+  // black).
   test('a PDF replaced on disk is drawn again', async () => {
     await withProduct(
       async (p) => {
+        const before = await snapshot(p);
         const viewer = await openInViewer(p, 'doc.pdf');
         await expect(viewer).toHaveAttribute('data-frame', 'pdf');
         const frame = viewer.locator('[data-artifact-frame="pdf"]');
-        const before = (await frame.getAttribute('src'))!;
+        await expect.poll(() => drawnMark(p, frame), { timeout: 15_000, message: 'the first version drawn: its black square' }).toBeGreaterThan(DRAWN);
+        const first = (await frame.getAttribute('src'))!;
         await expect(viewer.locator('[data-updated]')).toHaveCount(0);
-        writeFileSync(p.scratch.path('doc.pdf'), minimalPdf('https://example.invalid/the-new-version'));
-        await expect.poll(() => frame.getAttribute('src'), { timeout: 20_000, message: 'the frame drawn from a new token' }).not.toBe(before);
+        writeFileSync(p.scratch.path('doc.pdf'), minimalPdf(undefined, INVENTED_RED));
+        await expect.poll(() => frame.getAttribute('src'), { timeout: 20_000, message: 'the frame drawn from a new token' }).not.toBe(first);
         await expect(frame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
         await expect(viewer.locator('[data-updated]')).toHaveText('Updated');
         await expect(viewer).toHaveAttribute('data-frame', 'pdf');
         const after = (await frame.getAttribute('src'))!;
         await expect.poll(async () => (await pdfViewerOf(p.maws, after.slice(0, after.indexOf('#')))).length, { message: 'Chromium’s viewer in the new frame' }).toBe(1);
+        await expect.poll(() => drawnMark(p, frame, INVENTED_RED), { timeout: 15_000, message: 'the new version drawn: its red square' }).toBeGreaterThan(DRAWN);
+        expect(await drawnMark(p, frame), 'the first version’s black square gone').toBeLessThan(DRAWN / 10);
+        expect(await snapshot(p), 'nothing created').toEqual(before);
       },
       (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
-      { frames: true },
     );
   });
 
@@ -1012,9 +1059,12 @@ test.describe('the product in stub mode over a scratch repository', () => {
       },
       (scratch) => {
         mkdirSync(scratch.path('locked'), { mode: 0o000 });
-        writeFileSync(scratch.path('gone.pdf'), minimalPdf()); // UX wave U6b-2
+        // UX wave U6b-2: a PDF the viewer can draw in place of the scratch's placeholder, and one to remove
+        writeFileSync(scratch.path('doc.pdf'), minimalPdf());
+        writeFileSync(scratch.path('gone.pdf'), minimalPdf());
       },
-      { frames: true }, // UX wave U6b-2: the failed frame's 404 is the file's own console
+      // UX wave U6b-2: the removed PDF's frame asking its URL again, answered 404 before a byte (the responder's one answer)
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/gone\.pdf(#\S*)? Failed to load resource: the server responded with a status of 404 \(Not Found\)$/] },
     );
   });
 });

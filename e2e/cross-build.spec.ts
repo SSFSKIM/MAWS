@@ -167,7 +167,7 @@ import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
 import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
-import { minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -3570,6 +3570,7 @@ test('(file frame, both ways) this build’s window on the peer’s unit mawsd d
     const drawn = sideColumn(back.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
     await expect(drawn, 'drawn once a daemon of this build serves').toHaveAttribute('data-frame', 'pdf', { timeout: 30_000 });
     await expect(drawn.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+    await expect.poll(() => markPixels(back.maws.app, back.page, drawn.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
     expect(back.maws.consoleErrors()).toEqual([]);
     await s.quit(back);
     await endProfileProcesses(s.userData);

@@ -17,7 +17,8 @@ import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { assistantRecord, backgroundAgentRecords, backgroundAgentSidecars, backgroundBashRecords, CATALOG, editTurnRecords, taskNotificationRecord, terminalSession, turnEndRecords, userRecord, type BackgroundAgent, type TerminalSession } from './support/lane-a';
 import { addressed } from './support/address';
 import { openSurface, sessionCard, showSessionCards, sideColumn, surface } from './support/shell';
-import { minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2
+import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { sidebarOf, sidebarRow } from './support/sidebar';
 
 function invoke<N extends CommandName>(page: Page, name: N, input: CommandInput<N>): Promise<CommandResult<N>> {
@@ -415,6 +416,7 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     const path = c.repo.path('notes.pdf');
     writeFileSync(path, minimalPdf());
     await drive(c);
+    const before = await created(page, maws.userData, c.appId);
     await openSurface(page, 'Files');
     const row = surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
     await expect(row, 'the PDF in Files’ tree of the terminal session’s folder').toBeVisible({ timeout: 20_000 });
@@ -429,8 +431,10 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await expect
       .poll(() => maws.app.evaluate(({ BrowserWindow }, root) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith('chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/') && (f.parent?.url ?? '').startsWith(root)).length, url), { timeout: 20_000, message: 'Chromium’s viewer in the frame' })
       .toBe(1);
+    await expect.poll(() => markPixels(maws.app, page, frame), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
     await expect(viewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
     await expect(viewer.getByRole('button', { name: 'Open externally', exact: true }), 'Open externally in the bar').toBeVisible();
+    expect(await created(page, maws.userData, c.appId), 'nothing created').toEqual(before);
     expect(maws.consoleErrors()).toEqual([]);
   });
 

@@ -46,7 +46,8 @@ import {
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu'; // P3-G
 import { solidPng } from './support/side-replay';
-import { minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // P3-L M5b: shared with e2e/library.spec.ts
+import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav } from './support/media-fixtures'; // P3-L M5b: shared with e2e/library.spec.ts
+import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 
 test.describe.configure({ timeout: 120_000 });
 
@@ -1136,10 +1137,18 @@ async function openByPath(s: Scene, id: string, path: string): Promise<Locator> 
   return s.page.locator(`[data-file-viewer][data-path="${path}"]`);
 }
 
-// The delivered page, and what a page by a path may try beside it: its fetch's outcome written where the scene reads it,
-// and three messages to the window in the shapes the artifact frame's bridge posts (a pick, a cancelled pick, a located
+// The delivered page, and what a page by a path may try beside it: every Content Security Policy refusal its document
+// meets (recorded from its head, before any of its requests), its fetch's outcome written where the scene reads it, and
+// three messages to the window in the shapes the artifact frame's bridge posts (a pick, a cancelled pick, a located
 // element), which no listener of the window takes from a file's frame
 const HOSTILE_PAGE = DELIVERED_PAGE.replace(
+  '</head>',
+  `<script>
+document.addEventListener('securitypolicyviolation', (event) => {
+  document.documentElement.dataset.refused = (document.documentElement.dataset.refused || '') + event.effectiveDirective + ' ' + event.blockedURI + '\\n';
+});
+</script></head>`,
+).replace(
   '</body>',
   `<script>
 fetch('https://example.invalid/file-fetch').then(() => { document.body.dataset.fetch = 'reached'; }, () => { document.body.dataset.fetch = 'failed'; });
@@ -1196,6 +1205,7 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
       });
     });
     const heard = () => s.page.evaluate(() => [...(window as unknown as { __u6b2Heard: string[] }).__u6b2Heard]);
+    const before = await created(s.page, s.maws.userData, id); // B8
 
     const viewer = await openByPath(s, id, path);
     await expect(viewer).toHaveAttribute('data-frame', 'html');
@@ -1206,6 +1216,8 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     const page = await frameAt(s.page, src);
     await expect(page.locator('#marker'), 'its inline script ran').toHaveText('SCRIPT_RAN');
     await expect.poll(() => page.evaluate(() => document.body.dataset.fetch ?? ''), { message: 'its fetch has settled' }).toBe('failed');
+    // failed for the frame's policy, not for the name: the CSP's connect-src refused the request before it was made
+    await expect.poll(() => page.evaluate(() => document.documentElement.dataset.refused ?? ''), { message: 'the fetch refused by connect-src' }).toMatch(/^connect-src https:\/\/example\.invalid(\/file-fetch)?$/m);
 
     // its messages reached the window and changed nothing: no bridge listens to a file's frame (decision 13)
     await expect.poll(() => page.evaluate(() => document.body.dataset.posted ?? ''), { message: 'the page posted its messages' }).toBe('yes');
@@ -1220,8 +1232,10 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     console.log(`[u6b2-file-page] ICE candidate types in the frame: ${JSON.stringify(ice)}`);
     expect(ice).not.toContain('srflx');
     // a download link saves nothing: the frame's sandbox (no allow-downloads) refuses it before any download starts
+    // the barrier is the sandbox's own refusal, which Chromium logs in the frame as it declines to start the download
+    const refusedDownload = s.page.waitForEvent('console', { predicate: (message) => message.text().startsWith('Download is disallowed. The frame initiating or instantiating the download is sandboxed'), timeout: 15_000 });
     await page.locator('#save').click();
-    await s.page.waitForTimeout(1_500); // a download that started would have reached main by now; nothing to wait for
+    await refusedDownload;
     expect(seamLines(s).filter((l) => l.startsWith('blocked-download')), 'no download reached main').toEqual([]);
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(s.maws.userData, (name) => name === 'e2-download.txt' || name.endsWith('.crdownload'))).toEqual([]);
@@ -1232,6 +1246,7 @@ test("a file by a path: a hostile page's fetch fails, its link is refused, it ga
     await expect.poll(navigations).toContain('fail frame -30 https://example.invalid/away'); // ERR_BLOCKED_BY_CSP
     expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
     expect(s.page.url()).toBe(appUrl);
+    expect(await created(s.page, s.maws.userData, id), 'nothing created').toEqual(before);
   });
 });
 
@@ -1242,6 +1257,7 @@ test("a file by a path: a hostile PDF's link is a blocked navigation, its Downlo
     const path = join(s.repo, 'report.pdf');
     writeFileSync(path, minimalPdf('https://example.invalid/pdf-link'));
     const downloads = await scratchDownloads(s);
+    const before = await created(s.page, s.maws.userData, id); // B8
     await openByPath(s, id, path);
     // moved to the main area, where Chromium's toolbar, and so its Download, shows (decision 15)
     await sideColumn(s.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
@@ -1260,7 +1276,6 @@ test("a file by a path: a hostile PDF's link is a blocked navigation, its Downlo
     await s.page.mouse.click(square.x, square.y);
     await expect.poll(navigations, { timeout: 10_000 }).toContain('start window https://example.invalid/pdf-link');
     await expect.poll(() => seamLines(s)).toContain('blocked-navigation https://example.invalid/pdf-link');
-    await s.page.waitForTimeout(1_000); // a commit the guard let through would have landed by now
     expect((await navigations()).filter((line) => line.startsWith('navigated window'))).toEqual([]);
     const after = await framesOfWindow(s);
     expect(after.app).toBe(appUrl);
@@ -1271,9 +1286,9 @@ test("a file by a path: a hostile PDF's link is a blocked navigation, its Downlo
     const pressed = await pressPdfDownload(s);
     expect(pressed.some((answer) => answer.endsWith(' pressed')), JSON.stringify(pressed)).toBe(true);
     await expect.poll(() => seamLines(s).filter((line) => line.startsWith(`blocked-download ${url}`)).length, { message: 'the viewer’s save cancelled as a download of the token’s URL' }).toBeGreaterThan(0);
-    await s.page.waitForTimeout(1_000); // a download let through would have written its first bytes by now
     expect(filesUnder(downloads, () => true)).toEqual([]);
     expect(filesUnder(s.maws.userData, (name) => name.endsWith('.pdf') || name.endsWith('.crdownload'))).toEqual([]);
+    expect(await created(s.page, s.maws.userData, id), 'nothing created').toEqual(before);
   });
 });
 
@@ -1293,7 +1308,9 @@ test("ticket 662 on a file's frame: its dns-prefetch links ask the resolver for 
     const viewer = await openByPath(s, id, path);
     await expect(viewer).toHaveAttribute('data-frame', 'html');
     await expect.poll(() => s.page.evaluate(() => (window as unknown as { __u6b2Prefetch?: boolean }).__u6b2Prefetch === true), { message: 'the page’s script ran and connected both links' }).toBe(true);
-    // a prefetch goes from the frame's renderer to the browser process and on to the resolver after the insertion
+    // A bounded window, not a barrier: a prefetch goes from the frame's renderer to the browser process and on to the
+    // resolver some time after the insertion, and nothing observable says that none is coming. The control resolved after
+    // it shows the log was recording; the window only gives a prefetch, had one been asked, the time to reach the log.
     await s.page.waitForTimeout(2_000);
     await s.maws.app.evaluate(async ({ BrowserWindow }, host) => {
       const { session } = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents;
@@ -1315,30 +1332,35 @@ test("ticket 662 on a file's frame: its dns-prefetch links ask the resolver for 
   });
 });
 
-type Completion = { url: string; method: string; status: number; contents: number | null };
+// A request for a token's host as the window's partition ended it: completed with the responder's status, or ended by an
+// error (`error`, Chromium's name for it, the request filter's cancel among them) with no status.
+type Outcome = { url: string; method: string; status: number | null; error: string | null; contents: number | null };
 
-test("a token's URL: its own name's path is the file; another name, a longer path and a query are 404; a POST is 405; a closed tab's is 404", async () => {
+test("a token's URL: its own name's path is the file; another name, a longer path and a query are 404; a POST is 405; a closed tab's is cancelled before the responder", async () => {
   test.setTimeout(180_000);
   await scene({ titles: ['U6b-2: a token’s URL'] }, async (s) => {
     const [id] = s.ids;
     const path = join(s.repo, 'ledger.html');
     writeFileSync(path, FRAME_PAGE);
     const owner = await s.maws.app.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!.webContents.id);
-    // what the window's partition completed for the scheme: each request's status as the responder answered it, and the
-    // web contents that asked (the scene's own listener: the app sets none on this event)
+    // how the window's partition ended each request for the scheme: completed with the status the responder answered, or
+    // ended by an error, and the web contents that asked (the scene's own listeners: the app sets none on these events)
     await s.maws.app.evaluate(({ session }) => {
-      const done: Completion[] = [];
-      (globalThis as unknown as { __u6b2Completed: Completion[] }).__u6b2Completed = done;
+      const ended: Outcome[] = [];
+      (globalThis as unknown as { __u6b2Ended: Outcome[] }).__u6b2Ended = ended;
       session.defaultSession.webRequest.onCompleted({ urls: ['<all_urls>'] }, (details) => {
-        if (details.url.startsWith('maws-artifact://')) done.push({ url: details.url, method: details.method, status: details.statusCode, contents: details.webContentsId ?? null });
+        if (details.url.startsWith('maws-artifact://')) ended.push({ url: details.url, method: details.method, status: details.statusCode, error: null, contents: details.webContentsId ?? null });
+      });
+      session.defaultSession.webRequest.onErrorOccurred({ urls: ['<all_urls>'] }, (details) => {
+        if (details.url.startsWith('maws-artifact://')) ended.push({ url: details.url, method: details.method, status: null, error: details.error, contents: details.webContentsId ?? null });
       });
     });
-    const completed = () => s.maws.app.evaluate(() => [...(globalThis as unknown as { __u6b2Completed: Completion[] }).__u6b2Completed]);
+    const endedSoFar = () => s.maws.app.evaluate(() => [...(globalThis as unknown as { __u6b2Ended: Outcome[] }).__u6b2Ended]);
     let probes = 0;
     // `url` loaded by the owning window as a person's frame would load it, by a GET in a frame of its own, or by a form's
-    // POST into one; its completion, once the partition has one for it
-    const probe = async (url: string, method: 'GET' | 'POST' = 'GET'): Promise<Completion> => {
-      const before = (await completed()).length;
+    // POST into one; how the partition ended it, once it has
+    const probe = async (url: string, method: 'GET' | 'POST' = 'GET'): Promise<Outcome> => {
+      const before = (await endedSoFar()).length;
       const frame = `u6b2-probe-${++probes}`;
       if (method === 'GET') await mountFrames(s.page, [{ id: frame, kind: 'html', url }]);
       else {
@@ -1363,11 +1385,16 @@ test("a token's URL: its own name's path is the file; another name, a longer pat
           form.remove();
         }, { frame, url });
       }
-      let found: Completion | undefined;
-      await expect.poll(async () => (found = (await completed()).slice(before).find((c) => c.url === url && c.method === method)) !== undefined, { message: `${method} ${url} completed` }).toBe(true);
+      let found: Outcome | undefined;
+      await expect.poll(async () => (found = (await endedSoFar()).slice(before).find((c) => c.url === url && c.method === method)) !== undefined, { message: `${method} ${url} ended` }).toBe(true);
       await s.page.evaluate((frame) => document.getElementById(frame)?.remove(), frame);
       expect(found!.contents, `${method} ${url}: asked by the owning window`).toBe(owner);
       return found!;
+    };
+    const answered = async (url: string, method: 'GET' | 'POST' = 'GET') => {
+      const ended = await probe(url, method);
+      expect(ended.error, `${method} ${url} reached the responder`).toBeNull();
+      return ended.status;
     };
 
     const viewer = await openByPath(s, id, path);
@@ -1377,24 +1404,45 @@ test("a token's URL: its own name's path is the file; another name, a longer pat
     const root = url.slice(0, url.lastIndexOf('/') + 1); // `maws-artifact://<token>/`
 
     // its own name's path: the file, whose script runs
-    expect((await probe(url)).status, 'its own name').toBe(200);
+    expect(await answered(url), 'its own name').toBe(200);
     await expect((await frameAt(s.page, url)).locator('#marker')).toHaveText('SCRIPT_RAN');
-    // every other path under the token, and any query: 404, the same for each
-    expect((await probe(`${root}other`)).status, 'another name').toBe(404);
-    expect((await probe(`${root}nested/ledger.html`)).status, 'a longer path').toBe(404);
-    expect((await probe(`${url}?view=1`)).status, 'a query').toBe(404);
+    // every other path under the token, and any query: 404, the same for each (a live token passes the owner's check, so
+    // each reaches the responder)
+    expect(await answered(`${root}other`), 'another name').toBe(404);
+    expect(await answered(`${root}nested/ledger.html`), 'a longer path').toBe(404);
+    expect(await answered(`${url}?view=1`), 'a query').toBe(404);
     // a method other than GET and HEAD
-    expect((await probe(url, 'POST')).status, 'a POST').toBe(405);
+    expect(await answered(url, 'POST'), 'a POST').toBe(405);
 
-    // the tab closed: its entry goes, its token is released, and its URL answers 404
+    // the tab closed: its entry goes and its token is released, after which the request filter cancels its URL before the
+    // responder is entered (Decision Log 28; the responder's own 404 for a released token is its unit case). Each GET is
+    // seen to its end; the scene settles on the first one cancelled, then on the filter's line for it, and only then reads
+    // that the responder has no entry for it.
     await closeSideTab(s.page, 'ledger.html');
     await expect(s.page.locator(`[data-file-viewer][data-path="${path}"]`)).toHaveCount(0);
-    await expect.poll(async () => (await probe(url)).status, { message: 'the closed tab’s URL, once its token is released' }).toBe(404);
-    await s.maws.app.evaluate(({ session }) => session.defaultSession.webRequest.onCompleted(null));
+    const cancelLine = `frame-decision cancel ${owner} GET ${url}`;
+    let cancelsBefore = 0;
+    await expect
+      .poll(
+        async () => {
+          cancelsBefore = seamLines(s).filter((line) => line === cancelLine).length;
+          return (await probe(url)).error;
+        },
+        { timeout: 20_000, message: 'a GET of the closed tab’s URL, once its token is released, ended by the request filter’s cancel' },
+      )
+      .toBe('net::ERR_BLOCKED_BY_CLIENT');
+    await expect.poll(() => seamLines(s).filter((line) => line === cancelLine).length, { message: `the filter’s line: ${cancelLine}` }).toBeGreaterThan(cancelsBefore);
+    // the seam has one ordered writer, so an entry the responder made for the cancelled request would follow its line
+    const lines = seamLines(s);
+    expect(lines.slice(lines.lastIndexOf(cancelLine) + 1).filter((line) => line.startsWith('frame-entry ') && line.endsWith(` ${url}`)), 'the responder was never entered for it').toEqual([]);
+    await s.maws.app.evaluate(({ session }) => {
+      session.defaultSession.webRequest.onCompleted(null);
+      session.defaultSession.webRequest.onErrorOccurred(null);
+    });
   });
 });
 
-test("a read that fails before a PDF's first byte shows the sentence and Open again; pressed while it still fails, the same body; nothing reads again by itself; pressed once the file is readable, the PDF is drawn", async () => {
+test("a read that fails before a PDF's first byte shows the sentence and Open again; pressed while it still fails, the same body; nothing reads again by itself; pressed once the file is readable, the PDF is drawn; replaced and shown again, the new one is drawn", async () => {
   test.setTimeout(240_000);
   // A PDF outside the session's folder that the session's transcript links (U6c): no watch follows it, so its removal and
   // its return are seen by nobody until a person asks (sequence 12)
@@ -1416,12 +1464,15 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
     try {
       const [id] = s.ids;
       await show(s, id);
+      const before = await created(s.page, s.maws.userData, id); // B8: nothing created by the frame
       const chip = s.page.locator(`[data-region="main"] [data-chip="path"][title="${path}"]`);
       await expect(chip, 'the transcript’s link').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(s.page).locator(`[data-file-viewer][data-path="${path}"]`);
       await expect(viewer, 'the linked PDF drawn beside the chat').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
-      const firstUrl = (await viewer.locator('[data-artifact-frame="pdf"]').getAttribute('src'))!;
+      const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
+      const firstUrl = (await pdfFrame.getAttribute('src'))!;
+      await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF drawn before its file goes' }).toBeGreaterThan(2_000);
       // kept, so another tab can be shown in its place and it shown again
       await sideTab(sideColumn(s.page), 'report.pdf').dblclick();
       await expect(sideColumn(s.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the tab kept').toHaveCount(0);
@@ -1454,9 +1505,11 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       await expect(again).toBeVisible();
       expect(frameRequests(), 'no frame asked for its URL').toBe(asked);
 
-      // the file back, and time passing: nothing reads it again by itself
+      // the file back, and time passing: nothing reads it again by itself. A bounded window, not a barrier: no event says
+      // that a read is not coming. No watch follows a named file outside the folder, and that no clock reads again is the
+      // store's unit cases' to hold; the window only gives a read made by itself, were there one, the time to show.
       writeFileSync(path, bytes);
-      await s.page.waitForTimeout(3_000); // what a clock or a watch would have read by now; nothing should
+      await s.page.waitForTimeout(3_000);
       await expect(viewer).toHaveAttribute('data-loads', String(loads + 1));
       await expect(viewer).toHaveAttribute('data-frame', 'failed');
       expect(frameRequests(), 'no request for the file').toBe(asked);
@@ -1464,10 +1517,20 @@ test("a read that fails before a PDF's first byte shows the sentence and Open ag
       // pressed once the file is readable: a new token, and the PDF drawn
       await again.click();
       await expect(viewer, 'drawn again').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
-      const pdfFrame = viewer.locator('[data-artifact-frame="pdf"]');
       await expect(pdfFrame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
-      expect(await pdfFrame.getAttribute('src'), 'from a new token').not.toBe(firstUrl);
+      const secondUrl = (await pdfFrame.getAttribute('src'))!;
+      expect(secondUrl, 'from a new token').not.toBe(firstUrl);
       await expect.poll(async () => (await darkIn(s, pdfFrame)).dark, { timeout: 15_000, message: 'the PDF frame draws its page' }).toBeGreaterThan(2_000);
+
+      // B7 for a named PDF: replaced where no watch sees it, then its tab shown again; the showing reads it again, and the
+      // new version (its square red, the first's black) is drawn from a new token
+      writeFileSync(path, minimalPdf(undefined, INVENTED_RED));
+      await sideTab(sideColumn(s.page), 'Files').click(); // the Files tab added above
+      await expect(sideColumn(s.page).locator('[data-files-tab][data-file=""]'), 'another tab in its place').toBeVisible({ timeout: 20_000 });
+      await sideTab(sideColumn(s.page), 'report.pdf').click();
+      await expect.poll(() => pdfFrame.getAttribute('src'), { timeout: 20_000, message: 'the frame drawn from a new token' }).not.toBe(secondUrl);
+      await expect.poll(() => markPixels(s.maws.app, s.page, pdfFrame, INVENTED_RED), { timeout: 15_000, message: 'the new version drawn: its red square' }).toBeGreaterThan(2_000);
+      expect(await created(s.page, s.maws.userData, id), 'nothing created').toEqual(before);
     } catch (error) {
       await s.maws.cleanup();
       throw error;

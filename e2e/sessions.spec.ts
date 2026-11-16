@@ -24,7 +24,8 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, mainTabById, mainTabs, mountedTabs, sideColumn } from './support/shell';
-import { minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the linked PDF, drawn
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the linked PDF, drawn
+import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -1132,11 +1133,14 @@ test.describe('sessions', () => {
       await expect(notes).toHaveAttribute('data-dirty', 'false');
       await expect(notes.locator('[data-editor-controls]')).toHaveCount(0);
 
+      const before = await created(page, maws.userData, s!); // UX wave U6b-2: B8, nothing created by the frame
       await chip('report.pdf').click(); // the session's tab never left the front, so its transcript is where it was
       const report = side.locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
-      // UX wave U6b-2: drawn in its frame from a token whose URL names the file and no folder, with the side tab's fragment
+      // UX wave U6b-2: drawn in its frame from a token whose URL names the file and no folder, with the side tab's fragment,
+      // its page's black square painted (not an error or blank page)
       await expect(report, 'the linked PDF drawn').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
       await expect(report.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+      await expect.poll(() => markPixels(maws.app, page, report.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
       await expect(report.locator('[data-external-row]'), 'no row').toHaveCount(0);
       await expect(side.locator(`[data-files-tab][data-file="${file('report.pdf')}"]`), 'in the preview tab the text file was shown in').toBeVisible();
       await expect(side.locator(`[data-files-tab][data-file="${file('notes.txt')}"]`)).toHaveCount(0);
@@ -1145,6 +1149,7 @@ test.describe('sessions', () => {
       // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
       const opened = () => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }).split('\n').filter((line) => line !== '' && !line.startsWith('frame-'));
       await expect.poll(opened, { timeout: 20_000 }).toEqual([file('report.pdf')]);
+      expect(await created(page, maws.userData, s!), 'nothing created').toEqual(before);
 
       const refusal = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
       const read = (appSessionId: string, name: string, named: boolean) => invoke(page, 'files.read', { appSessionId: appSessionId as never, path: file(name), ...(named ? { named: true as const } : {}) });

@@ -76,26 +76,39 @@ export interface Product {
   scratch: CodeScratch;
 }
 
-// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): `frames`, for a case that draws a
-// session's file in its frame: the closing console check leaves out what the frame and Chromium's PDF viewer beneath it
-// log (a page's refused stylesheet, a released token's 404), which is the file's own console, as the artifact scenes
-// leave out an artifact frame's (support/maws-tools.ts); the window's own errors are still every one it logs.
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): `frames`, for a case whose fixture
+// makes a session's file in its frame log errors of its own (a page's stylesheet and script refused by the frame's CSP):
+// each pattern is matched against `<location> <text>`. The closing check leaves out a console error located in a frame (a
+// token's URL or Chromium's PDF viewer) only when one of the patterns matches it, and a page error only when the frame that
+// threw it (its stack's first call site, read after the message) is one and a pattern matches; every other error, the
+// window's own and a frame's unexpected load or viewer error, fails the case. Without `frames`, every error fails it.
 const FRAME_LOCATION = /^(maws-artifact|chrome-extension):/;
 
-export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: boolean } = {}): Promise<void> {
+// The URL of a page error's first call site, read below its message (which can hold any text); '' when the stack does not
+// begin with the message as Playwright writes it, so such an error counts as the window's.
+function thrownAt(error: Error): string {
+  const head = `${error.name}: ${error.message}`;
+  const stack = error.stack ?? '';
+  if (!stack.startsWith(head)) return '';
+  return /^\s+at (?:[^\n]*\()?([^\s()]+):\d+:\d+\)?$/m.exec(stack.slice(head.length))?.[1] ?? '';
+}
+
+export async function withProduct(body: (p: Product) => Promise<void>, prepare?: (scratch: CodeScratch) => void, opts: { frames?: RegExp[] } = {}): Promise<void> {
   const scratch = buildCodeScratch();
   prepare?.(scratch);
   let maws: MawsLaunch | null = null;
   try {
     maws = await launchMaws({ env: scratch.env });
     const { page } = maws;
-    const own: string[] = opts.frames ? maws.consoleErrors() : [];
-    if (opts.frames) {
+    const expected = opts.frames;
+    const own: string[] = expected ? maws.consoleErrors() : [];
+    if (expected) {
+      const theFrames = (location: string, text: string) => FRAME_LOCATION.test(location) && expected.some((pattern) => pattern.test(`${location} ${text}`));
       page.on('console', (message) => {
-        if (message.type() === 'error' && !FRAME_LOCATION.test(message.location().url)) own.push(message.text());
+        if (message.type() === 'error' && !theFrames(message.location().url, message.text())) own.push(message.text());
       });
       page.on('pageerror', (error) => {
-        if (!(error.stack ?? '').includes('maws-artifact://')) own.push(`uncaught: ${error.message}`);
+        if (!theFrames(thrownAt(error), error.message)) own.push(`uncaught: ${error.message}`);
       });
     }
     // W11: the row is in its project, expanded once the stub's records are in.
@@ -106,7 +119,7 @@ export async function withProduct(body: (p: Product) => Promise<void>, prepare?:
     await expect(tab).toHaveAttribute('aria-selected', 'true');
     await expect(tab).toContainText(CHARTER);
     await body({ maws, page, panel, scratch });
-    expect(opts.frames ? own : maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
+    expect(expected ? own : maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
   } finally {
     await maws?.cleanup();
     scratch.cleanup();
