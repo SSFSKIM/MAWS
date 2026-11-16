@@ -53,8 +53,9 @@ export function mawsTools(deps: {
   });
   // P3-B (M7): the document tools' session memory, sharing A's kinds-given-their-guide; A's create and read answer a
   // document through P3-B's wrappers, every other kind as before
-  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided), log: deps.log, provisional: deps.provisional /* P4-A2 */ };
-  const genericRead = artifactReadTool(artifacts); // P3-E: also the raw read of a held legacy dashboard
+  const documents = { artifacts: deps.artifacts, artifactScope: deps.artifactScope, session: new DocumentToolSession(artifacts.session.guided, artifacts.session.instructed /* UX wave U10b (M10) */, artifacts.session.ops /* M10 fix wave 1 */), log: deps.log, provisional: deps.provisional /* P4-A2 */ };
+  const genericRead = artifactReadTool(artifacts);
+  const legacyRead = artifactReadTool(artifacts, { instructs: false }); // P3-E: the raw read of a held legacy dashboard (UX wave U10b M10: it gives no Space's instructions)
   return [
     afterImport(sendFileTool(artifacts)), askTool({ asks: deps.asks, cancelled: deps.askCancelled }), showPaneTool(deps),
     // P3-E (E2 M2 fix wave): a dashboard made from files before E2 is held, read raw and never written
@@ -66,7 +67,7 @@ export function mawsTools(deps: {
       artifactDatasetTool({ ...artifacts, refreshes: deps.datasetRefresh /* E3 */, provisional: deps.provisional /* P4-A2 */ }), // P3-E (E2 M2)
       // P3-B (M7); P3-C (M7): B's thread tools answer a deck from its threads; P3-E: a design (E1's M2) and a dashboard (E2 M2) from their own
       ...dashboardThreadTools(documents, designThreadTools(documents, presentationThreadTools(documents, documentTools(documents)))),
-    ], genericRead).map(afterImport),
+    ], legacyRead).map(afterImport),
     afterImport(artifactSearchTool(artifacts)), // P4-B4: after the document tools
   ];
 }

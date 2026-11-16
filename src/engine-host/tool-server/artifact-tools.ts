@@ -25,6 +25,7 @@ import { isDocKind, type Artifact, type ArtifactKind, type Space } from '@shared
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import {
+  DESIGN_SYSTEM_KINDS,
   parseToolArguments,
   TOOL_ERRORS,
   type ArtifactCreateResult,
@@ -40,10 +41,14 @@ import type { ArtifactStore, ByteContent } from '../documents/store';
 import {
   actorOf,
   answering,
+  ArtifactSession,
   editorOf,
   filesOf,
+  instructionsField,
+  instructionsIn,
   lineageOf,
   loaderFields,
+  instructedOnDelivery,
   opIdOf,
   publisherOf,
   readHtmlSource,
@@ -82,6 +87,26 @@ export async function spaceNamed(store: ArtifactStore, ref: string | undefined, 
   throw refused({ reason: 'notFound', space: ref }, `no Space "${ref}"; ${there}`);
 }
 
+// UX wave U10b (l6-artifacts-08): the design system a create names, by its id, else its title (exactly, then in any case
+// and spacing; H18: the artifact's title, the name the Library and the person's choice show), among the live design
+// systems, read once the batch it was read in committed. None is refused with the systems there are, a title two
+// systems share with their ids; a kind no system governs is refused before anything is read (`refused` makes the
+// calling tool's refusal of the text, as `spaceNamed`'s does). A system deleted after this read is refused by the
+// store's own check at the create.
+export async function designSystemNamed(store: ArtifactStore, kind: ArtifactKind, ref: string | undefined, refused: (text: string) => Error): Promise<Artifact | undefined> {
+  if (ref === undefined) return undefined;
+  if (!(DESIGN_SYSTEM_KINDS as readonly ArtifactKind[]).includes(kind)) throw refused(TOOL_ERRORS.designSystemNotForKind(kind));
+  const systems = await store.readCommitted(() => store.list({ kind: 'design_system' }));
+  const byId = systems.find((system) => system.id === ref);
+  if (byId) return byId;
+  const loose = (title: string) => title.replace(/\s+/g, '').toLowerCase();
+  const exact = systems.filter((system) => system.title === ref);
+  const named = exact.length > 0 ? exact : systems.filter((system) => loose(system.title) === loose(ref));
+  if (named.length === 1) return named[0];
+  if (named.length > 1) throw refused(TOOL_ERRORS.designSystemAmbiguous(ref, named.map((system) => system.id).sort()));
+  throw refused(TOOL_ERRORS.noDesignSystem(ref, systems.map((system) => system.title).sort((a, b) => a.localeCompare(b, 'en'))));
+}
+
 // What a create's answer says of the Space it was made in.
 export const spaceFields = (space: Space | undefined): { spaceId?: string; spaceName?: string } => (space ? { spaceId: space.id, spaceName: space.name } : {});
 
@@ -112,21 +137,26 @@ export function artifactListTool(deps: ArtifactToolDeps): McpToolDefinition {
 }
 
 // The kind's guide and format reference; for a kind a design system styles, the guide of the system that would govern a
-// new artifact (the chain's answer for no system or Space of its own, Decision Log 42), when the store has one.
-export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope'> = {}): McpToolDefinition {
+// new artifact (the chain's answer for no system or Space of its own, Decision Log 42), when the store has one. UX wave
+// U10b (M10, §E.4): `space` describes a new artifact in that Space (its home and that Space's governing system); with
+// `artifact` the artifact's own placement governs and `space` is not read. The answer carries the Space's instructions
+// as a create or a read there would.
+export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts' | 'artifactScope'> & Partial<Pick<ArtifactToolDeps, 'session'>> = {}): McpToolDefinition {
+  const session = deps.session ?? new ArtifactSession();
   return defineMawsTool('artifact_describe_type', (args, ctx) => answering('artifact_describe_type', async () => {
     const parsed = parseToolArguments('artifact_describe_type', args);
     if (!parsed.ok) return toolError(parsed.error);
-    const { kind, artifact: ref } = parsed.data;
-    const store = ref === undefined ? deps.artifacts?.() ?? null : storeOf('artifact_describe_type', deps);
+    const { kind, artifact: ref, space: spaceRef } = parsed.data;
+    const store = ref === undefined && spaceRef === undefined ? deps.artifacts?.() ?? null : storeOf('artifact_describe_type', deps);
     const id = ref !== undefined && store ? await resolveArtifact('artifact_describe_type', store, ref, lineageOf(ctx, deps)) : undefined;
-    const placement = id && store ? await store.readCommitted(() => {
+    const space = ref === undefined && store ? await spaceNamed(store, spaceRef, (refusal, sentence) => refuse('artifact_describe_type', refusal, sentence)) : undefined;
+    const { placement, instructions } = id && store ? await store.readCommitted(() => {
       const artifact = store.get(id);
       if (!artifact) throw new ToolRefusal(TOOL_ERRORS.noArtifact('artifact_describe_type', ref!));
       if (artifact.kind !== kind) throw refuse('artifact_describe_type', { reason: 'invalid' }, `artifact ${id} is a ${artifact.kind}, not a ${kind}`);
-      return { artifactId: id, home: artifact.spaceId ? store.listSpaces().find((space) => space.id === artifact.spaceId)!.name : 'General' };
-    }) : {};
-    const designSystem = store && DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(id ?? {}) : null;
+      return { placement: { artifactId: id, home: artifact.spaceId ? store.listSpaces().find((candidate) => candidate.id === artifact.spaceId)!.name : 'General' }, instructions: instructionsIn(store, artifact.spaceId) };
+    }) : space && store ? await store.readCommitted(() => ({ placement: { home: space.name }, instructions: instructionsIn(store, space.id) })) : { placement: {}, instructions: null };
+    const designSystem = store && DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(id ?? (space ? { spaceId: space.id } : {})) : null;
     const designCheck = id && store && kind === 'design_system' ? await store.readCommitted(() => {
       const doc = newDoc();
       try {
@@ -138,8 +168,9 @@ export function artifactDescribeTypeTool(deps: Pick<ArtifactToolDeps, 'artifacts
           unknown: report.unknown.map((tag) => `${tag.tag}: ${tag.message}`), problems: validateCanon(files, parse5Parser, tokens) };
       } finally { doc.destroy(); }
     }) : undefined;
-    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...placement, ...(designCheck && { designCheck }), ...(designSystem !== null && { designSystem }) };
-    return toolText(result);
+    const given = instructionsField(session, instructions); // UX wave U10b (M10)
+    const result: ArtifactDescribeTypeResult = { status: 'described', kind, ...KIND_GUIDES[kind], ...placement, ...(designCheck && { designCheck }), ...(designSystem !== null && { designSystem }), ...given };
+    return instructedOnDelivery(toolText(result), session, instructions, given);
   }));
 }
 
@@ -159,9 +190,10 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       if (replayed.found) {
         const answer = replayed.result as ArtifactCreateResult;
         deps.session.guided.add(answer.kind);
-        return toolText(answer);
+        return toolText(answer); // UX wave U10b (M10, decision 4): its instructions as recorded, nothing marked given
       }
       const space = await spaceNamed(store, input.space, (refusal, sentence) => refuse('artifact_create', refusal, sentence)); // F5
+      const system = await designSystemNamed(store, kind, input.designSystem, (text) => new ToolRefusal(text)); // UX wave U10b
 
       // What the artifact starts from, read and checked before anything is written
       let content: ByteContent | undefined;
@@ -201,10 +233,13 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
 
       // The first answer's decorations, settled before the write so the recorded answer is the whole first answer: the
       // kind's guide when this session has not had it, the governing design system's guide as the registered chain names
-      // it (Decision Log 22d, 42; a new artifact has no system of its own, and the Space it is made in, if any; `{builtin}`
-      // attaches nothing, and the artifact's `designSystemId` stays unset, so the chain keeps deciding by reference)
+      // it (Decision Log 22d, 42; a new artifact has no system of its own unless the call names one (UX wave U10b), and
+      // the Space it is made in, if any; `{builtin}` attaches nothing; without a named system the artifact's
+      // `designSystemId` stays unset, so the chain keeps deciding by reference)
       const guide = deps.session.guided.has(kind) ? undefined : KIND_GUIDES[kind];
-      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor(space ? { spaceId: space.id } : {}) : null;
+      const instructions = space ? await store.readCommitted(() => instructionsIn(store, space.id)) : null; // UX wave U10b (M10)
+      const given = instructionsField(deps.session, instructions);
+      const designSystem = DESIGN_CONTEXT_KINDS.includes(kind) ? await store.designSystemContextFor({ ...(system && { designSystemId: system.id }), ...(space && { spaceId: space.id }) }) : null;
       const files = isDocKind(kind) ? input.files : undefined;
       let base: { revision: number; state: Uint8Array } | null = null;
       const recorded = await store.writeCommitted(() =>
@@ -223,12 +258,13 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
                 ...(page !== null && { id: handle ?? artifact.id, deliverableId: artifact.id, version: 1 as const, externalReferences: externalReferenceCount(page.bytes.toString('utf8')) }),
                 ...(guide && { guide }), ...(designSystem !== null && { designSystem }), ...loaded, // P3-C: recorded with the op, so a replay says it too
                 ...spaceFields(space), // F5
+                ...given, // UX wave U10b (M10): recorded with the op, so a replay says it too
               };
               if (isDocKind(kind)) base = { revision, state: store.service.readState(artifact.id).state };
               op.record(answer);
             };
             await store.create(
-              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
+              { kind, title: input.title, ...(handle !== undefined && { handle }), ...(space && { spaceId: space.id }), ...(system && { designSystemId: system.id }), ...(content && { content }), ...(files && { initial: (doc: Doc) => void publisherOf(store, kind)(doc, {}, files, false) }) },
               actor,
               complete,
             );
@@ -241,7 +277,7 @@ export function artifactCreateTool(deps: ArtifactToolDeps): McpToolDefinition {
       // the session's base: what it just wrote (a replayed call leaves none for a Y kind: the agent reads first)
       if (base) store.service.replica(ctx.appSessionId, recorded.artifactId).base = base;
       if (page !== null) deps.session.byteBases.set(recorded.artifactId, { revision: recorded.revision, sha256: createHash('sha256').update(page.bytes).digest('hex') });
-      return toolText(recorded);
+      return instructedOnDelivery(toolText(recorded), deps.session, instructions, given); // UX wave U10b (M10)
     })),
   );
 }
@@ -252,7 +288,11 @@ async function handleHolder(store: ArtifactStore, deps: ArtifactToolDeps, handle
   return store.readCommitted(() => (store.resolve(handle, [ctx.appSessionId]) ? 'self' : above.length > 0 && store.resolve(handle, above) ? 'above' : null));
 }
 
-export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
+// UX wave U10b (M10, decision 3): a read gives the artifact's Space's instructions, but for the raw read of a held legacy
+// dashboard (`instructs: false`, legacy.ts's) and the read MAWS makes for an artifact a message links (`ctx.linkedRead`),
+// which would spend the session's one delivery inside the person's message.
+export function artifactReadTool(deps: ArtifactToolDeps, opts: { instructs?: boolean } = {}): McpToolDefinition {
+  const instructs = opts.instructs ?? true;
   return defineMawsTool('artifact_read', (args, ctx) =>
     answering('artifact_read', async () => {
       const parsed = parseToolArguments('artifact_read', args);
@@ -269,6 +309,7 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
         const version = input.version === undefined ? null : store.versions.version(artifactId, input.version);
         if (input.version !== undefined && !version) throw new ToolRefusal(TOOL_ERRORS.refused('artifact_read', { reason: 'notFound', version: input.version }, `version ${input.version} does not exist; read the artifact for the versions it has`));
         const versions = store.listVersions(artifactId).slice(-VERSIONS_LISTED).reverse().map((v) => summaryOf(v, ctx.appSessionId));
+        const instructions = instructs && !ctx.linkedRead ? instructionsIn(store, artifact.spaceId) : null; // UX wave U10b (M10)
         const head = { status: 'read' as const, artifactId, kind: artifact.kind, title: artifact.title, ...(artifact.handle !== undefined && { handle: artifact.handle }), ...(version && { version: summaryOf(version, ctx.appSessionId) }), versions };
         if (isDocKind(artifact.kind)) {
           if (input.revision !== undefined) throw new ToolRefusal(TOOL_ERRORS.refused('artifact_read', { reason: 'invalid' }, `a ${artifact.kind} artifact is read live or by version, not by revision`));
@@ -280,12 +321,12 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
             ...(assets && artifact.kind === 'presentation' && { warnings: assetWarnings(doc, assets), held: heldSlides(doc) }), // P3-C
             ...(assets && artifact.kind === 'design' && { warnings: boardAssetWarnings(doc, assets), held: heldBoards(doc) }), // P3-E: by board path
           }));
-          return { kind: 'doc' as const, head: { ...head, revision }, body, base: version ? null : { revision, state, files: body.files /* P3-C */ } };
+          return { kind: 'doc' as const, head: { ...head, revision }, body, base: version ? null : { revision, state, files: body.files /* P3-C */ }, instructions };
         }
         const ref = version ? { revision: version.seq, ref: JSON.parse(store.versions.get(artifactId, version.id)!.content!) as ReturnType<typeof store.contentRef>['ref'] } : store.contentRef(artifactId, input.revision);
         const path = store.files.resolve(artifactId, ref.ref);
         const bytes = artifact.kind === 'html' ? Buffer.from(store.files.read(artifactId, ref.ref)) : null;
-        return { kind: 'bytes' as const, head: { ...head, revision: ref.revision }, ref: ref.ref, path, bytes, live: !version && input.revision === undefined };
+        return { kind: 'bytes' as const, head: { ...head, revision: ref.revision }, ref: ref.ref, path, bytes, live: !version && input.revision === undefined, instructions };
       });
 
       let result: ArtifactReadResult;
@@ -316,7 +357,8 @@ export function artifactReadTool(deps: ArtifactToolDeps): McpToolDefinition {
       // the session's `viewed` link is bookkeeping: a store a newer MAWS wrote is read-only (Decision Log 12, 24e) and
       // still answers reads
       if (!store.storage.readOnly) await store.writeCommitted(() => store.link(artifactId, ctx.appSessionId, 'viewed'));
-      return toolText(result);
+      const given = instructionsField(deps.session, read.instructions); // UX wave U10b (M10)
+      return instructedOnDelivery(toolText({ ...result, ...given }), deps.session, read.instructions, given);
     }),
   );
 }

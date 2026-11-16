@@ -549,6 +549,8 @@
   "settings.usageControls",
   "settings.userEngineDefaults",
   "spaces.delete",
-  "spaces.list"
+  "spaces.instructions",
+  "spaces.list",
+  "spaces.setInstructions"
  ]
 }

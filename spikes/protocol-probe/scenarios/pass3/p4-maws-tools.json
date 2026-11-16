@@ -223,7 +223,7 @@
     {
       "name": "artifact_create",
       "title": "Create artifact",
-      "description": "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS.",
+      "description": "Create a MAWS artifact the user can view, comment on and edit with you; without this tool, write the file and tell the user its path. kind is html by default: a self-contained HTML page from path (a .html file you wrote, absolute or relative to the working directory) or content (its text), shown in a sandboxed frame with no network access (inline everything: styles, scripts, images as data URLs); file delivers a file in place from path; a document starts empty or from markdown content, and so does a dashboard (then bind its data with artifact_dataset); presentation, design and design_system start empty or from files (path to text). Give a title and optionally a short handle to name it by in later calls (id and html_path are older names for handle and path). Give space (a Space's id or its name) to make it in that Space: it is listed there, copied into the Space's linked folder if it has one, and styled by the Space's default design system if it has one; a Space that does not exist is refused. Give designSystem (a design system's id or its name) to bind a document, presentation, design or dashboard to that system in place of the default; one that does not exist is refused. Returns the artifact's id and revision, its Space when it has one, and the first time this session creates a kind, that kind's guide and format reference. To name it to the user, write a Markdown link [its title](maws-artifact:<artifactId>): a click opens it in MAWS. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -271,6 +271,11 @@
             "maxLength": 16777216
           },
           "space": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
+          },
+          "designSystem": {
             "type": "string",
             "minLength": 1,
             "maxLength": 200
@@ -394,7 +399,7 @@
     {
       "name": "artifact_describe_type",
       "title": "Describe artifact kind",
-      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment.",
+      "description": "Return a MAWS artifact kind's guide (when to use it, how to create, read and edit it) and its format reference; without this tool, use the guide artifact_create returned. Kinds: document, presentation, design, design_system, dashboard, html, file. For a document, presentation or design it also returns the governing design system's DESIGN.md when one governs. Pass artifact (id or handle) to inspect that existing artifact's actual system and home, including its Space and explicit assignment; without artifact this describes the default for a new artifact. Pass space (a Space's id or its name) to describe a new artifact in that Space. For an existing design_system it also runs the canon and tagged law checks, reporting violations and checks requiring visual judgment. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
@@ -414,6 +419,11 @@
           "artifact": {
             "type": "string",
             "minLength": 1
+          },
+          "space": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 200
           }
         },
         "required": [
@@ -433,7 +443,7 @@
     {
       "name": "artifact_read",
       "title": "Read artifact",
-      "description": "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned.",
+      "description": "Read a MAWS artifact by id or handle; without this tool, ask the user what the artifact holds. Returns its live revision and content: an html page or a file kind's files (all, or the paths named), a document's structure (with its page setting), a file artifact's path and metadata (and its text when under 1 MiB). version reads one of the retained versions listed in the answer, read-only; revision reads an html page as an earlier write left it; for a document, tab, from, count and sinceRevision read one tab, count blocks from a block id, or the changes since a revision (other kinds ignore them). Read before you publish: artifact_publish takes the revision this read returned. When the artifact's Space has instructions from the user, the answer carries them as spaceInstructions, the first time and again after they change: follow them for work in that Space.",
       "inputSchema": {
         "$schema": "https://json-schema.org/draft/2020-12/schema",
         "type": "object",
