@@ -708,7 +708,12 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] video[data-artifact-media="video"]`);
       await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
       await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'at the time it left' }).toBeCloseTo(1, 1);
-      expect(await moved.evaluate((v: HTMLVideoElement) => v.paused), 'paused').toBe(true);
+      // paused (Decision Log 33): once it could play (HAVE_FUTURE_DATA), an observation window as B15's, bounded and no
+      // barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const movedStill = await moved.evaluate((v: HTMLVideoElement) => v.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await moved.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'paused').toEqual([true, movedStill]);
 
       const sound = await openInViewer(p, 'long.wav');
       await expect(sound).toHaveAttribute('data-frame', 'audio');
@@ -716,7 +721,12 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const src = (await audio.getAttribute('src'))!;
       expect(src).toMatch(/^maws-artifact:\/\/[0-9a-f]{32}\/long\.wav$/);
       await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(120, 0);
-      expect(await audio.evaluate((a: HTMLAudioElement) => a.paused), 'it does not start by itself').toBe(true);
+      // it does not start by itself (Decision Log 33): once it could (HAVE_FUTURE_DATA), an observation window as B15's,
+      // bounded and no barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const soundStill = await audio.evaluate((a: HTMLAudioElement) => a.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await audio.evaluate((a: HTMLAudioElement) => [a.paused, a.currentTime]), 'it does not start by itself').toEqual([true, soundStill]);
       await audio.evaluate(async (a: HTMLAudioElement) => {
         a.muted = true;
         await a.play();
