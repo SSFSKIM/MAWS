@@ -989,7 +989,8 @@ export class EditorController {
         return { text, cursor: text.length };
       },
       fill: (text, mode) => {
-        if (this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
+        // UX wave U6e (ticket 675): nor while a Send waits for a drop's conversion, whose serialise would carry the fill
+        if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
         this.revision += 1; // even replacing an empty box with empty text supersedes a pending draft restore
         if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end' });
         else if (mode === 'append') editor().chain().focus('end').insertContent(inlineContent(text)).run();
