@@ -240,6 +240,17 @@ describe('WhoDraws', () => {
       expect(draws.drawnBy(other)).toBe('mod');
       draws.status(withPlugin(null, AT, { appSessionId: other, launchId: 'l2', launchedAt: T(2) }));
       expect(draws.drawnBy(other)).toBe('maws'); // B14: l2's own report
+      // the same start time on both: the bind comes for a launch the running one already replaced, whatever the times
+      const equal = 'app-equal' as AppSessionId;
+      draws.status(status({ appSessionId: equal, launchId: 'l1', launchedAt: T(1), process: 'exited' }));
+      draws.status(status({ appSessionId: equal, launchId: 'l2', launchedAt: T(1), process: 'starting' }));
+      expect(draws.drawnBy(equal)).toBe('mod');
+      draws.bound(equal, 'l1', T(1));
+      expect(draws.drawnBy(equal)).toBe('mod'); // l1 is not reinstated
+      draws.status(withPlugin(NEWER, AT, { appSessionId: equal, launchId: 'l2', launchedAt: T(1) }));
+      expect(draws.drawnBy(equal)).toBe('mod'); // l2's statuses still apply (B13)
+      draws.status(withPlugin(null, T(5), { appSessionId: equal, launchId: 'l2', launchedAt: T(1) }));
+      expect(draws.drawnBy(equal)).toBe('maws'); // B14: l2's own report, applied
     });
 
     it('C3 · a launch bound with no start time known: the order cannot be told, and an unseen live launch becomes the running one (A4: not known)', () => {
