@@ -63,8 +63,13 @@ export function aboveLastCompaction(rows: readonly Row[], index: number): boolea
  * next prompt has no message id, and where it lies above the list's last compaction boundary: so the answer directly above
  * that boundary keeps Fork only against a typed `/compact` bubble (`aboveLastCompaction`'s one exception); the prompt that
  * set off an automatic compaction is written before it, and the answer before that prompt draws none (ruled, M3-4).
+ *
+ * The branch panel's finding 1: the rows of `discarded` turns (a rewound branch, drawn muted while its rewind is
+ * revealed) are read as if they were not in the list: they get no action row and are never a target.
  */
-export function answerActionsOf(rows: readonly Row[]): Map<RowId, AnswerAction> {
+export function answerActionsOf(allRows: readonly Row[], discarded: readonly TurnId[] = []): Map<RowId, AnswerAction> {
+  const gone = new Set(discarded);
+  const rows = gone.size === 0 ? allRows : allRows.filter((row) => row.turnId === null || !gone.has(row.turnId));
   const running = new Set<TurnId>();
   for (const row of rows) {
     if (row.turnId !== null && ((row.kind === 'divider' && row.state === 'working') || ('live' in row && row.live))) running.add(row.turnId);

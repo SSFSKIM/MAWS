@@ -19,7 +19,7 @@ import { useAfter } from '../../app/use-after'; // the UX wave, U9 (A3)
 import { restingRows, withPlacedRows, withQueueTail } from '../model/derive';
 import { answerActionsOf } from '../model/answer-actions'; // UX wave U3b
 import { compactingRow } from './compacting'; // UX wave U3b (M4)
-import type { Row, RowKind } from '../model/rows';
+import type { Row, RowKind, TurnId } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { DEFAULT_ACTIONS } from './default-actions';
 import { AnswerActionsStore, listElementId, rowElementId, TranscriptProvider, useDisclosures, type RewindInterface, type TranscriptActions, type TranscriptContextValue } from './context';
@@ -500,6 +500,7 @@ export interface TranscriptProps {
 }
 
 const NO_ROWS: Row[] = [];
+const NO_TURNS: readonly TurnId[] = []; // UX wave U3b: no rewound branch
 export const LOADING_AFTER_MS = 300; // the UX wave, U9 (A3): how long a read with nothing to draw is out before the pane says so
 const CHILD = 'child' as AgentId; // a child transcript's state treats its events as top-level (Derivation, *Child traffic*)
 
@@ -568,8 +569,10 @@ export function Transcript({ source, variant, actions, rewind, renderRequest, on
   // UX wave U3b (M4; decisions 16 and 17): while the session compacts, its row at the end, the last projection
   const rows = useMemo(() => compactingRow(shown, compacting) as Row[], [shown, compacting]);
   // UX wave U3b (decision 12, Interfaces §C): which drawn answers carry Copy, Fork from here and the time, placed once per
-  // change of the list and published to the rows through this mount's store
-  const placement = useMemo(() => answerActionsOf(rows), [rows]);
+  // change of the list and published to the rows through this mount's store; a rewound branch's rows are skipped, revealed
+  // or not (the branch panel's finding 1)
+  const discarded = useTranscriptStore((state) => state.entries[storeKey]?.state.hidden?.turns ?? NO_TURNS);
+  const placement = useMemo(() => answerActionsOf(rows, discarded), [rows, discarded]);
   const [answerActions] = useState(() => new AnswerActionsStore());
   useLayoutEffect(() => answerActions.publish(placement), [answerActions, placement]);
   const estimate = useCallback((row: Row) => estimateRow(row, placement.has(row.id)), [placement]);
