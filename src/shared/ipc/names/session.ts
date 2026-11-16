@@ -22,8 +22,8 @@ export const commands = [
   'session.fork', 'session.archiveOlder', 'session.archive', 'session.takeOverPane' /* W14 */, 'session.takeOver' /* W7 */, 'session.delete', 'session.rename', 'session.revealPath',
   'session.deletions.list', 'session.deletions.keep', 'session.deletions.preview', 'session.projects.addFolder' /* New chat */,
   // R2: the engine's remote surface
-  'session.ui.render', 'session.ui.renderSite', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
-  'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer',
+  'session.ui.render', 'session.ui.press', 'session.ui.input', 'session.ui.select', 'session.ui.focus', 'session.ui.scroll',
+  'session.ui.panes', 'session.ui.paneShow', 'session.ui.paneFocus', 'session.ui.close', 'session.ui.promptEdit', 'session.ui.answer', 'session.ui.renderSite' /* UX wave U2b */,
   'session.reloadSkills', // E8
   // P2-C start (2026-10-09): the host queue's steer cancel and the prompt record's read
   'session.steer.cancel', 'session.promptHistory',

@@ -211,7 +211,8 @@ describe('the engine-host commands survive a JSON wire (E11 W-E)', () => {
       .filter(([, spec]) => (spec as { owner: string }).owner === 'engine-host')
       .flatMap(([name, spec]) => [...droppableKeys((spec as { input: z.ZodType }).input, `${name}:in`, []), ...droppableKeys((spec as { output: z.ZodType }).output, `${name}:out`, [])]);
     const eventKey = (key: string) => /^(session\.events:out\.events\[\]|session\.pendingRequest:out\.event|fs\.agentEvents:out\.events\[\])\|\d+\.(.+)$/.exec(key)?.[2];
-    expect(found.filter((key) => !EVENT_KEYS.includes(eventKey(key) ?? ''))).toEqual(['session.ui.render:out.tree']);
+    // UX wave U2b: session.ui.renderSite answers through the same renderAnswerOf
+    expect(found.filter((key) => !EVENT_KEYS.includes(eventKey(key) ?? ''))).toEqual(['session.ui.render:out.tree', 'session.ui.renderSite:out.tree']);
     expect(new Set(found.map(eventKey).filter(Boolean))).toEqual(new Set(EVENT_KEYS));
   });
 
