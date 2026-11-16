@@ -61,8 +61,9 @@ export interface FileFramesDeps {
 
 type FrameAnswer = CommandOutput<'layout.frameFile'>;
 
-// The keys every read of a frame carries (U6e adds `agent` for a tab the agent opened: "What this document assumes").
-const FRAME_ASK: FrameAsk = { named: true };
+// The keys every read of a frame carries: `named`, and U6e's `agent` for a tab that holds the agent's mark ("What this
+// document assumes of landings in flight").
+const frameAskOf = (agent: true | undefined): FrameAsk => ({ named: true, ...(agent && { agent }) });
 
 const fail = (code: IpcError['code'], message: string): never => {
   throw new HostCommandError(ipcError(code, message));
@@ -91,14 +92,14 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
   }
 
   // On this Mac: the head, read raw as the asking page; its type fixes the frame.
-  async function onThisMac(client: ClientRef, appSessionId: AppSessionId, path: string): Promise<FrameAnswer> {
-    const head = await deps.read({ appSessionId, path, offset: 0, length: FRAME_HEAD_BYTES, raw: true, ...FRAME_ASK }, client);
+  async function onThisMac(client: ClientRef, appSessionId: AppSessionId, path: string, ask: FrameAsk): Promise<FrameAnswer> {
+    const head = await deps.read({ appSessionId, path, offset: 0, length: FRAME_HEAD_BYTES, raw: true, ...ask }, client);
     if (!head.ok) throw new HostCommandError(head.error);
     const { identity, encoding, content, mime } = head.value;
     if (identity === undefined || encoding !== 'base64') return { status: 'row', why: 'unserved' }; // a daemon that dropped `raw`
     const framed = framedKindOf(mime);
     if (framed === null) return { status: 'row', why: 'unframed' };
-    return issue(client, path, framed, fixedBy(framed, mime, Buffer.from(content, 'base64')), localSource(deps.read, client, { appSessionId, path }, FRAME_ASK));
+    return issue(client, path, framed, fixedBy(framed, mime, Buffer.from(content, 'base64')), localSource(deps.read, client, { appSessionId, path }, ask));
   }
 
   // A sink for a copy: created exclusively, owner-only, in the profile's own folder, and its name removed at once.
@@ -145,9 +146,10 @@ export function startFileFrames(deps: FileFramesDeps): { tokens: FrameTokens; re
     }
   }
 
-  deps.register('layout.frameFile', ({ appSessionId, path }, { client, target }) => {
+  deps.register('layout.frameFile', ({ appSessionId, path, agent }, { client, target }) => {
     const session = appSessionId as AppSessionId; // the router validated it against AppSessionIdSchema
-    return target === deps.local ? onThisMac(client, session, path) : fromMachine(client, target, session, path);
+    // another machine's copy asks as "Open externally"'s does, with neither key (the entry's own reads there carry none)
+    return target === deps.local ? onThisMac(client, session, path, frameAskOf(agent)) : fromMachine(client, target, session, path);
   });
   deps.register('layout.releaseFrame', ({ token }, { client }) => {
     if (!tokens.release(token, client)) fail('invalid_input', 'layout.releaseFrame: no frame of this window');

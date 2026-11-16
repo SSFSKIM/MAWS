@@ -809,7 +809,9 @@ const u6eCommands = {
 const FrameTokenSchema = z.string().regex(FRAME_TOKEN);
 const u6b2Commands = {
   'layout.frameFile': {
-    input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1) }),
+    // agent: the asking tab holds the agent's mark (UX wave U6e, decision 19), so main's reads for the frame carry it as
+    // the tab's own reads do
+    input: z.strictObject({ appSessionId: AppSessionIdSchema, path: z.string().min(1), agent: z.literal(true).optional() }),
     output: z.discriminatedUnion('status', [
       // neighbours: present exactly for 'html' (M5, decision 14)
       z.strictObject({ status: z.literal('ready'), token: FrameTokenSchema, url: z.string(), framed: z.enum(['pdf', 'html', 'video', 'audio']), neighbours: z.boolean().optional() }),

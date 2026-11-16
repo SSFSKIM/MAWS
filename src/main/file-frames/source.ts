@@ -39,9 +39,11 @@ export class FrameReadError extends Error {
   }
 }
 
-// The keys every read of the frame carries; U6e adds `agent?: true` ("What this document assumes of landings in flight").
+// The keys every read of the frame carries: `named`, and U6e's `agent` when the asking tab holds the agent's mark ("What
+// this document assumes of landings in flight").
 export interface FrameAsk {
   named: true;
+  agent?: true;
 }
 
 export type RawRead = (input: FilesReadInput, as: ClientRef) => Promise<CommandResult<'files.read'>>;

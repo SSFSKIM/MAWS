@@ -317,8 +317,8 @@ const heldToken = (frame: EntryFrame | null): string | null =>
   frame?.status === 'ready' ? frame.token : frame?.status === 'asking' ? (frame.shown?.token ?? null) : null;
 
 // UX wave U6b-2: what the window asks main for a framed file: the one place U6e's `agent` joins ("What this document
-// assumes of landings in flight").
-const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path });
+// assumes of landings in flight"), for an entry that holds the agent's mark, as its own reads carry it (`readChunk`).
+const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path, ...(entry.agent ? { agent: true as const } : {}) });
 
 // U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
 // or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
