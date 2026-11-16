@@ -256,7 +256,9 @@ export function unmerged(file: GitFileStatus): boolean {
 // the status lists unmerged is a conflict, but for a binary, whose body says "Binary file" whatever its state.
 // UX wave U5b-2 (§E, l5-code-03 and -04): This branch adds them too, being the working tree against the merge base, and
 // a new file's lines are its count from the working-tree read (`untracked`, by path); one it did not count, or every one
-// where the read was not asked (`untracked` null), is `uncounted`. A commit's diff lists no new file.
+// where the read was not asked (`untracked` null), is `uncounted`. A commit's diff lists no new file, and its files'
+// kinds are the commit's alone: the status's unmerged paths mark the scopes read from the index and the working tree
+// (the branch's max panel, the document's Decision Log 51).
 export function gitScopeFiles(input: {
   scope: Exclude<ReviewScope, 'turn'>;
   repoRoot: string;
@@ -265,7 +267,7 @@ export function gitScopeFiles(input: {
   status: GitStatus | null;
   untracked?: ReadonlyMap<string, Pick<GitUntrackedCount, 'insertions'>> | null;
 }): ReviewFile[] {
-  const conflicts = new Set(input.status?.files.filter(unmerged).map((entry) => entry.path));
+  const conflicts = new Set(input.scope === 'commit' ? [] : input.status?.files.filter(unmerged).map((entry) => entry.path));
   const rows: ReviewFile[] = input.files.map((file) => {
     const split = input.patch?.get(file.path);
     const kind: ReviewFileKind = file.binary ? 'binary' : (split?.kind ?? (file.oldPath ? 'renamed' : 'modified'));
