@@ -17,7 +17,7 @@
 import { DiffModeEnum, DiffView, SplitSide } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { getDiffViewHighlighter } from '@git-diff-view/shiki';
-import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { PassComment } from '../../../side/card/store';
 import { REVIEW_COPY } from '../copy';
 import type { LinePlace, LineSide } from './comment-place';
@@ -95,7 +95,7 @@ export default function FileBody({ path, data, mode, wrap }: FileBodyProps) {
   return (
     <>
       {data.map((block, index) => (
-        <div key={index} data-review-block={index} className={index > 0 ? 'border-t border-border' : undefined}>
+        <div key={index} data-review-block={index} onMouseDownCapture={keepKeyboard} className={index > 0 ? 'border-t border-border' : undefined}>
           <BlockBoundary block={block}>
             <DiffView<readonly PassComment[]>
               data={block}
@@ -122,6 +122,11 @@ export default function FileBody({ path, data, mode, wrap }: FileBodyProps) {
 }
 
 const NO_ROWS: readonly PlacedComment[] = [];
+// A press on a line's add button opens the card, which takes the keyboard (the library acts on the press); the
+// browser's own focus of the button pressed, after the press, would take it back and discard the empty card.
+const keepKeyboard = (event: ReactMouseEvent) => {
+  if (event.target instanceof Element && event.target.closest('.diff-add-widget')) event.preventDefault();
+};
 const sideOf = (side: SplitSide): LineSide => (side === SplitSide.old ? 'old' : 'new');
 type WidgetHook = { getReadonlyState(): { widgetSide?: SplitSide; widgetLineNumber?: number; setWidget(at: { side?: SplitSide; lineNumber?: number }): void } };
 
