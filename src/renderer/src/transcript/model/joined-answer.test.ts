@@ -69,7 +69,7 @@ describe('an answer envelope the engine joined with a waiting prompt', () => {
       // a session read from its file: the engine's file keeps the joined line, and no line of the envelope's own (MAWS's
       // write of it, and the engine's replay of it alone, both its whole text). Ticket 704: the joined line's replay is
       // now the prompt's event and, after it, the envelope's own, a replay under the same uuid, which the file keeps
-      const fromFile = journalToEvents(rows).filter((event) => !(event.kind === 'user.message' && event.content === envelope.message.content && !event.isReplay));
+      const fromFile = journalToEvents(rows).filter((event) => !(event.kind === 'user.message' && event.content === envelope.message.content && !(event.isReplay && event.messageUuid === under)));
       expect(fromFile.some((event) => event.kind === 'user.message' && event.messageUuid === under && event.content !== KIWI)).toBe(true); // the joined line stays
       const drawnRows = drawn([...call.events, ...fromFile]);
       expect(drawnRows.find((r): r is AskRow => r.kind === 'ask')).toMatchObject({ askId: steer.askId, state: 'answered', answers: steer.result.answers });
