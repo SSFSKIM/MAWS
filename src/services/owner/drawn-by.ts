@@ -6,9 +6,11 @@
 // computes the published value by tables A and B (`advertisementOf`, `drawnBy` in @shared/owner/draws). It calls
 // `changed` when the value a session would publish moves from the one it gave out last.
 // - The running launch (C): a status of it is applied; another launch's exit never puts it at rest; a launch not seen
-//   before becomes the running one only with a live process and a start time after the running one's (the engine's
-//   `launchedAt`; for a launch bound before its first status, the bind's time, which follows its start); a read of the
-//   live statuses is not applied to a session with a newer event since the read was sent.
+//   before becomes the running one with a live process, unless the host's own start times (`launchedAt`, of its status
+//   and of the running launch's, whose bind carries the one the host's launch answer gave) show it older; where the
+//   running launch's start time is not known the order cannot be told, and the unseen live launch becomes the running
+//   one (A4 reads it not known). The daemon's clock orders nothing. A read of the live statuses is not applied to a
+//   session with a newer event since the read was sent.
 // - The engine's state of it (B): at rest when its status says exiting or exited, or a read of the live statuses did not
 //   list it; otherwise live, its plugins reported or not. A launch bound before its first status, and every session
 //   before the first read, count as live with their plugins not reported. Before that read the running launch is the
@@ -35,12 +37,11 @@ export interface WhoDrawsDeps {
   row: (appSessionId: AppSessionId) => DrawRow | null; // null: no row, or the row cannot be read
   declares: (installPath: string) => Promise<boolean | null>; // ./declaration.ts's declarationOf; null: the read failed
   changed: (appSessionId: AppSessionId) => void;
-  now?: () => string; // the tests' seam: the time a decided launch is bound
 }
 
 interface Running {
   launchId: string;
-  startedBy: string; // the engine's launchedAt, or the bind's time until the launch's first status
+  launchedAt: string | null; // the host's start time; null for a launch bound with none known, until its first status
   process: EngineSessionStatus['process'];
 }
 
@@ -60,6 +61,8 @@ interface Session {
 }
 
 const atRest = (process: EngineSessionStatus['process']) => process === 'exiting' || process === 'exited';
+// Whether the host's start times of both show a launch started before the running one; either unknown, it cannot be told.
+const olderThan = (launchedAt: string | null, running: Running) => launchedAt !== null && running.launchedAt !== null && launchedAt < running.launchedAt;
 
 export class WhoDraws {
   private readonly sessions = new Map<AppSessionId, Session>();
@@ -103,17 +106,19 @@ export class WhoDraws {
     if (this.apply(status)) this.sessionOf(status.appSessionId as AppSessionId).touched = ++this.clock;
   }
 
-  // A decided launch the host accepted: the session's running launch, live with its plugins not reported until its
-  // first status.
-  bound(appSessionId: AppSessionId, launchId: string): void {
+  // A decided launch the host accepted, with the start time the host's answer gave it (null: none known): the session's
+  // running launch, live with its plugins not reported until its first status, unless the host's start times show the
+  // running launch started after it (an acknowledgement that came late).
+  bound(appSessionId: AppSessionId, launchId: string, launchedAt: string | null): void {
     if (this.stopped) return;
     const session = this.sessionOf(appSessionId);
     session.touched = ++this.clock;
-    if (session.running?.launchId !== launchId) {
-      session.seen.add(launchId);
-      session.running = { launchId, startedBy: (this.deps.now ?? (() => new Date().toISOString()))(), process: 'starting' };
+    const running = session.running;
+    session.seen.add(launchId);
+    if (running === null || (running.launchId !== launchId && !olderThan(launchedAt, running))) {
+      session.running = { launchId, launchedAt, process: 'starting' };
       session.loaded = null;
-    }
+    } else if (running.launchId === launchId) running.launchedAt ??= launchedAt;
     this.publish(appSessionId);
   }
 
@@ -159,14 +164,14 @@ export class WhoDraws {
     if (running === null || running.launchId !== status.launchId) {
       if (running !== null) {
         if (atRest(status.process)) return false; // C2: another launch's exit
-        if (session.seen.has(status.launchId) || status.launchedAt <= running.startedBy) return false; // C3: a launch replaced, or started before the running one
+        if (session.seen.has(status.launchId) || olderThan(status.launchedAt, running)) return false; // C3: a launch replaced, or started before the running one by the host's times
       }
       session.seen.add(status.launchId);
-      session.running = { launchId: status.launchId, startedBy: status.launchedAt, process: status.process };
+      session.running = { launchId: status.launchId, launchedAt: status.launchedAt, process: status.process };
       session.loaded = null;
     } else {
       running.process = status.process; // C1
-      running.startedBy = status.launchedAt;
+      running.launchedAt = status.launchedAt;
     }
     if (status.pluginsObservedAt !== null && status.pluginsObservedAt !== session.loaded?.observedAt) this.observe(appSessionId, session, status.launchId, status.pluginsObservedAt, status.plugins);
     this.publish(appSessionId);

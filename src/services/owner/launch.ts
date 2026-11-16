@@ -113,10 +113,18 @@ export interface OwnerChannelLaunchDeps {
   // the session's owner channel changed (a launch recorded, a style observed): its state is published again
   changed?: (appSessionId: AppSessionId) => void;
   // U2b: a decided launch was bound to the host's launch id (who draws follows that launch from here)
-  bound?: (appSessionId: AppSessionId, launchId: string) => void;
+  bound?: (appSessionId: AppSessionId, launchId: string, launchedAt: string | null) => void; // launchedAt: the host's start time, null when none was given
   modRoute?: boolean; // U2b, the tests' seam: the cutover's switch (TO_HUMAN_MOD_ROUTE)
   readDeclaration?: (installPath: string) => Promise<boolean>; // U2b, the tests' seam: ./declaration.ts
   now?: () => string; // U2b, the tests' seam: the reservation's time
+}
+
+// The host's `launching` answer for a decided launch: its id, when it was recorded, and (U2b) the host's own start time
+// of it (`EngineSessionStatus.launchedAt`), which the tracker of who draws orders launches by (§A, C3).
+export interface LaunchAnswered {
+  launchId: string;
+  at: string;
+  launchedAt?: string;
 }
 
 // The decided launches' bookkeeping: the record at `launching`, and the mismatch check at the launch's first init.
@@ -126,7 +134,7 @@ export class OwnerChannelLaunches {
 
   constructor(readonly deps: OwnerChannelLaunchDeps) {}
 
-  launched(decision: LaunchDecision, launch: { launchId: string; at: string }): void {
+  launched(decision: LaunchDecision, launch: LaunchAnswered): void {
     if (!this.subscribed && this.deps.subscribe) {
       this.subscribed = true;
       this.deps.subscribe((appSessionId, events) => this.observe(appSessionId, events));
@@ -142,7 +150,7 @@ export class OwnerChannelLaunches {
       this.deps.log(`the owner channel could not record the launch of ${decision.appSessionId}: ${messageOf(error)}`);
       return;
     }
-    this.deps.bound?.(decision.appSessionId, launch.launchId);
+    this.deps.bound?.(decision.appSessionId, launch.launchId, launch.launchedAt ?? null);
     this.deps.changed?.(decision.appSessionId);
   }
 
@@ -233,7 +241,7 @@ const declarationsOf = (deps: OwnerChannelLaunchDeps, paths: readonly string[]):
 const nowIso = () => new Date().toISOString();
 
 // The host answered `launching` for a decided launch (nothing to record for an undecided one).
-export function ownerChannelLaunched(s: Pick<OwnerLaunchSetup, 'owner'>, record: LaunchDecision | null, launch: { launchId: string; at: string }): void {
+export function ownerChannelLaunched(s: Pick<OwnerLaunchSetup, 'owner'>, record: LaunchDecision | null, launch: LaunchAnswered): void {
   if (record !== null) s.owner?.launched(record, launch);
 }
 

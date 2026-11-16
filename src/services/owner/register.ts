@@ -78,7 +78,7 @@ export function startOwnerChannel(deps: OwnerChannelDeps): OwnerChannel {
     // a launch's record and its observed style are the lane's state; P4-R7z: a record can move the lane in effect (its
     // style may carry none), so the session's items are projected again, silently, beside the state
     changed: (appSessionId) => service.laneChanged(appSessionId),
-    bound: (appSessionId, launchId) => whoDraws.bound(appSessionId, launchId), // U2b
+    bound: (appSessionId, launchId, launchedAt) => whoDraws.bound(appSessionId, launchId, launchedAt), // U2b
     ...(deps.modRoute !== undefined && { modRoute: deps.modRoute }),
   });
   const mods: ModsDeps = {
