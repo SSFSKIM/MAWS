@@ -51,6 +51,26 @@ describe('a call’s line, joined in one pass', () => {
     }
   });
 
+  // The task review's point: the count above cannot be read on the code before the fix, which has no join of its own.
+  // This pin can: every pattern `lineOf` applies to its text, whatever the call (`replace`, `split`, `match`, `test`),
+  // runs through `RegExp.prototype.exec` once that is replaced, so its source is seen. An unanchored pattern led by
+  // `\s*` rescans each suffix of a run of whitespace that no line break ends, as `/\s*[\r\n]+\s*/g` did: none is applied.
+  it('applies no unanchored pattern led by \\s* to a whitespace-heavy line', () => {
+    const exec = Object.getOwnPropertyDescriptor(RegExp.prototype, 'exec')!;
+    const applied = new Set<string>();
+    Object.defineProperty(RegExp.prototype, 'exec', { ...exec, value(this: RegExp, text: string) { applied.add(this.source); return (exec.value as RegExp['exec']).call(this, text); } });
+    try {
+      for (const text of [`a${' '.repeat(400)}b`, `a${' \t'.repeat(200)}\n b`, `${'\u00a0 '.repeat(100)}c`]) {
+        lineOf('Grep', { pattern: text });
+        lineOf('Bash', { description: text });
+      }
+    } finally {
+      Object.defineProperty(RegExp.prototype, 'exec', exec);
+    }
+    expect(applied.size, 'the patterns the line applies are seen').toBeGreaterThan(0);
+    expect([...applied].filter((source) => source.startsWith('\\s*'))).toEqual([]);
+  });
+
   it('visits each character of the line once, however long its runs of spaces', () => {
     for (const run of [4000, 8000, 16000]) {
       const pattern = `a${' '.repeat(run)}b`;
