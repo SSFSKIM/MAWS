@@ -399,13 +399,17 @@ describe('the worker’s reading of an envelope is the reader’s own (ticket 70
     for (const name of ['envelopeSlices', 'takeEnvelopesOut', 'askSteerOpening', 'ASK_STEER_OPENING']) expect(WORKER.split(`const ${name} = `), name).toHaveLength(2);
   });
 
-  it('guard: the two literals of the tag inside envelopeSlices are ASK_STEER_OPENING', () => {
+  it('guard: the two literals of the tag inside envelopeSlices, and the tag pattern of answeredBlock, which the worker also runs, are ASK_STEER_OPENING', () => {
+    const escaped = ASK_STEER_OPENING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     const source = String(envelopeSlices);
     const early = /if \(!text\.includes\((['"`])(.*?)\1\)\) return whole;/.exec(source);
     expect(early?.[2], 'the early return on a text without the tag').toBe(ASK_STEER_OPENING);
-    const pattern = /const id = \/(.+?)\/\.exec\(line\)/.exec(source)?.[1];
-    const escaped = ASK_STEER_OPENING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-    expect(pattern?.startsWith(`^${escaped}`), 'the id pattern of `opens`').toBe(true);
-    expect(new RegExp(pattern!).exec(askSteerOpening('toolu_x'))?.[1]).toBe('toolu_x');
+    for (const [what, pattern] of [
+      ['the id pattern of `opens`', /const id = \/(.+?)\/\.exec\(line\)/.exec(source)?.[1]],
+      ['the tag pattern of answeredBlock', /const tag = \/(.+?)\/\.exec\(text\)/.exec(String(answeredBlock))?.[1]],
+    ] as const) {
+      expect(pattern?.startsWith(`^${escaped}`), what).toBe(true);
+      expect(new RegExp(pattern!).exec(askSteerOpening('toolu_x'))?.[1], what).toBe('toolu_x');
+    }
   });
 });
