@@ -520,13 +520,14 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const message = (row.frame as { message?: { content?: unknown } }).message;
     return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
   }));
-  /** From the file: the transcript's records with every string content swapped (the user lines and the queue's). */
+  /** From the file: the transcript's records with every string content swapped (the user lines, the queue's and a queued_command's prompt). */
   const fromFile = async (name: string, swaps: Swaps): Promise<SessionEvent[]> => {
     const lines = readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').map((line) => {
       if (line.trim() === '') return line;
-      const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown };
+      const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown; attachment?: { prompt?: unknown } };
       if (typeof record.message?.content === 'string') record.message.content = swap(record.message.content, swaps);
       if (typeof record.content === 'string') record.content = swap(record.content, swaps);
+      if (typeof record.attachment?.prompt === 'string') record.attachment.prompt = swap(record.attachment.prompt, swaps); // a mid-turn message's queued_command
       return JSON.stringify(record);
     });
     const events: SessionEvent[] = [];

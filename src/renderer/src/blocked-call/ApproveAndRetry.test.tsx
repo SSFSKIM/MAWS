@@ -526,8 +526,10 @@ describe('while the grant waits, during a turn (Design 5; Acceptance 11; GRANT_D
     expect(rowText(stackRows(useQueueStore.getState().bySession.get(remote)!, new Set(), readOf(remote))[0]!)).toBe('You approved make build');
     const sendNow = within(stackRow()).getByRole('button', { name: 'Send now' }) as HTMLButtonElement;
     const del = within(stackRow()).getByRole('button', { name: 'Delete' }) as HTMLButtonElement;
-    expect([sendNow.disabled, sendNow.getAttribute('title')], 'Send now offered').toEqual([false, null]);
-    expect([del.disabled, del.getAttribute('title')], 'Delete offered').toEqual([false, null]);
+    // offered: open, its title the stack's own words for Send now during a turn, no refusal's
+    expect([sendNow.disabled, sendNow.getAttribute('title')], 'Send now offered').toEqual([false, STACK_WORDS.sendNowWhileRunning]);
+    expect(del.disabled, 'Delete offered').toBe(false);
+    expect(del.getAttribute('title') ?? '', 'no refusal on Delete').not.toContain('Update MAWS');
     fireEvent.click(sendNow);
     await flush();
     expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: 'app-r', messageUuid: G1 }]);
