@@ -17,11 +17,13 @@
 // sound is drawn by `FrameBody`, with Open externally in the bar unless its body is a row (which holds its own, or none);
 // `data-frame` on the viewer says what the frame shows. `host` says where the tab is drawn (`'side'` beside the chat,
 // `'main'` in the main area), and only the PDF's fragment reads it. `inView` false: the tab's body is kept mounted while it
-// is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29).
+// is not in view (Files' tree in its place, the panel collapsed), and a framed file draws no element (Decision Log 29). A tab
+// of the main area is in view while the main area is on screen (the shell's `useMainAreaOnScreen`, Decision Log 35).
 import { lazy, Suspense, useEffect, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
+import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
 import { VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls } from '../editor/EditorControls';
@@ -66,7 +68,8 @@ function PathLead({ path }: { path: string }) {
 // what it puts at the bar's end (Move to main area).
 // UX wave U6b-2 (M5, decision 11): `host`, where the tab is drawn; the main area when absent. (Decision Log 29) `inView`,
 // whether the mounted body is in view; in view when absent.
-export function FileViewer({ tab, start, end, host, inView }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean }) {
+export function FileViewer({ tab, start, end, host, inView = true }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean }) {
+  const mainOnScreen = useMainAreaOnScreen();
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const lead = (
     <>
@@ -74,7 +77,7 @@ export function FileViewer({ tab, start, end, host, inView }: { tab: FileTab; st
       <PathLead path={tab.path} />
     </>
   );
-  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} host={host} inView={inView} />;
+  return <FileBody tabId={tab.id} appSessionId={tab.appSessionId} path={tab.path} line={tab.line} lead={lead} controls={(entry) => <EditorControls entry={entry} />} end={end} host={host} inView={inView && (host === 'side' || mainOnScreen)} />;
 }
 
 function NoSession({ path }: { path: string }) {
