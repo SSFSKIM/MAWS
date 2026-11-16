@@ -322,6 +322,11 @@ describe('ask on an EngineSession (scripted)', () => {
     const steer = run.transport.writes.find((w) => w.type === 'user') as { message: { content: string }; priority: string; uuid: string };
     expect(steer.priority).toBe('next');
     expect(steer.message.content).toBe(askSteerText('toolu_async', [HELD[0]!] as never, answers));
+    // board ticket 711: the user-role message holds no text the model wrote: the question's header, its words and the
+    // label picked neither on its line nor in its block, where the answer's question is empty and the pick is its place;
+    // the event keeps the answers as given
+    expect(steer.message.content.split('\n')[1]).toBe('1. option 2'); // the label picked, by its place
+    for (const words of ['Colour', 'Which colour?', 'Blue']) expect(steer.message.content).not.toContain(words);
     const rows = run.journal.rows;
     const steerRow = rows.find((r) => r.direction === 'out' && (r.frame as { type?: string }).type === 'user')!;
     const [meta] = metaOf(rows, 'maws_ask_answered');
