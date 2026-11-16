@@ -238,22 +238,28 @@ export const stackTop = async (review: Locator): Promise<StackTop | null> => {
   return read === null ? null : { path: read.path, row: read.row, offset: read.offset, header: read.header, section: read.section };
 };
 
-// The place once the stack has come to rest: two reads a poll apart that agree.
+// The place once the stack has come to rest: two reads a poll apart that agree. A failure names the last read, so a run
+// shows where the stack stood.
 export async function settledTop(review: Locator): Promise<StackTop> {
   let last = '';
   let read: StackTop | null = null;
-  await expect
-    .poll(
-      async () => {
-        read = await stackTop(review);
-        const now = JSON.stringify(read);
-        const same = read !== null && read.row !== null && now === last;
-        last = now;
-        return same;
-      },
-      { message: 'the stack comes to rest on a diff row' },
-    )
-    .toBe(true);
+  try {
+    await expect
+      .poll(
+        async () => {
+          read = await stackTop(review);
+          const now = JSON.stringify(read);
+          const same = read !== null && read.row !== null && now === last;
+          last = now;
+          return same;
+        },
+        { message: 'the stack comes to rest on a diff row' },
+      )
+      .toBe(true);
+  } catch (error) {
+    if (error instanceof Error) error.message += `\nthe last read: ${last}`;
+    throw error;
+  }
   return read!;
 }
 
