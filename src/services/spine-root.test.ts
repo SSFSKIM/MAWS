@@ -297,6 +297,35 @@ describe('the spine and the checkouts composed under plain Node', () => {
     expect(digests.value.digests.find((d) => d.appSessionId === appSessionId)).toMatchObject({ phase: 'waiting', pendingRequests: 1 });
   });
 
+  // UX wave U8d M2 (Interfaces §A): the driver reads a watched session's agents from the engine host's listing,
+  // `fs.subagents`, then each `fs.subagentsChanged` (the owed listing and the host's streaming signal: driver.test.ts)
+  it('hands the lane A driver the engine host’s listing of a watched session’s agents, and each change of it', async () => {
+    const engineSessionId = '0e5b1c0d-0000-4000-8000-0000000000a9';
+    const seeded = new Index(join(profile, 'index.sqlite'));
+    const appSessionId = seeded.sessions.upsertFromSummary(summary({ sessionId: engineSessionId as SessionId })).record.appId;
+    seeded.sessions.setHolder(engineSessionId as SessionId, { kind: 'terminal', pid: 4242 });
+    seeded.close();
+    const bridge = await startFakeBridge({ home: sminos, session: engineSessionId });
+    bridges.push(bridge);
+    const listed = (agentId: string) => ({ agentId, meta: { agentType: 'general-purpose' }, transcriptPath: join(dir.path, `agent-${agentId}.jsonl`), size: 0, mtimeMs: 0, runId: null });
+    const host = new FakeSpineHost();
+    host.answer('fs.subagents', ({ appSessionId: asked }) => ({ agents: asked === appSessionId ? [listed('a0b1c2d3e4f500001')] as never : [] }));
+    // the host's holder registry still says the terminal holds it, so the connect's fold keeps the session driven
+    host.answer('fs.state', () => ({ configHome: '/nonexistent/.claude', watching: true, projects: 0, sessions: 0, bound: 0, followed: [], holders: [{ sessionId: engineSessionId as SessionId, appSessionId, holder: { kind: 'terminal', pid: 4242 } }], lastScanAt: null, lastScan: null }));
+    const bus = fakeBus();
+    compose(await openSpineData(profile, { build: BUILD }), host, bus);
+    await host.ready();
+    await expect.poll(async () => bus.invoke('laneA.state', { appSessionId }), { timeout: 5000 }).toMatchObject({ ok: true, value: { bridge: 'live' } });
+    expect(await bus.invoke('laneA.watch', { appSessionId })).toMatchObject({ ok: true });
+    const agentIds = () => {
+      const bodies = bus.emittedOf('laneA.plane').filter((p) => p.appSessionId === appSessionId).flatMap((p) => ('messages' in p ? p.messages : [])).filter((m) => m.kind === 'snapshot' || m.kind === 'subagents');
+      return ((bodies.at(-1)?.body as { subagents?: { agentId: string; status: string }[] } | undefined)?.subagents ?? []).map((a) => `${a.agentId} ${a.status}`);
+    };
+    await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown']);
+    host.emit('fs.subagentsChanged', { appSessionId, agents: [listed('a0b1c2d3e4f500001'), listed('a0b1c2d3e4f500002')] as never });
+    await expect.poll(agentIds, { timeout: 5000 }).toEqual(['a0b1c2d3e4f500001 unknown', 'a0b1c2d3e4f500002 unknown']);
+  });
+
   // UX wave U1a (UC-1, Interfaces §B, "One holder"; the review of M1): an answer the bridge took leaves the machine's list,
   // its attention.changed and the session's digest through the root's own wiring, while the bridge still lists it (it
   // settles nothing here). The badge is main's count over these same items (`src/main/attention/notifier.ts`, whose test

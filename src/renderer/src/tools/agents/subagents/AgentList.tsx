@@ -8,11 +8,14 @@
 // `· nested` at depth 0 with a tooltip naming the parent. A workflow's agents are in no list. A row reads by its own
 // status wherever it sits: a running one ticks its elapsed once a second while shown and the tool visible, a finished
 // one its `<ago>` on the slow tick.
+// UX wave U8d (R3): the sentence that status is known only while the session runs here is not drawn once a watch of the
+// session has reported a status other than unknown (a terminal session of this Mac or of another machine).
 import { useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
 import type { PanelToolContext } from '../../../panel/tool';
 import { useSessionControls } from '../../../session/controls/controls-for'; // P5 O9
 import { selectPendingOf, useAttention } from '../../../stores/attention';
+import { useLaneAAgents } from '../../../stores/lane-a';
 import { useTranscriptStore } from '../../../transcript';
 import { HeadingParts, headingText } from '../background/Group';
 import { SUBAGENTS_COPY, type PanelHeading } from '../copy';
@@ -50,6 +53,7 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   // earlier run of it
   const controls = useSessionControls(appSessionId);
   const live = (controls === null || controls.turn() === null) && ctx.status !== null;
+  const reported = useLaneAAgents(appSessionId)?.some((agent) => agent.status !== undefined && agent.status !== 'unknown') ?? false;
   // The roster: the newest listing's Teammates, from the transcript's activity (both paths, every launch).
   const activity = useTranscriptStore((s) => s.activity(appSessionId));
   const roster = useMemo(() => teammatesOf(activity), [activity]);
@@ -95,7 +99,7 @@ export function AgentList({ appSessionId, handle, expanded, shown, expandedFolds
   const any = SECTIONS.some((name) => rows[name].length > 0);
   return (
     <div data-view="lists" ref={scroller} onScroll={(e) => handle.setScrollTop(e.currentTarget.scrollTop)} className="flex h-full min-h-0 flex-col overflow-auto">
-      {!live && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{SUBAGENTS_COPY.diskOnly}</p>}
+      {!live && !reported && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-fg-muted">{SUBAGENTS_COPY.diskOnly}</p>}
       {sidecarsError !== null && <p className="shrink-0 px-3.5 pt-3 text-ui-sm text-danger">{SUBAGENTS_COPY.sidecarsUnavailable(sidecarsError)}</p>}
       {SECTIONS.filter((name) => rows[name].length > 0).map((name) => (
         <section key={name} data-section={name} aria-label={headingText(headings[name])} className="flex shrink-0 flex-col border-b border-border pb-1 last-of-type:border-b-0">
