@@ -1691,7 +1691,9 @@ describe('files saves outside the folders', () => {
 
   // The panel's finding 2: a prompt queued in a running turn counts for a save only when the person wrote it
   describe('which queued prompts count for a save', () => {
-    const answerNaming = (path: string) => askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: link(path) }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [link(path)] }]);
+    // board ticket 711: the envelope holds what the person typed and no label of an option, so the answer names the path
+    // in a typed answer
+    const answerNaming = (path: string) => askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: link(path) }]);
 
     it('reads a path only MAWS’s queued answer names, read-only, never saves it by that, and saves it once the person’s queued message links it', async () => {
       await transcriptOf(A, [queuedPrompt(answerNaming(out('result.txt')))]);
