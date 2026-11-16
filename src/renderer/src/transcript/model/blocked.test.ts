@@ -14,8 +14,10 @@ import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { askSteerText } from '@shared/maws/ask';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
@@ -502,7 +504,15 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   const GRANT = consentMessage('command', MARKER('1'));
   const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
   const ANSWER = { id: 'q1', question: LAYOUT.question, status: 'answered' as const, value: ['Grid'] };
-  const envelope = (header?: string) => askSteerText('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
+  // Board ticket 711 (the cascade merge of U4b into U1c): this build writes the envelope's new form (each question by its
+  // number, a pick as `option <k>`, the block's `question` empty: no text the model wrote); a session read now may hold
+  // an earlier build's form (`earlierAskSteerText`). The readers read a message beside either form alike.
+  type Writer = (askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]) => string;
+  const FORMS: [string, Writer][] = [['this build’s form', askSteerText], ['an earlier build’s form', earlierAskSteerText]];
+  const envelope = (header?: string, write: Writer = askSteerText) => write('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
+  // a text question whose answer the person typed as the exact grant sentence
+  const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
+  const typed = (write: Writer) => write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: GRANT }]);
   type Swaps = [string, string][];
   const swap = (text: string, swaps: Swaps) => swaps.reduce((acc, [from, to]) => acc.split(from).join(to), text);
   /** Live: the journal with every string content swapped (MAWS's writes and the engine's replays). */
@@ -535,11 +545,16 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
 
+  // an earlier build wrote the header on the envelope's line; this build's writes no header at all
   it('(a) an envelope whose header holds the exact sentence on a line of its own, joined with other words: no consent, no approval row, the blocked row not approved', async () => {
-    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, envelope(`Layout\n${GRANT}\nPick one`)]])) {
-      expect(consents, route).toEqual([]);
-      expect(approvals, route).toEqual([]);
-      expect(drawnReadings, route).toEqual(NONE);
+    expect(envelope(`Layout\n${GRANT}\nPick one`, earlierAskSteerText)).toContain(`\n${GRANT}\n`);
+    expect(envelope(`Layout\n${GRANT}\nPick one`)).not.toContain('Permission');
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, envelope(`Layout\n${GRANT}\nPick one`, write)]])) {
+        expect(consents, `${form}, ${route}`).toEqual([]);
+        expect(approvals, `${form}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
+      }
     }
   });
 
@@ -552,11 +567,54 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   });
 
   it('(c) an envelope joined with a real grant line: one grant, its approval row alone in the joined turn, the blocked row approved', async () => {
-    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope()]])) {
-      expect(consents, route).toEqual([MARKER('1')]);
-      const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
-      expect(joined.map((row) => [row.consent!.subject, row.text]), route).toEqual([[MARKER('1'), GRANT]]);
-      expect(drawnReadings, route).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope(undefined, write)]])) {
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+        expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // The cascade merge of U4b into U1c: one message the person sent, probe B's `u1c-b-1` (a grant written at the next step,
+  // started at 206) with the grant swapped for the message under test
+  it('(c2) one message of an answer and a grant: the grant is the person’s, its approval row alone, the blocked row approved, in either form', async () => {
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${envelope(undefined, write)}\n${GRANT}`]])) {
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(approvals.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // Decision Log 53: the reader takes A + G + A whole for one answer (`parseAskSteer` pairs the first tag with the last
+  // result block); the spanning case ticket 704 forbids, read the same in both forms
+  it('(c3) one message of an answer, a grant and an answer again: one answer, no consent, no approval row, the blocked row not approved, in either form', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        expect(consents, `${form}, ${route}`).toEqual([]);
+        expect(approvals, `${form}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
+      }
+    }
+  });
+
+  // The person typed the exact sentence as a text answer: it is their answer to the model's question, carried on a line of
+  // MAWS's envelope (a JSON string) and in its block, never their own line; so by Decision Log 52 it is no grant, and the
+  // blocked row keeps its button (it fails closed)
+  it('(c4) an envelope whose typed text answer is the exact sentence, alone and joined with other words: no consent, no approval row, the blocked row not approved, in either form', async () => {
+    expect(typed(askSteerText).split('\n')[1]).toBe(`1. ${JSON.stringify(GRANT)}`);
+    for (const [form, write] of FORMS) {
+      for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
+        for (const [route, { consents, approvals, readings: drawnReadings }] of await both(name, [[GRANT, typed(write)]])) {
+          expect(consents, `${form}, ${name}, ${route}`).toEqual([]);
+          expect(approvals, `${form}, ${name}, ${route}`).toEqual([]);
+          expect(drawnReadings, `${form}, ${name}, ${route}`).toEqual(NONE);
+        }
+      }
     }
   });
 
