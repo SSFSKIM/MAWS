@@ -1037,7 +1037,7 @@ test("a token's requests: every request that occurs for a PDF, a page, a video a
     // A completion boundary in the seam log: a request main makes for a name under a live token, which the request filter
     // cancels (no web contents asked) and records through the same ordered writer as every decision and entry. Once its
     // line is in the log, so is every line written before it; the answer is the log's length through that line, and a
-    // record read up to it is complete.
+    // record read up to it is complete through the marker's enqueue point.
     let marks = 0;
     const mark = async (): Promise<number> => {
       const url = `${tokenRoots[0]}u6b2-mark-${++marks}`;
