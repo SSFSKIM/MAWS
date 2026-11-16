@@ -280,8 +280,10 @@ export function personsGrants(text: string): Consent[] {
  * the writer's grammar (numbered answer lines, indented paths and notes, the fence, a block of JSON, the close), and none
  * of them is a bare sentence, whoever wrote it, so taking one out leaves none behind. Every envelope of either form
  * carries two lines the host wrote and the model cannot remove or alter: its opening line and the fence line that opens
- * its real result block. An earlier envelope cannot be taken out strictly: its real block holds the question's words,
- * which the tool requires, so a reading that reaches it fails and yields nothing; and a reading that ends earlier, at a
+ * its real result block. An earlier envelope cannot be taken out strictly: its real block holds the question's words
+ * in each answer (the tool's input requires a question of at least one character, and the earlier builds' sheet copied
+ * them into each answer; the answer's schema itself admits an empty one), so a reading that reaches it fails and
+ * yields nothing; and a reading that ends earlier, at a
  * block the model forged in a question, leaves the real fence line after it, and step 2 then yields nothing. Pasted
  * segments are read only in step 3, on a text that holds no envelope's line, so a pasted tag cannot hide one.
  *

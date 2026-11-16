@@ -1,10 +1,12 @@
 // UX wave U1c, rule R (the architect's ruling of 2026-11-16): the strict reading of this build's answer envelope, which
 // decides what of a person's message is MAWS's and so where a grant can stand. Its line grammar is derived from the writer
 // (`askSteerText`, `answerText`), and the seeded corpus below holds the two together: every envelope the writer can write
-// is taken out whole and leaves nothing. A change of the writer must keep this file green; a line the reader does not
-// know fails the person's grant closed, and a reader looser than the writer would let model text stand as theirs.
+// is taken out whole and leaves nothing. A change of the writer must keep this file green: a line the reader does not
+// know fails the person's grant closed. The corpus catches only that direction. It does not catch a reader looser than
+// the writer (a block laid out otherwise, a list where the writer writes one string, extra indented lines, `Other:`
+// without picks); the cases below pin the refusals that matter, and a tracker row names the rest.
 import { describe, expect, it } from 'vitest';
-import { consentMessage } from '../engine/arrival';
+import { consentMessage, personsGrants } from '../engine/arrival';
 import { askSteerOpening, askSteerText } from './ask';
 import { takeOutEnvelopes } from './ask-strict';
 import type { AskAnswer, AskQuestion } from './tools';
@@ -104,6 +106,31 @@ describe('the strict reading of this build’s envelope (rule R)', () => {
     expect(takenOut(answered([{ id: 'q1', question: '', status: 'skipped' }], 'toolu_b'))).toBeNull();
     expect(takenOut(`${opening}\n1. skipped\n\`\`\`json\n{ not json\n\`\`\``)).toBeNull();
     expect(takenOut(`${opening}\n1. skipped\n${block({ status: 'asked', askId: 'toolu_a' })}`)).toBeNull();
+  });
+
+  // R-3: what keeps an earlier build's block from closing is that its sheet wrote the question's words into each answer
+  // (the tool's input requires a question of at least one character); the earlier writer, given answers as that sheet
+  // gave them, carries them on every answer, in every modality
+  it('the earlier writer’s block, its answers as the earlier sheet gave them, holds the question’s words on every answer, in every modality', () => {
+    for (let seed = 1; seed <= 200; seed += 1) {
+      const r = random(seed);
+      const pairs = Array.from({ length: 1 + r.int(12) }, (_, i) => questionAndAnswer(r, i));
+      const answers = pairs.flatMap(([question, answer]) => (answer === null ? [] : [{ ...answer, question: question.question }]));
+      const envelope = earlierAskSteerText(`toolu_${seed}`, pairs.map(([question]) => question), answers);
+      const block = JSON.parse(envelope.slice(envelope.lastIndexOf('```json\n') + 8, -4)) as { answers: { question: string }[] };
+      expect(block.answers.every((answer) => answer.question.length > 0), `seed ${seed}`).toBe(true);
+      expect(takenOut(envelope), `seed ${seed}`).toBeNull();
+    }
+  });
+
+  // The stated limit: an earlier envelope whose block has `question` empty on every answer (no sheet of an earlier build
+  // wrote one). Today its answer lines (`<n>. <header> — <answer>`) are no line of this build's grammar, so it does not
+  // read strictly either, and no grant is read beside it; nothing in the reader rests on that
+  it('the limit: an earlier envelope whose block has every question empty reads no envelope, and no grant beside it', () => {
+    const emptied = earlierAskSteerText('toolu_a', [LAYOUT], [{ ...ANSWER, question: '' }]);
+    expect(emptied).toContain('"question": ""');
+    expect(takenOut(emptied)).toBeNull();
+    expect(personsGrants(`${emptied}\n${consentMessage('command', 'make build')}`)).toEqual([]);
   });
 
   it('lines that are no opening stay, in order, whatever they hold', () => {

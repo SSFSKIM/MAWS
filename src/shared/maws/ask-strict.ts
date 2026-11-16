@@ -80,8 +80,11 @@ function envelopeEnd(lines: readonly string[], start: number, id: string, work: 
 }
 
 // A block closes a strict envelope when it parses as the answered result of the tag's ask, holds at least one answer, and
-// every answer names its question by place with its `question` empty: an earlier build's block holds the question's
-// words (the tool requires them), and a block with no answers closes nothing
+// every answer names its question by place with its `question` empty. What keeps an earlier build's block out: the
+// tool's input requires each question to hold at least one character (`AskQuestionSchema`), and the earlier builds'
+// sheet copied those words into each answer's `question`. The answer's own schema admits an empty `question`, and no
+// host checked it, so this rests on that sheet (ask-strict.test.ts pins the earlier writer's blocks and what an earlier
+// envelope with every `question` empty reads). A block with no answers closes nothing.
 function closes(block: string, id: string): boolean {
   let json: unknown;
   try {
