@@ -195,6 +195,29 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     expect(ownTextWork(`${at}a`).refused).toBe('length');
   });
 
+  // the architect's ruling on NFKC: the bound holds for the folded text too, decided before any reader that folds runs
+  const WIDE = '\uFDFA'; // one character that compatibility folding makes many
+  const WIDE_FOLD = WIDE.normalize('NFKC').length;
+  it('a text whose compatibility fold passes the bound names the path for a read only, refused for length', () => {
+    const wide = `${LINK} ${WIDE.repeat(OWN_TEXT_MAX_CHARS - LINK.length - 1)}`;
+    expect(wide.length).toBe(OWN_TEXT_MAX_CHARS);
+    expect(WIDE_FOLD).toBeGreaterThan(1);
+    expect(both(wide)).toEqual([OTHER, OTHER]);
+    expect(ownTextWork(wide).refused).toBe('length');
+  });
+
+  it('a text just within the bound after folding counts, its work within one stretch', () => {
+    const head = `${LINK} `;
+    const count = Math.floor((OWN_TEXT_MAX_CHARS - head.length) / WIDE_FOLD);
+    const under = `${head}${WIDE.repeat(count)}${'a'.repeat(OWN_TEXT_MAX_CHARS - head.length - count * WIDE_FOLD)}`;
+    expect(under.normalize('NFKC').length).toBe(OWN_TEXT_MAX_CHARS);
+    expect(both(under)).toEqual([NAMES, NAMES]);
+    const read = ownTextWork(under);
+    expect(read.refused).toBeNull();
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * OWN_TEXT_MAX_CHARS); // the budget follows the folded length
+  });
+
   it('the over-budget branch runs and fails closed', () => {
     expect(ownTextWork(`Fix ${LINK}`)).toMatchObject({ texts: [`Fix ${LINK}`], refused: null });
     expect(ownTextWork(`Fix ${LINK}`, 1)).toMatchObject({ texts: [], refused: 'budget' });
