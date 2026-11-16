@@ -66,6 +66,8 @@ export function fixedWidth(line: Element): number {
 }
 
 // A line's fit, from its room and its parts' widths, measured at every change of what it says (`key`) and of its size.
+// `key` holds every word the line draws, its fixed parts' too (a count that gains a digit widens them), since nothing
+// observes the parts themselves: a change of words that is not in `key` keeps the old fit.
 export function useLineFit<F>(line: RefObject<HTMLElement | null>, fitOf: (line: HTMLElement, room: number) => F, same: (a: F, b: F) => boolean, initial: F, key: string): F {
   const [fit, setFit] = useState<F>(initial);
   useLayoutEffect(() => {

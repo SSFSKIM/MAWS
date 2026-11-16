@@ -126,7 +126,8 @@ function Heading({ ref, heading, review, appSessionId }: { ref: RefObject<HTMLDi
   const since = heading.kind === 'since' ? SCM_COPY.since(heading.base) : null;
   const sinceMin = heading.kind === 'since' ? SCM_COPY.since(shortest(heading.base)) : null;
   const behind = heading.kind === 'since' && heading.behind > 0 ? `· ${SCM_COPY.behind(heading.behind)}` : null;
-  const fit = useLineFit(ref, headingOf, sameHeading, WHOLE_HEADING, `${since}\0${behind}\0${review}`);
+  const count = heading.kind === 'since' ? SCM_COPY.count(heading.count) : null;
+  const fit = useLineFit(ref, headingOf, sameHeading, WHOLE_HEADING, `${count}\0${since}\0${behind}\0${review}`);
   return (
     <div ref={ref} data-scm-commits-heading className="relative flex min-h-6 min-w-0 items-center">
       <span data-scm-fixed className="shrink-0 whitespace-nowrap pr-1.5 text-fg-muted">

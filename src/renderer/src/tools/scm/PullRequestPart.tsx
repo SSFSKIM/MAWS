@@ -133,7 +133,8 @@ function SignedOut({ appSessionId, directory, mark, rights, sentence, detail }: 
 
 // The answer's pull request: the title, the state line (broken only between its phrases, each whole: frames' S5), a merge
 // state GitHub adds later in a muted line under it, the checks of an open pull request (the counts line only where a row
-// is listed or nothing folds, Decision Log 41), and "Open on GitHub ↗".
+// is listed or nothing folds, Decision Log 41; the first line of the checks opens with "Checks" in every state, so the
+// folded line standing alone carries it outside its button, Decision Log 45), and "Open on GitHub ↗".
 function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreApi<PageUi> }) {
   const phrases = stateLine(pr);
   const merge = mergeWords(pr);
@@ -163,7 +164,7 @@ function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreA
         <>
           {checks.countsLine && (
             <p data-scm-checks className="m-0 flex flex-wrap items-baseline gap-x-1 pt-1 text-ui-sm text-fg-muted">
-              <span>{SCM_COPY.checks}</span>{' '}
+              <ChecksLabel />{' '}
               {checks.countParts.map((count, i) => (
                 <span key={count}>
                   <span className="whitespace-nowrap">
@@ -179,12 +180,15 @@ function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreA
             <CheckRow key={`${check.name}\0${i}`} check={check} />
           ))}
           {checks.foldWords !== null && (
-            <button type="button" aria-expanded={open} onClick={() => ui.setState({ passedOpen: !open })} className="-mx-1 inline-flex h-6 items-center gap-1.5 self-start rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
-              <span aria-hidden className="w-2 text-center">
-                {open ? '⌄' : '›'}
-              </span>
-              {checks.foldWords}
-            </button>
+            <div data-scm-fold-line className="flex min-w-0 items-center gap-x-1 text-ui-sm">
+              {!checks.countsLine && <ChecksLabel />}
+              <button type="button" aria-expanded={open} onClick={() => ui.setState({ passedOpen: !open })} className="-mx-1 inline-flex h-6 items-center gap-1.5 rounded-sm px-1 text-ui-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+                <span aria-hidden className="w-2 text-center">
+                  {open ? '⌄' : '›'}
+                </span>
+                {checks.foldWords}
+              </button>
+            </div>
           )}
           {open && checks.folded.map((check, i) => <CheckRow key={`${check.name}\0${i}`} check={check} />)}
         </>
@@ -193,6 +197,16 @@ function PullRequest({ pr, ui }: { pr: NonNullable<ScmPrState['pr']>; ui: StoreA
         {SCM_COPY.openOnGitHub}
       </button>
     </>
+  );
+}
+
+// The checks' label, the muted "Checks" that opens their first line: the counts line's, or the folded line's where it
+// stands alone (Decision Log 45)
+function ChecksLabel() {
+  return (
+    <span data-scm-checks-label className="text-fg-muted">
+      {SCM_COPY.checks}
+    </span>
   );
 }
 

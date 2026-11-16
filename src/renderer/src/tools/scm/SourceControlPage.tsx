@@ -151,7 +151,8 @@ function Uncommitted({ appSessionId, entry, status }: { appSessionId: AppSession
   const conflicts = conflictCount(status);
   const counts = change.kind === 'change' ? `+${SCM_COPY.count(change.insertions)} −${SCM_COPY.count(change.deletions)}` : null;
   const conflictWords = conflicts > 0 ? SCM_COPY.conflicts(conflicts) : null;
-  const fit = useLineFit(line, uncommittedOf, sameUncommitted, WHOLE_UNCOMMITTED, `${change.kind}\0${counts}\0${conflictWords}`);
+  const files = change.kind === 'change' ? SCM_COPY.count(change.files) : null;
+  const fit = useLineFit(line, uncommittedOf, sameUncommitted, WHOLE_UNCOMMITTED, `${change.kind}\0${files}\0${counts}\0${conflictWords}`);
   return (
     <Part name="uncommitted" label={SCM_COPY.uncommitted}>
       <div ref={line} data-scm-uncommitted className="relative flex min-h-6 min-w-0 items-center">
