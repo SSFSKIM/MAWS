@@ -1887,7 +1887,7 @@ describe('This branch and the new files counted (UX wave U5b-2)', () => {
 
   it('a diff tab whose ref names a commit on a machine without the reads says so and sends nothing (S20)', async () => {
     serveReads([]);
-    const tab = { kind: 'diff' as const, id: 'diff-commit', appSessionId: A, ref: `commit:${SHA}` };
+    const tab = { kind: 'diff' as const, id: 'diff-commit', appSessionId: A, ref: `commit:${SHA}`, pinned: false };
     render(<DiffTab tab={tab} />);
     await waitFor(() => expect(document.querySelector('[data-review-unavailable]')?.textContent).toBe("Diff unavailable: this Mac's MAWS service is older than this window"));
     expect(main().callsOf('git.commitDiff')).toEqual([]);
