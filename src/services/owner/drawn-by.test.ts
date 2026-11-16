@@ -34,9 +34,10 @@ describe('WhoDraws', () => {
     });
   });
   afterEach(() => draws.stop());
+  // one read answers; the others stay in flight (so the wait is for that answer's continuation, not for every read)
   const answer = async (n: number, declares: boolean) => {
     reads[n]!.resolve(declares);
-    await draws.settled();
+    await new Promise((resolve) => setTimeout(resolve, 0));
   };
 
   describe('before the live statuses were read once', () => {
