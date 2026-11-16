@@ -4,7 +4,7 @@ import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import { envelopeSlices, MAX_ENVELOPE_CHECKS, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival'; // ticket 704: the envelope's reader, run from its source
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
-import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening } from '@shared/maws/ask';
 import { parseBash } from './backfill';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 
@@ -50,6 +50,7 @@ const isMadeUpFinalAnswer = ${isMadeUpFinalAnswer}; // the to-human plugin's ans
 const fingerprint = ${fingerprint};
 // Ticket 704 (ruling A): MAWS's answer envelopes inside a person's text, read as the window reads them, each function
 // from its own source (each uses its arguments alone), the block checked by the envelope's own checks.
+const ASK_STEER_OPENING = ${JSON.stringify(ASK_STEER_OPENING)}; // the opening's one constant (UX wave U6e), which askSteerOpening's source names
 const askSteerOpening = ${askSteerOpening};
 const pastedBodies = ${pastedBodies}; // the one definition of a pasted segment's lines, rule R's
 const MAX_ENVELOPE_CHECKS = ${MAX_ENVELOPE_CHECKS};

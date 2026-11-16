@@ -645,11 +645,15 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   // answer and then the grant beside the same answer, joined at the turn's end (probe B's `u1c-b-joinend-other-first-1`
   // with its two messages swapped for them). Live, the host's mark on the second frame gives the grant its consent; from
   // the file, the joined line is split as one message is. The two routes read the same
-  it('(c5) an answer, then the grant beside the same answer, two messages the engine joined: the grant the person’s on both routes, its approval row alone in the joined turn, in either form', async () => {
+  it('(c5) an answer, then the grant beside the same answer, two messages the engine joined: in this build’s form the grant the person’s on both routes, its approval row alone in the joined turn; in an earlier build’s form none (rule R)', async () => {
     for (const [form, write] of FORMS) {
       const answer = envelope(undefined, write);
       for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, answer], [GRANT, `${GRANT}\n${answer}`]])) {
         expect(answers, `${form}, ${route}`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
         expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
         const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
         expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
@@ -658,14 +662,15 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     }
   });
 
-  // The same family the other way (the architect's ruling of 2026-11-16, accepted, the tracker row of Decision Log 53): the
+  // The same family the other way (the architect's ruling of 2026-11-16, the tracker row of Decision Log 53): the
   // person's one message A + G + A, in this build's form (every word of it theirs), joined at the turn's end with another
-  // waiting message. Live the host reads the message it wrote whole as one answer and marks nothing; the file's joined row
-  // no longer reads whole, and rule R reads G. Ticket 704's link pins this case on the gate and on both routes afterwards
-  it('(c3b) the person’s A + G + A joined with another message: live no mark, from the file the grant (rule R; as it reads until ticket 704)', async () => {
+  // waiting message. Since ticket 704's chain merge of rule R the host reads the frame it wrote by rule R too (no longer
+  // whole as one answer), so live it marks G, and the file's joined row reads G; the wave pins the three routes (ruling 5)
+  it('(c3b) the person’s A + G + A joined with another message: the grant live and from the file (rule R on both routes)', async () => {
     const answer = envelope();
     const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]]));
-    expect([results.live!.consents, results.live!.approvals, results.live!.readings], 'live').toEqual([[], [], NONE]);
+    expect(results.live!.consents, 'live').toEqual([MARKER('1')]);
+    expect(results.live!.readings, 'live').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
     expect(results['from the file']!.consents, 'from the file').toEqual([MARKER('1')]);
     expect(results['from the file']!.readings, 'from the file').toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
   });
@@ -695,7 +700,7 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     expect(inner.split('\n')).toContain(GRANT);
     for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
       for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
-        expect(answers, `${name}, ${route}: the bound leaves it text`).toEqual([]);
+        expect(answers, `${name}, ${route}: the bound leaves it text, a message that reads as no envelope`).toEqual([JSON.stringify(null)]);
         expect(consents, `${name}, ${route}`).toEqual([]);
         expect(approvals, `${name}, ${route}`).toEqual([]);
         expect(drawnReadings, `${name}, ${route}`).toEqual(NONE);

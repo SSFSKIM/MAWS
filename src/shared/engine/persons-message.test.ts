@@ -7,12 +7,13 @@ import { describe, expect, it } from 'vitest';
 import { framePasted } from '@shared/composer/pasted-content';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
-import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { earlierAskSteerText, innerOpeningEnvelope } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
 import { consentMessage, envelopeSlices, MAX_ENVELOPE_CHECKS, ownWordsOf, pastedBodies, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
+import { messageText } from './peer-envelope';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -79,8 +80,9 @@ const READER_CORPUS: string[] = [
   ...[...PROBE_JOINS, ...U4B_JOINS].flatMap((name) => recordedTexts(recordedJoin(name))),
 ];
 
-// A function as the search text's worker gets it: its own source evaluated with nothing of its module in scope
-const isolated = <F>(fn: F): F => new Function(`return (${String(fn)});`)() as F;
+// A function as the search text's worker gets it: its own source evaluated with nothing of its module in scope but the
+// opening's one constant (UX wave U6e), which the worker interpolates beside the functions as askSteerOpening names it
+const isolated = <F>(fn: F): F => new Function('ASK_STEER_OPENING', `return (${String(fn)});`)(ASK_STEER_OPENING) as F;
 
 describe('envelopeSlices', () => {
   it('the corpus’s tagged envelope is an earlier build’s, its third line beginning with the tag and opening nothing', () => {
@@ -551,10 +553,10 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
       }
     });
 
-    it('an answer, a grant and the answer again: the grant the person’s, then each envelope', () => {
+    it('an answer, a grant and the answer again: the split draws the grant, then each envelope; rule R reads the grant in this build’s form, none in an earlier build’s', () => {
       const text = joinedText(E, NEW_FORM_GRANT, E);
       expect(contentsOf(splitPersonsMessage(joinedMessage(text)))).toEqual([NEW_FORM_GRANT, E, E]);
-      expect(personsGrants(text)).toEqual([{ class: 'consent', kind: 'command', subject: 'pnpm test' }]);
+      expect(personsGrants(text)).toEqual(write === askSteerText ? [{ class: 'consent', kind: 'command', subject: 'pnpm test' }] : []);
     });
 
     it('two envelopes: one event each, the first keeping `joined`', () => {
@@ -584,7 +586,7 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
       for (const text of [typed, joinedText(NEW_FORM_WORDS, typed), joinedText(typed, NEW_FORM_WORDS)]) {
         const parts = splitPersonsMessage(joinedMessage(text));
         expect(contentsOf(parts).at(-1)).toBe(typed);
-        for (const part of parts) expect(personsGrants(part.content), String(part.content).slice(0, 40)).toEqual([]);
+        for (const part of parts) expect(personsGrants(messageText(part.content)), String(part.content).slice(0, 40)).toEqual([]);
         expect(personsGrants(text)).toEqual([]);
       }
     });
@@ -643,11 +645,13 @@ describe('rule R on the inputs A2 pinned: the grants of the whole joined text', 
     }
   });
 
-  it('a grant beside a pasted segment that holds an envelope: no grant, the tag left over failing closed, pasted or not (rule R’s accepted cost)', () => {
-    for (const text of [joinedText(GRANT, framePasted('a1b2', A1)), joinedText(framePasted('a1b2', INNER), GRANT)]) {
-      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
-      expect(consents(text), text.slice(0, 40)).toEqual([]);
-    }
+  it('a grant beside a pasted segment that holds an envelope: the grant beside this build’s envelope, taken out strictly; none beside the brief’s envelope, its tag left over failing closed, pasted or not (rule R’s accepted cost)', () => {
+    const pastedCurrent = joinedText(GRANT, framePasted('a1b2', A1));
+    expect(personsGrants(pastedCurrent)).toEqual([DEPLOY]);
+    expect(consents(pastedCurrent)).toEqual([DEPLOY]);
+    const pastedEarlier = joinedText(framePasted('a1b2', INNER), GRANT);
+    expect(personsGrants(pastedEarlier)).toEqual([]);
+    expect(consents(pastedEarlier)).toEqual([]);
   });
 });
 
