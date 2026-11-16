@@ -215,6 +215,24 @@ describe('the second command, and the re-ask after a reload (M5)', () => {
     expect(fake.pending('session.ui.renderSite')).toBe(2);
   });
 
+  // Panel finding 2: the engine host leaving ready takes the session's status along (the shell's `engine.hostState`
+  // handler, ipc/events.ts: `forgetStatuses`), and no non-attached `session.status` comes; its successor's table reports
+  // the session attached and ready. The refusal was the old host's: the successor is asked.
+  it('an engine host’s departure clears the session’s refusal: one ask to the old host, one to its successor after release, remount and invalidation', async () => {
+    attach(true);
+    const first = render(<Line client={fake.client} />);
+    await act(() => fake.fail('session.ui.renderSite', 'unknown command', 'unknown_command'));
+    expect(fake.invoked('session.ui.renderSite')).toHaveLength(1);
+    act(() => useSessions.getState().forgetStatuses(TEST_MACHINE)); // the old host leaves ready: the site releases
+    first.unmount();
+    act(() => useSessions.getState().applyStatuses([{ ...status(ID), uiSurface: { clientId: 'maws-main' } }], TEST_MACHINE)); // the successor's table
+    render(<Line client={fake.client} />);
+    invalidate(fake);
+    expect(fake.invoked('session.ui.renderSite')).toHaveLength(2);
+    await act(() => fake.reply('session.ui.renderSite', { tree: { type: 'Text', children: ['successor'] }, props: {}, rewritten: false, hooked: true }));
+    expect(screen.getByTestId('u1~turn').textContent).toBe('successor');
+  });
+
   // Fix wave 1 (review Important 2): a session already running when the window opened is read into the sessions store
   // from `engine.sessions` (`applyStatuses`), no `session.status` event among it. Its first reload is still a reload.
   it('a session hydrated from the snapshot alone: its first reload, which pushes nothing, re-asks the mounted sites', async () => {
