@@ -308,11 +308,11 @@ function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
       work.lines += 1;
       k += 1;
     }
+    if (ends !== undefined) passed.set(id!, k); // the place kept whether or not a segment closes, so no closing line is passed twice
     if (ends === undefined || k === ends.length) {
       i += 1;
       continue;
     }
-    passed.set(id!, k);
     const end = ends[k]!;
     for (let line = i; line <= end; line += 1) {
       work.lines += 1;
