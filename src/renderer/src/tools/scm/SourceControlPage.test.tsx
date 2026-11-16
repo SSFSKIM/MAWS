@@ -494,6 +494,40 @@ describe('the pull request (S5, S6, S10; frames’ S11)', () => {
     expect(checkRows().map((row) => text(row))).toEqual(['build passed ↗', 'docs preview skipped', 'lint passed ↗']);
   });
 
+  // Decision Log 45: the part's first line opens with the muted "Checks" in every state, and "Checks" is drawn once
+  const checksLines = () => [...part('pr')!.querySelectorAll<HTMLElement>('[data-scm-checks], [data-scm-fold-line]')].map((line) => text(line));
+  const checksWords = () => (text(part('pr'))!.match(/Checks/g) ?? []).length;
+
+  it('with every check passed opens the folded line with "Checks", outside the fold’s button: "Checks › 5 passed", once', async () => {
+    serves();
+    scripted({ checks: { summary: 'pass', items: ['build', 'lint', 'types', 'unit tests', 'docs'].map((name) => check(name, 'pass')) } });
+    mount();
+    const fold = await screen.findByRole('button', { name: '5 passed' });
+    expect(checksLines()).toEqual(['Checks › 5 passed']);
+    expect(checksWords()).toBe(1);
+    expect(fold.textContent).not.toContain('Checks');
+    const label = part('pr')!.querySelector('[data-scm-fold-line] [data-scm-checks-label]')!;
+    expect(label.className).toContain('text-fg-muted');
+  });
+
+  it('with the checks passed or skipped reads "Checks › 3 passed · 1 skipped" on one line, "Checks" once', async () => {
+    serves();
+    scripted({ checks: { summary: 'pass', items: [check('build', 'pass'), check('lint', 'pass'), check('docs preview', 'skipping', null), check('types', 'pass')] } });
+    mount();
+    await screen.findByRole('button', { name: '3 passed · 1 skipped' });
+    expect(checksLines()).toEqual(['Checks › 3 passed · 1 skipped']);
+    expect(checksWords()).toBe(1);
+  });
+
+  it('with one check failed beside the passed draws "Checks" once, on the counts line, and the folded line under it without it', async () => {
+    serves();
+    scripted({ checks: { summary: 'fail', items: [check('build', 'pass'), check('unit tests', 'fail'), check('lint', 'pass'), check('types', 'pass')] } });
+    mount();
+    await screen.findByRole('button', { name: '3 passed' });
+    expect(checksLines()).toEqual(['Checks 3 passed · 1 failed', '› 3 passed']);
+    expect(checksWords()).toBe(1);
+  });
+
   it('reads "Merged · into main" with no checks, and words a merge state GitHub adds later under the line', async () => {
     serves();
     scripted({ state: 'MERGED', mergeStateStatus: 'CLEAN', checks: { summary: 'pass', items: [check('build', 'pass')] } });
@@ -619,6 +653,48 @@ describe('what gives way where a line lacks room (frames’ S4, S6), through the
     await flush();
     expect(part('uncommitted')!.querySelector('[data-scm-counts]')).toBeNull();
     expect(part('uncommitted')!.querySelector('[data-scm-conflicts]')!.className).toContain('whitespace-nowrap');
+  });
+
+  // The measure seam with a count's badge as wide as its digits (10 px each), so a count that gains a digit widens its
+  // line's fixed part at the same room
+  const measuresDigits = (widths: Record<string, number>, rooms: Record<string, number>) => {
+    measures(widths, rooms);
+    vi.spyOn(reviewLayout, 'width').mockImplementation((element) => (element.matches('[data-scm-count]') ? 10 * (element.textContent ?? '').length : (Object.entries(widths).find(([selector]) => element.matches(selector))?.[1] ?? 0)));
+  };
+
+  it('measures the Commits heading again when its count gains a digit at the same room: "since <base>" shortened at 9 commits, left out at 10', async () => {
+    serves();
+    main.state.branch = branchCommitsOf({ all: 9, notPushed: 1, behind: 3 });
+    measuresDigits({ '[data-scm-commits-heading] [data-scm-fixed]': 50, '[data-scm-measure="since"]': 120, '[data-scm-measure="since-min"]': 90, '[data-scm-measure="behind"]': 70 }, { '[data-scm-commits-heading]': 275 });
+    mount();
+    const heading = () => part('commits')!.querySelector('[data-scm-commits-heading]')!;
+    await waitFor(() => expect(text(heading().querySelector('[data-scm-count]'))).toBe('9'));
+    await flush();
+    expect(heading().querySelector<HTMLElement>('[data-scm-since]')?.dataset.fit).toBe('shortened');
+    main.state.branch = branchCommitsOf({ all: 10, notPushed: 1, behind: 3 });
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: FEATURE, reason: 'head' }));
+    await waitFor(() => expect(text(heading().querySelector('[data-scm-count]'))).toBe('10'));
+    await flush();
+    expect(heading().querySelector('[data-scm-since]')).toBeNull();
+    expect(text(heading().querySelector('[data-scm-behind]'))).toBe('· 3 behind');
+  });
+
+  it('measures Uncommitted again when its file count gains a digit at the same room: "+A −R" drawn at 9 files, left out at 10', async () => {
+    serves();
+    const files = (n: number) => Array.from({ length: n }, (_, i) => file(`src/f${i}.ts`));
+    main.state.status = statusOf({ ...FEATURE, files: files(9) });
+    measuresDigits({ '[data-scm-uncommitted] [data-scm-fixed]': 60, '[data-scm-measure="counts"]': 70 }, { '[data-scm-uncommitted]': 205 });
+    mount();
+    const line = () => part('uncommitted')!.querySelector('[data-scm-uncommitted]')!;
+    await waitFor(() => expect(text(line().querySelector('[data-scm-counts]'))).toBe('+48 −12'));
+    await flush();
+    expect(text(line().querySelector('[data-scm-count]'))).toBe('9');
+    const ten = statusOf({ ...FEATURE, files: files(10) });
+    main.state.status = ten;
+    act(() => main.emit('git.changed', { repoRoot: DIR, status: ten, reason: 'worktree' }));
+    await waitFor(() => expect(text(line().querySelector('[data-scm-count]'))).toBe('10'));
+    await flush();
+    expect(line().querySelector('[data-scm-counts]')).toBeNull();
   });
 
   it('the Commits heading shortens its base with "· N behind" whole, and leaves "since <base>" out whole where even that does not fit', async () => {
