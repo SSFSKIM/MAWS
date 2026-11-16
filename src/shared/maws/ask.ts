@@ -126,7 +126,7 @@ function picksOf(question: AskQuestion, values: readonly string[]): string[] {
 // is, and there is no place to write instead: one that quotes the grant (quotesGrant) is left out (`kept`). A choice's
 // picks are written by their place.
 const CARRIED = ['value', 'otherText', 'name', 'designSystemId', 'create', 'note'] as const;
-const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood
+export const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood (the strict reader's too, ask-strict.ts)
 const isPath = (question: AskQuestion) => question.modality === 'file' || question.modality === 'folder' || question.modality === 'repository';
 
 // The answer with every picked name and path that quotes the grant left out

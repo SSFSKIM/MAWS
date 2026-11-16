@@ -176,16 +176,18 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
   });
 
   // The cascade merge of U4b into U1c: MAWS's answer envelope in this build's new form (board ticket 711) and in an
-  // earlier build's, through the real writers: a grant line beside an envelope waits; a sentence the person typed as a
-  // text answer is on the envelope's line, no line of their own (Decision Log 52), and closes nothing
-  it('a waiting message of an answer envelope: a grant line beside it waits, in either form; the sentence typed as a text answer does not', () => {
+  // earlier build's, through the real writers: a grant line beside this build's envelope waits; beside an earlier build's,
+  // whose lines cannot be told from ones a model forged, it closes nothing (rule R, 2026-11-16: an accepted cost); a
+  // sentence the person typed as a text answer is on the envelope's line, no line of their own (Decision Log 52), and
+  // closes nothing
+  it('a waiting message of an answer envelope: a grant line beside it waits in this build’s form and not in an earlier build’s (rule R); the sentence typed as a text answer does not', () => {
     const id = at('waiting-envelope') as AppSessionId;
     const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
     const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
     for (const write of [askSteerText, earlierAskSteerText]) {
       const answer = write('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
       queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}`)], steers: [{ messageUuid: UUID, content: `${grant(CHECK)}\n${answer}`, createdAt: T0 }] });
-      expect([...waitingGrants(id)].sort(), write.name).toEqual([blockedKey(BUILD), blockedKey(CHECK)].sort());
+      expect([...waitingGrants(id)].sort(), write.name).toEqual(write === askSteerText ? [blockedKey(BUILD), blockedKey(CHECK)].sort() : []);
       const typed = write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: grant(BUILD) }]);
       queueOf(id, { entries: [entry(id, typed)], steers: [{ messageUuid: UUID, content: `${typed}\nAlso fix the footer.`, createdAt: T0 }] });
       expect([...waitingGrants(id)], write.name).toEqual([]);

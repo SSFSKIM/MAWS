@@ -19,6 +19,7 @@
 // (`readNext`); (6) a notification block's outcome is its `<status>`, and none without one.
 import { PASTED_BLOCK } from '../composer/pasted-content';
 import { askSteerOpening, parseAskSteer } from '../maws/ask';
+import { takeOutEnvelopes, type ReadingWork } from '../maws/ask-strict';
 import { stripAnsi } from '../wire/ansi';
 import type { Arrival } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
@@ -223,29 +224,103 @@ function quotedStrings(text: string, from: number): string[] | null {
   }
 }
 
-/**
- * The grants in the person's own text (rule 1): the whole text's, else, for a text that holds a line break, those of
- * each of the person's own lines that is a whole sentence, in order. The engine joins waiting messages with one line
- * break, and a sentence holds none (its subjects are quoted), so in a joined message each grant is one line (the U1c
- * document, Design 2). A grant is read only in the person's own words (Decision Log 52): never on a line of MAWS's
- * answer envelope nor inside a pasted segment, where a sentence is data; one MAWS does not read leaves its blocked row
- * with its button.
- */
+/** The grants in a person's message (rule R, `personsLines`), in order. */
 export function personsGrants(text: string): Consent[] {
-  const whole = readConsents(text);
-  if (whole.length > 0 || !text.includes('\n') || !text.includes(GRANT_OPENING)) return whole;
-  return ownLines(text).flatMap(({ line, pasted }) => (pasted ? [] : readConsents(line)));
+  return personsLines(text)?.flatMap((line) => line.grants) ?? [];
 }
 
 /**
- * The lines of a text with MAWS's answer envelopes taken out (`readAnswerEnvelopes`'s rest), each marked when it starts
- * inside a pasted segment. The person's words are the lines not marked; joined back, every line is the rest.
+ * Rule R (the architect's ruling of 2026-11-16, on the wave coordinator's proposal): the one reading of the grants in a
+ * person's message, its text blocks joined as `messageText` joins them. Every reader of a grant in a person's message
+ * comes here: the host's mark on a frame it writes and the file's rows (`personsText`), the queue's gate (`keysIn`,
+ * blocked-call/grants.ts) and the transcript's rows beside the grants (`wordsBesideGrants`, transcript/model/derive.ts).
+ * The lines of what is left, each with its grants, or null where the message yields none.
+ *
+ *  0. A text that is the sentence whole is that grant (`readConsents`), first and as before (Decision Log 52): a sentence
+ *     holds no line break, so no envelope can stand in it, and the readers that read a text whole agree with this one.
+ *  1. This build's envelopes are taken out strictly, in one forward pass with no pasted-segment logic
+ *     (`takeOutEnvelopes`, maws/ask-strict.ts); an opening line that does not read strictly yields no grant.
+ *  2. What is left fails closed: an envelope's tag anywhere in it, or a line that opens a json fence, yields no grant,
+ *     inside a pasted segment too.
+ *  3. Otherwise each line of what is left that is a whole sentence gives its grants, but a line inside a pasted segment,
+ *     where a sentence is data (`pastedBodies`).
+ *
+ * Why no sentence a model wrote is read as the person's. A strict envelope's lines are all of the writer's grammar
+ * (numbered answer lines, indented paths and notes, the fence, a block of JSON, the close), and none of them is a bare
+ * sentence, whoever wrote it, so taking one out takes no sentence away from where it would be read and leaves none
+ * behind. The only text a model wrote that can reach a message is inside an envelope an earlier build wrote (that build
+ * wrote the question's words on the envelope's line), and every envelope of either form carries two lines the host
+ * wrote and the model cannot remove or alter: its opening line and the fence line that opens its real result block. An
+ * earlier envelope cannot be taken out strictly: its real block holds the question's words, which the tool requires, so
+ * a reading that reaches it fails and yields nothing; and a reading that ends earlier, at a block the model forged in a
+ * question, leaves the real fence line after it. Whatever is forged inside (opening lines, blocks, pasted tags), the
+ * opening line or the real fence line is left, and step 2 then yields nothing. Pasted segments are read only in step 3,
+ * on a text that holds no envelope's line, so a pasted tag cannot hide one.
+ *
+ * Linear in the text: each line is looked at a bounded number of times (the take-out once, the check of what is left
+ * once, the pasted segments' two passes, the reading once), each block is parsed once, and every test of a line is
+ * anchored with no nested repetition. `work` counts it where it is done (arrival.test.ts pins the counts).
  */
-export function ownLines(text: string): { line: string; pasted: boolean }[] {
-  const { rest } = readAnswerEnvelopes(text);
-  const lines = rest.split('\n');
-  const pasted = pastedLines(rest, lines);
-  return lines.map((line, i) => ({ line, pasted: pasted[i]! }));
+export function personsLines(text: string, work: ReadingWork = { lines: 0, blockCharacters: 0 }): { line: string; grants: Consent[] }[] | null {
+  const whole = readConsents(text);
+  if (whole.length > 0) return [{ line: text, grants: whole }];
+  if (!text.includes('\n') || !text.includes(GRANT_OPENING)) return null;
+  const left = takeOutEnvelopes(text.split('\n'), work);
+  if (left === null) return null;
+  for (const line of left) {
+    work.lines += 1;
+    if (line.includes(TAG_OPENS) || line.startsWith('```json')) return null;
+  }
+  const pasted = pastedBodies(left, work);
+  const lines = left.map((line, i) => {
+    work.lines += 1;
+    return { line, grants: pasted[i] ? [] : readConsents(line) };
+  });
+  return lines.some((line) => line.grants.length > 0) ? lines : null;
+}
+
+// Which lines are inside a pasted segment, as `PASTED_BLOCK` finds segments (the terminal's frame, as the transcript's
+// `splitPastedSegments` reads it): from a line that ends with an opening tag to the first line, at least two after it,
+// that begins with the closing tag of the same id, both marked; the next segment is looked for from that line. Linear:
+// every line is looked at once in each of the two passes, and each closing line once more as a segment passes it.
+const OPENING_TAG = /^<pasted_content id="([0-9a-f]{4})">$/;
+const CLOSING_TAG = /^<\/pasted_content id="([0-9a-f]{4})">$/;
+const OPENING_TAG_LENGTH = '<pasted_content id="abcd">'.length;
+const CLOSING_TAG_LENGTH = '</pasted_content id="abcd">'.length;
+function pastedBodies(lines: readonly string[], work: ReadingWork): boolean[] {
+  const closings = new Map<string, number[]>();
+  lines.forEach((line, i) => {
+    work.lines += 1;
+    const id = CLOSING_TAG.exec(line.slice(0, CLOSING_TAG_LENGTH))?.[1];
+    if (id === undefined) return;
+    const ends = closings.get(id);
+    if (ends === undefined) closings.set(id, [i]);
+    else ends.push(i);
+  });
+  const passed = new Map<string, number>();
+  const pasted = lines.map(() => false);
+  for (let i = 0; i < lines.length; ) {
+    work.lines += 1;
+    const id = OPENING_TAG.exec(lines[i]!.slice(-OPENING_TAG_LENGTH))?.[1];
+    const ends = id === undefined ? undefined : closings.get(id);
+    let k = ends === undefined ? 0 : (passed.get(id!) ?? 0);
+    while (ends !== undefined && k < ends.length && ends[k]! < i + 2) {
+      work.lines += 1;
+      k += 1;
+    }
+    if (ends === undefined || k === ends.length) {
+      i += 1;
+      continue;
+    }
+    passed.set(id!, k);
+    const end = ends[k]!;
+    for (let line = i; line <= end; line += 1) {
+      work.lines += 1;
+      pasted[line] = true;
+    }
+    i = end;
+  }
+  return pasted;
 }
 
 type Read = { arrivals: Arrival[]; open: OpenArrivals };

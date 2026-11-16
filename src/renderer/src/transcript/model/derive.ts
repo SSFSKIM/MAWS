@@ -35,7 +35,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
-import { consentMessage, ownLines, readConsents } from '@shared/engine/arrival'; // UX wave U1c
+import { consentMessage, personsLines } from '@shared/engine/arrival'; // UX wave U1c; rule R
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
 import { NOTICE } from './copy'; // UX wave U3
 import { answeredWords } from './answered'; // UX wave U3
@@ -1619,14 +1619,14 @@ function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['
 // exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
 // when the lines do not give the marks, when the content holds anything but text (an image, a document: the whole
 // bubble keeps it), or when the words cannot be told apart from content that is not one string. The lines read are the
-// person's as the reader gives them (`ownLines`, Decision Log 52): MAWS's answer envelopes the engine joined in are no
-// words of theirs, so an envelope joined with grants and nothing else leaves no bubble, and a pasted segment's lines are
-// words, never grants.
+// person's as the reader gives them (`personsLines`, rule R): MAWS's answer envelopes the engine joined in are no words
+// of theirs, so an envelope joined with grants and nothing else leaves no bubble, and a pasted segment's lines are
+// words, never grants. A message rule R reads no grant in (the host marked a grant it wrote, which the engine joined with
+// an earlier build's envelope) keeps its whole bubble, beside its approval rows.
 function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
   if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
-  const text = messageText(content);
-  const whole = readConsents(text);
-  const lines = whole.length > 0 ? [{ line: text, grants: whole }] : ownLines(text).map(({ line, pasted }) => ({ line, grants: pasted ? [] : readConsents(line) }));
+  const lines = personsLines(messageText(content));
+  if (lines === null) return undefined;
   const grants = lines.flatMap((line) => line.grants);
   if (grants.length !== marks.length || grants.some((grant, i) => grant.kind !== marks[i]!.kind || grant.subject !== marks[i]!.subject)) return undefined;
   const others = lines.filter((line) => line.grants.length === 0).map((line) => line.line);

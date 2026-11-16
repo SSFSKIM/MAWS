@@ -582,9 +582,18 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     }
   });
 
-  it('(c) an envelope joined with a real grant line: one grant, its approval row alone in the joined turn, the blocked row approved', async () => {
+  // Rule R (2026-11-16): beside this build's envelope the grant line is the person's on both routes. Beside an earlier
+  // build's it is none where a reader reads the joined text, which the file's row is; the live host still carries the mark
+  // it put on the grant's own frame (marks come from each frame it wrote, never from the joined text). So after a reload
+  // that row offers its button again: the one direction of disagreement the architect accepted (it fails closed), with
+  // its row in docs/tech-debt-tracker.md
+  it('(c) an envelope joined with a real grant line: in this build’s form one grant on both routes, its approval row alone, the blocked row approved; in an earlier build’s form so live, and from the file none (rule R)', async () => {
     for (const [form, write] of FORMS) {
       for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope(undefined, write)]])) {
+        if (write === earlierAskSteerText && route === 'from the file') {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
         expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
         const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
         expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
@@ -594,10 +603,15 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   });
 
   // The cascade merge of U4b into U1c: one message the person sent, probe B's `u1c-b-1` (a grant written at the next step,
-  // started at 206) with the grant swapped for the message under test
-  it('(c2) one message of an answer and a grant: the grant is the person’s, its approval row alone, the blocked row approved, in either form', async () => {
+  // started at 206) with the grant swapped for the message under test. Rule R (2026-11-16): beside an earlier build's
+  // envelope, whose lines cannot be told from ones a model forged, the grant is none on both routes (an accepted cost)
+  it('(c2) one message of an answer and a grant: in this build’s form the grant is the person’s, its approval row alone, the blocked row approved; in an earlier build’s form none on either route (rule R)', async () => {
     for (const [form, write] of FORMS) {
       for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${envelope(undefined, write)}\n${GRANT}`]])) {
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
         expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
         expect(approvals.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
         expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
