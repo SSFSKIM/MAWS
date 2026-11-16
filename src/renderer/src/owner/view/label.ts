@@ -306,9 +306,43 @@ export function runOf(stretch: Stretch, rows: readonly Row[], runs: readonly Sto
 /** How long a line runs before it is cut (`LINE_MAX`, folds.tsx 137). */
 const LINE_MAX = 120;
 
+// `oneLine`'s join, in one pass (panel finding 5): every maximal run of whitespace (`\s`) that holds a line break becomes
+// one space and a run with none stays as it is, which is what the mod's `/\s*[\r\n]+\s*/g` matches, without its
+// rescans of a long run that holds no line break. `\s` holds no character outside the basic plane, so code units do.
+const SPACE = /\s/;
+let charsJoined = 0; // counted for tests, as `work` is: the characters the join has visited, cumulatively
+/** How many characters a call's line has visited as its lines were joined, cumulatively. */
+export const joinedChars = (): number => charsJoined;
+function joinLines(text: string): string {
+  let joined = '';
+  let copied = 0; // the text before this is in `joined`
+  let run = -1; // where the run of whitespace being read starts, or -1 outside one
+  let breaks = false; // that run holds a line break
+  const close = (end: number) => {
+    if (breaks) {
+      joined += `${text.slice(copied, run)} `;
+      copied = end;
+    }
+    run = -1;
+    breaks = false;
+  };
+  for (let at = 0; at < text.length; at += 1) {
+    charsJoined += 1;
+    const char = text[at]!;
+    if (!SPACE.test(char)) {
+      if (run >= 0) close(at);
+      continue;
+    }
+    if (run < 0) run = at;
+    if (char === '\n' || char === '\r') breaks = true;
+  }
+  if (run >= 0) close(text.length);
+  return joined + text.slice(copied);
+}
+
 // `oneLine`: newlines become spaces, and past `LINE_MAX` characters it is cut with `…`, between code points.
 function oneLine(text: string): string {
-  const chars = Array.from(text.replace(/\s*[\r\n]+\s*/g, ' ').trim());
+  const chars = Array.from(joinLines(text).trim());
   return chars.length > LINE_MAX ? `${chars.slice(0, LINE_MAX - 1).join('')}…` : chars.join('');
 }
 
