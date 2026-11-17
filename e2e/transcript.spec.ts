@@ -1430,7 +1430,7 @@ test('a command’s output is a dim line under its command, cut at the bottom of
           for (let node = walker.nextNode(); node !== null && out.length < 4; node = walker.nextNode()) {
             if (!node.textContent?.trim()) continue;
             range.selectNodeContents(node);
-            for (const rect of range.getClientRects()) if (out.length < 4) out.push({ top: rect.top - origin, bottom: rect.bottom - origin });
+            for (const rect of Array.from(range.getClientRects())) if (out.length < 4) out.push({ top: rect.top - origin, bottom: rect.bottom - origin });
           }
           return out;
         })(),
