@@ -1786,8 +1786,9 @@ function g1Repository(scratch: CodeScratch): void {
   writeFileSync(scratch.path('cache.bin'), Buffer.from([0x00, 0x01, 0x02]));
 }
 
-// G2's repository: a committed .gitignore naming *.keep-out (an invented extension no common global ignore file names, so
-// the runner's own rules cannot decide these entries), two files it ignores side by side (debug.keep-out, trace.keep-out),
+// G2's repository: a committed .gitignore naming *.keep-out (an invented extension), two files it ignores side by side
+// (debug.keep-out, trace.keep-out), whose ignoring the scene's own rule decides alone: the scratch's `gitHome` sets the
+// repository's core.excludesFile to an empty file, so the runner's global ignore file reaches no reader of it;
 // and the scratch's big.log removed; the rest as the scratch leaves it (src/app.ts modified, src/staged.ts staged, scratch.txt and
 // link-out untracked).
 function g2Repository(scratch: CodeScratch): void {

@@ -3721,11 +3721,16 @@ test('U6b-3a G3, a session on B: A’s Files shows B’s changed files and marks
     const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Make two changes.', firstReply: CHANGED_REPLY, title: 'B’s changed session', open: false }, held);
     // B's checkout made a repository, whatever the session left there committed with notes.txt and a .gitignore naming
     // logs/; then notes.txt modified, draft.md new, and logs/run.log written under the ignored folder. Every git command
-    // here runs under a home of its own, empty, so no ignore file or configuration of the runner's home decides the fixture
+    // here runs under a home of its own, empty, so no ignore file or configuration of the runner's home decides the fixture;
+    // and the checkout's core.excludesFile is an empty file of the scene's, so B's mawsd, which keeps the runner's HOME,
+    // reads what git ignores from the scene's .gitignore alone
     const gitHome = join(root, 'git-home');
     mkdirSync(gitHome);
     const gitHere = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: { ...isolatedGitEnv(), HOME: gitHome, XDG_CONFIG_HOME: join(gitHome, '.config') }, encoding: 'utf8' }).trim();
     gitHere(checkout, 'init', '--quiet', '-b', 'main');
+    const noGlobalIgnores = join(gitHome, 'excludes');
+    writeFileSync(noGlobalIgnores, '');
+    gitHere(checkout, 'config', 'core.excludesFile', noGlobalIgnores);
     writeFileSync(join(checkout, NOTES), NOTES_TEXT);
     writeFileSync(join(checkout, '.gitignore'), 'logs/\n');
     gitHere(checkout, 'add', '-A');

@@ -67,7 +67,9 @@ export interface CodeScratch {
 
 // UX wave U6b-3a: `gitHome`, every git command of the scratch run with a home of its own, empty (HOME and
 // XDG_CONFIG_HOME under the scratch's root), so that no ignore file or configuration of the runner's own home decides
-// what the fixture tracks or ignores. Without it the scratch is built as before.
+// what the fixture tracks or ignores; and the repository's own `core.excludesFile` an empty file of the scratch's, so
+// that every reader of it (the product's mawsd, this build's or a peer's, keeps the runner's HOME) follows the scene's
+// ignore rules (.gitignore, .git/info/exclude) and no global one. Without it the scratch is built as before.
 export function buildCodeScratch(options: { gitHome?: boolean } = {}): CodeScratch {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-code-')));
   const dir = join(root, 'repo');
@@ -85,6 +87,11 @@ export function buildCodeScratch(options: { gitHome?: boolean } = {}): CodeScrat
   git(root, 'init', '--quiet', '--bare', '-b', 'main', origin);
   mkdirSync(dir);
   git(dir, 'init', '--quiet', '-b', 'main');
+  if (options.gitHome) {
+    const noGlobalIgnores = join(home, 'excludes');
+    writeFileSync(noGlobalIgnores, '');
+    git(dir, 'config', 'core.excludesFile', noGlobalIgnores);
+  }
   write('src/app.ts', `${APP_LINES.join('\n')}\n`);
   write('src/generated.ts', Array.from({ length: GENERATED_LINES }, (_, i) => `${generatedLine(i + 1)}\n`).join(''));
   write('README.md', README);

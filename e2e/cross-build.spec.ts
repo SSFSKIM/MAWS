@@ -4703,9 +4703,13 @@ const DROPPED_SUBMODULE_EVENT = /dropped \S*\bsubmodule from event git\.changed,
 // lists `lib` alone, as a submodule whose working tree changed (porcelain v2's `sub` S.M.)
 function whatChangedRepo(s: Scratch): void {
   // every git command of the fixture under a home of its own, empty, so no ignore file or configuration of the runner's
-  // home decides what it tracks or ignores (gitAt's flags, this environment)
+  // home decides what it tracks or ignores (gitAt's flags, this environment); and the outer repository's and the
+  // submodule's core.excludesFile an empty file of the scene's, so each build's mawsd, which keeps the runner's HOME,
+  // reads what git ignores from the scene's .gitignore alone
   const home = join(s.root, 'git-home');
   mkdirSync(home);
+  const noGlobalIgnores = join(home, 'excludes');
+  writeFileSync(noGlobalIgnores, '');
   const env = { ...isolatedGitEnv(), HOME: home, XDG_CONFIG_HOME: join(home, '.config') };
   const git = (cwd: string, ...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd, env, encoding: 'utf8' });
   const origin = join(s.root, 'lib-origin');
@@ -4718,7 +4722,9 @@ function whatChangedRepo(s: Scratch): void {
   writeFileSync(join(s.repo, '.gitignore'), 'build/\n');
   for (const name of Object.values(XB_WITNESS)) writeFileSync(join(s.repo, name), 'An invented witness, as committed.\n');
   git(s.repo, 'init', '-q');
+  git(s.repo, 'config', 'core.excludesFile', noGlobalIgnores);
   git(s.repo, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', origin, 'lib');
+  git(join(s.repo, 'lib'), 'config', 'core.excludesFile', noGlobalIgnores);
   git(s.repo, 'add', '-A');
   git(s.repo, 'commit', '-q', '-m', 'An invented first commit');
   mkdirSync(join(s.repo, 'build'));
