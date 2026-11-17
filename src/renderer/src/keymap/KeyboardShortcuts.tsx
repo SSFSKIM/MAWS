@@ -27,7 +27,7 @@ export function KeyboardShortcuts() {
         </Dialog.Overlay>
         <Dialog.Content
           {...focus}
-          ref={handoff.ref}
+          ref={handoff.lend}
           onCloseAutoFocus={(event) => { focus.onCloseAutoFocus(event); handoff.closed(); }}
           onOpenAutoFocus={(event) => { focus.onOpenAutoFocus(); event.preventDefault(); search.current?.focus(); }}
           className="fixed top-[10%] left-1/2 z-50 flex max-h-[80vh] w-[min(600px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg shadow-float"

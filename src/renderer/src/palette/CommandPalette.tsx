@@ -138,7 +138,7 @@ export function CommandPalette() {
       <Dialog.Portal>
         <Dialog.Content
           {...focus}
-          ref={handoff.ref}
+          ref={handoff.lend}
           onCloseAutoFocus={(event) => {
             focus.onCloseAutoFocus(event);
             handoff.closed();

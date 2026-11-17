@@ -67,8 +67,8 @@ export function subscribeModalKeyboard(listener: () => void): () => void {
 }
 
 export interface ModalHandoff {
-  /** The modal's content: it lends itself while drawn. */
-  ref: RefCallback<HTMLElement>;
+  /** The ref of the modal's content: it lends itself while drawn. */
+  lend: RefCallback<HTMLElement>;
   /** Closes the modal and runs `run` from its close (the modal's own row of an action that moves the keyboard). */
   closeThen(run: () => void): void;
   /** Called from the content's `onCloseAutoFocus`, after the modal's own return of the keyboard: runs what was handed off. */
@@ -86,7 +86,7 @@ export function modalHandoff(close: () => void): ModalHandoff {
     close();
   };
   return {
-    ref: (content) => {
+    lend: (content) => {
       if (content === null) return;
       const lender: Lender = { content, closeThen };
       lenders.add(lender);
