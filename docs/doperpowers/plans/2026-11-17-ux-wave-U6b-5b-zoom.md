@@ -587,6 +587,8 @@ Found while this document was written and reviewed; each changed a decision abov
 
 11. **2026-11-17 (UTC) · M1: the same-URL test compares Chromium's zoom key, which keeps the query.** For a hostless (`file:`) page in the default mode, Chromium keys the zoom by the whole spec less the fragment (Electron 44.4.5's zoom controller; `HostZoomMap`'s host-or-spec helper). The cross-build probe therefore compares the URLs with the query kept. On another key, the relaunch is labelled neither the control nor P7 evidence. This is the task review's finding on the second fix wave. Its other finding there, that `popupPlace` in the e2e duplicates `popupBounds`, is left as Decision Log 10 rules: extracting the pure clamp into a module both can load would edit U12's `popup.ts`, which M1 must not touch (it changes nothing of the product but the two seam additions). The architect decides whether M2 or M3 extracts it.
 
+12. **2026-11-17 (UTC) · Ruled by the architect: M2 extracts `popupBounds`' clamp** into one module that main and the e2e both load, and the e2e mirror `popupPlace` (`e2e/support/zoom-probe.ts`) is removed then. M2 already changes popup placement (placement 2), so the extraction belongs there. This closes the finding Decision Log 11 deferred. M1's review loop stops at `76d0bbc9d`: a later find goes to the tracker unless it makes a measurement invalid. M2 starts on the architect's word, once M1's Mac rows are in and U6b-5a's head is merged.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
