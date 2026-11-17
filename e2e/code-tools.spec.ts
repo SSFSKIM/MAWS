@@ -53,6 +53,27 @@ async function storedFiles(page: Page): Promise<{ beside: string[]; main: string
   });
 }
 
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, M3 decision 4): Go to file by its menu
+// row's own click, which is what its accelerator does: the row is read first, enabled and carrying ⌘P.
+async function goToFile(p: Product): Promise<void> {
+  const row = () =>
+    p.maws.app.evaluate(({ Menu }) => {
+      const item = Menu.getApplicationMenu()?.getMenuItemById('files.goToFile');
+      return item ? { enabled: item.enabled, accelerator: item.accelerator ?? null } : null;
+    });
+  await expect.poll(row, { message: 'Go ▸ Go to file, enabled, with ⌘P' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
+  await menu(p.maws, 'files.goToFile');
+}
+// Where the keyboard is, as the page says: in Go to file's field; or inside a file's text, answered as the key of the file
+// view whose text holds it (null anywhere else, a tab's button among them).
+const fieldHasKeyboard = (page: Page) => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false);
+const keyboardInText = (page: Page) =>
+  page.evaluate(() => {
+    const active = document.activeElement;
+    if (active === null || active.getAttribute('role') === 'tab' || active.closest('.cm-content') === null) return null;
+    return active.closest('[data-file-keyboard]')?.getAttribute('data-key') ?? null;
+  });
+
 // ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
 
 const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'; // Chromium's PDF viewer, beneath a PDF's frame
@@ -1338,11 +1359,56 @@ test.describe('the product in stub mode over a scratch repository', () => {
             await expect(treeRow(p, p.scratch.path('big.log'))).toHaveAttribute('data-ignored', '');
             expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row, the Changed group and its marks beside ${file}, its tab the preview`).toEqual([]);
           }
+          // UX wave U6b-3b (§G): the scan covers Go to file's field (drawn in every tree column, here with the keyboard),
+          // its list in the tree's place with its first row highlighted, and its line for no match (the line's one drawing
+          // that the searching and the offline lines share; the failure's own is scanned last). Esc empties the field.
+          const files = surface(p.page, 'files');
+          const field = files.locator('[data-files-filter]');
+          await goToFile(p);
+          await expect.poll(() => fieldHasKeyboard(p.page), { message: `${theme}: the field has the keyboard` }).toBe(true);
+          await field.fill('app.ts');
+          await expect(files.locator(`[data-files-results]:not([aria-busy]) [data-files-result][data-path="${p.scratch.path('src/app.ts')}"]`), `${theme}: the list, its first row highlighted`).toHaveAttribute('aria-selected', 'true');
+          expect(await otherThemeColours(p.page), `${theme}: Go to file’s field, and its list with a highlighted row in the tree’s place`).toEqual([]);
+          await field.fill('zzqx');
+          await expect(files.locator('[data-files-line][data-line="none"]'), `${theme}: the line for no match`).toHaveText('No matching files');
+          expect(await otherThemeColours(p.page), `${theme}: Go to file’s line for no match`).toEqual([]);
+          await field.press('Escape');
+          await expect(field, 'Esc empties the field').toHaveValue('');
+          await expect(files.locator('[data-files-results], [data-files-line]'), 'the tree back in the list’s place').toHaveCount(0);
           // UX wave U6b-2: the failure body and its button
           await sideFileTab(p.page, 'gone.pdf').getByRole('tab').click();
           await expect(stopped, 'the read for its frame failed').toHaveAttribute('data-frame', 'failed', { timeout: 20_000 });
           await expect(stopped.locator('[data-frame-stopped]').getByRole('button', { name: 'Open again', exact: true })).toBeVisible();
           expect(await otherThemeColours(p.page), `${theme}: the failure body of a framed file, and its Open again`).toEqual([]);
+        }
+        // UX wave U6b-3b (§G): Go to file's line for a search that failed, in both themes, last of all: the repository's
+        // configuration is given a line git cannot read (and given back after). The lister keeps a folder's list for ten
+        // seconds from its load, so the text is changed until an ask loads the folder again and fails.
+        const config = p.scratch.path('.git/config');
+        const readable = readFileSync(config, 'utf8');
+        writeFileSync(config, `${readable}[core\n\tan invented line git cannot read\n`);
+        try {
+          const files = surface(p.page, 'files');
+          const field = files.locator('[data-files-filter]');
+          const failed = files.locator('[data-files-line][data-line="failed"]');
+          await goToFile(p);
+          await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+          let attempt = 0;
+          await expect(async () => {
+            attempt += 1;
+            await field.fill(`zzqx${attempt}`);
+            const settled = files.locator('[data-files-line][data-line="none"], [data-files-line][data-line="failed"]');
+            await expect(settled, 'the text’s answer or its failure').toHaveCount(1);
+            expect(await settled.getAttribute('data-line'), 'an ask that read the folder again').toBe('failed');
+          }).toPass({ timeout: 30_000, intervals: [1_000] });
+          for (const theme of ['dark', 'light'] as const) {
+            await menu(p.maws, `theme.${theme}`);
+            await expect(p.page.locator('html')).toHaveAttribute('data-theme', theme);
+            await expect(failed, `${theme}: the line for a search that failed`).toHaveText('Files could not be searched.');
+            expect(await otherThemeColours(p.page), `${theme}: Go to file’s line for a search that failed`).toEqual([]);
+          }
+        } finally {
+          writeFileSync(config, readable);
         }
       },
       (scratch) => {
@@ -1929,5 +1995,259 @@ test.describe('UX wave U6b-3a: Files shows what changed', () => {
       await expect(changedRow(p, 'debug.keep-out')).toHaveAttribute('data-letter', 'A');
       await expect(treeRow(p, p.scratch.path('trace.keep-out')), 'trace.keep-out still muted').toHaveAttribute('data-ignored', '');
     }, g2Repository, { gitHome: true });
+  });
+});
+
+// ---- UX wave U6b-3b: Go to file ------------------------------------------------------------------------------------------
+// docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md (Interfaces §A to §C and §G, scenes G1 to G4; acceptance
+// B1, B3, B5 and B6). The stub-mode product over the scratch repository, with invented files committed before the launch
+// (`goToFileRepository`). Go to file is reached by its menu row's own click (`goToFile`); its field is
+// `[data-files-filter]`, the list in the tree's place `[data-files-results]` (`aria-busy` while an answer is awaited over
+// earlier rows), a result `[data-files-result]` with its absolute `data-path`, and a file view's body
+// `[data-file-keyboard]` with its key in `data-key`. "The keyboard is in the file" is read as the page's active element
+// inside that view's text, never a tab's button (`keyboardInText`). Each scene runs alone: it launches the product over a
+// repository of its own and reads nothing another scene left. No scene sleeps or reads a time: each waits on what it then
+// reads, and a position it claims prints its boxes when it fails.
+
+// G1's query, `pier`, matches these three files, the folder pier/ and the submodule pier-dock (a gitlink, which the lister
+// names as the folder it is), and nothing else of the scratch; the list holds the three files alone.
+const PIER_FILES = ['docs/pier-ledger.txt', 'pier/ledger.ts', 'src/pier-ledger.test.ts'];
+const CHART_FILES = 60; // under charts/, so that the tree, that folder open, scrolls
+// The block's repository: the scratch's, with these committed (the scratch's own staged and untracked entries left as
+// they are): G1's three files and its clean submodule at pier-dock, made from a repository of its own beside the scratch's;
+// the charts; harbor/berth-log.ts (G3's file); quay/berth.ts and quay/berth-plan.txt (G4's query, `quayberth`, in a
+// folder git tracks, so that a file written there later is an entry of the status of its own).
+function goToFileRepository(scratch: CodeScratch): void {
+  const files: [string, string][] = [
+    ...PIER_FILES.map((relative): [string, string] => [relative, `An invented file for Go to file, ${relative}.\n`]),
+    ...Array.from({ length: CHART_FILES }, (_, i): [string, string] => [`charts/chart-${String(i + 1).padStart(2, '0')}.txt`, `An invented chart, number ${i + 1}.\n`]),
+    ['harbor/berth-log.ts', "export const berthLog = 'an invented log';\n"],
+    ['quay/berth.ts', "export const berth = 'an invented berth';\n"],
+    ['quay/berth-plan.txt', 'An invented plan of the berths.\n'],
+  ];
+  for (const [relative, text] of files) {
+    mkdirSync(dirname(scratch.path(relative)), { recursive: true });
+    writeFileSync(scratch.path(relative), text);
+  }
+  const dock = join(scratch.root, 'dock-origin');
+  const gitIn = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: scratch.gitEnv, encoding: 'utf8' }).trim();
+  mkdirSync(dock);
+  gitIn(dock, 'init', '--quiet', '-b', 'main');
+  writeFileSync(join(dock, 'moorings.txt'), 'An invented list of moorings.\n');
+  gitIn(dock, 'add', '-A');
+  gitIn(dock, 'commit', '--quiet', '-m', 'An invented dock');
+  scratch.git('-c', 'protocol.file.allow=always', 'submodule', 'add', '--quiet', dock, 'pier-dock');
+  const paths = files.map(([relative]) => relative);
+  scratch.git('add', '--', ...paths);
+  scratch.git('commit', '--quiet', '-m', 'Invented files for Go to file', '--', '.gitmodules', 'pier-dock', ...paths); // these alone: src/staged.ts stays staged
+}
+
+// The list for the text as it stands (not busy), a result of it, and the paths it holds in order.
+const answered = (p: Product) => filesOf(p).locator('[data-files-results]:not([aria-busy])');
+const resultOf = (p: Product, path: string) => answered(p).locator(`[data-files-result][data-path="${path}"]`);
+const resultPaths = (p: Product) => answered(p).locator('[data-files-result]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path') ?? ''));
+const fieldOf = (p: Product) => filesOf(p).locator('[data-files-filter]');
+const composerOf = (p: Product) => p.page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+// files.tree as the layout's own read answers it, for this session (its key the session's address)
+type StoredTree = { sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> };
+async function storedTreeOf(p: Product): Promise<StoredTree['sessions'][string] | null> {
+  const tree = await p.page.evaluate(async () => {
+    const read = await window.maws.invoke('layout.get', { key: 'files.tree' });
+    return read.ok ? (read.value.value as StoredTree | null) : null;
+  });
+  return tree?.sessions[await addressed(p.page, p.scratch.appSessionId)] ?? null;
+}
+
+test.describe('UX wave U6b-3b: Go to file', () => {
+  // G1 (B1, B5). Waits on the tree's scroller holding room past the offset it sets and reads back; on the composer, then
+  // the field, being the active element; on the list not busy and holding the three expected rows before it reads them
+  // (files only: no folder, no submodule) and the first's highlight; after Esc, on the field emptied and the tree's list
+  // drawn again before it compares the offset read before Go to file; after the second Esc, on the composer's editor
+  // being the active element. Then on the second row's highlight after ↓; after Enter, on the file's tab marker (kept)
+  // and the active element inside that file's text. After Go to file from the file, on the field holding the keyboard
+  // with its text selected; after `app.ts:25`, on the list's one row; after Enter, on the line's witness the scene "a
+  // TypeScript file highlights and jumps to the line" uses (`expectLandedOn`) and the keyboard in that file's text.
+  test('G1: Go to file from the composer: the field has the keyboard; a name lists files; ↓ and Enter open the second as a kept tab with the keyboard in the file; `name:line` lands on the line; Esc twice returns the tree and the keyboard', async () => {
+    await withProduct(async (p) => {
+      const machine = await localRef(p.page);
+      const expected = PIER_FILES.map((relative) => p.scratch.path(relative));
+
+      // the tree, charts/ open, scrolled down
+      await reveal(p, 'charts/chart-01.txt');
+      const scroller = filesOf(p).locator('[data-files-scroller]');
+      const OFFSET = 300;
+      await expect.poll(() => scroller.evaluate((el) => el.scrollHeight - el.clientHeight), { message: 'the tree scrolls past the offset' }).toBeGreaterThan(OFFSET);
+      const offset = await scroller.evaluate((el, at) => {
+        el.scrollTop = at;
+        return el.scrollTop;
+      }, OFFSET);
+      expect(offset, 'the tree scrolled').toBe(OFFSET);
+
+      // from the composer: the field has the keyboard, and a name lists the files that match it, files only
+      const composer = composerOf(p);
+      await composer.click();
+      await expect(composer, 'the keyboard in the composer').toBeFocused();
+      await goToFile(p);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('pier');
+      await expect.poll(async () => (await resultPaths(p)).sort(), { message: 'the three files, and no folder or submodule' }).toEqual([...expected].sort());
+      const first = answered(p).locator('[data-files-result]').first();
+      await expect(first, 'the first row highlighted').toHaveAttribute('aria-selected', 'true');
+      await expect(fieldOf(p), 'the field names it').toHaveAttribute('aria-activedescendant', (await first.getAttribute('id'))!);
+
+      // Esc with text: the field emptied, the keyboard kept, the tree at the offset it had; Esc again: the composer
+      await p.page.keyboard.press('Escape');
+      await expect(fieldOf(p), 'Esc empties the field').toHaveValue('');
+      await expect(filesOf(p).locator('[data-files-results], [data-files-line]'), 'the list gone').toHaveCount(0);
+      await expect(scroller, 'the tree’s list drawn again').toBeVisible();
+      await expect.poll(() => scroller.evaluate((el) => el.scrollTop), { message: 'the tree at the offset it had' }).toBe(offset);
+      expect(await fieldHasKeyboard(p.page), 'the keyboard still in the field').toBe(true);
+      await p.page.keyboard.press('Escape');
+      await expect(composer, 'Esc again: the keyboard back in the composer').toBeFocused();
+
+      // ↓ and Enter: the second row opens as a kept tab beside the chat, and the keyboard is in its text
+      await goToFile(p);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('pier');
+      await expect.poll(async () => (await resultPaths(p)).sort(), { message: 'the three files again' }).toEqual([...expected].sort());
+      const second = (await resultPaths(p))[1]!;
+      await p.page.keyboard.press('ArrowDown');
+      const secondRow = resultOf(p, second);
+      await expect(secondRow, '↓: the second row highlighted').toHaveAttribute('aria-selected', 'true');
+      await expect(fieldOf(p), 'the field names it').toHaveAttribute('aria-activedescendant', (await secondRow.getAttribute('id'))!);
+      await p.page.keyboard.press('Enter');
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${second}"]`), `${basename(second)} beside the chat`).toBeVisible({ timeout: 20_000 });
+      await expect(sideFileTab(p.page, basename(second)), 'a kept tab').not.toHaveAttribute('data-preview', 'true');
+      await expect.poll(() => keyboardInText(p.page), { message: `the keyboard in ${basename(second)}’s text` }).toBe(`file:${machine}:${second}`);
+
+      // Go to file from the file: the field's text selected, so typing replaces it; `name:line` lands on that line
+      await goToFile(p);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      expect(await fieldOf(p).evaluate((el: HTMLInputElement) => [el.value, el.selectionStart, el.selectionEnd]), 'its text selected').toEqual(['pier', 0, 4]);
+      await p.page.keyboard.type('app.ts:25');
+      await expect(fieldOf(p)).toHaveValue('app.ts:25');
+      const app = p.scratch.path('src/app.ts');
+      await expect.poll(() => resultPaths(p), { message: 'src/app.ts alone' }).toEqual([app]);
+      await expect(resultOf(p, app)).toHaveAttribute('aria-selected', 'true');
+      await p.page.keyboard.press('Enter');
+      await expectLandedOn(p.page, '// added at line 25');
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in app.ts’s text' }).toBe(`file:${machine}:${app}`);
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G2 (B3). Waits on `[data-files-tree][data-place]` in the tab that holds the file at each step: beside, then none once
+  // folded, beside again for the search, none after Enter; in the narrow tab none, then instead for the search, then none
+  // after Esc twice. Reads files.tree through the layout's own read once the fold is written, and again after each search:
+  // the session's entry as it was, folded. In the narrow tab it measures the "Files" bar above the field (the boxes
+  // printed when it fails) and waits on the keyboard in the file's text before Go to file and again after the second Esc.
+  test('G2: a folded tree is shown for the search and folded again; in a narrow tab the column stands in the file’s place', async () => {
+    await withProduct(async (p) => {
+      const machine = await localRef(p.page);
+      const app = p.scratch.path('src/app.ts');
+      const key = `file:${machine}:${app}`;
+      const viewer = await openInViewer(p, 'src/app.ts');
+      const tab = sideColumn(p.page).locator(`[data-files-tab][data-file="${app}"]`);
+      const column = tab.locator('[data-files-tree]');
+      const resizer = p.page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+      await resizer.focus();
+      await resizer.press('End'); // the side column at its widest: room for the tree beside the file
+      await expect(tab.locator('[data-files-tree][data-place="beside"]'), 'the tree beside the file').toBeVisible();
+
+      // folded by its button: the fold stored
+      await tab.locator('[data-files-tree-toggle]').click();
+      await expect(column, 'folded: no column').toHaveCount(0);
+      await expect.poll(async () => (await storedTreeOf(p))?.folded ?? null, { message: 'the fold stored' }).toBe(true);
+      const stored = await storedTreeOf(p);
+
+      // Go to file shows the column for the search; Enter opens the file and the tab is the file's again
+      await goToFile(p);
+      await expect(tab.locator('[data-files-tree][data-place="beside"]'), 'the column shown for the search').toBeVisible();
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('app.ts');
+      await expect(resultOf(p, app), 'src/app.ts, highlighted').toHaveAttribute('aria-selected', 'true');
+      await p.page.keyboard.press('Enter');
+      await expect(column, 'after Enter: folded again').toHaveCount(0);
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in the file’s text' }).toBe(key);
+      expect(await storedTreeOf(p), 'the stored tree as it was: folded, never written').toEqual(stored);
+
+      // a tab too narrow for both: the column stands in the file's place for the search, the bar first, then the field
+      await resizer.focus();
+      await resizer.press('Home');
+      await expect(resizer, 'the side column at its least').toHaveAttribute('aria-valuenow', '280');
+      await expect(column, 'too narrow for both: no column').toHaveCount(0);
+      await viewer.locator('.cm-content .cm-line').first().click({ position: { x: 3, y: 4 } });
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in the file’s text' }).toBe(key);
+      await goToFile(p);
+      const instead = tab.locator('[data-files-tree][data-place="instead"]');
+      await expect(instead, 'the column in the file’s place').toBeVisible();
+      await expect(viewer, 'the file hidden under it').toBeHidden();
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      const [bar, field] = [await instead.locator('[data-files-tree-toggle]').boundingBox(), await instead.locator('[data-files-filter]').boundingBox()];
+      expect(bar !== null && field !== null && field.y >= bar.y + bar.height - 0.5, `the "Files" bar above the field: ${boxText('the tree’s button', bar)}; ${boxText('the field', field)}`).toBe(true);
+
+      // Esc twice: the field emptied, then the search over: the file back in the tab, the keyboard in its text
+      await p.page.keyboard.press('Escape');
+      await expect(fieldOf(p), 'Esc empties the field').toHaveValue('');
+      await p.page.keyboard.press('Escape');
+      await expect(column, 'the search over: no column').toHaveCount(0);
+      await expect(viewer, 'the file in the tab again').toBeVisible();
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard back in the file’s text' }).toBe(key);
+      expect(await storedTreeOf(p), 'the stored tree as it was: folded, never written').toEqual(stored);
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G3 (B5). Waits on the file's main tab being selected after the ⌘-click, then on the session's tab being selected; on
+  // the field holding the keyboard and the list holding the file, highlighted; after Enter, on the main tab being selected
+  // and on the active element being inside the text of `[data-file-keyboard]` with that file's key, in the main area;
+  // after one typed character, on the main tab's unsaved mark.
+  test('G3: a file already open in the main area: found and entered, its tab comes forward and typing goes into its text', async () => {
+    await withProduct(async (p) => {
+      const machine = await localRef(p.page);
+      const log = p.scratch.path('harbor/berth-log.ts');
+      const key = `file:${machine}:${log}`;
+      const fileTab = mainTabById(p.page, key);
+      await (await reveal(p, 'harbor/berth-log.ts')).click({ modifiers: ['Meta'] });
+      await expect(fileTab, '⌘-click: a main tab of the file, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+      const sessionTab = mainTabById(p.page, `session:${await addressed(p.page, p.scratch.appSessionId)}`);
+      await sessionTab.click();
+      await expect(sessionTab, 'the session’s tab in front').toHaveAttribute('aria-selected', 'true');
+      await expect(fileTab).toHaveAttribute('aria-selected', 'false');
+
+      await composerOf(p).click();
+      await goToFile(p);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('berthlog');
+      await expect.poll(() => resultPaths(p), { message: 'the file alone' }).toEqual([log]);
+      await expect(resultOf(p, log), 'highlighted').toHaveAttribute('aria-selected', 'true');
+      await p.page.keyboard.press('Enter');
+      await expect(fileTab, 'its main tab comes forward').toHaveAttribute('aria-selected', 'true');
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in the main tab’s text, not on its button' }).toBe(key);
+      expect(await p.page.evaluate(() => document.activeElement?.closest('[data-region="main"]') !== null), 'in the main area').toBe(true);
+      await expect(sideFileTab(p.page, 'berth-log.ts'), 'no side tab of it: one view of a file').toHaveCount(0);
+      await p.page.keyboard.type('x');
+      await expect(fileTab, 'typed into its text: the unsaved mark').toHaveAttribute('data-dirty', 'true');
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G4 (B6). Waits on the list not busy and holding the two files of `quayberth`, then on the second row's highlight after
+  // ↓; writes a third matching file from the test's process, presses no key, and waits up to 30 s (a refresh's two asks
+  // and the status that sets it off) on its row; then reads the highlighted row's path.
+  test('G4: an open filter follows a new file', async () => {
+    await withProduct(async (p) => {
+      const quay = ['quay/berth.ts', 'quay/berth-plan.txt'].map((relative) => p.scratch.path(relative));
+      await goToFile(p);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('quayberth');
+      await expect.poll(async () => (await resultPaths(p)).sort(), { message: 'the two files' }).toEqual([...quay].sort());
+      const held = (await resultPaths(p))[1]!;
+      await p.page.keyboard.press('ArrowDown');
+      await expect(resultOf(p, held), '↓: the second row highlighted').toHaveAttribute('aria-selected', 'true');
+
+      const annex = p.scratch.path('quay/berth-annex.ts');
+      writeFileSync(annex, "export const annex = 'an invented annex';\n");
+      await expect(resultOf(p, annex), 'the file written in the working folder joins the list, no key pressed').toBeVisible({ timeout: 30_000 });
+      expect((await resultPaths(p)).sort(), 'the three files').toEqual([...quay, annex].sort());
+      await expect(answered(p).locator('[data-files-result][aria-selected="true"]'), 'the highlight on the row it was on').toHaveAttribute('data-path', held);
+    }, goToFileRepository, { gitHome: true });
   });
 });

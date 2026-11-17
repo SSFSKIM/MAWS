@@ -1085,3 +1085,49 @@ test('U6a: ⌘J, ⇧⌘D and ⇧⌘F show and hide Terminal, Review and Files; V
   await expect(sheet).toHaveCount(0);
   expect(maws.consoleErrors()).toEqual([]);
 });
+
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G5; acceptance B4, A13 for the
+// row files.goToFile): Go ▸ Go to file, read from the application menu by id, directly under Command palette with ⌘P and
+// no separator between them. Its enabled state follows the side column: polled to false with no session (the window as
+// it launches, no tab open), true once a session is open, false under the Settings dialog and under the Overview and true
+// again once each is closed; each act waits on its own mark (the dialog, the Overview, their absence) before the poll.
+// The shortcut sheet lists the row under Go with ⌘P.
+test('G5: Go ▸ Go to file stands under Command palette with ⌘P; disabled with no session, with Settings open and with the Overview open; enabled with a session; the sheet lists it under Go', async ({ maws }) => {
+  const { app, page } = maws;
+  const goRows = await app.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu()!
+      .items.find((item) => item.label === 'Go')!
+      .submenu!.items.map((item) => ({ id: item.id ?? null, type: item.type, label: item.label, accelerator: item.accelerator ?? null })),
+  );
+  const palette = goRows.findIndex((row) => row.id === 'palette.open');
+  expect(palette, `Command palette in Go: ${JSON.stringify(goRows)}`).toBeGreaterThanOrEqual(0);
+  expect(goRows[palette + 1], 'Go to file directly under Command palette, with ⌘P, no separator between them').toEqual({ id: 'files.goToFile', type: 'normal', label: 'Go to file', accelerator: 'Cmd+P' });
+
+  const enabled = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('files.goToFile')?.enabled ?? null);
+  await expect(main(page).getByText('No open tabs')).toBeVisible({ timeout: 15_000 });
+  await expect.poll(enabled, { message: 'disabled with no session in the side column' }).toBe(false);
+  await openSession(page);
+  await expect.poll(enabled, { message: 'enabled with a session in the side column' }).toBe(true);
+
+  await menu(app, 'settings.open');
+  await expect(settingsDialog(page)).toBeVisible();
+  await expect.poll(enabled, { message: 'disabled with the Settings dialog open' }).toBe(false);
+  await page.keyboard.press('Escape');
+  await expect(settingsDialog(page)).toHaveCount(0);
+  await expect.poll(enabled, { message: 'enabled once Settings is closed' }).toBe(true);
+
+  await menu(app, 'tab.overview');
+  const overview = page.getByRole('dialog', { name: 'Overview' });
+  await expect(overview).toBeVisible();
+  await expect.poll(enabled, { message: 'disabled with the Overview open' }).toBe(false);
+  await overview.getByRole('button', { name: 'Close Overview' }).click();
+  await expect(overview).toHaveCount(0);
+  await expect.poll(enabled, { message: 'enabled once the Overview is closed' }).toBe(true);
+
+  await menu(app, 'shortcuts.open');
+  const sheet = page.getByRole('dialog', { name: 'Keyboard shortcuts' });
+  await expect(sheet.getByRole('table', { name: 'Go', exact: true }).getByRole('row', { name: /Go to file/ }), 'the sheet lists it under Go, with ⌘P').toContainText('⌘P');
+  await page.keyboard.press('Escape');
+  await expect(sheet).toHaveCount(0);
+  expect(maws.consoleErrors()).toEqual([]);
+});

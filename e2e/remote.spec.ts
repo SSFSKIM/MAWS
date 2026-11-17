@@ -3778,6 +3778,89 @@ test('U6b-3a G3, a session on B: A’s Files shows B’s changed files and marks
   }
 });
 
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, §G, scene G7; acceptance B7): a session
+// MAWS runs on B, beside U6b-3a's scene. Go to file's list is read on B (`git.lsFiles` over the link, under B's checkout
+// rule; the checkout is a plain folder, so B's lister walks it): a file written in B's checkout is a result. A's way to
+// the hub cut (B unreachable), once the link's phase is offline the list says B is offline, whole, in the tree's column at
+// its least (160 px); restored, the text is asked again and the file is listed again. Go to file is its menu row's own
+// click (which is what ⌘P does; the row is read first, enabled and carrying ⌘P). Waits on the field being the active
+// element; on the result's row in the list not busy; after Enter, on the file's view beside the chat and on the tree beside
+// it; after the cut, on the link's offline mark (`data-link-phase`) before it reads the line; after the tree's divider is
+// at its least, it measures the column and the line (their boxes printed when a claim fails); after the restore, on A's
+// link up and the row again. Every name in B's checkout is invented.
+const FINDER_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e7';
+const FINDER_REPLY = 'B’s agent wrote its tide tables.';
+const TIDES_ON_B = 'tide-tables-on-b.txt';
+const boxWords = (name: string, box: { x: number; y: number; width: number; height: number } | null) =>
+  box === null ? `${name}: not drawn` : `${name}: x ${Math.round(box.x)}, y ${Math.round(box.y)}, ${Math.round(box.width)} × ${Math.round(box.height)}`;
+test('U6b-3b G7, a session on B: Go to file lists a file that exists on B alone; with B stopped the list says B is offline; with B back the text is asked again', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-finder-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-finder-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(FINDER_SESSION, checkout);
+    journal.turn(FINDER_REPLY);
+    const { scene, b, page, electron } = await laneBOpened({ root, aUserData, journal, first: 'Write the tide tables.', firstReply: FINDER_REPLY, title: 'B’s tide session' }, held);
+    const tides = join(checkout, TIDES_ON_B);
+    writeFileSync(tides, 'Invented tide tables, written in B’s checkout.\n');
+
+    // Go to file: the field takes the keyboard, and the text lists B's file
+    const row = () =>
+      electron.evaluate(({ Menu }) => {
+        const item = Menu.getApplicationMenu()?.getMenuItemById('files.goToFile');
+        return item ? { enabled: item.enabled, accelerator: item.accelerator ?? null } : null;
+      });
+    await expect.poll(row, { message: 'Go ▸ Go to file, enabled, with ⌘P' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
+    await menu(electron, 'files.goToFile');
+    await expect.poll(() => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false), { message: 'the field has the keyboard' }).toBe(true);
+    await page.keyboard.type('tidetables');
+    const files = surface(page, 'files');
+    const result = files.locator(`[data-files-results]:not([aria-busy]) [data-files-result][data-path="${tides}"]`);
+    await quoting(expect(result, 'the file in B’s checkout, listed on B').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    // Enter: the file beside the chat, read on B; the side column at its widest, so the tree stands beside it with the
+    // field still holding the text and its list
+    await page.keyboard.press('Enter');
+    const tab = sideColumn(page).locator(`[data-files-tab][data-file="${tides}"]`);
+    await quoting(expect(tab.locator(`[data-file-viewer][data-path="${tides}"]`), 'B’s file beside the chat').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    const panelDivider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel', exact: true });
+    await panelDivider.focus();
+    await panelDivider.press('End');
+    const column = tab.locator('[data-files-tree][data-place="beside"]');
+    await expect(column, 'the tree beside the file').toBeVisible();
+    await quoting(expect(result, 'the list in the tree’s column').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+
+    // B unreachable: once A's link is offline, the list says so and asks nothing; the sentence whole at 160 px
+    scene.aHub.cut();
+    await quoting(expect(linkLine(page), 'the link’s offline mark').toHaveAttribute('data-link-phase', 'offline', { timeout: REMOTE_ACT_PENDING_MS + 60_000 }), () => mainSaid(page));
+    const OFFLINE = `File search is unavailable while ${B_NAME} is offline.`;
+    const line = files.locator('[data-files-line][data-line="offline"]');
+    await expect(line, 'the list’s line').toHaveText(OFFLINE);
+    const treeDivider = tab.getByRole('separator', { name: 'Resize files', exact: true });
+    await treeDivider.focus();
+    await treeDivider.press('Home');
+    await expect(treeDivider, 'the tree’s column at its least').toHaveAttribute('aria-valuenow', '160');
+    const [box, said] = [await column.boundingBox(), await line.boundingBox()];
+    const clipped = await line.evaluate((el) => el.scrollWidth > el.clientWidth || el.scrollHeight > el.clientHeight);
+    const boxes = `${boxWords('the column', box)}; ${boxWords('the line', said)}`;
+    expect(box !== null && Math.abs(box.width - 160) <= 1, `the column 160 px wide: ${boxes}`).toBe(true);
+    expect(box !== null && said !== null && said.x >= box.x - 0.5 && said.x + said.width <= box.x + box.width + 0.5, `the line no wider than the column: ${boxes}`).toBe(true);
+    expect(clipped, `the sentence not clipped: ${boxes}`).toBe(false);
+    await expect(line, 'the sentence whole').toHaveText(OFFLINE);
+
+    // B reachable again: the text is asked again and the file is listed
+    scene.aHub.restore();
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
+    await quoting(expect(result, 'asked again: the file listed again').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4 on another machine, §C.3, §C.4): a
 // second session of B's makes its draft through its own tools (B's host runs the agent's seam, MAWS_DASHBOARD_E2E) and
 // its turn deletes it (`artifact_delete`, served by B's tool server; its journal is written once the draft exists, before
