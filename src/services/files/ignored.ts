@@ -315,6 +315,7 @@ const OWNED_ELSEWHERE = 'the repository belongs to another user';
 const CHANGED = 'the folder or its repository changed before git ran';
 const ANOTHER_TREE = 'git names another work tree for the folder';
 const UNREADABLE = 'git named a repository path the check cannot read';
+const NO_PATH_FORMAT = 'the git in use does not know rev-parse --path-format (older than the option)';
 
 // The repository that holds `dir` (an absolute realpath), as git's discovery finds it from there in read mode: the
 // nearest folder at or above it with a `.git` entry, and that entry. Null inside a `.git` folder, where no work tree
@@ -358,7 +359,9 @@ interface Repository {
 // directory and the common directory, and the `config` in each where there is one, must be this user's by `stat`, which
 // follows a link to what git reads (git's own check reads a `.git` link's owner, not its target's; a root-owned one
 // passes git's only for git run as root, which the daemon never is). A path with a line break in it cannot be read out
-// of git's answer (`UNREADABLE`). Any other failure of git is thrown, as a call's is.
+// of git's answer (`UNREADABLE`). A git that does not know `--path-format` takes it for a flag to show, prints it back
+// first and exits 0 (rev-parse's `show_flag`): `NO_PATH_FORMAT`, so the log says why nothing is marked. Any other
+// failure of git is thrown, as a call's is.
 async function repositoryAt(root: string, run: GitRun, timeoutMs: number): Promise<Repository | string> {
   let printed: string;
   try {
@@ -368,6 +371,7 @@ async function repositoryAt(root: string, run: GitRun, timeoutMs: number): Promi
     throw error;
   }
   const lines = printed.split('\n');
+  if (lines[0] === '--path-format=absolute') return NO_PATH_FORMAT;
   if (lines.length !== 4 || lines[3] !== '') return UNREADABLE;
   const [gitDir, commonDir, workTree] = lines as [string, string, string];
   if (workTree !== root) return ANOTHER_TREE;
