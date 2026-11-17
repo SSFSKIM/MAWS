@@ -32,7 +32,7 @@ import { useSessions } from '../../../stores/sessions';
 import { OPEN_FILE_COPY } from '../copy';
 import { openFile } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
-import { takesRemoteRoute } from './elsewhere';
+import { ownersOnly, takesRemoteRoute } from './elsewhere';
 import { RemoteChooser } from './RemoteChooser';
 import { chooserCalls, createRemoteChooser, startOf } from './remote-chooser';
 
@@ -68,7 +68,12 @@ function openChosenElsewhere(appSessionId: AppSessionId): Promise<void> {
     sheetElement()?.focus(); // C6: no second sheet; the open one takes the keyboard
     return sheet.closed;
   }
-  const chooser = createRemoteChooser(appSessionId, { ...chooserCalls(), machine: () => remoteStandingOf(appSessionId)?.machine ?? '', startAt: startOf(machineOf(appSessionId)) });
+  const chooser = createRemoteChooser(appSessionId, {
+    ...chooserCalls(),
+    machine: () => remoteStandingOf(appSessionId)?.machine ?? '',
+    unoffered: () => ownersOnly(remoteStandingOf(appSessionId), 'files.chooseOutside'), // asked again before each request
+    startAt: startOf(machineOf(appSessionId)),
+  });
   const host = document.body.appendChild(document.createElement('div'));
   const root = createRoot(host);
   let done = () => {};
@@ -94,9 +99,16 @@ function openChosenElsewhere(appSessionId: AppSessionId): Promise<void> {
   return closed;
 }
 
-/** Open File… for a session: main's chooser for a session of this Mac, MAWS's own sheet for one that takes the remote route. */
+/**
+ * Open File… for a session: main's chooser for a session of this Mac, MAWS's own sheet for one that takes the remote
+ * route. Fix wave (review finding 2): there, only while the window's helper has no sentence for the chooser, asked now,
+ * since a control may not have heard the standing move; with one, the sentence is said as a notice and nothing is asked.
+ */
 export function openChosenFor(appSessionId: AppSessionId): Promise<void> {
-  return takesRemoteRoute(appSessionId) ? openChosenElsewhere(appSessionId) : openChosen(appSessionId);
+  if (!takesRemoteRoute(appSessionId)) return openChosen(appSessionId);
+  const unavailable = remoteUnavailableOf(appSessionId, 'files.chooseOutside');
+  if (unavailable !== null) return Promise.resolve(void refuse(unavailable));
+  return openChosenElsewhere(appSessionId);
 }
 
 // The session whose chat is in front, or null: none under a page, nor while the Overview is open over the chat (decision

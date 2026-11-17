@@ -292,16 +292,16 @@ describe('a private folder (Card 1; decision 18)', () => {
 
   // Fix wave (review finding 4; C1): the question invalidates what was still asked for the listing behind it
   it('a More… still out when a private folder asks: its answer and its bound land nowhere, and the question stays', async () => {
-    vi.useFakeTimers();
     const { chooser, lists } = harness();
     await lists[0].answer(listed(HOME, AT_HOME, 'roadmap.md'));
+    vi.useFakeTimers(); // the More… below draws its bound on this clock
     chooser.more();
     expect(lists[1].input).toEqual({ appSessionId: R, path: HOME, cursor: 'roadmap.md' });
     chooser.enter(AT_HOME[0]);
     expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
-    await lists[1].answer(listed(HOME, [file(`${HOME}/zeta.txt`)]));
-    expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
-    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
+    const landed = lists[1].answer(listed(HOME, [file(`${HOME}/zeta.txt`)]));
+    await vi.advanceTimersByTimeAsync(REMOTE_ACT_PENDING_MS); // the old answer lands, and the old bound passes
+    await landed;
     expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
     chooser.back();
     expect(chooser.state()).toMatchObject({ at: 'listed', path: HOME, entries: AT_HOME, cursor: 'roadmap.md' }); // the listing as shown, More… to ask again

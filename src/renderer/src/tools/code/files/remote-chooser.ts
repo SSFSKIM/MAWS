@@ -16,6 +16,11 @@
 //   and, where its target is a folder, that folder is listed (the walk's real path then stands in the path field).
 // - It starts in the folder last shown on that machine this run, else the home (Card 2); the daemon lists every name,
 //   dot names after the others of their kind (Card 3), and nothing here hides them.
+// - Fix wave (the review's findings 2 to 5): the offer is asked again before every request (`unoffered`), and once
+//   withdrawn (`withdraw`, the sheet hearing the ownership go) nothing more is sent. What a request that carried `open`
+//   reached is what the person opened: the folder a listing ended at, the real path a choice was granted. The private
+//   folder's question invalidates whatever was still asked for the listing behind it. A typed file is looked for page by
+//   page in its parent, until found or the listing ends.
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { OutsideEntry } from '@shared/ipc/schema/files';
@@ -46,6 +51,7 @@ export interface RemoteChooser {
   choose(): Promise<string | null>; // the granted real path, or null
   retry(): void;
   cancel(): void;
+  withdraw(words: string): void; // the offer is gone: the sentence stands where the list stood, and nothing more is sent
 }
 
 export type ListInput = { appSessionId: AppSessionId; path?: string; open?: true; cursor?: string };
@@ -54,6 +60,7 @@ export interface ChooserDeps {
   list(input: ListInput): Promise<CommandResult<'files.listOutside'>>;
   choose(input: ChooseInput): Promise<CommandResult<'files.chooseOutside'>>;
   machine(): string; // the machine's name, for the sentences
+  unoffered?(): string | null; // the sentence the two acts are not offered with now (the ownership row); null: offered
   startAt: string | null; // null: the home
 }
 
@@ -112,6 +119,7 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
   let confirmed: (() => void) | null = null; // what the private folder's Open goes on to
   let declined: (() => void) | null = null; // and its Back
   let choice: ((path: string | null) => void) | null = null; // the open choice's answer
+  let withdrawn: string | null = null; // the offer's sentence once it went: nothing more is sent
 
   const set = (next: ChooserState) => {
     if (closed) return;
@@ -131,6 +139,8 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     refusalOf(error) !== null ? error.message : error.code === 'host_unavailable' ? REMOTE_CHOOSER_COPY.unreachable(deps.machine()) : error.code === 'timeout' ? REMOTE_CHOOSER_COPY.noAnswer(deps.machine()) : error.message;
   const opens = (path: string | null, asked: boolean | undefined) => asked === true || (path !== null && opened.has(path));
   const asking = (folder: OutsideEntry, onOpen: () => void, onBack: () => void) => {
+    newest += 1; // C1: what was still asked for the listing behind the question lands nowhere, its bound included
+    stopTimer();
     confirmed = onOpen;
     declined = onBack;
     set({ at: 'asking', folder });
@@ -147,8 +157,27 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     }
   };
 
+  // The folder the list's place stands for: the one shown, read or failed, else the listing behind a question or a choice.
+  const standingPath = (): string | null => (state.at === 'listed' || state.at === 'reading' || state.at === 'failed' ? state.path : (shown?.path ?? null));
+  // The offer gone: its sentence where the list stands, whatever was asked landing nowhere, and nothing sent after.
+  const stopOffer = (words: string) => {
+    const path = standingPath();
+    withdrawn = words;
+    newest += 1;
+    stopTimer();
+    answerChoice(null);
+    set({ at: 'failed', path, words });
+  };
+  // Before a request: the offer as it stands now; true when it is not offered, so nothing is sent.
+  const refusedNow = (): boolean => {
+    if (withdrawn !== null) return true;
+    const words = deps.unoffered?.() ?? null;
+    if (words !== null) stopOffer(words);
+    return words !== null;
+  };
+
   function list(how: Listing): void {
-    if (closed) return;
+    if (closed || refusedNow()) return;
     const ask = ++newest;
     stopTimer();
     if (how.cursor === undefined) set({ at: 'reading', path: how.path });
@@ -158,10 +187,10 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
       if (ask === newest) set({ at: 'failed', path: how.path, words: REMOTE_CHOOSER_COPY.noAnswer(deps.machine()) });
     }, REMOTE_ACT_PENDING_MS);
     const input: ListInput = { appSessionId, ...(how.path !== null && { path: how.path }), ...(opens(how.path, how.open) && { open: true as const }), ...(how.cursor !== undefined && { cursor: how.cursor }) };
-    void settled(() => deps.list(input), (error): CommandResult<'files.listOutside'> => ({ ok: false, error: error as never })).then((answer) => listed(ask, how, answer));
+    void settled(() => deps.list(input), (error): CommandResult<'files.listOutside'> => ({ ok: false, error: error as never })).then((answer) => listed(ask, how, input, answer));
   }
 
-  function listed(ask: number, how: Listing, answer: CommandResult<'files.listOutside'>): void {
+  function listed(ask: number, how: Listing, input: ListInput, answer: CommandResult<'files.listOutside'>): void {
     if (closed || ask !== newest) return; // C1: an ask no longer the newest lands nowhere
     stopTimer();
     if (!answer.ok) return set({ at: 'failed', path: how.path, words: words(answer.error) });
@@ -189,17 +218,20 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
           return set({ at: 'failed', path: how.path, words: REMOTE_CHOOSER_COPY.nothingThere(deps.machine()) });
       }
     }
-    if (how.open === true) opened.add(value.path); // the folder the walk ended at, once the person opened its way
+    if (input.open === true) opened.add(value.path); // the folder the walk ended at, the request having carried open
     lastShown.set(machine, value.path);
     const more = how.cursor !== undefined && state.at === 'listed' && state.path === value.path ? state : null;
     const entries = more ? [...more.entries, ...value.entries] : value.entries;
     const picked = how.select === undefined ? null : (entries.find((entry) => entry.name === how.select && selectable(entry))?.path ?? null);
-    const next: Extract<ChooserState, { at: 'listed' }> = { at: 'listed', path: value.path, parent: value.parent, home: value.home, entries, cursor: value.cursor, selected: more ? more.selected : picked };
+    const next: Extract<ChooserState, { at: 'listed' }> = { at: 'listed', path: value.path, parent: value.parent, home: value.home, entries, cursor: value.cursor, selected: (more ? more.selected : null) ?? picked };
     shown = next;
     set(next);
+    // a typed file not on this page: the next one is read for it, until it is found or the listing ends
+    if (how.select !== undefined && picked === null && value.cursor !== null) list({ path: value.path, cursor: value.cursor, select: how.select, open: how.open });
   }
 
   function choose(entry: OutsideEntry, open: boolean, from: Extract<ChooserState, { at: 'listed' }>): void {
+    if (refusedNow()) return;
     const ask = ++newest;
     stopTimer();
     set({ at: 'choosing', path: entry.path });
@@ -211,7 +243,10 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
         return set({ at: 'failed', path: from.path, words: words(answer.error) });
       }
       const value = answer.value;
-      if (value.status === 'granted') return answerChoice(value.path);
+      if (value.status === 'granted') {
+        if (input.open === true) opened.add(value.path); // the real path the person opened, which the tab then reads
+        return answerChoice(value.path);
+      }
       switch (value.reason) {
         case 'protected': // a link whose target lies in a private folder: asked as that folder is, then chosen again
           return asking(
@@ -308,6 +343,9 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
       answerChoice(null);
       closed = true;
       listeners.clear();
+    },
+    withdraw(words) {
+      if (!closed && withdrawn === null) stopOffer(words);
     },
   };
 }

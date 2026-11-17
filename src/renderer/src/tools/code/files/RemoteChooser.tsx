@@ -13,6 +13,8 @@
 // - The path field shows the folder shown (the home as `~`), scrolled to its end while it does not hold the keyboard.
 // - C5: the link dropping while a folder is shown asks that folder again, so the list's place says what the machine
 //   answers (or that it is not reachable) rather than standing as if nothing had happened.
+// - Fix wave (review finding 2): the ownership going while the sheet is open withdraws the offer: its sentence stands in
+//   the list's place, and the sheet sends nothing more.
 import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, type FormEvent } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { OutsideEntry } from '@shared/ipc/schema/files';
@@ -20,6 +22,7 @@ import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { Sheet } from '../../../sessions/Sheet';
 import { FIELD, PRIMARY, QUIET, SECONDARY } from '../../../sessions/ui';
 import { REMOTE_CHOOSER_COPY } from '../copy';
+import { ownersOnly } from './elsewhere';
 import { Chevron } from './FilesTool';
 import { parentOf, type ChooserState, type RemoteChooser as Model } from './remote-chooser';
 
@@ -51,6 +54,11 @@ export function RemoteChooser({ appSessionId, chooser, onClose, onChosen }: { ap
     lastPhase.current = phase;
     if (was === 'up' && phase !== 'up' && chooser.state().at === 'listed') chooser.retry();
   }, [phase, chooser]);
+
+  const ownership = ownersOnly(standing, 'files.chooseOutside');
+  useEffect(() => {
+    if (ownership !== null) chooser.withdraw(ownership);
+  }, [ownership, chooser]);
 
   const close = () => {
     chooser.cancel();
