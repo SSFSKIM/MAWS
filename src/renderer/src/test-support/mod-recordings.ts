@@ -8,10 +8,10 @@
 import type { RenderAnswer } from '@shared/engine/surface';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
-import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { renderAnswerOf } from '../../../../engine-host/surface-wire';
-import { loadUxwaveJournal } from '../../../../../test/support/fixtures';
-import { MemoryFileReader } from '../../../../../test/support/memory-reader';
+import { ChainFollower } from '../../../engine-host/fs/chain-follower';
+import { renderAnswerOf } from '../../../engine-host/surface-wire';
+import { loadUxwaveJournal } from '../../../../test/support/fixtures';
+import { MemoryFileReader } from '../../../../test/support/memory-reader';
 
 export const SEED_SESSION = '3f6b2a1c-8d4e-4f5a-9b7c-2e1d0a9f8b71';
 const u = (n: number) => `5e0d${String(n).padStart(4, '0')}-1a2b-4c3d-8e4f-${String(n).padStart(12, '0')}`;

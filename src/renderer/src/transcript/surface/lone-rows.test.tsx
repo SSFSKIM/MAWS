@@ -21,7 +21,7 @@ import { builder, uuid } from '../model/test-events';
 import { AnswerActionsStore } from '../view/context';
 import { renderRow, storeWith } from '../view/rows/test-support';
 import { publishFollows } from './follow';
-import { recordedAsks } from './mod-test-support';
+import { recordedAsks } from '../../test-support/mod-recordings';
 
 type Ask = { component: string; instanceId: string; props: Record<string, unknown> };
 const holder = vi.hoisted(() => ({ answer: null as ((name: string, input: unknown) => unknown) | null, calls: [] as { name: string; input: unknown }[] }));

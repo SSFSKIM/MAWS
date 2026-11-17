@@ -28,7 +28,7 @@ import { builder } from '../model/test-events';
 import type { Row } from '../model/rows';
 import type { TranscriptSource } from '../source/types';
 import { Transcript } from '../view/Transcript';
-import { answerOf, recordedAsks, SEED, SEED_TEXT, seedEvents } from './mod-test-support';
+import { answerOf, recordedAsks, SEED, SEED_TEXT, seedEvents } from '../../test-support/mod-recordings';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
 beforeAll(() => {

@@ -17,7 +17,7 @@ import { builder } from '../model/test-events';
 import { Disclosures, TranscriptProvider } from '../view/context';
 import { RowView } from '../view/rows/Row';
 import { spyActions, storeWith } from '../view/rows/test-support';
-import { ONE_CALL, oneCallTranscript, recordedAsks, seedEvents, type OneCallResult } from './mod-test-support';
+import { ONE_CALL, oneCallTranscript, recordedAsks, seedEvents, type OneCallResult } from '../../test-support/mod-recordings';
 
 type Ask = { name: string; component: string; instanceId: string; props: Record<string, unknown> };
 const holder = vi.hoisted(() => ({ answer: null as ((name: string, input: unknown) => unknown) | null, calls: [] as { name: string; input: unknown }[] }));
