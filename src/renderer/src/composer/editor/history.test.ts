@@ -424,6 +424,14 @@ describe('every composed form, recalled by ↑ and sent, keeps the framing of it
       sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, 'Is this safe?', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'const sum = 0;', 'Why did this go?', 'a1b2'), screenshot: false }], 'main'),
       recalled: { kept: true },
     },
+    // the architect's ruling 4376 (the re-reads): a slot is found by the place its row records, never by its text; the
+    // person's words here type the second comment's quote again, before it
+    {
+      form: 'a message of several comments, the first’s words typing the second’s quote again before it',
+      sent: commentsMessage([{ anchor: added, text: quotedComment(added, 'First quote', 'My duplicate:\n`Second quote`', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'Second quote', 'Explain the second.', 'a1b2'), screenshot: false }], 'main'),
+      recalled: { kept: true },
+    },
+    { form: 'a comment whose words type its own quote again', sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, `Is \`${MODEL}\` safe?\n\`${MODEL}\``, 'a1b2'), screenshot: false }], 'main'), recalled: { kept: true } },
     { form: 'a promoted side question', sent: promotionMessage([{ question: 'Which branch goes first?', response: MODEL }], 'Go on.', 'a1b2'), recalled: { kept: true } },
     { form: 'a plan after a clear', sent: planPrompt(`1. Sort the receipts.\n${MODEL}\n2. File the totals.`, 'a1b2'), recalled: { kept: true } },
     {
@@ -463,6 +471,20 @@ describe('every composed form, recalled by ↑ and sent, keeps the framing of it
     const typed = new Set(linesOf(first).filter(({ inside }) => !inside).map(({ line }) => line));
     return linesOf(recalled).filter(({ line, inside }) => !inside && !typed.has(line)).map(({ line }) => line);
   };
+  // the lines framed at the first send that the recall sends as typed, each read at its place: the two sends' lines are
+  // walked in order, a line of the recall matched to the first send's next line of the same text
+  const framedNowTyped = (first: string, recalled: string) => {
+    const before = linesOf(first);
+    let at = 0;
+    const out: string[] = [];
+    for (const { line, inside } of linesOf(recalled)) {
+      const match = before.findIndex((other, i) => i >= at && other.line === line);
+      if (match < 0) continue;
+      if (before[match]!.inside && !inside) out.push(line);
+      at = match + 1;
+    }
+    return out;
+  };
   const recallsOf = ({ sent, bash, derived }: Form) => {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u1'), origin: 'human' });
@@ -487,6 +509,7 @@ describe('every composed form, recalled by ↑ and sent, keeps the framing of it
     const first = textOf(row.sent);
     const again = sentAgain(recalls[0]!);
     expect(newlyTyped(first, again), 'typed at the recall, framed or absent at the first send').toEqual([]);
+    expect(framedNowTyped(first, again), 'framed at its place at the first send, typed at the recall').toEqual([]);
     if ('readAttached' in row.recalled) {
       expect(again, row.recalled.readAttached).toBe(`Fix the [notes](maws-artifact:${ARTIFACT}).`);
       return;
@@ -518,15 +541,16 @@ describe('a recalled chip opens only at the place its row records it (ticket 733
     expect(row.text.lastIndexOf('[Pasted text #1 +1 lines]')).not.toBe(row.placeholders[0]);
   });
 
-  it('recalled and sent, the paste goes once, at its place, and the typed spelling goes as text', () => {
+  // the architect's ruling 4376: a spelling at no recorded place opens nothing, whatever the digits it writes its numbers with
+  it.each([LITERAL, 'Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].'])('recalled and sent, the paste goes once, at its place, and the typed spelling goes as text: %s', (literal) => {
     const b = builder();
-    b.turn('u1', sent);
+    b.turn('u1', sent.replace(LITERAL, literal));
     b.end(['u1']);
     const state = applyEvents(createState(null, null), b.events);
     const [recall] = recallEntries(rowsOf(state), turnActivity(state), []);
     const content = String(serializeDraft(recallDoc(recall!), ctx).content);
     const bodies = [...content.matchAll(/<pasted_content id="[0-9a-f]{4}">\n([\s\S]*?)\n<\/pasted_content id="[0-9a-f]{4}">/g)].map((match) => match[1]);
-    expect(bodies).toEqual([`Start.ATTACHMENT\n${LITERAL}`]);
+    expect(bodies).toEqual([`Start.ATTACHMENT\n${literal}`]);
     expect(content.split('ATTACHMENT').length - 1, 'the paste goes once').toBe(1);
   });
 });

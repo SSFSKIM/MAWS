@@ -1038,6 +1038,17 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       expect(content.split('ATTACHMENT').length - 1, 'the paste goes once').toBe(1);
     });
 
+    // the architect's ruling 4376: a spelling at no recorded place opens nothing, whatever the digits of its numbers
+    it('a chip and its spelling typed after it with other digits: sent again, the paste goes once, the spelling as text (the architect’s ruling 4376)', async () => {
+      for (const literal of ['Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].']) {
+        sent = [];
+        rewinds = [];
+        const content = await resent(`Implement this plan:\n\nStart.${wrapPasted('ab12', 'ATTACHMENT')}${literal}`, (text) => text, how);
+        expect(bodiesOf(content), literal).toEqual([`Start.ATTACHMENT\n${literal}`]);
+        expect(content.split('ATTACHMENT').length - 1, `${literal}: the paste goes once`).toBe(1);
+      }
+    });
+
     it('the negative control: a person’s message naming the plan’s sentence is theirs, nothing framed and its line kept', async () => {
       const typed = `Please document the phrase Implement this plan: in the help text.\n${GRANT}`;
       const content = await resent(typed, (text) => `${text}\nThanks.`, how);
