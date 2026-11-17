@@ -2567,6 +2567,27 @@ describe('files saves outside the folders', () => {
         expect(logLines).toEqual([`outside write: member ${member} device ${device} session ${A} op op-save: ok 12 bytes ${out('named.txt')}`]);
       });
 
+      it('lists through files.listOutside under the claim machine.op passes, the folder’s real entries', async () => {
+        const folder = at('listing');
+        mkdirSync(join(folder, 'inner'), { recursive: true });
+        write(join(folder, 'a.txt'), '');
+        const bus = remoteHandlers();
+        expect(await bus.invoke('files.listOutside', { appSessionId: A, path: folder }, claimedContext('op-list'))).toEqual({
+          ok: true,
+          value: {
+            status: 'listed',
+            path: folder,
+            parent: base,
+            home,
+            entries: [
+              { name: 'inner', path: join(folder, 'inner'), kind: 'dir', protected: false },
+              { name: 'a.txt', path: join(folder, 'a.txt'), kind: 'file', protected: false },
+            ],
+            cursor: null,
+          },
+        });
+      });
+
       it('holds each input to its schema: no raw, no key beyond it, and nothing in a choice that could name a grant’s content', async () => {
         await transcriptOf(A, [said(link(out('named.txt')))]);
         const bus = remoteHandlers();
@@ -2833,6 +2854,29 @@ describe('files saves outside the folders', () => {
         expect(logLines.join('\n')).not.toContain('the words typed');
       });
 
+      it('escapes the control characters of a path in its line, so a name holding a line ending writes one line, and an ordinary path reads as it is', async () => {
+        const fed = out('fed\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        const returned = out('returned\r\u0001.txt');
+        write(fed, 'fed as it was\n');
+        write(returned, 'returned as it was\n');
+        const files = remoteService();
+        expect(await choose(files, fed, 'op-fed')).toEqual({ status: 'granted', path: fed });
+        expect(await saveThere(files, A, fed, 'saved\n', 'op-save')).toEqual({ status: 'ok', hash: sha('saved\n') });
+        await expect(files.writeOutside({ appSessionId: A, path: returned, content: 'pwned\n', expectedHash: sha('returned as it was\n'), real: returned }, claimed('op-returned'))).rejects.toThrow(new Error(OUT));
+        expect(await choose(files, out('tab\there'), 'op-tab')).toEqual({ status: 'refused', reason: 'no-file' });
+        expect(await choose(files, out('chosen.txt'), 'op-plain')).toEqual({ status: 'granted', path: out('chosen.txt') });
+        const by = (opId: string) => `member ${member} device ${device} session ${A} op ${opId}`;
+        const escapedFed = out('fed\\noutside choice: member someone device elsewhere session S op forged: granted .txt');
+        expect(logLines).toEqual([
+          `outside choice: ${by('op-fed')}: granted ${escapedFed}`,
+          `outside write: ${by('op-save')}: ok 6 bytes ${escapedFed}`,
+          `outside write: ${by('op-returned')}: refused (outside) ${out('returned\\r\\x01.txt')}`,
+          `outside choice: ${by('op-tab')}: refused (no-file) ${out('tab\\x09here')}`,
+          `outside choice: ${by('op-plain')}: granted ${out('chosen.txt')}`,
+        ]);
+        for (const line of logLines) expect(line, line).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+      });
+
       it('writes none for a save on this machine, a read or a listing, and a log that throws changes no answer', async () => {
         await transcriptOf(A, [said(link(out('named.txt')))]);
         const files = remoteService();
@@ -2848,6 +2892,39 @@ describe('files saves outside the folders', () => {
         expect(await saveThere(failing, A, out('named.txt'), 'saved anyway\n')).toEqual({ status: 'ok', hash: sha('saved anyway\n') });
         expect(await choose(failing, out('chosen.txt'))).toEqual({ status: 'granted', path: out('chosen.txt') });
         await expect(saveThere(failing, A, out('unnamed.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      });
+    });
+
+    // The architect's ruling on the walk-to-use race (the cheap half): the step after the chooser's walk uses the real path
+    // the walk ended at, and resolves nothing again from the path as typed. A link of the typed path is moved between the
+    // walk and that step, so a step that resolved the typed path again would reach the link's new target
+    describe('the walk’s real path, handed to the step after it', () => {
+      const relink = (link: string, target: string) => () => {
+        rmSync(link);
+        symlinkSync(target, link);
+        relinked.push(link);
+      };
+      let relinked: string[];
+      beforeEach(() => {
+        relinked = [];
+      });
+
+      it('grants the file the choice’s walk ended at', async () => {
+        symlinkSync(out('chosen.txt'), out('pick'));
+        const files = remoteService();
+        points['after-outside-walk'] = relink(out('pick'), out('unnamed.txt'));
+        expect(await choose(files, out('pick'))).toEqual({ status: 'granted', path: out('chosen.txt') });
+        expect(relinked, 'the link moved between the walk and the grant').toEqual([out('pick')]);
+        expect([grants.has(A, out('chosen.txt')), grants.has(A, out('unnamed.txt'))]).toEqual([true, false]);
+      });
+
+      it('lists the folder the listing’s walk ended at', async () => {
+        write(at('first', 'one.txt'), '');
+        write(at('second', 'two.txt'), '');
+        symlinkSync(at('first'), at('shown'));
+        points['after-outside-walk'] = relink(at('shown'), at('second'));
+        expect(await list(remoteService(), { path: at('shown') })).toEqual({ status: 'listed', path: at('first'), parent: base, home, entries: [{ name: 'one.txt', path: at('first', 'one.txt'), kind: 'file', protected: false }], cursor: null });
+        expect(relinked, 'the link moved between the walk and the listing').toEqual([at('shown')]);
       });
     });
 
