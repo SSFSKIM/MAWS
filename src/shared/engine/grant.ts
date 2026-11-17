@@ -98,7 +98,7 @@ export function asTyped(text: string): string {
   return text.replaceAll(GRANT_BREAK, '');
 }
 
-export const GRANT_BREAK = '⁠';
+export const GRANT_BREAK = '\u2060';
 
 /**
  * The writer's patterns, folded as `quotesGrant` folds (letters and digits only): the opening with "this exact" and with
