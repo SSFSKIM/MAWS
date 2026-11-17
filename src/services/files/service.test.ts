@@ -2873,6 +2873,24 @@ describe('files saves outside the folders', () => {
         expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
       });
 
+      // Decision Log 17, a stated limit of decision 18: `open: true` opens every private folder the walk meets, so a path
+      // under an opened private folder, on which a link leads into a second one, is read with it; without it, neither
+      // folder is touched
+      it('reads with open a path under an opened private folder whose link leads into a second private folder, and without open answers protected touching neither', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop'), inHome('Documents', 'to-desktop'));
+        const via = inHome('Documents', 'to-desktop', 'far.txt');
+        await transcriptOf(A, [said(link(via))]);
+        const files = remoteService();
+        const seen = recordTouches();
+        await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Documents'));
+        nothingTouchedIn(seen, inHome('Desktop'));
+        nothingAsked();
+        touches.on = false;
+        expect(await readThere(files, A, via, 'op-read', { open: true })).toMatchObject({ content: 'far as it was\n', named: true, outside: { real: inHome('Desktop', 'far.txt'), writable: true } });
+      });
+
       it('walks no path under one of the caller’s roots: a root inside a private folder reads and saves without open', async () => {
         records.set(B, record(inHome('Documents', 'deep')));
         const files = remoteService();
