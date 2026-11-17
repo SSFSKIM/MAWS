@@ -44,12 +44,29 @@ function canvasMeasure(font: string, text: string): number {
 
 let raw: RawMeasure = canvasMeasure;
 
+// Decision Log 8: each distinct string is measured once per font, and only when a drawn row asks for it. Past
+// WIDTHS_MAX strings of one font (a run that has drawn the folders of many repositories) that font's widths are
+// forgotten together and measured again as rows ask.
+const WIDTHS_MAX = 20_000;
+const widths = new Map<string, Map<string, number>>(); // by font, then by string
+
 // A measure in `font` (a CSS font shorthand).
 export function measureIn(font: string): Measure {
-  return (text) => raw(font, text);
+  return (text) => {
+    let known = widths.get(font);
+    if (known === undefined) widths.set(font, (known = new Map()));
+    let width = known.get(text);
+    if (width === undefined) {
+      if (known.size >= WIDTHS_MAX) known.clear();
+      width = raw(font, text);
+      known.set(text, width);
+    }
+    return width;
+  };
 }
 
 /** Tests only: measure with `next` (null: the canvas again), every width measured before forgotten. */
 export function measureWith(next: RawMeasure | null): void {
   raw = next ?? canvasMeasure;
+  widths.clear();
 }

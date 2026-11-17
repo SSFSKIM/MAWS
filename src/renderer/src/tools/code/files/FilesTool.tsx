@@ -550,6 +550,9 @@ function TreeList({
   changed: ChangedProps;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  // UX wave U6b-3a (M2 decision 8; Decision Log 6, note 1): Refresh and its room are the first root's row's, wherever in
+  // the list it stands, with or without a Changed group above it.
+  const rootAt = rows.findIndex((row) => row.kind === 'root');
   const [width, measureWidth] = useWidth(); // the rows' width, from which a Changed row's folder gets its room
   const fonts = useMemo(rowFonts, []);
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
@@ -597,6 +600,22 @@ function TreeList({
     else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) el.scrollTop = top + FILES_ROW_HEIGHT - height;
     useTreeState.getState().revealed(appSessionId);
   }, [revealAt, appSessionId]);
+  // UX wave U6b-3a (S2; M2 decision 4): when the Changed group gains or loses rows while a tree row is the first row in
+  // view, the offset moves by the same height, so the tree does not move under the person's eyes as the agent writes. A
+  // press on the heading moves nothing, nor does a group that changes while the list is at its top (it grows in view) or
+  // while an offset is being restored.
+  const treeAt = rows.findIndex((row) => row.kind !== 'changed-heading' && row.kind !== 'changed');
+  const sectionLength = treeAt < 0 ? rows.length : treeAt;
+  const sectionFolded = rows[0]?.kind === 'changed-heading' && rows[0].folded;
+  const drawnSection = useRef({ length: sectionLength, folded: sectionFolded });
+  useLayoutEffect(() => {
+    const last = drawnSection.current;
+    drawnSection.current = { length: sectionLength, folded: sectionFolded };
+    if (last.length === sectionLength || last.folded !== sectionFolded || pending.current !== null) return;
+    const el = scroller.current!;
+    if (el.scrollTop <= 0 || Math.floor(el.scrollTop / FILES_ROW_HEIGHT) < last.length) return;
+    el.scrollTop = Math.max(0, el.scrollTop + (sectionLength - last.length) * FILES_ROW_HEIGHT);
+  }, [sectionLength, sectionFolded]);
   const scrolledByOwner = () => {
     pending.current = null;
     useTreeState.getState().revealed(appSessionId);
@@ -608,7 +627,7 @@ function TreeList({
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
-              <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === 0 && row.kind === 'root' ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
+              <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
                 {row.kind === 'changed-heading' ? (
                   <ChangedHeading count={row.count} folded={row.folded} fold={changed.fold} />
                 ) : row.kind === 'changed' ? (
@@ -620,7 +639,11 @@ function TreeList({
             );
           })}
         </div>
-        {rows[0]?.kind === 'root' && <div className="absolute top-0 right-1"><RefreshButton refresh={refresh} /></div>}
+        {rootAt >= 0 && (
+          <div className="absolute right-1" style={{ top: rootAt * FILES_ROW_HEIGHT }}>
+            <RefreshButton refresh={refresh} />
+          </div>
+        )}
       </div>
     </div>
   );
