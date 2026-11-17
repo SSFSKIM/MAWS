@@ -14,7 +14,9 @@ import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
-import { anchoredMessage, commentsMessage, quotedComment } from '../src/shared/anchor/message';
+import { anchoredMessage, commentsMessage, PROMOTION_HEAD, promotionMessage, quotedComment } from '../src/shared/anchor/message';
+import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 733a: the engine's frame, as its parser reads it
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a: a segment's id
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { addressed, localRef } from './support/address';
 import { bareOf } from '../src/shared/machine/address';
@@ -29,7 +31,10 @@ import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sessionCards, sideColumn, sideTab, surface, surfaceRow } from './support/shell';
-const QUOTE_TAG = 'a1b2'; // ticket 733a M2: `quotedComment`'s tag id, passed so the project compiles; what each scene expects of the segment is M4's
+// Ticket 733a (its document, Design 3): the ids of the pasted segments a sent text holds, in order. A form composed for
+// the main conversation carries the session's own (`pastedTagId` of its engine id), a thread's first message, composed
+// before its session exists, a random one, so a scene reads that id from what was sent and compares the bytes at it.
+const segmentIds = (text: string) => [...text.matchAll(PASTED_BLOCK)].map((match) => match[1]!);
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -752,6 +757,18 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const firstPrompt = String((writtenUsers(maws, promoted)[0]!.frame.message!.content as { text: string }[])[0]!.text);
     expect(firstPrompt).toContain(`Q: ${SIDE_QUESTION}\nA: ZEBRA`);
     expect(firstPrompt).toContain(`Q: ${SIDE_FOLLOW_UP}\nA: zebra`);
+    // ticket 733a (S1): the host was handed the exchange inside one pasted segment, of a random id (the thread's session
+    // did not exist when main composed it), and the writer's text to the byte; the thread's first row reads the exchange as
+    // text, as it did before: no chip and no tag. Waits on the thread's reply above (the replay holds until the host wrote
+    // the prompt) and on the promotion's row by its anchor chip's attribute.
+    const ids = segmentIds(firstPrompt);
+    expect(ids, 'the exchange in one segment').toHaveLength(1);
+    expect(firstPrompt, 'the writer’s text, to the byte').toBe(promotionMessage([{ question: SIDE_QUESTION, response: 'ZEBRA' }, { question: SIDE_FOLLOW_UP, response: 'zebra' }], null, ids[0]!));
+    const promotion = thread.locator('.transcript-row[data-kind="user"]').filter({ has: page.locator('[data-chip="anchor"][data-anchor-kind="none"]') });
+    await expect(promotion, 'the promotion, one row of the thread').toHaveCount(1);
+    await expect(promotion.locator('[data-user-content]'), 'its exchange read as text, as before').toHaveText(`Side question ${PROMOTION_HEAD} Q: ${SIDE_QUESTION} A: ZEBRA Q: ${SIDE_FOLLOW_UP} A: zebra Continue from here.`, { useInnerText: true });
+    await expect(promotion.locator('.transcript-pasted'), 'no chip: the segment drawn in place').toHaveCount(0);
+    await expect(promotion, 'no tag').not.toContainText('pasted_content');
     expect(writtenControls(maws, promoted, 'rename_session').map((r) => r.frame.request)).toEqual([{ subtype: 'rename_session', title: 'Side question', source: 'host' }]);
     expect(writtenUsers(maws, parent), 'still nothing written to the main conversation').toHaveLength(1);
     expect(maws.consoleErrors()).toEqual([]);
@@ -1279,19 +1296,25 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect.poll(() => writtenUsers(maws, parent).length, { timeout: 20_000 }).toBe(2);
     const removed = reviewAnchor(repo, APP, 3, 'old');
     const added = reviewAnchor(repo, TOTAL, 4, 'new');
-    expect(writtenUsers(maws, parent)[1]!.frame.message!.content).toEqual([
+    // ticket 733a (S2): each quoted line went inside a pasted segment of the session's own id (the window holds the main
+    // conversation's engine id when it composes: Design 3, "The tag id"), the message the writer's to the byte; the bubble
+    // below draws both lines as before
+    const tag = pastedTagId(PARENT);
+    const sent = writtenUsers(maws, parent)[1]!.frame.message!.content as { type: string; text: string }[];
+    expect(sent).toEqual([
       {
         type: 'text',
         text: commentsMessage(
           [
-            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, QUOTE_TAG), screenshot: false },
-            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED, QUOTE_TAG), screenshot: false },
+            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, tag), screenshot: false },
+            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED, tag), screenshot: false },
           ],
           'main',
         ),
       },
     ]);
-    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, QUOTE_TAG)).toBe(`Before the change:\n\`${OLD_TOTAL_LINE}\`\n${COMMENT_REMOVED}`);
+    expect(segmentIds(sent[0]!.text), 'each quoted line in a segment of the session’s id').toEqual([tag, tag]);
+    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, tag)).toBe(`Before the change:\n\n\n<pasted_content id="${tag}">\n\`${OLD_TOTAL_LINE}\`\n</pasted_content id="${tag}">\n\n${COMMENT_REMOVED}`);
     // the transcript: one message, two chips, the two quoted lines as code, the removed one under its caption
     const main = mainRegion(page);
     await expect(main.getByText(REVIEW_REPLY)).toBeVisible({ timeout: 20_000 });
@@ -1301,6 +1324,8 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     await expect(bubble.locator('[data-chip="anchor"]')).toHaveText(['app.ts:3', 'total.ts:4']);
     await expect(bubble.locator('code')).toHaveText([OLD_TOTAL_LINE, ROUNDING_LINE]);
     await expect(bubble, 'the removed line under its caption').toContainText(/Before the change:\s*export const total = items\.reduce/);
+    await expect(bubble.locator('.transcript-pasted'), 'no chip: the two segments drawn in place').toHaveCount(0);
+    await expect(bubble, 'no tag').not.toContainText('pasted_content');
     await expect(main.getByText('2 comments, in the order made:', { exact: false }), 'no framing line drawn').toHaveCount(0);
     await expect.poll(async () => value(await invoke(page, 'session.status', { appSessionId: parent as never })).turn, { timeout: 20_000 }).toBeNull();
 
@@ -1320,9 +1345,17 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const threaded = reviewAnchor(repo, APP, 3, 'new');
     const record = value(await invoke(page, 'session.get', { appSessionId: child as never }));
     expect(record?.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: PARENT, anchor: threaded, openedBy: 'comment' });
-    expect(writtenUsers(maws, child).map((r) => r.frame.message!.content)).toEqual([
-      [{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD, QUOTE_TAG), screenshot: false }], 'thread') }],
-    ]);
+    // ticket 733a (S2): the thread's first message carries the quoted line in one segment of a random id (main composes it
+    // before the thread's session exists), the writer's text to the byte at that id; the thread's row draws the line as
+    // code, as before
+    const firstMessages = writtenUsers(maws, child).map((r) => r.frame.message!.content as { type: string; text: string }[]);
+    expect(firstMessages, 'one first message').toHaveLength(1);
+    const threadIds = segmentIds(firstMessages[0]![0]!.text);
+    expect(threadIds, 'the quoted line in one segment').toHaveLength(1);
+    expect(firstMessages).toEqual([[{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD, threadIds[0]!), screenshot: false }], 'thread') }]]);
+    const threadBubble = pane.locator('[data-bubble]').filter({ hasText: COMMENT_THREAD });
+    await expect(threadBubble.locator('code'), 'its quoted line as code, as before').toHaveText([NEW_TOTAL_LINE]);
+    await expect(threadBubble.locator('.transcript-pasted'), 'no chip: the segment drawn in place').toHaveCount(0);
     expect(writtenUsers(maws, parent), 'the main conversation received the one message').toHaveLength(2);
     expect(maws.consoleErrors()).toEqual([]);
   });
