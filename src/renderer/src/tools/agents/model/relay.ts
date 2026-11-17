@@ -31,6 +31,16 @@ export function relayText(agent: RelayTarget, text: string): string {
   return `Relay to agent ${agent.agentId}${agent.name ? ` (named "${agent.name}")` : ''} with SendMessage, verbatim, ${RELAY_CONTINUE}${text}`;
 }
 
+// Ticket 733a (its document, Design 5 and §D): a relay's text read by its own form, as an edit of its row begins: one of
+// the three openings the writer begins with at the text's start, and its closing words after it; `head` is the text up to
+// and with those words, MAWS's sentence around the names. Null for any other text.
+const RELAY_OPENINGS = ['Relay to agent ', 'Send a message to ', 'Reply to the cross-session message from '] as const;
+export function readRelay(text: string): { head: string } | null {
+  if (!RELAY_OPENINGS.some((opening) => text.startsWith(opening))) return null;
+  const close = text.indexOf(RELAY_CONTINUE);
+  return close < 0 ? null : { head: text.slice(0, close + RELAY_CONTINUE.length) };
+}
+
 // (b): the parent's own SendMessage (a child's is not the relay) addressed to the agent's id or its real name; the
 // description never matches.
 export function matchesSendMessage(event: SessionEvent, agent: AgentTarget): boolean;
