@@ -11,7 +11,7 @@
 import { useDialogFocus } from '../app/dialog-focus';
 import { Command } from 'cmdk';
 import { Dialog, VisuallyHidden } from 'radix-ui';
-import { useEffect, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useState, type KeyboardEvent } from 'react';
 import { create } from 'zustand';
 import type { AppSessionId, ProjectId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -21,6 +21,7 @@ import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime';
+import { useModalHandoff } from '../keymap/modal-handoff';
 import { sessionMatcher } from '../sidebar/derive';
 import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
@@ -116,27 +117,28 @@ const GROUP = '[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:pt-2 [&_[c
 export function CommandPalette() {
   const open = usePalette((s) => s.open);
   const focus = useDialogFocus();
-  const pendingFocus = useRef<ActionId | null>(null);
+  // UX wave U6b-3b (Decision Log 16): the palette holds nothing a person would lose, so it lends itself to an action that
+  // moves the keyboard, from its own row and from the menu alike (keymap/modal-handoff.ts)
+  const handoff = useModalHandoff(() => usePalette.setState({ open: false }), focus.onCloseAutoFocus);
   const run = (id: ActionId) => {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
     // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
     // U6b-3b: Go to file records where the keyboard is for Esc's second step, which is the opener, not the palette's field.
     const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile';
-    pendingFocus.current = afterClose ? id : null;
+    if (afterClose) {
+      handoff.closeThen(() => runAction(id));
+      return;
+    }
     usePalette.setState({ open: false });
-    if (!afterClose) runAction(id, id === 'tab.select' ? 1 : null);
+    runAction(id, id === 'tab.select' ? 1 : null);
   };
   return (
     <Dialog.Root open={open} onOpenChange={(next) => usePalette.setState({ open: next })}>
       <Dialog.Portal>
         <Dialog.Content
           {...focus}
-          onCloseAutoFocus={(event) => {
-            focus.onCloseAutoFocus(event);
-            const id = pendingFocus.current;
-            pendingFocus.current = null;
-            if (id !== null) runAction(id);
-          }}
+          ref={handoff.ref}
+          onCloseAutoFocus={handoff.onCloseAutoFocus}
           aria-describedby={undefined}
           className="fixed top-[16%] left-1/2 z-50 w-[min(560px,90vw)] -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg"
         >

@@ -27,7 +27,8 @@ import { buildCodeScratch, CONFLICT_BLOCK, GENERATED_LINES, generatedLine, MARKE
 import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav, type Rgb } from './support/media-fixtures'; // UX wave U6b-2
 import { created } from './support/nothing-created'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
-import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
+import { goToFile, goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
+import { menu } from './support/menu'; // UX wave U6b-3b, G10
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { activeMainTab, hideSurfaces, mainTabById, mainTabs, mountedTabs, moveSideTab, openSurface, pinSurfaceForSessions, sessionCard, sideColumn, sideGroup, sideTab, surface, unfoldSessionCard } from './support/shell';
@@ -2395,6 +2396,42 @@ test.describe('UX wave U6b-3b: Go to file', () => {
       expect(await p.page.evaluate(() => document.activeElement?.closest('[data-region="panel"]') !== null), 'in the side column').toBe(true);
       await expect(sheetDismissalOf(p), 'the sheet stays').toBeVisible();
       await expect(mainRegionOf(p), 'main still inert under it').toHaveJSProperty('inert', true);
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G10 (Decision Log 16, Go to file while a modal holds the keyboard). For the Command palette and then Keyboard shortcuts,
+  // each opened by its menu row with the side column closed and the composer's editor the active element: waits on the
+  // modal holding the keyboard; Go ▸ Go to file (whose helper waits on the row enabled); then waits on the modal gone, Files
+  // in view and the field being the active element; after Esc in the empty field, on the composer's editor being the active
+  // element, the modal's opener. Then the Rename sheet from the session's row in the sidebar: waits on the sheet in view
+  // and polls the menu row to disabled; after Esc, on the sheet gone, and polls the row to enabled.
+  test('G10: Go to file while the Command palette or Keyboard shortcuts holds the keyboard closes it and puts the keyboard in the field, Esc giving it back to the composer; while a sheet is open the menu row is disabled', async () => {
+    await withProduct(async (p) => {
+      const composer = composerOf(p);
+      for (const [action, name] of [['palette.open', 'Command palette'], ['shortcuts.open', 'Keyboard shortcuts']] as const) {
+        await hideSurfaces(p.page);
+        await composer.click();
+        await expect(composer, 'the keyboard in the composer').toBeFocused();
+        await menu(p.maws.app, action);
+        const modal = p.page.getByRole('dialog', { name, exact: true });
+        await expect.poll(() => modal.evaluate((element) => element.contains(document.activeElement)), { message: `${name} holds the keyboard` }).toBe(true);
+        await goToFile(p.maws.app);
+        await expect(modal, `${name} closed`).toHaveCount(0);
+        await expect(filesOf(p), 'Files opened').toBeVisible();
+        await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+        await p.page.keyboard.press('Escape');
+        await expect(composer, `Esc in the empty field: the keyboard back in the composer, ${name}’s opener`).toBeFocused();
+      }
+
+      // a sheet holds what a person types into it: Go to file is disabled while it is open
+      await (await sidebarRow(p.page, { appSessionId: p.scratch.appSessionId })).click({ button: 'right' });
+      await p.page.getByRole('menuitem', { name: 'Rename…' }).click();
+      const sheet = p.page.getByRole('dialog', { name: 'Rename' });
+      await expect(sheet, 'the Rename sheet').toBeVisible();
+      await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file disabled under the sheet' }).toEqual({ enabled: false, accelerator: 'Cmd+P' });
+      await p.page.keyboard.press('Escape');
+      await expect(sheet, 'the sheet closed').toHaveCount(0);
+      await expect.poll(() => goToFileRow(p.maws.app), { message: 'Go ▸ Go to file enabled again' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
     }, goToFileRepository, { gitHome: true });
   });
 });

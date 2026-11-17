@@ -1,11 +1,14 @@
 // Go to file (UX wave U6b-3b, docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, Interfaces §A and §C; M1).
 //
 // The action (decision 11; R5): `files.goToFile` (Go ▸ Go to file, ⌘P, the palette's row) is registered exactly while it
-// can end with the keyboard in Files' field: the side column has a session and neither the Settings dialog nor the
-// Overview is open. Its handler leaves an open page (root UC-12), records where the keyboard is (for Esc's second step),
-// shows the session's Files (`showFiles`, which shows a hidden or collapsed column), marks the tab it lands in as finding
-// (decision 9: that tab draws the tree column for the search, whatever its fold) and asks for the keyboard for that tab's
-// field.
+// can end with the keyboard in Files' field: the side column has a session, neither the Settings dialog nor the Overview
+// is open, and no modal keeps the keyboard (Decision Log 16: a modal that holds nothing a person would lose, the Command
+// palette or Keyboard shortcuts, lends itself; every other keeps it while open, `keymap/modal-handoff.ts`). Its handler,
+// with the keyboard in a modal that lends itself, closes that modal and runs again from its close, from the modal's
+// opener, by every route alike (the menu, its key, the palette's row). Then it leaves an open page (root UC-12), records
+// where the keyboard is (for Esc's second step), shows the session's Files (`showFiles`, which shows a hidden or collapsed
+// column), marks the tab it lands in as finding (decision 9: that tab draws the tree column for the search, whatever its
+// fold) and asks for the keyboard for that tab's field.
 //
 // The request for the keyboard (decision 10; sequence S2): one at most, for a taker that may not be drawn yet. A drawn
 // taker is told at once (`useKeyboardRequest`), one drawn later takes it when it draws (`takeKeyboard`, true once). The
@@ -30,6 +33,7 @@ import { shellGeometryOf } from '../../../app/shell-view';
 import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { registerAction } from '../../../keymap/actions-runtime';
+import { handOffModal, modalKeepsKeyboard, subscribeModalKeyboard } from '../../../keymap/modal-handoff';
 import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { surfaceSession } from '../../../panel/surface-model';
 import { useGit } from '../../../stores/git';
@@ -111,15 +115,15 @@ export function keyboardBefore(): HTMLElement | null {
 
 // ---- the action -------------------------------------------------------------------------------------------------------
 
-/** Decision 11 (R5): a session for the side column, no Settings dialog, no Overview. */
+/** Decision 11 (R5): a session for the side column, no Settings dialog, no Overview; and no modal keeps the keyboard (Decision Log 16). */
 export function canGoToFile(state: LayoutState): boolean {
-  return surfaceSession(state) !== null && state.settings === null && !state.overviewOpen;
+  return surfaceSession(state) !== null && state.settings === null && !state.overviewOpen && !modalKeepsKeyboard();
 }
 
-/** The handler: the page left, the keyboard's place recorded, Files shown, its tab finding, the request for its field. */
+/** The handler: a modal that lends itself closed first; the page left, the keyboard's place recorded, Files shown, its tab finding, the request for its field. */
 export function goToFile(): void {
   const state = useLayout.getState();
-  if (!canGoToFile(state)) return;
+  if (!canGoToFile(state) || handOffModal(goToFile)) return;
   const session = surfaceSession(state)!;
   if (pageOpen(state)) state.closeDestination();
   recordKeyboard();
@@ -140,9 +144,10 @@ export function connectGoToFile(): () => void {
     }
   };
   sync();
-  const unsubscribe = useLayout.subscribe(sync); // the side column's session, the dialog and the Overview
+  // the side column's session, the dialog and the Overview; a modal that keeps the keyboard
+  const offs = [useLayout.subscribe(sync), subscribeModalKeyboard(sync)];
   return () => {
-    unsubscribe();
+    offs.forEach((off) => off());
     unregister?.();
     unregister = null;
   };
