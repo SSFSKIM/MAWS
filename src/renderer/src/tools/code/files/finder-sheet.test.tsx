@@ -18,6 +18,8 @@ import { queryClient } from '../../../ipc/query';
 import { runAction } from '../../../keymap/actions-runtime';
 import { connectPanelHost, registerPanelTool } from '../../../panel/host';
 import { PanelHost } from '../../../panel/PanelHost';
+import { resetMarkup, startMarkup, useMarkup } from '../../../markup/session';
+import { registerMarkupSurface } from '../../../markup/surface';
 import { useLayout } from '../../../stores/layout';
 import { activeTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
@@ -104,6 +106,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetKeptOpens();
   useViewer.getState().reset();
+  resetMarkup(); // no mark-up session held over into the next case
   setWidth(1024);
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' })); // no request held over into the next case
 });
@@ -174,24 +177,49 @@ describe('Esc in Go to file’s field over a narrow window’s sheet (Decision L
     expect([panelCollapsed(), sheetDismissal(), finding()]).toEqual([false, null, null]);
   });
 
-  it('at full width, an Esc the field cannot answer (nothing to give the keyboard back to) is not swallowed, and the keyboard stays in the field; with an element recorded, the same field takes Esc and gives it back', async () => {
+  it('at full width, an Esc the field cannot answer (nothing to give the keyboard back to) is the field’s, and the keyboard stays in it; with an element recorded, the same field’s Esc gives it back', async () => {
     setWidth(WIDE);
     renderShell();
     act(() => void showFiles(A));
     await waitFor(() => expect(field()).not.toBeNull());
     act(() => field()!.focus()); // no ⌘P: nothing recorded
-    expect(esc()).toBe(true); // not prevented: it goes on to whatever stands behind
+    expect(esc()).toBe(false); // prevented: the field keeps it (ruling 1 holds in sheet geometry only)
     expect([document.activeElement, panelCollapsed(), sheetDismissal()]).toEqual([field(), false, null]);
-    // the control, in the same field: ⌘P from the composer records it, and the field's Esc is its own and gives it back
+    // the control, in the same field: ⌘P from the composer records it, and the field's Esc gives it back
     act(() => composer().focus());
     act(() => runAction('files.goToFile'));
     await waitFor(() => expect(document.activeElement).toBe(field()));
     expect(field()!.value).toBe('');
-    expect(esc()).toBe(false); // prevented: the field's
+    expect(esc()).toBe(false);
     expect([document.activeElement, panelCollapsed(), sheetDismissal()]).toEqual([composer(), false, null]);
+  });
+
+  it('at full width, a live mark-up session survives an Esc in the empty field with nothing to give the keyboard back to; the same Esc from outside the field ends it', async () => {
+    setWidth(WIDE);
+    renderShell();
+    let tabId = '';
+    act(() => void (tabId = showFiles(A)));
+    await waitFor(() => expect(field()).not.toBeNull());
+    // a stand-in surface for the side column's tab, registered and started by the mark-up layer's own path
+    const scope = { surface: 'panel', tabId } as const;
+    const region = document.body.appendChild(document.createElement('div'));
+    vi.spyOn(region, 'getBoundingClientRect').mockReturnValue({ left: 300, top: 120, width: 800, height: 500, x: 300, y: 120, right: 1100, bottom: 620, toJSON: () => ({}) } as DOMRect);
+    offs.push(registerMarkupSurface(scope, { element: () => region, label: () => 'an invented page', begin: async () => ({ mediaType: 'image/png', data: 'c3RpbGw=', width: 1600, height: 1000 }), end: () => {} }));
+    await act(() => startMarkup(scope));
+    await waitFor(() => expect(document.querySelector('[data-markup-layer]')).not.toBeNull());
+    expect(useMarkup.getState().session).not.toBeNull();
+    act(() => field()!.focus()); // no ⌘P: nothing recorded
+    expect(document.activeElement).toBe(field());
+    expect(esc()).toBe(false); // the field's
+    expect(useMarkup.getState().session, 'the mark-up session survives the field’s Esc').not.toBeNull();
+    expect(document.activeElement).toBe(field());
+    fireEvent.keyDown(document.body, { key: 'Escape' }); // the control: the same key, not from the field
+    expect(useMarkup.getState().session).toBeNull();
+    region.remove();
   });
 });
 
+// Each case waits on an editor's first drawing, which a loaded worker can take past a second, up to five each.
 describe('Enter in a narrow window (Decision Log 15)', { timeout: 20_000 }, () => {
   it('a file already open in a main-area tab, the session’s tab in front: Go to file and Enter close the sheet, bring the file’s tab forward and put the keyboard in its text', async () => {
     setWidth(NARROW);
