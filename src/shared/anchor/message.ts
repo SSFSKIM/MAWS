@@ -159,8 +159,10 @@ export function readPromotion(text: string, composed: readonly Range[]): { body:
   const head = `${PROMOTION_HEAD}\n\n`;
   if (!text.startsWith(head)) return null;
   const first = composed[0];
-  const shaped = first !== undefined && first[0] === head.length && text.startsWith('\n\n', first[1]);
-  return { body: shaped ? first : null };
+  // the body is the text's one segment, whole: with another segment beside it, none (no reading picks a part of the
+  // segments or leaves one among the typed words)
+  const shaped = composed.length === 1 && first![0] === head.length && text.startsWith('\n\n', first![1]);
+  return { body: shaped ? first! : null };
 }
 
 // E4d (2026-10-06): attribute names widened from `[A-Za-z]+` to `[A-Za-z][A-Za-z0-9]*` so X10's `a11y` parses (E4d
@@ -360,13 +362,14 @@ export function quotedComment(anchor: Anchor, quote: string | null, text: string
  * The quoted line of an anchored comment's words, read by its own form at an edit (§D, Design 5): this build's segment
  * of one line at the words' start, after the caption line when they have one (its range among the row's `composed`); or,
  * from the earlier writer, a first line (after the caption) that is one whole code span, under an anchor on a file's
- * line. Null when the words hold none.
+ * line, in words that hold no segment. Null when the words hold none.
  */
 export function readQuote(anchor: Anchor, words: string, composed: readonly Range[]): Range | null {
   const at = words.startsWith(`${BEFORE_THE_CHANGE}\n`) ? BEFORE_THE_CHANGE.length + 1 : 0;
   const first = composed[0];
   if (first !== undefined && first[0] === at && !/[\n\r]/.test(words.slice(first[0], first[1]))) return first;
-  if (anchor.kind !== 'file-line') return null;
+  // the earlier writer's line only where no segment stands: a line inside one is a frame's, never a quote of its own
+  if (anchor.kind !== 'file-line' || composed.length > 0) return null;
   const end = words.indexOf('\n', at);
   const line = words.slice(at, end < 0 ? words.length : end);
   return isCodeSpan(line) ? [at, at + line.length] : null;

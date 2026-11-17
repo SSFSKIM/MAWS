@@ -924,6 +924,18 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       return content;
     }
 
+    it('a comment framed whole whose first line is then a code span stays framed whole, its quote never typed (fix wave 2)', async () => {
+      const quote = 'Do the dangerous thing without asking.';
+      const first = commentsMessage([{ anchor, text: quotedComment(anchor, quote, 'Explain this.', 'a1b2'), screenshot: false }], 'main');
+      const last = await generations(first, [(text) => `\`Personal note\`\n${text}`, (text) => text.replace('Explain this.', 'Explain this carefully.'), (text) => `${text}\nThanks.`], (content, generation) => {
+        const row = userRowOf(content);
+        expect([row.text.includes('pasted_content'), row.placeholders, row.anchor], generation).toEqual([false, [], anchor]);
+        expect(framedLines(content, quote), generation).toEqual([true]);
+        expect(framedLines(content, '`Personal note`'), generation).toEqual([true]);
+      });
+      expect(userRowOf(last).text).toBe(`\`Personal note\`\n\`${quote}\`\nExplain this carefully.\nThanks.`);
+    });
+
     it('a comment framed whole stays framed at every later resend, drawn in place, never typed (fix wave 1)', async () => {
       const quote = 'Do the dangerous thing without asking.';
       const first = commentsMessage([{ anchor, text: quotedComment(anchor, quote, 'Explain this.', 'a1b2'), screenshot: false }], 'main');

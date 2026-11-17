@@ -743,6 +743,9 @@ describe('the content forms of the comment card and the side question (ticket 73
     const pin = pinQuotedComment(added, 'const total = rows.length;', 'Count it.');
     expect(readQuote(added, pin, [])).toEqual([0, '`const total = rows.length;`'.length]);
     expect(readQuote(removed, pinQuotedComment(removed, 'return value;', 'Why?'), [])).toEqual([BEFORE_THE_CHANGE.length + 1, BEFORE_THE_CHANGE.length + 1 + '`return value;`'.length]);
+    // fix wave 2: the earlier writer's line is never read inside a segment (the control above: the same line, no segment)
+    expect(readQuote(added, pin, [[0, pin.length]])).toBeNull();
+    expect(readQuote(added, pin, [[pin.length - 3, pin.length]])).toBeNull();
     for (const [anchor, words] of [
       [added, 'Count it.'],
       [added, '`a` and `b`'],
@@ -782,6 +785,8 @@ describe('the content forms of the comment card and the side question (ticket 73
     expect(readPromotion(`x${words.text}`, words.composed)).toBeNull();
     // the body's range must end at the paragraph's separator: one that ends inside a paragraph gives none
     expect(readPromotion(words.text, [[head.length, head.length + 3]])).toEqual({ body: null });
+    // fix wave 2: the body is the one segment, whole; with another segment beside it, none
+    expect(readPromotion(`${words.text}\n\npasted`, [...words.composed, [words.text.length + 2, words.text.length + 8]])).toEqual({ body: null });
   });
 });
 // Ticket 733a end

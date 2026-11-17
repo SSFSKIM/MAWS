@@ -19,7 +19,8 @@ import { typedFromRowText } from './editor/recall';
 
 /**
  * The form of the row an edit began from, by the forms' own readers (§D); null is a person's message. `whole`: a comment
- * whose words are one segment and no quoted line (words an earlier resend framed whole), its whole text the slot.
+ * whose words hold a segment that is not its quoted line (words an earlier resend framed whole, say), its whole text the
+ * slot.
  */
 export type StoredForm = { kind: 'plan' } | { kind: 'promotion'; body: string | null } | { kind: 'comment'; quote: string | null } | { kind: 'whole' } | { kind: 'relay' } | null;
 
@@ -31,11 +32,13 @@ const typedAt = (row: UserRow, [from, to]: Range) => typedFromRowText(row.text.s
 
 /**
  * The stored row's form, as an edit of it begins. An anchored row with a destination is a comment, its quoted line the one
- * `readQuote` names; words that are one segment whole, and no quoted line, went framed whole (a resend's fail-closed
- * fallback) and stay so, since sent as typed the body would leave its segment. An anchored row with none is a promoted
- * side question only under the promotion's own anchor, its body the segment `readPromotion` names (fail closed: with no
- * body, the whole edited text is the slot, also where an edit took the head out); under any other anchor no writer of
- * MAWS wrote it, at this build or an earlier one (the architect's ruling of 2026-11-17), so it is the person's. A plan
+ * `readQuote` names when it is the words' one segment (or the earlier writer's line, in words that hold none); words that
+ * hold any other segment (an earlier resend's fail-closed fallback framed them whole, or a paste stands in them) go
+ * framed whole, since sent as typed a body would leave its segment and read as the person's. An anchored row with none
+ * is a promoted side question only under the promotion's own anchor, its body the segment `readPromotion` names (fail
+ * closed: with no body, the whole edited text is the slot, also where an edit took the head out); under any other
+ * anchor no writer of MAWS wrote it, at this build or an earlier one (the architect's ruling of 2026-11-17), so it is the
+ * person's. A plan
  * prompt's row begins with its whole first line and a blank line (this build's shape, the earlier writer's, or a person's
  * message typed so: the architect's ruling of 2026-11-17, (3)), or with that line and a pasted block that took the blank
  * line. A relay begins with one of its writer's openings and holds its closing words.
@@ -44,9 +47,11 @@ export function storedFormOf(row: UserRow): StoredForm {
   const composed = row.composed ?? [];
   if (row.anchor !== undefined && row.anchorFrame !== undefined) {
     if (row.anchorFrame.destination !== null) {
+      // every segment is a slot or the whole is: a quote only where it is the words' one segment (or, from the earlier
+      // writer, where they hold none), and words holding any other segment go framed whole
       const quote = readQuote(row.anchor, row.text, composed);
-      if (quote !== null) return { kind: 'comment', quote: typedAt(row, quote) };
-      return framedWhole(row.text, composed) ? { kind: 'whole' } : { kind: 'comment', quote: null };
+      if (quote !== null && composed.length <= 1) return { kind: 'comment', quote: typedAt(row, quote) };
+      return composed.length > 0 ? { kind: 'whole' } : { kind: 'comment', quote: null };
     }
     if (anchorTag(row.anchor) !== anchorTag(PROMOTION_ANCHOR)) return null;
     const body = readPromotion(row.text, composed)?.body ?? null;
@@ -55,9 +60,6 @@ export function storedFormOf(row: UserRow): StoredForm {
   if (row.text.startsWith(PLAN_HEAD) || (row.text.startsWith(`${PLAN_LEAD}\n`) && row.placeholders.includes(PLAN_LEAD.length + 1))) return { kind: 'plan' };
   return readRelay(row.text) === null ? null : { kind: 'relay' };
 }
-
-// Whether the text is one segment's body, whole
-const framedWhole = (text: string, composed: readonly Range[]) => composed.length === 1 && composed[0]![0] === 0 && composed[0]![1] === text.length;
 
 type Edit = { text: string; bodies?: Readonly<Record<string, string>>; images?: Prefill['images']; form: StoredForm };
 
