@@ -93,15 +93,25 @@ function readsWhole(text: string, work?: { steps: number }): boolean {
 // place answers. Charged a step a code unit, one for each code a character beyond ASCII folds to, and, when it tells
 // places, one for each beginning a letter moves on or a bracket carries. It also answers whether it read a character
 // beyond ASCII: when it read none, the other case image is the same stream and need not be read.
+// Given an allowance, it stops before a character whose work could pass it (`spent`), so it never charges more.
+// The most one character can cost a pass: its code units (2), and for each code its fold gives (at most 18, U+FDFA) a
+// step and, telling places, the beginnings it moves on or carries (at most 19, every one but the empty one).
+const CHAR_PASS_WORK_MAX = 2 + 18 * 20;
+// The most compatibility folding and lower-casing together lengthen a text, a code unit: 18 (U+FDFA). Folding the whole
+// text is no longer than its full decomposition, which U+FDFA lengthens most, and lower-casing lengthens no decomposed
+// letter (U+0130, the one it lengthens, decomposes to I and a mark). The whole-text reading charges at most the text's
+// length and twice its fold's.
+const FOLD_GROWTH_MAX = 18;
 const BEGAN = new Int32Array(FOLDED_GRANT.length); // the reading so far: by its count of letters, where it began
 const SAVED_BEGAN = new Int32Array(FOLDED_GRANT.length); // the same, for the readings the `<`s since the last typed `>` saved
 type Spans = [from: number, to: number][];
-function readsOpening(text: string, image: 'lower' | 'upper', spans: Spans | null, work?: { steps: number }): { found: boolean; wide: boolean } {
+function readsOpening(text: string, image: 'lower' | 'upper', spans: Spans | null, work?: { steps: number }, allowance = Infinity): { found: boolean; wide: boolean; spent: boolean } {
   let reached = 1;
   let saved = 0;
   let wide = false;
   let steps = 0;
   let found = false;
+  let spent = false;
   // the readings `from` holds join `into`, each beginning at the earlier of the two places
   const join = (into: number, intoBegan: Int32Array, from: number, fromBegan: Int32Array): number => {
     if (spans !== null) {
@@ -143,6 +153,10 @@ function readsOpening(text: string, image: 'lower' | 'upper', spans: Spans | nul
   };
   let i = 0;
   while (i < text.length) {
+    if (steps + CHAR_PASS_WORK_MAX > allowance) {
+      spent = true; // the next character could pass the allowance: stop before it
+      break;
+    }
     const point = text.codePointAt(i)!;
     const end = i + (point > 0xffff ? 2 : 1);
     steps += end - i;
@@ -174,14 +188,17 @@ function readsOpening(text: string, image: 'lower' | 'upper', spans: Spans | nul
     i = end;
   }
   if (work) work.steps += steps;
-  return { found, wide };
+  return { found, wide, spent };
 }
 
 /**
  * The most `quotesGrant` charges, a character of the longer of a text and its compatibility fold (NFKC): the bound the
- * own-text rule plans each call of the forms' list by (src/shared/files/named.ts).
+ * own-text rule plans each call of the forms' list by (src/shared/files/named.ts). Counted over every code point, each
+ * repeated (the landing's M1, fix wave 1): U+0130 costs 11, its fold one character that lower-casing makes two (the
+ * whole-text reading 5, each case image's pass 3); the Greek letters an upper-casing makes three cost 9; the sharp s 8;
+ * every other character less; the count is a sum over the text's characters.
  */
-export const GRANT_TEST_WORK_PER_CHAR = 7;
+export const GRANT_TEST_WORK_PER_CHAR = 11;
 
 /**
  * Whether a string quotes the grant's opening, in any reading of it: the one test the ask tool's guard
@@ -201,22 +218,56 @@ export function quotesGrant(text: string, work?: { steps: number }): boolean {
   return lower.found || (lower.wide && readsOpening(text, 'upper', null, work).found);
 }
 
+// Two lists of ranges, each in order of their ends, merged into one in order of the ends, one range for each end from
+// its earliest beginning
+function byEnds(one: Spans, other: Spans): Spans {
+  const out: Spans = [];
+  let i = 0;
+  let k = 0;
+  while (i < one.length || k < other.length) {
+    const next = k >= other.length || (i < one.length && one[i]![1] <= other[k]![1]) ? one[i++]! : other[k++]!;
+    const last = out[out.length - 1];
+    if (last !== undefined && last[1] === next[1]) last[0] = Math.min(last[0], next[0]);
+    else out.push([next[0], next[1]]);
+  }
+  return out;
+}
+
 /**
  * Where `quotesGrant`'s reading stands (ticket 733a, Design 1): for each place a reading of the opening ends, the range
  * of the text from the earliest place a reading that ends there begins (its first letter) to that end, in the text's own
- * offsets, in order. Empty exactly when `quotesGrant` is false: one pass forward per case image, and, should only the
- * whole-text reading find the opening (whose offsets are the folded text's), the whole text as the one range.
+ * offsets, in order of their ends. Empty exactly when `quotesGrant` is false: one pass forward per case image, the two
+ * lists merged by their ends, and, should only the whole-text reading find the opening (whose offsets are the folded
+ * text's), the whole text as the one range.
  */
 export function grantSpans(text: string, work?: { steps: number }): (readonly [from: number, to: number])[] {
-  const spans: Spans = [];
-  if (readsOpening(text, 'lower', spans, work).wide) readsOpening(text, 'upper', spans, work);
-  if (spans.length === 0) return readsWhole(text, work) ? [[0, text.length]] : [];
-  // one range for each end, from its earliest beginning
-  spans.sort((a, b) => a[1] - b[1] || a[0] - b[0]);
-  const ranges: [number, number][] = [];
-  for (const span of spans) if (ranges.length === 0 || ranges[ranges.length - 1]![1] !== span[1]) ranges.push(span);
-  if (work) work.steps += spans.length;
-  return ranges.sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  return grantSpansWithin(text, Infinity, work)!;
+}
+
+/**
+ * `grantSpans` within an allowance of work: null, having charged at most the allowance, where the reading could pass it
+ * (each pass stops before a character that could; the whole-text reading and the merge are begun only when their bound
+ * fits what is left). The leave-out of content reads by it (./composed-content.ts).
+ */
+export function grantSpansWithin(text: string, allowance: number, work?: { steps: number }): (readonly [from: number, to: number])[] | null {
+  const meter = { steps: 0 };
+  const done = <T>(value: T): T => {
+    if (work) work.steps += meter.steps;
+    return value;
+  };
+  const lower: Spans = [];
+  const read = readsOpening(text, 'lower', lower, meter, allowance);
+  if (read.spent) return done(null);
+  const upper: Spans = [];
+  if (read.wide && readsOpening(text, 'upper', upper, meter, allowance - meter.steps).spent) return done(null);
+  if (lower.length + upper.length === 0) {
+    const bound = read.wide ? text.length * (1 + 2 * FOLD_GROWTH_MAX) : 3 * text.length;
+    if (meter.steps + bound > allowance) return done(null);
+    return done(readsWhole(text, meter) ? [[0, text.length]] : []);
+  }
+  if (meter.steps + lower.length + upper.length > allowance) return done(null);
+  meter.steps += lower.length + upper.length;
+  return done(byEnds(lower, upper));
 }
 
 /**
