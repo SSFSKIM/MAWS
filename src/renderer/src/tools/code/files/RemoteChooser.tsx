@@ -88,32 +88,30 @@ export function RemoteChooser({ appSessionId, chooser, onClose, onChosen }: { ap
     <Sheet title={REMOTE_CHOOSER_COPY.title(machine)} width={WIDTH} onClose={close} data-remote-chooser="">
       <div className="flex flex-col gap-3">
         <PathField shown={fieldPath === null ? '~' : tildified(fieldPath, home)} disabled={busy} go={(path) => chooser.go(path)} />
-        <ul data-chooser-list="" className="m-0 flex h-[min(280px,40vh)] list-none flex-col overflow-y-auto rounded-sm border border-border p-1">
+        <div data-chooser-list="" className="flex h-[min(280px,40vh)] flex-col overflow-y-auto rounded-sm border border-border p-1">
           {parent !== null && (
-            <li data-up="" className="shrink-0">
-              <button type="button" className={ROW} disabled={busy} onClick={() => chooser.up()}>
-                <span className={MARK} aria-hidden="true" />
-                <span className="min-w-0 truncate">{REMOTE_CHOOSER_COPY.up}</span>
-              </button>
-            </li>
+            <button type="button" data-up="" className={ROW} disabled={busy} onClick={() => chooser.up()}>
+              <span className={MARK} aria-hidden="true" />
+              <span className="min-w-0 truncate">{REMOTE_CHOOSER_COPY.up}</span>
+            </button>
           )}
           {state.at === 'reading' ? (
-            <li className={LINE}>{REMOTE_CHOOSER_COPY.reading}</li>
+            <p className={`m-0 ${LINE}`}>{REMOTE_CHOOSER_COPY.reading}</p>
           ) : state.at === 'failed' ? (
-            <li className="flex shrink-0 items-center gap-2 py-1 pr-1 pl-2">
+            <div className="flex shrink-0 items-center gap-2 py-1 pr-1 pl-2">
               <span role="alert" className="min-w-0 flex-1 text-ui-sm text-fg-muted">
                 {state.words}
               </span>
               <button type="button" className={SECONDARY} onClick={() => chooser.retry()}>
                 {REMOTE_CHOOSER_COPY.retry}
               </button>
-            </li>
+            </div>
           ) : listing !== null && listing.entries.length === 0 ? (
-            <li className={LINE}>{REMOTE_CHOOSER_COPY.empty}</li>
+            <p className={`m-0 ${LINE}`}>{REMOTE_CHOOSER_COPY.empty}</p>
           ) : (
             listing?.entries.map((entry) => <EntryRow key={entry.path} entry={entry} selected={listing.selected === entry.path} disabled={busy} chooser={chooser} choose={choose} />)
           )}
-        </ul>
+        </div>
         <button
           type="button"
           data-chooser-more=""
@@ -140,36 +138,35 @@ export function RemoteChooser({ appSessionId, chooser, onClose, onChosen }: { ap
 function EntryRow({ entry, selected, disabled, chooser, choose }: { entry: OutsideEntry; selected: boolean; disabled: boolean; chooser: Model; choose(): void }) {
   const selectable = entry.kind === 'file' || entry.kind === 'link';
   return (
-    <li className="shrink-0">
-      <button
-        type="button"
-        data-entry=""
-        data-kind={entry.kind}
-        title={entry.name}
-        aria-selected={selected}
-        className={ROW}
-        disabled={disabled || entry.kind === 'other'}
-        onClick={() => {
-          if (entry.kind === 'dir') chooser.enter(entry);
-          else if (selectable) chooser.select(entry.path);
-        }}
-        onDoubleClick={() => {
-          if (!selectable) return;
-          chooser.select(entry.path);
-          choose();
-        }}
-      >
-        {entry.kind === 'dir' ? <Chevron open={false} /> : <span className={MARK} aria-hidden="true" />}
-        <span className="min-w-0 truncate">{entry.name}</span>
-        {entry.protected && <span className={TAG}>{REMOTE_CHOOSER_COPY.private}</span>}
-        {entry.kind === 'link' && <span className={TAG}>{REMOTE_CHOOSER_COPY.link}</span>}
-      </button>
-    </li>
+    <button
+      type="button"
+      data-entry=""
+      data-kind={entry.kind}
+      title={entry.name}
+      aria-selected={selected}
+      className={ROW}
+      disabled={disabled || entry.kind === 'other'}
+      onClick={() => {
+        if (entry.kind === 'dir') chooser.enter(entry);
+        else if (selectable) chooser.select(entry.path);
+      }}
+      onDoubleClick={() => {
+        if (!selectable) return;
+        chooser.select(entry.path);
+        choose();
+      }}
+    >
+      {entry.kind === 'dir' ? <Chevron open={false} /> : <span className={MARK} aria-hidden="true" />}
+      <span className="min-w-0 truncate">{entry.name}</span>
+      {entry.protected && <span className={TAG}>{REMOTE_CHOOSER_COPY.private}</span>}
+      {entry.kind === 'link' && <span className={TAG}>{REMOTE_CHOOSER_COPY.link}</span>}
+    </button>
   );
 }
 
-// The path field: the folder shown while it does not hold the keyboard, scrolled to its end; what the person types while
-// it does. Enter or Go asks for the typed path; Go keeps the keyboard in the field, so what it asks is what was typed.
+// The path field: the folder shown, scrolled to its end while nothing is typed in it; what the person types, until the
+// keyboard leaves it. Enter or Go asks for what it holds; Go keeps the keyboard in the field, so what it asks is what was
+// typed.
 function PathField({ shown, disabled, go }: { shown: string; disabled: boolean; go(path: string): void }) {
   const [draft, setDraft] = useState<string | null>(null);
   const field = useRef<HTMLInputElement>(null);
@@ -192,7 +189,6 @@ function PathField({ shown, disabled, go }: { shown: string; disabled: boolean; 
         className={`${FIELD} min-w-0 flex-1 font-mono`}
         value={draft ?? shown}
         disabled={disabled}
-        onFocus={() => setDraft(shown)}
         onChange={(event) => setDraft(event.target.value)}
         onBlur={() => setDraft(null)}
       />
