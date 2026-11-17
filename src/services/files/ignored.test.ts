@@ -3,6 +3,7 @@
 // empty home: the facts of git the check rests on. Over stand-in spawn functions: its bound, its places and its
 // disposal, on a clock the test moves, and once over a real process group held open.
 import { execFileSync } from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -111,31 +112,36 @@ describe('the ignore check over a real repository', () => {
     expect(sorted(await check.names(repo.path('vendor'), ['fresh.js', 'kept.js']))).toEqual(['fresh.js']); // inside it, the tracked file alone is plain
   });
 
-  it('in one run of two folders, keeps a tracked file a rule names unmarked in one while the other’s ignored file is marked, and reads * and [ in a name or a folder as text', async () => {
+  it('in one run of folders of one repository, keeps a tracked file a rule names unmarked in one while another’s ignored file is marked, and reads * [ and : in a name or a folder as text', async () => {
     const repo = await repository();
     await repo.write('.gitignore', '*.log\n');
     await repo.write('g[1]/kept.log', 'kept on purpose\n');
-    await repo.git('add', '-f', 'g[1]/kept.log');
-    await repo.git('commit', '-q', '-m', 'a tracked log');
+    await repo.write(':(exclude)k/kept.log', 'kept on purpose\n'); // a folder whose name reads as pathspec magic
+    await repo.git('--literal-pathspecs', 'add', '-f', 'g[1]/kept.log', ':(exclude)k/kept.log');
+    await repo.git('commit', '-q', '-m', 'two tracked logs');
     await repo.write('g[1]/a*.log', 'x\n');
     await repo.write('g[1]/[x].log', 'x\n');
     await repo.write('g[1]/notes.md', 'x\n');
-    await repo.write('g1/other.log', 'x\n'); // what `g[1]/` would match as a glob
+    await repo.write(':(exclude)k/fresh.log', 'x\n');
+    await repo.write('g1/kept.log', 'x\n'); // what `g[1]/` would match as a glob: untracked here, so ignored
     await repo.write('seed/s.log', 'x\n');
     const runs = gatedFirstRun();
     const check = checkOf({ env: repo.serviceEnv(), execFile: runs.execFile });
     const seed = check.names(repo.path('seed'), ['s.log']);
-    await runs.firstCall; // the seed's run holds the repository
+    await runs.firstCall; // the seed's run holds the repository: the asks below join its next run
     const brackets = check.names(repo.path('g[1]'), ['[x].log', 'a*.log', 'kept.log', 'notes.md']);
-    const plain = check.names(repo.path('g1'), ['other.log']);
+    const plain = check.names(repo.path('g1'), ['kept.log']);
+    const magic = check.names(repo.path(':(exclude)k'), ['fresh.log', 'kept.log']);
     await settle();
     runs.open();
     expect(sorted(await seed)).toEqual(['s.log']);
-    expect(sorted(await brackets)).toEqual(['[x].log', 'a*.log']);
-    expect(sorted(await plain)).toEqual(['other.log']);
-    expect(runs.made).toHaveLength(4); // the seed's two runs, then one ls-files and one check-ignore for both folders
-    expect(runs.made[2]!.args.slice(4).sort()).toEqual(['g1/', 'g[1]/']);
-    expect(runs.made[3]!.input!.split('\0').filter((path) => path !== '').sort()).toEqual(['./g1/other.log', './g[1]/[x].log', './g[1]/a*.log', './g[1]/notes.md']);
+    expect(sorted(await brackets)).toEqual(['[x].log', 'a*.log']); // its tracked kept.log stays plain
+    expect(sorted(await plain)).toEqual(['kept.log']); // the same name, untracked in g1, is marked
+    expect(sorted(await magic)).toEqual(['fresh.log']);
+    expect(runs.made.map((run) => (run.args.includes('ls-files') ? 'ls-files' : 'check-ignore'))).toEqual(['ls-files', 'check-ignore', 'ls-files', 'check-ignore']); // the seed's run, then one run for the three folders
+    expect(runs.made[2]!.args.slice(0, 4)).toEqual(['--literal-pathspecs', 'ls-files', '-z', '--']);
+    expect(runs.made[2]!.args.slice(4).sort()).toEqual([':(exclude)k/', 'g1/', 'g[1]/']);
+    expect(runs.made[3]!.input!.split('\0').filter((path) => path !== '').sort()).toEqual(['./:(exclude)k/fresh.log', './g1/kept.log', './g[1]/[x].log', './g[1]/a*.log', './g[1]/notes.md']);
   });
 
   it('finds a linked worktree’s repository by its .git file, and judges its folder by its own rules', async () => {
@@ -482,6 +488,39 @@ describe('the bound and the places', () => {
     await vi.advanceTimersByTimeAsync(0);
     expect(sorted(got.z ?? null)).toEqual(['a.log']);
     expect(got.y).toBeNull();
+  });
+
+  it('frees a timed-out run’s place only when its child has closed, not when the runner gives the run up', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const children: EventEmitter[] = [];
+    let calls = 0;
+    let spawned!: () => void;
+    const firstSpawn = new Promise<void>((resolve) => (spawned = resolve));
+    // A child that never answers and closes only when the test says (a git blocked in the filesystem, past its SIGKILL)
+    const execFile: ExecFileFn = () => {
+      calls++;
+      spawned();
+      const child = new EventEmitter();
+      children.push(child);
+      return child as unknown as ChildProcess;
+    };
+    const check = checkOf({ execFile, concurrency: 1 });
+    const first = check.names(fakeRepo(), ['a.log']);
+    await firstSpawn; // after the walk, which reads the disk while the clock stands
+    await vi.advanceTimersByTimeAsync(1_000);
+    const second = check.names(fakeRepo(), ['b.log']); // deadline 3,000; waits for the one place
+    await settle();
+    expect(calls).toBe(1);
+    await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 1_000 + 600); // t = 2,600: past the first's bound, its timeout and the runner's kill delay
+    expect(await first).toBeNull();
+    expect(calls).toBe(1); // the runner gave the run up at 2,500, but its child has not closed: the place is still held
+    children[0]!.emit('close', null, 'SIGKILL');
+    await vi.advanceTimersByTimeAsync(0);
+    expect(calls).toBe(2); // the place is free once the child closed
+    const disposed = check.dispose();
+    expect(await second).toBeNull();
+    children[1]!.emit('close', null, 'SIGKILL'); // the stand-in has no process group to kill: its close is the test's
+    await disposed;
   });
 
   it('never starts the run of a check that waited for a place its whole bound', async () => {
