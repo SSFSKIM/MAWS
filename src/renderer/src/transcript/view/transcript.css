@@ -132,7 +132,10 @@ button.transcript-chip:hover { background: var(--bg-hover); }
   white-space: nowrap;
 }
 .transcript-user-line > :not(.transcript-user-line-actions) { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
-.transcript-user-line-actions { display: flex; flex: none; align-items: center; gap: 8px; width: 0; overflow: hidden; opacity: 0; transition: opacity 0.12s; }
+/* At rest the three keep their widths inside a box of none: packed to its end, they overflow it on the bubble's side,
+   inside the line, where the box clips them; packed to its start their boxes ran past the line's end, and past a
+   phone's screen in the desk's session view. Shown, the box is as wide as they are and the packing changes nothing. */
+.transcript-user-line-actions { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; width: 0; overflow: hidden; opacity: 0; transition: opacity 0.12s; }
 .transcript-user:hover .transcript-user-line-actions, .transcript-user:focus-within .transcript-user-line-actions { width: auto; overflow: visible; opacity: 1; }
 .transcript-user:hover .transcript-user-line-actions:not(:last-child), .transcript-user:focus-within .transcript-user-line-actions:not(:last-child) { margin-right: 8px; }
 .transcript-user-line-actions button { padding: 6px 2px 2px; margin: -6px -2px -2px; }
