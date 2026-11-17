@@ -10,6 +10,8 @@
 >
 > **Revision 4 (2026-11-17).** A narrow re-check of S1 (`37074c0b6`; one reviewer, medium rung) found the send's row closed and three gaps in what "accounted for" and `changed` mean. The architect ruled on them and added a bound on the whole hand-over (Decision Log 7). With this the review of S1 stops: what is found while building goes to a tracker row unless it loses a block.
 >
+> **Revision 5 (2026-11-17).** The owner answered this half's three cards (Decision Log 8). K1 and K2: the built defaults. K4: the cause in the sentence, which was not the default; the sentences that are built are now those.
+>
 > **Branch:** `ux-wave/U6b-5`. **Order in the chain:** after U6b-3b, before U6b-5b. It is built on a head that holds every landing before it in the chain; "Statements to check again" lists what is read again on that head. **Not in this landing:** zoom (U6b-5b); Go to file (U6b-3); links, notices and "Open in" (U6b-4); a bottom drawer; a printable sheet; history across relaunches.
 
 ## Purpose
@@ -26,6 +28,7 @@ How to see it working: the acceptance below, B1 to B9, B13 and B14. The unit hal
 - [x] (2026-11-17) Revision 2: this document for U6b-5a; the six findings that bind it designed in.
 - [x] (2026-11-17) The delta review of revision 2 and the architect's rulings on its four findings here; revision 3.
 - [x] (2026-11-17) The re-check of S1 and the architect's four rulings; revision 4. The review of S1 is closed.
+- [x] (2026-11-17) The owner's answers to K1, K2 and K4; revision 5.
 - [ ] M1 — The keyboard on show and hide, and the mode said aloud.
 - [ ] M2 — "Attach selection to chat".
 - [ ] M3 — Back and Forward.
@@ -255,7 +258,7 @@ Each item is a behaviour a person can check, numbered as in the first writing (B
 - **B2** (A7). Select text in a terminal and choose "Attach selection to chat" from its menu, or Edit ▸ Attach selection to chat: the composer of that terminal's session holds one pasted block whose text is the selection, the composer has the keyboard, and nothing was sent. A selection of three characters is a block too.
 - **B3**. With nothing selected the menu's item is drawn disabled, and Edit ▸ Attach selection to chat attaches what the terminal's screen shows.
 - **B4** (the cut's Decision Log 7; finding 2). A terminal kept open for every session, beside another session's chat: after Attach the line "Added to <its session's title>" appears. Reload the window before opening that session, then open it: its box holds the block. And when that session is opened and typed in while the attach is still on its way: its box ends holding what was typed and the block, once, and the line appears only then. When what was typed is also sent, and the session closed again, before the attach has landed: the message goes without the block, and the session's draft then holds the block, once.
-- **B5** (finding 3). Where the block cannot be put (the session has not started; a message is being taken back; the session is no longer known; its machine keeps no drafts for this member; its draft changed in every round), the line says the selection was not added, no draft holds the block and none can come to hold it, and the selection is still selected. Where MAWS cannot know (an answer was lost and no later read has shown the block; or the attach ran out of time after a write was sent), the line says that it could not confirm, whatever else went wrong after that, and a later look finds the block once or not at all, never twice. An attach always ends: within 80 seconds for a session on this Mac and eight minutes for one on another machine, and far sooner unless every answer is late.
+- **B5** (finding 3). Where the block cannot be put (the session has not started; a message is being taken back; the session is no longer known; its machine keeps no drafts for this member; its draft changed in every round), the line says the selection was not added and why, in the sentence for that cause, no draft holds the block and none can come to hold it, and the selection is still selected. Where MAWS cannot know (an answer was lost and no later read has shown the block; or the attach ran out of time after a write was sent), the line says that it could not confirm, whatever else went wrong after that, and a later look finds the block once or not at all, never twice. An attach always ends: within 80 seconds for a session on this Mac and eight minutes for one on another machine, and far sooner unless every answer is late.
 - **B6** (A8). ⌘K with nothing typed lists "Recent" first: the sessions and artifacts opened last in this run, newest first, eight at most, filled with the sessions most recently active; no line about the first 50. Typing an artifact's title lists it under "Artifacts", and Enter opens it beside the chat. The last row opens the Library on the typed text. No row is drawn disabled.
 - **B7** (A11; finding 5). Open session A, then session B, then the Customize page. Go ▸ Back shows B, again shows A; Go ▸ Forward goes forward again. With the Settings dialog open over B, Back closes the dialog and shows A. With the Overview open, Back closes it and shows the place before, and Forward opens it again over the same place. Back is disabled at the first place and Forward at the last. Closing a tab takes it out: Back never reopens it. Moving the keyboard between the two panes of a split adds nothing to Back.
 - **B8**. In an editable file ⌘[ and ⌘] change nothing in the text; Tab and ⇧Tab indent. In a plugin's detail ⌘[ returns to its list and the place in front does not change.
@@ -336,6 +339,7 @@ Five milestones. M1 is first: M2 reads `available`, which M1 exports. After M1, 
 - **The store's round.** A writer between the read and the write (the next round appends to the newer draft and names its revision); a draft's revision where the read answers one; where it answers none, the claim form on this Mac and `null` over the link; a stage kept (`taking-back`, one write, no further round); three stale answers and a last read that shows no block (`changed`); a session with no row (`unknown`); a machine that keeps no drafts (`no-store`, nothing sent). In every refusal no `session.drafts.set` is accepted and no line says "Added" (the control, in that test: the same fake, asked without the refusing condition, takes the write and the line is shown).
 - **A session on another machine (finding 4).** A draft never written there: the read answers none, the save names `null`, and it is taken, by a fake with build F's rule and by one with this build's. An ordinary save that failed before the attach, so that the window holds a newer document than the machine: the block is appended to the window's document, the save names the revision the machine answered, it is taken in the first round, and the failed save is not sent again after it. A stale answer: the next round asks the machine again (the fake counts its reads: one per round), and does not read the module's memory. `saveRemoteDraftOnce` naming `null`, in `remote-drafts.test.ts`.
 - A session that has not started, by each of the three ways of "The named question": refused where the store is the authority, with nothing read; taken by its mounted composer.
+- **The sentences (card K4, as answered).** One case per row of `ATTACH`'s table in "The sentences a person reads": the outcome, by the cause that makes it, shows exactly that sentence with the session's title, or its machine's name, in it; `unreachable` shows this Mac's sentence for a session here and the machine's for one elsewhere; `unconfirmed` shows its sentence and no "Not added"; no outcome falls through to another's sentence (the table is total over `AttachRefusal`, held by the type).
 - The handler is registered while a terminal holds the keyboard and at no other time; the menu's item is disabled without a selection and the chord's path attaches the screen.
 - A store of build F (`DraftStore` at `f1852de3a`, read with `git show`, its one rule restated in the test as a fake): a save naming a kept revision is taken, one naming none where none was kept is taken, and the claim form is stale in each round, and the last read shows no block: `changed`, with nothing written.
 
@@ -682,17 +686,26 @@ Little of this landing is drawn. The terminal's menu gains a row; a line is the 
 
 One table per surface, each at one place.
 
-**The terminal's attach** (`ATTACH` in `src/renderer/src/tools/terminal/copy.ts`). `<title>` is the session's title as its tab reads.
+**The terminal's attach** (`ATTACH` in `src/renderer/src/tools/terminal/copy.ts`), as the owner chose on card K4: the cause in the sentence. `<title>` is the session's title as its tab reads; `<machine>` is the name of the session's machine as the sidebar names it.
 
-| outcome | the sentence that is built | card K4's recommended wording |
-|---|---|---|
-| `added` | Added to <title> | the same |
-| `unconfirmed` | MAWS could not confirm that the selection was added to <title>. Open it to look before attaching again. | the same: the owner picks its words with the rest of K4 |
-| refused: `not-started`, `taking-back`, `changed`, `unknown`, `unreachable`, `no-store`, `failed`, `busy`, `closed` | The selection was not added to <title>. | Not added: <title> has not started. · Not added: <title> is taking a message back. · Not added: <title>'s draft kept changing. Attach again. · Not added: this terminal's session is no longer known. · Not added: <machine> is not answering. · Not added: <machine> keeps no drafts for this window. · The selection was not added to <title>. · Not added: <title> is sending a message. · Not added: <title> takes no typing now. |
-| refused: `unsaved` | <title> has the selection, but its draft could not be saved. | the same |
-| nothing to attach | Nothing on this terminal's screen to attach. | the same |
+| outcome | the sentence |
+|---|---|
+| `added` | Added to <title> |
+| `unconfirmed` | MAWS could not confirm that the selection was added to <title>. Open it to look before attaching again. |
+| refused, `not-started` | Not added: <title> has not started. |
+| refused, `taking-back` | Not added: <title> is taking a message back. |
+| refused, `changed` | Not added: <title>'s draft kept changing. Attach again. |
+| refused, `unknown` | Not added: this terminal's session is no longer known. |
+| refused, `unreachable`, a session on another machine | Not added: <machine> is not answering. |
+| refused, `unreachable`, a session on this Mac | Not added: MAWS's service on this Mac is not answering. |
+| refused, `no-store` | Not added: <machine> keeps no drafts for this window. |
+| refused, `busy` | Not added: <title> is sending a message. |
+| refused, `closed` | Not added: <title> takes no typing now. |
+| refused, `failed` | The selection was not added to <title>. |
+| refused, `unsaved` | <title> has the selection, but its draft could not be saved. |
+| nothing to attach | Nothing on this terminal's screen to attach. |
 
-"Not added" is said only where no write of the block can still land (S1); every other doubt is `unconfirmed`.
+"Not added" is said only where no write of the block can still land (S1); every other doubt is `unconfirmed`. The sentence for this Mac's own service is the cut's ruled wording for a service that does not answer (its X7), with "Not added:" before it: the card's column had one sentence with a machine's name in it, and this Mac has none to put there.
 
 The menu's row and the action's title: "Attach selection to chat" (the child's file).
 
@@ -704,7 +717,7 @@ The menu's row and the action's title: "Attach selection to chat" (the child's f
 
 ## The cards for the owner
 
-Each is in the form it could be put to the owner. Each has a default that is built at one named place, so none holds the build. K3 (how far zoom goes) is U6b-5b's.
+All three are answered (2026-11-17; Decision Log 8). Each is kept as it was put, with the question as the owner read it, the answer in the owner's words, and the one place it is built. K3 (how far zoom goes) is U6b-5b's.
 
 ### K1 · After you close a tab, where does ⌘[ go?
 
@@ -716,6 +729,8 @@ You looked at session A, then at session B. In the strip B stands last, after a 
 | 2. Closing a tab goes back | Closing B shows A, the place you were at before it | What a close shows changes for every tab, with or without ⌘[: the strip's own rule, which you looked at with the one strip, is replaced |
 
 Recommended: 1. The one place: `gone` in `keymap/places.ts` (option 2 would also change `closeTab` in U13's model, which this landing does not edit).
+
+**Answered, 2026-11-17.** The question as put: "MAWS gets ⌘[ / ⌘] to go Back and Forward between places you looked at (landing U6b-5a). Say you looked at session A, then at session B; in the tab strip B stands last, after a tab C you were not looking at. You close B, and MAWS shows C (the tab beside it), as it does today. What should ⌘[ do after that?" The owner's answer: "Strip decides, Back follows (Recommended)". This is option 1, which is what is built.
 
 ### K2 · You press Esc on a page. Was that Back?
 
@@ -729,19 +744,23 @@ On session A you open Customize, then press Esc, or the page's own Back button. 
 
 Recommended: 1. The one place: rule 2 of `seen` in `keymap/places.ts`; option 3 would also change `PageTitle` in `app/Toolbar.tsx` and the page's Esc (U7's).
 
+**Answered, 2026-11-17.** The question as put: "With ⌘[ / ⌘] for Back and Forward: on session A you open a page such as Customize, then press Esc (or the page's own Back button), and you are on A again. Was that Esc a step back?" The owner's answer: "Esc was a step back (Recommended)". This is option 1, which is what is built.
+
 ### K4 · What MAWS says when a selection could not be added
 
 You attach a selection from a terminal that is kept open for every session. Its own session is not on screen, and the selection cannot be put in that session's draft.
 
 | | what you read | what it means in use |
 |---|---|---|
-| **A. One sentence for every cause** (built) | "The selection was not added to <title>." | You know it failed and that the selection is still selected. You do not know whether to try again |
-| B. The cause in the sentence (recommended) | the third column of "The sentences a person reads" | You know what to do: open the session, wait, or try again |
+| A. One sentence for every cause (the first default) | "The selection was not added to <title>." | You know it failed and that the selection is still selected. You do not know whether to try again |
+| **B. The cause in the sentence** (recommended; chosen; built) | the table of "The sentences a person reads" | You know what to do: open the session, wait, or try again |
 | C. B, with one button where there is an act | B, and "Open <title>" on the line for a session that has not started | One click to the place where the attach will work |
 
 With any of the three there is one more sentence, for the rare case where MAWS cannot know (the session's machine took the write and its answer was lost, and the machine cannot be read): "MAWS could not confirm that the selection was added to <title>. Open it to look before attaching again." It is yours to word. It is never replaced by "not added": attaching again after a false "not added" would put the selection in twice.
 
 Recommended: B. The one place: `ATTACH` in `tools/terminal/copy.ts`.
+
+**Answered, 2026-11-17.** The question as put: "⇧⌘L attaches a terminal's selection to its session's chat even when that session is not on screen (landing U6b-5a). When it cannot be added, what should the one-line notice say? (Separately, in every option: when MAWS cannot know, it says "MAWS could not confirm that the selection was added to <title>. Open it to look before attaching again." Type in Other if you want that worded differently.)" The owner's answer: "The cause in the sentence (Recommended)". This is option B. It was not the default the earlier revisions built: the table of "The sentences a person reads" is now the cause sentences, and the sentence for what MAWS cannot confirm stands as worded.
 
 ## Proof that an executor does not run
 
@@ -775,7 +794,7 @@ These are estimates from reading, not a diff. M2 is the largest and the one whos
 
 **Review: the xhigh panel.** By size (past both marks), and because M2 is a sequence over four writers of one draft (the editor, a send in flight, the store's round, another machine's queue) in files of U4 and U9. The review's lens for M2 is S1's three claims: at most once, the person's edits kept, nothing said before an end.
 
-**The other half.** U6b-5b is about 2,100 lines over 46 files, with the panel as well; its document gives the count. The two are sequential: U6b-5b is cut from this landing's head, and "The landing's edge" names the files both edit. Its spike is written to run and be reviewed by itself while this half is built.
+**The other half.** U6b-5b is about 2,200 lines over 48 files, with the panel as well; its document gives the count. The two are sequential: U6b-5b is cut from this landing's head, and "The landing's edge" names the files both edit. Its spike is written to run and be reviewed by itself while this half is built.
 
 ## Statements to check again on the head this landing is built on
 
@@ -842,6 +861,7 @@ Found while this document was written and reviewed; each changed a decision abov
 5. **2026-11-17 (UTC) · Revision 2, in place.** The first writing's decision 9 is withdrawn and decisions 30 to 33 added; decisions 7, 8, 12, 13 and 15 are rewritten; S1 is new; S3 and decisions 23 to 29 moved to U6b-5b's document with M1, M6, B10 to B12, K3, P6 and P7. Milestones are numbered again (M1 to M5).
 6. **2026-11-17 (UTC) · Ruled on the delta review of revision 2.** One reviewer on the medium rung read `ee20c0074`; the session that keeps master had ruled a delta review, and there is no second adversarial read. For this document it closed findings 1, 4, 5 and 6 and left 2 and 3 partly closed. Its four findings here, each read by the architect at the cited place, all accepted. (i) A send outlives its composer and clears the draft when it settles: the hand-over's settlement includes every send of the session in flight, from a mounted composer or not; no turn begins and no round is believed while one is in flight; a test holds the attach's write and a send across an unmount. (ii) An unaccounted write survives every exit: while one is unaccounted for, every refusal ends `unconfirmed`. (iii) The store's rounds end on one last read with no write: the block there is `added`, absent is `changed` only when no write is unaccounted for, and so `changed` leaves no block. (iv) M2 follows M1, which exports `available`. The four choices of revision 2 are accepted as the reviewer found them sound: the loop and not a barrier; a move between panes points the current entry at the tab in front; and, for U6b-5b, `publish` for the zoom key only and a 375 size that reads 376 at 200 %. The reviewer also confirmed that a block's id survives the draft's two passages (`draftOf`, `docOfDraft`) and that `replaces: string | null` on the window's helper is no change of the wire. The `/btw` rule is ticket 733b's, which is not written: statement 2 stays.
 7. **2026-11-17 (UTC) · Ruled on the re-check of S1; the review of S1 stops here.** One reviewer on the medium rung read `37074c0b6`: the send's row is closed (`submissionOf` sees every send of the session, and a refused send's restoring save is covered). Three gaps in what "accounted for" and `changed` mean, each read by the architect at the cited place, all accepted, and one addition. (i) A write in the claim form that is unaccounted for stays so for the rest of the hand-over: a later accepted write does not retire it, since a claim can become eligible again after a clear; a write naming a revision is retired as before. Tested with the clear in between. (ii) For a session on another machine, `changed` at the last read needs the machine's own answer to lack the block and no save of the session still out in the window's queue; a clear the window still holds never masks a machine document that holds the block; otherwise the end is `unconfirmed`. Tested with another device of the member saving revisions that hold the block. (iii) Tests added: a send that outlives its composer, accepted and refused, for a session on another machine through the real remote queue, the send's own save held apart from its answer, with its timeout and its late landing; and a composer mounting during the last read. (iv) A deadline on the whole hand-over, `attachDeadlineMs`: eight times the bound of one command on the session's route (`REQUEST_TIMEOUT_MS`, `REMOTE_ACT_PENDING_MS`), seven for the store's work at its worst and one for a wait; at it the end is `unconfirmed` when any write of the block was sent, else a refusal by its cause; tested with a fake clock and a send that never settles. `ATTACH_ROUNDS` stays the bound on the store's work. After this, anything further found in S1 while building goes to a tracker row unless it loses a block.
+8. **2026-11-17 (UTC) · The owner's answers to K1, K2 and K4** (recorded verbatim on board ticket 674, with each question as put; quoted under each card). K1: "Strip decides, Back follows (Recommended)", the built default. K2: "Esc was a step back (Recommended)", the built default. K4: "The cause in the sentence (Recommended)", which was not the built default: `ATTACH` in `tools/terminal/copy.ts` is the cause sentences of the card's recommended column, the sentence for what MAWS cannot confirm stands as worded, and M2 pins each sentence by a case. One sentence is added to the column so that it is total: a session on this Mac whose service does not answer has no machine's name to say, and reads "Not added: MAWS's service on this Mac is not answering."
 
 ## Outcomes & Retrospective
 

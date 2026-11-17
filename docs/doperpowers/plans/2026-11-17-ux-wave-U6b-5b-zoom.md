@@ -8,7 +8,9 @@
 >
 > **Revision 3 (2026-11-17).** A delta review of revision 2 (`ee20c0074`; one reviewer, medium rung) closed findings 7 and 8 for this half and left 9 partly closed, with two findings of the second rank on this document. The architect read each cited place and ruled (Decision Log 5). What moved: what M1 records for the device size, and when row j is a stop.
 >
-> **Branch: `ux-wave/U6b-5b`**, cut from the head of `ux-wave/U6b-5` that carries this revision. M1 is a spike that stands on nothing of U6b-5a: it is built there at once, and may run and be reviewed while U6b-5a is built. Before M2, U6b-5a's head is merged into the branch; "What this landing stands on" says what of U6b-5a M2 and M3 need. **Order in the chain:** after U6b-5a, last of U6b. **Not in this landing:** everything of U6b-5a; pinch to zoom; a size per session or per surface; a control on screen for the size (card K3).
+> **Revision 4 (2026-11-17).** The owner answered card K3 (Decision Log 6): the range stays 50 % to 200 %, and after each zoom act a line says the size reached. That was not the default the earlier revisions built; decision 37, M2 and the scenes now hold it.
+>
+> **Branch: `ux-wave/U6b-5b`**, cut from the head of `ux-wave/U6b-5` that carries this revision. M1 is a spike that stands on nothing of U6b-5a: it is built there at once, and may run and be reviewed while U6b-5a is built. Before M2, U6b-5a's head is merged into the branch; "What this landing stands on" says what of U6b-5a M2 and M3 need. **Order in the chain:** after U6b-5a, last of U6b. **Not in this landing:** everything of U6b-5a; pinch to zoom; a size per session or per surface; a button or any other control on screen for the size (card K3, as answered: a line that says the size, and no button).
 
 ## Purpose
 
@@ -22,6 +24,7 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-17) The adversarial review and the architect's rulings: two landings; findings 7, 8 and 9 bind this one; P6 and P7 accepted, as the findings correct them.
 - [x] (2026-11-17) This document written.
 - [x] (2026-11-17) The delta review of revision 2 and the architect's rulings on its two findings here; revision 3.
+- [x] (2026-11-17) The owner's answer to K3; revision 4.
 - [ ] M1 — Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
 - [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
@@ -116,7 +119,7 @@ The review also noted that the Electron API the design rests on is in no tracked
 
 ## Decisions settled at authoring
 
-Each is a means the child's file and the cut leave open, with its reason and what it beat. The numbers are the first writing's (1 to 22 and 30 to 33 are U6b-5a's); 34 to 36 are new with revision 2.
+Each is a means the child's file and the cut leave open, with its reason and what it beat. The numbers are the first writing's (1 to 22 and 30 to 33 are U6b-5a's); 34 to 36 are new with revision 2, and 37 with the owner's answer to K3.
 
 23. **`window.zoom` is the truth; Chromium's own memory is not read.** `{ version: 1, factor }`, main's own key, absent at 100 %. Absent at 100 % so that a profile that was never zoomed holds no new key, and the scenes that pin the exact list of stored keys stand as they are. The zoom's module keeps no copy of the factor: every reader asks the store, so there is one value to be wrong about.
 24. **The steps are the in-app browser's**, between 50 % and 200 %: `stepZoom` over `ZOOM_PRESETS` (`src/main/browser/navigation.ts`, imported, not edited), held to 0.5 and 2.
@@ -128,6 +131,7 @@ Each is a means the child's file and the cut leave open, with its reason and wha
 34. **The zoom key is published, not set** (finding 7). The layout store gains one act, `publish(key, value)`: it puts the value in the map (or removes the key) and writes the file, and when the write throws it puts the map back to what it held for that key before the call and throws on. Only the zoom uses it. It beat giving `set` and `delete` the same rule for every key: that changes what a failed write of any layout key leaves, in every caller, which is no part of this landing.
 35. **One formula for the device size, with the app's factor** (finding 8). With W the size named, z the tab's zoom and a the app's factor: the page's element is `min(round(W × z ÷ a), the room)` CSS pixels; the size the page then reads is `round(element × a ÷ z)`; a size fits when `W × z ÷ a` is no more than the room. The same for the height. The element is rounded to a whole CSS pixel, as today, and main rounds its edges to points (decision 27), so the page can read one pixel off the name: at 200 % and a tab at 100 %, 375 is 188 CSS pixels, 376 points. The chip says what the page reads (376), never the name. It beat sending main the unrounded rectangle, which changes the schema of the command every pane's placement uses.
 36. **A scene reads native bounds only after main's acknowledgment** (finding 9). The e2e seam says which rectangle main last received for a tab; a scene that has changed the factor or the layout waits until that rectangle is the one the page now measures, and only then reads the view's bounds. Two frames are not a wait: the window sends its rectangle from its own measuring, at a time no frame count names.
+37. **After each zoom act a line says the size reached** (card K3, as the owner answered it). "Zoom 125 %": the step reached as a whole percent, a space before the sign. It is the app's own line, a toast (`toast` in `stores/notices.ts`): level `info`, no action, no button to dismiss it, on screen for `ZOOM_LINE_MS` (1,500 ms, the toast's own `durationMs`). One line at a time: a press while a line shows takes that line away (`dismiss`) and shows a new one, with its own full time; replacing the text in place would leave the second press only what was left of the first one's time. It is shown for a change of the factor that an act made, Actual Size included ("Zoom 100 %"), and not for the factor a window opens with. It is said to a screen reader by the toast host itself, which announces every toast it draws; no live region is added. A press at an end changes nothing and shows nothing: the item has no handler there (decision 29). Nothing of `stores/notices.ts` or `app/ToastHost.tsx` is edited. One consequence is the toast host's own rule and is not changed here: while a line lies over a page of the in-app browser, that page is drawn as its still, as under any toast.
 
 ## The sequences that must hold
 
@@ -160,7 +164,7 @@ The cross-build coverage table (the comment block U13a's M5 began in `e2e/cross-
 
 Each item is a behaviour a person can check, numbered as in the first writing (B1 to B9 are U6b-5a's). "Unit" runs on the build VM; a scene runs on a Mac and is the architect's to start. A menu chord cannot be pressed through the scenes' driver (`e2e/support/menu.ts`), so a scene clicks the menu's item by its id; that the key itself reaches the item is the owner's hands (B13).
 
-- **B10** (A10). View ▸ Zoom In and Zoom Out make the whole window larger and smaller along the steps; Actual Size returns to 100 % and is disabled there; Zoom In is disabled at 200 % and Zoom Out at 50 %. Quit and relaunch: the size is as left, and is in force when the window is first shown. In a page of the in-app browser the keys zoom that page alone, as today. When the size cannot be stored, nothing changes: the window, the next press and the next launch all have the size from before.
+- **B10** (A10). View ▸ Zoom In and Zoom Out make the whole window larger and smaller along the steps; Actual Size returns to 100 % and is disabled there; Zoom In is disabled at 200 % and Zoom Out at 50 %. Quit and relaunch: the size is as left, and is in force when the window is first shown. After each act a line, "Zoom 125 %" with the step reached, shows for a second and a half and is said to a screen reader; a second press replaces it. In a page of the in-app browser the keys zoom that page alone, as today, and show no such line. When the size cannot be stored, nothing changes and no line shows: the window, the next press and the next launch all have the size from before.
 - **B11** (A10, "stays exactly under its frame"). At 50 %, 80 %, 125 % and 200 %: the in-app browser's view covers its pane to the point, and a press lands on the page wherever the frame draws it and on the app everywhere else; an extension's popup opens under its icon; the bookmarks menu opens under its button; a comment's pin sits on the picked element; the traffic lights stand centred in the title bar and clear of its controls; a page at the Mobile size reads 375 wide (at 200 %, 375 or 376, and the chip says which), the chip's menu offers exactly the sizes that fit, and the chip says what the page reads. The same after the window is moved to a display of another scale; where M1's row j could not be run for want of a second display, that last sentence is not proven, and the tracker says so (M3).
 - **B12** (root UC-14). After this build at 125 %, build F and build M on the same profile each show 100 %, keep `window.zoom` through their own write, and this build then shows 125 % again. The presenter's window, the repair window, a deck's export, a screenshot of an artifact and Mark up's still are the same at 150 % as at 100 %.
 - **B13** (A13, A9), for this half's three rows. `src/shared/keymap/actions.test.ts` holds them to the wave's chords and lists them as landed; `src/main/menu.test.ts` finds the three zoom items in View outside any submenu; the sheet lists them under View. By hand, on the owner's machines: ⌘= and ⌘− work under the Korean input source (the child's probe 6).
@@ -252,9 +256,9 @@ Starts on the architect's word after M1's verdict, on a head that holds U6b-5a a
 
 **What it touches.** `src/shared/keymap/actions.ts` and `actions.test.ts` (`LANDED`); `src/shared/ipc/schema/layout.ts` (the key, its schema, the command, the event), `src/shared/ipc/names/layout.ts`, `src/shared/ipc/routes.json`; `src/main/zoom.ts` (new), `src/main/layout/store.ts` (`MAIN_KEYS`, `publish`, the writer it is given), `src/main/app.ts`, `src/main/window.ts`; the six placements of Interfaces §G, in `src/main/browser/` (U12's), `src/main/window.ts`, `src/renderer/src/tools/browser/viewport.ts`, `chrome/ViewportChip.tsx` and `Pane.tsx` (U12's) and `src/renderer/src/app/Toolbar.tsx` (U7's); `src/renderer/src/stores/zoom.ts` (new), `App.tsx`; `src/main/menu.ts` (the comment); tests beside each, `shared/ipc/schema/layout.test.ts` ("accepts the key grammar and nothing else"), `main/layout/store.test.ts` ("main's own keys"), `main/browser/view.test.ts`, `main/menu.test.ts`, `settings-tab/keymap.test.ts`.
 
-**Interfaces.** Exposes §G. Consumes `ZOOM_PRESETS`, `stepZoom` (`src/main/browser/navigation.ts`); `appWindows` (`src/main/windows.ts`); M1's seam and its verdict; from U6b-5a what "What this landing stands on" lists.
+**Interfaces.** Exposes §G. Consumes `ZOOM_PRESETS`, `stepZoom` (`src/main/browser/navigation.ts`); `appWindows` (`src/main/windows.ts`); `toast` and the store's `dismiss` (`src/renderer/src/stores/notices.ts`, unedited); M1's seam and its verdict; from U6b-5a what "What this landing stands on" lists.
 
-**Decisions.** 23 to 29 and 34 to 36; S3; P6, P7.
+**Decisions.** 23 to 29 and 34 to 37; S3; P6, P7; card K3.
 
 **What it does not touch.** The in-app browser's own zoom and its keys; `window.main` and `WindowStateSchema`; what `set` and `delete` of the layout store do for any other key; `src/main/presentations/` and `src/main/repair/` unless M1's row g says so; the layout's breakpoints and the window's minimum size; any zoom role of the menu (`menu-roles.test.ts` stands unedited); `app/shell-actions.ts`.
 
@@ -267,6 +271,7 @@ Starts on the architect's word after M1's verdict, on a head that holds U6b-5a a
 - **The device size (finding 8), in `viewport.test.ts` and in the chip's and the pane's tests.** At a = 2 and a = 0.5, with z = 1 and z = 1.25: the element's size, what the page reads and whether the size fits, all from the one formula. The review's two cases: at a = 2 a room of 300 CSS pixels offers Mobile (it needs 188); at a = 0.5 a room of 500 does not (it needs 750). A size cut by its room: the element is the room and `reads` is the room times a ÷ z, rounded. 375 at a = 2 reads 376 and the chip says 376. A change of the factor redraws the chip and the pane without any other change (they read `useZoom`).
 - A change of factor applies again every placement of that window, also where the window sent no new rectangle (held: the window is silent, main re-places).
 - The window's handlers: `zoom.in` absent at 2, `zoom.out` at 0.5, `zoom.reset` at 1, each present elsewhere; the root's `--app-zoom` follows the event.
+- **The line (card K3), in `stores/zoom.test.ts` against the real notices store.** After `layout.zoomChanged` with 1.25 the store holds one toast whose text is "Zoom 125 %", with no action, not dismissible, `durationMs` equal to `ZOOM_LINE_MS`; for 0.67 the text is "Zoom 67 %", for 1 "Zoom 100 %". A second event while the first line is held: the first is gone from the store and one line with the new size is there (the control for "gone", in that test: before the second event the same read finds the first). The factor read at the start (`current`) shows no line (the control, in that test: an event after it does). A command that answers an error shows none. With the toast host mounted and the suite's fake clock: the line's text is in the host's announcement for a screen reader; just under `ZOOM_LINE_MS` after it was drawn the store still holds it, and just over, it does not. That is an assertion of state at two points of a clock the test moves, not of a time measured.
 - A second app window made while the factor is 1.25 opens at 1.25.
 
 ### M3 — The scenes, the cross-build row, the record, and the acceptance run
@@ -373,7 +378,8 @@ export function zoomOf(contents: WebContents): number;   // the factor of the ap
 
 // src/renderer/src/stores/zoom.ts (new)
 export const useZoom: UseBoundStore<StoreApi<{ factor: number }>>;
-export function connectZoom(client?: MawsBridge): () => void;   // reads `layout.zoom { to: 'current' }`, follows the event, sets --app-zoom on the root, registers the three handlers by the factor
+export function connectZoom(client?: MawsBridge): () => void;   // reads `layout.zoom { to: 'current' }`, follows the event, sets --app-zoom on the root, registers the three handlers by the factor, and shows decision 37's line for each event
+export const ZOOM_LINE_MS = 1_500;                              // the line's time on screen (card K3)
 
 // src/renderer/src/tools/browser/viewport.ts: decision 35; `app` is the app's factor
 export function pageBox(viewport: BrowserViewport | null, zoom: number, room: Room, app: number): PageBox | null;
@@ -420,8 +426,8 @@ No spec file is added. Every scene reads a state it polls for; a scene that read
 
 | group, file | the scene | what it waits on |
 |---|---|---|
-| `e2e:layout`, `e2e/ux2-shell.spec.ts` | new step in the menus' scene: View holds Zoom In, Zoom Out and Actual Size outside any submenu; Actual Size disabled at 100 %, Zoom In at 200 %, Zoom Out at 50 %; the sheet lists the three under View (B10, B13) | the window's zoom store reading the factor after each click; the menu items' `enabled` read from the application menu (polled) |
-| `e2e:browser`, `e2e/browser.spec.ts` | new, "zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %" (B11; the child's probe 2): the view against its pane, the two rectangles' differences no more than a point, with a menu open over it; the lights' position against the toolbar; at the Mobile size what the page reads, what the chip says and what its menu offers; Mark up's still of the pane at 150 % covering what it covers at 100 % | the zoom store reading the factor, then `placedOn`, then the view's bounds equal to the pane's rectangle times the factor (polled) |
+| `e2e:layout`, `e2e/ux2-shell.spec.ts` | new step in the menus' scene: View holds Zoom In, Zoom Out and Actual Size outside any submenu; Actual Size disabled at 100 %, Zoom In at 200 %, Zoom Out at 50 %; after a click the line "Zoom 110 %" is drawn, and after the next it is "Zoom 125 %" alone; the sheet lists the three under View (B10, B13) | the window's zoom store reading the factor after each click; the line's text being drawn, and the earlier line being gone (polled; no time is asserted); the menu items' `enabled` read from the application menu (polled) |
+| `e2e:browser`, `e2e/browser.spec.ts` | new, "zoom: the page stays under its frame at 50 %, 80 %, 125 % and 200 %" (B11; the child's probe 2): the view against its pane, the two rectangles' differences no more than a point, with a menu open over it; the lights' position against the toolbar; at the Mobile size what the page reads, what the chip says and what its menu offers; Mark up's still of the pane at 150 % covering what it covers at 100 % | the zoom store reading the factor; then the zoom's line being gone, since a toast over the pane puts the page's still in the view's place while it shows; then `placedOn`; then the view's bounds equal to the pane's rectangle times the factor (polled) |
 | `e2e:browser-chrome`, `e2e/browser-chrome.spec.ts` | new: a popup under its icon and the bookmarks menu's point under its button, at 50 % and 125 % | the seam's `popup()`; the menu record's `at` |
 | `e2e:browser-comment`, `e2e/browser-comment.spec.ts` | new: the pin on the picked element at 50 %, 80 % and 125 % | the card for that pick being drawn |
 | `e2e:terminal`, `e2e/terminal.spec.ts` | new, "zoom: the grid refits and a selection is under the pointer at 125 %" (the child's probe 3) | the pty's reported size after the zoom; the selection's text |
@@ -441,7 +447,7 @@ That the size is in force when the window is first shown (B10) is M1's row f on 
 
 ## The card for the owner
 
-In the form it could be put to the owner. Its default is built at one named place, so it does not hold the build. K1, K2 and K4 are U6b-5a's.
+Answered (2026-11-17; Decision Log 6). It is kept as it was put, with the question as the owner read it, the answer in the owner's words, and the places it is built. K1, K2 and K4 are U6b-5a's.
 
 ### K3 · How far zoom goes, and what tells you the size
 
@@ -460,13 +466,17 @@ The layout reads the window's width in CSS pixels (`shellGeometry`): under 1,100
 
 | | what you get | what it means in use |
 |---|---|---|
-| **A. 50 % to 200 %, nothing on screen** (built) | View ▸ Actual Size is enabled away from 100 %, and that is the only sign | Nothing new on screen. After two presses you cannot read which size you are at |
-| B. The same range, and a line for a second and a half (recommended) | "Zoom 125 %" in the app's own line, no button, also said to a screen reader | You see the step you landed on. One short line per press |
+| A. 50 % to 200 %, nothing on screen (the first default) | View ▸ Actual Size is enabled away from 100 %, and that is the only sign | Nothing new on screen. After two presses you cannot read which size you are at |
+| **B. The same range, and a line for a second and a half** (recommended; chosen; built) | "Zoom 125 %" in the app's own line, no button, also said to a screen reader | You see the step you landed on. One short line per press |
 | C. Claude Desktop's line with its Reset button | as B, with a button that returns to 100 % | One more control, for an act the View menu already has |
 
 A second choice, on any of the three: hold the top at 150 % instead of 200 %. At 200 % a window under 1,400 points wide draws the side surface over the chat; at 150 % that starts under 1,050.
 
 Recommended: B, with 200 % kept. The one place for the range: `ZOOM_MIN` and `ZOOM_MAX` in `src/main/zoom.ts`; for the line: `connectZoom` in `stores/zoom.ts`.
+
+**Answered, 2026-11-17.** The question as put: "MAWS gets ⌘= / ⌘− / ⌘0 to zoom the whole window (landing U6b-5b), in the in-app browser's steps: 50, 67, 75, 80, 90, 100, 110, 125, 150, 175, 200 %. The layout reads width after zoom: a 1,440-point-wide window has 960 at 150 % and 720 at 200 %, and under 700 the side surface (terminal, files) is drawn over the chat; at 200 % that happens for any window under 1,400 points wide (at 150 %, under 1,050). Which range, and what shows the size?" The owner's answer: "Up to 200 %, a brief line (Recommended)". This is option B with 200 % kept. It was not the default the earlier revisions built: decision 37 is the line, at `connectZoom`, and the range is unchanged.
+
+One thing in the question as put is not what is built, and is no part of the answer: it names ⌘0 among the keys. ⌘0 is the Overview, and Actual Size has no chord (the child's file, l7-shell-08; UC-6's table).
 
 ## Proof that an executor does not run
 
@@ -481,7 +491,7 @@ Each is a step with what it needs, handed to the architect.
 | 5 | **The word to start M2** | after 2 to 4 | The findings read against "Promote or discard" | M2 starts, or one of its stops is ruled |
 | 6 | **The scenes of Interfaces §I** | after M3 | A Mac. The new scenes alone first, then each group whole: `e2e:layout`, `e2e:browser`, `e2e:browser-chrome`, `e2e:browser-comment`, `e2e:terminal`, `e2e:presentations`, `e2e:render-host`, `e2e:transcript`, `e2e:settings` | Each group's result. `e2e:transcript`'s zoom scene failing is the tracker's row of 2026-10-27 made reachable: its fix is one comparison in U3's scroll code, on a ruling |
 | 7 | **The cross-build run of record** | on the final head | `e2e:cross-build` with `--peer-exact f1852de3a` and with `--peer-exact 2c7044231`; and the group as the gate crosses it, against the master this landing merges into and against master at `b89d6d1d7` | "(zoom, both ways)" passed, not skipped, in all four. A skip is not evidence |
-| 8 | **The owner's hands and look** (the child's probe 6) | on the wave's build, on the owner's machines | About ten minutes: a page open in the in-app browser, a terminal, a transcript | ⌘= and ⌘− under the Korean input source; at 80 %, 125 % and 200 %: the page under its frame, text sharp, nothing cut; after a relaunch the window is at its size from the first moment it is seen |
+| 8 | **The owner's hands and look** (the child's probe 6) | on the wave's build, on the owner's machines | About ten minutes: a page open in the in-app browser, a terminal, a transcript | ⌘= and ⌘− under the Korean input source; at 80 %, 125 % and 200 %: the page under its frame, text sharp, nothing cut; the line with the size after each press, heard with VoiceOver on, and what a page of the in-app browser looks like under it for that second and a half; after a relaunch the window is at its size from the first moment it is seen |
 | 9 | **The branch review** | after M3 | `doperpowers:review-code`, the xhigh panel | A verdict and findings |
 | 10 | **Class 1a** | once, on the head the pull request will carry | `scripts/ci-gate.sh` with the static, unit and probe gates | The run's id |
 
@@ -494,15 +504,15 @@ Counted from the code at the pin, tests and scenes included, after the review's 
 | milestone | changed lines, about | files, about |
 |---|---|---|
 | M1 the spike | 650 | 16 |
-| M2 zoom | 1,150 | 34 |
+| M2 zoom | 1,200 | 34 |
 | M3 scenes, the cross-build row, the record | 350 | 11 |
-| **U6b-5b** | **2,150** | **48** (some files are counted in two milestones) |
+| **U6b-5b** | **2,200** | **48** (some files are counted in two milestones) |
 
 These are estimates from reading, not a diff. M2's count moves with M1's verdict: a `leaveAtActualSize`, or a call in the presenter's and the repair window's makers, each adds a file or two.
 
 **Review.** M1 alone, on its commits: one reviewer, medium rung (a harness, two seam fields read only under the e2e switch, probes that assert nothing). The landing: the xhigh panel, by its file count (well past twenty), and because it edits the placement code every scene of the in-app browser rests on and adds an act to the layout store.
 
-**The other half.** U6b-5a is about 3,900 lines over 58 files, with the panel as well. The two are sequential ("The landing's edge").
+**The other half.** U6b-5a is about 4,050 lines over 58 files, with the panel as well. The two are sequential ("The landing's edge").
 
 ## Statements to check again on the head this landing is built on
 
@@ -549,6 +559,7 @@ Found while this document was written and reviewed; each changed a decision abov
 3. **2026-11-17 (UTC) · Ruled on the points.** P6 accepted as findings 8 and 9 correct it. P7 accepted; M1's rows decide. (P1 to P5, P8 and P9 are in U6b-5a's document.) The card K3 stays the owner's with its built default.
 4. **2026-11-17 (UTC) · Ruled: two landings (P10).** U6b-5b, zoom: this document; a branch cut from U6b-5a's head, with M1 as a spike that may run and be reviewed while U6b-5a is built. The halves are sequential; each adds only its own ids to `LANDED`, has its own acceptance, proof, scene groups and tracker rows; neither takes a wire minor. Order in the chain: U6b-3b, then U6b-5a, then U6b-5b.
 5. **2026-11-17 (UTC) · Ruled on the delta review of revision 2.** One reviewer on the medium rung read `ee20c0074`; the session that keeps master had ruled a delta review, and there is no second adversarial read. For this document it closed findings 7 and 8 and left 9 partly closed. Its two findings here, each read by the architect at the cited place, both accepted. (i) Placement 6 at M1: as the pin's code runs, the page is not "375 times the factor"; M1 records the element's size, the frame's size, the view's, the page's `innerWidth`, the chip's text and the menu's fit choices at each factor, each beside the value the code predicts; the formula's verdict is M2's unit proof. No separate diagnostic configuration is built for it: the choice was the author's to make, and a build made only to show one placement fixed alone would be product code written for a probe. (ii) Row j: a changed `devicePixelRatio` is expected between displays of different scale and is recorded; the row is a stop only when the app's factor changes across the move or the view no longer stands on the frame as drawn. Also ruled: M1 is built on `ux-wave/U6b-5b`, cut from the head that carries this revision, and U6b-5a's head is merged into it before M2; with one display row j is recorded as not run, B11 names the gap, and M2 may start; the pointer's row stands as arithmetic with the press by hand in the look; `publish` for the zoom key only and a 375 size that reads 376 at 200 % are accepted, the reviewer having found each sound. The reviewer also confirmed that `window.zoom` is a new stored key that both older builds keep.
+6. **2026-11-17 (UTC) · The owner's answer to K3** (recorded verbatim on board ticket 674, with the question as put; quoted under the card). "Up to 200 %, a brief line (Recommended)", which was not the built default: the range stays 50 % to 200 %, and after each zoom act a line "Zoom 125 %" (the step reached) shows for a second and a half in the app's own line, with no button, also said to a screen reader, at `connectZoom` in `stores/zoom.ts` (decision 37). M2 gains the line and its unit cases, the time held by state on a fake clock; the menus' scene draws it, and the browser's scene waits for it to be gone before it reads a view. It edits no file another landing owns: the notices' store and the toast host are called and drawn as they are.
 
 ## Outcomes & Retrospective
 
