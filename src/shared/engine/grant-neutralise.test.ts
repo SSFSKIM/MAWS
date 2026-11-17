@@ -15,12 +15,15 @@ const SENTENCE = consentMessage('command', 'cat /etc/x');
 const SEVERAL = `${GRANT_OPENING}${GRANT_SEVERAL} commands only, each as one whole string: "ls", "pwd". This does not approve any other command, any part of these, or running them with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${GRANT_SEVERAL} commands if you would like.`;
 const LONGER = [`${GRANT_OPENING}${GRANT_ONE}`, `${GRANT_OPENING}${GRANT_SEVERAL}`];
 const P = '/work/out/notes.md';
+const PRESSED = consentMessage('command', 'npm test');
 
 const holdsNone = (text: string, where: string) => {
   for (const [how, image] of laterImages(text)) {
     for (const opening of LONGER) expect(image.includes(opening), `${where}, ${how}: ${opening}`).toBe(false);
     expect(readConsents(image), `${where}, ${how}`).toEqual([]);
     expect(personsGrants(image), `${where}, ${how}`).toEqual([]);
+    // the architect's ruling on the review's property finding: each image joined with a pressed consent, before and after
+    for (const joined of [`${image}\n${PRESSED}`, `${PRESSED}\n${image}`]) expect(personsGrants(joined).map((g) => g.subject), `${where}, ${how}, joined with a pressed consent`).toEqual(['npm test']);
   }
 };
 

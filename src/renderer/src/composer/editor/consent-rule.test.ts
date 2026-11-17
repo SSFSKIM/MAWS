@@ -50,6 +50,9 @@ function holdsNone(content: SendContent, where: string): void {
     for (const [how, image] of laterImages(block)) {
       for (const opening of LONGER) expect(image.includes(opening), `${where}, ${how}: a verbatim ${opening}`).toBe(false);
       expect(readers(image), `${where}, ${how}`).toEqual(NONE);
+      // the architect's ruling on the review's property finding: each image joined with a pressed consent, before and after
+      expect(readers(`${image}\n${PRESSED}`), `${where}, ${how}, a pressed consent after`).toEqual(PRESSED_ONLY);
+      expect(readers(`${PRESSED}\n${image}`), `${where}, ${how}, a pressed consent before`).toEqual(PRESSED_ONLY);
     }
   }
   expect(readers(content), `${where}, as sent`).toEqual(NONE);
