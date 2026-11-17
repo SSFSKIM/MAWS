@@ -1,7 +1,7 @@
 // The callers of the UX wave's U6f differential (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md,
 // condition (a)), for an authorizer taken without a channel: the real `Authorizer` over a signed head, the machine's
 // policy, the grant ledger's rights and the offer and grade seams, asked about one act of one name from one caller at a
-// time. Read by test/endpoint/outside-rows.test.ts and test/cross-build/outside-offers.test.ts.
+// time. Read by test/endpoint/outside-rows.test.ts and test/endpoint/outside-offers.test.ts.
 //
 // The org: A, an admin who owns the machine (a1); B, a member a grant names with `shell` (b1; b2 is a device the head
 // no longer lists); C, a member whose grant names `spawn` alone (c1); D, a member who holds `view` on the session the
@@ -117,7 +117,8 @@ export async function outsideWorld(options: WorldOptions = {}): Promise<World> {
       const asked: Who = { member: who.member, device: who.device.device.id, clientClass: cls };
       const decision = await authorizer.authorize(kind === 'act' ? { kind, name, input: action.args, action } : { kind, name, input }, asked, Date.now());
       if (!decision.ok) return decision;
-      const { stands: _stands, ...rest } = decision;
+      const { stands, ...rest } = decision;
+      void stands; // a function, compared by nothing
       return rest;
     },
   };

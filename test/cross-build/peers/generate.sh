@@ -8,7 +8,7 @@
 #
 # UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, Concrete Steps 7): also
 # that commit's endpoint offer table and capability list, src/endpoint/offers.ts and src/endpoint/capabilities.ts, read
-# by test/cross-build/outside-offers.test.ts. Neither holds a relative import at either commit, so each is copied as
+# by test/endpoint/outside-offers.test.ts. Neither holds a relative import at either commit, so each is copied as
 # `git show` prints it.
 set -euo pipefail
 cd "$(dirname "$0")"

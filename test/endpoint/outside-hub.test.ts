@@ -149,7 +149,7 @@ async function run(r: { device: Device; channel: Channel; inbox: ChannelMessage[
   const action: Action = r.device.action({ machine: ref, action: name, args });
   await r.channel.send({ t: 'act', action });
   const done = await until(() => r.inbox.some((m) => m.t === 'done' && m.opId === action.opId), `the done of ${name}`).then(() => r.inbox.find((m) => m.t === 'done' && m.opId === action.opId)!);
-  return (done as { outcome: unknown }).outcome;
+  return (done as unknown as { outcome: unknown }).outcome;
 }
 
 /** Each place the hub kept something that holds `text`: as it is, or in base64 or base64url. */
