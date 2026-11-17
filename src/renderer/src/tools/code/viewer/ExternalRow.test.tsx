@@ -87,6 +87,7 @@ describe('what a row says (rowWords)', () => {
     bytes: 3 * MiB, loaded: 0, complete: true, text: '', epoch: 1, base64: null, removed: false, updated: 0, sourceView: false, line: null, pendingJump: null, loadingMore: false,
     hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 1, pending: 0, readOnly: false, named: false, frame: null,
     locked: null, pin: null, agent: false, textEditable: false, // UX wave U6e's fields of the entry
+    said: false, needsOpen: false, offersOpenFile: false, // UX wave U6f's
     ...over,
   });
   const openButton = () => screen.queryByRole('button', { name: 'Open externally' });
