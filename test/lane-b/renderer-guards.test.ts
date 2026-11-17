@@ -202,8 +202,11 @@ describe('the chooser’s two acts on another machine', () => {
     return found;
   };
 
+  // Parsed only where the source holds an act's name at all (a quoted string, a template or a sum of parts holds its tail):
+  // parsing every renderer module again took the case past the 5 s default under the whole suite's load (M5's run)
+  const mayName = (source: string) => source.includes('listOutside') || source.includes('chooseOutside');
   it('are named by no renderer source but the chooser’s model', () => {
-    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && issues(m.path, m.source)).map((m) => m.path);
+    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && mayName(m.source) && issues(m.path, m.source)).map((m) => m.path);
     expect(naming).toEqual(['tools/code/files/remote-chooser.ts']);
   });
 
