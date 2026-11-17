@@ -1,4 +1,5 @@
-// UX wave U1c: the editor's notice check that code-editor.spec.ts and sessions.spec.ts share.
+// UX wave U1c: the check that an editor's reason in a file's bar is drawn whole (Changed on disk, the merge view's
+// reason, why the disk's version cannot be merged), which code-editor.spec.ts and sessions.spec.ts share.
 import { expect, type Locator, type Page } from '@playwright/test';
 import { resizePanel } from './toolbar-controls';
 

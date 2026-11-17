@@ -208,6 +208,24 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // U1c (the coordinator's item after the architect's ruling): the reason the disk's version cannot be merged is drawn
+  // whole, like the notice beside it: the disk's copy rewritten under unsaved edits as bytes that are no UTF-8 (an
+  // invented Latin-1 é), so the bar says why and offers Save alone
+  test('a disk copy that is no longer UTF-8 under unsaved edits: the bar says why it cannot be merged, drawn whole', async () => {
+    await withProduct(async (p) => {
+      const original = read(p, APP);
+      const viewer = await openEditor(p, APP);
+      await typeAtTop(p, viewer, TYPED);
+      writeFileSync(p.scratch.path(APP), Buffer.concat([Buffer.from('// caf'), Buffer.from([0xe9]), Buffer.from(' changed on disk\n'), Buffer.from(original)]));
+      const reason = viewer.locator('[data-disk-unusable]');
+      await expect(reason).toHaveText('Changed on disk: no longer UTF-8, so it cannot be merged', { timeout: MEASURED_WAIT_MS });
+      await expect(reason).toHaveAttribute('data-disk-unusable', 'encoding');
+      await expect(viewer, 'no version on offer').toHaveAttribute('data-theirs', '');
+      await expect(viewer, 'the edit still in the tab').toHaveAttribute('data-dirty', 'true');
+      await expectDrawnWholeAtBothWidths(p.page, reason);
+    });
+  });
+
   test('a save over a changed file opens the merge view, and Save writes the resolution', async () => {
     await withProduct(async (p) => {
       const original = read(p, APP);
