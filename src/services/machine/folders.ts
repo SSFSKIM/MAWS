@@ -2,8 +2,9 @@
 // folders under the machine's home, a page at a time, names only, which "+ Session" on a machine with no checkout of the
 // project browses for the folder that holds it. Nothing here raises a privacy prompt by itself: the path is resolved by
 // src/shared/machine/home-folders.ts, touching nothing inside a protected folder unless the call opens it (`open: true`
-// opens the folders the named path itself enters), and a folder's entries are read by their directory entry types
-// alone, no entry stat'ed or followed. A link is not listed (its target may be anywhere); a file is not either.
+// opens the folders the named path itself enters, and those of its last component's target when that is a link), and a
+// folder's entries are read by their directory entry types alone, no entry stat'ed or followed. A link is not listed
+// (its target may be anywhere); a file is not either.
 //
 // A refusal is `invalid_input` whose message starts with its reason (`no-folder`, `outside-home`, `symlink-escape`,
 // `protected`), as the endpoint's setup refusals name them.
@@ -34,7 +35,8 @@ export async function listFolders(input: CommandInput<'machine.folders.list'>, w
   const asked = input.path ?? '~';
   const named = expandHome(asked, where.home);
   if (named === null) throw refuse('outside-home', asked);
-  // `open` opens the protected folders the named path enters itself, no other (a link inside one into another is refused)
+  // `open` opens the protected folders the named path enters itself and its last link's target, no other (a link on the
+  // way into one is refused: UX wave U6f, Decision Log 17 and 19)
   const resolved = await walk(named, where, { opened: () => false, open: input.open === true });
   if (!resolved.ok) throw refuse(resolved.reason, asked);
   let names: string[];

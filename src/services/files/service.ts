@@ -98,10 +98,10 @@ import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import type { FileGrants } from './grants';
 import { fileMime, isTextMime } from './mime';
 import type { Naming } from './named';
-import { listOutsideFolder, walkOutside } from './outside-list';
+import { listOutsideFolder, refused as refusedListing, walkOutside } from './outside-list';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between the chooser's walk and the grant or listing of its real path */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -551,10 +551,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  // U6f (decision 10): the daemon's own record of an outside act from another machine, which no failure of it changes
+  // U6f (decision 10): the daemon's own record of an outside act from another machine, which no failure of it changes;
+  // always one line, whatever the path it names holds
   function logOutside(line: string): void {
     try {
-      outsideLog?.(line);
+      outsideLog?.(oneLine(line));
     } catch {
       // the act's answer stands; the log is the daemon's, and a line it could not take is not the act's to report
     }
@@ -625,8 +626,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     if (claimOf(caller) === null) throw new Refusal();
     if (!records(appSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
     const named = expandHome(path ?? '~', home());
-    if (named === null) return { status: 'refused', reason: 'no-folder' };
-    return listOutsideFolder(named, where(), open === true, cursor);
+    if (named === null) return refusedListing('no-folder');
+    const walked = await walkOutside(named, where(), open === true);
+    if (!walked.ok) return refusedListing(walked.reason === 'protected' ? 'protected' : 'no-folder');
+    await at('after-outside-walk', named);
+    return listOutsideFolder(walked.real, where(), cursor); // the walk's real path, resolved once
   }
 
   // U6f (§B, decision 7): the person's pick in another machine's chooser, under a claim: the whole path walked, a last
@@ -641,7 +645,10 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       const named = expandHome(path, home());
       const walked = named === null ? null : await walkOutside(named, where(), open === true);
       if (walked === null || !walked.ok) answer = { status: 'refused', reason: walked?.ok === false && walked.reason === 'protected' ? 'protected' : 'no-file' };
-      else answer = await grant(appSessionId, walked.real, caller);
+      else {
+        await at('after-outside-walk', path);
+        answer = await grant(appSessionId, walked.real, caller); // the walk's real path, not the typed one resolved again
+      }
     } catch (error) {
       logged(`refused (other) ${path}`);
       throw error;
@@ -772,6 +779,11 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 // UX wave U6b-2 (Interfaces §B): the version of a file as an opened descriptor knows it. The change time joins the four
 // other values because a writer can set a modification time back and cannot set a change time.
 export const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+
+// UX wave U6f (decision 10): a line of the log as one line. A POSIX name may hold any character but `/` and NUL, a line
+// ending included, so each control character is escaped (`\n`, `\r`, any other `\xNN`) and a path cannot end its line
+// and write one of its own; a line with none reads as written
+const oneLine = (line: string): string => line.replace(/\p{Cc}/gu, (char) => (char === '\n' ? '\\n' : char === '\r' ? '\\r' : `\\x${char.charCodeAt(0).toString(16).padStart(2, '0')}`));
 
 // UX wave U6f (decision 10): who a line of the log is for, the claim's own (the member and device the endpoint proved)
 const askedBy = (claim: FilesClaim, appSessionId: AppSessionId): string => `member ${claim.member} device ${claim.device} session ${appSessionId} op ${claim.opId}`;

@@ -19,14 +19,14 @@ export function walkOutside(path: string, where: Home, open: boolean): Promise<R
   return walk(path, where, { opened: () => false, open, file: true, outside: true });
 }
 
-const refused = (reason: Extract<FilesListOutsideOutput, { status: 'refused' }>['reason']): FilesListOutsideOutput => ({ status: 'refused', reason });
+export const refused = (reason: Extract<FilesListOutsideOutput, { status: 'refused' }>['reason']): FilesListOutsideOutput => ({ status: 'refused', reason });
 const errno = (error: unknown) => (error as NodeJS.ErrnoException | null)?.code;
 
-/** One page of the folder `path` (absolute) leads to, the names after `cursor` in the listing's order. */
-export async function listOutsideFolder(path: string, where: Home, open: boolean, cursor?: string, page = OUTSIDE_LIST_PAGE): Promise<FilesListOutsideOutput> {
-  const walked = await walkOutside(path, where, open);
-  if (!walked.ok) return refused(walked.reason === 'protected' ? 'protected' : 'no-folder');
-  const { real } = walked;
+/**
+ * One page of the folder at `real`, the real path `walkOutside` ended at (read as walked, never resolved again from the
+ * path as typed), the names after `cursor` in the listing's order.
+ */
+export async function listOutsideFolder(real: string, where: Home, cursor?: string, page = OUTSIDE_LIST_PAGE): Promise<FilesListOutsideOutput> {
   let entries: OutsideEntry[];
   try {
     entries = (await readdir(real, { withFileTypes: true })).map((entry) => {
