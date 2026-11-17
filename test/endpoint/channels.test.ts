@@ -295,7 +295,7 @@ describe('the loop', () => {
     const channel = await dev.open(dialDirect(h), REF);
     for (const [id, content] of [['n1', neutralised], ['p1', pressed]] as const) {
       const result = await dev.request(channel, { t: 'call', id, name: 'session.send', input: { appSessionId: 'x', content } }, (m): m is ChannelMessage => m.t === 'result');
-      expect((result as { output: { content: string } }).output.content, `${id}: back to the device as sent`).toBe(content);
+      expect((result as unknown as { output: { content: string } }).output.content, `${id}: back to the device as sent`).toBe(content);
     }
     expect(heard.map((input) => (input as { content: string }).content), 'to the machine as sent').toEqual([neutralised, pressed]);
     expect(neutralised.includes('\u2060')).toBe(true);
