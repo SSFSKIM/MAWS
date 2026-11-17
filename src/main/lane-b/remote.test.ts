@@ -1845,11 +1845,11 @@ describe('the timing lines', () => {
 describe('the outside acts (`rl2.outside-files`)', () => {
   const SERVES = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads', 'rl2.outside-files'];
   const OLDER = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads']; // an endpoint of a build before them
-  const ACTS: Array<[string, Record<string, unknown>]> = [
-    ['files.readOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }],
-    ['files.listOutside', { appSessionId: APP, path: '/srv/elsewhere' }],
-    ['files.chooseOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }],
-    ['files.writeOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt', content: 'an invented line\n', expectedHash: 'a'.repeat(64), real: '/srv/elsewhere/notes.txt' }],
+  const ACTS: Array<[string, Record<string, unknown>, unknown]> = [
+    ['files.readOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }, { encoding: 'utf8', content: 'an invented line\n', bytes: 17, offset: 0, length: 17, truncated: false, mime: 'text/plain', hash: null, utf8: null, named: true, outside: { real: '/srv/elsewhere/notes.txt', writable: true } }],
+    ['files.listOutside', { appSessionId: APP, path: '/srv/elsewhere' }, { status: 'listed', path: '/srv/elsewhere', parent: '/srv', home: '/home/someone', entries: [], cursor: null }],
+    ['files.chooseOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }, { status: 'granted', path: '/srv/elsewhere/notes.txt' }],
+    ['files.writeOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt', content: 'an invented line\n', expectedHash: 'a'.repeat(64), real: '/srv/elsewhere/notes.txt' }, { status: 'ok', hash: 'b'.repeat(64) }],
   ];
 
   it('are taken by the adapter', () => {
@@ -1860,8 +1860,8 @@ describe('the outside acts (`rl2.outside-files`)', () => {
   it('go as `machine` acts carrying the capability to a peer that lists it, on a session no tab holds', async () => {
     const l = lab({ tabs: [] });
     l.link.relink(SERVES);
-    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok' } });
-    for (const [name, input] of ACTS) expect([name, await l.cmd(name, input)]).toEqual([name, { ok: true, value: { status: 'ok' } }]);
+    l.link.onAct = (act) => act.settle({ state: 'done', result: ACTS.find(([name]) => name === act.request.action)![2] });
+    for (const [name, input, output] of ACTS) expect([name, await l.cmd(name, input)]).toEqual([name, { ok: true, value: output }]);
     expect(l.link.acts.map((a) => a.request)).toEqual(ACTS.map(([action, args]) => ({ action, args, executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.outside-files' })));
     expect(l.base).toEqual([]);
   });

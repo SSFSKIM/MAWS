@@ -24,7 +24,8 @@ import { ENDPOINT_CAPABILITIES } from '../../src/endpoint/capabilities';
 import { OFFERS, READ_OPENS, outsideRows, type OfferRow, type Offers } from '../../src/endpoint/offers';
 import { STREAM_ACTS } from '../../src/endpoint/streams';
 import { INPUTS, outsideWorld, type Caller, type World } from './outside-world';
-import { act, done, iso, makeOrg, openRemote, ORG, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { iso } from './org-fixtures';
+import { act, done, makeOrg, openRemote, ORG, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
 
 const FIVE = [TERMINAL_ACT, ...OUTSIDE_ACTS];
 
