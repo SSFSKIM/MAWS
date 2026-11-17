@@ -36,10 +36,9 @@ const typedAt = (row: UserRow, [from, to]: Range) => typedFromRowText(row.text.s
  * side question only under the promotion's own anchor, its body the segment `readPromotion` names (fail closed: with no
  * body, the whole edited text is the slot, also where an edit took the head out); under any other anchor no writer of
  * MAWS wrote it, at this build or an earlier one (the architect's ruling of 2026-11-17), so it is the person's. A plan
- * prompt's row
- * begins with its whole first line and a blank line (this build's shape, the earlier writer's, or a person's message typed
- * so: the architect's ruling of 2026-11-17, (3)), or with that line and a pasted block that took the blank line. A relay
- * begins with one of its writer's openings and holds its closing words.
+ * prompt's row begins with its whole first line and a blank line (this build's shape, the earlier writer's, or a person's
+ * message typed so: the architect's ruling of 2026-11-17, (3)), or with that line and a pasted block that took the blank
+ * line. A relay begins with one of its writer's openings and holds its closing words.
  */
 export function storedFormOf(row: UserRow): StoredForm {
   const composed = row.composed ?? [];
