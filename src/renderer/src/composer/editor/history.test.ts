@@ -4,7 +4,9 @@ import { consentMessage, readConsents } from '@shared/engine/arrival';
 import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
+import { parseJournalRow } from '@shared/wire/journal';
 import type { Row, TurnActivity } from '../../transcript';
+import { journalToEvents } from '../../transcript/dev/journal';
 import { turnActivity } from '../../transcript/model/activity';
 import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
@@ -330,7 +332,16 @@ describe('the one-writer rule: recall meets the prompt as typed, and no consent 
     const [recalled] = recallEntries(rows, [...state.order].map((turnId) => ({ turnId, origin: 'human' }) as TurnActivity), []);
     expect(recallText(recalled!), 'the copy is the sentence as typed').toBe(sentence);
     expect(readConsents(recallText(recalled!)), 'read by itself it would be a grant').toHaveLength(1);
-    expect(rows.filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn from the row').toEqual([]);
+    // An approval is drawn from the arrival the engine host marks on the message, never from a row's text, and the
+    // builder's message carries none: so the row is read as the host reads the frame it was sent in. The control shows
+    // that frame is taken and read: the sentence un-neutralised draws one approval.
+    const approvalsDrawnFrom = (text: string) => {
+      const frame = { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: text } };
+      const events = journalToEvents([parseJournalRow({ seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame })]);
+      return rowsOf(applyEvents(createState(null, null), events)).filter((row) => row.kind === 'user' && row.consent !== undefined);
+    };
+    expect(approvalsDrawnFrom(sentence), 'the control: the frame is read, and the sentence alone draws its approval').toHaveLength(1);
+    expect(approvalsDrawnFrom(sent.text), 'no approval drawn from the text as sent').toEqual([]);
     expect(grantsReadFrom(sent.content), 'the row’s text reads none').toEqual({ gate: [], live: [], file: [] });
   });
 });
