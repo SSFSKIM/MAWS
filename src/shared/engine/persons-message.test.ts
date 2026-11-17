@@ -10,11 +10,11 @@ import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
 import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
-import { earlierAskSteerText, innerOpeningEnvelope } from '../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope, laterPassOverTheCap } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { queuedPrompt } from '../../../test/support/queued-rows';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, MAX_ENVELOPE_CHECKS, ownWordsOf, pastedBodies, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
+import { consentMessage, envelopeSlices, MAX_ENVELOPE_CHECKS, ownWordsOf, pastedBodies, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, takeEnvelopesOut } from './arrival';
 import { messageText } from './peer-envelope';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
@@ -805,5 +805,44 @@ describe('made by hand: takeEnvelopesOut reads at most 16 passes', () => {
     const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text }));
     expect(again('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
     expect(count.calls).toBe(16);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The frontier review's input (ticket 704): a pass after the first goes over the slicer's cap of checks. Over either
+// bound, the cap in a pass or the loop's 16 passes, the text is left whole and no envelope is taken, so what is read
+// does not depend on which pass gave up. Made by hand: no recording holds such a text.
+
+describe('made by hand: a later pass over the slicer’s cap leaves the text whole', () => {
+  const text = laterPassOverTheCap();
+  const slicesOf = (part: string) => envelopeSlices(part, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const message = (content: string | ContentBlock[]): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000712' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+
+  it('the premise: the first pass takes the inner envelope in one check, and the second, on what it leaves, stops at the cap', () => {
+    const first = readAnswerEnvelopesWithCost(text);
+    expect(first.cost.checks).toBe(1);
+    expect(first.envelopes.map((envelope) => envelope.askId)).toEqual(['inner']);
+    const second = readAnswerEnvelopesWithCost(first.rest);
+    expect(second.cost.checks).toBe(MAX_ENVELOPE_CHECKS);
+    expect(second).toMatchObject({ envelopes: [], rest: first.rest });
+  });
+
+  it('the loop takes no envelope and leaves the text whole, from the module and from its own source as the search text’s worker runs it', () => {
+    expect(takeEnvelopesOut(text, slicesOf)).toEqual({ own: text, envelopes: [] });
+    const [again, slices, paste, block, opening] = [isolated(takeEnvelopesOut), isolated(envelopeSlices), isolated(pastedBodies), isolated(answeredBlock), isolated(askSteerOpening)];
+    expect(again(text, (part: string) => slices(part, opening, paste, block, MAX_ENVELOPE_CHECKS))).toEqual({ own: text, envelopes: [] });
+  });
+
+  it('the reader and the split hand the message on as it came, as a text and as a text block beside an image', () => {
+    const blocks: ContentBlock[] = [{ type: 'text', text }, IMAGE];
+    expect(personsParts(text)).toEqual({ own: text, envelopes: [] });
+    expect(personsParts(blocks)).toEqual({ own: blocks, envelopes: [] });
+    expect(personsWords(text)).toBe(text);
+    for (const content of [text, blocks]) {
+      const lone = message(content);
+      expect(splitPersonsMessage(lone)).toEqual([lone]);
+      expect(splitPersonsMessage(lone)[0]).toBe(lone);
+    }
   });
 });

@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import type { ContentBlock } from '@shared/graph/events';
 import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins';
-import { innerOpeningEnvelope } from '../../../test/support/ask-steer';
+import { innerOpeningEnvelope, laterPassOverTheCap } from '../../../test/support/ask-steer';
 import { consentMessage, envelopeSlices, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival';
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
 import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText } from '@shared/maws/ask';
@@ -333,6 +333,17 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
       await writeFile(path, [nest(16), nest(15)].map((content) => JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { content } })).join('\n') + '\n');
       const text = await wholeText(path);
       expect(text).toBe(`${nest(16)}\nWords of the person.`); // fifteen, within the bound, are read out
+    } finally { await rm(dir, { recursive: true }); }
+  });
+
+  // the frontier review's input: the loop's second pass goes over the slicer's cap of checks, and over either bound the
+  // text is left whole, as the window draws it; the second row, within both bounds, has its envelope read out
+  it('made by hand: the opening of one ask, a whole envelope of another, 65 closing lines and the first ask’s block, which a second pass reads only past the slicer’s cap: the text is the row as it came, as the window draws it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, [laterPassOverTheCap(), `Words of the person.\n${askSteerText('inner', [], [])}`].map((content) => JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { content } })).join('\n') + '\n');
+      expect(await wholeText(path)).toBe(`${laterPassOverTheCap()}\nWords of the person.`);
     } finally { await rm(dir, { recursive: true }); }
   });
 
