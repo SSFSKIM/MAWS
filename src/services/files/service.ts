@@ -101,7 +101,7 @@ import type { Naming } from './named';
 import { listOutsideFolder, refused as refusedListing, walkOutside } from './outside-list';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between the chooser's walk and the grant or listing of its real path */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'after-outside-walk' /* U6f: between an outside walk and the step that takes its real path */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -288,7 +288,8 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     // U6f (decision 18): another machine's claimed caller touches nothing inside a protected folder the person did not
     // open, before the path is resolved and before any evidence is asked; a path under one of its roots, as written, is
     // the session's own
-    if (claimOf(caller) !== null && !roots.some((root) => under(root, path))) await protectedFirst(path, asked.open === true);
+    const walked = claimOf(caller) !== null && !roots.some((root) => under(root, path)) ? await protectedFirst(path, asked.open === true) : null;
+    if (walked !== null) await at('after-outside-walk', path);
     let real0: string;
     try {
       real0 = await fs.promises.realpath(path);
@@ -298,6 +299,9 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       if (answer instanceof Refusal && outside && absent(error) && (chosen(path) || (await namesIt()) !== false)) throw new Error(`not found: ${path}`, { cause: error });
       throw answer;
     }
+    // U6f (the architect's ruling on the walk-to-use race): a path that changed between the walk and the resolution is
+    // refused as moved, before any evidence is asked and before anything is opened
+    if (walked !== null && walked !== real0) throw new Error(FILES_MOVED);
     let mark: Mark | null = null;
     if (!roots.some((root) => under(root, real0))) {
       if (outside) {
@@ -334,11 +338,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     }
   }
 
-  // U6f (decision 18): the walk of a claimed path that enters no protected folder unopened; only its `protected` answer
-  // counts here, and every other one leaves the path to the boundary's own steps
-  async function protectedFirst(path: string, open: boolean): Promise<void> {
+  // U6f (decision 18): the walk of a claimed path that enters no protected folder unopened, answering the real path it
+  // ended at; `protected` is refused here, and every other refusal (null) leaves the path to the boundary's own steps
+  async function protectedFirst(path: string, open: boolean): Promise<string | null> {
     const walked = await walkOutside(path, where(), open);
     if (!walked.ok && walked.reason === 'protected') throw new HostCommandError(ipcError('internal', FILES_PROTECTED, { refusal: 'protected' }));
+    return walked.ok ? walked.real : null;
   }
   const where = (): Home => ({ home: home(), platform });
 
