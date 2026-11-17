@@ -252,6 +252,39 @@ describe('the view manager: placement (E4a Design §3, Decision Log 22)', () => 
   });
 });
 
+// UX wave U6b-5b M1 (Interfaces §G, the e2e seam; decision 36): what main last took from `browser.view.place` for a tab,
+// as received, and how many such reports it has acted on: the acknowledgment a scene waits on before it reads bounds.
+describe('the view manager: the placement main acknowledged (U6b-5b M1)', () => {
+  it('is null before any report, then the last rect acted on as received and how many were', () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId } = h.loaded();
+    const entry = () => h.store.entry(tabId)!;
+    expect(h.manager.placedOf(entry())).toBeNull();
+    h.place(sender, tabId, 'p1', R, true);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: R, count: 1 });
+    const unrounded = { x: 10.4, y: 20.6, width: 300.5, height: 199.49 };
+    h.place(sender, tabId, 'p1', unrounded);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: unrounded, count: 2 }); // as received; the view takes it rounded
+    h.place(sender, tabId, 'p1', null);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: null, count: 3 }); // the owner's release is acted on too
+  });
+
+  it('a report the manager ignores (another pane, no claim; an unknown window) is not acknowledged', () => {
+    const h = harness();
+    const { sender } = h.win();
+    const { tabId } = h.loaded();
+    const entry = () => h.store.entry(tabId)!;
+    h.place(sender, tabId, 'p1', R, true);
+    h.place(sender, tabId, 'p2', { ...R, x: 99 });
+    h.place(sender, tabId, 'p2', null);
+    h.place({} as WebContents, tabId, 'p1', { ...R, x: 7 }, true);
+    expect(h.manager.placedOf(entry())).toEqual({ rect: R, count: 1 });
+    h.place(sender, tabId, 'p2', { ...R, x: 99 }, true); // the control: the same pane's claim is acted on
+    expect(h.manager.placedOf(entry())).toEqual({ rect: { ...R, x: 99 }, count: 2 });
+  });
+});
+
 describe('the view manager: lastShownAt and the cap (Design §2)', () => {
   it('a showing stamps lastShownAt when it starts and when it ends, so the cap evicts the tab released first', () => {
     const h = harness();

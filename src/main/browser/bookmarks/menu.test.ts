@@ -141,6 +141,22 @@ describe('NativeMenus: the presenter and its e2e seam', () => {
     expect(menus.seam.pick(['open-all'])).toBe(false);
   });
 
+  // UX wave U6b-5b M1 (Interfaces §G, the e2e seam): the point the last menu was handed to the presenter with
+  it('under the e2e keeps the point the last menu was presented at, through a pick; outside it keeps none', () => {
+    const { tree, menu } = built();
+    const menus = new NativeMenus({ e2e: true });
+    expect(menus.seam.at()).toBeNull();
+    menus.present(menu, at);
+    expect(menus.seam.at()).toEqual({ x: 10, y: 30 });
+    menus.present(menu, { ...at, x: 41.5, y: 7 });
+    expect(menus.seam.at()).toEqual({ x: 41.5, y: 7 });
+    expect(menus.seam.pick([`folder:${idOf(tree, 'G')}`, `bookmark:${idOf(tree, 'G1')}`])).toBe(true);
+    expect(menus.seam.at()).toEqual({ x: 41.5, y: 7 });
+    const native = new NativeMenus({ e2e: false, popup: vi.fn() });
+    native.present(menu, at);
+    expect(native.seam.at()).toBeNull(); // the control above: the same read finds the point under the e2e
+  });
+
   it('pick refuses a path that names no item, a submenu, a separator or a disabled line', () => {
     const { tree, menu } = built();
     const menus = new NativeMenus({ e2e: true });
