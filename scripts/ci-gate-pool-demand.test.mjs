@@ -77,8 +77,7 @@ function scheduledPoolDemand(outputs) {
       continue; // never a pool job
     }
     const runner = /^ {4}runs-on: (.*)$/m.exec(body)?.[1];
-    // Literal hosted jobs, and the light jobs on GATE_LIGHT_RUNNER (a hosted label), cannot ask for a pool box.
-    if (/^ubuntu-[\w.-]+$/.test(runner) || runner === "${{ vars.GATE_LIGHT_RUNNER || 'ubuntu-slim' }}") continue;
+    if (/^ubuntu-[\w.-]+$/.test(runner)) continue; // literal hosted jobs cannot ask for a pool box
     const condition = /^ {4}if: (.*)$/m.exec(body)?.[1];
     const [, key, operator, value, runnerKey, runnerOperator, runnerValue] = /^needs\.plan\.outputs\.(\w+) (==|!=) '([^']*)'(?: && fromJSON\(needs\.plan\.outputs\.(\w+)\) (==|!=) '([^']*)')?$/.exec(condition) ?? [];
     assert.ok(key, `${name}: unsupported condition ${condition}`);
