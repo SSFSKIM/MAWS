@@ -75,14 +75,16 @@ describe('the ignore check over a real repository', () => {
     expect(sorted(await check.names(repo.path('src'), ['cart.ts']))).toEqual([]);
   });
 
-  it('answers a name that begins with a colon and one that begins with a dash when a pattern names them', async () => {
+  // Asked bare, git 2.43 reads `:notes.txt` as a pathspec with empty magic, so it judges `notes.txt` and answers nothing
+  // (M1 decision 6, seen on the build VM); `./` keeps such a name a name.
+  it('answers a name that begins with a colon and one that begins with a dash when only a pattern for that name matches, beside the plain name it does not', async () => {
     const repo = await repository();
-    await repo.write('.gitignore', '*.log\n');
-    await repo.write(':colon.log', 'a\n');
-    await repo.write('-dash.log', 'b\n');
-    await repo.write('plain.txt', 'c\n');
+    await repo.write('.gitignore', ':*\n-*\n');
+    await repo.write(':notes.txt', 'a\n');
+    await repo.write('-notes.txt', 'b\n');
+    await repo.write('notes.txt', 'c\n');
     const check = checkOf({ env: repo.serviceEnv() });
-    expect(sorted(await check.names(repo.root, [':colon.log', '-dash.log', 'plain.txt']))).toEqual(['-dash.log', ':colon.log']);
+    expect(sorted(await check.names(repo.root, [':notes.txt', '-notes.txt', 'notes.txt']))).toEqual(['-notes.txt', ':notes.txt']);
   });
 
   it('judges a folder of a nested repository by that repository’s rules, not the outer one’s', async () => {
