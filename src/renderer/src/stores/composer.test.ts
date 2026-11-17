@@ -40,7 +40,7 @@ describe('composer store seam', () => {
     expect([isStarting(useComposerStore.getState(), A), isStarting(useComposerStore.getState(), B)]).toEqual([true, false]);
     setStarting(A, false);
     expect(isStarting(useComposerStore.getState(), A)).toBe(false);
-    setInlineEdit(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid, kind: 'edit', text: 'turn two', bodies: {}, images: [] });
+    setInlineEdit(A, { messageUuid: 'u-1' as MessageUuid, seenCursor: 'u-2' as MessageUuid, kind: 'edit', text: 'turn two', bodies: {}, images: [], form: null });
     setInlineText(A, 'turn two edited');
     expect(inlineEditOf(useComposerStore.getState(), A)).toMatchObject({ messageUuid: 'u-1', seenCursor: 'u-2', text: 'turn two edited' });
     expect(inlineEditOf(useComposerStore.getState(), B)).toBeNull();

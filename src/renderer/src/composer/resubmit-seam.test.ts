@@ -812,7 +812,7 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
     editRowOf(A, rows.find((row) => row.kind === 'user') as never, 'edit');
     setInlineText(A, change(edit()!.text));
     if (how === 'fork') {
-      const forkFrom = vi.fn(async (_: { content: unknown }) => ({ appSessionId: 'app-fork' as AppSessionId }));
+      const forkFrom = vi.fn<(request: { content: unknown }) => Promise<{ appSessionId: AppSessionId }>>(async () => ({ appSessionId: 'app-fork' as AppSessionId }));
       const off = registerResubmitProvider({ forkFrom });
       try {
         expect(await forkInlineEdit(client, A)).toBe(true);
