@@ -28,7 +28,7 @@ How to see it working: on this Mac open the chat of a session that runs on a sec
 - [x] (2026-11-17T09:12Z) M1 — The other machine's daemon: the claimed caller, the read, the listing, the choice, the save, the log. Commits `75170591e`..`d29d795e3`, reviewed clean after three fix rounds (Decision Log 16 to 19, 21, 22).
 - [x] (2026-11-17T10:15Z) M2 — The endpoint and the link's vocabulary: the four rows, the capability, what the ledger keeps, the two older builds' tables. Commits `57164d8e3`..`e90440bd4` (RL2 minor 18 at `3a26f7780`), reviewed clean (Decision Log 23 to 25).
 - [x] (2026-11-17T12:22Z) M3 — This Mac's main: the adapter for the outside acts, the caller at every promotion, the copy's reader, the words. Commits `4f7453310`..`7e2906d42`, reviewed clean after three fix waves (Decision Log 26 to 29).
-- [ ] M4 — The window: reading and saving there, the chooser, Open File… for a session on another machine.
+- [x] (2026-11-17T14:05Z) M4 — The window: reading and saving there, the chooser, Open File… for a session on another machine. Commits `3a8b40b9b`..`fddff736c`, reviewed clean after one fix wave (Decision Log 30, 31).
 - [ ] M5 — The scenes, the two older builds, the record, and the acceptance run.
 - [ ] The proof an executor does not run: the two-machine scenes and their groups on a Mac, the runs with each of the two older builds, the macOS unit files, class 1a, the branch's review, the owner's look at the chooser, the pull request.
 
