@@ -373,7 +373,7 @@ Three milestones, in order: M2 draws from what M1 answers, and M3 writes scenes 
 6. *Outside the session's folders* (decision 6, R6) is `expandTo(the listed roots' paths, row.path) === null`, asked at the click; the row carries the answer as a marker and in its title. The Changed section's rows are made only once the roots' listing is `ok`.
 7. *The fold* (decision 11) is one run-only flag of the session's tree state, `changedFolded`, false at first and never written; folded, the section's rows are the heading alone, and the tree's marks are what they were. A person's fold moves no scroll offset by decision 4's adjustment: that one is for a status, not for a press.
 8. *Refresh* is drawn in the first row of kind `root`, wherever in the list it stands, and that row has the room for it; today both hang on the list's first row being a root (`rows[0]?.kind === 'root'`), which a Changed group above would make false.
-9. *The mark's slot and the folder* (decisions 8 and 9). The slot is rendered only where `marksOf` answers a letter or a dot. `folderFromEnd(folder, room, measure)` is pure: the whole folder when it fits; else an ellipsis and the longest end of the folder that fits, begun at a segment's start where one fits and otherwise at any character; null when two characters of the row's font do not fit. The row gives it the room the name leaves and a `measure` made from a canvas in the folder's font; the tests give it a stand-in that counts characters. 3b's result rows use the same function.
+9. *The mark's slot and the folder* (decisions 8 and 9). The slot is rendered only where `marksOf` answers a letter or a dot. `folderFromEnd(folder, room, measure)` is pure: the whole folder when it fits; else an ellipsis and the longest end of the folder that fits, begun at a segment's start where one fits and otherwise at any character; null when two characters of the row's font do not fit. The row gives it the room the name leaves and a `measure` made from a canvas in the folder's font; the tests give it a stand-in that counts characters. Each distinct string is measured once per font, and only for drawn rows (Decision Log 8). 3b's result rows use the same function.
 10. *The muted name* is one class on the name's element and leaves the row's hover and selection as they are.
 11. *`copy.ts` is compiled by the desk's web app* (it reads `REVIEW_COPY`): the proof adds that package's typecheck, build and test project, although the edit only adds keys to `FILES_COPY`.
 
@@ -717,6 +717,12 @@ Opened by the architect when the landing before this one in the chain (U6f) is o
    - 2026-11-17 (UTC) · Notes 14, 18, 19, 20 and 24: accepted as measured, written and drawn. Note 21: its numbers went to the owner with the card. Note 8: option C of the card was a sketch; it was not chosen.
    - Notes 6, 7, 12, 13, 22 and 23 are about the field and its list: U6b-3b's log.
 7. **2026-11-17 (UTC) · The owner's answer on the card "A long list of changed files"** (recorded on ticket 672, comment 6943042432), verbatim: "It folds by its heading (Recommended)". The first and second writings built option B until answered (the heading no control); the answer is option A, so the heading becomes a button that folds the group, for the run and never stored (decision 11; M2 decision 7; Interfaces §C; scene G1). It adds about forty lines to M2.
+
+8. **The architect's rulings on the author's last points**, given with the dispatch of this landing's executor, each a line of this log:
+   - 2026-11-17 (UTC) · A row inside the session's folders but not under the working folder (another root of the session in the same repository) keeps the path from the repository's root: accepted (decision 8; Decision Log 6, note 9).
+   - 2026-11-17 (UTC) · A folder's Changed row for a new folder at the top of the working folder shows no parent folder: accepted (decision 6, the folder's row; Decision Log 6, note 5).
+   - 2026-11-17 (UTC) · `folderFromEnd`'s measuring: each distinct string is measured once per font (a cache), and only for the drawn rows of the virtual list; a unit case counts the measure calls for a list scrolled through twice (M2 decision 9).
+   - 2026-11-17 (UTC) · The reading of a gitlink belongs to U6b-3b and is not built here.
 
 ## Outcomes & Retrospective
 
