@@ -56,13 +56,46 @@ cells took the presses made at the frame's corners.
 
 ### Build VM (Linux)
 
-2026-11-17, at `c701fbafc`, command `cd spikes/zoom-probe && timeout 900 node run.mjs`. **Not run.** The run stopped before
-any Electron started, at the sandbox helper check:
+**2026-11-17, at `d78e60abf`, the run of record.** Linux x64 under Xvfb, one display at scale 1, Electron 44.4.5. The
+command was `vmcheck 'cd spikes/zoom-probe && timeout 900 node run.mjs --setuid-sandbox'`. Both `sudo -n` acts on the
+checkout's own `chrome-sandbox` succeeded. It exited 0 and printed:
 
-    chrome-sandbox at <the VM's checkout>/node_modules/electron/dist/chrome-sandbox is not setuid root; pass --setuid-sandbox to set it with sudo -n
+    RECORD a RECORD [{"end":"quit","valid":true,"standin":1.5,"prefs":{"Preferences":[{"key":"partition.per_host_zoom_levels","value":{"16111051991340486948":{"<harness>/page/index.html":2.223901085741545}}}]}}]
+    RECORD b RECORD [{"end":"kill-now","valid":true,"standin":1,"prefs":{}},{"end":"kill-15s","valid":true,"standin":1.5,"prefs":{"Preferences":[{"key":"partition.per_host_zoom_levels","value":{"9072364690696296174":{"<harness>/page/index.html":2.223901085741545}}}]}}]
+    RECORD c PASS [{"end":"quit","valid":true,"standin":1,"prefs":{"Preferences":[]}}]
+    RECORD d PASS [{"end":"kill-now","valid":true,"standin":1,"prefs":{}},{"end":"kill-15s","valid":true,"standin":1,"prefs":{"Preferences":[]}}]
+    RECORD e RECORD [{"at":"factor 0.5","afterReload":0.5,"afterLoad":0.5},{"at":"factor 2","afterReload":2,"afterLoad":2}]
+    RECORD f PASS {"openAt":"f1","ways":[{"way":"f0 (the control, at 1)","atDomReady":1,"atShow":1},{"way":"f1 at 0.5","atDomReady":0.5,"atShow":0.5,"inkRatio":0.485,"ok":true},{"way":"f1 at 2","atDomReady":2,"atShow":2,"inkRatio":1.939,"ok":true},{"way":"f2 at 0.5","atDomReady":0.5,"atShow":0.5,"inkRatio":0.485,"ok":true},{"way":"f2 at 2","atDomReady":2,"atShow":2,"inkRatio":1.939,"ok":true},{"way":"f3 at 0.5","atDomReady":1,"atShow":0.5,"inkRatio":0.485,"ok":true},{"way":"f3 at 2","atDomReady":1,"atShow":2,"inkRatio":1.939,"ok":true}]}
+    RECORD g RECORD [{"mode":"default","first":1.5,"openBefore":{"present":1,"repair":1},"openedAfter":{"present":1,"repair":1}},{"mode":"isolated","first":1.5,"openBefore":{"present":1,"repair":1},"openedAfter":{"present":1,"repair":1}}]
+    RECORD h PASS [{"at":"factor 0.5","viewFactor":1,"want":{"x":20,"y":60,"width":200,"height":120},"bounds":{"x":20,"y":60,"width":200,"height":120},"inner":{"width":200,"height":120}},{"at":"factor 2","viewFactor":1,"want":{"x":80,"y":240,"width":800,"height":480},"bounds":{"x":80,"y":240,"width":800,"height":480},"inner":{"width":800,"height":480}}]
+    RECORD i PASS {"part":"api","setZoomMode":"function","getZoomMode":"function","mode":"isolated","electron":"44.4.5"}
+    RECORD j NOT RUN {"part":"move","notRun":true,"displays":[{"id":60,"scale":1}]}
 
-The VM has no `DISPLAY` but has `xvfb-run`, which `run.mjs` would have used. `--setuid-sandbox` was not passed: it
-changes the VM's checkout, which was not ruled for this run. Both files pass `node --check`.
+What the VM can say:
+
+- **P7 stands on Linux (rows c and d).** An isolated zoom is kept nowhere: after a quit, after an immediate SIGKILL,
+  and after a SIGKILL 15 s later, the stand-in opened at 1 and `Preferences` held no zoom key.
+- **A default-mode zoom is kept (rows a and b), and keyed by the page's whole file URL, not by a host.** The key is
+  `partition.per_host_zoom_levels.<hash>.<the page's file URL>`, at level 2.2239 (1.2 to that power is 1.5). It is
+  written on a quit and within 15 s of the call. It is not written before an immediate SIGKILL, which leaves no
+  `Preferences` file at all.
+- **Row e: an isolated zoom survives a reload and a load of the same file with another query,** at 0.5 and at 2.
+  `applyAfterLoad` is not needed, if the Mac agrees.
+- **Row f: `openAt` is f1** (`webPreferences.zoomFactor` at creation). f1 and f2 have the factor in force at the show
+  and the capture at the factor, at both factors. f3 passed in this run. In the first run (`e641ef3e7`) f3 failed at
+  2: `getZoomFactor()` read 2 at the show, but the capture taken then still had its ink at 1.0. So f3 is not reliable,
+  and the first way that passes is f1 in both runs. What a window paints first is the platform's, so the Mac's run decides.
+- **Row g: no other window takes the zoom,** in either mode: neither the same file with another query nor another
+  file, whether opened before the zoom or after it. In default mode this follows from the key being the whole URL.
+- **Row h: a child view of another partition keeps its own factor at 1,** and takes decision 27's bounds as given,
+  with its page that many CSS pixels wide.
+- **Row i: Electron 44.4.5 has `setZoomMode` and `getZoomMode`,** and a window made with `zoomMode: 'isolated'` reads
+  back as isolated.
+- **Not applicable on the VM:** row j (one display, at one scale), the traffic lights and the title bar, and whether
+  a first paint on macOS matches the capture.
+
+The first run (`e641ef3e7`) gave the same values for every row but f3 at 2. Its lines' labels were overwritten by a
+bug in `run.mjs`, fixed in `d78e60abf`.
 
 ### Mac
 

@@ -25,7 +25,7 @@ How to see it working: the acceptance below, B10 to B12, B13 and B14. All of its
 - [x] (2026-11-17) This document written.
 - [x] (2026-11-17) The delta review of revision 2 and the architect's rulings on its two findings here; revision 3.
 - [x] (2026-11-17) The owner's answer to K3; revision 4.
-- [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green. The harness stopped at the VM's sandbox helper (`spikes/zoom-probe/FINDINGS.md`). The architect's review and the Mac runs are still to come.
+- [ ] (2026-11-17) M1 built on `ux-wave/U6b-5b` (`366e995bf` to the head): the seam's two additions, `placedOn`, the harness and the four probe scenes. On the build VM the node and e2e typechecks, `src/main/browser`, eslint and the gate's script tests are green, and the harness's rows a to i have run (j: not run, one display). The task review's fix wave is `d78e60abf`. The architect's review and the Mac runs are still to come.
 - [ ] M1 — Spike: what Chromium keeps of a window's zoom, and where the six placements land (the harness on the build VM; the probe scenes on a Mac, run by the architect). Its verdict gates M2.
 - [ ] M2 — Zoom (on the architect's word after M1's verdict; on a head that holds U6b-5a).
 - [ ] M3 — The scenes, the cross-build row, the record, and the acceptance run.
@@ -553,8 +553,10 @@ Found while this document was written and reviewed; each changed a decision abov
 - Observation: Claude Desktop `app-5.1231.2`, read for zoom. It zooms by level in half steps between 25 % and 500 %, stores no zoom of its own, disables Actual Size at 100 % and the two others at their limits, moves its window controls with the factor, and shows a line with the percentage and a Reset button for a second and a half (`main-process/index.chunk-BV3uOqbK.js:327946-327999`, `:328474-328478`, `:197293-197308`; `web/app/v1/ccce0aa9f-CEzQPX52.js:281-411`).
   Evidence: the lines cited, read in the build's readable tree.
 
-- Observation (M1, 2026-11-17): the harness cannot run on the build VM as that VM is set up. Chromium's sandbox needs its setuid helper on that kernel, and the checkout's Electron does not have it. The harness's `--setuid-sandbox` would set it with `sudo -n`, and that was not ruled for this run.
-  Evidence: `RECORD` lines never printed; `run.mjs` exited 2 with the helper's line (FINDINGS.md, "Build VM").
+- Observation (M1, 2026-11-17): the harness runs on the build VM only with Chromium's setuid sandbox helper set. The architect ruled `--setuid-sandbox` for that VM's checkout, and the run of record is at `d78e60abf`.
+  Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM".
+- Observation (M1, the VM run; the Mac decides): an isolated zoom is kept nowhere after a quit or a forced exit (rows c and d PASS), so P7 stands on Linux. A default-mode zoom is kept under `partition.per_host_zoom_levels`, keyed by the page's whole `file:` URL, and written on a quit or within 15 s. `webPreferences.zoomFactor` (f1) has the factor in force at the first show. A call at `ready-to-show` (f3) failed at 2 in one of two runs.
+  Evidence: `spikes/zoom-probe/FINDINGS.md`, "Build VM", the RECORD lines.
 
 ## Decision Log
 
