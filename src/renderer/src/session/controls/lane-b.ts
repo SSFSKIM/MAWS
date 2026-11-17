@@ -39,6 +39,7 @@ import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@share
 import { useHosts } from '../../stores/hosts';
 import { hostHasThisWire } from '@shared/sessions/host-wire';
 import { HOST_UPDATING } from '../../composer/queue/host-wire';
+import { neutraliseGrant } from '@shared/engine/grant'; // UX wave U1c
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -209,7 +210,8 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     }),
     btw: (question, options) => client.invoke('session.sideQuestion', { appSessionId, question, ...(options?.retryOf !== undefined && { retryOf: options.retryOf }) }),
     command: () => refusedHere('command'),
-    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? `/compact ${instructions}` : '/compact' })),
+    // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? neutraliseGrant(`/compact ${instructions}`) : '/compact' })),
     stopAgent: () => refusedHere('stop-agent'),
     tell: () => refusedHere('tell'),
     stopTask: async (taskId) => controlResultOf(await client.invoke('session.stopTask', { appSessionId, taskId: taskId as TaskId })),

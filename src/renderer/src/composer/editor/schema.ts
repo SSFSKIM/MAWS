@@ -10,6 +10,7 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import { pastedPlaceholder } from '@shared/composer/pasted-content';
 import { PASTED, type PastedAttrs } from './doc';
+import { mentionText } from './mention-text';
 
 export const ComposerDocument = Document.extend({
   addAttributes() {
@@ -34,13 +35,6 @@ export const MentionNode = Mention.extend({
     };
   },
 });
-
-// A mention's text form: `@<path>` (quoted when the path holds whitespace, the terminal's form) or `@agent-<name>`, the
-// form the engine's agent-mention producer recognises.
-export function mentionText({ id, kind }: { id: string; kind: 'file' | 'agent' }): string {
-  if (kind === 'agent') return `@agent-${id}`;
-  return /\s/.test(id) ? `@"${id}"` : `@${id}`;
-}
 
 // The placeholder an atom stands for in `display` and history: `[Pasted text #n +L lines]`, `[Image #n]`, `[PDF #n]`.
 export function atomPlaceholder(attrs: Pick<PastedAttrs, 'kind' | 'lines'>, n: number): string {

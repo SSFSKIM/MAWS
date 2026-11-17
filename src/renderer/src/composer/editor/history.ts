@@ -10,6 +10,7 @@
 // reaches the transcript read apart (ticket 704: the person's message, then the envelope as a message of its own), so a
 // row's text is the person's words and the recall takes it as drawn. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { GRANT_BREAK } from '@shared/engine/grant';
 import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
@@ -50,7 +51,8 @@ function rowPrefill(row: UserRow): Prefill {
   const dataUrl = (url: string) => /^data:([^;,]+);base64,(.*)$/s.exec(url);
   return {
     text: typedFromRowText(row.text),
-    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text! })),
+    // UX wave U1c: a body as pasted, without the joiner the one-writer rule put in the grant's opening (recall.ts `typedFromRowText`)
+    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text!.replaceAll(GRANT_BREAK, '') })),
     images: row.attachments.flatMap((a) => {
       const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
       return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts[1], data: parts[2] }] : [];

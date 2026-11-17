@@ -3919,10 +3919,11 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 // U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
 // build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
 // Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
-// `file` tab of U6b-1's shape. Its two peers are build F (`f1852de3a`) and master at its parent pin (`2c7044231`), told
-// apart by the peer's checked-out commit (the gate's peer is a worktree at it, .github/scripts/gate-peer.sh); each scene
-// skips, saying so, for a peer that is neither, and the runs of record are `--peer-exact f1852de3a` and `--peer-exact
-// 2c7044231`.
+// `file` tab of U6b-1's shape. Its peers are the builds from before it, read from marks in the peer's source as the file's
+// other scenes read theirs (`u6ePeer`): a peer whose source names `files.grant` has U6e, and each scene skips, saying so;
+// any other is told by whether its files service answers `named`. One that does not is build F's behaviour (`f1852de3a`);
+// one that does, with no `outside`, is a master from before U6e (its parent pin `2c7044231`, or a later one such as
+// `b89d6d1d7`).
 //   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
 //                                         File… (the pick seam), saves one beside the chat and moves the other to the
 //                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
@@ -3940,17 +3941,16 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 //                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
 // The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
 // (test/cross-build/files-schema.test.ts), as §A says.
-const U6E_PEERS = { f1852de3a: 'build F', '2c7044231': 'master at U6e’s parent pin' } as const;
+const U6E_PEERS = { dropsNamed: 'build F’s files service, which drops `named`', answersNamed: 'a master from before U6e, whose files service answers `named` with no `outside`' } as const;
 type U6ePeer = keyof typeof U6E_PEERS;
+const peerSource = (build: Build, path: string) => readFileSync(join(build.root ?? REPO_ROOT, path), 'utf8');
 function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
-  let head = '';
-  try {
-    head = execFileSync('git', ['-C', peer.root ?? REPO_ROOT, 'rev-parse', 'HEAD'], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
-  } catch {
-    // no commit to read: neither peer can be told
+  if (peerSource(peer, 'src/shared/ipc/names/files.ts').includes("'files.grant'")) {
+    return { which: null, why: `the peer (wire ${wireOf(peer)}) names files.grant (its src/shared/ipc/names/files.ts): a build from U6e on, which knows a grant` };
   }
-  const which = (Object.keys(U6E_PEERS) as U6ePeer[]).find((sha) => head.startsWith(sha)) ?? null;
-  return { which, why: `the peer (wire ${wireOf(peer)}) is at ${head || 'a commit git cannot read'}: U6e's cross-build scenes are written for f1852de3a and 2c7044231 (--peer-exact)` };
+  // the files service's answer to a read asked with `named` (`{ ...answer, named: true }` in a master before U6e; F's has none)
+  const which = peerSource(peer, 'src/services/files/service.ts').includes('named: true') ? 'answersNamed' : 'dropsNamed';
+  return { which, why: '' };
 }
 const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
 const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
@@ -4080,7 +4080,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
-      if (known.which === 'f1852de3a') {
+      if (known.which === 'dropsNamed') {
         await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
@@ -4101,7 +4101,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
       expect(run.maws.consoleErrors()).toEqual([]);
-      said.push(`  the link: ${known.which === 'f1852de3a' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
       await s.quit(run);
       record(said);
     });

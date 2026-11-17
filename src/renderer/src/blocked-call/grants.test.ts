@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject, SessionMessage } from 'desk-hub/protocol';
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import { askSteerText } from '@shared/maws/ask';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
@@ -311,6 +311,23 @@ describe('the gate (Design 6): closed over unavailable over open', () => {
 });
 
 describe('what a press sends (Design 5 and 7)', () => {
+  // UX wave U1c, the one-writer rule (the architect's ruling of 2026-11-16, UTC): the press is the one way a grant goes by
+  // text, and its sentence passes through no serialiser, so the three readers read it its grant
+  it('the press’s own send reads its grant on the queue’s gate, the live route and the file route', async () => {
+    const id = at('options-rule') as AppSessionId;
+    const client = fakeClient({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' } });
+    ready(id);
+    await sendToSession(id, consentMessage(BUILD.kind, BUILD.subject), grantOptions(id), client.client);
+    const [sent] = client.invoked('session.send') as { content: string }[];
+    expect(sent!.content).toBe(grant(BUILD));
+    queueOf(id, { entries: [entry(id, sent!.content)] });
+    expect([...waitingGrants(id)], 'the gate').toEqual([blockedKey(BUILD)]);
+    queueOf(id, { entries: [] });
+    const subjects = (row: unknown) => readArrivals(row).flatMap((arrival) => (arrival.class === 'consent' ? [arrival.subject] : []));
+    expect(subjects({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: sent!.content } }), 'live').toEqual([BUILD.subject]);
+    expect(subjects({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content: sent!.content } }), 'the file').toEqual([BUILD.subject]);
+  });
+
   it('GRANT_DURING_TURN’s two values: after the turn, a session MAWS runs is asked to keep it (`when: after`); at the next step it is sent as Enter sends; a terminal session never gets `when`', () => {
     const lane = at('options-b') as AppSessionId;
     ready(lane);

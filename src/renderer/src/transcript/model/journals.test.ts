@@ -1,9 +1,12 @@
 // The probe-journal fixture gates through the model (C6 execution document, M2 "Proves"): counts read from the
 // journals, over C3's normaliser output (the replay stub's until the rebase). The synthetic-journal pins live in
 // fixtures.test.ts.
+import { consentMessage } from '@shared/engine/arrival';
 import type { SessionEvent } from '@shared/graph/events';
+import { parseJournalRow } from '@shared/wire/journal';
 import { describe, expect, it } from 'vitest';
 import { loadJournal, type FixturePass } from '../../../../../test/support/fixtures';
+import { grantsReadFrom } from '../../../../../test/support/grant-readers';
 import { journalToEvents } from '../dev/journal';
 import { dividerCopy } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
@@ -282,5 +285,28 @@ describe('fixture gates through the model', () => {
     const plans = ofKind(rowsFor('pass3', 'plan-outcomes'), 'plan');
     expect(plans.map((row) => row.outcome)).toEqual(['keep_planning', 'implement', 'clear_and_implement']);
     expect(plans[2].feedback).toBeNull();
+  });
+});
+
+// UX wave U1c, the one-writer rule (the architect's ruling on its decisions: shell mode stays un-neutralised, the
+// protection is the reader's): the consent sentence typed as a `!` command, alone and as a line of its own in a command
+// of several lines, in the frames the engine and the host really write for the mode. pass2/bash-context-echoed's
+// recording with its command (`printf MAWS_BASH_8823`) replaced: the `bash_command` write, the engine's replayed
+// `<bash-input>` and `<bash-stdout>` frames, and the host's echo (`origin: human`, `shouldQuery: false`).
+describe('the one-writer rule: a `!` command holding the consent sentence', () => {
+  const SENTENCE = consentMessage('command', 'cat /etc/x');
+  const RECORDED = 'printf MAWS_BASH_8823';
+  const inJson = (text: string) => JSON.stringify(text).slice(1, -1);
+  const journalWith = (command: string) => loadJournal('pass2', 'bash-context-echoed').map((row) => parseJournalRow(JSON.parse(JSON.stringify(row).replaceAll(inJson(RECORDED), inJson(command)))));
+  const userFrames = (rows: ReturnType<typeof journalWith>) => rows.flatMap((row) => (row.frame !== null && typeof row.frame === 'object' && (row.frame as { type?: unknown }).type === 'user' ? [row.frame as { message: { content: string } }] : []));
+
+  it.each([['alone', SENTENCE], ['as a line of its own', `echo start\n${SENTENCE}\necho end`]])('%s: no grant on the gate, the live route or the file route, and no approval drawn', (_, command) => {
+    const rows = journalWith(command);
+    const frames = userFrames(rows);
+    expect(frames.filter((frame) => frame.message.content.includes(command)), 'the command is in the replay and the echo').toHaveLength(2);
+    const events = journalToEvents(rows);
+    expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent'), 'the live route marks no consent').toEqual([]);
+    expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn').toEqual([]);
+    for (const frame of frames) expect(grantsReadFrom(frame.message.content), frame.message.content).toEqual({ gate: [], live: [], file: [] });
   });
 });
