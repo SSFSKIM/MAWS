@@ -185,12 +185,33 @@ describe('the window’s helper', () => {
 // UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4): the chooser's two
 // acts, which no declaration greys (they are offered behind a capability, and the helper's sentence closes Open File…), are
 // issued by the chooser's model alone, so no other control of the window lists or chooses a file on another machine.
-// Test support answers them as main does and issues none.
+// Asking the window's helper for the act's sentence, or naming the act in a type, issues nothing. Test support answers
+// them as main does and issues none.
 describe('the chooser’s two acts on another machine', () => {
   const CHOOSER = new Set(['files.listOutside', 'files.chooseOutside']);
+  const ASKS_WORDS = new Set(['useRemoteUnavailable', 'useRemoteUnavailableAs', 'remoteUnavailableOf', 'remoteUnavailableAsOf', 'outsideUnavailable', 'disabledWords']);
+  const asksWords = (node: ts.Node): boolean => ts.isCallExpression(node.parent) && node.parent.arguments.includes(node as ts.Expression) && ts.isIdentifier(node.parent.expression) && ASKS_WORDS.has(node.parent.expression.text);
+  const inType = (node: ts.Node): boolean => (node.parent === undefined ? false : ts.isTypeNode(node.parent) || inType(node.parent));
+  const issues = (path: string, source: string): boolean => {
+    let found = false;
+    const visit = (node: ts.Node): void => {
+      if ((ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) && CHOOSER.has(node.text) && !asksWords(node) && !inType(node)) found = true;
+      ts.forEachChild(node, visit);
+    };
+    visit(parsed(path, source));
+    return found;
+  };
+
   it('are named by no renderer source but the chooser’s model', () => {
-    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && literalsOf(m.path, m.source).some((text) => CHOOSER.has(text))).map((m) => m.path);
+    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && issues(m.path, m.source)).map((m) => m.path);
     expect(naming).toEqual(['tools/code/files/remote-chooser.ts']);
+  });
+
+  it('take a call of the command for an issue, and a question to the helper or a type for none', () => {
+    expect(issues('x.ts', "void ipc.invoke('files.listOutside', input);")).toBe(true);
+    expect(issues('x.ts', "const act = `files.chooseOutside`; void ipc.invoke(act, input);")).toBe(true);
+    expect(issues('x.ts', "const why = remoteUnavailableOf(session, 'files.chooseOutside');")).toBe(false);
+    expect(issues('x.ts', "type Act = 'files.listOutside' | 'files.chooseOutside';")).toBe(false);
   });
 });
 

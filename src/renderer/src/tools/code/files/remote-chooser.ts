@@ -137,10 +137,15 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
   };
   const selectable = (entry: OutsideEntry) => entry.kind === 'file' || entry.kind === 'link';
   const backToShown = () => (shown !== null ? set(shown) : list({ path: null }));
-  const settled = <T>(call: () => Promise<T>, failed: (error: Failure) => T): Promise<T> =>
-    Promise.resolve()
-      .then(call)
-      .catch((error: unknown) => failed({ code: 'internal', message: error instanceof Error ? error.message : String(error) }));
+  // A call that throws or rejects answers as a failure of its own; it is sent at once, so the ask is out when it returns.
+  const settled = <T>(call: () => Promise<T>, failed: (error: Failure) => T): Promise<T> => {
+    const failure = (error: unknown) => failed({ code: 'internal', message: error instanceof Error ? error.message : String(error) });
+    try {
+      return call().catch(failure);
+    } catch (error) {
+      return Promise.resolve(failure(error));
+    }
+  };
 
   function list(how: Listing): void {
     if (closed) return;
