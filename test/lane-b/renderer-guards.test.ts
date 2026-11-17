@@ -189,7 +189,7 @@ describe('the window’s helper', () => {
 // them as main does and issues none.
 describe('the chooser’s two acts on another machine', () => {
   const CHOOSER = new Set(['files.listOutside', 'files.chooseOutside']);
-  const ASKS_WORDS = new Set(['useRemoteUnavailable', 'useRemoteUnavailableAs', 'remoteUnavailableOf', 'remoteUnavailableAsOf', 'outsideUnavailable', 'disabledWords']);
+  const ASKS_WORDS = new Set(['useRemoteUnavailable', 'useRemoteUnavailableAs', 'remoteUnavailableOf', 'remoteUnavailableAsOf', 'outsideUnavailable', 'ownersOnly', 'disabledWords']);
   const asksWords = (node: ts.Node): boolean => ts.isCallExpression(node.parent) && node.parent.arguments.includes(node as ts.Expression) && ts.isIdentifier(node.parent.expression) && ASKS_WORDS.has(node.parent.expression.text);
   const inType = (node: ts.Node): boolean => (node.parent === undefined ? false : ts.isTypeNode(node.parent) || inType(node.parent));
   const issues = (path: string, source: string): boolean => {
