@@ -1827,8 +1827,8 @@ test('a wide table and a code block are the text column’s width in an answer, 
 // bubble: the row is the bubble's height plus 16 px at rest, hovered and focused, a short message and one of twenty lines
 // alike, at each transcript width (768, 960 and 1280 px). At rest the controls take no width, so a caption has the whole line; shown, they stand left of it in the order
 // time, Copy, Edit, and the caption (or "Not sent") stays flush with the bubble's edge without moving. Tab reaches Copy.
-// In a pane too narrow for the line the caption alone shrinks. Copy's and Edit's targets overhang the line 6 px up and
-// 2 px down and overlap neither each other nor the turn line's button at 360 and 280 px; their focus rings, at offset 0,
+// In a pane too narrow for the line the caption alone shrinks. Copy's and Edit's targets overhang the line 7 px up and
+// 1 px down and overlap neither each other nor the turn line's button at 360 and 280 px; their focus rings, at offset 0,
 // cover no neighbour's words. The nineteen-line fold still works.
 test('the owner’s time, Copy and Edit sit on one line under the bubble, shown on hover or focus within, and the row keeps its height', async ({ harness }) => {
   const { page } = harness;
@@ -1959,8 +1959,9 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     expect(words.filter((rect) => overlaps(rect, ring.box)), 'R22: the ring covers no neighbour’s words').toEqual([]);
   }
 
-  // R21: Copy's and Edit's targets overhang the line 6 px up and 2 px down; at 360 and 280 px neither overlaps the other
-  // or the turn line's button. R20 at 280 px: at rest the caption is whole.
+  // R21 (amended 2026-11-17): Copy's and Edit's targets overhang the line 7 px up and 1 px down, 1 px clear of the turn
+  // line's button, more than the virtual list's rounding of a row's height can take; at 360 and 280 px neither overlaps
+  // the other or the turn line's button. R20 at 280 px: at rest the caption is whole.
   for (const width of [360, 280]) {
     await paneWidth(page, width);
     await atRest();
@@ -1974,8 +1975,8 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     const line = await boxOf(short.locator('.transcript-user-line'));
     const [copyBox, editBox, turnButton] = [await boxOf(short.getByRole('button', { name: 'Copy' })), await boxOf(short.getByRole('button', { name: 'Edit' })), await boxOf(turnLine.locator('button').first())];
     for (const [name, target] of [['Copy', copyBox], ['Edit', editBox]] as const) {
-      expectNear(line.top - target.top, 6, `${width} px, R21: ${name}’s target overhangs 6 px up`);
-      expectNear(target.bottom - line.bottom, 2, `${width} px, R21: and 2 px down`);
+      expectNear(line.top - target.top, 7, `${width} px, R21: ${name}’s target overhangs 7 px up`);
+      expectNear(target.bottom - line.bottom, 1, `${width} px, R21: and 1 px down`);
       expect(target.height, `${width} px, R9 and R21: ${name} is a 24 px target`).toBeGreaterThanOrEqual(24);
       expect(overlaps(target, turnButton), `${width} px, R21: ${name}’s target clear of the turn line’s button (${JSON.stringify({ target, turnButton, line })})`).toBe(false);
     }
