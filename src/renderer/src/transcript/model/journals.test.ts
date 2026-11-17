@@ -313,14 +313,17 @@ describe('the one-writer rule: a `!` command holding the consent sentence', () =
 
 // UX wave U1c, the review round's R4: step 1b claims the openings of the engine's local-command output as the fixtures
 // record them. Each case takes the recorded form (pass2/bash-context-echoed seq 7's replay for `!` output; the uxwave
-// u3-commands-r1 transcript's rows for a slash command's), puts the consent sentence on a line of its own inside the
+// u3-commands-r1 transcript's rows for a slash command's: a `user` row for stdout, a `local_command` system row for
+// stderr), puts the consent sentence on a line of its own inside the
 // output, and writes it as a frame and a row of human origin (whatever origin the transcript file gives such a row).
 describe('the one-writer rule: a local command’s output holding the consent sentence', () => {
   const SENTENCE = consentMessage('command', 'cat /etc/x');
   const bashOutput = (loadJournal('pass2', 'bash-context-echoed').find((row) => row.seq === 7)!.frame as { message: { content: string } }).message.content;
+  // the transcript's row of a slash command's output: a `user` row's message (stdout), a `local_command` system row's
+  // content (stderr)
   const commandOutput = (opening: string) => {
-    const row = loadUxwaveTranscript('u3-commands-r1').find((record) => record.type === 'user' && typeof (record.message as { content?: unknown } | undefined)?.content === 'string' && ((record.message as { content: string }).content).startsWith(opening));
-    return (row!.message as { content: string }).content;
+    const texts = loadUxwaveTranscript('u3-commands-r1').flatMap((record) => [(record.message as { content?: unknown } | undefined)?.content, (record as { content?: unknown }).content]);
+    return texts.find((text): text is string => typeof text === 'string' && text.startsWith(opening))!;
   };
   it.each([
     ['<bash-stdout>', () => bashOutput],
