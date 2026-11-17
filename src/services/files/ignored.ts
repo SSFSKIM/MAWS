@@ -18,8 +18,9 @@
 // overflows and gives no answer.
 //
 // The check can only cost what it is allowed: at most `concurrency` runs at once in a daemon, at most one per
-// repository, the rest waiting in order; each ask answers within `allowanceMs` of being asked, its wait and its walk
-// included, or gives no answer (null), and an ask whose bound passes while it waits leaves its run. A run's timeout is
+// repository, the rest waiting in order, a run holding its place until the runner settled and its every child closed;
+// each ask answers within `allowanceMs` of being asked, its wait and its walk included, or gives no answer (null), and
+// an ask whose bound passes while it waits leaves its run. A run's timeout is
 // the latest deadline among the asks it carries. No answer is never a failure of the listing that asked, and a run
 // that fails gives none of its asks an answer. The check owns its runs: its runner is made with a spawn function that
 // keeps every child it starts until that child's `close`, so the daemon's stop (`dispose`, a part of the checkouts'
@@ -28,7 +29,7 @@
 import type { ChildProcess } from 'node:child_process';
 import fs from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
-import { createGitRunner, execGit, GitCommandError, GitTimeoutError, NotARepositoryError, type ExecFileFn } from '../git/runner';
+import { createGitRunner, execGit, GitCommandError, GitTimeoutError, NotARepositoryError, type ExecFileFn, type GitRun } from '../git/runner';
 
 export const IGNORED_CHECK_MS = 2_000; // one check's whole allowance, its wait for a place included
 export const IGNORED_CHECK_CONCURRENCY = 4; // runs at once in one daemon
@@ -54,6 +55,11 @@ interface Ask {
   answer(value: ReadonlySet<string> | null): void; // the first call settles; later ones do nothing
 }
 
+interface Owned {
+  children: Set<ChildProcess>; // the run's children not yet closed
+  closed: (() => void)[]; // called when `children` is empty
+}
+
 interface Batch {
   root: string;
   asks: Ask[];
@@ -68,18 +74,27 @@ export function createIgnoreCheck(
   const { env, execFile = execGit, concurrency = IGNORED_CHECK_CONCURRENCY, allowanceMs = IGNORED_CHECK_MS, observe } = options;
   const children = new Set<ChildProcess>(); // every child started and not yet closed
   const idle: (() => void)[] = []; // `dispose`'s waiters, called when `children` is empty
-  const keeping: ExecFileFn = (file, args, execOptions, callback) => {
-    const child = execFile(file, args, execOptions, callback);
-    if (child) {
-      children.add(child);
-      child.once('close', () => {
-        children.delete(child);
-        if (children.size === 0) for (const settle of idle.splice(0)) settle();
-      });
-    }
-    return child;
+  // Each run's own runner, over a spawn function that keeps every child it starts, in the check's set and in the run's,
+  // until that child's `close`: after a timeout the runner gives a run up at its SIGKILL, before the child has closed,
+  // and the run's place is freed only once its own set is empty (Decision Log 12)
+  const runnerFor = (owned: Owned) => {
+    const keeping: ExecFileFn = (file, args, execOptions, callback) => {
+      const child = execFile(file, args, execOptions, callback);
+      if (child) {
+        children.add(child);
+        owned.children.add(child);
+        child.once('close', () => {
+          children.delete(child);
+          owned.children.delete(child);
+          if (owned.children.size === 0) for (const settle of owned.closed.splice(0)) settle();
+          if (children.size === 0) for (const settle of idle.splice(0)) settle();
+        });
+      }
+      return child;
+    };
+    return createGitRunner({ ...(env === undefined ? {} : { env }), execFile: keeping });
   };
-  const run = createGitRunner({ ...(env === undefined ? {} : { env }), execFile: keeping });
+  const allClosed = (owned: Owned) => (owned.children.size === 0 ? Promise.resolve() : new Promise<void>((resolve) => owned.closed.push(resolve)));
   const pending = new Set<Ask>(); // asked and not answered
   const open = new Map<string, Batch>(); // per repository root: the run not started yet, which new asks join
   const queue: Batch[] = []; // runs not started, in the order they were opened
@@ -128,15 +143,18 @@ export function createIgnoreCheck(
       busy.add(batch.root);
       const now = Date.now();
       observe?.({ kind: 'run', waitedMs: batch.asks.map((ask) => now - ask.asked) });
-      void carry(batch).finally(() => {
-        running--; // the run has really ended: its place, and its repository, are free
-        busy.delete(batch.root);
-        start();
-      });
+      const owned: Owned = { children: new Set(), closed: [] };
+      void carry(batch, runnerFor(owned))
+        .then(() => allClosed(owned))
+        .finally(() => {
+          running--; // the run has really ended, its every child closed: its place, and its repository, are free
+          busy.delete(batch.root);
+          start();
+        });
     }
   };
 
-  async function carry({ root, asks }: Batch): Promise<void> {
+  async function carry({ root, asks }: Batch, run: GitRun): Promise<void> {
     const deadline = Math.max(...asks.map((ask) => ask.deadline));
     const rest = () => Math.max(1, deadline - Date.now()); // both calls share the latest deadline the run carries
     const live = () => asks.filter((ask) => pending.has(ask));
