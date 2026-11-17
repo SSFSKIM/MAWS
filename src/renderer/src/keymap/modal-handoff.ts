@@ -13,7 +13,7 @@
 // drawn modal) Radix sets `pointer-events: none` on the body, and takes it off when the last one goes. The modal that holds
 // the keyboard is the one the focused element is in, since a modal traps focus. A lender opened while the lock was
 // already on is over another modal (the task review's finding: a palette over a sheet): it remembers the layers it found
-// in the page and does not lend while any of them is still there, whatever holds the keyboard.
+// in the page, other lenders' left out, and does not lend while any of them is still there, whatever holds the keyboard.
 import type { RefCallback } from 'react';
 
 interface Lender {
@@ -101,8 +101,10 @@ export function modalHandoff(close: () => void): ModalHandoff {
   return {
     lend: (content) => {
       if (content === null) return;
-      // Attached as the content mounts, before Radix's effect locks the body for it: a lock now is another modal's
-      const over = locked() ? [...document.body.children].filter((element) => element !== content && isLayer(element)) : [];
+      // Attached as the content mounts, before Radix's effect locks the body for it: a lock now is another modal's. Another
+      // lender's content is no layer it is over: both may be closed by the handoff, one from the other's close.
+      const lent = new Set<Element>([...lenders].map((other) => other.content));
+      const over = locked() ? [...document.body.children].filter((element) => element !== content && !lent.has(element) && isLayer(element)) : [];
       const lender: Lender = { content, over, closeThen };
       lenders.add(lender);
       return () => void lenders.delete(lender);
