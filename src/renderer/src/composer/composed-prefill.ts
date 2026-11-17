@@ -14,8 +14,8 @@ import { leaveOutGrant, type Range } from '@shared/engine/composed-content';
 import { PLAN_LEAD } from '@shared/engine/host-prompts';
 import type { Prefill } from '../stores/composer';
 import { readRelay } from '../tools/agents/model/relay';
-import type { UserRow } from './edit-prefill';
-import { typedFromRowText } from './editor/recall';
+import { rowPrefill, type UserRow } from './edit-prefill';
+import { bodiesByPlaceholder, typedFromRowText } from './editor/recall';
 
 /**
  * The form of the row an edit began from, by the forms' own readers (§D); null is a person's message. `whole`: a comment
@@ -62,6 +62,25 @@ export function storedFormOf(row: UserRow): StoredForm {
 }
 
 type Edit = { text: string; bodies?: Readonly<Record<string, string>>; images?: Prefill['images']; form: StoredForm };
+
+/**
+ * The edit a stored row opens (Design 5): its text as drawn and typed, each pasted placeholder with the body it names,
+ * its images, and its form by the forms' own readers. The bubble's editor holds it; it goes out through
+ * `composedPrefill` and back into the composer through `handBackEdit`.
+ */
+export function storedRowEdit(row: UserRow): { text: string; bodies: Record<string, string>; images: NonNullable<Prefill['images']>; form: StoredForm } {
+  const prefill = rowPrefill(row);
+  return { text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [], form: storedFormOf(row) };
+}
+
+/**
+ * A stored row put back into the composer from where it is kept (the branch's review, the architect's ruling on history
+ * recall): `prefill`, what the composer loads, the row's edit as its form's reader says; `drawn`, the row as drawn,
+ * which history keys and searches its entries by, and which nothing loads.
+ */
+export function storedRowPrefill(row: UserRow): { prefill: Prefill; drawn: Prefill } {
+  return { prefill: composedPrefill(storedRowEdit(row)), drawn: rowPrefill(row) };
+}
 
 /** What an edited row is sent again as (Design 5's table): the edit's prefill with each slot of its form one pasted atom. */
 export function composedPrefill(edit: Edit): Prefill {

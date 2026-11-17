@@ -15,7 +15,8 @@ import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
-import { historyEntryToDoc, prefillToDoc, typedFromRowText } from './recall';
+import { storedRowPrefill } from '../composed-prefill'; // ticket 733a, the branch's review
+import { historyEntryToDoc, prefillToDoc } from './recall';
 
 export interface HistoryNav {
   index: number | null; // the entry shown, into the list oldest first; null while not navigating
@@ -37,7 +38,9 @@ export function historyNavigation(nav: HistoryNav, action: 'up' | 'down' | 'edit
   return { nav: { index: null, draft: null }, show: nav.draft ? { kind: 'draft', doc: nav.draft } : null };
 }
 
-export type Recall = { source: 'session'; prefill: Prefill } | { source: 'history'; entry: HistoryEntry };
+// Ticket 733a, the branch's review (the architect's ruling on history recall): a session entry loads `prefill`, the row as
+// its form's reader says (`storedRowPrefill`); `text`, the row as drawn, is what the search reads, where it differs.
+export type Recall = { source: 'session'; prefill: Prefill; text?: string } | { source: 'history'; entry: HistoryEntry };
 
 type UserRow = Extract<Row, { kind: 'user' }>;
 
@@ -47,19 +50,6 @@ const PLACEHOLDER_SPACE = /\s*(\[Pasted text #\d+ \+\d+ lines\])\s*/g;
 const ATTACHMENT_PLACEHOLDER = /\s*\[(?:Image|PDF) #\d+\]/g;
 // UX wave U1c (the review round's R3): both sides as typed (`asTyped`), so one prompt is one entry whichever path it came back by
 const keyOf = (display: string, bodies: (string | null)[]) => `${asTyped(display).replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies.map((body) => (body === null ? null : asTyped(body))))}`;
-
-function rowPrefill(row: UserRow): Prefill {
-  const dataUrl = (url: string) => /^data:([^;,]+);base64,(.*)$/s.exec(url);
-  return {
-    text: typedFromRowText(row.text),
-    // UX wave U1c: a body as pasted (shared/engine/grant.ts `asTyped`)
-    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: asTyped(a.text!) })),
-    images: row.attachments.flatMap((a) => {
-      const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
-      return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts[1], data: parts[2] }] : [];
-    }),
-  };
-}
 
 const prefillKey = (p: Prefill) => keyOf(p.text, (p.pasted ?? []).map((b) => b.text));
 const entryKey = (e: HistoryEntry) =>
@@ -88,12 +78,13 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
   for (const row of rows) {
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
     if (allAnswer(row)) continue; // an answer is not a prompt (U4b)
-    const prefill = rowPrefill(row);
-    const key = prefillKey(prefill);
+    // the keys and the search read the row as drawn, as before; what loads is the row as its form's reader says
+    const { prefill, drawn } = storedRowPrefill(row);
+    const key = prefillKey(drawn);
     if (key === last) continue;
     last = key;
     keys.add(key);
-    session.push({ source: 'session', prefill });
+    session.push({ source: 'session', prefill, text: drawn.text });
   }
   const earlier = [...listed].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).filter((e) => !keys.has(entryKey(e)));
   return [...earlier.map((entry): Recall => ({ source: 'history', entry })), ...session];
@@ -107,7 +98,7 @@ export const recallDoc = (recall: Recall): ComposerDoc => (recall.source === 'se
 export const recallLine = (index: number, count: number): string => `History ${count - index}/${count} · ↓ to restore your draft`;
 
 // The text a search reads in a recall: what the box shows for it, its placeholders included.
-export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : asTyped(recall.entry.display)); // UX wave U1c: as typed
+export const recallText = (recall: Recall): string => (recall.source === 'session' ? (recall.text ?? recall.prefill.text) : asTyped(recall.entry.display)); // UX wave U1c: as typed
 
 const holds = (text: string, query: string) => text.toLowerCase().includes(query.toLowerCase());
 

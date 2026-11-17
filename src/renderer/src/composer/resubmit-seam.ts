@@ -37,10 +37,10 @@ import { useSessions } from '../stores/sessions';
 import type { TranscriptEntry } from '../stores/transcript';
 import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
-import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
-import { composedPrefill, storedFormOf } from './composed-prefill'; // ticket 733a
+import { newestUserUuid, type UserRow } from './edit-prefill';
+import { composedPrefill, storedRowEdit } from './composed-prefill'; // ticket 733a
 import { handBackEdit } from './hand-back'; // ticket 733a, the branch's review
-import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
+import { prefillToDoc } from './editor/recall';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { anchoredTextOf } from '../transcript/model/user-text';
 import { precheck, submitSerialized, type Dispatch } from './editor/submit';
@@ -87,10 +87,10 @@ export function startInlineEdit(appSessionId: AppSessionId, messageUuid: Message
   const rows = useTranscriptStore.getState().rows(appSessionId);
   const row = rows.find((r): r is UserRow => r.kind === 'user' && r.messageUuid === messageUuid);
   if (row === undefined) return false;
-  const prefill = rowPrefill(row);
+  const opened = storedRowEdit(row);
   dispose(appSessionId);
   const framing = row.anchor && row.anchorFrame ? { framing: { anchor: row.anchor, ...row.anchorFrame } } : {}; // E11: the bubble edits the comment alone
-  setInlineEdit(appSessionId, { messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [], form: storedFormOf(row), ...framing });
+  setInlineEdit(appSessionId, { messageUuid, seenCursor: kind === 'edit' ? newestUserUuid(rows) : null, kind, ...opened, ...framing });
   setResubmit(appSessionId, 'idle');
   return true;
 }
