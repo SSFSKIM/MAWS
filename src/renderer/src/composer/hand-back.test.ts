@@ -151,7 +151,7 @@ describe('a stored row’s text goes back into the composer only through the hel
     const red = ['src/renderer/src/planted.ts: reads a stored row’s text, outside the helper'];
     expect(planted("import { typedFromRowText } from './composer/editor/recall';\nexport const put = (row) => typedFromRowText(row.text);"), 'a reading').toEqual(red);
     expect(planted("import { typedFromRowText as asTyped } from './composer/editor/recall';\nexport const put = (row) => asTyped(row.text);"), 'a reading renamed').toEqual(red);
-    expect(planted("import { rowWords } from './composer/editor/recall';\nexport const put = (row) => rowWords(row);", [{ ...recall, text: `${recall.text}\nexport const rowWords = (row) => typedFromRowText(row.text);\n` }]), 'a new successor').toEqual(red);
+    expect(planted("import { plantedRowWordsOfTheGuard } from './composer/editor/recall';\nexport const put = (row) => plantedRowWordsOfTheGuard(row);", [{ ...recall, text: `${recall.text}\nexport const plantedRowWordsOfTheGuard = (row) => typedFromRowText(row.text);\n` }]), 'a new successor').toEqual(red);
     expect(planted("import * as recall from './composer/editor/recall';\nexport const put = (row) => recall['typed' + 'FromRowText'](row.text);"), 'a module taken whole').toEqual(red);
     expect(planted("export const load = () => import('./composer/edit-prefill');"), 'a module taken by a dynamic import').toEqual(red);
     expect(planted("import { storedRowPrefill } from './composer/composed-prefill';\nexport const put = (row) => storedRowPrefill(row).prefill;"), 'the helper: the control').toEqual([]);
