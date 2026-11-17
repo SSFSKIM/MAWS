@@ -15,11 +15,14 @@ export const COPY_WORDS = {
 
 type Opened = CommandResult<'files.openExternal'>;
 
-/** A session's file opened outside MAWS: by the OS here, or for a lane B session on another machine, as a copy here. */
-export function openSessionFile(appSessionId: AppSessionId, path: string, client: MawsBridge): Promise<Opened> {
+/**
+ * A session's file opened outside MAWS: by the OS here, or for a lane B session on another machine, as a copy here. UX wave
+ * U6f (Decision Log 33 (3)): `open`, the person opened the protected folder the file lies in there, rides the copy alone.
+ */
+export function openSessionFile(appSessionId: AppSessionId, path: string, client: MawsBridge, { open }: { open?: true } = {}): Promise<Opened> {
   if (!isRemoteLaneB(appSessionId)) return client.invoke('files.openExternal', { appSessionId, path });
   // the session's address sends it to its machine, whose file it reads; main answers it here (its allow-list)
-  return client.invoke('remote.openCopy', { machine: machineOf(appSessionId), source: { appSessionId, path } });
+  return client.invoke('remote.openCopy', { machine: machineOf(appSessionId), source: { appSessionId, path }, ...(open && { open }) });
 }
 
 /** A stored file of another machine's artifact (at `revision`, else the latest), opened as a copy here. */

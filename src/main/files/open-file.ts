@@ -45,9 +45,10 @@ export const appPageOnly =
 /**
  * UX wave U6f (Decision Log 26): the commands that carry `open` (the person opened a protected folder on another machine)
  * only from a live page of an app window, as `files.read`'s comes from the page's own record of what the person opened.
- * A frame, which is no app page, asks the same command without it.
+ * A frame, which is no app page, asks the same command without it. "Open externally"'s copy carries it under the same
+ * rule (the branch review, Decision Log 33 (3)).
  */
-export const OPENS_FROM_APP_PAGE_ONLY: readonly CommandName[] = ['layout.frameFile'];
+export const OPENS_FROM_APP_PAGE_ONLY: readonly CommandName[] = ['layout.frameFile', 'remote.openCopy'];
 
 export const openFromAppPageOnly =
   (appUrl: string): CommandGuard =>

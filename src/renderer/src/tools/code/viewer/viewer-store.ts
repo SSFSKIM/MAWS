@@ -377,7 +377,8 @@ const saveFailureOf = (error: Failure, outside: boolean): Pick<ViewerEntry, 'sav
 // remote route, and a path the person opened on its machine this run.
 const opensThere = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>): boolean =>
   entry.appSessionId !== null && takesRemoteRoute(entry.appSessionId) && openedThere(machineOf(entry.appSessionId)).has(entry.path);
-const opens = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>) => (opensThere(entry) ? { open: true as const } : {});
+/** `open` for a request about the entry's path, under that test; also "Open externally"'s copy (ExternalRow.tsx). */
+export const opens = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>) => (opensThere(entry) ? { open: true as const } : {});
 const machineNameOf = (appSessionId: AppSessionId | null): string => (appSessionId === null ? '' : (remoteStandingOf(appSessionId)?.machine ?? ''));
 const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
 

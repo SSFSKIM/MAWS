@@ -234,14 +234,15 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
       return call(link, name, fields);
     },
     async openCopy(input, client) {
-      const { machine, source } = input as { machine: MachineRef; source: RemoteCopySource }; // validated at the boundary
+      const { machine, source, open } = input as { machine: MachineRef; source: RemoteCopySource; open?: true }; // validated at the boundary
       const link = deps.remote(machine);
       if (link === null) return failure('host_unavailable', `remote.openCopy: machine ${machine} is not connected`) as CommandResult<'remote.openCopy'>;
       if ('artifactId' in source) deps.machines.record(source.artifactId, machine);
       // UX wave U6f (decision 15): a session's file is read for the caller that asked, the act on a file outside the folders
-      // for the people it is offered to (Decision Log 27: the plain read today's)
+      // for the people it is offered to (Decision Log 27: the plain read today's); the page's `open` rides that act alone, as
+      // a frame's does (the branch review, Decision Log 33 (3))
       const read = deps.readSessionFile;
-      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, fields, client ?? null, {}) };
+      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, ...(open && { open }) }, client ?? null, {}) };
       return openCopy(link, source, { openPath: deps.openPath, tempDir, env: deps.env, log: deps.log, ...reader });
     },
     async copyInto(machine, source, sink, max, { client, agent, open, ...options }) {
