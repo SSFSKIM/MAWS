@@ -1029,6 +1029,15 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       expect(bodiesOf(chipped)[0]).not.toContain('[Pasted text #');
     });
 
+    // The architect's ruling 4368 (the delta review): a chip opens only at the place its row records it; the same spelling
+    // typed elsewhere in the row stays text, so the paste goes once
+    it('a chip and its spelling typed after it in a plan’s shape: sent again, the paste goes once, at its place, the spelling as text (the architect’s ruling 4368)', async () => {
+      const LITERAL = 'Literal [Pasted text #1 +1 lines].';
+      const content = await resent(`Implement this plan:\n\nStart.${wrapPasted('ab12', 'ATTACHMENT')}${LITERAL}`, (text) => text, how);
+      expect(bodiesOf(content)).toEqual([`Start.ATTACHMENT\n${LITERAL}`]);
+      expect(content.split('ATTACHMENT').length - 1, 'the paste goes once').toBe(1);
+    });
+
     it('the negative control: a person’s message naming the plan’s sentence is theirs, nothing framed and its line kept', async () => {
       const typed = `Please document the phrase Implement this plan: in the help text.\n${GRANT}`;
       const content = await resent(typed, (text) => `${text}\nThanks.`, how);

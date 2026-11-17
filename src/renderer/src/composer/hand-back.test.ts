@@ -8,6 +8,7 @@
 import { readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { storedRowPrefill } from './composed-prefill'; // the architect's ruling 4366
 
 const REPOSITORY = join(__dirname, '../../../..');
 const RENDERER = join(REPOSITORY, 'src/renderer/src');
@@ -155,5 +156,72 @@ describe('a stored row’s text goes back into the composer only through the hel
     expect(planted("import * as recall from './composer/editor/recall';\nexport const put = (row) => recall['typed' + 'FromRowText'](row.text);"), 'a module taken whole').toEqual(red);
     expect(planted("export const load = () => import('./composer/edit-prefill');"), 'a module taken by a dynamic import').toEqual(red);
     expect(planted("import { storedRowPrefill } from './composer/composed-prefill';\nexport const put = (row) => storedRowPrefill(row).prefill;"), 'the helper: the control').toEqual([]);
+  });
+});
+
+// The architect's ruling 4366 (the delta review): the row as drawn leaves `storedRowPrefill` only as strings, the search's
+// text and the history's key, never as a prefill anything could load. Its result is read here in two ways: at run time,
+// every field but `prefill` is a string; in the source, a module that calls it takes `prefill`, `search` or `key` and
+// nothing else (a field by name, by destructuring, or off a binding), and never the result whole. A successor that hands
+// the drawn row out is a reading by the scan above.
+const RESULT_FIELDS = new Set(['prefill', 'search', 'key']);
+function closingParen(text: string, open: number): number {
+  let depth = 0;
+  for (let i = open; i < text.length; i += 1) {
+    if (text[i] === '(') depth += 1;
+    else if (text[i] === ')' && --depth === 0) return i;
+  }
+  return text.length;
+}
+// What each module takes of the helper's result that is not one of its three fields
+function resultTaken(sources: readonly Source[]): string[] {
+  const problems: string[] = [];
+  for (const { file, text } of sources) {
+    if (file in DEFINING) continue;
+    for (const call of text.matchAll(/\bstoredRowPrefill\s*\(/g)) {
+      const after = text.slice(closingParen(text, call.index + call[0].length - 1) + 1);
+      const before = text.slice(0, call.index);
+      const field = /^\s*\.\s*([\w$]+)/.exec(after)?.[1];
+      const destructured = /(?:const|let|var)\s*\{([^}]*)\}\s*=\s*$/.exec(before)?.[1];
+      const bound = /(?:const|let|var)\s+([\w$]+)\s*=\s*$/.exec(before)?.[1];
+      const taken: string[] = [];
+      if (field !== undefined) taken.push(field);
+      else if (/^\s*\[/.test(after)) taken.push('a computed field');
+      else if (destructured !== undefined) taken.push(...destructured.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => (entry.startsWith('...') ? 'the rest' : entry.split(':')[0]!.trim())));
+      else if (bound !== undefined) for (const use of after.matchAll(new RegExp(`\\b${bound.replace(/\$/g, '\\$')}\\b(\\s*\\.\\s*([\\w$]+))?`, 'g'))) taken.push(use[2] ?? 'the result whole');
+      else taken.push('the result whole');
+      for (const name of taken) if (!RESULT_FIELDS.has(name)) problems.push(`${file}: takes ${RESULT_FIELDS.has(name) ? name : `\`${name}\``} of storedRowPrefill’s result`);
+    }
+  }
+  return problems;
+}
+
+describe('the row as drawn leaves the helper only as strings (ticket 733a, the architect’s ruling 4366)', () => {
+  const row = { kind: 'user', id: 'r-1', messageUuid: 'u-1', turnId: null, text: 'Implement this plan:\n\nStart.\n[Pasted text #1 +1 lines]', attachments: [{ kind: 'text', name: 'Pasted text #1', bytes: 10, dataUrl: null, mediaType: 'text/plain', text: 'ATTACHMENT' }], placeholders: [29], lines: 4, editable: true, steer: false, dropped: false } as never;
+
+  it('every field of its result but the prefill is a string', () => {
+    const result = storedRowPrefill(row, (text, bodies) => `${text}|${bodies.join('|')}`) as unknown as Record<string, unknown>;
+    expect(Object.keys(result).sort()).toEqual([...RESULT_FIELDS].sort());
+    expect(Object.entries(result).filter(([field, value]) => field !== 'prefill' && typeof value !== 'string').map(([field]) => field)).toEqual([]);
+  });
+
+  it('no module takes any other field of its result, or the result whole', () => {
+    expect(resultTaken(scan())).toEqual([]);
+  });
+
+  it('goes red on a planted load of the drawn row: by its field, destructured, off a binding, the result whole, or a successor that hands it out; the three fields are not one', () => {
+    const sources = scan();
+    const at = 'src/renderer/src/planted.ts';
+    const taken = (text: string) => resultTaken([{ file: at, text: codeOf(text) }]);
+    expect(taken('export const load = (row) => prefillToDoc(storedRowPrefill(row, keyOf).drawn);'), 'by its field').toEqual([`${at}: takes \`drawn\` of storedRowPrefill’s result`]);
+    expect(taken('const { prefill, drawn } = storedRowPrefill(row, keyOf);\nload(drawn);'), 'destructured').toEqual([`${at}: takes \`drawn\` of storedRowPrefill’s result`]);
+    expect(taken('const recalled = storedRowPrefill(row, keyOf);\nload(recalled.prefill);\nload(recalled.drawn);'), 'off a binding').toEqual([`${at}: takes \`drawn\` of storedRowPrefill’s result`]);
+    expect(taken('load(storedRowPrefill(row, keyOf));'), 'the result whole').toEqual([`${at}: takes \`the result whole\` of storedRowPrefill’s result`]);
+    expect(taken('const { prefill, search, key } = storedRowPrefill(row, keyOf);\nconst again = storedRowPrefill(row, keyOf).prefill;'), 'the three fields: the control').toEqual([]);
+    // a successor in the helper's module that hands the drawn row out is a reading, and its caller a reader
+    const helper = sources.find(({ file }) => file === 'src/renderer/src/composer/composed-prefill.ts')!;
+    const withSuccessor = [...sources.filter(({ file }) => file !== helper.file), { ...helper, text: `${helper.text}\nexport const plantedDrawnOfTheGuard = (row) => rowPrefill(row);\n` }];
+    const before = unexcluded(sources);
+    expect(unexcluded([...withSuccessor, { file: at, text: codeOf("import { plantedDrawnOfTheGuard } from './composer/composed-prefill';\nexport const load = (row) => prefillToDoc(plantedDrawnOfTheGuard(row));") }]).filter((problem) => !before.includes(problem)), 'a successor').toEqual([`${at}: reads a stored row’s text, outside the helper`]);
   });
 });
