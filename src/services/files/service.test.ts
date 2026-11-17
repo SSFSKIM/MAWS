@@ -2937,7 +2937,7 @@ describe('files saves outside the folders', () => {
         for (const real of [at('first', 'file.txt'), at('second', 'file.txt')]) grants.add(A, real); // either is the session's to read and save
         const files = remoteService();
         // the read
-        let seen = recordTouches();
+        const seen = recordTouches();
         points['after-outside-walk'] = relink(at('via'), at('second'));
         await expect(readThere(files, A, path)).rejects.toThrow(new Error(FILES_MOVED));
         expect(relinked, 'the link moved between the walk and the resolution').toEqual([at('via')]);
@@ -2947,7 +2947,8 @@ describe('files saves outside the folders', () => {
         relink(at('via'), at('first'))();
         const read = await readThere(files, A, path);
         expect(read).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
-        seen = recordTouches();
+        seen.length = 0;
+        touches.on = true;
         points['after-outside-walk'] = relink(at('via'), at('second'));
         await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed('op-save'))).rejects.toThrow(new Error(FILES_MOVED));
         expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
