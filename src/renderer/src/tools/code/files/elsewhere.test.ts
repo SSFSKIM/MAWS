@@ -76,6 +76,16 @@ describe('openedThere', () => {
     expect(openedThere(THIRD).has('/srv/single.txt.bak')).toBe(false);
   });
 
+  // Fix wave (review finding 1): containment is proven on a normalized path, so a parent segment cannot leave the folder
+  it('lends nothing to a path with a "." or ".." segment, beside a descendant written plainly', () => {
+    openedThere(OTHER_MACHINE).add('/home/someone/Documents');
+    expect(openedThere(OTHER_MACHINE).has('/home/someone/Documents/minutes/rota.ods')).toBe(true); // the control
+    expect(openedThere(OTHER_MACHINE).has('/home/someone/Documents/../Downloads')).toBe(false);
+    expect(openedThere(OTHER_MACHINE).has('/home/someone/Documents/../Downloads/notes.txt')).toBe(false);
+    expect(openedThere(OTHER_MACHINE).has('/home/someone/Documents/./rota.ods')).toBe(false);
+    expect(openedThere(OTHER_MACHINE).has('/home/someone/Documents/minutes/..')).toBe(false);
+  });
+
   it('is kept in memory alone and forgotten whole', () => {
     openedThere(OTHER_MACHINE).add('/home/someone/Desktop');
     forgetOpenedThere();

@@ -14,7 +14,7 @@ import { addressOf, bareOf, machineOf } from '@shared/machine/address';
 import { failureWords } from '@shared/ipc/remote-unavailable'; // UX wave U6f
 import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
 import { forgetOpenedThere, openedThere } from '../files/elsewhere'; // UX wave U6f
-import { forgetStarts } from '../files/remote-chooser'; // UX wave U6f
+import { chooserCalls, createRemoteChooser, forgetStarts } from '../files/remote-chooser'; // UX wave U6f
 import { record } from '../../../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
@@ -2094,6 +2094,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
   const lead = () => document.querySelector<HTMLElement>('[data-path-lead]')!;
   const label = () => document.querySelector<HTMLElement>('[data-read-only]');
   const body = () => document.querySelector<HTMLElement>('[data-refusal]');
+  const saveFailure = () => document.querySelector<HTMLElement>('span[role="alert"]')?.textContent ?? null; // the bar's line below the path
   const reads = (main: { callsOf: ReturnType<typeof installDisk>['callsOf'] }) => main.callsOf('files.read');
   // The disk as studio's daemon answers it for an owner: `/elsewhere` outside the session's folders, and what admits a file
   // there for the session (a counted name, an added record).
@@ -2251,7 +2252,8 @@ describe('a file outside the folders on another machine (U6f)', () => {
       expect(readOnlyReason(shown())).toBe('elsewhere');
       expect(existingViewState(shown().tabId)?.docOf?.()).toBe('mine one\n');
       expect(label()!.getAttribute('aria-description')).toBe('Read-only: Only studio’s owners can save this file there.');
-      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('noop');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can'); // UC-7's sentence, said once (Decision Log 30 d)
       expect(main.callsOf('files.writeOutside')).toEqual([]);
       expect(main.callsOf('files.write')).toEqual([]);
     });
@@ -2265,7 +2267,10 @@ describe('a file outside the folders on another machine (U6f)', () => {
       act(() => rosterSays(T, { capabilities: ['rl2.channel'] }));
       await waitFor(() => expect(label()?.getAttribute('data-read-only')).toBe('elsewhere'));
       expect(label()!.getAttribute('aria-description')).toBe('Read-only: Can’t save this file on studio yet. Update MAWS on studio and try again.');
-      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('noop');
+      // Fix wave (review finding 7; decision 14, B9): Save answers the refusal as the save's failure, nothing sent
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: update MAWS on studio and try again');
+      expect(shown()).toMatchObject({ dirty: true, saving: false });
       expect(main.callsOf('files.writeOutside')).toEqual([]);
       expect(main.callsOf('files.write')).toEqual([]);
     });
@@ -2281,6 +2286,35 @@ describe('a file outside the folders on another machine (U6f)', () => {
       expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('ok');
       expect(main.callsOf('files.writeOutside')).toHaveLength(1);
     });
+
+    // Fix wave (review finding 2): waiting offline is the owners'; a person known not to own the machine sends nothing
+    it('offline, an edited file of a person who does not own the machine sends no save and says why', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined, owner: false }));
+      expect(readOnlyReason(shown())).toBe('elsewhere');
+      await act(() => useViewer.getState().save(shown().tabId));
+      expect(saveFailure()).toBe('Not saved: only studio’s owners can');
+      expect(main.callsOf('files.writeOutside')).toEqual([]);
+      expect(main.callsOf('files.write')).toEqual([]);
+    });
+
+    // Decision Log 30 (d): the failure of a save the machine could not be reached for, as the bar draws it
+    it('a save that fails with studio offline reads exactly the refusal’s sentence, said once', async () => {
+      const main = disk({ [OUT]: 'one\n' }, { names: [OUT] });
+      show();
+      await editable();
+      typed('mine ');
+      await waitFor(() => expect(shown().dirty).toBe(true));
+      act(() => rosterSays(T, { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }));
+      main.answers.by = (name) => (name === 'files.writeOutside' ? refused('Not saved: studio is offline', 'offline') : null);
+      expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
+      expect(saveFailure()).toBe('Not saved: studio is offline');
+      expect(main.files[OUT]).toBe('one\n');
+    });
   });
 
   it('R7: a save the service refuses there is worded as U6e’s, with the way on', async () => {
@@ -2292,6 +2326,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
     main.answers.by = (name) => (name === 'files.writeOutside' ? fail(failureWords('files.writeOutside', OUTSIDE_REFUSAL)) : null);
     expect(await act(() => useViewer.getState().save(shown().tabId))).toBe('error');
     expect(shown().saveError).toBe('MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it');
+    expect(saveFailure()).toBe('Could not save: MAWS may no longer write this file for this session. Choose it with File ▸ Open File… to save it'); // no sentence of UC-7: U6e's prefix
     expect(main.files[OUT]).toBe('one\n');
   });
 
@@ -2347,6 +2382,63 @@ describe('a file outside the folders on another machine (U6f)', () => {
       fireEvent.click(within(body()!).getByRole('button', { name: 'Open File…' }));
       await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
       expect(main.callsOf('layout.openFile')).toEqual([]);
+    });
+
+    // Decision Log 30 (c) as built (a): main's projection keeps no field of a refusal but its word, so Open it remembers the file
+    it('Open it remembers the file: its reads carry open after, and another file in that folder still asks', async () => {
+      const OTHER_INSIDE = `${PRIVATE}/minutes.txt`;
+      const main = disk({ [INSIDE]: 'rota\n', [OTHER_INSIDE]: 'minutes\n' }, { names: [INSIDE, OTHER_INSIDE] });
+      main.answers.by = asksOpen();
+      show(INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      fireEvent.click(within(body()!).getByRole('button', { name: 'Open it' }));
+      await editable(INSIDE);
+      expect(openedThere(OTHER_MACHINE).has(INSIDE)).toBe(true); // the control
+      cleanup();
+      main.calls.splice(0);
+      show(OTHER_INSIDE);
+      await waitFor(() => expect(within(body()!).queryByRole('button', { name: 'Open it' })).not.toBeNull());
+      expect(reads(main).every((input) => !('open' in input))).toBe(true);
+    });
+
+    // Fix wave (review finding 6): the second sentence follows what the request carried, not what is known when it answers
+    it('a read sent with no open, its folder confirmed while it is out, answers protected with the first sentence and Open it', async () => {
+      const main = disk({ [INSIDE]: 'rota\n' }, { names: [INSIDE] });
+      main.answers.by = asksOpen();
+      const gate = main.hold('files.read');
+      show(INSIDE);
+      await waitFor(() => expect(reads(main)).toHaveLength(1));
+      expect(reads(main)[0]).not.toHaveProperty('open');
+      openedThere(OTHER_MACHINE).add(PRIVATE); // the chooser's confirmation lands meanwhile
+      gate.release();
+      await waitFor(() => expect(body()).not.toBeNull());
+      expect(body()!.querySelector('p')!.textContent).toBe(protectedThere);
+      expect(within(body()!).getByRole('button', { name: 'Open it' })).toBeTruthy();
+      expect(shown(INSIDE)).toMatchObject({ needsOpen: true, offersOpenFile: false });
+    });
+
+    // Fix wave (review finding 3): a link into a private folder chosen in the chooser, followed through the tab's first read
+    it('a file chosen through a link into a private folder opens with open on its first read, and asks nothing', async () => {
+      const GRANTED = `${PRIVATE}/rota.txt`;
+      const main = disk({ [GRANTED]: 'rota\n' }, { names: [GRANTED] });
+      const asks = asksOpen();
+      main.answers.by = (name, input) => {
+        if (name === 'files.listOutside') return { ok: true, value: { status: 'listed', path: '/home/someone', parent: '/home', home: '/home/someone', entries: [{ name: 'latest', path: '/home/someone/latest', kind: 'link', protected: false }], cursor: null } };
+        if (name === 'files.chooseOutside') return input.open === true ? { ok: true, value: { status: 'granted', path: GRANTED } } : { ok: true, value: { status: 'refused', reason: 'protected' } };
+        return asks(name, input);
+      };
+      const chooser = createRemoteChooser(T, { ...chooserCalls(), machine: () => 'studio', startAt: null });
+      await waitFor(() => expect(chooser.state().at).toBe('listed'));
+      chooser.select('/home/someone/latest');
+      const chosen = chooser.choose();
+      await waitFor(() => expect(chooser.state().at).toBe('asking'));
+      chooser.confirm();
+      expect(await chosen).toBe(GRANTED);
+      show(GRANTED);
+      await editable(GRANTED);
+      expect(reads(main).length).toBeGreaterThan(0);
+      expect(reads(main).every((input) => input.open === true)).toBe(true);
+      expect(body()).toBeNull();
     });
 
     it('W3: an answer for a tab closed meanwhile lands nowhere; a failure of the press leaves the sentence and the button', async () => {

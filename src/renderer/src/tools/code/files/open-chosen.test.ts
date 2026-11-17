@@ -216,6 +216,20 @@ describe('Open File… for a session on another machine (U6f)', () => {
     readAdmission.mockRestore();
   });
 
+  // Fix wave (review finding 2): asked by a control that has not yet heard the offer move, it opens nothing there
+  it('for a session there whose machine no longer offers the chooser to this person, opens no sheet and asks nothing; with the offer, it does (the control)', async () => {
+    act(() => rosterSays(T, { owner: false }));
+    act(() => void openChosenFor(T));
+    await settle();
+    expect(sheet()).toBeNull();
+    expect(main.callsOf('files.listOutside')).toEqual([]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+    act(() => rosterSays(T, {}));
+    act(() => void openChosenFor(T));
+    await waitFor(() => expect(sheet()).not.toBeNull());
+    expect(main.callsOf('files.listOutside')).toHaveLength(1);
+  });
+
   it('C6: asked again while the sheet is open, the sheet takes the keyboard and no second one opens', async () => {
     act(() => void openChosenFor(T));
     await waitFor(() => expect(sheet()).not.toBeNull());

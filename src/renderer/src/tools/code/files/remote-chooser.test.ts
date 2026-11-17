@@ -30,7 +30,7 @@ const refusedChoice = (reason: 'not-a-file' | 'no-file' | 'protected'): Choice =
 const unreachable = { ok: false as const, error: { code: 'host_unavailable' as const, message: 'files.listOutside: machine studio is not reachable' } };
 
 // A chooser whose listings and choices wait for the test: each ask is recorded with its input and its answer's gate.
-function harness(startAt: string | null = null) {
+function harness(startAt: string | null = null, offer: { words: string | null } = { words: null }) {
   const lists: { input: ListInput; answer(result: Listing): Promise<void> }[] = [];
   const chooses: { input: ChooseInput; answer(result: Choice): Promise<void> }[] = [];
   const settle = () => new Promise<void>((resolve) => setTimeout(resolve, 0));
@@ -46,6 +46,7 @@ function harness(startAt: string | null = null) {
       return gate.promise;
     },
     machine: () => 'studio',
+    unoffered: () => offer.words,
     startAt,
   });
   const heard = { count: 0 };
@@ -196,6 +197,38 @@ describe('the listing’s edges (B4)', () => {
     expect(chooser.state()).toMatchObject({ at: 'listed', entries: [...first, file('/srv/many/g.txt')], cursor: null, selected: '/srv/many/f1.txt' });
   });
 
+  // Fix wave (review finding 5)
+  it('a typed file on a later page of its parent: the pages are read on until it is found, then it is selected', async () => {
+    const { chooser, lists } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.go('/srv/shared/zeta.txt');
+    await lists[1].answer(refusedListing('not-a-folder'));
+    expect(lists[2].input).toEqual({ appSessionId: R, path: '/srv/shared' });
+    await lists[2].answer(listed('/srv/shared', [file('/srv/shared/alpha.txt')], 'alpha.txt'));
+    expect(lists[3].input).toEqual({ appSessionId: R, path: '/srv/shared', cursor: 'alpha.txt' });
+    await lists[3].answer(listed('/srv/shared', [file('/srv/shared/zeta.txt')], 'zeta.txt'));
+    expect(chooser.state()).toMatchObject({ at: 'listed', path: '/srv/shared', selected: '/srv/shared/zeta.txt', cursor: 'zeta.txt', entries: [file('/srv/shared/alpha.txt'), file('/srv/shared/zeta.txt')] });
+    expect(lists).toHaveLength(4); // found: no further page is asked for it
+  });
+
+  it('a typed file not in its parent stops at the listing’s end, selecting nothing; Cancel stops the paging', async () => {
+    const { chooser, lists } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.go('/srv/shared/gone.txt');
+    await lists[1].answer(refusedListing('not-a-folder'));
+    await lists[2].answer(listed('/srv/shared', [file('/srv/shared/alpha.txt')], 'alpha.txt'));
+    await lists[3].answer(listed('/srv/shared', [file('/srv/shared/beta.txt')]));
+    expect(chooser.state()).toMatchObject({ at: 'listed', selected: null, cursor: null });
+    expect(lists).toHaveLength(4);
+    chooser.go('/srv/other/gone.txt');
+    await lists[4].answer(refusedListing('not-a-folder'));
+    await lists[5].answer(listed('/srv/other', [file('/srv/other/a.txt')], 'a.txt'));
+    expect(lists).toHaveLength(7);
+    chooser.cancel();
+    await lists[6].answer(listed('/srv/other', [file('/srv/other/gone.txt')], 'gone.txt'));
+    expect(lists).toHaveLength(7); // nothing asked after Cancel
+  });
+
   it('a typed path that names a folder shows it; a file selects it in its parent’s listing; neither says there is nothing there', async () => {
     const { chooser, lists } = harness();
     await lists[0].answer(listed(HOME, AT_HOME));
@@ -255,6 +288,54 @@ describe('a private folder (Card 1; decision 18)', () => {
     await lists[4].answer(listed(HOME, AT_HOME));
     chooser.enter(AT_HOME[0]); // confirmed once this run: entered with no question
     expect(lists[5].input).toEqual({ appSessionId: R, path: `${HOME}/Documents`, open: true });
+  });
+
+  // Fix wave (review finding 4; C1): the question invalidates what was still asked for the listing behind it
+  it('a More… still out when a private folder asks: its answer and its bound land nowhere, and the question stays', async () => {
+    vi.useFakeTimers();
+    const { chooser, lists } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME, 'roadmap.md'));
+    chooser.more();
+    expect(lists[1].input).toEqual({ appSessionId: R, path: HOME, cursor: 'roadmap.md' });
+    chooser.enter(AT_HOME[0]);
+    expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
+    await lists[1].answer(listed(HOME, [file(`${HOME}/zeta.txt`)]));
+    expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
+    expect(chooser.state()).toEqual({ at: 'asking', folder: AT_HOME[0] });
+    chooser.back();
+    expect(chooser.state()).toMatchObject({ at: 'listed', path: HOME, entries: AT_HOME, cursor: 'roadmap.md' }); // the listing as shown, More… to ask again
+  });
+
+  // Fix wave (review finding 1): a path the walk would leave the confirmed folder by inherits nothing
+  it('a typed path that leaves a confirmed folder by ".." is sent with no open, beside one inside it', async () => {
+    const { chooser, lists } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.enter(AT_HOME[0]);
+    chooser.confirm();
+    await lists[1].answer(listed(`${HOME}/Documents`, []));
+    chooser.go(`${HOME}/Documents/minutes`);
+    expect(lists[2].input).toEqual({ appSessionId: R, path: `${HOME}/Documents/minutes`, open: true }); // the control
+    await lists[2].answer(listed(`${HOME}/Documents/minutes`, []));
+    chooser.go(`${HOME}/Documents/../Downloads`);
+    expect(lists[3].input).toEqual({ appSessionId: R, path: `${HOME}/Documents/../Downloads` });
+  });
+
+  // Fix wave (review finding 3): the folder a listing that carried open ended at joins openedThere, the request's open
+  // inherited from a confirmed folder included
+  it('a folder listed under an inherited open joins openedThere at the real path the walk ended at', async () => {
+    const { chooser, lists } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.enter(AT_HOME[0]);
+    chooser.confirm();
+    await lists[1].answer(listed(`${HOME}/Documents`, [dir(`${HOME}/Documents/minutes`)]));
+    chooser.enter(dir(`${HOME}/Documents/minutes`)); // a link to a folder elsewhere: its open inherited, not asked
+    expect(lists[2].input).toEqual({ appSessionId: R, path: `${HOME}/Documents/minutes`, open: true });
+    await lists[2].answer(listed('/data/minutes-real', []));
+    expect(openedThere(OTHER_MACHINE).has('/data/minutes-real/2026.ods')).toBe(true);
+    chooser.go('/srv/plain');
+    await lists[3].answer(listed('/srv/plain-real', []));
+    expect(openedThere(OTHER_MACHINE).has('/srv/plain-real')).toBe(false); // the control: a listing with no open adds nothing
   });
 
   it('a folder entered through a link, a typed path, into a private folder asks as that folder does, then reads with open', async () => {
@@ -343,8 +424,21 @@ describe('the choice (C3)', () => {
     expect(chooser.state()).toEqual({ at: 'asking', folder: link(`${HOME}/latest`) });
     chooser.confirm();
     expect(chooses[1].input).toEqual({ appSessionId: R, path: `${HOME}/latest`, open: true });
-    await chooses[1].answer(granted(`${HOME}/Documents/rota.ods`));
-    expect(await chosen).toBe(`${HOME}/Documents/rota.ods`);
+    await chooses[1].answer(granted('/data/Private/rota.ods'));
+    expect(await chosen).toBe('/data/Private/rota.ods');
+    // Fix wave (review finding 3): the granted real path, chosen under open, is one the person opened, so the tab's first
+    // read of it carries open and asks nothing (viewer.test.tsx follows it through the read)
+    expect(openedThere(OTHER_MACHINE).has('/data/Private/rota.ods')).toBe(true);
+  });
+
+  it('a grant chosen with no open adds nothing to openedThere', async () => {
+    const { chooser, lists, chooses } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.select(`${HOME}/roadmap.md`);
+    const chosen = chooser.choose();
+    await chooses[0].answer(granted('/data/roadmap.md'));
+    expect(await chosen).toBe('/data/roadmap.md');
+    expect(openedThere(OTHER_MACHINE).has('/data/roadmap.md')).toBe(false);
   });
 
   it('Back from that question answers no choice, and nothing more is asked', async () => {
@@ -376,6 +470,52 @@ describe('the choice (C3)', () => {
     await chooses[0].answer({ ok: false, error: { code: 'host_unavailable', message: 'files.chooseOutside: machine studio is not reachable' } });
     expect(await chosen).toBeNull();
     expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: 'studio is not reachable.' });
+  });
+});
+
+// Fix wave (review finding 2): the outside acts are offered to the machine's owners alone, asked again before each request
+describe('the offer withdrawn while the chooser is open', () => {
+  const ONLY = 'Only studio’s owners can open a file there.';
+
+  it('withdraw shows the sentence where the list stands, and no listing, choice or Try again sends anything after', async () => {
+    const offer = { words: null as string | null };
+    const { chooser, lists, chooses } = harness(null, offer);
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.more(); // no cursor: nothing
+    offer.words = ONLY;
+    chooser.withdraw(ONLY);
+    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: ONLY });
+    chooser.retry();
+    chooser.go('/srv/shared');
+    chooser.enter(dir(`${HOME}/garden-club`));
+    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: ONLY });
+    expect(lists).toHaveLength(1);
+    expect(chooses).toHaveLength(0);
+  });
+
+  it('a request is not sent while the offer has a sentence, even before the sheet heard of it; with none it is (the control)', async () => {
+    const offer = { words: null as string | null };
+    const { chooser, lists, chooses } = harness(null, offer);
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.enter(dir(`${HOME}/garden-club`));
+    expect(lists).toHaveLength(2); // the control
+    await lists[1].answer(listed(`${HOME}/garden-club`, [file(`${HOME}/garden-club/a.txt`)]));
+    chooser.select(`${HOME}/garden-club/a.txt`);
+    offer.words = ONLY;
+    expect(await chooser.choose()).toBeNull();
+    expect(chooses).toHaveLength(0);
+    expect(chooser.state()).toEqual({ at: 'failed', path: `${HOME}/garden-club`, words: ONLY });
+  });
+
+  it('a choice in flight when the offer is withdrawn answers nothing, and its grant opens nothing', async () => {
+    const { chooser, lists, chooses } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.select(`${HOME}/roadmap.md`);
+    const chosen = chooser.choose();
+    chooser.withdraw(ONLY);
+    await chooses[0].answer(granted('/data/roadmap.md'));
+    expect(await chosen).toBeNull();
+    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: ONLY });
   });
 });
 

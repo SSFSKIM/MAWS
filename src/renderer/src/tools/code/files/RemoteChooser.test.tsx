@@ -218,6 +218,24 @@ describe('the chooser’s sheet', () => {
     expect(onClose).toHaveBeenCalledOnce();
   });
 
+  // Fix wave (review finding 2): the outside acts are the owners'; a sheet left open when that stops sends nothing more
+  it('the ownership withdrawn while the sheet is open: the list’s place says so, and nothing is asked after; an owner’s sheet asks (the control)', async () => {
+    open();
+    await lists[0].answer(listed(`${HOME}/garden-club`, [entry(`${HOME}/garden-club/sub`, 'dir')]));
+    fireEvent.click(row('sub'));
+    expect(lists).toHaveLength(2); // the control: an owner's click asks
+    await lists[1].answer(listed(`${HOME}/garden-club/sub`, []));
+    act(() => rosterSays(R, { owner: false }));
+    expect(list()!.textContent).toContain('Only studio’s owners can open a file there.');
+    fireEvent.click(within(list()!).getByRole('button', { name: 'Try again' }));
+    fireEvent.click(list()!.querySelector('[data-up]')!);
+    fireEvent.change(field(), { target: { value: '/srv/shared' } });
+    fireEvent.submit(field().closest('form')!);
+    await settle();
+    expect(lists).toHaveLength(2);
+    expect(chooses).toHaveLength(0);
+  });
+
   it('C5: the link dropping while a folder is shown asks that folder again, and the list’s place says the machine is not reachable, the path standing', async () => {
     open();
     await lists[0].answer(listed(`${HOME}/garden-club`, [entry(`${HOME}/garden-club/a.txt`)]));
