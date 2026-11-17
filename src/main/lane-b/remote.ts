@@ -483,7 +483,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   });
   // the UX wave (U6f): a file outside a session's folders, read, listed, chosen and saved there
   const outside = createRemoteOutsideFiles({
-    call: (link, name, fields, { label, oneChannel }) => readInPages(link, name, fields, deps.log, label, oneChannel === true ? { oneChannel } : {}),
+    call: (link, name, fields, { label, boundTo }) => readInPages(link, name, fields, deps.log, label, boundTo !== undefined ? { boundTo } : {}),
     act: (link, name, fields, { oneChannel, deadline }) => machineAct(link, name, fields, deadline, oneChannel ? { oneChannel: true } : {}),
     isAppPage: deps.isAppPage ?? (() => false),
     owns: deps.owns ?? (() => null),

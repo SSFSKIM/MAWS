@@ -12,8 +12,9 @@
 //   build's schema does not hold taken off, its refusal of a path outside the folders worded as the update sentence; to
 //   one that lists it, the plain read with `named` first, which is all a file inside the folders costs; on the files
 //   service's refusal, or an answer the session's deliveries admit read-only (`added`), the act, when the question
-//   allows it. The call is bound to the channel whose peer's list was read for it (`oneChannel`, its pages too), so the
-//   link never carries keys only that peer reads to the next channel's peer (M3's fix wave; Decision Log 27). When that
+//   allows it. The call is bound, whole, to the channel whose peer's list was read for it (its pages too, none asked once
+//   another channel is current), so keys only that peer reads never reach another channel's peer, carried by the link or
+//   asked anew (M3's fix waves 1 and 3; Decision Log 27). When that
 //   channel ends before the read is answered (the call, a page, or the act), the read waits for the link's next channel,
 //   within the hold the link gives a carried call, and is read afresh there by decision 5's order: a new look at the
 //   peer's list, a new call, the act if one is due; once (fix wave 2, the architect's condition 2). So the page sees
@@ -54,10 +55,11 @@ type Result = CommandResult<CommandName>;
 
 export interface RemoteOutsideDeps {
   /**
-   * Today's paged call (`readInPages`), its log lines naming `label` in place of the path when one is given; `oneChannel`:
-   * the call and its pages go only on the channel current when each is made, and fail at its end.
+   * Today's paged call (`readInPages`), its log lines naming `label` in place of the path when one is given; `boundTo`:
+   * whether the channel the read began on is still the current one, asked before each of its requests, each of which goes
+   * on that channel alone and fails at its end.
    */
-  call(link: RemoteLink, name: 'files.read', fields: Fields, options: { label?: string; oneChannel?: true }): Promise<Result>;
+  call(link: RemoteLink, name: 'files.read', fields: Fields, options: { label?: string; boundTo?: () => boolean }): Promise<Result>;
   /** Remote lane B's `machine` act, the capability as its `requires`. */
   act(link: RemoteLink, name: OutsideAct, fields: Fields, options: { oneChannel: boolean; deadline: number }): Promise<Result>;
   /** U6e's `isAppPage(client, appUrl)` bound to the app's URL: the predicate the router's guard uses. */
@@ -132,20 +134,26 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
     return again === CHANNEL_ENDED ? unreachable('files.read', link) : again;
   }
 
-  /** `read`'s answer, or CHANNEL_ENDED: a channel ended while it was under way and it failed as no machine reachable. */
+  /**
+   * `read`'s answer, or CHANNEL_ENDED: the channel it began on ended or was replaced while it was under way, and it failed
+   * as no machine reachable (a request the link failed at that channel's end, or one never asked of the next).
+   */
   async function onItsChannel(link: RemoteLink, read: () => Promise<Result>): Promise<Result | typeof CHANNEL_ENDED> {
+    const began = link.peerCapabilities(); // a channel's own list: another channel's is another
     let ended = false;
     const off = link.onChannel((event) => void (event === 'lost' && (ended = true)));
     try {
       const result = await read();
-      return ended && !result.ok && result.error.code === 'host_unavailable' ? CHANNEL_ENDED : result;
+      const replaced = ended || link.peerCapabilities() !== began;
+      return replaced && !result.ok && result.error.code === 'host_unavailable' ? CHANNEL_ENDED : result;
     } finally {
       off();
     }
   }
 
-  /** Whether a channel is current by `until`, waiting for the link's next one. */
+  /** Whether a channel is current before `until`, waiting for the link's next one; one current only after it is none. */
   function nextChannel(link: RemoteLink, until: number): Promise<boolean> {
+    if (deps.now() >= until) return Promise.resolve(false);
     if (link.peerCapabilities() !== null) return Promise.resolve(true);
     return new Promise((resolve) => {
       const done = (current: boolean) => {
@@ -154,7 +162,7 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
         resolve(current);
       };
       const timer = setTimeout(() => done(false), Math.max(0, until - deps.now()));
-      const off = link.onChannel((event) => void (event === 'current' && done(true)));
+      const off = link.onChannel((event) => void (event === 'current' && done(deps.now() < until)));
     });
   }
 
@@ -162,7 +170,8 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
   async function decided(link: RemoteLink, fields: Fields, client: ClientRef | null, label: string | undefined): Promise<Result> {
     const peers = link.peerCapabilities();
     if (peers === null) return unreachable('files.read', link);
-    const bound = { ...(label !== undefined && { label }), oneChannel: true as const };
+    // the attempt whose keys this list chose is this channel's, whole: no request of it goes once another is current
+    const bound = { ...(label !== undefined && { label }), boundTo: () => link.peerCapabilities() === peers };
     // (i) a build before this landing: today's read to the byte; its refusal of a path outside the folders says to update
     if (!peers.includes(OUTSIDE_FILES_CAPABILITY)) {
       const plain = await deps.call(link, 'files.read', without(fields, 'named', 'agent', 'raw', 'open'), bound);
