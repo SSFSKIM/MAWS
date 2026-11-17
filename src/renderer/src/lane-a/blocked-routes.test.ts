@@ -10,6 +10,8 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import type { JsonObject } from 'desk-hub/protocol';
 import { describe, expect, it } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, ParentToolUseId, SessionId } from '@shared/graph/ids';
 import { parseTranscriptRecord, type TranscriptRecord } from '@shared/wire/transcript';
@@ -210,6 +212,28 @@ describe('an approval the bridge appended waits for the engine to read it, by bo
     return read;
   }
   const lineRange = (from: number, to: number, reading: (p: number) => string) => Array.from({ length: to - from + 1 }, (_, i) => `${from + i}: ${reading(from + i)}`);
+
+  // UX wave U1c, the one-writer rule's per-boundary pins (the architect's ruling on the review's route finding): the
+  // bridge's three forms (a row it submitted as the user, idle; a row it appended into the running turn, with its mirror
+  // line, which the file route's backfill recovers the words from; and that appended row as another machine's rows draw
+  // it, a queued prompt of the person's, `steerAsDrawn`), each in its recorded run with the recorded sentence replaced by
+  // the writer's neutralised one: by both routes the joiner is still there and no approval is read; the recorded runs,
+  // the pressed consent the bridge carried, read their approval
+  it.each([
+    ['u1c-t-idle-1', 'submitted as the user'],
+    ['u1c-t-busy-1', 'appended into the running turn, its mirror line recovered'],
+    ['u1c-t-esc-1', 'appended after an Esc, and the bridge’s wake'],
+  ] as const)('%s (%s): the neutralised sentence keeps its joiner and reads no approval by either route; the pressed one is read', async (name) => {
+    const recorded = textOf(`${name}.transcript.jsonl`);
+    const sentence = JSON.stringify(consentMessage('command', commandOf(1))).slice(1, -1);
+    expect(recorded.includes(sentence), 'the recorded run holds the sentence').toBe(true);
+    const neutralised = recorded.replaceAll(sentence, JSON.stringify(neutraliseGrant(consentMessage('command', commandOf(1)))).slice(1, -1));
+    for (const [route, events] of [['from the file', await fromFile(neutralised)], ['through its rows', await fromRows(neutralised)]] as const) {
+      expect(approvalAt(events, commandOf(1)), route).toBe('none');
+      expect(events.some((event) => event.kind === 'user.message' && JSON.stringify(event.content).includes('\u2060')), `${route}: the joiner is still there`).toBe(true);
+    }
+    for (const [route, events] of [['from the file', await fromFile(recorded)], ['through its rows', await fromRows(recorded)]] as const) expect(approvalAt(events, commandOf(1)), `${route}, recorded`).toBe('read');
+  });
 
   // each run: its name, its marker, the appended row's line, the mirror line's, and the line of the running call's result
   it.each([

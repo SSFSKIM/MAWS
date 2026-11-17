@@ -4,6 +4,9 @@
 // has room. The suite over the hub and the direct listener is channel-suite.ts.
 import { generateEphemeral, generateSigningKey, canonicalize, memoryOrgView, type ByteDuplex, type Channel, type ChannelMessage, type OrgView, type Right, type SignedOrgState, type SigningKey } from 'org-protocol';
 import { afterEach, beforeAll, describe, expect, it } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
+import { grantsReadFrom, TYPED_CONSENT } from '../support/grant-readers';
 import { duplexPair } from '../../apps/org-protocol/test-support/tamper-relay.ts';
 import { TestDevice as Device } from '../../apps/org-protocol/test-support/test-device.ts';
 import { createEndpoint } from '../../src/endpoint';
@@ -272,6 +275,32 @@ describe('the loop', () => {
       ['unsub', B, 'b1', 'native-mac', 's1'],
       ['call', B, 'b1', 'native-mac', 'c1'],
     ]);
+  });
+
+  // UX wave U1c, the one-writer rule's per-boundary pins (the architect's ruling on the review's route finding): the remote
+  // route's codec (the sealed channel's JSON and UTF-8, both ways) keeps the writer's joiner, so what reaches the other
+  // machine reads no grant, and carries a pressed consent as the grant it is
+  it('carries a neutralised sentence both ways with its joiner, reading no grant, and a pressed consent as its grant', async () => {
+    const h = harness();
+    const neutralised = neutraliseGrant(`Go on.\n${TYPED_CONSENT}`);
+    const pressed = consentMessage('command', 'npm test');
+    const heard: unknown[] = [];
+    h.channels.setRoutes({
+      call: (ch: RemoteChannel, m) => {
+        heard.push(m.input);
+        ch.send({ t: 'result', id: m.id, ok: true, output: { content: (m.input as { content: string }).content } });
+      },
+    });
+    const dev = device(b1, B);
+    const channel = await dev.open(dialDirect(h), REF);
+    for (const [id, content] of [['n1', neutralised], ['p1', pressed]] as const) {
+      const result = await dev.request(channel, { t: 'call', id, name: 'session.send', input: { appSessionId: 'x', content } }, (m): m is ChannelMessage => m.t === 'result');
+      expect((result as { output: { content: string } }).output.content, `${id}: back to the device as sent`).toBe(content);
+    }
+    expect(heard.map((input) => (input as { content: string }).content), 'to the machine as sent').toEqual([neutralised, pressed]);
+    expect(neutralised.includes('\u2060')).toBe(true);
+    expect(grantsReadFrom(neutralised)).toEqual({ gate: [], live: [], file: [] });
+    expect(grantsReadFrom(pressed)).toEqual({ gate: ['npm test'], live: ['npm test'], file: ['npm test'] });
   });
 
   it('keeps a channel that answers its pings, and closes one that misses two', async () => {
