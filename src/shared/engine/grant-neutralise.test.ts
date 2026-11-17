@@ -120,7 +120,7 @@ describe('neutraliseGrant', () => {
       expect(out.replaceAll(GRANT_BREAK, ''), `seed ${seed}, text ${n}: only the joiner is added`).toBe(text.replaceAll(GRANT_BREAK, ''));
     }
     expect(broken, 'texts in which a span was broken').toBeGreaterThan(count / 5);
-  });
+  }, 30_000); // a work case, about 2.2 s alone on a build machine: its limit is explicit, since a loaded run took it past the default 5 s
 
   it('joined by the engine’s line break with a pressed consent, before or after, the pressed one alone keeps its grant', () => {
     const pressed = consentMessage('command', 'npm test');
