@@ -1480,8 +1480,20 @@ test.describe('the floating session card (P3-G)', () => {
       const box = (await body.boundingBox())!;
       await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2);
       await page.mouse.wheel(0, 2000);
+      // The first wheel's scroll lands before the toolbar's place is read (the scene above's wait). This scene's first
+      // run on a Mac read the place at once: a wheel is not awaited, so the toolbar can still be below the card's edge,
+      // the second wheel then meets nothing of the card, and the body stays at its foot with the question's controls
+      // above its top. The toolbar's centre is asserted inside the body's rect, so a lost wheel fails here by name.
+      const composerBottom = async () => {
+        const composer = (await card.locator('section[data-composer]').boundingBox())!;
+        return composer.y + composer.height;
+      };
+      await expect.poll(composerBottom, { message: 'the composer’s bottom inside the card' }).toBeLessThanOrEqual(box.y + box.height + 1);
       const toolbar = (await card.getByRole('toolbar', { name: 'Composer tools' }).boundingBox())!;
-      await page.mouse.move(toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2);
+      const [toolbarX, toolbarY] = [toolbar.x + toolbar.width / 2, toolbar.y + toolbar.height / 2];
+      const insideBody = toolbarX > box.x && toolbarX < box.x + box.width && toolbarY > box.y && toolbarY < box.y + box.height;
+      expect(insideBody, `the toolbar’s centre (${Math.round(toolbarX)}, ${Math.round(toolbarY)}) inside the body’s rect (x ${Math.round(box.x)} to ${Math.round(box.x + box.width)}, y ${Math.round(box.y)} to ${Math.round(box.y + box.height)})`).toBe(true);
+      await page.mouse.move(toolbarX, toolbarY);
       await page.mouse.wheel(0, -2000);
       const reachable = () =>
         card.evaluate((cardElement) => {
@@ -1495,9 +1507,32 @@ test.describe('the floating session card (P3-G)', () => {
               return `${element.textContent?.trim()}: ${inside && element.contains(document.elementFromPoint(x, y))}`;
             });
         });
-      await expect.poll(reachable, { message: 'the question’s controls in the card’s visible rect' }).toEqual(['Dismiss: true', 'Skip: true', 'Next: true']);
+      // Where the controls stand against the body's rect, printed and kept with the result whether the poll passes or
+      // not (the architect's ruling on this scene's first Mac run: the reading rests on a measurement).
+      const placed = () =>
+        card.evaluate((cardElement) => {
+          const pane = cardElement.querySelector<HTMLElement>('[data-pane="card"]')!;
+          const view = pane.getBoundingClientRect();
+          const controls = Array.from(cardElement.querySelectorAll<HTMLElement>('[data-waiting-form] button'))
+            .filter((element) => ['Dismiss', 'Skip', 'Next', 'Submit'].includes(element.textContent?.trim() ?? ''))
+            .map((element) => {
+              const r = element.getBoundingClientRect();
+              return `${element.textContent?.trim()} x ${Math.round(r.left)} to ${Math.round(r.right)}, y ${Math.round(r.top)} to ${Math.round(r.bottom)}`;
+            });
+          return `window ${window.innerWidth} x ${window.innerHeight}; body x ${Math.round(view.left)} to ${Math.round(view.right)}, y ${Math.round(view.top)} to ${Math.round(view.bottom)}, scrolled ${Math.round(pane.scrollTop)} of ${pane.scrollHeight - pane.clientHeight}; ${controls.join('; ')}`;
+        });
+      try {
+        await expect.poll(reachable, { message: 'the question’s controls in the card’s visible rect' }).toEqual(['Dismiss: true', 'Skip: true', 'Next: true']);
+      } finally {
+        const where = await placed();
+        test.info().annotations.push({ type: 'the question’s controls against the card’s body', description: where });
+        console.log(`[panel floor] ${where}`);
+      }
       expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
-      await expect(card.getByRole('heading', { name: title })).toBeInViewport();
+      // The card's header, by its level and not by the seeded title: this scene launches fresh under replay, so the
+      // index rebinds the selected session to the launch's own engine id, as it does at /clear, and the session reads
+      // "New chat" while the seeded transcript stays a row of its own (a person's resume keeps the id and the title).
+      await expect(card.getByRole('heading', { level: 2 }), 'the card’s header stays in place').toBeInViewport();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     } finally {
       await maws.cleanup();
