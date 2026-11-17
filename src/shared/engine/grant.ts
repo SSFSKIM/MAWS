@@ -88,6 +88,8 @@ export function quotesGrant(text: string, work?: { steps: number }): boolean {
  * opening. U+2060, the word joiner: no white space, no line break, no wrap point, and invisible; only its own removal can
  * give the opening back.
  */
+export const GRANT_BREAK = '\u2060';
+
 /**
  * The as-typed copy of a text that went on the wire (the review round's R3): every U+2060 removed, the writer's joiner
  * and one a person typed or pasted alike. The one helper every copy a person meets takes: recall, take-back, a bubble's
@@ -97,8 +99,6 @@ export function quotesGrant(text: string, work?: { steps: number }): boolean {
 export function asTyped(text: string): string {
   return text.replaceAll(GRANT_BREAK, '');
 }
-
-export const GRANT_BREAK = '\u2060';
 
 /**
  * The writer's patterns, folded as `quotesGrant` folds (letters and digits only): the opening with "this exact" and with

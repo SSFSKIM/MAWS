@@ -312,10 +312,12 @@ describe('the one-writer rule: a `!` command holding the consent sentence', () =
 });
 
 // UX wave U1c, the review round's R4: step 1b claims the openings of the engine's local-command output as the fixtures
-// record them. Each case takes the recorded form (pass2/bash-context-echoed seq 7's replay for `!` output; the uxwave
-// u3-commands-r1 transcript's rows for a slash command's: a `user` row for stdout, a `local_command` system row for
-// stderr), puts the consent sentence on a line of its own inside the
-// output, and writes it as a frame and a row of human origin (whatever origin the transcript file gives such a row).
+// record them, whatever origin a row of them has (defence in depth). The recordings show none of these forms with a
+// human origin (pass2/bash-context-echoed seq 7's replay for `!` output, no origin; the uxwave u3-commands-r1
+// transcript's rows for a slash command's: stdout on a `user` row with no origin and on `local_command` system rows,
+// stderr only on a `local_command` system row); one that carried a human origin would have read as a grant before step
+// 1b claimed them. Each case takes the recorded form, puts the consent sentence on a line of its own inside the output,
+// and writes it as a frame and a row of human origin, the case no recording shows.
 describe('the one-writer rule: a local command’s output holding the consent sentence', () => {
   const SENTENCE = consentMessage('command', 'cat /etc/x');
   const bashOutput = (loadJournal('pass2', 'bash-context-echoed').find((row) => row.seq === 7)!.frame as { message: { content: string } }).message.content;
