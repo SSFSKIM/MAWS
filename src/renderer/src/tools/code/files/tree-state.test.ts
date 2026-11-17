@@ -312,6 +312,18 @@ describe('the field’s text and the finding tab', () => {
     vi.advanceTimersByTime(DELAY);
     expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [A]: { width: null, folded: true, expanded: [] } }) }]);
   });
+
+  // ⌘P before the first read answered (the first Files tab of the run is drawn by it): the read brings a stored session's
+  // width and fold, and the search goes on in the tab it chose with the text typed meanwhile
+  it('keep the field’s text and the finding tab set before the read answered over what the read brings', async () => {
+    const fake = fakeClient({ 'layout.get': { value: stored({ [A]: { width: 300, folded: true, expanded: ['/r'] } }) } });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    store.getState().setFinding(A, 'files:one');
+    store.getState().setFilter(A, 'tide');
+    await store.getState().load();
+    expect(treeOf(store.getState(), A)).toMatchObject({ width: 300, folded: true, filter: 'tide', finding: 'files:one' });
+    expect([...treeOf(store.getState(), A).expanded]).toEqual(['/r']);
+  });
 });
 
 describe('the sessions the window knows', () => {
