@@ -840,6 +840,7 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
     - Otherwise this build's answer envelopes are taken out strictly in one forward pass (`takeOutEnvelopes`, `src/shared/maws/ask-strict.ts`): each line of the writer's grammar, the json fence, and a block that names the tag's ask with at least one answer, each by place with its question empty. An opening line that does not read so yields no grant.
     - What is left yields none if it holds an envelope's tag or a json fence line, pasted or not.
     - Otherwise each whole-sentence line is a grant, except a line inside a pasted segment.
+  - **Since Decision 63 (F1):** a pressed consent's own frame is the sentence whole on every route: the queue's preparation attaches no linked read to a submission that is a consent whole (`engine-host/linked-reads.ts`), since a link in its subject is the call's text, not the person's words.
   - **Why the slicer no longer decides grants:** an earlier build wrote the model's question words on the envelope's line. Inputs built from them could make the legacy slicer end an envelope early or hide one behind a pasted segment, and so read a sentence the model wrote as the person's. Patching the slicer for each such input would be a chase. The strict reading leaves an earlier envelope's opening line or its real fence line behind, however it is forged, so it fails closed instead.
   - **The accepted costs, as a person sees them:** a consent beside an earlier build's envelope, beside a json code block they typed, or beside a pasted segment that holds an envelope's tag is not read. The blocked row keeps "Approve and retry", and one press approves.
   - **One accepted disagreement:** a grant MAWS sent that the engine joined with an earlier build's envelope reads approved live, from the host's own mark, and after a reload offers its button again (tracker row). No build has both the consent button and the earlier writer.
@@ -883,6 +884,64 @@ About 800 lines of source, 1,620 of tests and 300 of scenes, in about forty file
   Date/Author: 2026-11-16, the architect; built by the rule-R worker; recorded by the controller.
 - Decision 62 (the session that keeps master, 2026-11-16 (UTC)): L1 is struck, and no line is set aside from step 2's tag and fence test. Reason, verbatim: "every exemption on this surface has been the hole the next review found, and L1 rests on an assumption, a tag always at a line's start, that a join can break; its benefit, a consent whose subject holds the envelope's tag keeping its grant when joined, is rare and recoverable with one press". The cost: a pressed consent whose subject holds `[MAWS ask ` reads its grant alone, and none when joined (cost (b)'s tracker row). Built in `69a511594`.
   Date/Author: 2026-11-16, the master session; built by the rule-R worker; recorded by the controller.
+- Decision 63 (the independent review of rule R, F1, 2026-11-16, UTC): the queue's preparation attaches no linked read to a submission that is the consent sentence whole, a string or one text block, by rule R's step 0 test (`readConsents`).
+  - Why: a consent's subject is the blocked call's text, quoted, so a `maws-artifact:` link in it is the model's, not the person's words. A read on the consent's own frame left that frame no sentence whole, and it held `LINKED_READ_OPENING`. So Approve pressed while no turn ran read no grant on the live route and the file route, with nothing joined, and the model chose that subject.
+  - Built in `engine-host/linked-reads.ts` (`consentWhole`). Red at `07646bda3`, built at `f19de6c96`.
+  - The joined cost stays as it was: a pressed consent the engine joins with another message's composed form.
+  - Rule R's text (Decision 57, and `personsLines`'s comment) gains: A pressed consent's own frame is the sentence whole on every route: the queue's preparation attaches no linked read to a submission that is a consent whole (`engine-host/linked-reads.ts`), since a link in its subject is the call's text, not the person's words.
+  Date/Author: 2026-11-16, the independent review (F1); built by the fixes worker; recorded by the controller.
+- Decision 64 (the independent review of rule R, F2, 2026-11-16, UTC): a mention writes no control character.
+  - `mentionText`, the one writer of a mention onto the wire, replaces `[\p{Cc}\u2028\u2029]` with U+FFFD as its last step, for a file and for an agent.
+  - The intake refuses a path that holds one, for a drop and for the + menu's pick answered by its path alone (`pathRefusal`). The words are the refusal sentence above.
+  - Why: a model with a shell can create a path whose segments put the consent sentence on a line of its own. The mention went onto the wire raw, so a grant nobody gave was read.
+  - Why U+FFFD: it is no separator and keeps the mention one token.
+  - The serialiser's piece kinds are a closed list (`PIECE_KINDS`), walked by a test that fails to compile or to run when a kind is added without a row.
+  - Red at `82e4772ca` and `83893c0b7`, built at `7e4220147`. It stands as hygiene beside Decision 65.
+  Date/Author: 2026-11-16, the independent review (F2); built by the fixes worker; recorded by the controller.
+- Decision 65 (the architect, 2026-11-16, UTC): the one-writer rule, in its neutralise form.
+  - **The rule.** A grant by text comes from the Approve press alone. What MAWS sends as a person's own free text cannot read as a consent. Board ticket 733 is the same principle at the writer of MAWS's composed forms. Board ticket 724, a positive mark on the Approve press, is the full fix.
+  - **The mechanism (neutralising).** `neutraliseGrant` (src/shared/engine/grant.ts) puts U+2060 (`GRANT_BREAK`, the word joiner: no white space, no line break, no wrap point, invisible) inside the first word of every span that reads as the grant's opening, after its first letter. The reading is `quotesGrant`'s (compatibility and case folding, letters and digits only, angle-bracket pairs read both ways), widened:
+    - each character is folded by itself;
+    - the words from any `<` to any later `>` with no typed `>` between them read kept and removed.
+    - So it breaks every span `quotesGrant` finds, and more. It is idempotent and linear (counted), and returns a text with no span unchanged.
+  - **Where it runs:** the last step of `serializeDraft` (on the assembled wire text: pieces joined, pasted bodies wrapped, mentions written, placeholders placed), of `remoteMessage` (after the uploaded paths' mentions), and of the raw-text sites: the sidebar's quick reply, a card thread's reply, the notification's reply in main, the fork's prompt, Compact's instructions. The press does not pass it. Bash mode's command and memory mode's note do not either: neither is a message (`<bash-input>` is an envelope that reads no grant), and changing a command's bytes would change what runs. The architect accepted this on condition that the reader side is pinned: the exact sentence typed in shell mode (alone, and as a line of a command of several lines), driven from the recorded `bash-context-echoed` fixture, reads no grant on the gate, the live route and the file route and draws no approval; memory mode's note, from the host's writer `memoryAppend`, lands in the file and reaches no reader (`fceef3923`). Recall of a row whose pasted body quotes the grant, sent again, writes the neutralised text (`fceef3923`).
+  - **What it replaces and why.** Two forms ruled the same day came first. The per-inserter form (built at `a0baca39a` and `005a6322f`, reverted at `f630a9879`) framed a grant-quoting text as data at each way text enters the draft; no single place takes every such text in, so it gave way to one writer. The frame form (built at `f571ac0f7`, `b865c8d09` and `65548801f`, removed at `31be506bd`, `0bd8a1ca8` and `1ba5ace98`) wrote a line that read as a consent as a pasted segment of its own: it protected a sentence by where it stood, and the task review showed that where a line stands is what a later layer can change (trimming a whole line; CRLF changing which pasted tags pair; an unavailable atom joining two fragments on the wire). Neutralising makes the protection a substring fact: the written text holds no span that reads as the grant's opening, and no change of white space, line ends or frames puts one back.
+  - **Recall reads the text as typed.** `typedFromRowText` (composer/editor/recall.ts) removes `GRANT_BREAK`, as it restores a neutralised pasted tag. So a sent prompt is one entry under the up arrow, and the recall search finds words across the joiner. Sending again puts the joiner back.
+  - **Condition 3's assumption: no layer between the writer and the consent test removes U+2060.**
+    - MAWS's own steps are enumerated in the task report, with per-route pins.
+    - The engine's step was observed on engine 2.1.322, smallest model, by the probe: branch `ux-wave/u1c-writer-probe` at `effddc84f9aff65318ab16dad3ed9310bdf85d4e`, findings `spikes/protocol-probe/findings-uxwave-u1c-writer-forms.txt`, fixtures `spikes/protocol-probe/fixtures/uxwave/u1cw-*.jsonl` (run E, one session). A user message's text is kept character for character in four places: the transcript row, the replay frame, a waiting message's `attachment.prompt`, and the joined row (the first text, one LF, the second, nothing trimmed). That holds for U+2060, U+200B, U+FEFF, doubled spaces, CR, CRLF, U+2028, U+2029, leading and trailing spaces and tabs, and a trailing LF.
+    - Only the `last-prompt` metadata row differs: it is trimmed, each LF is turned to a space, and it is cut at 200 characters plus an ellipsis.
+    - MAWS reads it in two places. Neither hands it to a consent reader or draws it as a sent message: engine-host/fs/summarize.ts:62 (a title's fallback) and engine-host/fs/chain-follower.ts:253 (a rewind's prefill, which passes the serialiser again if sent). The rewind's source is board ticket 740.
+  - **Untraced:** rows from another machine's terminal lane are produced outside this repository, outside what MAWS writes; rule R reads them like any other row.
+  - **Scope.** The rule protects what MAWS shows as approved. A read consent drives only:
+    - the Approve button's gate (blocked-call/grants.ts:86, `waitingGrants` :65);
+    - the press's bookkeeping (:145, :220-250);
+    - the transcript's consent line (transcript/model/derive.ts:1613, view/rows/User.tsx:59; head.ts:46, adapters.ts:331);
+    - the host's marks (engine-host/normalizer.ts:465-467, :499);
+    - lane A's own-message reading (lane-a/source/off-chain.ts:84).
+    - No permission answer comes from it. Whether the engine's classifier allows a call is tickets 733 and 724.
+    - The engine's classifier, as observed in the probe's runs P (30 sessions on the same commit; the call blocked in turn 1 in 30 of 30). The counts are allowed retries, not a bound:
+      - a follow-up alone: 0 of 2;
+      - the consent sentence alone: 3 of 3;
+      - pasted model output with the sentence on its own line: 5 of 5;
+      - the same through `neutraliseGrant`: 3 of 5;
+      - the sentence's line as a `wrapPasted` segment: 0 of 5;
+      - the segment and `neutraliseGrant`: 0 of 5;
+      - inside a path's `mentionText`: 0 of 5.
+    - The joiner settles what MAWS reads and shows. It does not settle the classifier's decision.
+  - **Accepted costs:**
+    - typing or pasting the sentence does not grant;
+    - a recalled or taken-back consent does not grant: the person presses Approve again;
+    - copying a sent bubble's text copies the invisible joiner;
+    - a U+2060 a person typed into a span's first word is read back as the rule's and leaves the recalled text.
+  - **Proof:**
+    - a seeded substring property: drafts over every piece kind, seed `0x75316331`, 600; free text, seed `0x66726565`, 600; the function's own texts, seed `0x6e657574`, 3000;
+    - under each later change and all in a row, on the gate, the live route and the file route, with a pressed consent joined before and after (which keeps its own);
+    - the inverse (the press reads its grant on all three);
+    - the save rule unchanged (`rowClaim`);
+    - the guard's behaviour cases;
+    - linear work, by a count.
+  Date/Author: 2026-11-16, the architect; built by the fixes worker; recorded by the controller.
 
 ## Outcomes & Retrospective
 

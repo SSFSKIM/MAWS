@@ -13,6 +13,9 @@ import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../te
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
+// The cases that read large inputs assert counts of the scan's work, never a time: the runner's default limit only measured
+// the machine's load (2 to 4.6 seconds alone on a quiet machine, over 5 under load). A reader that never ends still fails here.
+const WORK_CASE_LIMIT = 30_000;
 
 describe('the link form: linkPaths', () => {
   it.each([
@@ -263,7 +266,7 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
     ['a thousand nested images, then links', `${'!['.repeat(1000)}${`[r](${P})`.repeat(1000)}`],
   ])('%s', (_, text) => {
     bounded(text);
-  });
+  }, WORK_CASE_LIMIT);
 
   // The round's fix pass (the task review): work the string probes cannot see. A table of a hundred rows of twelve
   // thousand pipes makes 1.2 million empty cells, each a context the inline pass is called for; every step of every
@@ -370,7 +373,7 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
       worstStretch = Math.max(worstStretch, longest);
     }
     console.log(`named scan work: seed ${seed}, ${count} hostile texts, ${chars} characters, most work per character ${worstRatio.toFixed(1)} (bound ${WORK_PER_CHAR}), longest stretch ${worstStretch} (bound ${STRETCH_MAX})`);
-  });
+  }, WORK_CASE_LIMIT);
 });
 
 // §A, clickPath step 7 (Decision Log 12): the window parses `maws-path:<href>` as a URL before the click reads it; a
@@ -851,7 +854,7 @@ describe('rowClaim: decision 22’s table over the recorded transcripts', () => 
     expect(named).toBeGreaterThan(0);
     expect(waiting).toBeGreaterThan(0);
     expect(other).toBe(0); // no recorded row links a path in text someone else wrote; the case above writes them
-  });
+  }, WORK_CASE_LIMIT);
 });
 
 describe('needlesOf, and the fact it rests on', () => {

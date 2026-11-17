@@ -7,9 +7,10 @@ import { SEND_UPLOADS_MAX, SendUploadsSchema, UPLOAD_FILES_MAX, UPLOAD_KEPT_MS }
 import { REMOTE_INLINE_MAX_BYTES } from '@shared/ipc/schema/remote';
 import { addressOf } from '@shared/machine/address';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { OTHER_MACHINE } from '../../../../../test/support/machine';
-import type { Attachment } from './doc';
-import type { Serialized } from './serialize';
+import { docOf, paragraph, textNode, type Attachment } from './doc';
+import { serializeDraft, type Serialized } from './serialize';
 import { classifyRemoteFile, composeRemoteSend, forgetUploads, planRemoteSend, remoteMessage, resetRemoteUploads, STALE_UPLOADS, uploadAttachments, uploadName, useRemoteUploads } from './remote-uploads';
 
 const MiB = 1024 * 1024;
@@ -118,6 +119,13 @@ describe('the message a send with uploads makes', () => {
     ]);
     expect(message.text).toBe('look\n\n@.claude/desk-uploads/r/u.0.pdf @"/elsewhere/x y.txt"');
     expect(message.empty).toBe(false);
+  });
+
+  // UX wave U1c, the one-writer rule: the neutralising is the last step here too, once the paths' mentions are joined
+  it('the one-writer rule: the text with the paths’ mentions joined reads no grant, the sentence in a path or typed', () => {
+    const typed = serializeDraft(docOf([paragraph(textNode(TYPED_CONSENT))]), { sessionId: null, cwd: '/w' });
+    expectNoGrantSent(remoteMessage(typed, [], ['/w/a.txt'], '/w').content);
+    expectNoGrantSent(remoteMessage({ ...s, text: 'Go on.' }, [], [`/w/x\n${TYPED_CONSENT}`], '/w').content);
   });
 
   it('is the mentions alone when there is no text, and a string when nothing is inline', () => {
