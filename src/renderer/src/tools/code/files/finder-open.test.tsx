@@ -26,7 +26,7 @@ import { openFile, resetKeptOpens } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
-import { connectGoToFile } from './finder';
+import { connectGoToFile, requestKeyboard } from './finder';
 import { useFiles } from './store';
 import { resetTreeState, treeOf, useTreeState } from './tree-state';
 
@@ -185,6 +185,24 @@ describe('Enter puts the keyboard in the file (S3; B5)', () => {
     expect(document.activeElement!.getAttribute('role')).not.toBe('tab');
     expect(document.activeElement!.closest('[role="tab"]')).toBeNull();
     expect(document.querySelector(`[data-region="panel"] [data-file-viewer][data-path="${APP}"]`)).toBeNull(); // no side tab of it
+  });
+
+  // Below Enter (Interfaces §E): the request by the file's key is what puts the keyboard in a file's text wherever it is
+  // drawn; here with an open that brings the file's main tab forward, as Enter's does.
+  it('the request for a file’s keyboard, made with an open that brings its main tab forward, is taken inside that tab’s text and never on a tab', async () => {
+    render(<Page />);
+    act(() => void openFile(A, APP, null, { main: true }));
+    await waitFor(() => expect(textOf(APP, 'main')).not.toBeNull(), { timeout: 5000 });
+    act(() => useLayout.getState().activateTab(`session:${A}`));
+    await waitFor(() => expect(textOf(APP, 'main')).toBeNull());
+    act(() => composer().focus());
+    act(() => {
+      void openFile(A, APP, null, { keep: true });
+      requestKeyboard({ into: 'file', key: KEY(APP) });
+    });
+    await waitFor(() => expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(APP)));
+    await waitFor(() => expect(document.activeElement).toBe(textOf(APP, 'main')), { timeout: 5000 });
+    expect(document.activeElement!.closest('[role="tab"]')).toBeNull();
   });
 
   it('a main tab of the file whose read is held and then fails: the keyboard is on the file’s body and stays there', async () => {
