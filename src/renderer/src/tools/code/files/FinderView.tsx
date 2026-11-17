@@ -127,13 +127,13 @@ function lineOf(state: FinderState): { line: 'none' | 'searching' | 'failed' | '
 
 function FinderList({ tabId, directory, state, choose, clicked }: { tabId: string; directory: string | null; state: FinderState; choose: Finder['choose']; clicked?(path: string, opened: Opened | null): void }) {
   const [width, measure] = useWidth(); // the rows' width, from which a row's folder gets its room
-  const fonts = useMemo(rowFonts, []);
+  const fonts = useMemo(() => rowFonts(), []);
   const rows = drawnRows(state) ?? [];
   const at = state.status === 'answered' ? state.at : null;
   const highlighted = at === null ? null : optionId(tabId, at);
   useEffect(() => {
     if (highlighted !== null) document.getElementById(highlighted)?.scrollIntoView?.({ block: 'nearest' }); // the highlight stays in view
-  }, [highlighted, rows]);
+  }, [highlighted, state]);
   const said = lineOf(state);
   if (said !== null) {
     return (

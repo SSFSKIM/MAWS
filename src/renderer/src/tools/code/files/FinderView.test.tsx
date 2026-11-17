@@ -45,15 +45,13 @@ const REPO: Record<string, FilesEntry[]> = {
 };
 const FOLDED = { version: 1, sessions: { [A]: { width: null, folded: true, expanded: ['/r'] } } };
 
-// What git.lsFiles answers for a query (the paths from the working folder, folders with their slash), and the reads a
-// case holds or fails.
+// What git.lsFiles answers for a query (the paths from the working folder, folders with their slash), and the files' text
+// a case gives.
 type Answer = ReturnType<typeof answer>;
 const listed = (...paths: string[]): Answer => answer({ paths, truncated: false, source: 'git' });
 const LISTING = ['src/app.ts', 'notes.md', 'src/', 'vendor/', 'vendor/harbor-lib/'];
 let search: (query: string) => Answer | Promise<Answer>;
 let searches: { query: string; reply: ReturnType<typeof deferred<Answer>> }[];
-let heldReads: Map<string, ReturnType<typeof deferred<void>>>;
-let failedReads: Set<string>;
 let contents: Record<string, string>;
 const holdSearches = () => {
   search = (query) => {
@@ -61,11 +59,6 @@ const holdSearches = () => {
     searches.push({ query, reply });
     return reply.promise;
   };
-};
-const holdRead = (path: string) => {
-  const gate = deferred<void>();
-  heldReads.set(path, gate);
-  return gate;
 };
 
 // The virtual list draws rows only in a scroller with a height (happy-dom lays nothing out).
@@ -82,7 +75,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 beforeAll(() => import('../viewer/CodeView')); // the editor's chunk, loaded once before the cases that draw a file
 
 function finderMain(stored: unknown = null) {
-  return installFakeMain(async (name, input) => {
+  return installFakeMain((name, input) => {
     if (name === 'layout.get') return answer({ value: input.key === 'files.tree' ? stored : null });
     if (name === 'layout.set' || name === 'files.watch' || name === 'files.unwatch' || name === 'git.unwatch') return answer();
     if (name === 'git.watch') return fail('not a git repository');
@@ -95,8 +88,6 @@ function finderMain(stored: unknown = null) {
     if (name === 'git.lsFiles') return search(input.query as string);
     if (name === 'files.read') {
       const path = String(input.path);
-      await heldReads.get(path)?.promise;
-      if (failedReads.has(path)) return fail(`denied: ${path}`);
       const content = contents[path] ?? `// ${path}\n`;
       return answer({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     }
@@ -140,8 +131,6 @@ const openBeside = async (width: number) => {
 beforeEach(() => {
   search = (query) => listed(...LISTING.filter((path) => path.includes(query)));
   searches = [];
-  heldReads = new Map();
-  failedReads = new Set();
   contents = {};
   resetPanelStores();
   resetKeptOpens();
