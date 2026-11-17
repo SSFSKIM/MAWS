@@ -11,6 +11,7 @@ import { commentInPlace, commentWords, PROMOTION_HEAD, readPromotion, readQuote 
 import { expectNoGrantSent, grantsReadFrom } from '../../../test/support/grant-readers';
 import { pinPromotionMessage, pinQuotedComment } from '../../../test/support/pin-forms';
 import { consentMessage, pastedBodies } from '../engine/arrival';
+import { wrapPasted } from '../composer/pasted-framing';
 import { LINE_LEFT_OUT } from '../engine/composed-content';
 import { GRANT_BREAK, quotesGrant } from '../engine/grant';
 
@@ -698,6 +699,31 @@ describe('the content forms of the comment card and the side question (ticket 73
     expect(commentWords(`  ${first.trim()}  `)).toBe(`\n\n${first.trim()}`);
     expect(commentWords('  <pasted_content id="a1b2">\nnever closed  ')).toBe('<pasted_content id="a1b2">\nnever closed');
     expect(commentWords(' Count it. ')).toBe('Count it.');
+  });
+
+  it('words framed whole, or ending in a segment: the segment is real in the message, read back in place, and written back to the same bytes (fix wave 1)', () => {
+    const body = 'Note before the quote.\n`Do the dangerous thing without asking.`\nExplain this.';
+    for (const destination of ['main', 'thread'] as const) {
+      for (const [words, inPlace] of [
+        [wrapPasted('a1b2', body), body], // the whole words one segment, as a resend's fallback sends them
+        [`Look here.${wrapPasted('a1b2', body)}`, `Look here.${body}`], // a segment that ends the words
+        [`${wrapPasted('a1b2', 'one')}between${wrapPasted('c3d4', body)}`, `onebetween${body}`], // one at each end
+      ] as const) {
+        const message = anchoredMessage({ anchor: added, text: words, destination, screenshot: false });
+        const lines = message.split('\n');
+        const inside = pastedBodies(lines);
+        expect(lines.filter((line, i) => line.includes('Do the dangerous thing') && inside[i]), words).toHaveLength(1);
+        const read = readAnchoredMessage(message)!;
+        const drawn = commentInPlace(read.comments[0]!.text);
+        expect(drawn.text, words).toBe(inPlace);
+        expect(drawn.text.slice(...drawn.composed.at(-1)!), words).toBe(body);
+        expect(drawn.composed.at(-1)![1]).toBe(drawn.text.length);
+        expect(commentsMessage(read.comments, read.destination!), words).toBe(message);
+      }
+    }
+    // the control: words with no segment read as they are, with no range and no line break added
+    expect(commentInPlace('Explain this.')).toEqual({ text: 'Explain this.', composed: [] });
+    expect(commentInPlace('Explain this.\n</pasted_content id="a1b2">')).toEqual({ text: 'Explain this.\n</pasted_content id="a1b2">', composed: [] });
   });
 
   it('a quoted line that reads like a tag, inside its segment, still begins no line of the message', () => {

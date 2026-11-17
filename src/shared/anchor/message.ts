@@ -111,21 +111,29 @@ export function anchoredMessage(input: { anchor: Anchor; text: string; destinati
 }
 
 // Ticket 733a (its document, Designs 3 and 4): a comment's words as a message carries them, trimmed; words that begin
-// with a pasted segment (a quoted line, `quotedComment`) keep the segment's two line breaks before it, which the trim
-// would take and which the segment's own reader (`takeSegment`) reads. The readers trim them off again (`readOneComment`,
-// as build F reads), so writing back what was read gives the same bytes.
+// with a pasted segment (a quoted line, `quotedComment`, or words a resend framed whole) keep the segment's two line
+// breaks before it, which the trim would take and which the segment's own reader (`takeSegment`) reads. A segment that
+// ends the words loses the line break after its closing tag to the trim; the message's next line break stands for it.
+// The readers trim the words again (`readOneComment`, as build F reads), so writing back what was read gives the same
+// bytes.
 export function commentWords(text: string): string {
   const words = text.trim();
-  return takeSegment(`\n\n${words}`, 0) === null ? words : `\n\n${words}`;
+  return opensWithSegment(words) ? `\n\n${words}` : words;
 }
 
+// Whether trimmed words begin with a pasted segment, the frame's line breaks around it being the ones the trim took
+const opensWithSegment = (words: string) => takeSegment(`\n\n${words}\n`, 0) !== null;
+
 /**
- * A comment's words read in place (Design 4): every pasted segment in them, the one at their start included (whose two
- * line breaks a reader's trim took off), drawn as its body where it stood, and each body's range in the text it gives.
- * Called only on the words of a message `readAnchoredMessage` read.
+ * A comment's words read in place (Design 4): every pasted segment in them, the one at their start and the one at their
+ * end included (whose line breaks a reader's trim took off), drawn as its body where it stood, and each body's range in
+ * the text it gives. Called only on the words of a message `readAnchoredMessage` read.
  */
 export function commentInPlace(words: string): { text: string; composed: Range[] } {
-  return segmentsInPlace(takeSegment(`\n\n${words}`, 0) === null ? words : `\n\n${words}`);
+  const read = segmentsInPlace(`${opensWithSegment(words) ? '\n\n' : ''}${words}\n`);
+  // the line break put after the words is the closing tag's own when a segment ends them (its reading took it), else no
+  // part of the words
+  return read.composed.at(-1)?.[1] === read.text.length ? read : { text: read.text.slice(0, -1), composed: read.composed };
 }
 
 // A `/btw` exchange promoted to a side thread: its first prompt lists the answered exchanges, then the text the human

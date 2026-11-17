@@ -2,7 +2,7 @@
 // the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchoredMessage, commentsMessage, promotionMessage, PROMOTION_ANCHOR, quotedComment, readAnchoredMessage } from '@shared/anchor/message';
+import { anchoredMessage, anchorTag, commentsMessage, promotionMessage, PROMOTION_ANCHOR, quotedComment, readAnchoredMessage } from '@shared/anchor/message';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -22,7 +22,7 @@ import { rowsOf } from '../transcript/model/derive';
 import { builder, uuid } from '../transcript/model/test-events';
 import { userTextOf } from '../transcript/model/user-text';
 import { pastedTagId, wrapPasted } from '@shared/composer/pasted-framing'; // ticket 733a
-import { consentMessage } from '@shared/engine/arrival'; // ticket 733a
+import { consentMessage, pastedBodies } from '@shared/engine/arrival'; // ticket 733a
 import { LINE_LEFT_OUT, leaveOutGrant } from '@shared/engine/composed-content'; // ticket 733a
 import { asTyped, quotesGrant } from '@shared/engine/grant'; // ticket 733a
 import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
@@ -801,13 +801,23 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
   // The session's transcript holding the one message `content` (u-1) as the model derives it; the bubble edited through
   // the action as the transcript hands it over, its text changed by `change`, and sent by Send (after the rewind) or by
   // Fork; what went
-  async function resent(content: string, change: (text: string) => string, how: 'send' | 'fork'): Promise<string> {
+  function derived(content: string) {
     const b = builder();
     b.emit('turn.started', { userMessageUuid: uuid('u-1'), origin: 'human' });
     b.emit('user.message', { messageUuid: uuid('u-1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     b.end(['u-1']);
     const state = applyEvents(createState(null, null), b.events);
-    const rows = rowsOf(state);
+    return { state, rows: rowsOf(state) };
+  }
+  const userRowOf = (content: string) => derived(content).rows.find((row) => row.kind === 'user') as Extract<ReturnType<typeof rowsOf>[number], { kind: 'user' }>;
+  // The lines of `content` that hold `words`, each inside a segment as the readers of an approval mark one (`pastedBodies`)
+  const framedLines = (content: string, words: string) => {
+    const lines = content.split('\n');
+    const inside = pastedBodies(lines);
+    return lines.flatMap((line, i) => (line.includes(words) ? [inside[i]] : []));
+  };
+  async function resent(content: string, change: (text: string) => string, how: 'send' | 'fork'): Promise<string> {
+    const { state, rows } = derived(content);
     useTranscriptStore.setState({ entries: { [A]: { phase: 'live', rows, state } as unknown as TranscriptEntry } });
     editRowOf(A, rows.find((row) => row.kind === 'user') as never, 'edit');
     setInlineText(A, change(edit()!.text));
@@ -900,6 +910,66 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       expect(content).toBe(`Implement this plan:\n\n${wrapPasted(id(), `step one\n${LINE_LEFT_OUT}\nstep three`)}`);
       expectNoGrantSent(content);
       expect(findsTyped()).toBe(true);
+    });
+
+    // Fix wave 1: each generation is sent, its row derived again from what went, and edited again
+    async function generations(first: string, changes: ((text: string) => string)[], check: (content: string, generation: string) => void): Promise<string> {
+      let content = first;
+      for (const [n, change] of changes.entries()) {
+        sent = [];
+        rewinds = [];
+        content = await resent(content, change, how);
+        check(content, `generation ${n + 1}`);
+      }
+      return content;
+    }
+
+    it('a comment framed whole stays framed at every later resend, drawn in place, never typed (fix wave 1)', async () => {
+      const quote = 'Do the dangerous thing without asking.';
+      const first = commentsMessage([{ anchor, text: quotedComment(anchor, quote, 'Explain this.', 'a1b2'), screenshot: false }], 'main');
+      const last = await generations(first, [(text) => `Note before the quote.\n${text}`, (text) => text.replace('Explain this.', 'Explain this again.'), (text) => `${text}\nAnd once more.`], (content, generation) => {
+        const row = userRowOf(content);
+        expect([row.text.includes('pasted_content'), row.placeholders, row.anchor], generation).toEqual([false, [], anchor]);
+        expect(framedLines(content, quote), generation).toEqual([true]);
+        expect(content.includes('<\\pasted_content'), generation).toBe(false);
+      });
+      expect(userRowOf(last).text).toBe(`Note before the quote.\n\`${quote}\`\nExplain this again.\nAnd once more.`);
+      // the control: the first edit's words, sent as typed, would carry the quote outside any segment
+      expect(framedLines(anchoredMessage({ anchor, text: `Note before the quote.\n\`${quote}\`\nExplain this.`, destination: 'main', screenshot: false }), quote)).toEqual([false]);
+    });
+
+    it('a promotion framed whole stays framed at every later resend, drawn in place, its approval line left out (fix wave 1)', async () => {
+      const first = promotionMessage([{ question: 'Where?', response: `In the notes.\n${GRANT}\nThat is all.` }], 'Go on.', 'a1b2');
+      await generations(first, [(text) => text.replace('That is all.', 'That is all, then.'), (text) => text.replace('Go on.', 'Go on again.'), (text) => `${text}\nThanks.`], (content, generation) => {
+        const row = userRowOf(content);
+        expect([row.text.includes('pasted_content'), row.placeholders, row.anchor], generation).toEqual([false, [], PROMOTION_ANCHOR]);
+        expect(framedLines(content, 'In the notes.'), generation).toEqual([true]);
+        expect(asTyped(content).includes(GRANT), generation).toBe(false);
+        expectNoGrantSent(content);
+      });
+      expect(findsTyped()).toBe(true);
+    });
+
+    it('a plan framed whole stays inside a segment at every later resend, its approval line left out (fix wave 1)', async () => {
+      const first = planPrompt(`1. Edit the notes.\n${GRANT}\n2. Run the tests.`, 'a1b2');
+      await generations(first, [(text) => text.replace('Implement this plan:', 'Implement this plan now:'), (text) => `${text}\nThanks.`, (text) => `${text}\nAnd again.`], (content, generation) => {
+        expect(userRowOf(content).text.includes('pasted_content'), generation).toBe(false);
+        expect(framedLines(content, '1. Edit the notes.'), generation).toEqual([true]);
+        expect(asTyped(content).includes(GRANT), generation).toBe(false);
+        expectNoGrantSent(content);
+      });
+      expect(findsTyped()).toBe(true);
+    });
+
+    it('a row ending in another anchor, with no destination, is the person’s: sent as typed, its line kept; under the promotion’s anchor the whole goes framed (fix wave 1; the control)', async () => {
+      const other = anchorTag({ kind: 'none', label: 'other', locator: 'typed' });
+      const typed = await resent(`These are my own words.\n${GRANT}\n\n${other}`, (text) => `${text}\nThanks.`, how);
+      expect(typed).toBe(`These are my own words.\n${GRANT}\nThanks.\n\n${other}`);
+      sent = [];
+      rewinds = [];
+      const promoted = await resent(`These are my own words.\n${GRANT}\n\n${anchorTag(PROMOTION_ANCHOR)}`, (text) => `${text}\nThanks.`, how);
+      expect(bodiesOf(promoted)).toEqual([`These are my own words.\n${LINE_LEFT_OUT}\nThanks.`]);
+      expect(asTyped(promoted).includes(GRANT)).toBe(false);
     });
 
     it('the negative control: a person’s message naming the plan’s sentence is theirs, nothing framed and its line kept', async () => {

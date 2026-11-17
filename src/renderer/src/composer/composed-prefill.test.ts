@@ -28,6 +28,13 @@ describe('storedFormOf: the stored row’s form, by its own reader', () => {
     ['a comment with this build’s quoted line', row({ text: '`x = 1`\nWhy?', anchor: LINE, anchorFrame: { destination: 'main', screenshot: false }, composed: [[0, 7]] }), { kind: 'comment', quote: '`x = 1`' }],
     ['a comment with the earlier writer’s quoted line', row({ text: '`x = 1`\nWhy?', anchor: LINE, anchorFrame: { destination: 'thread', screenshot: false } }), { kind: 'comment', quote: '`x = 1`' }],
     ['a comment with none', row({ text: 'Why?', anchor: LINE, anchorFrame: { destination: 'main', screenshot: false } }), { kind: 'comment', quote: null }],
+    // fix wave 1: words an earlier resend framed whole stay framed whole; a segment that is not all of them leaves the words as typed
+    ['a comment whose words are one segment, of several lines (fail closed: the whole is the slot)', row({ text: 'Note.\n`x = 1`\nWhy?', anchor: LINE, anchorFrame: { destination: 'main', screenshot: false }, composed: [[0, 'Note.\n`x = 1`\nWhy?'.length]] }), { kind: 'whole' }],
+    ['a comment whose segment is not all of its words and no quoted line', row({ text: 'Why?\nlines\nof a paste', anchor: LINE, anchorFrame: { destination: 'main', screenshot: false }, composed: [[5, 'Why?\nlines\nof a paste'.length]] }), { kind: 'comment', quote: null }],
+    // fix wave 1: an anchored row with no destination is a promotion only under the promotion's anchor; no writer of MAWS
+    // writes that shape under another, so it is the person's (the control: the same text under the promotion's anchor)
+    ['a row ending in another anchor with no destination: the person’s', row({ text: `These are my own words.\n${GRANT}`, anchor: { kind: 'none', label: 'other', locator: 'typed' }, anchorFrame: { destination: null, screenshot: false } }), null],
+    ['the same text under the promotion’s anchor (the control)', row({ text: `These are my own words.\n${GRANT}`, anchor: PROMOTION, anchorFrame: { destination: null, screenshot: false } }), { kind: 'promotion', body: null }],
     ['a relay', row({ text: 'Relay to agent a1 with SendMessage, verbatim, then continue what you were doing: hi' }), { kind: 'relay' }],
     ['a person’s message', row({ text: 'Please document the phrase Implement this plan: in the help text.' }), null],
     ['a person’s message opening with the relay’s words but no closing words', row({ text: 'Relay to agent a1 the notes' }), null],
@@ -44,6 +51,15 @@ describe('composedPrefill: Design 5’s table', () => {
     // the negative control: a person's message only naming the sentence is no form, and is the text as typed
     const typed = `Please document the phrase Implement this plan: in the help text.\n${GRANT}`;
     expect(sent(typed, null)).toEqual({ text: typed, bodies: {}, images: [] });
+  });
+
+  it('a comment framed whole: the whole text one atom, left out by line, whatever the edit (fix wave 1)', () => {
+    for (const text of ['Note.\n`x = 1`\nWhy?', `Note.\n${GRANT}\nWhy, again?`, 'one line']) {
+      const prefill = sent(text, { kind: 'whole' });
+      expect(Object.keys(prefill.bodies!), text).toHaveLength(1);
+      expect(prefill.text).toBe(Object.keys(prefill.bodies!)[0]);
+      expect(Object.values(prefill.bodies!)[0]).toBe(text.replace(GRANT, LINE_LEFT_OUT));
+    }
   });
 
   it('a plan whose first line changed: the whole text one atom', () => {
