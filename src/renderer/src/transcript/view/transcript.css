@@ -116,8 +116,10 @@ button.transcript-chip:hover { background: var(--bg-hover); }
    shown on hover or focus within, then the caption, always shown and flush with the bubble's edge. At rest the controls
    take no width (they stay in the tab order: Tab reaches Copy and shows them), so the caption has the whole line and
    never moves; where the line cannot fit, the caption is what shrinks, cut with an ellipsis (its title holds it whole).
-   Copy and Edit keep 16 px of text height and overhang the line to 24 px targets, 6 px up into the bubble's bottom
-   padding and 2 px down; their focus rings sit on those targets, not 3 px beyond them over the bubble and the turn line. */
+   Copy and Edit keep 16 px of text height and overhang the line to 24 px targets, 7 px up into the bubble's bottom
+   padding and 1 px down, 1 px clear of the turn line's button (which starts 2 px into its row) so a row placed up to
+   0.5 px early by the list's rounding still leaves them apart (R21, amended 2026-11-17); their focus rings sit on those
+   targets, not 3 px beyond them over the bubble and the turn line. */
 .transcript-user:has(> .transcript-user-line) { padding-bottom: 0; }
 .transcript-user-line {
   display: flex;
