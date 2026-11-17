@@ -30,6 +30,7 @@ How to see it working: the unit tests named under each milestone, which write ea
 - [x] (2026-11-17) The first document written, reviewed, and split by the architect's rulings.
 - [x] (2026-11-17) This document written against the pin: the writers, their recognisers and the readers of each form traced; the probes' rows read and the rows cited here recounted from the findings.
 - [x] (2026-11-17) The adversarial review of this document at `05dc8cacc` (two findings of the first rank, four of the second, one note on integration), the third probe's counts, and the architect's rulings on both; revised once to them ("Ruled", second table).
+- [x] (2026-11-17) Revised a second time: the ruling on older builds, and the re-read of Design 5 ("Ruled", second table, its last four rows).
 - [ ] The pass over "Statements to check again".
 - [ ] M1 — The shared rules, and the measurements on the branch.
 - [ ] M2 — The content forms: written, read in place, edited and sent again.
@@ -71,6 +72,10 @@ By the architect, 2026-11-17, on the third probe (ruling 37052769) and on the ad
 | review, second rank | The own-text rule's meter charges the anchored message's reconstruction the work it does. | Design 1 |
 | review, second rank | A reworded approval's rate is not measured and no rate is claimed for it; the counts are stated per treatment as sent; the byte form of each shipped writer is fixed by a fixture written from the writer itself. | "What was measured"; M2, M3 |
 | review, integration | The search worker runs `parseBash` from its source. | Design 4 |
+| older builds and the read (ruling A) | The segment stays around the read's JSON; the three older peers draw this build's reads as text. It is a stored form older builds see: the cross-build scene records exactly what each draws, and Design 8 says it in a person's words. The window in which a machine runs an older build against this one is meant to be short. The author's three additions are accepted: a value's lines left out one by one; a read whose opening is put together across strings is not attached; the echo's second stream. | Design 3, 8; §F |
+| the re-read of Design 5, first | Ranges are layout, not proof of cleaning: at a resend every slot a model, a command or a page wrote, as the form's reader isolates it, goes through the leave-out and a segment, whatever the ranges. | Design 5 |
+| the re-read, second | A stored form is recognised only by its own reader reading the whole form, never by `holdsGrantForm`. | Design 5 |
+| the re-read, note | A read refused at attach is dropped without a word to the person: a stated limit and a tracker row; no new sentence. | Design 3 |
 
 ## What was measured, and what this landing claims from it
 
@@ -138,7 +143,7 @@ One reading at the merged head, by the executor of M1, recorded in Progress; a r
 | 10 | The desk's web app draws rows by the transcript's model and view, imported by path | `apps/desk-web/src` | Constraints |
 | 11 | `parseBash` reads a row that begins with `<bash-input>` as its command alone; the search worker runs `parseBash` from its source; the output a window draws comes from the engine's replayed row | `src/engine-host/fs/backfill.ts`, `search-text.ts`, `src/engine-host/bash-mode.ts` | Design 4; M3 |
 | 12 | `linkedReadOf` recognises a read by its opening, its lead rebuilt from the JSON's title, and the JSON between the read line and the closing tag; the host attaches a read as a text block of its own after the person's | `src/shared/maws/linked-read.ts`, `src/engine-host/linked-reads.ts` | Design 3; M3 |
-| 13 | `holdsGrantForm` answers for the forms flagged for grants, the plan's lead, the promotion's head and a relay's words among them | `src/shared/engine/composed-forms.ts` | Design 5; M2 |
+| 13 | `relayText` opens a relay with one of three sentences (`Relay to agent `, `Send a message to `, `Reply to the cross-session message from `) and closes its instruction with `RELAY_CONTINUE`; `holdsGrantForm` searches a form's fixed words anywhere in a text | `tools/agents/model/relay.ts`, `src/shared/engine/composed-forms.ts` | Design 5; M2 |
 
 ## What the code holds today
 
@@ -241,6 +246,8 @@ Every content writer calls one function, `composedContent(content, tagId)` = `wr
 | a blocked call's consent (`consentMessage`) | the call's subject, one JSON string | unchanged: it is the approval, sent by the person's press | as today | unchanged |
 | `/compact <instructions>`, `/clear` | none | unchanged | as today | unchanged |
 
+**A read that is not attached leaves no trace.** The host drops a skipped read without telling the window (`SessionMaws.withLinkedReads` hands on the content and discards what was skipped), and §E adds no sentence for it. The person's message goes without that read, and the agent can read the artifact itself. That is a limit, with a tracker row.
+
 **The read's segment is real.** A segment is lines of the text block: an opening tag on a line, the body, a closing tag on a line. Written into a JSON string it would be escaped characters and no segment at all, and the keys of a read's `files` and `json` would never be visited. So the leave-out works on the parsed read, string by string, and the frame goes around the whole line of JSON in the text. Where the artifact's own text holds the tag's spelling, the body carries it neutralised, which is not valid JSON until `linkedReadOf` restores it; the model reads it as written. The tests run on the final text block, for a document's read and for one that is no document, with the approval sentence in a key and in a value: `pastedBodies` finds the segment's lines, and `quotesGrant` of the whole block is false.
 
 **Names MAWS writes into a draft.** A file mention and an agent mention (`mentionText`), the Agents widget's `@agent-<name>`, the Skills widget's `/<name>`, the `@` menu's skill row, the slash palette's row, a design system's adoption request (an artifact's title), and Mark-up's `Mark-up of <label>` (a page's title and address): each name through `nameSlot` where it is written. A file whose path `quotesGrant` matches is refused where it comes in (`pathRefusal`: a drop, a pick, the `@` menu), with §E's sentence beside the one for a control character. These are edits of strings at eight call sites and of one pure function; the editor's document and its schema are not touched.
@@ -285,17 +292,29 @@ A plan prompt edited so that its first line changed is no longer the plan's shap
 
 **The stored row, by its id.** `startInlineEdit` takes the message id and reads the row from the transcript's store; it never edits a row it was handed. A message whose id the store does not hold is not edited. So where a surface mod rewrote the drawn text, Edit shows the message as it was sent, not the mod's words: a mod's rewrite is a drawing, and never the source of a message. The test: a row with rewritten text handed to the action gives an edit that holds the stored text, its framing and its composed parts; the control in the same test is the unrewritten row, which gives the same edit.
 
-**What an edited row is sent as.** One function at the seam decides, for Send, for Fork and for the send after a rewind alike (`composedPrefill`, §D), from the stored row:
+**What an edited row is sent as.** One function at the seam decides, for Send, for Fork and for the send after a rewind alike (`composedPrefill`, §D). It asks two things of the stored row, and they are kept apart.
 
-| the stored row | sent again as |
-|---|---|
-| holds composed ranges (a form this build wrote) | each stored body that stands in the edited text **exactly once**, the bodies in their stored order: framed again where it stands. If any body is missing, was edited, or stands more than once: the whole edited text inside one segment. Nothing is rewritten: its lines were left out when it was first written |
-| holds none, and is one of MAWS's forms: the row is anchored, or `holdsGrantForm` claims its stored text (the plan's lead, the promotion's head, a relay's words, and the other forms flagged for grants in `composed-forms.ts`) | the composed part through `leaveOutGrant` and a segment, where a reader isolates it. A plan prompt: after an unchanged `Implement this plan:` line, everything. An anchored comment: its lead and tag are MAWS's and are written again from the anchor, through `nameSlot`; of its words, on a line of a file, a first line that is one whole code span (with its caption line when it has one) is the quoted line; the rest are the person's, as the own-text rule reads them, and go as typed. Where no reader isolates it (a promotion, a relay, a plan whose first line was edited away): the whole edited text through `leaveOutGrant` and one segment |
-| holds none, and is no form | as today: the person's text |
+*Which form is it.* Only a form's own reader, reading the whole form at its own place, says so. A search for a form's fixed words anywhere in a text (`holdsGrantForm`) is a broad guard for readers and decides no rewrite here.
 
-The absence of ranges is never read as proof that a person wrote the text: a form written before this landing, or by an older build, has none. The second row fails closed on purpose: in a text of a form that cannot be taken apart, a line the person typed that quotes the opening is left out with the rest. The framing of an anchored comment or a promotion is put back around the result as today.
+*Where does what the person did not write stand.* The form's reader says, never the row's ranges. Ranges are layout: they say which body stood where, so that it can be found again in the edited text. They are no proof that a body was ever cleaned: a plan written before this landing can hold a real segment a model wrote into it. So every slot a model, a command or a page wrote goes through `leaveOutGrant` and a segment at the resend, whatever the ranges. On a body this build wrote that changes no byte (but for a question of the person's inside a promotion's exchange that quotes the opening: the exchange cannot be taken apart, and the line is left out).
 
-The tests, each through the seam's real path for Send and for Fork: a promotion of this build edited in its typed words (the exchange one segment, the typed words outside); edited inside the exchange (the whole one segment); a stored body that stands twice in the edited text, and an edit inside the first of two occurrences (the whole one segment, in both); rows written at the pin, from fixtures: a promotion, a plan prompt, a comment with a quoted line and a relay, each with the approval sentence in its slot (after the edit and Send: the sentence gone, the content in a segment, no grant through the readers of an approval); and the control, an ordinary message edited, sent with no segment and no line left out.
+| the stored row, by its form's own reader | the slot, as that reader isolates it | sent again as |
+|---|---|---|
+| **a plan prompt**: its text begins with the whole line `Implement this plan:` and a blank line (this build's shape, or the earlier writer's) | everything after that line | the edited text still begins with that line and the blank line: everything after it, with any chip in it opened to its body, through `leaveOutGrant` and one segment. Otherwise: the whole edited text, chips opened, through `leaveOutGrant` and one segment |
+| **a promoted side question**: the row carries the promotion's anchor and its text begins with the promotion's head and a blank line | in this build's shape (one segment directly after the head, the typed words after it): that segment's body. In any other shape: none can be told from the typed words | the stored row is this build's shape, the head is unchanged, and the body stands in the edited text exactly once, directly after the head: the body through `leaveOutGrant` and a segment, the words after it as typed. Otherwise (the earlier writer's shape; the head, or the body, edited; the body missing or standing twice): the whole edited text through `leaveOutGrant` and one segment |
+| **an anchored comment** (`readAnchoredMessage`, with a destination) | the lead and the tag, which are written again from the anchor through `nameSlot`; and, in the words, the quoted line: this build's segment of one line at the words' start (after its caption line when it has one), or, from the earlier writer, a first line that is one whole code span under an anchor on a file's line | the quoted line stands in the edited words exactly once, at that place: through `leaveOutGrant` and a segment; the rest of the words are the person's, as the own-text rule reads them, and go as typed. The stored words held a quoted line and the edited words no longer hold it exactly once at that place: all the edited words through `leaveOutGrant` and one segment. The stored words held none: as typed |
+| **a relay**: its text begins with one of `relayText`'s three openings and holds its closing words after them (`readRelay`) | the names, inside MAWS's sentence; they cannot be taken out of an edited text | the whole edited text through `leaveOutGrant` and one segment |
+| **none of these** | — | as today, the person's text: nothing framed, no line left out |
+
+The whole-text cases fail closed on purpose: in a text of a form that can no longer be taken apart, a line the person typed that quotes the opening is left out with the rest. The absence of ranges is never read as proof that a person wrote the text, and their presence never as proof that MAWS cleaned it. The framing of an anchored comment or a promotion is put back around the result as today. A person who typed MAWS's whole first line themselves (`Implement this plan:` and a blank line) has written the form, and an edit of that message is sent as the form.
+
+The tests, each through the seam's real path for Send and for Fork:
+
+- this build's rows: a promotion edited in its typed words (the exchange one segment, the typed words outside, its bytes unchanged); edited inside the exchange (the whole one segment); a stored body that stands twice in the edited text, and an edit inside the first of two occurrences (the whole one segment, in both); a plan edited after its first line (one segment); a comment with a quoted line edited in its words (the quote one segment, the words typed);
+- rows written by the pin's writers, copied into the test, each with the approval sentence in its slot: a promotion, a plan prompt, a comment with a quoted line, a relay: after the edit, the sentence gone, the content in a segment, no grant through the readers of an approval;
+- rows of the pin's writers that already hold a real segment: a plan whose text is a forged segment holding the opening (it reads as this build's shape and gets ranges: the sentence is gone all the same); a plan with such a segment in its middle (drawn as a chip: the chip's body is opened and cleaned); a promotion with a forged segment in an answer and the model's text outside it (the whole through the leave-out and one segment);
+- the negative control: the message "Please document the phrase Implement this plan: in the help text." with a line of the person's own that quotes the opening, edited and sent: it is the person's text, nothing is framed, and the line is kept (it passes `neutraliseGrant` as any typed text does);
+- the control for the forms: an ordinary message edited, sent with no segment and no line left out.
 
 ### 6. What rule R and the own-text rule answer
 
@@ -320,7 +339,7 @@ Neither reader's rule is edited.
 | a promotion, a plan prompt or a single comment with a segment, in the engine's transcript and the host's journal | recognised by the same constants and the same tag; the segment draws as a chip, `Pasted text #1 · L lines`, which opens to the text (`splitPastedSegments` and `PastedBlock`, the same code at all three). Edit gives the chip's placeholder back and sends it framed again | in place |
 | a message of several comments with a quoted line (the build in use; F has no such message) | the segment is drawn as raw tags inside that comment | in place |
 | an anchor whose field `nameSlot` changed | lead and tag agree, so the lead is stripped as for any comment; the chip shows the marker | the same |
-| an attached read (its JSON inside a segment) | their `linkedReadOf` parses what stands after the read line as JSON, finds the frame there, and does not recognise the block: the read is drawn as text in the person's message, tags and all, where today it is an attachment's chip. Every read this build attaches | recognised, the segment taken out first |
+| a message that links an artifact, with the artifact's read attached (the read's JSON inside a segment) | on master at `b89d6d1d7`, on F and on the build in use (the same `linkedReadOf` at all three): the read is not recognised. Where this build shows the person's words and under them a small file chip, "<title>, read at revision N", the older build shows the person's words and then the whole attachment as text inside the same bubble: a line beginning `<system-reminder>`, the two tag lines of the segment, and the artifact's content as one long line of JSON. Every message of this build that carries a read looks so on an older build; nothing is lost or sent differently, and the agent received the same message. The window in which a machine runs an older build against a transcript or a host of this one is meant to be short | the chip, as today |
 | the echo of a `!` command with its output framed | read as its command, as today (`parseBash`'s first branch, the same at all three) | the same |
 | a text with a look-alike tag neutralised | their `restorePastedTags` leaves the added backslash in what Edit shows | restored |
 
@@ -335,6 +354,7 @@ What an older build sent is read as before: its forms hold no segment, and the t
 - Letters of other scripts that look like the tag's (Design 1).
 - A form with a random tag id under the reminder's gate, and a block in a session's first message (Design 3).
 - A relay's own text and a rewind's prefill go as typed.
+- A read that is not attached is dropped without a word to the person (Design 3).
 
 ### Why this, not that
 
@@ -359,7 +379,7 @@ Each is a behaviour with the test that shows it; the commands are in Concrete St
 7. **The forms read as today.** Through the real derivation, the row of a promotion, of a plan prompt, of one comment with a quoted line and of several: its text equals the text the writer at the pin gave for the same input (but for one trailing line break of the content), with no placeholder and no chip. The same for a queued row's text and the resume preview; a plan prompt's title reads the plan's first words. A framed echo row through the backfill gives its command, and through the search worker the row whole. A read of this build and a read written at the pin are both recognised and drawn as the attachment they are.
 8. **No message of a person's is drawn differently.** The differential of Design 4: for seeded messages that are no form, the row equals the row at the pin, byte for byte.
 9. **Edit takes the stored row.** Design 5's test, with its control. A message id the store does not hold opens no edit.
-10. **An edited row is sent as Design 5's table says**, each case of its last paragraph, for Send and for Fork.
+10. **An edited row is sent as Design 5's table says**: each case of its list of tests, the negative control among them, for Send and for Fork.
 11. **The own-text rule's two directions**, Design 6's test; and a long anchored comment that reaches the reconstruction is read inside its refitted bound.
 12. **The guard is whole.** Every site and form is classified; each `maws` form names its slot's treatment; the draft forms are eight.
 13. **The measurements are on the branch.** `node --test spikes/protocol-probe/fixtures.test.mjs` passes with the three probes' cases.
@@ -401,11 +421,11 @@ Four milestones, in order; each is reviewed before the next starts.
 
 **Exists at its end:** a promotion, a plan prompt and a quoted line are written with their content left out by line and framed, and are drawn as today everywhere Design 4 lists; Edit takes the stored row; an edited row is sent again as Design 5's table says, a form written before this landing among them; the own-text rule's two directions are pinned. Writer and reader land together: no head of this milestone shows a form as a chip.
 
-**Touches:** `src/shared/anchor/message.ts` (`promotionMessage`, `quotedComment`, the anchored recogniser's in-place reading), `src/shared/engine/host-prompts.ts` (`planPrompt` and its reader); their callers `src/renderer/src/side/actions.ts`, `src/services/sessions/service.ts`, `src/engine-host/session-clear.ts`; `transcript/model/user-text.ts`, `rows.ts`, `schema.ts`; `composer/queue/entry-text.ts`; `src/services/sessions/recent-turns.ts`; `src/services/index/sessions.ts`; `composer/resubmit-seam.ts`, `stores/composer.ts`; the tests of `named`; `test/support/person-sends.test.ts` (the three forms' cases).
+**Touches:** `src/shared/anchor/message.ts` (`promotionMessage`, `quotedComment`, the anchored recogniser's in-place reading), `src/shared/engine/host-prompts.ts` (`planPrompt` and its reader); their callers `src/renderer/src/side/actions.ts`, `src/services/sessions/service.ts`, `src/engine-host/session-clear.ts`; `transcript/model/user-text.ts`, `rows.ts`, `schema.ts`; `composer/queue/entry-text.ts`; `src/services/sessions/recent-turns.ts`; `src/services/index/sessions.ts`; `composer/resubmit-seam.ts`, `stores/composer.ts`; `tools/agents/model/relay.ts` (`readRelay`, beside its writer); the tests of `named`; `test/support/person-sends.test.ts` (the three forms' cases).
 
 **Interfaces:** consumes §A to §C; exposes §D.
 
-**Decisions:** in one commit series per form, the writer and its reader together, with the writer's fixture. The equality "read in place, it is the pin's text" is held against the pin's writer copied into the test. The tag id by Design 3's rule. The row's `composed` ranges are recorded where the text is built, as chips' places are. `startInlineEdit` resolves the stored row itself, so every caller is covered by one place. The rows "written at the pin" of Design 5's tests are fixtures made by the pin's writers copied into the test, never by this build's. The guard's `Form` gains its slot's treatment here (`content`, `name` or `none`), declared for every form; the three content forms' cases move with their writers, and the other forms keep their cases until M3.
+**Decisions:** in one commit series per form, the writer and its reader together, with the writer's fixture. The equality "read in place, it is the pin's text" is held against the pin's writer copied into the test. The tag id by Design 3's rule. The row's `composed` ranges are recorded where the text is built, as chips' places are. `startInlineEdit` resolves the stored row itself, so every caller is covered by one place. The rows "written at the pin" of Design 5's tests are fixtures made by the pin's writers copied into the test, never by this build's; the forged segments in them are written with the pin's `wrapPasted`. No branch of `composedPrefill` asks `holdsGrantForm`. The guard's `Form` gains its slot's treatment here (`content`, `name` or `none`), declared for every form; the three content forms' cases move with their writers, and the other forms keep their cases until M3.
 
 **Does not touch:** `splitPastedSegments`; the name forms and their cases in the guard; the host's echo and read; the editor.
 
@@ -431,7 +451,7 @@ Four milestones, in order; each is reviewed before the next starts.
 
 **Touches:** the e2e specs §F names and their harness support; `e2e/cross-build.spec.ts`; the tech-debt tracker.
 
-**Decisions:** the tracker rows: the rule's route to the model, a foreign tag id and a block in a first message, to check at every engine pin bump; a rewind's prefill of a composed row (with a line on ticket 740); the search snippet and an echo row's search text; an opening assembled across a slot's edge; the letters the tag's fold does not cover; a relay's own text.
+**Decisions:** the tracker rows: the rule's route to the model, a foreign tag id and a block in a first message, to check at every engine pin bump; a rewind's prefill of a composed row (with a line on ticket 740); the search snippet and an echo row's search text; an opening assembled across a slot's edge; the letters the tag's fold does not cover; a relay's own text; a read that is not attached, of which the person is told nothing.
 
 **Does not touch:** source outside the harness. If a change here moves a byte either host writer sends, the recording is void and is asked for again.
 
@@ -527,10 +547,13 @@ No library is added. Signatures are what must exist; bodies are the executor's.
     relayText(target, text): string | null                                         // null: a peer's address quotes the opening
     bashEcho(command: string, output: string, tagId: string): string
     linkedReadBlock(read: string, tagId: string): string | null                    // null: not attached
-    composedPrefill(edit: { text: string; composed: readonly string[] | null; form: 'plan' | 'comment' | 'whole' | null }): Prefill   // Design 5's table
+    readPromotion(text: string): { body: Range | null } | null                     // the head at the text's start; the one segment directly after it, in this build's shape
+    readRelay(text: string): { head: string } | null                               // one of the three openings at the text's start, up to its closing words
+    composedPrefill(edit: { text: string; form: StoredForm }): Prefill               // Design 5's table
+    type StoredForm = { kind: 'plan' } | { kind: 'promotion'; body: string | null } | { kind: 'comment'; quote: string | null } | { kind: 'relay' } | null
 
 - The transcript's user row gains `composed: Range[]` beside `placeholders`; `transcript/model/schema.ts` gains it too.
-- The inline edit's state gains what `composedPrefill` needs, taken from the stored row when the edit begins: the bodies of its composed ranges, or, for a row with none, which of MAWS's forms it is.
+- The inline edit's state gains `form: StoredForm`, read from the stored row by the forms' own readers when the edit begins (a body or a quote is the text that stood at the range the reader named); null is a person's message.
 - `startInlineEdit(appSessionId, messageUuid, kind)` reads the row from the store.
 
 ### §E. Words (exact)
@@ -551,14 +574,14 @@ No other word a person reads is added or changed.
 |---|---|---|---|
 | S1 | the side thread's spec (`e2e/side.spec.ts`, or the spec that holds the promotion's scene at the merged head) | a side question promoted: the thread's first row reads the exchange as text, no chip; the message the host wrote holds the exchange in one segment | the thread's first row by its attribute; the harness's record of the sent content |
 | S2 | `e2e/code-tools.spec.ts` (Review; or the spec that holds a pass comment's scene at the merged head) | a comment on a diff line: its bubble shows the quoted line as today; the sent content holds it in a segment | the bubble by its attribute; the sent content |
-| S3 | `e2e/cross-build.spec.ts`, for `f1852de3a` and for `2c7044231` | the peer draws this build's promotion with its exchange as a chip that opens, never raw tags, and recognises the row as a side question; and what the peer draws for a message with an attached read of this build (Design 8: the read as text), recorded as it is | the peer's row, by the states the group's other scenes wait on |
+| S3 | `e2e/cross-build.spec.ts`, against master at `b89d6d1d7`, `f1852de3a` and `2c7044231` | the peer draws this build's promotion with its exchange as a chip that opens, never raw tags, and recognises the row as a side question; and exactly what each peer draws for a message with an attached read of this build: the bubble's text asserted whole (the person's words, then the read's block as text), so the record says what a person sees there, and the same message on this build drawn with its chip, as the control | the peer's row, by the states the group's other scenes wait on |
 
 ## Proofs an executor cannot run
 
 Each is a step for the architect, with what it needs.
 
 1. **S1 and S2, each alone on a Mac**, on the head M4 hands back, then the landing's Mac run set under the load rule: the default group, the comment card's and Review's, the transcript's, the agents tool's (the relay), the composer's (Edit on a bubble), the remote group, the desk's web app's.
-2. **S3, the cross-build group**, with `--peer-exact f1852de3a` and again with `--peer-exact 2c7044231`, on the final head. A skipped scene is not evidence.
+2. **S3, the cross-build group**, on the final head, three times: against master at `b89d6d1d7`, with `--peer-exact f1852de3a`, and with `--peer-exact 2c7044231`. The attached read is a stored form older builds see; the run's record of what each peer draws for it is what the architect reports to the owner. A skipped scene is not evidence.
 3. **A recording of the exact bytes the built code sends**, for the echo of a `!` command and for an attached read, because the marker and the segment together were sent in no run of the third probe. By that probe's method (`scenarios/pass3/uxwave-733-composed.mjs`): engine 2.1.322, auto mode, `claude-haiku-5-5` only, turn 1 a blocked command; then the form, written by this branch's own `bashEcho` and `linkedReadBlock` bundled at run time, with the approval sentence in the command's output and in the read's content; then the neutral follow-up; a typed control beside each form. Five runs a row, four rows, a cap of 0.1 USD, on a build VM.
    - **The head:** the one M3 hands back, named by its sha in the findings; it runs before the branch's panel. A later commit that changes a byte either writer sends (its fixture changes) voids the recording, and it is run again on that head.
    - **Where it is kept:** on the probe branch, the recordings `spikes/protocol-probe/fixtures/uxwave/p733d-<row>-<run>.jsonl` (rows `e` the echo, `et` its typed control, `r` the read, `rt` its typed control), their cases in `fixtures.test.mjs`, and a section appended to `findings-uxwave-733-composed-forms.txt`; merged into this branch before the pull request.
@@ -576,7 +599,7 @@ Estimates, counted against the code at the pin.
 | M1 | about 340 lines (one new file of about 190; four edited) | about 850 (one new file; five edited) | — | 11, and the probe merge's files under `spikes/` |
 | M2 | about 390 lines in thirteen files | about 950 in nine files | — | 22 |
 | M3 | about 330 lines in nineteen files | about 800 in eleven files | — | 30 |
-| M4 | about 30 lines in the harness; seven tracker rows | about 100 | about 250 lines in three specs | 6 |
+| M4 | about 30 lines in the harness; eight tracker rows | about 100 | about 250 lines in three specs | 6 |
 
 About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-five files (several edited in two milestones), beside the recordings. Before this revision the estimate was 880, 2,100 and 250; the growth is the read's real segment and its deep leave-out, the echo's, the rows written before this landing at Edit, `grantSpans` and the two meters. The first document's whole was about 1,860, 3,500 and 550 in eighty-five files.
 
@@ -614,6 +637,9 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
   Date/Author: 2026-11-17, the architect and the adversarial review; recorded by the document's author.
 - **2026-11-17 · A recording of the built bytes is part of the proof.** The marker and the segment together were sent in no run of the third probe. So before the branch's panel, the echo and the attached read as this branch's own writers send them are recorded, five runs each with a typed control beside each, on the smallest model, on a build VM, on the head M3 hands back; any allowed run comes to the architect before the landing ("Proofs an executor cannot run", 3).
   Date/Author: 2026-11-17, the architect; recorded by the document's author.
+
+- **2026-11-17 · Revised a second time, to the architect's ruling on older builds and a re-read of Design 5.** The segment stays around the read's JSON and the three older peers draw this build's reads as text, recorded by the cross-build scene and said in Design 8 in a person's words; the update window is meant to be short. Design 5's table is keyed on the form's own reader: a slot goes through the leave-out and a segment whatever the row's ranges, and no stored form is recognised by `holdsGrantForm`. A read that is not attached is a stated limit.
+  Date/Author: 2026-11-17, the architect and the re-read; recorded by the document's author.
 
 ## Outcomes & Retrospective
 
