@@ -32,7 +32,7 @@ How to see it working: the unit tests named under each milestone, which write ea
 - [x] (2026-11-17) The adversarial review of this document at `05dc8cacc` (two findings of the first rank, four of the second, one note on integration), the third probe's counts, and the architect's rulings on both; revised once to them ("Ruled", second table).
 - [x] (2026-11-17) Revised a second time: the ruling on older builds, and the re-read of Design 5 ("Ruled", second table, its last four rows).
 - [x] (2026-11-17) The pass over "Statements to check again", at `938347bd2` (no merge of master: the architect names any further merge): rows 2, 5, 6, 10, 11, 12 and 13 hold; rows 1, 3, 4, 7, 8 and 9 hold with the nuances under Surprises & Discoveries; none stops a milestone.
-- [ ] M1 — The shared rules, and the measurements on the branch.
+- [x] (2026-11-17) M1 — The shared rules, and the measurements on the branch. Commits `e8b27e4f3` (the probe merge) to `442d5cae4`; reviewed clean after one fix wave (the meters refitted, the budget checked before each piece of work, controls beside every absence); nine mutations each caught by the new test sets.
 - [ ] M2 — The content forms: written, read in place, edited and sent again.
 - [ ] M3 — The name forms, the host's two forms, the guard.
 - [ ] M4 — The scenes, the cross-build row, the whole suite, the acceptance.
