@@ -76,10 +76,11 @@ function FinderField({ appSessionId, tabId, visible, text, finder, expanded, act
   };
   // Esc in an empty field leaves it: the search ends first, and the page is drawn without it before the keyboard goes
   // back, since the element ⌘P found it in may be this tab's own file, hidden and inert while the tree stood in its place.
-  // Where the keyboard cannot be given back (that element gone from the page, or still under an inert main area), the key
-  // is not the field's (Decision Log 15). Over a narrow window's sheet the sheet is dismissed by its own path: for that
-  // element, which takes the keyboard once main has left inert; with none, by the sheet's own Esc, and the search ends.
-  // Elsewhere the key goes on to whatever stands behind, and the keyboard stays in the field.
+  // Where the keyboard cannot be given back (that element gone from the page, or still under an inert main area) over a
+  // narrow window's sheet, the key is not the field's (Decision Log 15): the sheet is dismissed by its own path, for that
+  // element, which takes the keyboard once main has left inert; with none, by the sheet's own Esc; and the search ends.
+  // Elsewhere the key stays the field's, so no layer behind it (a mark-up session among them) hears it, and the keyboard
+  // stays in the field.
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Escape') return onKey(event);
     if (composing(event)) return;
@@ -96,7 +97,7 @@ function FinderField({ appSessionId, tabId, visible, text, finder, expanded, act
         return void back.focus({ preventScroll: true });
       }
     }
-    if (!shellGeometryOf(useLayout.getState(), window.innerWidth).sheet) return;
+    if (!shellGeometryOf(useLayout.getState(), window.innerWidth).sheet) return void event.preventDefault();
     endFinding();
     if (back === null) return; // the sheet's own Esc dismisses it
     event.preventDefault();
