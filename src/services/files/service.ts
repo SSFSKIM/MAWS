@@ -31,7 +31,10 @@
 // `stat` are two path steps an ancestor flipping symlink, directory, symlink can straddle; M1 review); hard links
 // inside a root, and a directory renamed into a root, are in the tree when opened, accepted by design. `list`: a
 // swap-and-restore between `readdir` and the final confirmation can let outside names and metadata (never contents)
-// into the answer. `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside
+// into the answer; a substitution that stands is refused by that confirmation, which holds both the request's spelling
+// and the realpath the names, the entries' reads and the ignore check were made by (UX wave U6b-3a's branch panel: a
+// moved real ancestor, the request's link retargeted to it, can keep the first on the opened directory while the second
+// leads elsewhere). `watch`: a swap-and-restore between the install and its confirmation attaches the watcher outside
 // until a batch's confirmation catches a standing swap, or forwards outside filenames if it was restored; a swap
 // between a batch's confirmation and its per-name `lstat` classifies that batch's kinds from outside metadata.
 // `openExternal` is path-checked immediately before `shell.openPath`, with no descriptor guarantee, and hands the OS
@@ -112,8 +115,9 @@ export interface FilesServiceOptions {
   own?: () => readonly string[];
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): the names among
   // a listed directory's entries that git ignores there (`createIgnoreCheck().names`), asked with the directory's
-  // confirmed realpath; null when git gives no answer. Absent: nothing is asked and no entry is marked.
-  ignored?: (dir: string, names: readonly string[]) => Promise<ReadonlySet<string> | null>;
+  // confirmed realpath and the identity of the directory opened there, which git is asked about only while that realpath
+  // still names it; null when git gives no answer. Absent: nothing is asked and no entry is marked.
+  ignored?: (dir: string, names: readonly string[], opened: Identity) => Promise<ReadonlySet<string> | null>;
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS
@@ -348,12 +352,13 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       const collected = (await mapBounded(names, LIST_STAT_CONCURRENCY, (name) => entryAt(real, name))).filter((entry) => entry !== null);
       const sorted = collected.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name));
       const entries = sorted.slice(0, FILES_LIST_MAX_ENTRIES);
-      // U6b-3a (decisions 12 and 13): which of the answered entries git ignores, asked in the confirmed directory before
-      // the last confirmation, so a swap while git runs refuses the listing as a swap after the reads does; no answer marks
+      // U6b-3a (decisions 12 and 13): which of the answered entries git ignores, asked in the confirmed directory, of the
+      // object opened there, before the last confirmation, so a swap while git runs refuses the listing as a swap after the reads does; no answer marks
       // nothing, and a name the answer holds that the listing does not carry is dropped
       await at('before-ignored', path);
-      const marked = ignored === undefined ? null : await ignored(real, entries.map((entry) => entry.name));
+      const marked = ignored === undefined ? null : await ignored(real, entries.map((entry) => entry.name), stat);
       await confirm(path, roots, stat);
+      await confirmSpelling(real, stat); // the spelling every read above, and git, was handed
       const root = roots.filter((candidate) => under(candidate, real)).sort((a, b) => b.length - a.length)[0] ?? null;
       return {
         root,
@@ -676,6 +681,14 @@ async function confirm(path: string, roots: readonly string[], opened: Identity)
   const now = await fs.promises.stat(real, { bigint: true }).catch(() => null);
   if (!now || !sameIdentity(now, opened)) throw new Refusal();
   return real;
+}
+
+// The last confirmation of a listing, for the spelling its reads were made by: still its own realpath, so no link has
+// come onto its way, and still the opened object (UX wave U6b-3a's branch panel, its security findings)
+async function confirmSpelling(real: string, opened: Identity): Promise<void> {
+  if ((await fs.promises.realpath(real).catch(() => null)) !== real) throw new Refusal();
+  const now = await fs.promises.stat(real, { bigint: true }).catch(() => null);
+  if (!now || !sameIdentity(now, opened)) throw new Refusal();
 }
 
 async function entryAt(real: string, name: string): Promise<FilesEntry | null> {

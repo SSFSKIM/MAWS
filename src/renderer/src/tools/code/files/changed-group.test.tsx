@@ -250,6 +250,42 @@ describe('the Changed group (U6b-3a)', () => {
     expect(reviews).toHaveLength(1);
   });
 
+  // The panel's scalpel 3, first finding: a staged rename whose new path the working tree has lost (`git mv`, then the
+  // new file deleted) is RD at the new path, and `git diff HEAD`, Review's list, lists only its source, as deleted
+  it('opens Review at a renamed file’s source when the working tree has lost the new path, as git diff HEAD lists it', async () => {
+    changedMain(TREE, { '/r': statusOf([entry('src/berth.ts', 'RD', { oldPath: 'src/dock.ts' }), entry('src/cart.ts', '.M')]) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('2'));
+    expect(changedRow('/r/src/berth.ts')!.getAttribute('data-letter')).toBe('D');
+    fireEvent.click(changedRow('/r/src/berth.ts')!);
+    expect(reviews).toEqual([{ appSessionId: A, params: { scope: 'uncommitted', path: 'src/dock.ts' } }]);
+    expect(filesTab().getAttribute('data-file')).toBe('');
+  });
+
+  // The ruling on the panel's sweep 1 and scalpel 3's second finding: the viewer refuses a path whose last part is a link,
+  // and a conflicted file the work tree has lost has nothing to open. (A) the status says so for a tracked path; (B) for
+  // an untracked link, the folder's listing the store holds says so.
+  it('opens Review and no viewer for a tracked link, a conflict deleted from the work tree and an untracked link whose folder is listed; a file beside them opens its tab', async () => {
+    // the tracked link in a folder the tree has not listed, so the status alone can say it is one
+    const linked = { ...TREE, '/r/src': [file('/r/src/cart.ts'), file('/r/src/fresh.ts'), file('/r/src/merge.ts'), { ...file('/r/src/latest.ts'), kind: 'symlink' as const, target: 'cart.ts' }] };
+    changedMain(linked, {
+      '/r': statusOf([entry('notes/today.md', '.M', { worktreeKind: 'link' }), entry('src/merge.ts', 'UU', { worktreeKind: 'none' }), entry('src/latest.ts', '??'), entry('src/fresh.ts', '??')]),
+    });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('4'));
+    await expand('/r/src'); // the folder's listing, which says latest.ts is a link
+    expect(useFiles.getState().listing(A, '/r/notes')).toBeUndefined();
+    for (const path of ['/r/notes/today.md', '/r/src/merge.ts', '/r/src/latest.ts']) fireEvent.click(changedRow(path)!);
+    expect(reviews).toEqual(['notes/today.md', 'src/merge.ts', 'src/latest.ts'].map((path) => ({ appSessionId: A, params: { scope: 'uncommitted', path } })));
+    await flush();
+    expect(filesTab().getAttribute('data-file')).toBe(''); // no viewer onto a refusal
+    fireEvent.click(changedRow('/r/src/fresh.ts')!); // the control: an untracked file in the same listed folder
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe('/r/src/fresh.ts'));
+    expect(reviews).toHaveLength(3);
+  });
+
   it('a row outside the session’s folders opens Review at its entry, a file and a folder alike; the file inside opens its tab', async () => {
     setRecord({ directory: '/coast/harbor' });
     changedMain(
@@ -463,6 +499,28 @@ describe('the Changed group (U6b-3a)', () => {
 
   // The architect's ruling 2 on CHANGED_ROW_FIXED (Decision Log 14): happy-dom applies no Tailwind, so the case reads the
   // classes the constant mirrors off a drawn Changed row, and the inline indent, and sums their widths.
+  // The panel's scalpel 4, first finding (an accessibility regression): a group that grows above the row the keyboard is
+  // in moves that row out of the drawn range before the offset is corrected; it must keep the keyboard
+  it('keeps the keyboard on a focused tree row when a hundred Changed rows arrive above it, the row in view where it was (S2)', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => file(`/r/src/f${String(i).padStart(2, '0')}.ts`));
+    const main = changedMain({ ...TREE, '/r/src': many }, { '/r': statusOf([entry('src/f00.ts', '.M')]) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+    await expand('/r/src');
+    scrollTo(30 * FILES_ROW_HEIGHT);
+    const path = firstInView()!;
+    expect(path).toMatch(/^\/r\/src\/f/); // a tree row
+    act(() => treeRow(path)!.focus());
+    expect(document.activeElement).toBe(treeRow(path)); // the control: the keyboard is in the row
+    const hundred = Array.from({ length: 100 }, (_, i) => entry(`src/new${String(i).padStart(3, '0')}.ts`, '??'));
+    changed(main, statusOf([entry('src/f00.ts', '.M'), ...hundred]));
+    await waitFor(() => expect(heldCount()).toBe(101));
+    fireEvent.scroll(scroller()); // the list draws the rows at its corrected offset
+    expect(firstInView()).toBe(path);
+    expect(document.activeElement).toBe(treeRow(path));
+  });
+
   it('pins the fixed part of a Changed row’s width to the classes and indent the row is drawn with', async () => {
     changedMain(TREE, { '/r': statusOf([entry('src/cart.ts', '.M')]) });
     connect();
@@ -587,6 +645,28 @@ describe('the Changed group (U6b-3a)', () => {
       expect(counts(main)[1]).toBe(before[1] + 1);
     });
 
+    // The panel's sweep, second finding: the listings are the session's, shared by every Files view of it
+    it('lists each drawn directory again once when two Files views of the session see the same set change', async () => {
+      const main = changedMain(TWO_ROOTS, { '/r': first });
+      connect();
+      render(
+        <>
+          <TestHost />
+          <TestHost />
+        </>,
+      );
+      act(() => void panelHost.addTool('files', { appSessionId: A }));
+      await waitFor(() => expect(document.querySelectorAll('[role="treeitem"][data-kind][data-path="/r"]')).toHaveLength(2));
+      await expand('/r/src');
+      await waitFor(() => expect(document.querySelectorAll('[role="treeitem"][data-kind][data-path="/r/src/cart.ts"]')).toHaveLength(2));
+      await flush();
+      const before = counts(main);
+      changed(main, moved);
+      await flush();
+      await flush();
+      expect(counts(main)).toEqual([before[0] + 1, before[1] + 1, before[2]]);
+    });
+
     it('asks each directory twice and never three times for two set changes in a row with the first flight held', async () => {
       const main = changedMain(TWO_ROOTS, { '/r': first });
       connect();
@@ -641,6 +721,22 @@ describe('the Changed group (U6b-3a)', () => {
       expect(top + FILES_ROW_HEIGHT).toBeLessThanOrEqual(scroller().scrollTop + 600);
       expect(treeRow('/r/a/b/new')!.getAttribute('aria-selected')).toBe('true');
       expect(treeRow('/r/a/b/new')!.getAttribute('aria-expanded')).toBe('true');
+    });
+
+    // The panel's scalpel 4, second finding: a folder on the way whose listing failed is asked again, as a tree row's
+    // expansion asks it, so the folder opened from its Changed row can arrive
+    it('asks again for a folder on the way whose listing failed, and the folder arrives selected', async () => {
+      const tree: Record<string, FilesEntry[] | string> = { ...TREE, '/r/notes': 'could not read the folder', '/r/notes/drafts': [file('/r/notes/drafts/plan.md')] };
+      const main = changedMain(tree, { '/r': statusOf([entry('notes/drafts/', '??')]) });
+      connect();
+      await openTree();
+      await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+      await expand('/r/notes');
+      expect(useFiles.getState().listing(A, '/r/notes')?.status).toBe('error');
+      tree['/r/notes'] = [dir('/r/notes/drafts')];
+      fireEvent.click(changedRow('/r/notes/drafts')!);
+      await waitFor(() => expect(treeRow('/r/notes/drafts')?.getAttribute('aria-selected')).toBe('true'));
+      expect(main.listed('/r/notes')).toBe(2);
     });
 
     it('drops the note when the person scrolls first, and the list stays where it is', async () => {

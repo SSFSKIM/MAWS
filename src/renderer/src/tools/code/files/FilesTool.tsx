@@ -29,10 +29,11 @@
 // "Files" bar. A tab Go to file chose is finding: its column is drawn for the search whatever the fold, and the tree's
 // button ends that before it does what it did. M2: while the field holds text the list stands in the tree's place, the
 // tree kept mounted (its hold on the git store) and drawing nothing.
-import { useVirtualizer } from '@tanstack/react-virtual';
+import { defaultRangeExtractor, useVirtualizer, type Range } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
+import type { GitStatus } from '@shared/ipc/schema/git';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { Resizer } from '../../../app/Resizer';
@@ -51,14 +52,14 @@ import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
-import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
+import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, reviewEntry, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
 import { FinderColumn } from './FinderView';
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
-import { expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
+import { basename, expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
@@ -296,6 +297,16 @@ function TreeToggle({ drawn, onToggle, keepKeyboard }: { drawn: boolean; onToggl
   );
 }
 
+// Per status the git store holds, the sessions for which one of their drawn trees has listed again (decision 14 (b)).
+const relisted = new WeakMap<GitStatus, Set<AppSessionId>>();
+function firstToRelist(status: GitStatus, appSessionId: AppSessionId): boolean {
+  const sessions = relisted.get(status) ?? new Set<AppSessionId>();
+  relisted.set(status, sessions);
+  if (sessions.has(appSessionId)) return false;
+  sessions.add(appSessionId);
+  return true;
+}
+
 // The session's tree. `marked`: the file the tab holds, whose row is marked when it is listed (Decision 8: the tree marks
 // and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it. U6b-3b:
 // `searching`, Go to file's list stands in its place: it keeps its holds and draws nothing.
@@ -373,35 +384,50 @@ function SessionTree({ appSessionId, session, marked, chosen, searching }: { app
   const listRows = useMemo(() => [...section, ...rows], [section, rows]);
 
   // Decision 14 (b): a status whose set of entries differs from the last one this tree drew from lists again every drawn
-  // directory in its repository; the first status, and one of another folder, list nothing (S3, S5).
+  // directory in its repository; the first status, and one of another folder, list nothing (S3, S5). The listings are
+  // the session's, so of its trees drawn at once only the first to see a status lists again for it (the branch panel's
+  // sweep): the trees of one session draw the same directories.
   const seen = useRef<{ key: string; set: string } | null>(null);
   useEffect(() => {
     if (status === null || gitKey === null) return;
     const set = statusSet(status);
     const last = seen.current;
     seen.current = { key: gitKey, set };
-    if (last === null || last.key !== gitKey || last.set === set || shown === '') return;
+    if (last === null || last.key !== gitKey || last.set === set || shown === '' || !firstToRelist(status, appSessionId)) return;
     for (const path of shown.split('\0')) if (pathUnder(status.repoRoot, path) !== null) useFiles.getState().list(appSessionId, path);
   }, [status, gitKey, shown, appSessionId]);
 
   // A Changed row's click (decision 6): a file on disk opens as a tree row's does; a folder opens in the tree; a row with
   // nothing on disk, and one outside every listed root (R6), opens Review on Uncommitted at its entry.
   const rootPaths = rootEntries.map((root) => root.path);
+  // A link at a Changed row's path (the ruling on the panel's sweep 1): the status says so for a tracked path; for an
+  // untracked one, the listing the store holds of its folder, when it holds one. The viewer opens no link.
+  const isLink = (row: ChangedRow, inside: { path: string; ancestors: readonly string[] }) => {
+    if (row.link) return true;
+    const folder = inside.ancestors.at(-1);
+    const listing = folder === undefined ? undefined : useFiles.getState().listing(appSessionId, folder);
+    return listing?.status === 'ok' && listing.value.entries.some((entry) => entry.name === basename(inside.path) && entry.kind === 'symlink');
+  };
   const activateChanged = (row: ChangedRow, main: boolean) => {
     const inside = expandTo(rootPaths, row.path);
-    if (inside === null || !row.onDisk) {
-      const entry = row.folder && row.letter === 'U' ? `${row.rel}/` : row.rel; // as the status lists it
-      panelHost.addTool('review', { appSessionId, params: { scope: 'uncommitted', path: entry } });
+    if (inside === null || !row.onDisk || (!row.folder && isLink(row, inside))) {
+      panelHost.addTool('review', { appSessionId, params: { scope: 'uncommitted', path: reviewEntry(row) } });
       return;
     }
-    if (row.folder) return useTreeState.getState().revealIn(appSessionId, inside.path, inside.ancestors);
+    if (row.folder) {
+      // a folder on the way whose listing failed is asked again, as a tree row's expansion asks it (the branch panel's
+      // scalpel 4), so the folder can arrive
+      for (const folder of [...inside.ancestors, inside.path]) if (useFiles.getState().listing(appSessionId, folder)?.status === 'error') useFiles.getState().list(appSessionId, folder);
+      return useTreeState.getState().revealIn(appSessionId, inside.path, inside.ancestors);
+    }
     useTreeState.getState().select(appSessionId, inside.path);
     chosen();
     if (main) return void openFile(appSessionId, row.path, null, { main: true });
     chosenFile(row.path, openFile(appSessionId, row.path, null));
   };
   const keepChanged = (row: ChangedRow) => {
-    if (row.onDisk && !row.folder && expandTo(rootPaths, row.path) !== null) openFile(appSessionId, row.path, null, { keep: true });
+    const inside = expandTo(rootPaths, row.path);
+    if (row.onDisk && !row.folder && inside !== null && !isLink(row, inside)) openFile(appSessionId, row.path, null, { keep: true });
   };
   const changed: ChangedProps = {
     marks,
@@ -588,6 +614,18 @@ function TreeList({
   const [width, measureWidth] = useWidth(); // the rows' width, from which a Changed row's folder gets its room
   const fonts = useMemo(rowFonts, []);
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
+  // The row the keyboard is in stays drawn while it is out of the drawn range (the branch panel's scalpel 4): a group
+  // that grows above it moves it out of that range before the offset is corrected, and an unmounted row would drop the
+  // keyboard to the page.
+  const [focused, setFocused] = useState<string | null>(null);
+  const kept = useMemo(() => (focused === null ? -1 : rows.findIndex((row) => row.key === focused)), [rows, focused]);
+  const rangeExtractor = useCallback(
+    (range: Range) => {
+      const base = defaultRangeExtractor(range);
+      return kept < 0 || base.includes(kept) ? base : [...base, kept].sort((a, b) => a - b);
+    },
+    [kept],
+  );
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
   const virtualizer = useVirtualizer({
     count: rows.length,
@@ -595,6 +633,7 @@ function TreeList({
     estimateSize: () => FILES_ROW_HEIGHT,
     getItemKey,
     overscan: 12,
+    rangeExtractor,
   });
   // The scroll offset lives in the session's tree state across unmounts (the host mounts only the selected tab): restored once
   // per mount, written back on unmount. A tab hidden past the watch grace comes back with its directories unlisted, so
@@ -649,7 +688,13 @@ function TreeList({
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
-              <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
+              <div
+                key={item.key}
+                className={`absolute inset-x-0 flex items-center ${item.index === rootAt ? 'pr-8' : 'pr-1'}`}
+                style={{ top: item.start, height: FILES_ROW_HEIGHT }}
+                onFocus={() => setFocused(row.key)}
+                onBlur={() => setFocused((key) => (key === row.key ? null : key))}
+              >
                 {row.kind === 'changed-heading' ? (
                   <ChangedHeading count={row.count} folded={row.folded} fold={changed.fold} />
                 ) : row.kind === 'changed' ? (

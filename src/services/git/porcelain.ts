@@ -15,13 +15,17 @@ export interface ParsedStatus {
 // Porcelain v2 record types by their first character: how many space-separated fields precede the path, and whether a
 // second NUL-terminated path (the rename or copy source) follows. `!` (ignored) never makes the tree dirty and is not
 // listed; `#` headers are read separately.
-const RECORDS: Record<string, { fields: number; source: boolean; untracked: boolean; listed: boolean }> = {
-  '1': { fields: 8, source: false, untracked: false, listed: true }, // 1 XY sub mH mI mW hH hI path
-  '2': { fields: 9, source: true, untracked: false, listed: true }, // 2 XY sub mH mI mW hH hI Xscore path \0 origPath
-  u: { fields: 10, source: false, untracked: false, listed: true }, // u XY sub m1 m2 m3 mW h1 h2 h3 path
+// `worktreeMode`: the field that holds the work tree's mode (mW), for the records that carry one.
+const RECORDS: Record<string, { fields: number; source: boolean; untracked: boolean; listed: boolean; worktreeMode?: number }> = {
+  '1': { fields: 8, source: false, untracked: false, listed: true, worktreeMode: 5 }, // 1 XY sub mH mI mW hH hI path
+  '2': { fields: 9, source: true, untracked: false, listed: true, worktreeMode: 5 }, // 2 XY sub mH mI mW hH hI Xscore path \0 origPath
+  u: { fields: 10, source: false, untracked: false, listed: true, worktreeMode: 6 }, // u XY sub m1 m2 m3 mW h1 h2 h3 path
   '?': { fields: 1, source: false, untracked: true, listed: true }, // ? path
   '!': { fields: 1, source: false, untracked: false, listed: false }, // ! path
 };
+const GITLINK_MODE = '160000';
+// The work tree's modes a status entry names (`worktreeKind`): a symbolic link, and nothing at the path
+const WORKTREE_KINDS: Record<string, 'link' | 'none'> = { '120000': 'link', '000000': 'none' };
 
 export function parseStatus(out: string): ParsedStatus {
   const status: ParsedStatus = { branch: null, head: '', upstream: null, ahead: 0, behind: 0, files: [] };
@@ -40,9 +44,14 @@ export function parseStatus(out: string): ParsedStatus {
     const oldPath = record.source ? entries[++i] : null;
     if (!record.listed) continue;
     const xy = record.untracked ? '??' : parts[1];
-    // UX wave U6b-3a (R2): the `sub` field of a `1`, `2` or `u` record begins with S for a submodule (`N...` otherwise)
-    const submodule = !record.untracked && parts[2].startsWith('S');
-    status.files.push({ path, oldPath, index: xy[0], worktree: xy[1], untracked: record.untracked, ...(submodule ? { submodule: true as const } : {}) });
+    // UX wave U6b-3a (R2): the `sub` field of a `1`, `2` or `u` record begins with S for a submodule (`N...` otherwise),
+    // which it is in the work tree only while the work tree's mode there is a gitlink's: `sub` says S also for a
+    // submodule a file, a link or nothing has replaced (the branch panel's scalpel 3)
+    const mode = record.worktreeMode === undefined ? undefined : parts[record.worktreeMode];
+    const submodule = mode === GITLINK_MODE && parts[2].startsWith('S'); // an untracked record has neither field
+    // the ruling on the panel's sweep 1 and scalpel 3: a link or nothing in the work tree, which XY does not say
+    const worktreeKind = mode === undefined ? undefined : WORKTREE_KINDS[mode];
+    status.files.push({ path, oldPath, index: xy[0], worktree: xy[1], untracked: record.untracked, ...(submodule ? { submodule: true as const } : {}), ...(worktreeKind === undefined ? {} : { worktreeKind }) });
   }
   return status;
 }

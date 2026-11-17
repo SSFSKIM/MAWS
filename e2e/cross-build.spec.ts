@@ -1851,9 +1851,10 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | U6b-3a: nothing stored. On the wire (its      | (what changed, both ways), after its same-build       | the second half: the peer's app on this build's    |
 //   | minor 55 for now, a stand-in the chain's      | control: on the peer's mawsd this build's window      | mawsd lists the folder, shows the dirty submodule  |
 //   | merge takes again, Decision Log 13):          | lists the folder with nothing dimmed, draws the       | and then a second change in its own Review,        |
-//   | `files.list`'s entries' `ignored` and a       | dirty submodule as a file's row, and a second         | refuses no answer and no event, and its log names  |
-//   | status entry's `submodule`, in answers and    | change reaches the Changed group by the peer's        | both keys as dropped. Every peer the gate crosses  |
-//   | in `git.changed`                              | `git.changed`                                         | runs both halves: none is skipped                  |
+//   | `files.list`'s entries' `ignored`, and a      | dirty submodule as a file's row, and a second         | refuses no answer and no event, and its log names  |
+//   | status entry's `submodule` and                | change reaches the Changed group by the peer's        | `ignored` and `submodule` as dropped (its          |
+//   | `worktreeKind`, in answers and in             | `git.changed`                                         | repository sends no `worktreeKind`). Every peer    |
+//   | `git.changed`                                 |                                                       | the gate crosses runs both halves: none is skipped |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -4663,11 +4664,14 @@ test('(a commit’s side thread, to the peer) a side thread this build opened fr
 
 // ---- UX wave U6b-3a: what changed, both ways (UC-14; B6) ---------------------------------------------------------------
 // U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §B and §F, scene G4; M3 decision 4)
-// stores nothing and adds two optional keys to what a daemon sends: `ignored: true` on an entry of `files.list`'s answer
-// that git ignores, and `submodule: true` on a status entry that is a submodule, in `git.watch`'s and `git.status`'s
-// answers and in the event `git.changed`. A daemon of an older build sends neither, so this build's window dims nothing
-// and draws a dirty submodule as a file's row; an older app's main drops both keys with its tolerant reader and logs each
-// once. The scene's repository holds an ignored folder with a file in it and a submodule (a second scratch repository
+// stores nothing and adds three optional keys to what a daemon sends: `ignored: true` on an entry of `files.list`'s
+// answer that git ignores; `submodule: true` on a status entry that is a submodule; and `worktreeKind` on a status
+// entry whose path the work tree holds a link or nothing at (the ruling on the branch panel's findings); the last two in
+// `git.watch`'s and `git.status`'s answers and in the event `git.changed`. A daemon of an older build sends none, so
+// this build's window dims nothing and draws a dirty submodule as a file's row; an older app's main drops each key with
+// its tolerant reader and logs it once. This scene's repository holds no link and no path its work tree lost, so it
+// sends no `worktreeKind`: test/cross-build/git-status-schema.test.ts holds that key's drop against both peers'
+// schemas. The scene's repository holds an ignored folder with a file in it and a submodule (a second scratch repository
 // added from its path) whose working tree has a tracked file modified, dirty through all three steps; and three tracked
 // files committed clean, one per step, each the witness of that step's `git.changed`: its row is read as absent in the
 // surface already open, the file is written, and its row is waited on, with nothing shown, reopened or reloaded between,

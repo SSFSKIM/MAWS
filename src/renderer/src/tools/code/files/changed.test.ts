@@ -70,7 +70,7 @@ describe('a row per path, a letter per row (decision 4)', () => {
 
   it('keeps the path, the absolute path and a rename’s source', () => {
     const [row] = changedRows(statusOf([entry('src/port.ts', 'R.', { oldPath: 'src/harbor-port.ts' })], '/coast'));
-    expect(row).toEqual({ path: '/coast/src/port.ts', rel: 'src/port.ts', oldRel: 'src/harbor-port.ts', letter: 'R', folder: false, onDisk: true });
+    expect(row).toEqual({ path: '/coast/src/port.ts', rel: 'src/port.ts', oldRel: 'src/harbor-port.ts', letter: 'R', folder: false, onDisk: true, link: false });
   });
 
   it('makes a folder’s row of a wholly untracked folder and of a submodule, without the trailing slash', () => {

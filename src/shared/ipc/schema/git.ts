@@ -18,8 +18,12 @@ export const GitFileStatusSchema = z.strictObject({
   worktree: z.string(),
   untracked: z.boolean(),
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §A, R2): the entry is a
-  // submodule (porcelain v2's `sub` begins with S); sent only when true
+  // submodule in the work tree (porcelain v2's `sub` begins with S and the work tree's mode is a gitlink's); sent only when true
   submodule: z.literal(true).optional(),
+  // UX wave U6b-3a, the ruling on its branch panel's findings (sweep 1, scalpel 3): what the work tree holds at the path
+  // when it is no file or folder, from porcelain v2's work-tree mode: a symbolic link (120000), or nothing (000000); sent
+  // only then, and never on an untracked entry, whose record carries no mode
+  worktreeKind: z.enum(['link', 'none']).optional(),
 });
 export type GitFileStatus = z.infer<typeof GitFileStatusSchema>;
 

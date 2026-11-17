@@ -26,6 +26,9 @@ import { ADMISSION_CASES, admissionRepos, type AdmissionPaths } from '../../../t
 import { rootsOf, under, type AllowlistRecord } from './allowlist';
 import { NO_LINK } from '../fs/no-link';
 import { StoreFixture } from '../../../test/support/store-fixture';
+import { runGit } from '../../../test/support/git-fixture';
+import { execGit, type ExecFileFn } from '../git/runner';
+import { createIgnoreCheck, type IgnoreCheck } from './ignored';
 import { createNamedPaths, type NamedPathsOptions } from './named';
 import { createFilesService, O_NOFOLLOW_ANY, OPEN_FLAGS, type BoundaryPoint, type FilesServiceOptions } from './service';
 
@@ -703,7 +706,8 @@ describe('files service listing: what git ignores', () => {
     expect(listing.entries.map((entry) => entry.name)).toEqual(['adir', 'zdir', 'A.txt', 'b.txt']);
     expect(markedOf(listing)).toEqual([['zdir', true], ['b.txt', true]]);
     expect(ignored).toHaveBeenCalledTimes(1);
-    expect(ignored).toHaveBeenCalledWith(inRoot('mix'), ['adir', 'zdir', 'A.txt', 'b.txt']);
+    const opened = statSync(inRoot('mix'), { bigint: true });
+    expect(ignored).toHaveBeenCalledWith(inRoot('mix'), ['adir', 'zdir', 'A.txt', 'b.txt'], expect.objectContaining({ dev: opened.dev, ino: opened.ino })); // the folder the service confirmed
   });
 
   it('marks no entry when the check answers nothing, gives no answer or is absent, and never asks for the roots, beside a listing it marks', async () => {
@@ -748,6 +752,63 @@ describe('files service listing: what git ignores', () => {
     const ignored = vi.fn(async () => new Set(['b.txt']));
     expect(markedOf(await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]);
     expect(points['before-ignored']).toBeUndefined(); // the point was reached
+  });
+
+  // The panel's scalpel 2, first finding, with its own input. The listed folder is reached through a link (`via`) to its
+  // real ancestor (`real`); at a point after the open, `real` is moved elsewhere in the root, `via` retargeted to it, and
+  // `real` replaced by a link to an outside repository. The request's spelling still names the opened folder; the
+  // spelling the listing read it by, and handed to git, leads outside.
+  describe('a standing substitution under a moved ancestor', () => {
+    let checks: IgnoreCheck[];
+    let calls: string[];
+    beforeEach(async () => {
+      checks = [];
+      calls = [];
+      await runGit(root, ['init', '-q', '-b', 'main']);
+      write(inRoot('.gitignore'), '*.tmp\n'); // the root's own rule
+      write(inRoot('real', 'listed', 'x.log'), 'x');
+      write(inRoot('real', 'listed', 'y.tmp'), 'y');
+      symlinkSync(inRoot('real'), inRoot('via'));
+      write(join(outside, 'repo', '.gitignore'), '*.log\n'); // the outside repository's rule
+      write(join(outside, 'repo', 'listed', 'x.log'), 'outside x');
+      await runGit(join(outside, 'repo'), ['init', '-q', '-b', 'main']);
+    });
+    afterEach(async () => {
+      await Promise.all(checks.map((check) => check.dispose()));
+    });
+    // The real check, under an empty home, keeping each git call's directory
+    const check = () => {
+      mkdirSync(at('home'), { recursive: true });
+      const execFile: ExecFileFn = (file, args, options, callback) => (calls.push(args[1]!), execGit(file, args, options, callback));
+      const made = createIgnoreCheck({ env: { PATH: process.env.PATH, HOME: at('home') }, execFile });
+      checks.push(made);
+      return made;
+    };
+    const substitute = () => {
+      renameSync(inRoot('real'), inRoot('moved'));
+      unlinkSync(inRoot('via'));
+      symlinkSync(inRoot('moved'), inRoot('via'));
+      symlinkSync(join(outside, 'repo'), inRoot('real'));
+    };
+
+    it('marks by the root’s rules through the link with nothing substituted (the control)', async () => {
+      const listing = await service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') });
+      expect(markedOf(listing)).toEqual([['y.tmp', true]]);
+      expect(calls.length).toBeGreaterThan(0);
+    });
+
+    it('refuses the listing, and runs no git, under the substitution at before-ignored', async () => {
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
+      points['before-ignored'] = substitute;
+      await expect(service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+      expect(calls).toEqual([]);
+      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the folder or its repository changed before git ran/)]); // naming no folder
+    });
+
+    it('refuses the listing under the same substitution once the names were read, with no check', async () => {
+      points['after-readdir'] = substitute;
+      await expect(service().list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
+    });
   });
 });
 
