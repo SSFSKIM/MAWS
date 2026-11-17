@@ -4,7 +4,7 @@
 // disposal, on a clock the test moves, and once over a real process group held open.
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import fs, { type BigIntStats, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
@@ -305,7 +305,7 @@ describe('the ignore check over a real repository', () => {
       expect(sorted(await check.names(tree, ['a.log']))).toEqual(['a.log']); // the control: the git directory is this user's
       ownedByAnother(other.root);
       expect(await check.names(tree, ['a.log'])).toBeNull();
-      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the repository belongs to another user/)]);
+      expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the repository belongs to another user/)]);
     });
   }
 
