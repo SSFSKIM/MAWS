@@ -16,12 +16,15 @@
 // - P5 O7 M5a: `library.read` (a library item's stored file, or with `export` an export's) answers as `files.read` does,
 //   and is read the same way (`readInPages`): the viewer's read of a File artifact, an open copy's and a Save As's.
 // - UX wave U6f: the paging itself (`readPages`) takes the function that reads one page, so a file outside a session's
-//   folders, read by one act per page, is assembled and checked as these are.
+//   folders, read by one act per page, is assembled and checked as these are. And a read may be bound to the channel
+//   current when it is made (`oneChannel`, the whole call and every page): the page's keyed read, whose keys only a peer
+//   that lists the capability reads, is never carried to the next channel (M3's fix wave; Decision Log 27). Every other
+//   read is held across a channel's end and sent again on the next, as it always was.
 import { MESSAGE_MAX_BYTES } from '../../../apps/org-protocol/src/index.ts';
 import { ipcError } from '@shared/ipc/errors';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, type FilesReadOutput } from '@shared/ipc/schema/files';
-import { dispatchOverLink } from '../machines/remote/dispatch';
+import { callOverLink, dispatchOverLink } from '../machines/remote/dispatch';
 import type { RemoteLink } from '../machines/remote/link';
 
 /** Bytes per ranged read: base64 of it, with the answer's envelope, stays under the channel's result bound. */
@@ -44,11 +47,13 @@ export function readFileInPages(link: RemoteLink, input: Record<string, unknown>
 // UX wave U6b-2 (M3, decision 9; A7): `label`, when given, names the read in the two log lines in place of the path or the
 // artifact's id, so a file frame's copy logs no path. The sentence a file that kept changing answers is unchanged: it goes
 // to the window that asked, which named the path.
-export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void, label?: string): Promise<Result> {
-  const whole = await dispatchOverLink(link, name, input);
+export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void, label?: string, { oneChannel }: { oneChannel?: true } = {}): Promise<Result> {
+  // both reads are graded `view`, so the call `callOverLink` makes is the one `dispatchOverLink` would, bound to its channel
+  const ask = (fields: Record<string, unknown>) => (oneChannel === true ? callOverLink(link, name, fields, { oneChannel }) : dispatchOverLink(link, name, fields));
+  const whole = await ask(input);
   if (!tooLarge(whole)) return whole;
   log(`${saidOf(link, name, input, label)}: too large for the channel in one answer; read in pages`);
-  return readPages(link, name, input, log, { page: (fields) => dispatchOverLink(link, name, fields), pageBytes: REMOTE_READ_PAGE_BYTES, ...(label !== undefined && { label }) });
+  return readPages(link, name, input, log, { page: ask, pageBytes: REMOTE_READ_PAGE_BYTES, ...(label !== undefined && { label }) });
 }
 
 const saidOf = (link: RemoteLink, name: string, input: Record<string, unknown>, label?: string) => `lane B: ${name} of ${link.name} ${label ?? String(input.path ?? input.artifactId)}`;

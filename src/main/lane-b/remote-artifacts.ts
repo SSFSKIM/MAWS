@@ -124,7 +124,7 @@ export interface RemoteArtifacts {
 }
 
 /** What a file frame's copy gives the read (UX wave U6b-2's `label` and `seen`; U6f's caller and the tab's mark). */
-export type CopyOptions = { label: string; seen(first: { mime: string; bytes: number }): void; client?: ClientRef; agent?: true };
+export type CopyOptions = { label: string; seen(first: { mime: string; bytes: number }): void; client?: ClientRef; agent?: true; open?: true };
 
 type Result = CommandResult<CommandName>;
 const failure = (code: IpcErrorCode, message: string, issues?: unknown): Result => ({ ok: false, error: ipcError(code, message, issues) });
@@ -238,18 +238,19 @@ export function createRemoteArtifacts(deps: RemoteArtifactsDeps): RemoteArtifact
       const link = deps.remote(machine);
       if (link === null) return failure('host_unavailable', `remote.openCopy: machine ${machine} is not connected`) as CommandResult<'remote.openCopy'>;
       if ('artifactId' in source) deps.machines.record(source.artifactId, machine);
-      // UX wave U6f (decision 15): a session's file is read for the caller that asked, as its keyed read is
+      // UX wave U6f (decision 15): a session's file is read for the caller that asked, the act on a file outside the folders
+      // for the people it is offered to (Decision Log 27: the plain read today's)
       const read = deps.readSessionFile;
-      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, named: true }, client ?? null, {}) };
+      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, fields, client ?? null, {}) };
       return openCopy(link, source, { openPath: deps.openPath, tempDir, env: deps.env, log: deps.log, ...reader });
     },
-    async copyInto(machine, source, sink, max, { client, agent, ...options }) {
+    async copyInto(machine, source, sink, max, { client, agent, open, ...options }) {
       const link = deps.remote(machine);
       if (link === null) return null;
-      // UX wave U6f (decision 15): the frame's copy reads as the tab's own reads there do, `named` and the tab's mark, for
-      // the page that asked, its log lines naming the label
+      // UX wave U6f (decision 15; Decision Log 26, 27): the frame's copy is read for the page that asked, its log lines
+      // naming the label; the tab's mark and its `open` ride the act on a file outside the folders alone
       const read = deps.readSessionFile;
-      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, named: true, ...(agent && { agent }) }, client ?? null, { label: options.label }) };
+      const reader = read && { readSessionFile: (fields: Record<string, unknown>) => read(link, { ...fields, ...(agent && { agent }), ...(open && { open }) }, client ?? null, { label: options.label }) };
       return fetchInto(link, source, sink, max, deps.log, { ...options, ...reader });
     },
     files(machine) {

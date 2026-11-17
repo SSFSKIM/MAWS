@@ -12,12 +12,18 @@
 //   build's schema does not hold taken off, its refusal of a path outside the folders worded as the update sentence; to
 //   one that lists it, the plain read with `named` first, which is all a file inside the folders costs; on the files
 //   service's refusal, or an answer the session's deliveries admit read-only (`added`), the act, when the question
-//   allows it.
+//   allows it. The call is bound to the channel whose peer's list was read for it (`oneChannel`, its pages too), so the
+//   link never carries keys only that peer reads to the next channel's peer (M3's fix wave; Decision Log 27).
+// - A copy's read ("Open externally"'s, a frame's): today's request to the byte, `named`, `agent` and `open` taken off,
+//   held across a channel's end and sent again on the next as every copy's read always was, so any peer may read it; the
+//   act only on the service's refusal of a path outside the folders, for a caller the question allows, judged on the
+//   channel current when the act goes (Decision Log 27). The frame's `agent` and `open` ride that act alone.
 // - The act's reads cross in pages of REMOTE_OUTSIDE_PAGE_BYTES, each an act on one channel, assembled and checked as
 //   a call's pages are (./remote-files-read.ts); a page the services' ledger did not keep (its marker) is asked once more
 //   under a new operation (decision 4).
-// - With no channel current a read, a listing and a choice answer at once; the save waits under the link's hold within
-//   its send window, as `files.write` does, and nothing withdraws it (decision 6; R8).
+// - With no channel current a keyed read, a listing and a choice answer at once (a copy's plain read waits, as above);
+//   the save waits under the link's hold within its send window, as `files.write` does, and nothing withdraws it
+//   (decision 6; R8).
 import { NOT_KEPT_REFUSAL, OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY, outsideOffer } from '@shared/files/outside';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
@@ -43,8 +49,11 @@ type Fields = Record<string, unknown>;
 type Result = CommandResult<CommandName>;
 
 export interface RemoteOutsideDeps {
-  /** Today's paged call (`readInPages`), its log lines naming `label` in place of the path when one is given. */
-  call(link: RemoteLink, name: 'files.read', fields: Fields, label?: string): Promise<Result>;
+  /**
+   * Today's paged call (`readInPages`), its log lines naming `label` in place of the path when one is given; `oneChannel`:
+   * the call and its pages go only on the channel current when each is made, and fail at its end.
+   */
+  call(link: RemoteLink, name: 'files.read', fields: Fields, options: { label?: string; oneChannel?: true }): Promise<Result>;
   /** Remote lane B's `machine` act, the capability as its `requires`. */
   act(link: RemoteLink, name: OutsideAct, fields: Fields, options: { oneChannel: boolean; deadline: number }): Promise<Result>;
   /** U6e's `isAppPage(client, appUrl)` bound to the app's URL: the predicate the router's guard uses. */
@@ -63,8 +72,9 @@ export interface RemoteOutsideFiles {
   dispatch(link: RemoteLink, name: CommandName, fields: Fields, client: ClientRef): Promise<Result>;
   /**
    * A keyed read (decision 5's order); `client` null: no page asked, never promoted. `label`: a frame's copy, whose log
-   * lines name no path. `copy`: a copy's read ("Open externally"'s, a frame's), answered the plain read's refusal where
-   * the act is not offered (P2), the keyed read the ownership sentence.
+   * lines name no path. `copy`: a copy's read ("Open externally"'s, a frame's): today's plain read, held as it always was,
+   * then the act on the service's refusal; answered the plain read's refusal where the act is not offered (P2), the keyed
+   * read the ownership sentence.
    */
   read(link: RemoteLink, fields: Fields, client: ClientRef | null, options?: { label?: string; copy?: true }): Promise<Result>;
 }
@@ -100,28 +110,43 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
     });
   }
 
+  /** The page's keyed read, by decision 5's order, each call on the channel whose peer's list decided its keys. */
+  async function keyedRead(link: RemoteLink, fields: Fields, client: ClientRef | null, label: string | undefined): Promise<Result> {
+    const peers = link.peerCapabilities();
+    if (peers === null) return unreachable('files.read', link);
+    const bound = { ...(label !== undefined && { label }), oneChannel: true as const };
+    // (i) a build before this landing: today's read to the byte; its refusal of a path outside the folders says to update
+    if (!peers.includes(OUTSIDE_FILES_CAPABILITY)) {
+      const plain = await deps.call(link, 'files.read', without(fields, 'named', 'agent', 'raw', 'open'), bound);
+      return refusedOutside(plain) ? refusalResult('files.readOutside', link.name, 'not-offered') : plain;
+    }
+    // (ii) the plain read, with `named`: a file inside the folders costs this one call; a call asks nothing of a private folder
+    const plain = await deps.call(link, 'files.read', without(fields, 'open'), bound);
+    const added = addedOf(plain);
+    if (!added && !refusedOutside(plain)) return plain;
+    // (iv) no act for any other caller, nor for a person this build does not offer it to
+    if (!mayPromote(client, link.machine)) return client !== null && deps.isAppPage(client) && !added ? refusalResult('files.readOutside', link.name, 'owners-only') : plain;
+    // (iii) the act, by the outside rule: no `named` (the act always asks by it) and no raw read across a link
+    const outside = await readOutside(link, without(fields, 'named', 'raw'), label);
+    return added && !outside.ok ? plain : outside;
+  }
+
+  /** A copy's read: today's plain read, held as it always was; the act on the service's refusal alone. */
+  async function copyRead(link: RemoteLink, fields: Fields, client: ClientRef | null, label: string | undefined): Promise<Result> {
+    const plain = await deps.call(link, 'files.read', without(fields, 'named', 'agent', 'open'), label !== undefined ? { label } : {});
+    if (!refusedOutside(plain)) return plain;
+    // the peer the act would go to: the channel current now, which may not be the one that refused
+    const peers = link.peerCapabilities();
+    if (peers !== null && !peers.includes(OUTSIDE_FILES_CAPABILITY)) return refusalResult('files.readOutside', link.name, 'not-offered');
+    if (!mayPromote(client, link.machine)) return plain;
+    if (peers === null) return unreachable('files.readOutside', link);
+    return readOutside(link, without(fields, 'named', 'raw'), label);
+  }
+
   return {
     handles: (name) => isOutsideAct(name),
 
-    async read(link, fields, client, options = {}) {
-      const { label, copy } = options;
-      const peers = link.peerCapabilities();
-      if (peers === null) return unreachable('files.read', link);
-      // (i) a build before this landing: today's read to the byte; its refusal of a path outside the folders says to update
-      if (!peers.includes(OUTSIDE_FILES_CAPABILITY)) {
-        const plain = await deps.call(link, 'files.read', without(fields, 'named', 'agent', 'raw', 'open'), label);
-        return refusedOutside(plain) ? refusalResult('files.readOutside', link.name, 'not-offered') : plain;
-      }
-      // (ii) the plain read, with `named`: a file inside the folders costs this one call; a call asks nothing of a private folder
-      const plain = await deps.call(link, 'files.read', without(fields, 'open'), label);
-      const added = addedOf(plain);
-      if (!added && !refusedOutside(plain)) return plain;
-      // (iv) no act for any other caller, nor for a person this build does not offer it to
-      if (!mayPromote(client, link.machine)) return client !== null && deps.isAppPage(client) && !added && copy !== true ? refusalResult('files.readOutside', link.name, 'owners-only') : plain;
-      // (iii) the act, by the outside rule: no `named` (the act always asks by it) and no raw read across a link
-      const outside = await readOutside(link, without(fields, 'named', 'raw'), label);
-      return added && !outside.ok ? plain : outside;
-    },
+    read: (link, fields, client, { label, copy } = {}) => (copy === true ? copyRead(link, fields, client, label) : keyedRead(link, fields, client, label)),
 
     async dispatch(link, name, fields) {
       if (!isOutsideAct(name)) return { ok: false, error: ipcError('internal', `${name}: not an act on a file outside a session's folders`) };

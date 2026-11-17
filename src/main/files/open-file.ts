@@ -42,6 +42,18 @@ export const appPageOnly =
   (name, _input, ctx) =>
     isAppPage(ctx.client, appUrl) ? undefined : ipcError('forbidden_sender', `${name} may only be invoked by the app window`);
 
+/**
+ * UX wave U6f (Decision Log 26): the commands that carry `open` (the person opened a protected folder on another machine)
+ * only from a live page of an app window, as `files.read`'s comes from the page's own record of what the person opened.
+ * A frame, which is no app page, asks the same command without it.
+ */
+export const OPENS_FROM_APP_PAGE_ONLY: readonly CommandName[] = ['layout.frameFile'];
+
+export const openFromAppPageOnly =
+  (appUrl: string): CommandGuard =>
+  (name, input, ctx) =>
+    (input as { open?: unknown }).open !== true || isAppPage(ctx.client, appUrl) ? undefined : ipcError('forbidden_sender', `${name} with open may only be invoked by the app window`);
+
 export interface OpenFileDeps {
   port: Pick<ClientPort, 'pick'>;
   isAppPage(client: ClientRef): boolean;

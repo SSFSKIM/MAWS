@@ -116,9 +116,9 @@ interface FrameCopy {
  * is the length verified.
  *
  * Asks the machine `files.read { appSessionId, path, offset, length, hash }` and nothing else: the keys the copy of Open
- * externally sends when it proves a text. UX wave U6f: through `readSessionFile` when it is given, which adds the keys the
- * tab's own reads there carry (`named`, the agent's mark) for a machine that reads them, and takes them off again for
- * one that does not.
+ * externally sends when it proves a text. UX wave U6f: through `readSessionFile` when it is given, which sends that same
+ * request, held as it always was, and reads a file outside the session's folders by the act for a page it is offered to
+ * (Decision Log 27).
  */
 export async function fetchInto(
   link: RemoteLink,

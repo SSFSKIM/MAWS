@@ -86,7 +86,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
-import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
+import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile, OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly } from './files/open-file'; // UX wave U6e; U6f's frame's open
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -574,6 +574,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
   // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
   guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl));
+  guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl)); // UX wave U6f (Decision Log 26): a frame's open
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
