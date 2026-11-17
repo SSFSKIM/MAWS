@@ -768,7 +768,7 @@ describe('Edit takes the stored row (ticket 733a)', () => {
     const rewritten = { ...row, text: `A mod's words.\n${GRANT}`, placeholders: [], attachments: [] };
     editRowOf(A, rewritten, 'edit');
     const fromRewritten = edit();
-    expect(fromRewritten).toMatchObject({ messageUuid: 'u-1', text: '`return total;`\nCount the header.', framing: { anchor, destination: 'main', screenshot: false }, form: { kind: 'comment', quote: '`return total;`' } });
+    expect(fromRewritten).toMatchObject({ messageUuid: 'u-1', text: '`return total;`\nCount the header.', framing: { anchor, destination: 'main', screenshot: false }, form: { kind: 'comment', quote: { at: [0, 15], body: '`return total;`' } } });
     cancelInlineEdit(A);
     editRowOf(A, row, 'edit');
     expect(edit()).toEqual(fromRewritten);
