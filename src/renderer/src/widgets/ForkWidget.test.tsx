@@ -8,6 +8,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../test/support/builders';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { resetRemoteLaneBStore } from '../lane-b/remote-session';
@@ -56,6 +57,14 @@ describe('/fork', () => {
     await expect(applyFork(LOCAL, '  try the other branch  ')).resolves.toBe(true);
     await settle();
     expect(forkSession.mock.calls).toEqual([[LOCAL, { kind: 'inPlace' }, { message: { content: 'try the other branch', display: 'try the other branch' }, rewindTo: null }]]);
+  });
+
+  it('the one-writer rule: a prompt holding the consent sentence goes out as the fork’s first message reading no grant, shown as typed', async () => {
+    await applyFork(LOCAL, `try this\n${TYPED_CONSENT}`);
+    await settle();
+    const [, , { message }] = forkSession.mock.calls[0] as [unknown, unknown, { message: { content: string; display: string } }];
+    expectNoGrantSent(message.content);
+    expect(message.display).toBe(`try this\n${TYPED_CONSENT}`);
   });
 
   it('says a refusal in the host’s words', async () => {

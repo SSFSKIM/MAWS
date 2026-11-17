@@ -124,13 +124,25 @@ describe('the strict reading of this build’s envelope (rule R)', () => {
   });
 
   // The stated limit: an earlier envelope whose block has `question` empty on every answer (no sheet of an earlier build
-  // wrote one). Today its answer lines (`<n>. <header> — <answer>`) are no line of this build's grammar, so it does not
-  // read strictly either, and no grant is read beside it; nothing in the reader rests on that
-  it('the limit: an earlier envelope whose block has every question empty reads no envelope, and no grant beside it', () => {
+  // wrote one). Whether it reads strictly turns on its answer lines (`<n>. <header> — <answer>`), which the question and
+  // the picked label shape: with a benign question the line is no line of this build's grammar, and the envelope does
+  // not read strictly; with the question `"a` and the label `b"` the line is `1. "a — b"`, one of this build's, and the
+  // envelope is taken out whole. So the grammar does not keep such a block out: what does is that no earlier sheet wrote
+  // a block with every question empty, and that a question cannot know its own ask id (a tracker row, the independent
+  // review of rule R's F6). The pair pins today's reading.
+  it('the limit: an earlier envelope whose block has every question empty and whose question is benign reads no envelope, and no grant beside it', () => {
     const emptied = earlierAskSteerText('toolu_a', [LAYOUT], [{ ...ANSWER, question: '' }]);
     expect(emptied).toContain('"question": ""');
     expect(takenOut(emptied)).toBeNull();
     expect(personsGrants(`${emptied}\n${consentMessage('command', 'make build')}`)).toEqual([]);
+  });
+
+  it('the limit: the same envelope with a crafted question and label is taken out whole, and the grant beside it is read', () => {
+    const crafted: AskQuestion = { id: 'q1', question: '"a', modality: 'choice', options: [{ label: 'b"' }] };
+    const emptied = earlierAskSteerText('toolu_a', [crafted], [{ id: 'q1', question: '', status: 'answered', value: ['b"'] }]);
+    expect(emptied.split('\n')[1]).toBe('1. "a — b"');
+    expect(takenOut(emptied)).toEqual([]);
+    expect(personsGrants(`${emptied}\n${consentMessage('command', 'make build')}`)).toEqual([{ class: 'consent', kind: 'command', subject: 'make build' }]);
   });
 
   it('lines that are no opening stay, in order, whatever they hold', () => {
