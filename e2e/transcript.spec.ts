@@ -1889,11 +1889,17 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
       expect(hovered.tail!.box, `${name}, R20: the caption does not move when the controls appear`).toEqual(rest.tail!.box);
     }
     await atRest();
+    // focusing Copy scrolls a control partly out of view into it, which moves the whole row: the parts are compared in
+    // the row's own box, and the scroll the focus made is told
+    const scrolled = () => row.evaluate((frame) => frame.closest('[data-transcript-scroller]')!.scrollTop);
+    const scrollBefore = await scrolled();
     await row.getByRole('button', { name: 'Copy' }).focus();
+    const scrollAfter = await scrolled();
     await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on focus within`).toHaveCSS('opacity', '1');
     const focused = await measure(row);
     expect(focused.row.height, `${name}: focus adds no height`).toBe(rest.row.height);
-    expect(focused.parts.map((part) => part.box), `${name}: on keyboard focus the controls and the caption stand where they do on hover`).toEqual(hovered.parts.map((part) => part.box));
+    const inRow = (drawn: typeof focused) => drawn.parts.map(({ box }) => ({ left: box.left - drawn.row.left, top: box.top - drawn.row.top, width: box.width, height: box.height }));
+    expect(inRow(focused), `${name}: on keyboard focus the controls and the caption stand where they do on hover, in the row (the list scrolled from ${scrollBefore} to ${scrollAfter} on focus)`).toEqual(inRow(hovered));
   };
   // at each transcript width
   await roomForWidths(harness);

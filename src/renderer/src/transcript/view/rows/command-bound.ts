@@ -1,11 +1,12 @@
 // Where a closed command output is cut (UX wave U3b, M1; the architect's ruling R19 on the drawn example, and the branch
 // panel's finding 3): closed, an output is never drawn taller than its bound, whatever it holds and whenever it finishes
 // loading. Where its first two drawn lines are text lines, the bound is the bottom of the second, so the closed state
-// shows two lines whole whatever they hold (a paragraph's two lines at 36 px; a heading and the line under it, 4 px
-// apart, at 40 px). Where what it draws is taller than that without being text lines (an image, a rule, a table's frame
-// before its text), the bound is two lines of the output's own type. Read from the line boxes and the whole height the
-// drawing measures, at mount and on any change of its size; an output no taller than its bound is shown whole, with no
-// bound and no "Show more".
+// shows two lines whole whatever they hold (a paragraph's two lines at about 36 px; a heading and the line under it, 4 px
+// apart, at about 40 px). Where what it draws is taller than that without being text lines (an image, a rule, a table's
+// frame before its text), the bound is two lines of the output's own type. Read from the line boxes and the whole height
+// the drawing measures, at mount and on any change of its size; an output no taller than its bound is shown whole, with
+// no bound and no "Show more". A range measures a line's text by the font's box, shorter than the line: each fragment is
+// grown by its half-leading to the line box of its own element's type before its line is read.
 export interface LineBox { top: number; bottom: number }
 
 /**
@@ -38,9 +39,13 @@ export function lineBoxes(fragments: readonly LineBox[]): LineBox[] {
  *  line's, and the line height of the type of the element that holds its text. */
 export interface TextFragment extends LineBox { lineHeight: number }
 
-/** The drawn lines of a set of text fragments. */
+/** The drawn lines of a set of text fragments: each grown to its line box by its half-leading, (line height − its
+ *  height) / 2 above and below (none where its line is no taller than it), then grouped into lines. */
 export function textLines(fragments: readonly TextFragment[]): LineBox[] {
-  return lineBoxes(fragments);
+  return lineBoxes(fragments.filter((box) => box.bottom > box.top).map(({ top, bottom, lineHeight }) => {
+    const leading = Math.max(0, (lineHeight - (bottom - top)) / 2);
+    return { top: top - leading, bottom: bottom + leading };
+  }));
 }
 
 /** One line of an element's own type, in pixels: its computed line height (a font's normal line where none is set). */
@@ -50,20 +55,24 @@ export function lineHeightOf(element: HTMLElement): number {
 }
 
 /** The first drawn lines of an element's text, from its top edge, up to a third: each text node's line fragments (a
- *  range over a whole element would give its block boxes too, each as tall as its lines); none where a range cannot
- *  measure. */
+ *  range over a whole element would give its block boxes too, each as tall as its lines), each grown to a line of its
+ *  parent element's type; none where a range cannot measure. */
 export function drawnLineBoxes(element: HTMLElement): LineBox[] {
   if (typeof document.createRange !== 'function') return [];
   const origin = element.getBoundingClientRect().top - element.scrollTop;
-  const fragments: LineBox[] = [];
+  const fragments: TextFragment[] = [];
+  const lineHeights = new Map<HTMLElement, number>(); // read once per element
   const walker = document.createTreeWalker(element, NodeFilter.SHOW_TEXT);
   const range = document.createRange();
   for (let node = walker.nextNode(); node !== null; node = walker.nextNode()) {
     if (!node.textContent?.trim()) continue;
     range.selectNodeContents(node);
     if (typeof range.getClientRects !== 'function') return [];
-    for (const rect of range.getClientRects()) fragments.push({ top: rect.top - origin, bottom: rect.bottom - origin });
-    if (lineBoxes(fragments).length > 2) break; // a third line is all the bound needs to know of; text is drawn in order
+    const parent = node.parentElement ?? element;
+    let lineHeight = lineHeights.get(parent);
+    if (lineHeight === undefined) lineHeights.set(parent, (lineHeight = lineHeightOf(parent)));
+    for (const rect of range.getClientRects()) fragments.push({ top: rect.top - origin, bottom: rect.bottom - origin, lineHeight });
+    if (textLines(fragments).length > 2) break; // a third line is all the bound needs to know of; text is drawn in order
   }
-  return lineBoxes(fragments);
+  return textLines(fragments);
 }
