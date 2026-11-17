@@ -23,7 +23,7 @@ import { deferred, fail, installFakeMain, ok } from '../../../test-support/code'
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { installResizeObserver } from '../../../test-support/resize';
 import { openFile, resetKeptOpens } from '../open-file';
-import { FileViewer } from '../viewer/FileViewer';
+import { FileBody, FileViewer } from '../viewer/FileViewer';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
 import { connectGoToFile, requestKeyboard } from './finder';
@@ -33,20 +33,22 @@ import { resetTreeState, treeOf, useTreeState } from './tree-state';
 vi.mock('../../../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
 const APP = '/r/src/app.ts';
+const TIDES = '/r/src/tides.ts';
 const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const dir = (path: string): FilesEntry => ({ name: path.slice(path.lastIndexOf('/') + 1), path, kind: 'dir', size: 0, mtimeMs: 0, target: null });
 const file = (path: string): FilesEntry => ({ ...dir(path), kind: 'file', size: 10 });
-const REPO: Record<string, FilesEntry[]> = { '': [dir('/r')], '/r': [dir('/r/src')], '/r/src': [file(APP)] };
+const REPO: Record<string, FilesEntry[]> = { '': [dir('/r')], '/r': [dir('/r/src')], '/r/src': [file(APP), file(TIDES)] };
+const UNKNOWN_SESSION = `unknown app session ${A}`; // main's answer for a session it cannot place: the viewer's no-session notice
 
 let heldReads: Map<string, ReturnType<typeof deferred<void>>>;
-let failedReads: Set<string>;
+let failedReads: Map<string, string>; // a path's read fails with this message
 function openMain() {
   return installFakeMain(async (name, input) => {
     if (name === 'layout.get') return ok({ value: null });
     if (name === 'layout.set' || name === 'files.watch' || name === 'files.unwatch' || name === 'git.unwatch') return ok();
     if (name === 'git.watch') return fail('not a git repository');
     if (name === 'fs.workflows') return ok({ runs: [] });
-    if (name === 'git.lsFiles') return ok({ paths: ['src/app.ts', 'src/'], truncated: false, source: 'git' });
+    if (name === 'git.lsFiles') return ok({ paths: ['src/app.ts', 'src/tides.ts', 'src/'].filter((path) => path.includes(input.query as string)), truncated: false, source: 'git' });
     if (name === 'files.list') {
       const path = (input.path as string | undefined) ?? '';
       const found = REPO[path];
@@ -55,7 +57,8 @@ function openMain() {
     if (name === 'files.read') {
       const path = String(input.path);
       await heldReads.get(path)?.promise;
-      if (failedReads.has(path)) return fail(`denied: ${path}`);
+      const failure = failedReads.get(path);
+      if (failure !== undefined) return fail(failure);
       const content = `export const app = '${path}';\n`;
       return ok({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     }
@@ -79,7 +82,7 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 const offs: (() => void)[] = [];
 beforeEach(() => {
   heldReads = new Map();
-  failedReads = new Set();
+  failedReads = new Map();
   resetPanelStores();
   resetKeptOpens();
   resetTreeState();
@@ -128,13 +131,13 @@ const holdRead = (path: string) => {
   return gate;
 };
 
-// ⌘P from the composer, `app` typed, and Enter on its one result once it is listed.
-async function findAndEnter(): Promise<void> {
+// ⌘P from the composer, `query` typed, and Enter on its one result (`path`) once it is listed.
+async function findAndEnter(query = 'app', path = APP): Promise<void> {
   act(() => composer().focus());
   act(() => runAction('files.goToFile'));
   await waitFor(() => expect(document.activeElement).toBe(field()));
-  fireEvent.change(field()!, { target: { value: 'app' } });
-  await waitFor(() => expect(document.querySelector(`[data-files-result][data-path="${APP}"]`)).not.toBeNull());
+  fireEvent.change(field()!, { target: { value: query } });
+  await waitFor(() => expect([...document.querySelectorAll('[data-files-result]')].map((row) => row.getAttribute('data-path'))).toEqual([path]));
   fireEvent.keyDown(field()!, { key: 'Enter' });
 }
 
@@ -153,7 +156,7 @@ describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, ()
     expect(document.activeElement!.closest('[role="tab"]')).toBeNull();
   });
 
-  it('beside the chat, a press in the composer before the read lands: the keyboard stays there and the editor takes nothing', async () => {
+  it('beside the chat, a press in the composer before the read lands: the keyboard stays there and the editor takes nothing; with no press between, the editor takes it', async () => {
     const read = holdRead(APP);
     render(<Page />);
     await findAndEnter();
@@ -164,6 +167,21 @@ describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, ()
     await waitFor(() => expect(textOf(APP, 'panel')).not.toBeNull(), { timeout: 5000 });
     await settle();
     expect(document.activeElement).toBe(composer());
+    const control = holdRead(TIDES); // the control: the same hand-off with nothing between
+    await findAndEnter('tides', TIDES);
+    await waitFor(() => expect(document.activeElement).toBe(body(TIDES, 'panel')));
+    act(() => control.resolve());
+    await waitFor(() => expect(document.activeElement).toBe(textOf(TIDES, 'panel')), { timeout: 5000 });
+  });
+
+  it('beside the chat, a read that fails because the session is not one main can place: the notice is drawn in the body, which keeps the keyboard', async () => {
+    failedReads.set(APP, UNKNOWN_SESSION);
+    render(<Page />);
+    act(() => void openFile(A, APP, null, { keep: true }));
+    await waitFor(() => expect(document.querySelector(`[data-region="panel"] [data-file-viewer][data-path="${APP}"]`)?.textContent).toContain('No session grants access to this file'));
+    await findAndEnter(); // the failure is there before Enter: the body still takes the request
+    await waitFor(() => expect(document.activeElement).toBe(body(APP, 'panel')));
+    expect(document.activeElement!.textContent).toContain('No session grants access to this file');
   });
 
   it('beside the chat, already drawn: the keyboard is handed on to its text at once', async () => {
@@ -210,7 +228,7 @@ describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, ()
     render(<Page />);
     act(() => useLayout.getState().openTab({ kind: 'file', path: APP, line: null, appSessionId: A, machine: TEST_MACHINE }, { activate: false }));
     const read = holdRead(APP);
-    failedReads.add(APP);
+    failedReads.set(APP, `denied: ${APP}`);
     await findAndEnter();
     await waitFor(() => expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(APP)));
     await waitFor(() => expect(document.activeElement).toBe(body(APP, 'main')));
@@ -219,5 +237,44 @@ describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, ()
     await settle();
     expect(document.activeElement).toBe(body(APP, 'main'));
     expect(document.activeElement!.closest('[role="tab"]')).toBeNull();
+  });
+
+  it('a main tab of the file whose read is held and then fails because the session is not one main can place: the keyboard stays on the body, which draws the notice', async () => {
+    render(<Page />);
+    act(() => useLayout.getState().openTab({ kind: 'file', path: APP, line: null, appSessionId: A, machine: TEST_MACHINE }, { activate: false }));
+    const read = holdRead(APP);
+    failedReads.set(APP, UNKNOWN_SESSION);
+    await findAndEnter();
+    await waitFor(() => expect(activeTab(useLayout.getState().main)?.id).toBe(KEY(APP)));
+    const waiting = await waitFor(() => {
+      expect(document.activeElement).toBe(body(APP, 'main'));
+      return document.activeElement;
+    });
+    act(() => read.resolve());
+    await waitFor(() => expect(document.querySelector(`[data-region="main"] [data-file-viewer][data-path="${APP}"]`)?.textContent).toContain('No session grants access to this file'));
+    await settle();
+    expect(document.activeElement).toBe(waiting); // the same element: the body is not drawn again
+    expect(document.activeElement).toBe(body(APP, 'main'));
+  });
+});
+
+// The file view's body as a place for the keyboard (Decision Log 11): no new tab stop, and its outline drawn under
+// `focus-visible` only, so a mouse click that lands the keyboard on it draws no ring. The File artifact's body (no key)
+// is not focusable.
+describe('the file view’s body', () => {
+  it('under a key is focusable at tabIndex -1 with the app’s outline under focus-visible only; with none it is not focusable', async () => {
+    render(
+      <QueryClientProvider client={queryClient}>
+        <FileViewer tab={{ id: KEY(APP), kind: 'file', path: APP, line: null, appSessionId: A, machine: TEST_MACHINE, pinned: false }} />
+        <FileBody tabId="artifact:a1:1" appSessionId={A} path={TIDES} />
+      </QueryClientProvider>,
+    );
+    const keyed = document.querySelector<HTMLElement>(`[data-file-viewer][data-path="${APP}"]`)!;
+    expect([keyed.getAttribute('tabindex'), keyed.getAttribute('data-file-keyboard'), keyed.getAttribute('data-key')]).toEqual(['-1', '', KEY(APP)]);
+    const outlines = (element: HTMLElement) => element.className.split(/\s+/).filter((name) => /outline|focus|ring/.test(name)).sort();
+    expect(outlines(keyed)).toEqual(['-outline-offset-2', 'focus-visible:outline-2', 'outline-accent']); // no `focus:` class among them
+    const plain = document.querySelector<HTMLElement>(`[data-file-viewer][data-path="${TIDES}"]`)!;
+    expect([plain.hasAttribute('tabindex'), plain.hasAttribute('data-file-keyboard')]).toEqual([false, false]);
+    expect(outlines(plain)).toEqual([]);
   });
 });

@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -5,6 +6,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } 
 import type { SessionRecord } from '@shared/graph/session';
 import { LsFilesSchema } from '@shared/ipc/schema/git';
 import { admissionRepos, type AdmissionPaths } from '../../../test/support/admission-cases';
+import { isolatedGitEnv } from '../../../test/support/git-env';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { project, record } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
@@ -277,6 +279,32 @@ describe('git lsFiles beside a refused repository, and a submodule as the folder
     } finally {
       library.dispose();
     }
+  });
+
+  // A conflict whose stages mix a file and a gitlink (one side added a submodule where the other added a file): the path
+  // is listed once, as the folder, since a gitlink at any of its stages makes it one. A path whose stages are all files,
+  // in the same index, is listed once as a file: the control.
+  it('lists a conflicted path whose stages mix a file and a gitlink once, as <path>/; one whose stages are all files once, as a file', async () => {
+    const git = (args: string[], input?: string): string =>
+      execFileSync('/usr/bin/git', ['-C', repo.root, ...args], { env: isolatedGitEnv(), encoding: 'utf8', input });
+    await repo.write('blob-a.txt', 'ebb\n');
+    await repo.write('blob-b.txt', 'flood\n');
+    const a = git(['hash-object', '-w', 'blob-a.txt']).trim();
+    const b = git(['hash-object', '-w', 'blob-b.txt']).trim();
+    const link = git(['rev-parse', 'HEAD']).trim();
+    git(['update-index', '--index-info'], [
+      `100644 ${a} 1\tharbor`,
+      `160000 ${link} 2\tharbor`,
+      `100644 ${b} 3\tharbor`,
+      `100644 ${a} 1\tquay.txt`,
+      `100644 ${a} 2\tquay.txt`,
+      `100644 ${b} 3\tquay.txt`,
+      '',
+    ].join('\n'));
+    expect(git(['ls-files', '--stage', 'harbor']).trim().split('\n')).toHaveLength(3);
+    const answer = LsFilesSchema.parse(await lister(() => [repo.root]).list({ directory: repo.root, query: '', limit: 200 }));
+    expect(answer.paths.filter((path) => path.startsWith('harbor'))).toEqual(['harbor/']);
+    expect(answer.paths.filter((path) => path.startsWith('quay'))).toEqual(['quay.txt']);
   });
 
   // Decision 14's one limit, pinned so that a change of the reading is seen: an untracked path whose own name begins with
