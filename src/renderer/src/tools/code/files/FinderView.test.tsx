@@ -10,7 +10,7 @@ import type { FilesEntry } from '@shared/ipc/schema/files';
 import { record } from '../../../../../../test/support/builders';
 import { connectCodeEvents } from '../../../ipc/events';
 import { runAction } from '../../../keymap/actions-runtime';
-import { registerPanelTool } from '../../../panel/host';
+import { connectPanelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { fail, installFakeMain, ok as answer } from '../../../test-support/code';
@@ -107,7 +107,7 @@ beforeEach(() => {
   useViewer.getState().reset();
   observer = installResizeObserver();
   main = finderMain();
-  offs.push(connectCodeEvents(), registerPanelTool(filesTool), connectGoToFile());
+  offs.push(connectCodeEvents(), connectPanelHost(), registerPanelTool(filesTool), connectGoToFile()); // the host notes the tab last in view, which ⌘P brings back
   useSessions.setState((s) => ({ records: new Map(s.records).set(A, record(A, { directory: '/r' })) }));
 });
 afterEach(() => {
