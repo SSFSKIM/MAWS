@@ -133,7 +133,7 @@ describe('readConsents accepts only a text that opens with a longer opening', ()
     expect(readConsents(SEVERAL).map((g) => g.subject)).toEqual(['ls', 'pwd']);
     expect(readConsents(consentMessage('call', '{"a":1}')).length).toBe(1);
     for (const [from, to] of [[GRANT_ONE, 'this very'], [GRANT_ONE, 'that exact'], [GRANT_SEVERAL, 'those exact']] as const) {
-      for (const text of [SENTENCE, SEVERAL]) expect(readConsents(text.replaceAll(from, to)), `${from} → ${to}`).toEqual([]);
+      for (const text of [SENTENCE, SEVERAL].filter((t) => t.includes(from))) expect(readConsents(text.replaceAll(from, to)), `${from} → ${to}`).toEqual([]);
     }
   });
 
