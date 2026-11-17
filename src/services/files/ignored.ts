@@ -76,7 +76,7 @@ export function createIgnoreCheck(options: { env?: NodeJS.ProcessEnv; execFile?:
   async function check(ask: Ask): Promise<ReadonlySet<string> | null> {
     const { dir, names, deadline } = ask;
     try {
-      const out = await run(dir, ['check-ignore', '-z', '--stdin'], {
+      const out = await run(dir, ['check-ignore', '--no-index', '-z', '--stdin'], {
         input: names.map((name) => `./${name}\0`).join(''),
         acceptExitCodes: [1], // nothing ignored
         timeoutMs: Math.max(1, deadline - Date.now()),

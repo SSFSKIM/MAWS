@@ -75,6 +75,24 @@ describe('the ignore check over a real repository', () => {
     expect(sorted(await check.names(repo.path('src'), ['cart.ts']))).toEqual([]);
   });
 
+  // Index-mode `check-ignore` names no folder that holds a tracked file (its pathspec matches an index entry); the check
+  // asks with --no-index, so it leaves out every name that is a tracked path or the first segment of one (Decision Log 9)
+  it('answers a folder a rule names that holds nothing tracked, and not one a rule names that holds a tracked file, as index mode does', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', 'vendor/\nbuild/\n');
+    await repo.write('vendor/kept.js', 'kept on purpose\n');
+    await repo.git('add', '-f', 'vendor/kept.js');
+    await repo.git('commit', '-q', '-m', 'a vendored file');
+    await repo.write('vendor/fresh.js', 'new\n');
+    await repo.write('build/out.js', 'built\n');
+    const run = createGitRunner({ env: repo.serviceEnv() });
+    const indexMode = await run(repo.root, ['check-ignore', '-z', '--stdin'], { input: './vendor\0./build\0', acceptExitCodes: [1] });
+    expect(indexMode).toBe('./build\0'); // the rule the check keeps, as git's index mode answers it
+    const check = checkOf({ env: repo.serviceEnv() });
+    expect(sorted(await check.names(repo.root, ['build', 'vendor']))).toEqual(['build']);
+    expect(sorted(await check.names(repo.path('vendor'), ['fresh.js', 'kept.js']))).toEqual(['fresh.js']); // inside it, the tracked file alone is plain
+  });
+
   // Asked bare, git 2.43 reads `:notes.txt` as a pathspec with empty magic, so it judges `notes.txt` and answers nothing
   // (M1 decision 6, seen on the build VM); `./` keeps such a name a name.
   it('answers a name that begins with a colon and one that begins with a dash when only a pattern for that name matches, beside the plain name it does not', async () => {
@@ -213,7 +231,7 @@ describe('the bound and the places', () => {
     expect(answer.entries.filter((entry) => 'ignored' in entry)).toEqual([]);
     files.dispose();
     // the control: the same listing, with a check that answers, marks the entry it names
-    const answering = checkOf({ execFile: (_file, _args, _options, callback) => void queueMicrotask(() => callback(null, './b.log\0', '')) });
+    const answering = checkOf({ execFile: (_file, args, _options, callback) => void queueMicrotask(() => callback(null, args.includes('ls-files') ? 'a.txt\0' : './b.log\0', '')) });
     const marked = createFilesService({ records, ignored: answering.names });
     expect((await marked.list({ appSessionId: S, path: dir })).entries.filter((entry) => 'ignored' in entry).map((entry) => entry.name)).toEqual(['b.log']);
     marked.dispose();
@@ -224,12 +242,63 @@ describe('the bound and the places', () => {
     const check = checkOf({ execFile, allowanceMs: 600_000 }); // the bound is not what this case reads
     const answers = Array.from({ length: 10 }, (_, i) => check.names('/work/repo', [`f${i}.log`]));
     expect(counts()).toEqual({ calls: IGNORED_CHECK_CONCURRENCY, live: IGNORED_CHECK_CONCURRENCY, most: IGNORED_CHECK_CONCURRENCY });
-    for (let released = 0; released < 10; released++) {
-      await vi.waitFor(() => expect(pending.length).toBeGreaterThan(0));
-      pending.shift()!(null, '', '');
+    let settled = 0;
+    void Promise.all(answers.map((answer) => answer.then(() => void (settled += 1))));
+    while (settled < 10) {
+      await vi.waitFor(() => expect(pending.length > 0 || settled === 10).toBe(true));
+      pending.shift()?.(null, '', ''); // each check's two runs, ls-files then check-ignore, one after the other in its place
     }
     expect(await Promise.all(answers)).toHaveLength(10);
-    expect(counts()).toEqual({ calls: 10, live: 0, most: IGNORED_CHECK_CONCURRENCY });
+    expect(counts()).toEqual({ calls: 20, live: 0, most: IGNORED_CHECK_CONCURRENCY });
+  });
+
+  it('asks check-ignore with --no-index about the names ls-files does not track, each as ./<name>, and no first segment of a tracked path', async () => {
+    const asked: { args: string[]; input: string | undefined }[] = [];
+    const execFile: ExecFileFn = (_file, args, options, callback) => {
+      asked.push({ args: args.slice(2), input: options.input });
+      queueMicrotask(() => callback(null, args.includes('ls-files') ? 'src/cart.ts\0src/lib/rates.ts\0README.md\0' : './debug.log\0', ''));
+    };
+    const check = checkOf({ execFile });
+    expect(sorted(await check.names('/work/harbor', ['src', 'README.md', 'debug.log', 'node_modules']))).toEqual(['debug.log']);
+    expect(asked).toEqual([
+      { args: ['ls-files', '-z'], input: undefined },
+      { args: ['check-ignore', '--no-index', '-z', '--stdin'], input: './debug.log\0./node_modules\0' },
+    ]);
+  });
+
+  it('gives no answer and runs no check-ignore when ls-files fails, beside a check whose ls-files answers', async () => {
+    const subcommands: string[] = [];
+    const failing: ExecFileFn = (_file, args, _options, callback) => {
+      subcommands.push(args[2]!);
+      queueMicrotask(() => callback(Object.assign(new Error('Git exited with 128'), { code: 128 }), '', 'fatal: unreadable index\n'));
+    };
+    expect(await checkOf({ execFile: failing }).names('/work/harbor', ['debug.log'])).toBeNull();
+    expect(subcommands).toEqual(['ls-files']);
+    const answering: ExecFileFn = (_file, args, _options, callback) => {
+      subcommands.push(args[2]!);
+      queueMicrotask(() => callback(null, args.includes('ls-files') ? '' : './debug.log\0', ''));
+    };
+    expect(sorted(await checkOf({ execFile: answering }).names('/work/harbor', ['debug.log']))).toEqual(['debug.log']); // the control
+    expect(subcommands).toEqual(['ls-files', 'ls-files', 'check-ignore']);
+  });
+
+  it('bounds the two runs by one deadline: a slow ls-files leaves check-ignore the rest of the allowance, not a fresh one', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const subcommands: string[] = [];
+    const execFile: ExecFileFn = (_file, args, _options, callback) => {
+      subcommands.push(args[2]!);
+      if (args.includes('ls-files')) setTimeout(() => callback(null, '', ''), IGNORED_CHECK_MS - 500); // check-ignore then never answers
+    };
+    const check = checkOf({ execFile });
+    let answer: ReadonlySet<string> | null | undefined;
+    void check.names('/work/harbor', ['debug.log']).then((value) => void (answer = value));
+    await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 500);
+    expect(subcommands).toEqual(['ls-files', 'check-ignore']);
+    expect(answer).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(500);
+    expect(answer).toBeNull();
+    await vi.advanceTimersByTimeAsync(1_000); // past the runner's kill of the check-ignore run
+    expect(subcommands).toEqual(['ls-files', 'check-ignore']);
   });
 
   it('never starts the run of a check that waited for a place its whole bound', async () => {
