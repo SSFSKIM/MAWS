@@ -1490,7 +1490,9 @@ test('a command’s output is a dim line under its command, cut at the bottom of
   await mounted(page, context);
   const drawn = await context.locator('.transcript-command-output').evaluate((output) => {
     const prose = output.querySelector('.transcript-prose')!;
-    const blocks = Array.from(prose.children).flatMap((child) => (child.hasAttribute('dir') || getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child])); // a per-block wrapper, where one is drawn
+    // a per-block wrapper (`display: contents`, live mode's) is flattened; static mode draws none, and the `dir` it puts on
+    // each p, heading, li and cell marks a block, not a wrapper
+    const blocks = Array.from(prose.children).flatMap((child) => (getComputedStyle(child).display === 'contents' ? Array.from(child.children) : [child]));
     const heading = prose.querySelector('h2')!;
     const style = getComputedStyle(heading);
     return {
