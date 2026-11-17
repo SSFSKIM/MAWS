@@ -16,7 +16,7 @@
 // project's channel through `connection.say`), and the terminal lane's port types through the sminos bridge, whose rows
 // carry the plugin's origin (session/controls/lane-a.ts, the carrier below); neither is a site of the rule.
 import { readdirSync, readFileSync } from 'node:fs';
-import { join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
 import { consentMessage, pastedBodies, personsGrants } from '@shared/engine/arrival';
@@ -412,7 +412,7 @@ describe('who sends as the person', () => {
 // Ticket 733a (the architect's ruling on M3's numbers, guard (a)): the anchored writer's assembly before its last pass
 // (`commentsMessageBeforeLastPass`) is no message, so no sender may hold it: the own-text rule's meter is its one
 // importer in the product, and two tests hold it to its pass. Every file of the repository is read, tests included.
-// New with the split; no red first.
+// New with the split; no red first. Widened at M4 to every way a file can take it, red first (the second case).
 describe('the write-back’s assembly', () => {
   const IMPORTERS = ['src/shared/files/named.ts', 'src/shared/anchor/message.test.ts', 'src/services/files/named-split.test.ts'];
   const SKIPPED = new Set(['node_modules', 'dist', 'out']);
@@ -422,15 +422,24 @@ describe('the write-back’s assembly', () => {
       if (entry.isDirectory()) return SKIPPED.has(entry.name) || entry.name.startsWith('.') ? [] : files(path);
       return /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
     });
-  // Whether a file's text, at `path`, takes the assembly
-  const holdsAssembly = (_path: string, text: string) => /^\s*(?:import|export)\s[^;]*\bcommentsMessageBeforeLastPass\b[^;]*\sfrom\s/m.test(text);
-  it('is imported by the own-text rule alone, and by the tests that hold it to its pass', () => {
+  // Whether a file's text, at `path`, takes the assembly (ticket 733a, M4: a named import alone was read before): it
+  // names it, in any place, or it takes the anchored writer's module whole, which hands it every export, this one
+  // included (a namespace import or re-export, a wildcard re-export, a dynamic import, a require, a mock's factory). A
+  // module is named by a relative path or the `@shared/` alias, with or without its extension. What a file reaches by a
+  // computed name, from a module object another file handed it, is outside what a reading of the text can see.
+  const MESSAGE_MODULE = join(REPOSITORY, 'src/shared/anchor/message');
+  const WHOLE = /(?:\bimport\s*\*\s*as\s+[\w$]+\s+from|\bexport\s*\*\s*(?:as\s+[\w$]+\s+)?from|\bimport\s*\(|\brequire\s*\(|\bvi\.(?:mock|doMock|importActual)\s*(?:<[^>]*>)?\s*\()\s*(['"`])([^'"`]+)\1/g;
+  const moduleOf = (path: string, specifier: string) =>
+    (specifier.startsWith('@shared/') ? join(REPOSITORY, 'src/shared', specifier.slice('@shared/'.length)) : specifier.startsWith('.') ? resolve(dirname(path), specifier) : specifier).replace(/\.[cm]?[jt]sx?$/, '');
+  const holdsAssembly = (path: string, text: string) =>
+    /\bcommentsMessageBeforeLastPass\b/.test(text) || [...text.matchAll(WHOLE)].some((match) => moduleOf(path, match[2]!) === MESSAGE_MODULE);
+  it('is named by the own-text rule alone, by the tests that hold it to its pass, its writer and this guard, and no other file takes its module whole', () => {
     const importers = ['src', 'apps', 'test', 'e2e', 'scripts', 'plugins']
       .flatMap((top) => files(join(REPOSITORY, top)))
       .filter((path) => holdsAssembly(path, readFileSync(path, 'utf8')))
       .map((path) => relative(REPOSITORY, path).split(sep).join('/'))
       .sort();
-    expect(importers).toEqual([...IMPORTERS].sort());
+    expect(importers).toEqual([...IMPORTERS, 'src/shared/anchor/message.ts', 'test/support/person-sends.test.ts'].sort());
   });
   // Ticket 733a, M4: every way a file can reach the assembly, each read as holding it, beside the ways that do not
   it('reads a file as holding the assembly however it takes it: by name, or the module whole', () => {
