@@ -33,7 +33,7 @@ How to see it working: the unit tests named under each milestone, which write ea
 - [x] (2026-11-17) Revised a second time: the ruling on older builds, and the re-read of Design 5 ("Ruled", second table, its last four rows).
 - [x] (2026-11-17) The pass over "Statements to check again", at `938347bd2` (no merge of master: the architect names any further merge): rows 2, 5, 6, 10, 11, 12 and 13 hold; rows 1, 3, 4, 7, 8 and 9 hold with the nuances under Surprises & Discoveries; none stops a milestone.
 - [x] (2026-11-17) M1 — The shared rules, and the measurements on the branch. Commits `e8b27e4f3` (the probe merge) to `442d5cae4`; reviewed clean after one fix wave (the meters refitted, the budget checked before each piece of work, controls beside every absence); nine mutations each caught by the new test sets.
-- [ ] M2 — The content forms: written, read in place, edited and sent again.
+- [x] (2026-11-17) M2 — The content forms: written, read in place, edited and sent again. Commits `55f23f7b8` to `de9a79074`; reviewed clean after three fix waves (`4bf2897c3`..`db736e1e3`, `0622ff89e`..`ac13620e6`, `c4773ea7c`): a whole-framed comment kept framed at every resend, a promotion only under its anchor, every segment of a form a slot or the whole, the anchored recogniser narrowed to MAWS's own forms; the e2e project compiles.
 - [ ] M3 — The name forms, the host's two forms, the guard.
 - [ ] M4 — The scenes, the cross-build row, the whole suite, the acceptance.
 
