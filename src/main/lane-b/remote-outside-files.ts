@@ -14,9 +14,9 @@
 //   service's refusal, or an answer the session's deliveries admit read-only (`added`), the act, when the question
 //   allows it. The call is bound, whole, to the channel whose peer's list was read for it (its pages too, none asked once
 //   another channel is current), so keys only that peer reads never reach another channel's peer, carried by the link or
-//   asked anew (M3's fix waves 1 and 3; Decision Log 27). When that
-//   channel ends before the read is answered (the call, a page, or the act), the read waits for the link's next channel,
-//   within the hold the link gives a carried call, and is read afresh there by decision 5's order: a new look at the
+//   asked anew (M3's fix waves 1 and 3; Decision Log 27). When that channel ends or is replaced before the read is
+//   answered (under the call, a page, or the act), the read waits for the link's next channel, before the deadline of
+//   the hold the link gives a carried call, and is read afresh there by decision 5's order: a new look at the
 //   peer's list, a new call, the act if one is due; once (fix wave 2, the architect's condition 2). So the page sees
 //   what today's carried read gave it: the answer, or at the hold's end today's sentence for a machine not reachable.
 // - A copy's read ("Open externally"'s, a frame's): today's request to the byte, `named`, `agent` and `open` taken off,
