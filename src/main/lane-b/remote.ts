@@ -117,6 +117,7 @@ import type { MainContext, RemoteDispatch } from '../ipc/router';
 import type { LayoutFileStore } from '../layout/store';
 import type { LinkState } from '../machines/manager';
 import { budgetedMs } from '../machines/budgets'; // U9 (M2): a fork's answer within its command's budget
+import { REMOTE_TIMING } from '../machines/remote/timing'; // the UX wave (U6f): the link's hold of a carried call
 import { peerLists } from '../machines/remote/capabilities';
 import { needsProjectActs } from '../machines/project-acts-peer';
 import { callOverLink, dispatchOverLink, refusalError } from '../machines/remote/dispatch';
@@ -156,6 +157,11 @@ export interface RemoteLaneBTiming extends RemoteSessionTiming, RemoteCheckoutTi
   spawnKeptMs: number;
   /** P5 O7 M5b: a document's open answers `timeout` when no stream opened by then (../artifacts/remote-open.ts). */
   documentOpenMs: number;
+  /**
+   * The UX wave (U6f, M3's fix wave 2): how long the link holds a carried call with no budget of its own for its next
+   * channel (the link's CALL_TIMEOUT_MS, which no build overrides): a keyed read whose channel ended under it waits that long.
+   */
+  carriedCallMs: number;
 }
 
 export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
@@ -174,6 +180,7 @@ export const REMOTE_LANE_B_TIMING: RemoteLaneBTiming = {
   spawnKeptMs: 24 * 60 * 60_000,
   feedRetryMs: [1000, 30_000],
   documentOpenMs: DOCUMENT_OPEN_MS, // P5 O7 M5b: a page's bound
+  carriedCallMs: REMOTE_TIMING.CALL_TIMEOUT_MS, // the UX wave (U6f)
   // P5 O7 M5c: a consent's listener from its act's acceptance, the machine's own bound on the flow and a round trip: a
   // Connect's owner action (OWNER_ACTION_DEADLINE_MS, 330 s, src/services/connectors/owner.ts: discovery, then the 120 s
   // callback wait from the flow's bind, which this side can't see), a sign-in's config and callback waits (CONFIG_MS and
@@ -482,6 +489,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     owns: deps.owns ?? (() => null),
     now,
     pendingMs: timing.sendPendingMs,
+    holdMs: (link) => budgetedMs(link.budgets, 'files.read') ?? timing.carriedCallMs,
     log: deps.log,
   });
   // P5 O7 M5a: artifacts

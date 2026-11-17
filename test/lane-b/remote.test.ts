@@ -2836,9 +2836,9 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
     await until(() => o.reads().length === 1, 'the copy’s read at the machine');
     endpointWithout(OUTSIDE_FILES_CAPABILITY);
     await o.drop();
+    release(); // the first channel's answer goes nowhere; the carried read is answered on this one
     expect(o.l.a.link.peerCapabilities()).not.toContain(OUTSIDE_FILES_CAPABILITY);
     expect(await copying).toEqual({ result: { ok: true, value: { written: TEXT.length } }, written: TEXT });
-    release();
     const [first, carried, ...rest] = o.reads();
     expect(rest).toEqual([]);
     expect(JSON.stringify(carried)).toBe(JSON.stringify(first));

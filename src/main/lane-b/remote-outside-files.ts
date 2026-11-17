@@ -13,7 +13,11 @@
 //   one that lists it, the plain read with `named` first, which is all a file inside the folders costs; on the files
 //   service's refusal, or an answer the session's deliveries admit read-only (`added`), the act, when the question
 //   allows it. The call is bound to the channel whose peer's list was read for it (`oneChannel`, its pages too), so the
-//   link never carries keys only that peer reads to the next channel's peer (M3's fix wave; Decision Log 27).
+//   link never carries keys only that peer reads to the next channel's peer (M3's fix wave; Decision Log 27). When that
+//   channel ends before the read is answered (the call, a page, or the act), the read waits for the link's next channel,
+//   within the hold the link gives a carried call, and is read afresh there by decision 5's order: a new look at the
+//   peer's list, a new call, the act if one is due; once (fix wave 2, the architect's condition 2). So the page sees
+//   what today's carried read gave it: the answer, or at the hold's end today's sentence for a machine not reachable.
 // - A copy's read ("Open externally"'s, a frame's): today's request to the byte, `named`, `agent` and `open` taken off,
 //   held across a channel's end and sent again on the next as every copy's read always was, so any peer may read it; the
 //   act only on the service's refusal of a path outside the folders, for a caller the question allows, judged on the
@@ -62,6 +66,8 @@ export interface RemoteOutsideDeps {
   owns(machine: MachineRef): boolean | null;
   now(): number;
   pendingMs: number;
+  /** How long the link holds a carried call of `files.read` for its next channel: its budget, else the link's default. */
+  holdMs(link: RemoteLink): number;
   log(line: string): void;
 }
 
@@ -85,6 +91,8 @@ const refusalOf = (result: Result): unknown => (result.ok ? undefined : (result.
 /** The files service refused the path as outside the session's folders. */
 const refusedOutside = (result: Result) => !result.ok && result.error.code === 'internal' && result.error.message === OUTSIDE_REFUSAL;
 const addedOf = (result: Result) => result.ok && (result.value as FilesReadOutput | undefined)?.outside?.why === 'added';
+/** A keyed read whose channel ended before it answered. */
+const CHANNEL_ENDED = Symbol('the channel ended');
 const unreachable = (name: string, link: RemoteLink): Result => ({ ok: false, error: ipcError('host_unavailable', `${name}: machine ${link.name} is not reachable`) });
 
 export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutsideFiles {
@@ -110,8 +118,49 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
     });
   }
 
-  /** The page's keyed read, by decision 5's order, each call on the channel whose peer's list decided its keys. */
+  /**
+   * The page's keyed read; once more on the link's next channel, by the hold's end, when the channel it was checked on
+   * ended before it answered. A second end, or no channel by then, answers what today's read held that long answers.
+   */
   async function keyedRead(link: RemoteLink, fields: Fields, client: ClientRef | null, label: string | undefined): Promise<Result> {
+    const until = deps.now() + deps.holdMs(link);
+    const first = await onItsChannel(link, () => decided(link, fields, client, label));
+    if (first !== CHANNEL_ENDED) return first;
+    if (!(await nextChannel(link, until))) return unreachable('files.read', link);
+    deps.log(`lane B: files.read of ${link.name} ${label ?? String(fields.path)}: its channel ended before it answered; read again on the next`);
+    const again = await onItsChannel(link, () => decided(link, fields, client, label));
+    return again === CHANNEL_ENDED ? unreachable('files.read', link) : again;
+  }
+
+  /** `read`'s answer, or CHANNEL_ENDED: a channel ended while it was under way and it failed as no machine reachable. */
+  async function onItsChannel(link: RemoteLink, read: () => Promise<Result>): Promise<Result | typeof CHANNEL_ENDED> {
+    let ended = false;
+    const off = link.onChannel((event) => void (event === 'lost' && (ended = true)));
+    try {
+      const result = await read();
+      return ended && !result.ok && result.error.code === 'host_unavailable' ? CHANNEL_ENDED : result;
+    } finally {
+      off();
+    }
+  }
+
+  /** Whether a channel is current by `until`, waiting for the link's next one. */
+  function nextChannel(link: RemoteLink, until: number): Promise<boolean> {
+    if (link.peerCapabilities() !== null) return Promise.resolve(true);
+    return new Promise((resolve) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const off = link.onChannel((event) => void (event === 'current' && done(true)));
+      const done = (current: boolean) => {
+        clearTimeout(timer);
+        off();
+        resolve(current);
+      };
+      timer = setTimeout(() => done(false), Math.max(0, until - deps.now()));
+    });
+  }
+
+  /** Decision 5's order, each call on the channel whose peer's list decided its keys. */
+  async function decided(link: RemoteLink, fields: Fields, client: ClientRef | null, label: string | undefined): Promise<Result> {
     const peers = link.peerCapabilities();
     if (peers === null) return unreachable('files.read', link);
     const bound = { ...(label !== undefined && { label }), oneChannel: true as const };
