@@ -4,11 +4,11 @@
 // The guard: `files.writeOutside` and `layout.openFile` (and, UX wave U6f, the open, the chooser's listing and the pick of
 // a file outside a session's folders on another machine: `APP_PAGE_ONLY`) are answered only for a live page of an app
 // window, the window `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's
-// own origin test, ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a web contents that
-// is no window's and a page at another origin; this refuses, too, a window of the app's origin that is not an app window
-// (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through `dispatchLocal`
-// and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app registers it with
-// `guardCommand`, which runs it before anything is forwarded (src/main/ipc/router.ts).
+// own origin test, ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a
+// web contents that is no window's and a page at another origin; this refuses, too, a window of the app's origin that is
+// not an app window (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through
+// `dispatchLocal` and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app
+// registers it with `guardCommand`, which runs it before anything is forwarded (src/main/ipc/router.ts).
 //
 // Open File…: `layout.openFile` is main's own command, as `layout.pickFiles` is, since a request to the daemon has ten
 // seconds and a person choosing takes longer. Its handler shows the system's chooser for one file on the asking page's
