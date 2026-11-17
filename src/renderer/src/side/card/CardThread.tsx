@@ -10,6 +10,7 @@
 // screen, so the unread rule and attention navigation count it as the Side pane's. P3-F (L154): a reply sets out through
 // the host's `onSending` as the comment's send does, so a document's card records it as its thread's next message.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { neutraliseGrant } from '@shared/engine/grant';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
@@ -239,7 +240,8 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const settled = onSending?.(content); // P3-F (L154): told as it sets out, then whether it went, the card gone or not
     let result: HumanPromptResult;
     try {
-      result = await sendToSession(child, content, { origin: 'comment' });
+      // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+      result = await sendToSession(child, neutraliseGrant(content), { origin: 'comment' });
     } catch (error) {
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }

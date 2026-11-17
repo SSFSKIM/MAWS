@@ -20,6 +20,7 @@
     // imports a new file outside these lists fails there until the file is added here.
     // P3-D (M7): the design-system live run validates the mirrored token file and law with the kind's own checks
     "src/artifacts/design-system/color.ts",
+    "src/artifacts/design-system/page/component-canvas.ts", // UX wave U10b (M11): the canvas table and its rule, which the measuring scene applies
     "src/artifacts/design-system/extensions.ts",
     "src/artifacts/design-system/law.ts",
     "src/artifacts/design-system/resolve.ts",
@@ -72,6 +73,7 @@
     "src/pty-host/files.ts", // P5 O3-B: a launch's cleanup removes the pty host's socket fallback with the profile's processes
     "src/engine-host/transport.ts",
     "src/services/git/runner.ts",
+    "src/services/git/default-base.ts", // UX wave U5b-2 (M11): the hand-run This branch steps read the default-branch rule's base
     "src/services/index/migrations.ts",
     "src/services/index/browser-staging.ts", // P5 O3-A: migration 14's staging step, which migrations.ts imports
     "src/services/index/db.ts",

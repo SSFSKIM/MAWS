@@ -225,8 +225,11 @@ export class DeckTabState {
     const handle = this.current.handle;
     if (!handle) return true;
     const session = this.current.session;
-    const settled = () => handle.state().readOnly || (handle.state().unsaved === 0 && (session?.snapshot().pending ?? 0) === 0);
+    // UX wave U10b fix wave 5: read-only settles only with nothing unacknowledged; a read-only replica holding an edit
+    // (one an agent's delete parked) will acknowledge nothing meanwhile, so it is asked about at once
+    const settled = () => (handle.state().readOnly ? handle.state().unsaved === 0 : handle.state().unsaved === 0 && (session?.snapshot().pending ?? 0) === 0);
     const unwritten = () => session?.hasUnwrittenNotes() ?? false; // L203
+    if (handle.state().readOnly && handle.state().unsaved > 0) return this.deps.confirmDiscard(this.title);
     if (settled()) return !unwritten() || this.deps.confirmDiscard(this.title);
     const saved = await new Promise<boolean>((resolve) => {
       const stops: (() => void)[] = [];

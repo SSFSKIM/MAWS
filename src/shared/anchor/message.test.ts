@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import { loadJournal } from '../../../test/support/fixtures';
 import { AnchorSchema, type Anchor } from './anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, promotionMessage, readAnchoredMessage, readOneComment, SIDE_THREAD_PREAMBLE, SIDE_THREAD_PREAMBLE_MANY, type Destination, type MessageComment } from './message'; // UX wave U5a: the message of several comments
+import { Marked, type Token } from 'marked'; // UX wave U5b: a CommonMark reading of the quoted line's span
+import { BEFORE_THE_CHANGE, QUOTE_MAX, quotedComment } from './message'; // UX wave U5b (§A): the quoted line
 
 // UX wave U5a (decision 15): a message of one comment as `readAnchoredMessage` reads it, in the one comment's shape
 // (`{ anchor, text, destination }`); a message read as several comments throws, since none of these cases writes one
@@ -445,3 +447,168 @@ describe('a message of several comments (UX wave U5a)', () => {
   });
 });
 // UX wave U5a end
+
+// UX wave U5b start (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A; M1): a comment made on a
+// line of a diff carries that line's text in its words, as one inline code span on a line of its own above them, under
+// the line "Before the change:" for a removed line. The lead and the tag do not move by a byte; `side="old"` is a field
+// the tag already writes.
+describe('a quoted line (UX wave U5b)', () => {
+  const added: Anchor = { kind: 'file-line', locator: '/work/berth/src/berth-csv.ts#L32', label: 'berth-csv.ts:32', path: '/work/berth/src/berth-csv.ts', line: 32 };
+  const removed: Anchor = { ...added, side: 'old' };
+  // the code spans a CommonMark reader finds in a text, in order
+  const spans = (markdown: string): string[] => {
+    const marked = new Marked();
+    const found: string[] = [];
+    marked.walkTokens(marked.lexer(markdown), (token: Token) => {
+      if (token.type === 'codespan') found.push((token as { text: string }).text);
+    });
+    return found;
+  };
+
+  it('leaves the lead of a file-line anchor as it is without `side`, and writes `side="old"` in its tag', () => {
+    expect(anchorLead(removed, false)).toBe(anchorLead(added, false));
+    expect(anchorLead(removed, false)).toBe('Comment on "berth-csv.ts:32" (file /work/berth/src/berth-csv.ts, line 32):');
+    expect(anchorTag(removed)).toBe('<maws_anchor kind="file-line" label="berth-csv.ts:32" locator="/work/berth/src/berth-csv.ts#L32" path="/work/berth/src/berth-csv.ts" line="32" side="old"/>');
+    expect(anchorTag(added)).toBe('<maws_anchor kind="file-line" label="berth-csv.ts:32" locator="/work/berth/src/berth-csv.ts#L32" path="/work/berth/src/berth-csv.ts" line="32"/>');
+  });
+
+  it('quotes the line as an inline code span on a line of its own, then the words', () => {
+    expect(quotedComment(added, 'const total = rows.length;', 'Count the header too.')).toBe('`const total = rows.length;`\nCount the header too.');
+    expect(spans(quotedComment(added, 'const total = rows.length;', 'Count the header too.'))).toEqual(['const total = rows.length;']);
+  });
+
+  it('puts "Before the change:" first for a removed line, whether or not a quote follows', () => {
+    expect(BEFORE_THE_CHANGE).toBe('Before the change:');
+    expect(quotedComment(removed, 'if (row.berth) skip();', 'Why was this dropped?')).toBe('Before the change:\n`if (row.berth) skip();`\nWhy was this dropped?');
+    expect(quotedComment(removed, null, 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
+    expect(quotedComment(removed, '', 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
+  });
+
+  it('is the words unchanged with no quote on an added or unchanged line, and for every other kind', () => {
+    expect(quotedComment(added, null, 'Rename it.')).toBe('Rename it.');
+    for (const anchor of ANCHORS.filter((each) => each.kind !== 'file-line')) expect(quotedComment(anchor, null, 'Rename it.')).toBe('Rename it.');
+    // a pull request's line keeps its own side in its lead: no caption
+    expect(quotedComment({ ...ANCHORS[1]!, side: 'old' }, null, 'Rename it.')).toBe('Rename it.');
+  });
+
+  it('has no quote for an empty line or a line of spaces', () => {
+    expect(quotedComment(added, '', 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(added, '    ', 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(added, ' \t ', 'Why blank?')).toBe('Why blank?');
+  });
+
+  it('has no quote for a line of spaces or tabs past QUOTE_MAX: blankness is read before the cut', () => {
+    expect(quotedComment(added, ' '.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(added, '\t'.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quotedComment(removed, ' \t'.repeat(QUOTE_MAX), 'Why blank?')).toBe('Before the change:\nWhy blank?');
+  });
+
+  it('sends nothing more for a comment with no words', () => {
+    expect(quotedComment(added, 'const total = rows.length;', '')).toBe('');
+    expect(quotedComment(removed, 'const total = rows.length;', '  ')).toBe('  ');
+  });
+
+  it('takes a run of backticks one longer than the line’s longest, and a space inside each end where the line begins or ends with a backtick or a space; a CommonMark reading gives the line back exactly', () => {
+    const cases: [string, string][] = [
+      ['a ``` b', '````a ``` b````'],
+      ['`raw` template', '`` `raw` template ``'],
+      ['label = `row ${n}`', '`` label = `row ${n}` ``'],
+      ['    return total;', '`     return total; `'],
+      ['total += 1;  ', '` total += 1;   `'],
+      ['```', '```` ``` ````'],
+    ];
+    for (const [line, span] of cases) {
+      const words = quotedComment(added, line, 'Look here.');
+      expect(words, line).toBe(`${span}\nLook here.`);
+      expect(spans(words), line).toEqual([line]);
+      // and inside the lead's paragraph, as the agent and the transcript read it
+      expect(spans(anchoredMessage({ anchor: added, text: words, destination: 'main', screenshot: false })), line).toEqual([line]);
+    }
+  });
+
+  it('is one line: a line break or another control character is U+FFFD, a tab stays, the line’s own CR ending is dropped', () => {
+    expect(quotedComment(added, 'a\u0000b\nc\u001bd\u007fe', 'w')).toBe('`a�b�c�d�e`\nw');
+    expect(quotedComment(added, 'a\tb', 'w')).toBe('`a\tb`\nw');
+    expect(quotedComment(added, 'const total = rows.length;\r', 'w')).toBe('`const total = rows.length;`\nw');
+  });
+
+  it('cuts a line past QUOTE_MAX to that many units ending with "…", and never halves a surrogate pair', () => {
+    expect(QUOTE_MAX).toBe(400);
+    const [long] = spans(quotedComment(added, 'x'.repeat(QUOTE_MAX + 50), 'w'));
+    expect(long).toHaveLength(QUOTE_MAX);
+    expect(long!.endsWith('x…')).toBe(true);
+    expect(spans(quotedComment(added, 'x'.repeat(QUOTE_MAX), 'w'))).toEqual(['x'.repeat(QUOTE_MAX)]);
+    const [pair] = spans(quotedComment(added, `${'x'.repeat(QUOTE_MAX - 2)}😀tail`, 'w'));
+    expect(pair).toBe(`${'x'.repeat(QUOTE_MAX - 2)}…`);
+  });
+
+  it('a quoted line that reads like a tag cannot begin a line of the message: one comment and two read back whole', () => {
+    const tagLike = anchorTag({ kind: 'none', locator: 'btw', label: 'Side question' });
+    const one = quotedComment(added, tagLike, 'Is this ours?');
+    const two: MessageComment[] = [
+      { anchor: added, text: one, screenshot: false },
+      { anchor: removed, text: quotedComment(removed, tagLike, 'And this?'), screenshot: false },
+    ];
+    for (const destination of ['main', 'thread'] as const) {
+      const single = anchoredMessage({ anchor: added, text: one, destination, screenshot: false });
+      expect(single.split('\n').filter((line) => line.startsWith('<maws_anchor'))).toEqual([anchorTag(added)]);
+      expect(readAnchoredMessage(single)).toEqual({ comments: [{ anchor: added, text: one, screenshot: false }], destination });
+      const framed = commentsMessage(two, destination);
+      expect(framed.split('\n').filter((line) => line.startsWith('<maws_anchor'))).toEqual([anchorTag(added), anchorTag(removed)]);
+      expect(readAnchoredMessage(framed)).toEqual({ comments: two, destination });
+    }
+  });
+});
+// UX wave U5b end
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §A, M9): a comment on
+// a line of one commit's diff names that commit, in its lead and as its tag's last attribute; a tag without it is
+// written as before, to the byte.
+describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
+  const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+  const SHA256 = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c5d6e7f8091a2b3c4d5e6f708';
+  const onNew: Anchor = { kind: 'file-line', locator: `src/berth-csv.ts#L32@${SHA}`, label: 'berth-csv.ts:32 · 3f9a1c2', path: 'src/berth-csv.ts', line: 32, side: 'new', commit: SHA };
+  const onOld: Anchor = { ...onNew, side: 'old' };
+
+  it('leads with the path in that commit, the line, the side and the full hash; the old side names the first parent of the commit', () => {
+    expect(anchorLead(onNew, false)).toBe(`Comment on "berth-csv.ts:32 · 3f9a1c2" (file src/berth-csv.ts, line 32, new side, commit ${SHA}):`);
+    expect(anchorLead(onOld, false)).toBe(`Comment on "berth-csv.ts:32 · 3f9a1c2" (file src/berth-csv.ts, line 32, old side, the first parent of commit ${SHA}):`);
+    expect(anchorLead({ ...onNew, commit: SHA256 }, false)).toContain(`commit ${SHA256})`);
+  });
+
+  it('writes `commit` as the tag’s last attribute, and a tag without it as before', () => {
+    expect(anchorTag(onNew)).toBe(`<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@${SHA}" path="src/berth-csv.ts" line="32" side="new" commit="${SHA}"/>`);
+    const without: Anchor = { ...onNew };
+    delete without.commit;
+    expect(anchorTag(without)).toBe('<maws_anchor kind="file-line" label="berth-csv.ts:32 · 3f9a1c2" locator="src/berth-csv.ts#L32@3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c" path="src/berth-csv.ts" line="32" side="new"/>');
+    expect(anchorTag(fileLine)).toBe('<maws_anchor kind="file-line" label="src/x.ts:42" locator="/abs/src/x.ts#L42" path="/abs/src/x.ts" line="42"/>');
+  });
+
+  it('round-trips one comment and a message of two through readAnchoredMessage, each keeping its own hash', () => {
+    for (const destination of ['main', 'thread'] as const) {
+      const message = anchoredMessage({ anchor: onOld, text: 'Why was this guard dropped?', destination, screenshot: false });
+      expect(one(message)).toEqual({ anchor: onOld, text: 'Why was this guard dropped?', destination });
+    }
+    const other = { ...onNew, commit: '0000000000000000000000000000000000000abc', label: 'berth-csv.ts:32 · 0000000', locator: 'src/berth-csv.ts#L32@0000000000000000000000000000000000000abc' };
+    const two: MessageComment[] = [
+      { anchor: onNew, text: 'First.', screenshot: false },
+      { anchor: other, text: 'Second.', screenshot: false },
+    ];
+    expect(readAnchoredMessage(commentsMessage(two, 'main'))).toEqual({ comments: two, destination: 'main' });
+  });
+
+  it('quotes the line without "Before the change:" on a commit’s old side: the lead says the side', () => {
+    expect(quotedComment(onOld, 'return value;', 'Why?')).toBe('`return value;`\nWhy?');
+    expect(quotedComment(onNew, 'return quoted(value);', 'Why?')).toBe('`return quoted(value);`\nWhy?');
+    expect(quotedComment(onOld, null, 'Why?')).toBe('Why?');
+  });
+
+  it('refuses a commit that is not a whole lower-case object id', () => {
+    expect(AnchorSchema.safeParse(onNew).success).toBe(true);
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA256 }).success).toBe(true);
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA.slice(1) }).success).toBe(false); // 39 characters
+    expect(AnchorSchema.safeParse({ ...onNew, commit: SHA.replace('f', 'F') }).success).toBe(false); // an upper-case letter
+    expect(AnchorSchema.safeParse({ ...onNew, commit: 'HEAD' }).success).toBe(false);
+  });
+});
+// UX wave U5b-2 end

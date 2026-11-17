@@ -114,7 +114,12 @@ export const commands = {
   // 2026-10-16-p3-e-design-dashboard.md Decision Log 21 and 22): a live document an earlier build stored in another
   // shape is migrated first, as the human, or the read refused naming why; `prepare: false` (the default is true) reads
   // the row alone, for a caller that then reads a retained version and never the live document
-  'artifacts.get': host(z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional(), prepare: z.boolean().optional() /* P3-E */ }), z.strictObject({ artifact: ArtifactRowSchema.nullable() })),
+  // UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.5, "the host's word"): `deleted`, present
+  // only for an artifact that is deleted, says what it was and whether an agent's delete removed it (`undoable`).
+  'artifacts.get': host(
+    z.strictObject({ artifactId: Id, includeDeleted: z.boolean().optional(), prepare: z.boolean().optional() /* P3-E */ }),
+    z.strictObject({ artifact: ArtifactRowSchema.nullable(), deleted: z.strictObject({ title: z.string(), kind: ArtifactKindSchema, undoable: z.boolean() }).optional() }),
+  ),
   // The human's create: a byte kind with its content, a document kind empty.
   'artifacts.create': host(
     z.strictObject({ kind: ArtifactKindSchema, title: z.string().min(1).max(1_000), spaceId: Id.optional(), designSystemId: Id.optional(), content: ArtifactContentInputSchema.optional() }),
@@ -133,6 +138,9 @@ export const commands = {
   ),
   // A soft delete; a design system still governing a live artifact is refused `designSystemInUse {artifactIds}`.
   'artifacts.delete': host(z.strictObject({ artifactId: Id }), z.void()),
+  // UX wave U10b (§C.2): the undo of an agent's delete of its own draft; success for a live artifact, refused `invalid` for
+  // one deleted in the Library.
+  'artifacts.undelete': host(z.strictObject({ artifactId: Id }), z.void()),
   // A copy of the live state, or of a version's ("Make a copy", Decision Log 23b).
   'artifacts.duplicate': host(z.strictObject({ artifactId: Id, versionId: z.number().int().positive().optional() }), ArtifactAnswer),
   // A title substring, until P3-L's index.

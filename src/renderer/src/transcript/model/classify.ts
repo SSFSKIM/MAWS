@@ -8,6 +8,7 @@ import { MAWS_SERVER_NAME, MAWS_TOOL_NAMES, type MawsToolName } from '@shared/ma
 import { HISTORICAL_ARTIFACT_UPDATE } from '@shared/maws/artifact-update'; // P3-A
 import type { BrowserToolName } from '@shared/maws/browser'; // E4c
 import { isMessageTool } from '@shared/owner/message-call'; // P4-R7
+import { WEB_FETCH_TOOLS } from '@shared/engine/web-fetch'; // UX wave U3b
 import type { ToolCategory, ToolClassification } from './rows';
 
 export type Presentation = 'cell' | 'subagent' | 'agent_message' | 'question' | 'plan' | /* E1 */ 'ask' | 'delivery' | /* E7 */ 'agent_list' | /* E2 */ 'artifact' | /* E4c */ 'browser_action' | /* P4-R7 */ 'message';
@@ -62,6 +63,7 @@ const ROW_KIND_TOOLS: Record<string, Presentation> = {
   [MAWS_TOOL_USE.artifact_create]: 'artifact',
   [MAWS_TOOL_USE.artifact_publish]: 'artifact',
   [HISTORICAL_ARTIFACT_UPDATE_TOOL_USE]: 'artifact',
+  [MAWS_TOOL_USE.artifact_delete]: 'artifact', // UX wave U10b (M5, §C.4): an agent's delete is the row's third action
   // E2 end
   // E4c start: every historical browser tool call is a browser action row (E4c execution document, Design §10)
   ...Object.fromEntries(Object.values(HISTORICAL_BROWSER_TOOL_USE).map((name) => [name, 'browser_action' as const])),
@@ -85,7 +87,8 @@ const TABLE: Record<string, TableRow> = {
   Grep: grouped('exploration'),
   Edit: grouped('files'), MultiEdit: grouped('files'), Write: grouped('files'), NotebookEdit: grouped('files'),
   Bash: grouped('commands'), PowerShell: grouped('commands'), BashOutput: grouped('commands'), KillShell: grouped('commands'), Monitor: grouped('commands'),
-  WebFetch: grouped('web'), WebSearch: grouped('web'),
+  // UX wave U3b (M5, decision 18): every web fetch, the web plugin's among them, ahead of the MCP pattern
+  ...Object.fromEntries(WEB_FETCH_TOOLS.map((name) => [name, grouped('web')])), WebSearch: grouped('web'),
   // UX wave U2 (O-29; X3's classification as amended by the U2a document, decision 10): the bookkeeping calls are
   // ordinary steps of their run, nothing inside a run is hidden
   EnterPlanMode: grouped('other'), EnterWorktree: grouped('other'), ExitWorktree: grouped('other'),

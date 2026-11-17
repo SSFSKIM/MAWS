@@ -10,8 +10,9 @@ import type { Row } from '../../transcript/model/rows';
 import { ipcRewind } from '../../transcript/source/ipc';
 import { useAgentLookup } from '../../transcript/view/agent-lookup';
 import { useRegisteredActions, useRegisteredRequestRenderer } from '../../transcript/view/registry';
+import type { TranscriptActions } from '../../transcript/view/context'; // UX wave U3b
 import { Transcript, type TranscriptListHandle } from '../../transcript/view/Transcript';
-import type { TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
+import { useViewLane, type TranscriptSlotProps } from '../../transcript/view/TranscriptSlot';
 import { useRemoteTranscript } from '../remote-source';
 import { useLaneAStreaming } from '../stream/use-overlay';
 import { drawnRows } from './drawn-rows';
@@ -19,12 +20,19 @@ import { useKeepPlaceThroughOlderRows } from './keep-place';
 import { useOlderPages } from './older-pages';
 import { LANE_A_WORDS } from '../../session/controls/lane-a';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
+import { useCompactingSince } from '../../stores/compacting'; // UX wave U3b (M4)
 
 const NO_ROWS: readonly Row[] = [];
 
 export function RemoteTranscriptSlot({ appSessionId, className, startAt, presentation, actions: overrides }: TranscriptSlotProps) {
   const registered = useRegisteredActions();
-  const actions = useMemo(() => (overrides ? { ...registered, ...overrides } : registered), [registered, overrides]);
+  // UX wave U3b ("Routes"): no "Fork from here": the link finds a session by a MAWS session id, which a terminal session
+  // on another machine has none of (U9's rule for its session menu)
+  const actions = useMemo(() => {
+    const merged: Partial<TranscriptActions> = { ...registered, ...overrides };
+    delete merged.forkFrom;
+    return merged;
+  }, [registered, overrides]);
   const renderRequest = useRegisteredRequestRenderer();
   const transcript = useRemoteTranscript(appSessionId)!;
   const state = useStore(transcript.state);
@@ -37,6 +45,8 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
   const rewind = useMemo(() => ({ ...ipcRewind(appSessionId), unavailable: filesReason }), [appSessionId, filesReason]);
   const streaming = useLaneAStreaming(appSessionId, storeKey);
   const promptAuthor = usePromptAuthor(appSessionId); // board 525: another member's session names its prompts' authors
+  const ownerLane = useViewLane(appSessionId); // UX wave U2b: its channel is not read over the link, so this app's switch decides
+  const compacting = useCompactingSince(appSessionId); // UX wave U3b (M4): between its bridge's `compact` start and end
   // Older rows when the reader reaches the top, while what is drawn does not fill the pane, and after a page that drew
   // nothing new; the reader's place kept through each (the desk's own rules, lifted with the plane transcript).
   const list = useRef<TranscriptListHandle>(null);
@@ -71,9 +81,11 @@ export function RemoteTranscriptSlot({ appSessionId, className, startAt, present
         tail={streaming.tail}
         startAt={startAt}
         presentation={presentation}
+        ownerLane={ownerLane}
         atRest={atRest}
         placed={streaming.kept}
         promptAuthor={promptAuthor}
+        compacting={compacting}
       />
     </>
   );

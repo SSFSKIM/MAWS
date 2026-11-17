@@ -15,7 +15,10 @@ export const SIDE_THREAD_PREAMBLE = 'You are in a side thread forked from the ma
 export const SIDE_THREAD_PREAMBLE_MANY = 'You are in a side thread forked from the main conversation to handle these comments. Address them here; the main conversation continues separately and is not waiting on you.';
 
 const SCREENSHOT_SENTENCE = '. A screenshot of it is attached:';
-const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
+// UX wave U6e: the reader of the person's own text (src/shared/files/named.ts) claims a text that holds the promotion's
+// head or a tag's opening anywhere, so the forms keep these one copies.
+export const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
+export const ANCHOR_TAG_OPENING = '<maws_anchor';
 const PROMOTION_CONTINUE = 'Continue from here.';
 const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' };
 
@@ -25,8 +28,13 @@ function leadParts(anchor: Anchor): string[] {
   const { path, line, pageUrl } = anchor;
   const present = (...parts: (string | false | undefined)[]): string[] => parts.filter((part): part is string => typeof part === 'string' && part !== '');
   switch (anchor.kind) {
-    case 'file-line':
-      return present(path !== undefined && `file ${path}`, line !== undefined && `line ${line}`);
+    case 'file-line': // UX wave U5b-2 (§A): a commit's line adds its side and the commit, the old side as its first parent's
+      return present(
+        path !== undefined && `file ${path}`,
+        line !== undefined && `line ${line}`,
+        anchor.commit !== undefined && anchor.side !== undefined && `${anchor.side} side`,
+        anchor.commit !== undefined && (anchor.side === 'old' ? `the first parent of commit ${anchor.commit}` : `commit ${anchor.commit}`),
+      );
     case 'pr-line': {
       const where = path !== undefined && line !== undefined ? `${path} line ${line}` : path ?? (line !== undefined ? `line ${line}` : undefined);
       return present(anchor.prNumber !== undefined && `PR #${anchor.prNumber}`, where, anchor.side !== undefined && `${anchor.side} side`, pageUrl);
@@ -74,7 +82,7 @@ const unescapeAttribute = (value: string) => value.replace(/&(amp|quot|lt|gt);/g
 
 // The tag's attributes, in the order they are written (Interfaces): the tag is byte-stable, and the parse accepts it
 // only when re-writing the anchor it read gives the same bytes.
-const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */] as const;
+const TAG_FIELDS = ['kind', 'label', 'locator', 'pageUrl', 'path', 'line', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box' /* E4d */, 'artifactId', 'threadId' /* P3-B */, 'artifactKind' /* P3-C */, 'artifactTarget' /* P3-E */, 'commit' /* UX wave U5b-2 */] as const;
 const NUMERIC_FIELDS: ReadonlySet<string> = new Set(['line', 'prNumber']);
 
 // E4d start: the browser-element box (E4d execution document, Design §6) is one attribute, `x,y,width,height`; any other
@@ -91,7 +99,7 @@ export function anchorTag(anchor: Anchor): string {
     const value = anchor[field];
     return value === undefined ? [] : [` ${field}="${escapeAttribute(tagValue(value) /* E4d: was String(value) */)}"`];
   });
-  return `<maws_anchor${attributes.join('')}/>`;
+  return `${ANCHOR_TAG_OPENING}${attributes.join('')}/>`;
 }
 
 export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }): string {
@@ -249,3 +257,49 @@ function readFramed(text: string): { comments: MessageComment[]; destination: De
   return { comments, destination };
 }
 // UX wave U5a end
+
+// UX wave U5b start (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A and decision 3; M1): a
+// comment made on a line of a diff carries that line's text inside its words, so no command, schema or reader changes
+// and an older daemon cannot drop it. The quote is one inline code span on a line of its own above the words (a fence
+// is a tall block in the transcript's bubble): a run of backticks one longer than the line's longest, with one space
+// inside each end where the line begins or ends with a backtick or a space, which a CommonMark reader strips again. Its
+// backticks begin the line, so no quoted text can begin a line of the message as a tag does. A removed line is said in
+// the words, under "Before the change:", and never in the lead, so the lead and the tag stay what both older builds
+// regenerate (R6).
+export const QUOTE_MAX = 400; // UTF-16 units; a longer line is cut and ends with "…"
+export const BEFORE_THE_CHANGE = 'Before the change:';
+
+// eslint-disable-next-line no-control-regex -- matching control characters is the point
+const QUOTE_CONTROL = /[\u0000-\u0008\u000a-\u001f\u007f-\u009f]/g; // every control character but the tab
+const BLANK_LINE = /^[ \t]*$/;
+
+// The line as one line of at most QUOTE_MAX units, or null when it is blank, which is read before the cut (a cut line
+// of spaces would hold "…"): the CR of a CRLF line's ending is no part of its text; any other line break or control
+// character is U+FFFD; a cut never halves a surrogate pair.
+function quoteLine(line: string): string | null {
+  const one = line.replace(/\r$/, '').replace(QUOTE_CONTROL, '\uFFFD');
+  if (BLANK_LINE.test(one)) return null;
+  if (one.length <= QUOTE_MAX) return one;
+  let end = QUOTE_MAX - 1;
+  const last = one.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1;
+  return `${one.slice(0, end)}…`;
+}
+
+function codeSpan(line: string): string {
+  const longest = Math.max(0, ...(line.match(/`+/g) ?? []).map((run) => run.length));
+  const ticks = '`'.repeat(longest + 1);
+  const pad = /^[` ]|[` ]$/.test(line) ? ' ' : '';
+  return `${ticks}${pad}${line}${pad}${ticks}`;
+}
+
+/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a commit's diff); unchanged when `quote` is null and the line is not such a removed one. */
+export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
+  if (text.trim() === '') return text; // a comment with no words is not sent
+  const line = quote === null ? null : quoteLine(quote);
+  // UX wave U5b-2: a commit's old side says so in its lead ("the first parent of commit"), so its words take no caption
+  const caption = anchor.kind === 'file-line' && anchor.side === 'old' && anchor.commit === undefined;
+  const parts = [...(caption ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
+  return parts.join('\n');
+}
+// UX wave U5b end

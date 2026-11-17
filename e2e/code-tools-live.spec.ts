@@ -11,9 +11,11 @@
 //   pnpm build && MAWS_CODE_LIVE=1 pnpm exec playwright test e2e/code-tools-live.spec.ts
 import { withProbeFile } from '../test/support/probe-file';
 import { isolatedGitEnv } from '../test/support/git-env';
-import { gitEnv } from '../src/services/git/runner';
+import { createGitRunner, gitEnv } from '../src/services/git/runner';
+import { defaultBase } from '../src/services/git/default-base';
+import { UNTRACKED_COUNT_BYTES, UNTRACKED_COUNT_FILES } from '../src/shared/ipc/schema/git';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Page } from '@playwright/test';
@@ -67,6 +69,39 @@ function expectOwnerHomeUntouched(sessionId: string, scratch: string): void {
   const projects = join(home, 'projects');
   const folders = existsSync(projects) ? readdirSync(projects).filter((name) => name.includes(basename(scratch))) : [];
   expect(folders, `${projects} has a folder for this run`).toEqual([]);
+}
+
+// Review's totals over the working tree against `against` (UX wave U5b-2, §I; Decision Log 29, 4), from git itself: the
+// tracked files' numstat, then each untracked entry the status lists (a new folder listed, never counted). A new file's
+// lines are counted as the service counts them (src/services/fs/count-lines.ts: a symlink one line; a regular file up
+// to the per-file cap with no NUL in its first 8000 bytes, its lines; the first UNTRACKED_COUNT_FILES files only), and
+// the new files not counted are named after the totals.
+function reviewTotals(root: string, against: string): { words: string; files: number; added: number; removed: number; uncounted: number } {
+  const numstat = git(root, 'diff', against, '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
+  let added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
+  const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
+  const entries = git(root, 'status', '--porcelain=v1', '-z', '--untracked-files=normal').split('\0').filter((e) => e.startsWith('?? ')).map((e) => e.slice(3));
+  const newFiles = entries.filter((path) => !path.endsWith('/'));
+  const lines = (path: string): number | null => {
+    const full = join(root, path);
+    const stat = lstatSync(full);
+    if (stat.isSymbolicLink()) return 1;
+    if (!stat.isFile() || stat.size > UNTRACKED_COUNT_BYTES) return null;
+    const bytes = readFileSync(full);
+    if (bytes.subarray(0, 8000).includes(0)) return null;
+    if (bytes.length === 0) return 0;
+    return bytes.reduce((n, b) => n + (b === 10 ? 1 : 0), 0) + (bytes[bytes.length - 1] === 10 ? 0 : 1);
+  };
+  let uncounted = 0;
+  newFiles.forEach((path, at) => {
+    const n = at < UNTRACKED_COUNT_FILES ? lines(path) : null;
+    if (n === null) uncounted++;
+    else added += n;
+  });
+  const files = numstat.length + entries.length;
+  const n = (v: number) => v.toLocaleString('en-US');
+  const words = `${n(files)} ${files === 1 ? 'file' : 'files'} changed · +${n(added)} −${n(removed)}${uncounted > 0 ? `, and ${n(uncounted)} untracked ${uncounted === 1 ? 'file' : 'files'} not counted` : ''}`;
+  return { words, files, added, removed, uncounted };
 }
 
 // The flashed line of the code view: its text, and whether it sits in the middle third or the view rests at an end.
@@ -150,44 +185,45 @@ test('live: Files, the viewer and Review over this checkout', async () => {
             .toBe(true);
         });
 
-        await test.step('Review Uncommitted matches git diff HEAD --numstat plus the untracked files', async () => {
-          const numstat = git(root, 'diff', 'HEAD', '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
-          const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
-          const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
-          const untracked = git(root, 'status', '--porcelain', '--untracked-files=all').split('\n').filter((l) => l.startsWith('??')).length;
-          const files = numstat.length + untracked;
-          const expected = `${files} ${files === 1 ? 'file' : 'files'} changed · +${added} −${removed} · Uncommitted`;
+        await test.step('Review Uncommitted matches git diff HEAD --numstat plus the untracked files, their lines counted', async () => {
+          // UX wave U5b: the totals no longer name the scope (card 1 at its default); a file is a section of the stack.
+          // UX wave U5b-2: the new files' lines are in the totals (the probe's two among them), and its header says +2.
+          const expected = reviewTotals(root, 'HEAD');
           await addTool(page, 'Review');
-          await expect(panel.locator('[data-review-header]')).toHaveText(expected, { timeout: 15_000 });
-          await expect(panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`)).toHaveAttribute('data-kind', 'untracked');
-          observed.review = { header: expected, numstat: numstat.length, untracked };
+          await expect(panel.locator('[data-chip="uncommitted"]')).toHaveAttribute('aria-pressed', 'true', { timeout: 15_000 });
+          await expect(panel.locator('[data-review-header]')).toHaveText(expected.words, { timeout: 15_000 });
+          const probeSection = panel.locator(`[data-review-file="${basename(probe)}"]`);
+          await expect(probeSection).toHaveAttribute('data-kind', 'untracked');
+          await expect(probeSection.locator('[data-review-counts]')).toHaveText('+2');
+          observed.review = expected;
         });
 
-        await test.step('G3: This branch is the three-dot diff against the main worktree’s branch (C10’s git.worktree.branch)', async () => {
-          const current = git(root, 'branch', '--show-current');
-          const base = git(mainCheckout, 'symbolic-ref', '--short', 'HEAD');
+        // G3, rewritten for UX wave U5b-2 (§C, §E; decision 13): This branch is the working tree against the merge base with
+        // the repository's default branch, the rule's base read as the service reads it (src/services/git/default-base.ts:
+        // the remote HEAD's branch, then <remote>/main, <remote>/master, local main, local master). A session on the
+        // main checkout is compared like any other; the chip is off, with its reason, only where the rule finds no base.
+        await test.step('G3: This branch is the working tree against the merge base with the default branch', async () => {
+          const branch = git(root, 'branch', '--show-current') || `detached at ${git(root, 'rev-parse', 'HEAD').slice(0, 7)}`;
+          const base = await defaultBase(createGitRunner({ env: process.env }), root);
           const chip = panel.locator('[data-chip="branch"]');
-          if (current === base) {
-            await expect(chip).toHaveAttribute('title', `Session runs on ${current}, the main worktree's branch`);
+          if (base === null) {
+            await expect(chip).toHaveAttribute('title', 'No default branch to compare with', { timeout: 15_000 });
             await expect(chip).toBeDisabled();
-            observed.thisBranch = { current, base, disabled: await chip.getAttribute('title') };
+            observed.thisBranch = { branch, base: null };
             return;
           }
-          await expect(chip).toBeEnabled({ timeout: 10_000 });
+          await expect(chip).toBeEnabled({ timeout: 15_000 });
           await chip.click();
-          await expect(panel.locator('[data-review-footer]')).toHaveText(`${current} · Since ${base}`);
-          const numstat = git(root, 'diff', `${base}...HEAD`, '--numstat').split('\n').filter(Boolean).map((l) => l.split('\t'));
-          const added = numstat.reduce((sum, [a]) => sum + (a === '-' ? 0 : Number(a)), 0);
-          const removed = numstat.reduce((sum, [, r]) => sum + (r === '-' ? 0 : Number(r)), 0);
-          if (numstat.length === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${current} beyond ${base}`, { timeout: 15_000 });
-          else await expect(panel.locator('[data-review-header]')).toHaveText(`${numstat.length} ${numstat.length === 1 ? 'file' : 'files'} changed · +${added} −${removed} · This branch`, { timeout: 15_000 });
-          observed.thisBranch = { current, base, files: numstat.length, added, removed };
+          await expect(panel.locator('[data-review-footer]')).toHaveText(`${branch} · Since ${base.ref}`, { timeout: 15_000 });
+          const expected = reviewTotals(root, base.mergeBase);
+          if (expected.files === 0) await expect(panel.locator('[data-review-empty]')).toHaveText(`Nothing on ${branch} beyond ${base.ref}`, { timeout: 15_000 });
+          else await expect(panel.locator('[data-review-header]')).toHaveText(expected.words, { timeout: 15_000 });
+          observed.thisBranch = { branch, base: base.ref, ...expected };
           await panel.locator('[data-chip="uncommitted"]').click(); // back, for the steps below
         });
 
         await test.step('the viewer follows an edit made outside MAWS', async () => {
-          await panel.locator(`[role="option"] button[data-path="${basename(probe)}"]`).click();
-          await panel.locator('[data-open-file]').click();
+          await panel.locator(`[data-review-file="${basename(probe)}"] [data-open-file]`).click();
           const viewer = page.locator(`[data-file-viewer][data-path="${probe}"]`);
           await expect(viewer.locator('.cm-content')).toContainText('two');
           const written = Date.now();
@@ -295,11 +331,12 @@ test('live: a turn that edits a file opens Review on Last turn and the viewer at
     const panel = page.locator('[data-region="panel"]');
     await panel.locator('[data-chip="turn"]').click();
     await expect(panel.locator('[data-chip="turn"]')).toHaveAttribute('aria-pressed', 'true');
-    const file = panel.locator(`[role="option"] button[data-path="${join(record!.directory, target)}"]`);
+    // UX wave U5b: the file is a section of the stack, by its identity (absolute for Last turn); its header names it
+    const file = panel.locator(`[data-review-file="${join(record!.directory, target)}"]`);
     await expect(file).toBeVisible();
-    observed.review = { header: await panel.locator('[data-review-header]').textContent(), file: await file.textContent() };
+    observed.review = { header: await panel.locator('[data-review-header]').textContent(), file: await file.locator('[data-review-file-header]').textContent() };
 
-    await panel.locator('[data-open-file]').click();
+    await file.locator('[data-open-file]').click();
     await expect.poll(async () => (await flashed(page))?.text, { timeout: 5_000 }).toBe(edited);
     const landed = (await flashed(page))!;
     expect(landed.centred).toBe(true);

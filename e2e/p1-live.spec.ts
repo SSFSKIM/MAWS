@@ -331,8 +331,8 @@ async function sendFromComposer(live: Live, id: AppSessionId, prompt: string, op
   await live.page.keyboard.press('Enter');
 }
 
-// Waits for `until`, allowing every permission the session asks meanwhile through the card docked in `scope` (the main
-// pane, or the Side pane for a thread), or C7's inline request card when `scope` is a comment card's thread (P2-E1: it
+// Waits for `until`, allowing every permission the session asks meanwhile through its card in `scope` (since UX wave U1b
+// at the end of the main pane's transcript, or the Side pane's for a thread), or C7's inline request card when `scope` is a comment card's thread (P2-E1: it
 // has no `group` role), once. A request already resolved is left alone.
 async function drive(live: Live, scope: Locator, id: string, what: string, until: () => Promise<boolean>, allowed: string[] = [], timeout = TURN_MS): Promise<void> {
   const deadline = Date.now() + timeout;

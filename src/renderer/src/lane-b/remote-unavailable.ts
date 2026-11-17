@@ -54,6 +54,12 @@ export function remoteUnavailableOf(appSessionId: AppSessionId | null, ...comman
   return unavailableIn(remoteStandingOf(id), machineOfSession(id), notOfferedRefusals(), commands);
 }
 
+/** The labelled answer read now, for a key pressed outside a render (the UX wave, U4b: Esc and ↑ say their control's sentence). */
+export function remoteUnavailableAsOf(label: string, appSessionId: AppSessionId | null, ...commands: CommandName[]): string | null {
+  const id = appSessionId ?? NONE;
+  return unavailableIn(remoteStandingOf(id), machineOfSession(id), notOfferedRefusals(), commands, label);
+}
+
 function useUnavailable(label: string | undefined, appSessionId: AppSessionId | null, commands: readonly CommandName[]): string | null {
   const id = appSessionId ?? NONE;
   const standing = useRemoteStanding(id);

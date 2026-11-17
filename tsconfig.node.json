@@ -90,6 +90,7 @@
     "src/renderer/src/side/copy.ts",
     "src/renderer/src/composer/submit/submit-state.ts",
     // E3 end
+    "src/renderer/src/composer/editor/mention-text.ts", // UX wave U1c: test/support/person-sends.test.ts runs the mention's writer
     // P5 O7 M4 (milestone review): src/main/lane-b/remote-checkout-git-store.test.ts runs the renderer's git store over
     // main's remote checkout; listed for the same reason as C8a's
     "src/renderer/src/stores/git.ts",
@@ -169,6 +170,7 @@
     "src/renderer/src/artifacts/host.ts", // P3-A M5: the detached-channel test drives the real ArtifactHost under Node
     "src/renderer/src/artifacts/command-error.ts", // P3-H H4: host.ts's error, shared with its connector family
     "src/renderer/src/artifacts/connectors.ts", // P3-H H4: host.ts's connector family
+    "src/renderer/src/artifacts/deleted-replicas.ts", // UX wave U10b M5: host.ts notes the replicas that wait for a restore
     // P3-B: test/artifacts/document-writer-bench.test.ts benches the patch writer on the 200-page seed M9's gate uses
     "e2e/support/document-seed.ts",
     // P3-E (E2 M6); P3-F: test/support/final-bundle.test.ts drives the dashboard acceptance run's final reporter
@@ -179,7 +181,8 @@
     "e2e/support/quiet.ts", // P4-W: test/support/quiet.test.ts runs the measured specs' quiet admission
     "e2e/support/clock.ts", // P4 W2-D: test/support/clock.test.ts holds the e2e clock pin to the app's own clock
     "e2e/support/window-origin.ts", // ci-kit's mac-lane concurrency spec, M2: test/support/window-origin.test.ts runs a shared desktop's corners
-    "e2e/support/host-ready.ts" // P5 O3-B: test/support/host-ready.test.ts runs the launch's bounded wait for the daemon shape's engine host
+    "e2e/support/host-ready.ts", // P5 O3-B: test/support/host-ready.test.ts runs the launch's bounded wait for the daemon shape's engine host
+    "e2e/support/stop-record.ts" // UX wave U1b M7: test/support/stop-record.test.ts runs e2e:lane-a's staging of the probe 9b records
   ],
   // P3-B: the document editor's React and DOM, and the importers that parse HTML through the DOM (M6), typechecked by
   // tsconfig.web.json. P3-D M4: the design system's React and DOM (the apply API's scopes, the page), likewise. P3-C M4:

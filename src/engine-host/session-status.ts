@@ -31,6 +31,9 @@ const str = (v: unknown): string | null => (typeof v === 'string' ? v : null);
 const list = (v: unknown): Record<string, unknown>[] => (Array.isArray(v) ? (v.filter((x) => typeof x === 'object' && x !== null) as Record<string, unknown>[]) : []);
 // system/init's and reload_plugins' plugin items alike: `name`, `path`, `source`, `version` (E8: pass3/e8-plugins-reload seq 26, 31)
 export const pluginsOf = (v: unknown): EngineSessionStatus['plugins'] => list(v).map((p) => ({ name: String(p.name), path: str(p.path) ?? '', source: str(p.source), version: str(p.version) }));
+// system/init's `mcp_servers` and reload_plugins' `mcpServers` alike (mcp_status's projection: pass3/p2-no-prompt-resume-1
+// seq 30): each server's name, status and source
+const mcpServersOf = (v: unknown): EngineSessionStatus['mcpServers'] => list(v).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
 // P2-A start (2026-10-09): a main-lane system/init's plugins with their load errors and warnings (omitted by the engine
 // when empty, SPEC 45 §45.10.2), read the same way by the tracker and by X17's observed facts (observed-facts.ts)
 export function initPluginsOf(frame: Record<string, unknown>): Pick<EngineSessionStatus, 'plugins' | 'pluginErrors' | 'pluginWarnings'> {
@@ -64,7 +67,7 @@ export class SessionStatusTracker {
   firstTurnAt: string | null = null; // O16 D69: the launch's first main-lane turn.started (the fold restores it)
   pluginErrors: EngineSessionStatus['pluginErrors'] = [];
   pluginWarnings: EngineSessionStatus['pluginWarnings'] = [];
-  pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet)
+  pluginsObservedAt: string | null = null; // P2-A: when this launch's init or reload last reported the plugins (null: not yet); U11h: and its MCP servers
   mcpServers: EngineSessionStatus['mcpServers'] = [];
   backgroundTasks: EngineSessionStatus['backgroundTasks'] = [];
   heldPeerMessages: EngineSessionStatus['heldPeerMessages'] = [];
@@ -252,9 +255,12 @@ export class SessionStatusTracker {
   // answer carries only a count of errors, so the last init's errors and warnings stay. Its commands and agents, in the
   // initialize response's shape, are the catalogue's (a plugin's skills are among the commands); the skills and terminal
   // commands lists come only from system/init, so the skills keep only names still among the answer's commands (W-D
-  // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9).
+  // review m1: pass3/e8-plugins-reload seq 54 drops e8-probe:e8-hello, an init skill at seq 9). UX wave U11h: the answer
+  // also lists the MCP servers once the engine applied the plugins' changes, so they are the status's servers, observed
+  // with the plugins (`pluginsObservedAt` is when both were); an answer without the list leaves the last one.
   applyReload(answer: ReloadPluginsResponse): void {
     this.plugins = pluginsOf(answer.plugins);
+    if (Array.isArray(answer.mcpServers)) this.mcpServers = mcpServersOf(answer.mcpServers);
     this.pluginsObservedAt = new Date().toISOString(); // P2-A
     const names = new Set(list(answer.commands).map((command) => command.name));
     this.setCatalog({ commands: answer.commands, agents: answer.agents, skills: this.catalogState.skills.filter((skill) => names.has(skill)) });
@@ -330,7 +336,7 @@ export class SessionStatusTracker {
     if (typeof frame.claude_code_version === 'string') this.engineVersion = frame.claude_code_version;
     if (typeof frame.cwd === 'string') this.engineCwd = frame.cwd;
     if (typeof frame.permissionMode === 'string') this.setMode(frame.permissionMode);
-    if (Array.isArray(frame.mcp_servers)) this.mcpServers = list(frame.mcp_servers).map((s) => ({ name: String(s.name), status: String(s.status), source: str(s.source) }));
+    if (Array.isArray(frame.mcp_servers)) this.mcpServers = mcpServersOf(frame.mcp_servers);
     this.setFastMode(frame);
     ({ plugins: this.plugins, pluginErrors: this.pluginErrors, pluginWarnings: this.pluginWarnings } = initPluginsOf(frame));
     this.pluginsObservedAt = at; // P2-A

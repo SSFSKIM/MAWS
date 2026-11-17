@@ -19,6 +19,8 @@ export interface ProvidedReplica {
   hold: boolean;
   /** Delivers what each side has posted (the replica's unless held); answers how many frames moved. */
   deliver(): number;
+  /** UX wave U10b (M4): the provider connected again over new ends (an editor's reconnect after the host closed it). */
+  reconnect(): void;
 }
 
 type Listener = (event: { data?: unknown }) => void;
@@ -50,26 +52,34 @@ export function provided(service: DocumentService, artifactId: string, actor: Ac
       }
       return moved;
     },
-  };
-  const replicaEnd: PortLike = {
-    postMessage: (message) => void (replica.closed || toHost.push(message.slice())),
-    addEventListener: (type, listener) => void listeners[type].add(listener),
-    removeEventListener: (type, listener) => void listeners[type].delete(listener),
-    close: () => {}, // the replica never hangs up in these tests
-  };
-  const hostEnd: HostPort = {
-    send: (frame) => void (replica.closed || toReplica.push(frame)),
-    close: () => {
-      if (replica.closed) return;
-      replica.closed = true;
-      toHost.length = 0;
-      toReplica.length = 0;
-      for (const listener of [...listeners.close]) listener({});
+    reconnect() {
+      replica.closed = false;
+      connect();
     },
-    onMessage: (listener) => void (hostListener = listener),
-    onClose: () => {},
   };
-  service.attach(artifactId, hostEnd, actor);
-  replica.provider.connect(replicaEnd);
+  // The two ends of one connection; a reconnect makes new ones (the closed ones carry nothing more).
+  const connect = () => {
+    const replicaEnd: PortLike = {
+      postMessage: (message) => void (replica.closed || toHost.push(message.slice())),
+      addEventListener: (type, listener) => void listeners[type].add(listener),
+      removeEventListener: (type, listener) => void listeners[type].delete(listener),
+      close: () => {}, // the replica never hangs up in these tests
+    };
+    const hostEnd: HostPort = {
+      send: (frame) => void (replica.closed || toReplica.push(frame)),
+      close: () => {
+        if (replica.closed) return;
+        replica.closed = true;
+        toHost.length = 0;
+        toReplica.length = 0;
+        for (const listener of [...listeners.close]) listener({});
+      },
+      onMessage: (listener) => void (hostListener = listener),
+      onClose: () => {},
+    };
+    service.attach(artifactId, hostEnd, actor);
+    replica.provider.connect(replicaEnd);
+  };
+  connect();
   return replica;
 }

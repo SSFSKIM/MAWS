@@ -7,9 +7,10 @@ import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, SessionId } from '@shared/graph/ids';
+import { askSteerText } from '@shared/maws/ask'; // board ticket 711
 import { AgentMetaSchema } from '@shared/wire/transcript';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { FIXTURE_DIR, loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 
 const SNAPSHOT_DIR = join(__dirname, '../../../../../test/snapshots/transcript');
@@ -223,6 +224,22 @@ describe('a steer reloaded from disk', () => {
   });
 });
 
+// UX wave U1b, probe 9a (spikes/protocol-probe/findings-uxwave-u1b-message-and-stop-while-asked.txt): a message sent
+// while MAWS's blocking ask waits is queued by the engine, and once the ask is answered its file holds it only as a
+// `queued_command` attachment after the ask's result, never as a `user` row. Reloaded, it is the person's message, drawn
+// as their bubble after the ask's row.
+describe('a message sent while a blocking ask waited, reloaded from disk (probe 9a)', () => {
+  it('u1b-askwait-mcp-answer-r1: the queued_command after the ask’s result is the person’s message, after the ask’s row', async () => {
+    const disk = await backfill(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u1b-askwait-mcp-answer-r1.transcript.jsonl')), 'de3d3e11-577b-40eb-be7c-80b9cf3c4563');
+    const rows = expanded(stateOf(disk));
+    const users = ofKind(rows, 'user');
+    expect(users.map((row) => [row.steer, row.text])).toEqual([[false, users[0]!.text], [true, 'Also: end your reply with the word KIWI.']]);
+    const message = rows.findIndex((row) => row.kind === 'user' && row.steer);
+    expect(message, 'after the ask’s row').toBeGreaterThan(rows.findIndex((row) => row.kind === 'ask'));
+    expect(rows.findIndex((row) => row.kind === 'ask')).toBeGreaterThan(-1);
+  });
+});
+
 // W1 (A5): `/compact` between two turns, recorded live (pass3/compact) and read back from disk (w1-compact.jsonl).
 describe('a /compact turn from disk', () => {
   it('w1-compact: the summary is no bubble, the command one line, its output and the boundary in view, and no divider', async () => {
@@ -260,6 +277,29 @@ describe('a maws ask read from disk', () => {
     expect(state.order).toHaveLength(2);
     expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
     await expect(`${JSON.stringify(rows.map(sortKeys), null, 2)}\n`).toMatchFileSnapshot(join(SNAPSHOT_DIR, 'disk/p1-maws-ask-async.rows.json'));
+  });
+
+  // Board ticket 711: the same transcript with its steer as this build writes it (the pick by its place among the
+  // options, no words of the model's), the disk's only record of the answers: the capsule draws the label from the call
+  it('p1-maws-ask-async with its steer in the new form: the capsule draws the picked label from the call, and the steer is no bubble', async () => {
+    const ASK_ID = 'toolu_016zBCDTWVXbAqbGdLyd1Zzj';
+    const text = readFileSync(join(TRANSCRIPT_FIXTURE_DIR, 'p1-maws-ask-async.jsonl'), 'utf8');
+    const contentOf = (line: string): unknown => (JSON.parse(line) as { message?: { content?: unknown } }).message?.content;
+    const old = text.split('\n').filter(Boolean).map(contentOf).find((content): content is string => typeof content === 'string' && content.startsWith(`[MAWS ask ${ASK_ID}]`));
+    expect(old).toContain('1. Proceed? — Yes'); // the recording's form
+    const question = { id: 'q1', question: 'Proceed?', modality: 'choice' as const, options: [{ label: 'Yes' }, { label: 'No' }] };
+    const fresh = askSteerText(ASK_ID, [question], [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }]);
+    expect(fresh.split('\n')[1]).toBe('1. option 1');
+    const swapped = text.replaceAll(JSON.stringify(old).slice(1, -1), JSON.stringify(fresh).slice(1, -1));
+    expect(swapped).not.toBe(text);
+    const disk = await backfill(Buffer.from(swapped), 'ccd2c390-f412-47ce-a480-87c2524d643e');
+    expect(disk.filter((event) => event.kind.startsWith('maws.'))).toEqual([]);
+    const state = stateOf(disk);
+    const rows = rowsOf(withAllExpanded(state));
+    const [ask] = ofKind(rows, 'ask');
+    expect(ask).toMatchObject({ state: 'answered', askId: ASK_ID, answers: [{ id: 'q1', question: '', status: 'answered', value: ['Yes'] }] });
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(state.order.slice(0, 1));
+    expect(rows.some((row) => row.kind === 'user' && row.text.includes('[MAWS ask'))).toBe(false);
   });
 });
 

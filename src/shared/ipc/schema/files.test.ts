@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { readTolerant } from '../tolerant';
+import { commands as libraryCommands } from './library';
 import { commands, FilesOpenExternalInputSchema, FilesReadInputSchema, FilesReadOutputSchema, FilesReadResolvedInputSchema, opensExternally } from './files';
 
 describe('files opensExternally', () => {
@@ -49,5 +50,39 @@ describe('files named', () => {
     for (const [name, schema] of Object.entries(before)) {
       expect(readTolerant(schema, { ...asked, named: true }), name).toEqual({ ok: true, value: asked, dropped: ['named'] });
     }
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B): `raw` on files.read's
+// input and `identity` on its answer, optional and additive; a daemon of an older build drops `raw` and answers the plain
+// read, and a reader of an older build drops `identity`
+describe('files raw and identity', () => {
+  const asked = { appSessionId: '11111111-1111-4111-8111-111111111111', path: '/root/doc.pdf' };
+  const answer = { encoding: 'base64', content: 'JVBERg==', bytes: 4, offset: 0, length: 4, truncated: false, mime: 'application/pdf', hash: null, utf8: null };
+
+  it('is an optional `true` on files.read’s input, and an optional non-empty string on its answer', () => {
+    expect(FilesReadInputSchema.safeParse({ ...asked, raw: true }).success).toBe(true);
+    expect(FilesReadInputSchema.safeParse({ ...asked, raw: false }).success).toBe(false);
+    expect(FilesReadOutputSchema.safeParse({ ...answer, identity: '1:2:4:5:6' }).success).toBe(true);
+    expect(FilesReadOutputSchema.safeParse({ ...answer, identity: '' }).success).toBe(false);
+    expect(FilesReadOutputSchema.safeParse(answer).success).toBe(true);
+  });
+
+  it('a reader that does not know raw reads the request as the plain one', () => {
+    expect(readTolerant(FilesReadInputSchema.omit({ raw: true }), { ...asked, raw: true })).toEqual({ ok: true, value: asked, dropped: ['raw'] });
+  });
+
+  it('an answer with identity is read by a reader that does not know it as the answer without it', () => {
+    expect(readTolerant(FilesReadOutputSchema.omit({ identity: true }), { ...answer, identity: '1:2:4:5:6' })).toEqual({ ok: true, value: answer, dropped: ['identity'] });
+  });
+
+  it('files.readResolved refuses raw', () => {
+    expect(FilesReadResolvedInputSchema.safeParse({ path: asked.path }).success).toBe(true);
+    expect(FilesReadResolvedInputSchema.safeParse({ path: asked.path, raw: true }).success).toBe(false);
+    expect(commands['files.readResolved'].input.safeParse({ path: asked.path, raw: true }).success).toBe(false);
+    // library.read picks three of the read's keys, and so takes none of the others (B14)
+    const stored = { artifactId: '22222222-2222-4222-8222-222222222222' };
+    expect(libraryCommands['library.read'].input.safeParse(stored).success).toBe(true);
+    expect(libraryCommands['library.read'].input.safeParse({ ...stored, raw: true }).success).toBe(false);
   });
 });

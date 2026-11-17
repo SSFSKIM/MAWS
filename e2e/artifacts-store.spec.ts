@@ -9,12 +9,14 @@
 // every `maws-artifact:` load, the app's and the capture window's, goes through the scheme proxy to `mawsd`'s artifact
 // endpoint on artifacts.sock, and asserts what they asserted of main's handler. P5 O5 M4: there `artifacts.export` is a
 // machine command, rendered by `mawsd`'s render host (the library's Export from the app's window, as from any client).
+import { createHash } from 'node:crypto';
 import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { loadavg, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, test, type ElectronApplication, type Page } from '@playwright/test';
 import type { HostStatus } from '@shared/ipc/schema/host';
+import { AgentSeam } from './support/dashboards';
 import { documents, seamReady } from './support/documents';
 import { launchMaws, type MawsLaunch } from './support/launch';
 import { quietWait, type QuietAdmission } from './support/quiet';
@@ -527,4 +529,38 @@ test('S2’s numbers in the product: first sync of a 1 MB document, keystroke to
   expect(ackVoid, `the keystroke-to-ack window is void by load, not a bound miss: its 1-minute load read ${ackLoads[0]![0]} at the start and ${ackLoads[1]![0]} at the end (${VOID_LOAD} or more at either end voids it); rerun the group in a quiet window (p95 ${ackP95Ms} ms, no verdict)`).toBe(false);
   expect(ackP95Ms, 'keystroke to durable ack, p95').toBeLessThan(PERF_BOUNDS.ackP95Ms);
   expect(ackedLost, 'acknowledged keystrokes lost to three host SIGKILLs').toBe(PERF_BOUNDS.ackedLost);
+});
+
+// UX wave U10b (A5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M1 and M3): an agent publishes a new
+// version of its HTML page from the file it wrote (`path`, not the page's text in the call), and the page's `html`
+// export is that file byte for byte, a byte that is not UTF-8 included. The agent's half runs through the host's
+// dashboard seam (MAWS_DASHBOARD_E2E=1), the `maws` server's own tools with a real working directory.
+const sha256 = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
+
+test('UX wave U10b (A5): an agent publishes its HTML page by path, and the html export is the published file byte for byte', async () => {
+  profile = mkdtempSync(join(tmpdir(), 'maws-e2e-artifacts-'));
+  launch = await launchMaws({ userData: profile, env: { MAWS_DASHBOARD_E2E: '1' } });
+  const { page } = launch;
+  await seamReady(page);
+  await hostReady(page);
+  const agent = new AgentSeam(join(profile, 'dashboard-e2e'));
+  const session = 'app-e2e-page-agent';
+
+  await agent.write(session, 'report-v1.html', '<!doctype html><html><head><title>Weekly report</title></head><body><h1>Weekly report</h1><p>First draft.</p></body></html>\n');
+  const created = await agent.ok<{ artifactId: string; revision: number }>(session, 'artifact_create', { kind: 'html', title: 'Weekly report', path: 'report-v1.html' });
+  // the second version: a page whose bytes are not all UTF-8 (a Latin-1 é in its text), as a tool may write one
+  const v2 = Buffer.concat([
+    Buffer.from('<!doctype html><html><head><title>Weekly report</title></head><body><h1>Weekly report</h1><p>Caf', 'utf8'),
+    Buffer.from([0xe9]),
+    Buffer.from(' opening hours moved to nine.</p></body></html>\n', 'utf8'),
+  ]);
+  await agent.write(session, 'report-v2.html', v2);
+  const published = await agent.call<{ revision: number }>(session, 'artifact_publish', { artifact: created.artifactId, baseRevision: created.revision, path: 'report-v2.html' });
+  expect(published.isError, published.text).toBe(false);
+  expect(published.result!.revision).toBeGreaterThan(created.revision);
+
+  const exported = await ok<{ path: string }>(page, 'artifacts.export', { artifactId: created.artifactId, format: 'html' });
+  const bytes = readFileSync(exported.path);
+  expect({ sha256: sha256(bytes), bytes: bytes.length }, 'the export is the published file').toEqual({ sha256: sha256(v2), bytes: v2.length });
+  expect(launch.consoleErrors()).toEqual([]);
 });

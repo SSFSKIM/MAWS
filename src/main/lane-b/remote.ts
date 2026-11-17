@@ -80,6 +80,17 @@
 //   word of the link (as the attention feed's is), or with the machine's first lane. A page that just subscribed is told
 //   the settled generation again (`replay`). M5's three timing lines (./remote-timing.ts): a tab's open, here; a history
 //   read, ./remote-history.ts; New chat's chooser, its two reads timed where the router routes them (`routeLaneB`).
+// - The UX wave (U4b, docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C): sending a
+//   waiting message now is an engine-host act behind `rl2.send-now`, never behind a send; it, taking a waiting message
+//   back and a pane's answer act on a live launch alone and never resume a session (`LIVE_ONLY`); and a Send now the
+//   endpoint accepted and an earlier engine host refused `unavailable` says so (`host-older`), apart from the endpoint's
+//   own `unavailable`.
+// - The UX wave (U5b-2, M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+//   branch read, the commit read and the working-tree read (`GIT_READ_CALLS`) are the adapter's, not the manager's path,
+//   where nothing reads REMOTE_NEEDS and the link holds a call made with no channel for the next one and resends one
+//   whose channel ended. Each goes only on the channel whose capabilities were just read and list `rl2.git-reads`
+//   (`oneChannel`), naming the session it is made for as the checkout's other reads do; while none are known it is
+//   refused `host_unavailable`, and a channel that ends under it fails it, never carried to the next channel's peer.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -88,7 +99,7 @@ import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
 import type { CommandInput, CommandName, CommandResult, EventName, EventPayload } from '@shared/ipc/schema';
 import { PROJECT_ACTS_CAPABILITY } from '@shared/ipc/schema/session';
-import { REMOTE_NEEDS } from '@shared/ipc/remote-unavailable';
+import { failureWords, REMOTE_NEEDS } from '@shared/ipc/remote-unavailable';
 import { validateCommandOutput } from '@shared/ipc/validate';
 import type { MachineRef } from '@shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS } from '@shared/machine/remote-pending';
@@ -232,7 +243,7 @@ export interface RemoteLaneB {
   /** P5 O7 M6: every RL2 machine's attention, from its feed, for the badge and the notifier. */
   attention: Pick<RemoteAttention, 'machines' | 'machine' | 'onChange' | 'sayAgain'>;
   /** P5 O7 M5a: `remote.openCopy` (main's handler's) and a remote artifact's files for Save As (src/main/library/files.ts). */
-  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets'>; // P5 O7 M5b: scheme, assets
+  artifacts: Pick<RemoteArtifacts, 'openCopy' | 'files' | 'scheme' | 'assets' | 'copyInto'>; // P5 O7 M5b: scheme, assets; UX wave U6b-2: copyInto
   /** Every subscription, feed, stream and forwarded port's listener closed: before the links, in the shutdown order. */
   stop(): void;
   /** M4c fix wave 2: the spawn attempts kept, by tab (tests): an act out, or its answer. */
@@ -250,6 +261,7 @@ export const ENGINE_HOST_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   'session.rewind', 'session.rewindFiles', 'session.forget', 'session.setKeep', 'session.generateTitle',
   'maws.ask.answer', 'side.question.clear', 'session.reloadPlugins', // P5 O7 M8 (§U)
   'session.steer.cancel', 'maws.pane.answer', // the UX wave (U9): behind `rl2.session-acts`; a pane's answer never resumes a session
+  'session.steer.sendNow', // the UX wave (U4b): behind `rl2.send-now`
 ]);
 /** The `machine` acts §L offers for lane B: placed by their args (or, a spawn, on the machine), neither a session nor a context. */
 export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
@@ -288,6 +300,11 @@ const PROJECT_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.p
  * adapter's to send for that reason, a call by name on the channel it was checked on.
  */
 const SESSION_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['session.list']);
+/**
+ * The UX wave (U5b-2, M8): git's reads behind `rl2.git-reads` (REMOTE_NEEDS), the adapter's to send for the same reason as
+ * the archived read, each on the channel it was checked on and naming its session for the endpoint's checkout rule.
+ */
+const GIT_READ_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['git.branchCommits', 'git.commitDiff', 'git.changesSince']);
 /** The capability an act carries as `requires`: the project registry's, else the one REMOTE_NEEDS names. */
 const requiredBy = (name: CommandName, fields: Fields): string | undefined => (needsProjectActs(name, fields) ? PROJECT_ACTS_CAPABILITY : REMOTE_NEEDS[name]);
 // `needsProjectActs` (../machines/project-acts-peer.ts) names what needs the capability; this Mac's daemon is checked by it too
@@ -310,6 +327,8 @@ export const PAGED_READS: ReadonlySet<CommandName> = new Set<CommandName>(['sess
  */
 export const TARGETED_CALLS: ReadonlySet<CommandName> = new Set<CommandName>(['fs.tasks', 'fs.unfollow', 'fs.agentEvents']);
 const SENDS: ReadonlySet<CommandName> = new Set<CommandName>(['session.send', 'session.steer']);
+/** Engine-host acts that act on a live launch alone: with none, nothing is acquired and nothing is sent. */
+const LIVE_ONLY: ReadonlySet<CommandName> = new Set<CommandName>(['maws.pane.answer', 'session.steer.sendNow', 'session.steer.cancel']);
 const OPERATIONS: ReadonlySet<string> = new Set<string>(OPERATION_COMMANDS);
 export const NOT_OPEN = 'open the session to drive it';
 /** The remote drill-in: `fs.agentEvents` takes no byte budget, so an agent's disk window past the channel's bound can't cross. */
@@ -642,6 +661,15 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
 
   // ---- Acts ----------------------------------------------------------------------------------------------------------------
 
+  /** Whether the endpoint accepted the act (its `ack`), followed from the act's making to its outcome. */
+  function acceptance(handle: ActHandle): { seen(): boolean; off(): void } {
+    let seen = handle.progress() === 'accepted';
+    const off = handle.onProgress((progress) => {
+      if (progress === 'accepted') seen = true;
+    });
+    return { seen: () => seen, off };
+  }
+
   /** The outcome, or `pending` at `deadline` once a copy of the act went out (one never sent waits for the link's hold). */
   function bounded(handle: ActHandle, deadline: number): Promise<ActOutcome | 'pending'> {
     return new Promise((resolve) => {
@@ -733,8 +761,13 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     const app = lane.session.state.app;
     let context = lane.session.context();
     const resuming = context === null;
-    // U9: a pane's request died with the launch that asked it, so its answer resumes nothing and acquires nothing
-    if (context === null && name === 'maws.pane.answer') return failure('internal', `${name}: the pane’s request ended with its session’s launch on ${link.name}`, { refusal: 'not-live' });
+    // U9: a pane's request died with the launch that asked it, so its answer resumes nothing and acquires nothing. U4b: a
+    // waiting message lives only in a live launch (the queue abandons every pending steer at the process's exit), so
+    // neither sending it now nor taking it back starts an engine to be told that nothing waits
+    if (context === null && LIVE_ONLY.has(name)) {
+      const words = name === 'maws.pane.answer' ? `${name}: the pane’s request ended with its session’s launch on ${link.name}` : failureWords(name, `the session isn’t running on ${link.name}`);
+      return failure('internal', words, { refusal: 'not-live' });
+    }
     if (context === null) {
       // A launch already on its way is waited for; one that ended (its row kept, `exited`) or none is resumed first.
       const resume = lane.session.launching()
@@ -765,8 +798,16 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (uploads && !blocks) deps.log(`lane B: session.send on ${link.name}/${app}: its endpoint lists no rl2.upload-blocks; the uploads go as their mentions alone`);
     const since = lane.session.openings(); // the opening the act is made under: a receipt heard after a later one is asked of the machine
     const needs = REMOTE_NEEDS[name]; // U9: judged at each transmission, as the uploads' capability is
-    const make = (args: Fields, requires: boolean) =>
-      settle(link, name, link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires ? { requires: 'rl2.upload-blocks' } : needs !== undefined ? { requires: needs } : {}) }), deadline, app);
+    const make = async (args: Fields, requires: boolean) => {
+      const handle = link.act({ action: name, session: app, context: { lane: 'B', ...context }, args, executor: 'engine-host', sendBy: deadline, ...(requestDigest !== undefined && { requestDigest }), ...(requires ? { requires: 'rl2.upload-blocks' } : needs !== undefined ? { requires: needs } : {}) });
+      const accepted = acceptance(handle);
+      const result = await settle(link, name, handle, deadline, app);
+      accepted.off();
+      // U4b (decision 14): the endpoint accepted it and the engine host then refused it `unavailable`, which a host has no
+      // handler for: an earlier host still serving the session; the endpoint's own `unavailable` comes in place of the `ack`
+      const refused = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
+      return name === 'session.steer.sendNow' && refused === 'unavailable' && accepted.seen() ? refusalResult(name, link.name, 'host-older') : result;
+    };
     let result = await make(blocks || !uploads ? fields : withoutUploads(fields), blocks);
     const refusal = result.ok ? null : (result.error.issues as { refusal?: unknown } | undefined)?.refusal;
     // m8-3 review round 2: only when the channel it went on lists no `rl2.upload-blocks`; any other not-offered is the send's error
@@ -885,6 +926,10 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       const peers = link.peerCapabilities();
       if (peers !== null && !peers.includes(needs)) return refusalResult(name, link.name, 'not-offered');
       if (SESSION_CALLS.has(name)) return peers === null ? failure('host_unavailable', `${name}: machine ${link.name} is not reachable`) : callOverLink(link, name, fields, { oneChannel: true });
+      if (GIT_READ_CALLS.has(name)) {
+        if (peers === null) return failure('host_unavailable', `${name}: machine ${link.name} is not reachable`);
+        return callOverLink(link, name, fields, { oneChannel: true, ...(ctx.session !== undefined && { session: { lane: 'B' as const, id: ctx.session } }) });
+      }
     }
     if (artifacts.handles(name)) return artifacts.dispatch(link, name, fields, ctx.client); // P5 O7 M5a; M5b: the window a document opens in
     if (PTY_NAMES.has(name)) return ptys.dispatch(link, name, fields);
@@ -921,7 +966,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
   }
 
   return {
-    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
+    handles: (name) => ENGINE_HOST_ACTS.has(name) || MACHINE_ACTS.has(name) || PROJECT_CALLS.has(name) || SESSION_CALLS.has(name) || GIT_READ_CALLS.has(name) || MACHINE_CALLS.has(name) || SUBSTITUTES.has(name) || PAGED_READS.has(name) || TARGETED_CALLS.has(name) || WATCH_COMMANDS.has(name) || PTY_NAMES.has(name) || artifacts.handles(name),
     async dispatch(link, name, input, ctx) {
       try {
         return await run(link, name, record(input) ?? {}, ctx);
@@ -948,7 +993,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     chooserRead(machine, read, startedAt, answeredAt) {
       chooser(deps.remote(machine)?.name ?? machine, read, startedAt, answeredAt);
     },
-    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine) },
+    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine), copyInto: (...args) => artifacts.copyInto(...args) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);

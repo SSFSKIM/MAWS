@@ -6,7 +6,11 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { readAnchoredMessage } from '../anchor/message';
+import { ANCHOR_TAG_OPENING, commentsMessage, readAnchoredMessage } from '../anchor/message';
+import { neutralisePastedTags } from '../composer/pasted-framing';
+import { framePasted } from '../composer/pasted-content';
+import { readArrivals } from '../engine/arrival';
+import { CLAIMED_FOR_SAVES } from '../engine/composed-forms';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1006,10 +1010,25 @@ export interface PendingCall {
   toolUseId: string;
   when: 'mcp' | 'edit';
 }
-export type RowClaim = { names: true } | { names: false; pending: PendingCall[] };
+// `other`: a `user` row or a queued prompt whose text names the path, in text that is not the person's own (UX wave U6e,
+// Decision Log 8; ticket 675: `ownTexts`): a result form already resolved, which names the path for a read and admits no
+// save. The anchor form is such a text (ruling B): it names the path for a read only.
+export type RowClaim = { names: true } | { names: false; pending: PendingCall[]; other?: true };
 
 const NOTHING: RowClaim = { names: false, pending: [] };
 const NAMES: RowClaim = { names: true };
+const OTHER: RowClaim = { names: false, pending: [], other: true };
+// UX wave U6e (Decision Log 8, amended by 22: the person's own text fails closed): a carrier of a person's message (a
+// `user` row, a queued prompt) holds the person's own text only when it is positively the person's: its origin is the
+// person's (`human`, what the engine writes on a typed prompt) and U3a's reader of arrivals reads no other arrival off
+// its marks. A row of any other origin (a plugin's, with `asUser` or without, a peer's, a notification's, every kind that
+// is no person) or of none is never the person's text, whatever the reader returns; nor is MAWS's answer or consent text
+// in a person's row. Such text is the class of a tool's result. The one test, both carriers'.
+const originKindOf = (row: unknown): unknown => {
+  const fields = record(row);
+  return record(fields.type === 'attachment' ? record(fields.attachment).origin : fields.origin).kind;
+};
+const personsOwn = (row: unknown): boolean => originKindOf(row) === 'human' && readArrivals(row).every((arrival) => arrival.class === 'own');
 const isThePath = (value: unknown, path: string) => typeof value === 'string' && normalizeLexically(value) === path;
 const listOf = (value: unknown): readonly unknown[] => (Array.isArray(value) ? value : []);
 
@@ -1063,11 +1082,198 @@ function* anyStringLinks(value: unknown, path: string): Steps<boolean> {
   return false;
 }
 
-// A person's message names the path by a link in its text, or by its anchored comment's tag; the window joins the text
-// blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
+// Some text of a person's message names the path, for a read: a link in any of its texts, or its anchored comment's
+// tag; the window joins the text blocks this way before it reads the tag (`userTextOf`, model/user-text.ts).
 function* personNames(content: unknown, path: string): Steps<boolean> {
   const texts = yield* textsOf(content);
   return (yield* linksTo(texts, path)) || (yield* anchorNames(texts.join('\n\n'), path));
+}
+
+// UX wave U6e, board ticket 675 (the write rule's line 1; the architect's ruling D, with A, B and C): which texts of a
+// person's message are the person's own, the only texts that name a path for a save. Both carriers ask it, the `user`
+// row and the queued prompt, after `personsOwn` has placed the row as the person's.
+//
+// The rule is an allowlist by position and an exclusion list by content; content assembled at run time is outside what
+// the guard can see.
+// - By position: at most one text is the person's, the content when it is a string, else its first text block. The
+//   window's composer writes one text block, after its images and documents (composer/editor/serialize.ts); every block
+//   after it is read only, whatever its kind: the engine host's attached artifact reads (engine-host/linked-reads.ts),
+//   a second message the engine joined into the row, and any kind added later, with nobody touching this function.
+// - By content: that text counts only when no reader of a form MAWS writes as the person's claims any part of it,
+//   anywhere in the text: `CLAIMED` below, each reader sharing its one constant with its writer. A text one of them
+//   claims is read only whole, the person's words beside the form included (a joined message fails closed: no reader
+//   can tell where the form ends within one text).
+// - Inside a text no reader claims: a paste's frame and body are read only and the typed words around them count
+//   (ruling A); an anchored comment's own words count, its lead, passage and tag are read only (ruling B); a typed slash
+//   command's arguments are read only (ruling C, in `CLAIMED`).
+// Every site that hands content to a send, a steer or the queue as the person's message is listed, with the reader
+// of its form, by the guard test/support/person-sends.test.ts, which fails on a site it does not list.
+// Each reader charges its work to `work`: a constant's search one native pass over the text, the grant's test what it
+// counts itself, the answer lines' match two (a line's opening, then its words). The list is shared with the grant
+// reading (rule R's step 1b, src/shared/engine/composed-forms.ts), each form flagged for what it counts for.
+type Work = { steps: number };
+const holds = (needle: string) => (text: string, work: Work) => {
+  work.steps += text.length + 1;
+  return text.includes(needle);
+};
+const CLAIMED = CLAIMED_FOR_SAVES;
+
+// Decision Log 24's meter on the person's own text (the closing wave's item 3). Every reader is linear by construction
+// and runs as one call, charged the work it did; before a call the reading pauses when that call's bound would carry
+// the work past the next pause, so a pause falls between the readers of a long text and no stretch passes STRETCH_MAX.
+// The costliest call is the anchored message's read, bounded by ANCHOR_READ_WORK_PER_CHAR units a character (its passes
+// over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
+// to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
+// person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
+// units a character in all (the readers' bounds sum to 41), the text does not count: it fails closed. The grant's
+// test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
+// for the folded text too, decided by one fold before any reader runs; the budget follows the longer of the two, and
+// the grant's test on a counted text stays within one stretch.
+const ANCHOR_READ_WORK_PER_CHAR = 16;
+const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
+export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
+export const OWN_WORK_PER_CHAR = 48;
+const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
+const PASTE_OPENING = '<pasted_content id="'; // the head of the opener `framePasted` writes (composer/pasted-content.ts)
+
+// One reader's call, metered as above.
+function* inOneCall<T>(m: Meter, bound: number, read: (work: Work) => T): Steps<T> {
+  if (m.work + bound > m.pause && m.work > m.pause - SCAN_STEP_CHARS) yield pauseAt(m);
+  const work = { steps: 0 };
+  const value = read(work);
+  charge(m, work.steps);
+  if (m.work >= m.pause) yield pauseAt(m);
+  return value;
+}
+
+// A part of the person's text with each paste's frame and body out (ruling A), a blank line in its place so no link
+// spans it, as the engine's own parser cuts them (`PASTED_BLOCK`, up to two newlines on each side); found by a plain
+// scan, each opener up to the first closer of its own id. Null when an opener is not the composer's or has no closer,
+// or a tag of the form is left that is not the composer's neutralised one: such a part does not count.
+function* withoutPastes(part: string, m: Meter): Steps<string | null> {
+  let out = '';
+  for (let from = 0; ; ) {
+    const at = yield* inOneCall(m, part.length - from + 1, (work) => {
+      const found = part.indexOf(PASTE_OPENING, from);
+      work.steps += (found < 0 ? part.length : found) - from + 1;
+      return found;
+    });
+    if (at < 0) {
+      out += part.slice(from);
+      break;
+    }
+    const id = part.slice(at + PASTE_OPENING.length, at + PASTE_OPENING.length + 4);
+    const [opener, closer] = framePasted(id, '\u0000').split('\u0000') as [string, string]; // the writer's own frame, either side of a body
+    if (!/^[0-9a-f]{4}$/.test(id) || !part.startsWith(opener, at)) return null;
+    const body = at + opener.length;
+    const close = yield* inOneCall(m, part.length - body + 1, (work) => {
+      const found = part.indexOf(closer, body);
+      work.steps += (found < 0 ? part.length : found + closer.length) - body + 1;
+      return found;
+    });
+    if (close < 0) return null;
+    let lead = at;
+    while (lead > from && at - lead < 2 && part.charCodeAt(lead - 1) === 10) lead -= 1;
+    let after = close + closer.length;
+    for (let n = 0; n < 2 && part.charCodeAt(after) === 10; n += 1) after += 1;
+    out += `${part.slice(from, lead)}\n\n`;
+    from = after;
+  }
+  const kept = out;
+  return (yield* inOneCall(m, 2 * kept.length + 1, (work) => {
+    work.steps += 2 * kept.length + 1;
+    return neutralisePastedTags(kept) === kept;
+  })) ? kept : null;
+}
+
+/** What the reading of the person's own text found, and why it counted nothing when it was refused. */
+export interface OwnRead {
+  texts: string[];
+  refused: 'length' | 'budget' | null;
+}
+
+function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { meter?: Meter }): Steps<OwnRead> {
+  const none: OwnRead = { texts: [], refused: null };
+  const first = yield* firstTextOf(content);
+  if (first === null) return none;
+  if (first.length > OWN_TEXT_MAX_CHARS) return { texts: [], refused: 'length' };
+  // the bound holds for the text as the grant's test reads it, after compatibility folding (the architect's ruling):
+  // one native call over at most OWN_TEXT_MAX_CHARS characters, decided before any reader runs
+  const folded = first.normalize('NFKC').length;
+  if (folded > OWN_TEXT_MAX_CHARS) return { texts: [], refused: 'length' };
+  const n = first.length;
+  const m: Meter = { work: 0, budget: workPerChar * (Math.max(n, folded) + OWN_WORK_FLOOR_CHARS), pause: SCAN_STEP_CHARS };
+  if (seen) seen.meter = m;
+  try {
+    charge(m, n + folded + 1); // the fold
+    for (const claims of CLAIMED) if (yield* inOneCall(m, 3 * n + 2, (work) => claims(first, work))) return none;
+    let parts = [first];
+    if (yield* inOneCall(m, n + 1, (work) => holds(ANCHOR_TAG_OPENING)(first, work))) {
+      // an anchored message counts only when read whole: its read comments, written back by the same writer, are the
+      // text to the byte, and no comment's words hold a tag (the same anchor's message twice reads as led and writes back
+      // whole, the first's tag and the second's lead then inside the comment); ruling B
+      const read = yield* inOneCall(m, ANCHOR_READ_WORK_PER_CHAR * n, (work) => {
+        work.steps += ANCHOR_READ_WORK_PER_CHAR * n;
+        return readAnchoredMessage(first);
+      });
+      if (read === null || read.destination === null) return none; // a tag the reader does not take: MAWS's form
+      const { comments, destination } = read;
+      const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * n + 1, (work) => {
+        work.steps += ANCHOR_WRITE_WORK_PER_CHAR * n + 1;
+        return commentsMessage(comments, destination) === first && comments.every((comment) => !comment.text.includes(ANCHOR_TAG_OPENING));
+      });
+      if (!whole) return none;
+      parts = comments.map((comment) => comment.text);
+    }
+    const texts: string[] = [];
+    for (const part of parts) {
+      const kept = yield* withoutPastes(part, m);
+      if (kept !== null) texts.push(kept);
+    }
+    return { texts, refused: null };
+  } catch (error) {
+    if (error instanceof ScanRefused) return { texts: [], refused: 'budget' };
+    throw error;
+  }
+}
+
+// The reading of the person's own text with its meter's count (the closing wave's item 3; named-own.test.ts): the
+// work, the most of it between two pauses (the start and the end counted as pauses) and the pauses; `workPerChar`
+// lowers the budget so a test can run the refusal.
+export function ownTextWork(content: unknown, workPerChar = OWN_WORK_PER_CHAR): OwnRead & { work: number; longest: number; pauses: number } {
+  const seen: { meter?: Meter } = {};
+  const steps = ownTexts(content, workPerChar, seen);
+  let longest = 0;
+  let last = 0;
+  let pauses = 0;
+  for (;;) {
+    const step = steps.next();
+    const work = seen.meter?.work ?? 0;
+    if (step.done) return { ...step.value, work, longest: Math.max(longest, work - last), pauses };
+    if (step.value !== PAUSE) continue;
+    pauses += 1;
+    longest = Math.max(longest, work - last);
+    last = work;
+  }
+}
+
+// The content's string, or its first text block's text; a step per block passed.
+function* firstTextOf(content: unknown): Steps<string | null> {
+  if (typeof content === 'string') return content;
+  for (const value of listOf(content)) {
+    yield;
+    const block = record(value);
+    if (block.type === 'text') return typeof block.text === 'string' ? block.text : null;
+  }
+  return null;
+}
+
+// What a person's message, in a row `personsOwn` may place, answers for the path: null when no text of it names the
+// path; else NAMES when the person's own text links it, and OTHER (a read only) for any other text that names it.
+function* personClaim(row: unknown, content: unknown, path: string): Steps<RowClaim | null> {
+  if (!(yield* personNames(content, path))) return null;
+  if (!personsOwn(row)) return OTHER;
+  return (yield* linksTo((yield* ownTexts(content)).texts, path)) ? NAMES : OTHER;
 }
 
 // The anchor form's read of a person's message (UX wave U5a, docs/doperpowers/plans/2026-11-12-ux-wave-U5a-comment-card.md,
@@ -1075,7 +1281,7 @@ function* personNames(content: unknown, path: string): Steps<boolean> {
 // text, as the link pass's loops are, and then a step and the path's compare for each comment read, at most
 // MESSAGE_COMMENTS_MAX, since the reader reads no more.
 function* anchorNames(text: string, path: string): Steps<boolean> {
-  if (!text.includes('<maws_anchor')) return false;
+  if (!text.includes(ANCHOR_TAG_OPENING)) return false;
   const m = meterFor(text);
   try {
     charge(m, text.length + 1);
@@ -1117,7 +1323,10 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
     case 'user': {
       if (fields.isMeta === true || fields.isCompactSummary === true) return NOTHING; // the window draws no bubble for these
       const content = record(fields.message).content;
-      if (yield* personNames(content, path)) return NAMES;
+      // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, Decision Log 8; ticket 675):
+      // the person's own text names the path; any other text names it for a read only (`personClaim`)
+      const claim = yield* personClaim(row, content, path);
+      if (claim !== null) return claim;
       const edited = isThePath(record(fields.toolUseResult).filePath, path);
       const pending: PendingCall[] = [];
       for (const value of listOf(content)) {
@@ -1134,7 +1343,8 @@ export function* rowClaimSteps(row: unknown, path: string): Steps<RowClaim> {
       const attachment = record(fields.attachment);
       const human = attachment.type === 'queued_command' && record(attachment.origin).kind === 'human' && attachment.commandMode === 'prompt' && attachment.isMeta !== true;
       if (!human || typeof attachment.source_uuid !== 'string' || attachment.source_uuid === '') return NOTHING;
-      return (yield* personNames(attachment.prompt, path)) ? NAMES : NOTHING;
+      // U6e (the panel's finding 2; ticket 675): as the `user` row's text, the one rule of the person's own text
+      return (yield* personClaim(row, attachment.prompt, path)) ?? NOTHING;
     }
     default:
       return NOTHING;

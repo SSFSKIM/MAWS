@@ -103,6 +103,20 @@ describe('the maws-artifact: handler (Decision Log 14, 35e): the files the host 
     expect((await get(artifactUrl(PAGE, 'live', 'index.html'), { method: 'POST' })).status).toBe(405);
   });
 
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, "Main's decisions, each with a token
+  // host"): a file frame's token host is no artifact's id, so the store's own path and the daemon's endpoint (this same
+  // handler) answer it 404 and never ask the host about it, whatever its path
+  it('answers 404 for a token host', async () => {
+    await hold(PAGE, 'live', 'index.html', 'html', '<p>x</p>');
+    asked = [];
+    for (const url of ['maws-artifact://3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b/ledger%20draft.pdf', 'maws-artifact://3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b/live/index.html', 'maws-artifact://3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b/']) {
+      const answer = await get(url, { headers: { Range: 'bytes=0-' } });
+      expect(answer.status, url).toBe(404);
+      expect(await answer.text(), url).not.toContain('<p>x</p>');
+    }
+    expect(asked).toEqual([]);
+  });
+
   it('answers 404 when the host’s answer names a file that cannot be served (gone, a directory)', async () => {
     files.set(`${PAGE} live index.html`, { kind: 'html', path: join(root, 'gone.html'), name: 'index.html' });
     files.set(`${PAGE} live assets/dir`, { kind: 'html', path: root, name: 'dir' });

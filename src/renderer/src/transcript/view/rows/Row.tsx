@@ -17,9 +17,12 @@ import { AgentListRow } from './AgentList'; // E7
 import { ArtifactRowView } from './Artifact'; // E2
 import { BrowserActionRow } from './BrowserAction'; // E4c
 import { BrowserActivityRow } from './BrowserActivity'; // E13
-import { OwnerRecordRow } from '../../../owner/report/OwnerRecordRow'; // P2-C
+import { RecordFold } from '../../../owner/view/RecordFold'; // UX wave U2b
+import { ReportOnly } from '../../../owner/view/Message'; // UX wave U2b
 import { FoldedAssistantProbes, SurfaceAgentMessageRow /* UX wave U3 */, SurfaceAssistantRow, SurfaceCommandRow, SurfaceGroupRow, SurfaceNoticeRow /* UX wave U3 */, SurfaceQuestionRow, SurfaceUserRow } from '../../surface/Rows';
 import { CutTextRow } from './AssistantText'; // P5 O9
+import { AnswerActions } from './AnswerActions'; // UX wave U3b
+import { ActivityRow } from './Activity'; // UX wave U3b (M4)
 import { BashRow } from './Bash';
 import { BoundaryRow } from './Boundary';
 import { GapRow } from './GapRow'; // P5 O7 M2
@@ -28,6 +31,7 @@ import { DividerRow } from './Divider';
 import { ErrorRow } from './Error';
 import { PlanRow } from './Plan';
 import { RequestSlotRow } from './RequestSlot';
+import { WaitingAsk, WaitingRow } from './WaitingForm'; // UX wave U1b
 import { SubagentRow } from './Subagent';
 import { ThinkingRow } from './Thinking';
 import { TimeRow } from './Time';
@@ -37,7 +41,7 @@ function body(row: Row) {
   switch (row.kind) {
     case 'time': return <TimeRow row={row} />;
     case 'user': return <SurfaceUserRow row={row} />;
-    case 'assistant_text': return row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />; // P5 O9: a cut reply is no answer a surface draws
+    case 'assistant_text': return <ReportOnly value={row.reportOnly === true}>{row.cut ? <CutTextRow row={row} /> : <SurfaceAssistantRow row={row} />}</ReportOnly>; // P5 O9: a cut reply is no answer a surface draws; UX wave U2b: a closed stretch's head draws only its messages, a cut one's under its note
     case 'thinking': return <ThinkingRow row={row} />;
     case 'divider': return <><FoldedAssistantProbes row={row} /><DividerRow row={row} /></>;
     case 'group': return <SurfaceGroupRow row={row} />;
@@ -48,14 +52,15 @@ function body(row: Row) {
     case 'bash': return <BashRow row={row} />;
     case 'notice': return <SurfaceNoticeRow row={row} />; // UX wave U3: a task's end, a scheduled fire, an answer, the bridge's wake
     case 'local_command': return <SurfaceCommandRow row={row} />;
-    case 'plan': return <PlanRow row={row} />;
-    case 'question': return <SurfaceQuestionRow row={row} />;
+    // UX wave U1b (Interfaces §D): a waiting row draws its request's form and asks no mod's site of its own
+    case 'plan': return row.waiting ? <WaitingRow row={row} receipt={<PlanRow row={row} />} /> : <PlanRow row={row} />;
+    case 'question': return row.waiting ? <WaitingRow row={row} receipt={<SurfaceQuestionRow row={row} />} /> : <SurfaceQuestionRow row={row} />;
     case 'request_slot': return <RequestSlotRow row={row} />;
     case 'boundary': return <BoundaryRow row={row} />;
     case 'gap': return <GapRow row={row} />; // P5 O7 M2
     case 'error': return <ErrorRow row={row} />;
     // E1 start
-    case 'ask': return <AskCapsule row={row} />;
+    case 'ask': return row.waiting ? <WaitingAsk row={row} /> : <AskCapsule row={row} />;
     case 'delivery': return <DeliveryRowView row={row} />;
     // E1 end
     case 'side_thread': return <SideThreadRow row={row} />; // E3
@@ -63,8 +68,9 @@ function body(row: Row) {
     case 'artifact': return <ArtifactRowView row={row} />; // E2
     case 'browser_action': return <BrowserActionRow row={row} />; // E4c
     case 'browser_activity': return <BrowserActivityRow row={row} />; // E13
-    case 'owner_record': return <OwnerRecordRow row={row} />; // P2-C (2026-10-09): placed by the report projection
+    case 'record_fold': return <RecordFold row={row} />; // UX wave U2b: placed by the mirror
     case 'to_human': return <ToHumanMessageRow row={row} />; // P4-R7: a message tool's message
+    case 'activity': return <ActivityRow row={row} />; // UX wave U3b (M4): placed by the view at the drawn list's end
   }
 }
 
@@ -72,7 +78,8 @@ function body(row: Row) {
 // nothing under it has no divider, so the mark goes on the turn's first drawn row, whatever its kind.
 const opensTurn = (row: Row, rows: readonly Row[] | undefined) => rows?.find((candidate) => candidate.turnId === row.turnId && candidate.kind !== 'time')?.id === row.id;
 
-// Keep one frame/body lineage when a surface answer moves a row into or out of the work area.
+// Keep one frame/body lineage when a surface answer moves a row into or out of the work area. UX wave U3b (Interfaces
+// §C): an answer's action row follows its body, drawn when the mount placed one on it.
 export function RowView({ row }: { row: Row }) {
   const motion = useWorkMotion();
   const work = inWorkArea(row);
@@ -82,6 +89,7 @@ export function RowView({ row }: { row: Row }) {
   return (
     <RowFrame row={row} frameRef={ref}>
       {mounted && body(row)}
+      {mounted && row.kind === 'assistant_text' && <AnswerActions row={row} />}
     </RowFrame>
   );
 }

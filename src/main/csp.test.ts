@@ -51,6 +51,18 @@ describe('content security policy', () => {
     expect(admitting.sort()).toEqual(['font-src', 'frame-src', 'img-src', 'media-src']);
   });
 
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, R2): a file frame's token is the
+  // store's scheme too, so the window's document can show a token's bytes as a frame, an image, a font or media, and can
+  // neither run them nor fetch them
+  it('admits the store’s scheme where bytes are shown, and nowhere a script runs or a page fetches', () => {
+    for (const csp of [PRODUCTION_CSP, buildCsp({ nonce: 'N', devServerUrl: 'http://localhost:5173' })]) {
+      const sources = directives(csp);
+      for (const shown of ['frame-src', 'media-src', 'img-src', 'font-src']) expect(sources[shown], shown).toContain('maws-artifact:');
+      for (const runs of ['default-src', 'script-src', 'connect-src', 'style-src']) expect(sources[runs], runs).not.toContain('maws-artifact:');
+      expect(Object.keys(sources)).not.toContain('worker-src'); // a worker falls back to script-src, which does not name it
+    }
+  });
+
   it('takes the socket host and port from the dev server URL', () => {
     const csp = buildCsp({ nonce: 'abc+/=', devServerUrl: 'http://127.0.0.1:5174/' });
     expect(directives(csp)['connect-src']).toEqual(["'self'", 'ws://127.0.0.1:5174']);

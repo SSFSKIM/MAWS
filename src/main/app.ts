@@ -18,7 +18,7 @@ import { mainClient, pageOf } from './ipc/clients'; // P5 O3-E: mainClient, main
 import { createHosts, prepareLaunch, refuseTestLaunchOnDefaultProfile, type LaunchOutcome, type LaunchShape } from './hosts'; // P5 O2 M7: prepareLaunch; the landing: the refusal
 import { repairLaunch } from './repair'; // P5 O15 M2: the launch `mawsd` cannot start
 import { readMachineIdentity } from './machine/identity'; // P5 O15 M2: the profile's MachineRef, with no services' module
-import { beforeCommand, dispatchLocal, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand
+import { beforeCommand, dispatchLocal, guardCommand, installRouter, invokeOwn } from './ipc/router'; // P5 O6 M3: dispatchLocal, the local link's and the stand-in's; P5 O3-E: invokeOwn, main's own calls; P5 O4: beforeCommand; UX wave U6e: guardCommand
 import { startSettings, type SettingsService } from './client/settings'; // P5 O3-A: the client half, composed with the machine's
 import { createMachineSettingsMirror } from './client/machine-settings-mirror'; // P5 O3-D M5b: mawsd's machine half
 import { startDaemonSpine, type DaemonSpine } from './sessions/daemon-spine'; // P5 O3-D M5b: mawsd's spine, through main's mirror
@@ -38,6 +38,7 @@ import { registerMachineHandler, registerMainHandler } from './ipc/router'; // P
 import { bindLocalMachine } from './machine/local'; // P5 O6 M2
 import { startMachines } from './machines'; // P5 O6 M3: the connection manager (P5 O3-D M6: the stand-in gone)
 import { localProjectActsSource, PROJECT_ACT_COMMANDS, refuseUnservedProjectActs } from './machines/project-acts-peer'; // panel scalpel-3#2
+import { joinCapabilitySources, localGitReadsSource } from './machines/git-reads-peer'; // UX wave U5b-2 (M8)
 import { refuseUnservedSideThreads, SIDE_THREAD_COMMANDS } from './machines/side-thread-peer'; // UX wave U5a, Decision Log 52
 import { createRecordSigner, createStateSigner, createStepUp, promptTouchIDConfirmation } from './device/step-up'; // P5 O7 M1: the development org session's signer; P5 O8 M1: the production session's; M3: its state signer; M4b: its record signer
 import { harnessConfirmation, sheetConfirmation } from './device/step-up-sheet'; // P5 O7 M2: the step-up sheet before Touch ID
@@ -85,6 +86,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
+import { appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -140,6 +142,8 @@ import { ImportedProfiles, startBrowserImport, sweepBrowserImports } from './bro
 // P3-A start
 import { installStorePolicies, startArtifacts } from './artifacts'; // P5 O5: registerStoreSchemes runs in the entry's shared bootstrap
 // P3-A end
+import { startFileFrames } from './file-frames'; // UX wave U6b-2: a PDF, a page or media drawn by a path
+import { writeSeam } from '../render/policies'; // UX wave U6b-2: the file frames' e2e seam line
 // P3-L start
 import { registerLibraryFiles } from './library/files'; // P5 O3-C (D22): the client's, beside the spine's derived index; P5 O4 M3: the export formats and Save as alone
 import type { ServicesBus } from '@shared/spine/bus'; // P5 O3-C
@@ -451,8 +455,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     register: registerMainHandler,
     dispatchLocal,
     budgets: COMMAND_BUDGETS_MS, // P5 O7 M5a: a cold machine's export is waited for its budget, not the link's 10 s
-    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says
-    localCapabilities: localProjectActsSource(hosts),
+    // panel scalpel-3#2: whether this Mac's machine serves the project acts, as its daemon's welcome says; UX wave U5b-2
+    // (M8): and the git reads, so the window asks this Mac what it asks another machine
+    localCapabilities: joinCapabilitySources(localProjectActsSource(hosts), localGitReadsSource(hosts)),
     // P5 O7 M1: the org session the RL2 links read; P5 O8 M1: production's sign-in, or O7's development session
     session,
     wake, // P5 O15 M2b: its wake notices reach every link, its unlocks probe them
@@ -552,6 +557,8 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
+  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
+  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly(appUrl));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its
@@ -615,9 +622,27 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // no fields).
   process.env.MAWS_USER_DATA = app.getPath('userData');
   // C3 end
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M4): the file frames' tokens, made
+  // before the policies that ask their owner; `layout.frameFile` reads this Mac's files through mawsd's files service as
+  // the asking page, and copies another machine's over its link; every token released at quit
+  const fileFrames = startFileFrames({
+    local,
+    read: (input, client) => invokeOwn('files.read', input, { client, target: local }) as Promise<CommandResult<'files.read'>>,
+    copy: (machine, source, sink, max, options) => remoteLaneB.artifacts.copyInto(machine, source, sink, max, options),
+    page: (client) => {
+      const page = pageOf(client);
+      return page && { id: page.id, send: (name, payload) => void emitTo(page, name, payload) };
+    },
+    userData: () => app.getPath('userData'),
+    register: registerMainHandler,
+    ...(process.env.MAWS_E2E === '1' && { seam: (line: string) => writeSeam(process.env, line) }),
+    log: (line) => console.log(line),
+  });
+  shutdown.add('file frames', fileFrames.stop);
   // E2's frame policies on the window's session and the capture partition, before any window loads (P3-L M6b: the
-  // artifact scheme's, `installStorePolicies`; the deliverable store's reader, scheme and IPC are gone)
-  installStorePolicies(process.env, appUrl);
+  // artifact scheme's, `installStorePolicies`; the deliverable store's reader, scheme and IPC are gone). UX wave U6b-2:
+  // with the file frames' owner's check first
+  installStorePolicies(process.env, appUrl, fileFrames.tokens.ownerOf);
 
   // P5 O8 M2: the roster of other machines (declared above), for the org rows composed over the spine's view below
   machines.onRemote((refs) => {
@@ -755,6 +780,10 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   registerMainHandler('settings.usage', ({ engineSessionIds }) => usage.snapshot(engineSessionIds));
   // C10: the port's pick answers through the e2e seam under MAWS_E2E=1 (MAWS_E2E_PICK_PATHS or cancelled), else the panel
   registerMainHandler('layout.pickFiles', (input, { client }) => pickFiles(input, client, { port: clientPort }));
+  // UX wave U6e (decision 3): Open File…, the chooser through the same port, then the grant as main's own call
+  registerMainHandler('layout.openFile', (input, ctx) =>
+    openChosenFile(input, ctx, { port: clientPort, isAppPage: (client) => isAppPage(client, appUrl), grant: (grant) => invokeOwn('files.grant', grant, { client: mainClient, target: local }) as Promise<CommandResult<'files.grant'>> }),
+  );
   shutdown.add('usage', () => usage.stop());
   // C7 end
   // C11 start: the plumbing of settings v3 (C11 execution document, M1): ClaudeUsage's hand-off and status; the reveal
@@ -927,6 +956,7 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
     artifactsSocket: daemonPaths(profile).artifactsSocket, // P5 O5 M2: the scheme proxy's endpoint, while the daemon's welcome lists it
     authors: exportAuthors, // P5 O5 M3
     remote: remoteLaneB.artifacts.scheme, // P5 O7 M5b: another machine's artifact pages, over its link
+    fileFrames: fileFrames.responder, // UX wave U6b-2: first on the window's session
   });
   shutdown.add('artifacts', artifacts.stop);
   // P5 O4 M2 (docs/doperpowers/plans/2026-10-31-p5-o4-services.md, D7): an artifact page's connectors, the owner's

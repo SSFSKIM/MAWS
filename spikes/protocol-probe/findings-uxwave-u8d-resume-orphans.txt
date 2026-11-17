@@ -1,0 +1,96 @@
+UX wave, landing U8d, probe P1 (and the coordinator's addition on shells): what engine 2.1.322 writes when a terminal
+session is resumed after its process ended with background agents, or background shell commands, still running
+(docs/doperpowers/plans/2026-11-15-ux-wave-U8d-terminal-subagents.md, "Probes to arrange" P1 and R9; it serves
+"Engine facts" 10 and M4's scene of the gone terminal; 2026-11-15, VM dc-uxwave5-26dc, branch ux-wave/U8d-probes)
+
+Question. A session's process ends while two agents launched in the background still run; the session is then resumed
+in a terminal. What does the engine write to the main transcript for each orphan, and when: one block per agent or one
+block naming both, with which <status>; or does it restart one under the same id; and does either meta change? The
+same with one orphan; and with two (and one) background shell commands.
+
+Verdict.
+  - Two orphaned agents: ONE block naming both. It has two <task-id> elements, one <status>stopped</status>, no
+    <tool-use-id> and no <output-file>, and a summary naming each agent with its id. It is written as a queue record
+    (enqueue), then a dequeue, then a `user` row of origin task-notification (promptSource "system",
+    queueTranscriptOnly true). It is written about 1 to 3.5 s after the resumed engine starts, before any prompt, and
+    it opens no model turn. 4 of 4 runs: 2 resumed at once, 2 with the agents' files and metas set 72 h back first.
+  - One orphaned agent: one block, one <task-id>, an <output-file>, no <tool-use-id>, <status>stopped</status>,
+    "Background agent "…" didn't finish before the previous session ended", in the same three rows. 4 of 4 runs (2 at
+    once, 2 with files 72 h old).
+  - No restart under the same id in any run (0 of 8), including the four whose agent files were seconds old. In the
+    terminal the resumed engine wrote nothing in any agent's file. No meta changed at the exit or at the resume.
+  - So "Engine facts" 10 holds for the one-block form and the status word. Its "or it restarts the agent under the same
+    id" did not happen on a terminal resume. Its "failed" did not either: the agent's file existed, so the word was
+    stopped. The document's default for P1 (as the bundle reads) held. R9's gap is the common case, not a corner: every
+    resume with two or more orphaned agents gave one block, so a reader of the first <task-id> leaves every other orphan
+    `running` until the process goes.
+  - Shells, two orphaned: ONE block with three <task-id> elements: the two shells' ids and `__orphan_summary__:shell`,
+    which is no task. The block's <note> says ids beginning "__orphan_summary" are internal scan markers. It has
+    <status>stopped</status>, no <tool-use-id>, and a summary "2 background shell command tasks didn't finish before
+    the previous session ended. Task ids: <a>, <b>." It is written as the same three rows (enqueue, dequeue, user row).
+    No per-shell record is written at the resume. 2 of 2 runs. No `__orphan_summary_live__:` marker appeared (none of
+    the shells was still alive).
+  - Shells, one orphaned: one block, the shell's <task-id> and its <tool-use-id>, <status>stopped</status>, "Background
+    shell command didn't finish before the previous session ended". 2 of 2 runs.
+  - At the process end itself (SIGTERM), each running background shell got a per-shell queue record: <status>killed
+    </status>, "Background command "…" was stopped", with its <tool-use-id> and <output-file>, enqueue only, no
+    dequeue and no user row. 4 of 4 runs, 6 shells. The resume's scan still counted those shells as orphans. Agents get
+    no such record at the exit (P3).
+
+Method.
+  Engine 2.1.322 (/opt/maws-probe/engines/2.1.322; rows' `version` "2.1.322"), model haiku (claude-haiku-5-5), route:
+  the gateway through vm-run.sh's loopback forward, feature-gate cache seeded. scenarios/pass3/uxwave-u8d-terminal.mjs
+  under vm-run.sh (method and recorder as in findings-uxwave-u8d-process-end.txt). Each case: the interactive engine in
+  tmux with `--session-id <id>`; the background work started by a typed prompt; once it runs (each slow agent's file
+  holds its `python3 uxw8d_wait.py` Bash call, or each shell's `backgroundTaskId` is in the main transcript) and the
+  turn is idle, SIGTERM to the engine; 5 s later (UXW_STALE=1: after `utimes` set every agent file and meta to now -
+  72 h, because the bundle restarts an orphan only when its file is younger than 48 h, B:941133 `yi`, B:941398) a new
+  tmux session `--model haiku --resume <id>` in the same folder; recorded until nothing new for 75 s (an agent
+  restarted from its sleep would be silent up to 90 s); then one typed prompt ("Reply with only the word AFTER.") and
+  the terminal closed.
+  Cases: p1-two: agents "uxw slow A" and "uxw slow B" (each a 60 s sleep). p1-one: "uxw quick Q" (replies PONG, no
+  tools) and "uxw slow B" (90 s); the process ended only after Q's completion notification was in the main
+  transcript. p1-shells: two background Bash commands "uxw shell S1", "uxw shell S2" (300 s sleeps). p1-shell: one.
+  Fixtures (fixtures/uxwave/): u8d-p1-two-r{1,2}, u8d-p1-two-stale-r{1,2}, u8d-p1-one-r{1,2},
+  u8d-p1-one-stale-r{1,2}, u8d-p1-shells-r{1,2}, u8d-p1-shell-r{1,2}: .terminal.json (record), .transcript.jsonl
+  (main transcript, both processes), -subagents/ (agents' files and metas at the end).
+
+Observed (main-transcript line numbers).
+  p1-two-r1: at SIGTERM, each agent's own file got its Bash call's error result ("Error: Exit code 137", is_error
+    true; agent files line 16), nothing named an agent in the main transcript (39-42: tools-used, cost-state,
+    last-prompt, cost-state). Resume started at ms 21172; at ms 22314 line 43 queue-operation enqueue, content
+    <task-notification> <task-id>a9e2112e4a1755b40</task-id> <task-id>ab58a371c69e84a69</task-id>
+    <status>stopped</status> <summary>2 background agents didn't finish before the previous session ended: "uxw slow
+    A" (a9e…), "uxw slow B" (ab5…).</summary> <note>… Resume any of them by sending a message to its id with
+    SendMessage …</note>; line 44 dequeue; line 45 (ms 22720) `user`, origin {kind: task-notification}, promptSource
+    system, queueTranscriptOnly true, the same block. Nothing else until the typed prompt (47). Metas: one version each.
+  p1-two-r2: the same: block at 43-45, 1.2 s after the resume; metas one version each.
+  p1-two-stale-r1: the same block at 43-45, 3.5 s after the resume (the order of the two ids differs from the order of
+    the launch); stale-r2: 42-44, 1.7 s after. Nothing restarted; no agent file grew after the exit.
+  p1-one-r1: Q completed before the exit: queue enqueue <status>completed</status> "Agent "uxw quick Q" finished"
+    (42), the hand-back as a peer row (44), the notification as a user row (51); Q's meta rewritten with `finished:
+    true` at its completion (version 2). After the resume, B's block: 55 enqueue (<task-id>B</task-id>, <output-file>,
+    <status>stopped</status>, "Background agent "uxw slow B" didn't finish before the previous session ended"), 56
+    dequeue, 57 user row. B's meta: one version.
+  p1-one-r2: 54-56; p1-one-stale-r1: 55-57; p1-one-stale-r2: 55-57. Same contents; Q's meta `finished: true` in each.
+  p1-shells-r1: shells blarjjpox and b7zjm1p3t. At SIGTERM (+233 ms): 42 and 43, queue-operation enqueue, each one
+    shell, <status>killed</status>, "Background command "uxw shell S2" was stopped" (and S1). The resume: 45 enqueue
+    <task-id>blarjjpox</task-id> <task-id>b7zjm1p3t</task-id> <task-id>__orphan_summary__:shell</task-id>
+    <status>stopped</status> <summary>2 background shell command tasks didn't finish before the previous session
+    ended. Task ids: blarjjpox, b7zjm1p3t.</summary> <note>… Task ids in this notification beginning with
+    "__orphan_summary" are internal scan markers, not tasks.</note>; 46 dequeue; 47 user row, the same block.
+  p1-shells-r2: killed records 41-42 at the exit; the block at 44-46, the same three ids' form.
+  p1-shell-r1: killed record 40 at the exit; resume block 42-44, <task-id>, <tool-use-id>, <status>stopped</status>.
+    p1-shell-r2: 39; 41-43.
+
+Inference.
+  - The block an agent orphan gets on a terminal resume is the bundle's grouped form (B:941409-941416: the `stopped`
+    group of agents that can be continued, emitted by `Ti` when it has more than one member, by `tt` for one). The
+    restart branch needs a resume callback (B:941398 tests `s !== void 0`). Of the callers of the restore
+    (`Yzt`), B:610283 (the headless print path), B:1205272 and B:1205651 pass `undefined` for it, and B:1205647 passes
+    `this.resumeOrphanedAgents`. Which of them a terminal resume takes was not established from the source; on the
+    terminal no restart happened in 8 of 8 runs.
+  - For M4's scene of the gone terminal: after a resume, the rows give each orphan `stopped`. For two or more agents
+    that is one block. For the ledger's jobs half, the shell block's ids include `__orphan_summary__:shell`, which
+    names no job, and a shell's first word at the exit is `killed` (queue record), which DX4's ledger reads as an end
+    before any resume.

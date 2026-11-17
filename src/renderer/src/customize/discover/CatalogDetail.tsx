@@ -6,18 +6,19 @@
 // shown after install"; the runs-code warning; and + (the install sheet). An item the engine cannot install says why and
 // shows its documentation link as text, with no +; a failed scan turns + off with its reason. Plain text throughout.
 import { useEffect, useRef } from 'react';
-import type { CatalogItem, CatalogTab } from '@shared/ipc/schema/catalog';
+import type { CatalogItem, CatalogKindTab } from '@shared/ipc/schema/catalog';
 import { formatDate } from '@shared/app/date-format';
 import { OperationLine } from '../../widgets/plugins/manage';
 import { BackButton, backOnChord } from '../../widgets/plugins/PluginDetail';
+import { ItemImage } from '../image/ItemImage';
+import { catalogSeedOf } from '../image/tile';
 import { catalogKey } from './add';
 import { AddButton, InstalledMark, TrustLabel } from './CatalogCard';
-import { CatalogIcon } from './CatalogIcon';
 import { DISCOVER as D } from './copy';
 import { addable, marketplaceOf, metricWords, runsCodeWords, trustOf } from './present';
 import { useCatalogItem } from './read';
 
-export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: CatalogItem; tab: CatalogTab; cwd: string | null; onBack(): void }) {
+export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: CatalogItem; tab: CatalogKindTab; cwd: string | null; onBack(): void }) {
   const root = useRef<HTMLDivElement>(null);
   useEffect(() => root.current?.focus(), []);
   // the item as the catalog reads it now, else as it was opened (an install's change may drop and return it)
@@ -34,7 +35,7 @@ export function CatalogDetail({ item: opened, tab, cwd, onBack }: { item: Catalo
       <div className="flex shrink-0 flex-col gap-3 border-b border-border px-3 pb-3">
         <BackButton to={D.discover} onBack={onBack} />
         <div className="flex min-w-0 items-start gap-3">
-          <CatalogIcon item={item} size="lg" />
+          <ItemImage kind={item.kind} seed={catalogSeedOf(item)} iconUrl={item.iconUrl} size="detail" />
           <div className="flex min-w-0 flex-1 flex-col gap-0.5">
             <h3 className="m-0 truncate text-prose font-semibold text-fg">{item.name}</h3>
             {item.installName && item.installName !== item.name && <p className="m-0 font-mono text-ui-sm text-fg-muted">{D.installName(item.installName)}</p>}

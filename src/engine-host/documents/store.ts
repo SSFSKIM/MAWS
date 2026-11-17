@@ -22,6 +22,7 @@ import { isDocKind, type Artifact, type ArtifactKind, type ArtifactSessionLink, 
 import type { ArtifactVersion } from '@shared/artifacts/version';
 import type { AppSessionId } from '@shared/graph/ids';
 import { ARTIFACT_ID, ARTIFACT_MAX_BYTES } from '@shared/maws/tools';
+import { agentDraftKey, markStands, newMark, readMark, type AgentDraftMark } from './agent-draft'; // UX wave U10b (M4)
 import { ArtifactFiles, safeName, type ContentRef } from './bytes';
 import { ArtifactStoreError, StoreTooNewError } from './errors'; // P3-H: StoreTooNewError
 import { Maintenance } from './maintenance';
@@ -30,6 +31,7 @@ import { timed } from './host-work'; // P4-R6
 import { restoreArtifact } from './restore';
 import { datasetRefsOf, isQuerySnapshotName, SnapshotRetention, type AssetHold } from './retention'; // E3
 import { mainOf, type Committed, type DocumentService, type WriteOptions } from './service';
+import { readInstructions, SPACE_INSTRUCTIONS_KEY, withInstructions, type SpaceInstructions } from './space-instructions'; // UX wave U10b (M9)
 import type { SqliteDocumentStorage } from './storage';
 import { actorFromKey, VersionStore, type DesignSystemRef, type VersionKind } from './versions';
 
@@ -215,6 +217,7 @@ export class ArtifactStore {
     this.unsubscribe.push(service.onBeforeCommit((ids) => this.stamp(ids)));
     // the last version's state is kept only while its doc is loaded (versionInFrame): it goes when the doc does
     this.unsubscribe.push(service.onUnload((artifactId) => this.versions.forget(artifactId)));
+    service.setIsDeleted((artifactId) => storage.isDeleted(artifactId)); // UX wave U10b (M4, §C.5): the fence
   }
 
   registerAdapter(adapter: KindAdapter): void {
@@ -412,6 +415,7 @@ export class ArtifactStore {
     this.storage.db
       .prepare('INSERT INTO artifacts (id, kind, title, handle, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
       .run(id, input.kind, input.title, input.handle ?? null, input.spaceId ?? null, input.projectId ?? null, actorKey(actor), at, at, input.designSystemId ?? null, input.content && 'path' in input.content ? input.content.path : null, isDocKind(input.kind) ? bindingVersion : null);
+    this.markInFrame(id, actor);
     if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
     if (input.content) this.writeBytesInFrame(this.entity(id)!, actor, input.content, { kind: 'import' });
   }
@@ -438,22 +442,107 @@ export class ArtifactStore {
   }
 
   // A soft delete (`deletedAt`); a design system still governing a live artifact is refused (Decision Log 22a). P3-H:
-  // its connector grants go in the same savepoint (a soft delete fires no cascade), each announced as revoked.
+  // its connector grants go in the same savepoint (a soft delete fires no cascade), each announced as revoked. UX wave
+  // U10b: writing `deletedAt` raises the document service's fence (§C.5), so no content is admitted after it.
   async delete(artifactId: string, inFrame?: InFrame<void>): Promise<void> {
     const row = this.requireLive(artifactId);
-    if (row.kind === 'design_system') {
-      const users = (this.storage.db.prepare('SELECT id FROM artifacts WHERE designSystemId = ? AND deletedAt IS NULL AND id <> ? ORDER BY id').all(artifactId, artifactId) as { id: string }[]).map((r) => r.id);
-      if (users.length > 0) throw new ArtifactStoreError('designSystemInUse', `the design system governs ${users.length} artifact(s)`, { artifactIds: users });
-    }
+    this.refuseSystemInUse(row);
     const at = this.now();
     this.breakFences(artifactId, null); // P3-H H3b: no connector call fenced before the delete writes
     const revoked = await this.service.inBatch(() => {
-      this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
-      const grants = this.grantRows(artifactId); // P3-H
-      this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ?').run(artifactId); // P3-H
+      const grants = this.softDeleteInFrame(artifactId, at);
       inFrame?.();
       return grants;
     });
+    this.deleted(artifactId, revoked);
+  }
+
+  // UX wave U10b (M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.1): the agent's delete of its own
+  // draft. Its rules run inside the savepoint that sets `deletedAt`, in this order, the first that fails refusing: the
+  // artifact was created by a session of `lineage` (else `byUser` or `otherSession`); its agent-draft mark stands (else
+  // `edited` for a person's row, `unknown` for no mark or one that lags the newest row); a design system is not another
+  // live artifact's own (`designSystemInUse`, as `delete`). A refusal of the first two carries `why` and the title. A
+  // content frame is admitted before the savepoint or refused after it (the fence), so what the rules read is what is
+  // deleted. Then it does what `delete` does and records itself in the mark (`deleted`), which the undelete requires.
+  async deleteOwnDraft(artifactId: string, lineage: readonly AppSessionId[], inFrame?: InFrame<void>): Promise<void> {
+    const at = this.now();
+    const revoked = await this.service.inBatch(() => {
+      const row = this.requireLive(artifactId);
+      const mark = this.standingDraft(row, lineage);
+      this.refuseSystemInUse(row);
+      this.breakFences(artifactId, null); // P3-H H3b, as `delete`
+      const grants = this.softDeleteInFrame(artifactId, at);
+      this.storage.setMeta(agentDraftKey(artifactId), JSON.stringify({ ...mark, deleted: { at, by: actorKey({ kind: 'session', appSessionId: lineage[0]! }) } } satisfies AgentDraftMark));
+      inFrame?.();
+      return grants;
+    });
+    this.deleted(artifactId, revoked);
+  }
+
+  // UX wave U10b (M4, §C.2): the undo of an agent's delete. A live artifact: success, and nothing written or announced
+  // (two presses end as one). A deleted one whose mark holds `deleted`: `deletedAt` cleared, which lowers the fence,
+  // `updatedAt` set, `deleted` taken from the mark (whose standing is kept: nothing was written meanwhile), `created`
+  // announced. A deleted one without it was deleted in the Library and stays deleted; an unknown id is `notFound`.
+  // Connector grants the delete removed do not come back.
+  async undelete(artifactId: string, inFrame?: InFrame<void>): Promise<void> {
+    const at = this.now();
+    const restored = await this.service.inBatch(() => {
+      const row = this.entity(artifactId);
+      if (!row) throw new ArtifactStoreError('notFound', `no artifact ${artifactId}`, { artifactId });
+      if (row.deletedAt === null) return false;
+      const mark = readMark(this.storage.getMeta(agentDraftKey(artifactId)));
+      if (!mark?.deleted) throw new ArtifactStoreError('invalid', 'this artifact was deleted in the Library, not by an agent', { artifactId });
+      this.storage.db.prepare('UPDATE artifacts SET deletedAt = NULL, updatedAt = ? WHERE id = ?').run(at, artifactId);
+      const kept: AgentDraftMark = { ...mark };
+      delete kept.deleted;
+      this.storage.setMeta(agentDraftKey(artifactId), JSON.stringify(kept));
+      inFrame?.();
+      return true;
+    });
+    if (restored) this.emit(artifactId, 'created');
+  }
+
+  // UX wave U10b (M4): what a deleted artifact's answer says of it (`artifacts.get`'s `deleted`): its title and kind, and
+  // whether an agent's delete removed it, so the undelete can bring it back. Null for a live artifact or an unknown id.
+  deletion(artifactId: string): { title: string; kind: ArtifactKind; undoable: boolean } | null {
+    const row = this.entity(artifactId);
+    if (!row || row.deletedAt === null) return null;
+    return { title: row.title, kind: row.kind, undoable: readMark(this.storage.getMeta(agentDraftKey(artifactId)))?.deleted !== undefined };
+  }
+
+  // The agent-draft mark written with an artifact's entity row when a session creates it (U10b, agent-draft.ts).
+  private markInFrame(artifactId: string, creator: Actor): void {
+    if (creator.kind === 'session') this.storage.setMeta(agentDraftKey(artifactId), JSON.stringify(newMark(creator)));
+  }
+
+  // `deleteOwnDraft`'s first two rules: the artifact's mark when it stands, else the refusal.
+  private standingDraft(row: EntityRow, lineage: readonly AppSessionId[]): AgentDraftMark {
+    const creator = actorFromKey(row.createdBy);
+    const refuse = (why: 'byUser' | 'otherSession' | 'edited' | 'unknown') => new ArtifactStoreError('invalid', `artifact_delete refused: ${why}`, { artifactId: row.id, title: row.title, why });
+    if (creator.kind !== 'session') throw refuse('byUser');
+    if (!lineage.includes(creator.appSessionId)) throw refuse('otherSession');
+    const mark = readMark(this.storage.getMeta(agentDraftKey(row.id)));
+    if (mark !== null && markStands(mark, this.storage.newestContentSeq(row.id))) return mark;
+    throw refuse(mark?.broken === 'person' ? 'edited' : 'unknown');
+  }
+
+  // A design system still governing another live artifact cannot be deleted (Decision Log 22a).
+  private refuseSystemInUse(row: EntityRow): void {
+    if (row.kind !== 'design_system') return;
+    const users = (this.storage.db.prepare('SELECT id FROM artifacts WHERE designSystemId = ? AND deletedAt IS NULL AND id <> ? ORDER BY id').all(row.id, row.id) as { id: string }[]).map((r) => r.id);
+    if (users.length > 0) throw new ArtifactStoreError('designSystemInUse', `the design system governs ${users.length} artifact(s)`, { artifactIds: users });
+  }
+
+  // Inside a savepoint: the soft delete's rows, answering the connector grants it removed (P3-H).
+  private softDeleteInFrame(artifactId: string, at: number): ConnectorGrant[] {
+    this.storage.db.prepare('UPDATE artifacts SET deletedAt = ?, updatedAt = ? WHERE id = ?').run(at, at, artifactId);
+    const grants = this.grantRows(artifactId); // P3-H
+    this.storage.db.prepare('DELETE FROM artifact_connector_grants WHERE artifactId = ?').run(artifactId); // P3-H
+    return grants;
+  }
+
+  // After a soft delete's batch committed.
+  private deleted(artifactId: string, revoked: ConnectorGrant[]): void {
     this.versions.forget(artifactId); // a deleted artifact writes no more versions
     for (const grant of revoked) this.emitGrant(artifactId, grant, 'revoked'); // P3-H
     this.emit(artifactId, 'deleted');
@@ -495,6 +584,7 @@ export class ArtifactStore {
       this.storage.db
         .prepare('INSERT INTO artifacts (id, kind, title, spaceId, projectId, createdBy, createdAt, updatedAt, pinned, designSystemId, linkedPath, bindingVersion) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?)')
         .run(id, source.kind, options.title ?? `Copy of ${source.title}`, source.spaceId, source.projectId, actorKey(actor), at, at, source.designSystemId, source.linkedPath, isDocKind(source.kind) ? bindingVersion : null);
+      this.markInFrame(id, actor);
       if (actor.kind === 'session') this.linkInFrame(id, actor.appSessionId, 'created', at);
       this.copyAssetsInFrame(artifactId, id, assets);
     };
@@ -560,6 +650,7 @@ export class ArtifactStore {
         this.storage.db
           .prepare('INSERT INTO artifacts (id, kind, title, handle, projectId, createdBy, createdAt, updatedAt, pinned, linkedPath) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 0, ?)')
           .run(id, input.kind, input.title, handle ?? null, input.projectId ?? null, actorKey(input.createdBy), input.createdAt, input.updatedAt, 'path' in latest ? latest.path : null);
+        this.markInFrame(id, input.createdBy);
         for (const link of input.links) this.linkInFrame(id, link.appSessionId, link.role, link.lastAt);
         const row = this.entity(id)!;
         // no design-system pin: a historic version was not seen under today's system (Decision Log 38d)
@@ -664,9 +755,37 @@ export class ArtifactStore {
     await this.service.inBatch(() => {
       this.storage.db.prepare('UPDATE artifacts SET spaceId = NULL, updatedAt = ? WHERE spaceId = ?').run(at, spaceId);
       this.storage.db.prepare('DELETE FROM spaces WHERE id = ?').run(spaceId);
+      if (this.storage.getMeta(SPACE_INSTRUCTIONS_KEY) !== null) this.writeInstructionsInFrame(spaceId, ''); // UX wave U10b (M9): its text goes with it
     });
     this.emitSpace(spaceId, 'deleted');
     for (const id of moved) this.emit(id, 'updated');
+  }
+
+  // UX wave U10b (M9, §E.1; space-instructions.ts): a Space's instructions, held in `meta` beside the Space. A text is
+  // answered only while its Space exists (one deleted under an older build leaves its entry until the next write).
+  spaceInstructions(spaceId: string): SpaceInstructions | null {
+    const entry = readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY))[spaceId];
+    return entry && this.getSpace(spaceId) ? entry : null;
+  }
+
+  allSpaceInstructions(): ({ spaceId: string } & SpaceInstructions)[] {
+    const live = new Set(this.listSpaces().map((space) => space.id));
+    return Object.entries(readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY)))
+      .filter(([spaceId]) => live.has(spaceId))
+      .map(([spaceId, entry]) => ({ spaceId, text: entry.text, at: entry.at }))
+      .sort((a, b) => a.spaceId.localeCompare(b.spaceId));
+  }
+
+  // Sets a Space's text ('' removes it), announced as the Space updated.
+  async setSpaceInstructions(spaceId: string, text: string): Promise<void> {
+    this.requireSpace(spaceId);
+    await this.service.inBatch(() => this.writeInstructionsInFrame(spaceId, text));
+    this.emitSpace(spaceId, 'updated');
+  }
+
+  private writeInstructionsInFrame(spaceId: string, text: string): void {
+    const table = withInstructions(readInstructions(this.storage.getMeta(SPACE_INSTRUCTIONS_KEY)), spaceId, text, this.now(), (id) => this.getSpace(id) !== null);
+    this.storage.setMeta(SPACE_INSTRUCTIONS_KEY, JSON.stringify(table));
   }
 
   // ── byte kinds and assets ──

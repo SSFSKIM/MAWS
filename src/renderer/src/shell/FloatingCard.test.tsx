@@ -4,7 +4,7 @@ import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } 
 import userEvent from '@testing-library/user-event';
 import { useEffect, useRef, useState } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { AppSessionId } from '@shared/graph/ids';
+import type { AppSessionId, AttentionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, tabId } from '@shared/ipc/schema/layout';
 import { record } from '../../../../test/support/builders';
 import { fakeClient } from '../../../../test/support/fake-client';
@@ -15,6 +15,7 @@ import { Shell } from '../app/Shell';
 import { registerSlot, resetSlots } from '../app/slots';
 import { DockedCardFrame } from '../composer/docked/DockedCardFrame';
 import { registerFocusTarget, useComposerStore } from '../stores/composer';
+import { useAttention } from '../stores/attention'; // UX wave U1b
 import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices'; // P3-F (F-shell)
 import { useSessions } from '../stores/sessions';
@@ -28,6 +29,7 @@ import { EditorHostScopeContext } from '../panel/editor-host'; // P3-G (M4)
 import { RegionControls, StripControls } from '../panel/PanelHeader';
 import { CommentCardHost } from '../side/card/CardHost'; // P3-G (M4)
 import { fail, installFakeMain, ok } from '../test-support/code'; // P3-G (M4)
+import { itemFor, permission } from '../request-card/test-requests'; // UX wave U1b
 
 vi.mock('../app/Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -156,6 +158,27 @@ describe('the floating card in the Shell', () => {
     expect(composers()).toEqual([A]);
   });
 
+  // UX wave U1b (acceptance 10): the compact composer's "Waiting for you · N" opens the card for its request, whose row then
+  // takes the keyboard; the card's composer is not marked to take it as it mounts (its focus would land after the row's).
+  // The bar's Open conversation still hands the keyboard to the card's composer (UX wave U10b: the bar's names).
+  it('the compact composer’s Waiting for you line opens the card without handing its composer the keyboard; the pill still does', async () => {
+    const user = userEvent.setup();
+    act(() => useAttention.getState().applySnapshot([itemFor(permission(), A, { id: at('att-card' as AttentionId) })], TEST_MACHINE));
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    const compact = screen.getByRole('region', { name: 'Chat' });
+    focused.splice(0);
+    await user.click(within(compact).getByRole('button', { name: 'Waiting for you · 1' }));
+    expect(card()).not.toBeNull();
+    expect(composers()).toEqual([A]);
+    expect(focused).toEqual([]);
+    await user.click(within(card()!).getByRole('button', { name: 'Close session card' }));
+    await user.click(within(screen.getByRole('region', { name: 'Chat' })).getByRole('button', { name: 'Open conversation' }));
+    expect(card()).not.toBeNull();
+    expect(focused).toEqual([A]);
+  });
+
   // P3-F (F-shell, scalpel-4#5): Close unmounts the focused Close button with the card; what it leaves takes the
   // keyboard, the bar's Open conversation (UX wave U10b, M7 decision 6) or the chip a browser chrome's row hosts, so
   // focus never drops to the body
@@ -195,6 +218,14 @@ describe('the floating card in the Shell', () => {
     const body = card()!.querySelector<HTMLElement>('[data-pane="card"]')!;
     expect(body.classList).toContain('overflow-y-auto');
     expect(body.classList).toContain('overflow-x-hidden');
+  });
+
+  // UX wave U1b, the branch review (2026-11-15 UTC): the card stands for one main pane (the focused one, for the panel's
+  // card), and its pane boundary names it, so a prompt in it reads the shell's focused pane as a main pane's prompt does
+  it('the card’s body names the main pane it stands for', () => {
+    useLayout.getState().setPanel({ floating: true });
+    render(<Shell />);
+    expect(card()!.querySelector<HTMLElement>('[data-pane="card"]')!.dataset.cardPane).toBe('0');
   });
 
   it('Dock restores the column at its width and the main pane’s composer takes the keyboard', async () => {

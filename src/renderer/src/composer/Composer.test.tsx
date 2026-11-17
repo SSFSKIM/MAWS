@@ -30,7 +30,7 @@ import { rememberRemoteDraft } from './editor/drafts'; // P5 O7 M4
 import { readerRowsOf, resetReaderRows } from '../lane-b/reader-rows'; // P5 O8 M6a
 import { READER } from '../sessions/share/copy'; // board 525
 import { resetReader } from '../sessions/share/reader'; // board 525
-import { queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
+import { firstSendPending, queueFirstSend, resetRemoteSpawn, restoreHeldAttempts, SPAWN_WORDS, takeFirstSend, useRemoteSpawn } from '../sessions/remote-spawn'; // P5 O7 M4
 import { DRAFT_CLAIM, HOME_CHECKOUT } from '@shared/ipc/schema/session';
 import { useDialogs } from '../sessions/dialogs'; // P5 O7 M9
 import { connectKeys } from '../keymap/dispatcher';
@@ -52,6 +52,8 @@ import { useLayout } from '../stores/layout';
 import { useNotices } from '../stores/notices';
 import { resetQueueStore } from '../stores/queue';
 import { useSessions } from '../stores/sessions';
+import { useTranscriptStore } from '../stores/transcript'; // UX wave U2b
+import { builder } from '../transcript/model/test-events'; // UX wave U2b
 import { resetShellStores } from '../test-support/shell-stores';
 import { resetCatalogStore } from '../stores/catalog';
 import { Composer, FILES_FOR_ANOTHER_MACHINE } from './Composer';
@@ -187,11 +189,6 @@ const composerOf = (index: 0 | 1) => screen.getByRole('region', { name: `pane ${
 const editorOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('textbox', { name: 'Message', hidden: true }) as TiptapElement;
 const type = (text: string, index: 0 | 1 = 0) => act(() => void editorOf(index).editor.commands.insertContent(text));
 const key = (target: HTMLElement, init: KeyboardEventInit) => act(async () => void target.dispatchEvent(new KeyboardEvent('keydown', { bubbles: true, cancelable: true, ...init })));
-// UX wave U1a (§D): a permission prompt is allowed once with ⌘↩, which acts once the prompt has been drawn for 400 ms
-const allowOnceKey = async (target: HTMLElement) => {
-  await act(() => new Promise((resolve) => setTimeout(resolve, 400)));
-  await key(target, { key: 'Enter', code: 'Enter', metaKey: true });
-};
 const primary = (index: 0 | 1 = 0) => composerOf(index).querySelector<HTMLButtonElement>('[data-submit-state]')!;
 const invoked = (name: Parameters<FakeClient['invoked']>[0]) => fake.invoked(name);
 const plusOf = (index: 0 | 1 = 0) => within(composerOf(index)).getByRole('button', { name: 'Add files, photos or commands' });
@@ -277,11 +274,17 @@ describe("composer DOM under C5's dispatcher", () => {
     const held: QueueEntry = { ...uncertain, queueId: 'q-1', content: 'later', uncertain: false };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [uncertain, held], paused: false, pauseReason: null }));
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'now' }])); // the uncertain one waits for the human
+    // the uncertain one waits for the human; while the turn runs the after-the-turn row goes at the next step, then is sent now (UX wave U4b, decision 15)
+    await waitFor(() => expect(invoked('session.queue.promote')).toEqual([{ appSessionId: A_ID, queueId: 'q-1', priority: 'next' }]));
+    const promoted = '55555555-5555-4555-8555-555555555555';
+    await fake.reply('session.queue.promote', { messageUuid: promoted });
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: promoted }]));
+    await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     const steer = { messageUuid: '44444444-4444-4444-8444-444444444444', content: 'look at b too', createdAt: '2026-09-29T09:59:00.000Z' };
     act(() => fake.event('session.queue', { appSessionId: A_ID, entries: [held], paused: false, pauseReason: null, steers: [steer] }));
     await key(editorOf(), { key: 'Escape' });
-    await waitFor(() => expect(invoked('session.steer.sendNow')).toEqual([{ appSessionId: A_ID, messageUuid: steer.messageUuid }])); // the next step's row comes first
+    await waitFor(() => expect(invoked('session.steer.sendNow')).toHaveLength(2));
+    expect(invoked('session.steer.sendNow')[1]).toEqual({ appSessionId: A_ID, messageUuid: steer.messageUuid }); // the next step's row comes first
     await fake.reply('session.steer.sendNow', { outcome: 'delivering' });
     expect(invoked('session.interrupt')).toHaveLength(1);
   });
@@ -454,30 +457,34 @@ describe("composer DOM under C5's dispatcher", () => {
     await waitFor(() => expect(invoked('session.send')).toHaveLength(1));
   });
 
-  it('gives the frame’s place to a docked permission without unmounting the editor, and takes focus back after', async () => {
-    live(A);
-    mount([{ index: 0, id: A }]);
-    await type('a draft kept aside');
-    act(() => editorOf().focus());
-    const event = permission({ requestId: 'req-a' as never });
-    const item = pageItem(itemFor(event, A_ID));
-    act(() => useAttention.setState({ bySession: new Map([[A, [item]]]), requests: new Map([[item.id, event]]), version: 1 }));
-    const frame = await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
-    expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(true); // the box and the toolbar
-    expect(within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools', hidden: true }).closest('[hidden]')).not.toBeNull(); // W2: the location with it
-    expect(editorOf().editor.getText()).toBe('a draft kept aside'); // mounted, hidden
-    await waitFor(() => expect(document.activeElement).toBe(frame)); // the pane held focus
-    expect(useComposerStore.getState().docked.get(A)?.has('req-a' as never)).toBe(true);
-    await allowOnceKey(frame);
-    await waitFor(() => expect(invoked('session.answer')).toHaveLength(1));
-    act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 }));
-    await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
-    expect(editorOf().editor.getText()).toBe('a draft kept aside');
-    await waitFor(() => expect(editorOf().contains(document.activeElement)).toBe(true)); // focus is back in the editor
+  // UX wave U1b (M3, proof i; decisions 1 and 14): a request waits in the transcript, never in the composer's place. The
+  // editor stays shown and takes text, a send queues during the turn, Stop stands, ⌘L focuses the editor, and the
+  // composer neither reads the request nor says it is paused.
+  it('stays free beside a waiting request: shown, takes text, ⌘Enter queues and Stop stands, ⌘L focuses it, nothing says paused', async () => {
+    busy(A);
+    useLayout.setState((s) => ({ main: { ...s.main, panes: [{ tabs: [{ id: `session:${A}`, kind: 'session', appSessionId: A, pinned: false }], activeTabId: `session:${A}` }], focusedPane: 0, splitRatio: 0.5 } }) as never);
+    mount([{ index: 0, id: A }], <ComposerAppKeys />);
+    // one request read already (the dock took the oldest read one), one not read yet (the dock read it first)
+    const read = permission({ requestId: 'req-a' as never, at: '2026-09-29T09:00:00.000Z' });
+    const [first, unread] = [pageItem(itemFor(read, A_ID)), pageItem(itemFor(permission({ requestId: 'req-b' as never, at: '2026-09-29T09:01:00.000Z' }), A_ID))];
+    act(() => useAttention.setState({ bySession: new Map([[A, [first, unread]]]), requests: new Map([[first.id, read]]), version: 1 }));
+    await waitFor(() => expect(primary().textContent).toBe('Stop'));
+    expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false);
+    expect(composerOf(0).querySelector('[data-request-card], [data-docked-frame]')).toBeNull();
+    expect(composerOf(0).textContent).not.toMatch(/Composer paused|more waiting/);
+    expect(useComposerStore.getState().focusTargets.get(A)!.draftShown?.()).toBe(true);
+    await key(document.body, { key: 'l', code: 'KeyL', metaKey: true });
+    await waitFor(() => expect(editorOf().editor.isFocused).toBe(true));
+    await type('after the turn');
+    await key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
+    await waitFor(() => expect(invoked('session.send')).toEqual([{ appSessionId: A_ID, content: 'after the turn' }]));
+    expect(invoked('session.answer')).toEqual([]);
+    expect(invoked('attention.request')).toEqual([]); // the composer reads no request
   });
 
   // The O9 sitting (item 8): the Mode menu, open when an approval docked, jumped to the window's top corner, its anchor
-  // hidden with the toolbar. Every toolbar menu closes as the card takes the draft's place, and stays closed after.
+  // hidden with the toolbar. Every toolbar menu closes as a card takes the draft's place, and stays closed after. UX wave
+  // U1b: only a card another child docks takes it now (a trust card here).
   it('closes a toolbar menu open when a card docks, and leaves it closed when the card goes', async () => {
     live(A);
     const offEffort = registerSlashWidget('effort', { title: 'Effort', placement: 'modelChip', component: () => <p>effort view</p> });
@@ -485,71 +492,21 @@ describe("composer DOM under C5's dispatcher", () => {
     mount([{ index: 0, id: A }]);
     const user = userEvent.setup();
     const toolbar = within(composerOf(0)).getByRole('toolbar', { name: 'Composer tools' });
-    const dock = (version: number, items: AttentionItem[]) => act(() => useAttention.setState({ bySession: new Map([[A, items]]), requests: new Map(items.map((i) => [i.id, permission({ requestId: 'req-m' as never })])), version }));
-    const item = pageItem(itemFor(permission({ requestId: 'req-m' as never }), A_ID));
     const menus = [
       { open: () => user.click(within(toolbar).getByRole('button', { name: /^Permission mode/ })), shown: () => screen.queryByRole('menu', { name: 'Permission mode' }) },
       { open: () => user.click(within(toolbar).getByRole('button', { name: 'Add files, photos or commands' })), shown: () => screen.queryByRole('menuitem', { name: 'Slash commands' }) },
       { open: () => user.click(within(toolbar).getByRole('button', { name: /^Model / })), shown: () => screen.queryByText('effort view') },
     ];
-    for (const [i, menu] of menus.entries()) {
+    for (const menu of menus) {
       await menu.open();
       await waitFor(() => expect(menu.shown()).not.toBeNull());
-      dock(2 * i + 1, [item]);
-      await within(composerOf(0)).findByRole('group', { name: 'Approval needed' });
+      const undock = dockCard(A, { id: 'c10:trust', render: () => <DockedCardFrame appSessionId={A} title="Trust this folder?" onAccept={() => {}} onDecline={null}>Trust?</DockedCardFrame> });
+      await within(composerOf(0)).findByRole('group', { name: 'Trust this folder?' });
       await waitFor(() => expect(menu.shown()).toBeNull());
-      dock(2 * i + 2, []);
+      act(() => undock());
       await waitFor(() => expect(composerOf(0).querySelector('[data-composer-draft]')!.hasAttribute('hidden')).toBe(false));
       expect(menu.shown()).toBeNull();
     }
-  });
-
-  it('hands focus from a retiring docked request to the next one, whose ⌘↩ answers it (§5.7)', async () => {
-    live(A);
-    mount([{ index: 0, id: A }]);
-    act(() => editorOf().focus());
-    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
-    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:01:00.000Z' });
-    const [one, two] = [pageItem(itemFor(first, A_ID)), pageItem(itemFor(second, A_ID))];
-    const requests = new Map([
-      [one.id, first],
-      [two.id, second],
-    ]);
-    act(() => useAttention.setState({ bySession: new Map([[A, [one, two]]]), requests, version: 1 }));
-    await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
-    expect(within(composerOf(0)).getByText('1 more waiting')).toBeTruthy();
-    await allowOnceKey(document.activeElement as HTMLElement);
-    await waitFor(() => expect(invoked('session.answer')).toEqual([{ appSessionId: A_ID, requestId: 'req-1', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }]));
-    act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 2 })); // the first retires behind the second
-    await waitFor(() => expect(composerOf(0).querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id));
-    await new Promise((resolve) => requestAnimationFrame(resolve)); // past any deferred return to the editor
-    const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
-    expect(document.activeElement).toBe(next);
-    await allowOnceKey(next);
-    await waitFor(() => expect(invoked('session.answer').at(-1)).toEqual({ appSessionId: A_ID, requestId: 'req-2', answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
-  });
-
-  // UX wave U1a (decision 17, the ruling of 2026-11-13): the next request can be listed a commit after the answered one
-  // left, before the editor's deferred focus has had its turn; its frame takes the focus all the same
-  it('gives the focus to a docked request listed a commit after the answered one left', async () => {
-    live(A);
-    mount([{ index: 0, id: A }]);
-    act(() => editorOf().focus());
-    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
-    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:01:00.000Z' });
-    const [one, two] = [pageItem(itemFor(first, A_ID)), pageItem(itemFor(second, A_ID))];
-    const requests = new Map([
-      [one.id, first],
-      [two.id, second],
-    ]);
-    act(() => useAttention.setState({ bySession: new Map([[A, [one]]]), requests, version: 1 }));
-    await waitFor(() => expect(document.activeElement?.getAttribute('data-docked-frame')).toBe(A));
-    act(() => useAttention.setState({ bySession: new Map([[A, []]]), version: 2 })); // answered: the list lets it go
-    await Promise.resolve(); // the frame's microtask has asked the editor for the focus, which it takes a frame later
-    act(() => useAttention.setState({ bySession: new Map([[A, [two]]]), version: 3 })); // the engine's next request
-    const next = composerOf(0).querySelector<HTMLElement>('[data-docked-frame]')!;
-    expect(next.querySelector('[data-request-card]')?.getAttribute('data-request-card')).toBe(two.id);
-    expect(document.activeElement).toBe(next);
   });
 
   it('docks a foreign card ahead of any request, hides the editor the same way, and answers Enter through its own onAccept', async () => {
@@ -895,6 +852,34 @@ describe("composer DOM under C5's dispatcher", () => {
 
 // UX wave U4a (l3-input-08, l3-input-03): Enter always sends, ⌘Enter keeps a message for after the running turn, and
 // the empty box says which key does what while a turn runs
+// UX wave U2b (M2; A14, decision 16): the view's switch is one line above the composer, mounted directly after the mods'
+// band, while MAWS draws the session's to-human view in force; absent otherwise.
+describe('the view’s switch above the composer', () => {
+  afterEach(() => useTranscriptStore.getState().drop(A));
+  const inForce = (on: boolean) => useTranscriptStore.getState().setToHumanView(A, { lane: on, tailMessage: false });
+
+  it('stands above the frame while the view is in force, reads the view to switch to, and goes when the view leaves force', async () => {
+    live(A);
+    const b = builder();
+    b.turn('u1', 'Count the files');
+    b.text('m1', 0, '<message>Three files.</message>');
+    b.end(['u1']);
+    const events = b.events;
+    await act(() => useTranscriptStore.getState().attach(A, { subscribe: () => () => {}, snapshot: () => Promise.resolve(events) }));
+    act(() => inForce(true));
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(editorOf()).toBeTruthy());
+    const line = composerOf(0).querySelector('[data-view-switch]')!;
+    expect(line.textContent).toBe('to-human view · full transcript ›');
+    expect(line.compareDocumentPosition(editorOf()) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    fireEvent.click(within(composerOf(0)).getByRole('button', { name: 'full transcript ›' }));
+    expect(useTranscriptStore.getState().entries[A]?.state.ui.view).toBe('transcript');
+    expect(composerOf(0).querySelector('[data-view-switch]')?.textContent).toBe('to-human view · report only ›');
+    act(() => inForce(false));
+    expect(composerOf(0).querySelector('[data-view-switch]')).toBeNull();
+  });
+});
+
 describe('sending from the box', () => {
   const placeholder = () => editorOf().querySelector('[data-placeholder]')?.getAttribute('data-placeholder') ?? null;
   const cmdEnter = () => key(editorOf(), { key: 'Enter', code: 'Enter', metaKey: true });
@@ -922,6 +907,38 @@ describe('sending from the box', () => {
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     expect(invoked('session.steer')).toEqual([]);
     expect(invoked('session.history.append').map((i) => (i as { display: string }).display)).toEqual(['idle one', 'idle two', 'after the turn']);
+  });
+
+  // UX wave U6e (board ticket 675; the architect's bound for an engine plugin's text): a plugin's fill and its
+  // suggestion only enter the draft; the person's press is what sends it
+  const promptPort = () => useComposerStore.getState().focusTargets.get(A)!.prompt!;
+  const settle = () => act(async () => void (await new Promise((resolve) => setTimeout(resolve, 50))));
+  it('a plugin’s fill enters the draft and sends nothing by itself', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    let filled = false;
+    act(() => void (filled = promptPort().fill('the plugin’s words', 'replace')));
+    expect(filled).toBe(true);
+    await settle();
+    expect(editorOf().editor.getText()).toBe('the plugin’s words');
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
+  });
+
+  it('a plugin’s suggestion that Tab takes enters the draft and sends nothing', async () => {
+    live(A);
+    mount([{ index: 0, id: A }]);
+    await waitFor(() => expect(fake.pending('session.queue.list')).toBe(0));
+    let shown = false;
+    act(() => void (shown = promptPort().suggest('the plugin’s idea')));
+    expect(shown).toBe(true);
+    act(() => editorOf().focus());
+    await key(editorOf(), { key: 'Tab' });
+    await settle();
+    expect(editorOf().editor.getText()).toBe('the plugin’s idea');
+    expect(invoked('session.send')).toEqual([]);
+    expect(invoked('session.steer')).toEqual([]);
   });
 
   it('sends a draft of several lines on Enter, during a turn as at the next step', async () => {
@@ -2043,6 +2060,26 @@ describe('a lane B session on another machine', () => {
     await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
     await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
     expect(takeFirstSend(R)).toBe(false);
+  });
+
+  // UX wave U6e (board ticket 675; the check on the architect's bound for an engine plugin's fill): the first send of a
+  // spawned session goes with no press of the person's, once the handed document is restored. A plugin's fill that lands
+  // first must not go out in the document's place.
+  it('the first send of a spawned session never sends a plugin’s fill that landed before the handed document', async () => {
+    rememberRemoteDraft(R, docOf([paragraph(textNode('read this'))], []));
+    queueFirstSend(R);
+    mount([{ index: 0, id: R }]);
+    let filled = false;
+    act(() => void (filled = useComposerStore.getState().focusTargets.get(R)?.prompt?.fill('the plugin’s words', 'replace') ?? false));
+    await act(async () => void (await new Promise((resolve) => setTimeout(resolve, 100))));
+    expect(JSON.stringify(remote.invoked('session.send'))).not.toContain('the plugin’s words');
+    // the fill was refused while the document waited to go, and the document went as handed
+    expect(filled).toBe(false);
+    await waitFor(() => expect(remote.invoked('session.send')).toEqual([{ appSessionId: 'app-r', content: 'read this' }]));
+    expect(firstSendPending(R)).toBe(false);
+    // the send answered, so no submission of this session is left in flight for the cases after it
+    await act(() => remote.reply('session.send', { messageUuid: null, disposition: 'sent', queueId: 'q-1' }));
+    await waitFor(() => expect(editorOf().editor.getText()).toBe(''));
   });
 
   // P5 O7 M8 ("The attachment"): a dropped PDF reaches the model as a document block, as a local drop's does: its upload

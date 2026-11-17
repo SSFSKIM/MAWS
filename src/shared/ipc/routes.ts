@@ -33,7 +33,7 @@ export const PATH_COMMANDS = [
   'session.projects.add', 'session.replay.start', 'session.trust.check', 'session.create', 'session.revealPath', 'session.projects.addFolder',
   'engine.models', 'engine.configure',
   'fs.sessionText', 'fs.scan', 'fs.bind', 'fs.holders', 'fs.readSpill',
-  'git.status', 'git.branches', 'git.diff', 'git.log', 'git.watch', 'git.unwatch', 'git.lsFiles', 'git.worktree.list', 'git.worktree.status', 'git.worktree.branch', 'git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch',
+  'git.status', 'git.branches', 'git.diff', 'git.log', 'git.branchCommits', 'git.commitDiff', 'git.changesSince' /* UX wave U5b-2 */, 'git.watch', 'git.unwatch', 'git.lsFiles', 'git.worktree.list', 'git.worktree.status', 'git.worktree.branch', 'git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch',
   'settings.set', 'settings.usage', 'settings.reveal',
   'plugins.list', 'plugins.available', 'plugins.install', 'plugins.update', 'plugins.uninstall', 'plugins.enable', 'plugins.disable', 'plugins.manifest', 'plugins.marketplaceManifest',
   'marketplaces.list', 'marketplaces.add', 'marketplaces.update', 'marketplaces.remove',

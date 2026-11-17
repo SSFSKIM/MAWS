@@ -8,7 +8,7 @@ import { at } from '../../../../../../test/support/machine';
 import { useTranscriptStore } from '../../../stores/transcript';
 import type { Row } from '../../model/rows';
 import type { TranscriptSource } from '../../source/types';
-import { Disclosures, NO_ACTIONS, TranscriptProvider, type RewindInterface, type TranscriptActions } from '../context';
+import { Disclosures, NO_ACTIONS, TranscriptProvider, type AnswerActionsSource, type RewindInterface, type TranscriptActions } from '../context';
 import { RowView } from './Row';
 
 let keys = 0;
@@ -56,13 +56,16 @@ export function renderRow(
     sessionCwd?: string; // UX wave U8c-2: the agent's folder while the session is in its launch folder
     disclosures?: Disclosures; // shared across renders to stand for one transcript whose rows remount
     effort?: string; // W8: the session's effort, as the live thinking label names it
+    variant?: 'session' | 'child';
+    answerActions?: AnswerActionsSource; // UX wave U3b: the mount's placement of the answers' action rows
   } = {},
 ) {
   const actions = options.actions ?? spyActions();
   const value = {
-    storeKey: options.storeKey ?? '', variant: 'session' as const, actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null,
+    storeKey: options.storeKey ?? '', variant: options.variant ?? ('session' as const), actions, rewind: options.rewind ?? null, renderRequest: options.renderRequest ?? null,
     disclosures: options.disclosures ?? new Disclosures(), idPrefix: 't', sessionDirectory: options.sessionDirectory ?? null, effort: options.effort ?? null,
     ...(options.sessionCwd !== undefined && { sessionCwd: options.sessionCwd }),
+    ...(options.answerActions !== undefined && { answerActions: options.answerActions }),
   };
   const view = render(
     <TranscriptProvider value={value}>

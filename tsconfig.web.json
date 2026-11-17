@@ -30,12 +30,15 @@
     "src/main/usage/claude-usage-reader.ts",
     "src/main/usage/request-ledger.ts",
     "test/support/agents-events.ts",
+    "test/support/ask-steer.ts", // board ticket 711: the steer as the earlier builds wrote it, for the U4b readers' suites
     "test/support/builders.ts",
     "test/support/engine-pin/index.ts",
     "test/support/events.ts",
     "test/support/fake-client.ts",
     "test/support/fixtures.ts",
     "test/support/git-env.ts",
+    "test/support/grant-readers.ts", // UX wave U1c, the one-writer rule: what a sender sends, read by the grant readers
+    "test/support/later-changes.ts", // UX wave U1c, the one-writer rule: what a later layer might do to a person's text
     "test/support/layout-build-f.ts", // UX wave U8b: build F's frozen reader of the side column's values
     "test/support/import-reports.ts",
     "test/support/machine.ts", // P5 O6 M2: the unit suites' local machine
@@ -44,8 +47,11 @@
     "test/support/panel-child-fixture.ts",
     "test/support/panel-child-tail.ts",
     "test/support/r3-surface.ts",
+    "test/support/recorded-joins.ts", // UX wave, ticket 704: the probes' recorded joins (lane-a/joined-answer-older-host.test.ts)
+    "test/support/rule-r.ts", // UX wave U1c, rule R: the inputs every grant reader is pinned on
     "test/support/scenario.ts",
     "test/support/synth-transcript.ts",
+    "test/support/web-fetch-recorded.ts", // UX wave U3b M5: the web plugin's recorded fetches, read by the renderer's and the services' suites
     "test/support/widget-backend.ts"
   ],
   "exclude": [

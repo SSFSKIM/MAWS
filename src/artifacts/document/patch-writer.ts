@@ -12,21 +12,24 @@
 // re-inserts the node under its id (a v14 node's name is immutable) and reports a `retype` carry for the characters
 // the diff kept; then the top-level inserts, deletions and re-inserts in op order, each re-insert a `move` carry. Last,
 // the written blocks are read back and compared with the plan; a difference is a bug, thrown inside the transaction,
-// which the caller's replica (A's `AgentReplica.edit`) discards rather than sends.
+// which the caller's replica (A's `AgentReplica.edit`) discards rather than sends. UX wave U10b (§B.2 of
+// docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md): a plan that sets the page writes the settings node in
+// the same transaction; one that sets only the page is that transaction alone, and one that changes nothing opens none.
 import type { Node as PMNode } from '@tiptap/pm/model';
 import * as delta from 'lib0/delta';
 import { newDoc, transact, type Doc, type Node } from '../yjs';
 import { pmnodeToDelta, ynodeToPmnode } from '../yjs/prosemirror';
-import type { Applied, ApplyOptions, Carry, Op, Slot } from './edit-ops';
+import type { Applied, ApplyOptions, BlockOp, Carry, Op, OpResult, Slot } from './edit-ops';
 import { canonicalJSON, joinedCells, pmCells, planEdit, textblocksOf, type Plan, type RootAction } from './edit-plan';
 import { diffCells, equalMap, textOf } from './inline-diff';
+import { docPage, setDocPage, type DocPage } from './meta';
 import { schemaFor } from './schema';
 import { createDocument } from './tabs';
 import { sentenceHunks } from './sentence';
 import { deepSlotIds, itemAt, itemOf, slotKey, textblocksY } from './structs';
 
 export { EditError } from './edit-ops';
-export type { Applied, ApplyOptions, Carry, EditRefusal, Op, OpResult } from './edit-ops';
+export type { Applied, ApplyOptions, BlockOp, Carry, EditRefusal, Op, OpResult, PageOpResult } from './edit-ops';
 
 type Fmt = Record<string, unknown>;
 interface DeltaCell {
@@ -361,17 +364,29 @@ function insertRuns(d: ReturnType<typeof delta.create>, cells: DeltaCell[], left
   }
 }
 
+const samePage = (a: DocPage, b: DocPage): boolean => a.size === b.size && a.density === b.density;
+
 /**
  * Applies `ops` to `doc` as one transaction, or throws `EditError` having written nothing. The caller owns the sandbox
  * rule: on the host it runs inside the agent's replica's `edit(fn)`, which sends the update only when this returns.
  */
+export function applyEdit(doc: Doc, ops: readonly BlockOp[], options?: ApplyOptions): Applied<OpResult>;
+export function applyEdit(doc: Doc, ops: readonly Op[], options?: ApplyOptions): Applied;
 export function applyEdit(doc: Doc, ops: readonly Op[], options: ApplyOptions = {}): Applied {
   const plan = planEdit(doc, ops, options);
   let carries: Carry[] = [];
-  if (plan.tops.size > 0 || plan.actions.length > 0) {
+  const page = plan.page !== undefined && !samePage(plan.page, docPage(doc)) ? plan.page : undefined;
+  if (plan.tops.size > 0 || plan.actions.length > 0 || page) {
     const writer = new YWriter(doc, plan);
     writer.startClock = doc.store.getClock(doc.clientID);
-    transact(doc, () => (carries = writer.write()), options.origin);
+    transact(
+      doc,
+      () => {
+        carries = writer.write();
+        if (page) setDocPage(doc, page);
+      },
+      options.origin,
+    );
   }
   return { results: plan.results, carries, orphaned: plan.orphaned, answer: plan.answer };
 }
@@ -395,7 +410,7 @@ export function warmWriter(): string[] {
       ],
     });
     createDocument(doc, { title: 'Warm', id: 'warm', body });
-    const ops: Op[] = [
+    const ops: BlockOp[] = [
       { op: 'replace_text', old: 'It is reviewed.', new: 'It is reviewed twice.' },
       { op: 'replace_block', id: 'w0q', markdown: 'A *rewritten* paragraph.' },
       { op: 'insert', after: 'w0h', markdown: 'An inserted paragraph.' },

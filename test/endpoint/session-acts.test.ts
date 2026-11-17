@@ -252,6 +252,40 @@ describe('dismiss, take back and a pane’s answer (`converse`)', () => {
   });
 });
 
+// The UX wave (U4b, M3; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C and G):
+// Send now on a waiting message, offered behind `rl2.send-now` as an engine-host act on the session's live launch, at
+// `converse`. An engine host with no handler for it (an earlier build's, still serving the session after an update)
+// gives the one shape the device words apart: the act acknowledged, then its outcome refused `unavailable`.
+// (`src/engine-host/ops.test.ts` pins the host's side, a name with no handler.)
+describe('Send now on a waiting message (`converse`, an engine-host act)', () => {
+  const sendNow = (f: Fixture, r: Remote, app: AppSessionId) => hostAction(f, r, 'session.steer.sendNow', app, { messageUuid: 'm2' });
+
+  it('runs for a member at `converse` and is refused `grade` below it, `context` for a stale launch and `read-only` in read-only mode', async () => {
+    const { f, h } = await machine();
+    const talk = session(f, h, { shares: [{ member: org.B, grade: 'converse' }], live: true }).appId;
+    const look = session(f, h, { shares: [{ member: org.B, grade: 'view' }], live: true }).appId;
+    const asked: unknown[] = [];
+    f.host.handlers.set('session.steer.sendNow', (input) => (asked.push(input), { outcome: 'delivering' }));
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await resultOf(b, sendNow(f, b, talk))).toEqual({ outcome: 'delivering' });
+    expect(asked).toEqual([{ appSessionId: talk, messageUuid: 'm2' }]);
+    expect(await refusal(b, sendNow(f, b, look))).toBe('grade');
+    const live = f.host.session(talk);
+    const stale = b.device.action({ machine: f.ref, action: 'session.steer.sendNow', session: talk, context: { lane: 'B', launchId: 'launch-stale', engineSessionId: live.engineSessionId! }, args: { appSessionId: talk, messageUuid: 'm2' } });
+    expect(await refusal(b, stale)).toBe('context');
+    f.endpoint.policy.set({ read_only: true });
+    expect(await refusal(b, sendNow(f, b, talk))).toBe('read-only');
+    expect(asked).toHaveLength(1);
+  });
+
+  it('under an engine host with no handler for it: acknowledged, then refused `unavailable`, nothing run', async () => {
+    const { f, h } = await machine();
+    const app = session(f, h, { live: true }).appId;
+    const a = await openRemote(f, org.a1, org.A);
+    expect(await run(a, sendNow(f, a, app))).toMatchObject({ ack: 'ok', outcome: { state: 'refused', reason: 'unavailable' } });
+  });
+});
+
 describe('the archived sessions’ read (`session.list {includeArchived: true}`, cut at `manage`)', () => {
   const idsOf = (m: Msg) => ((m.output as { sessions: SessionRecord[] }).sessions ?? []).map((record) => record.appId).sort();
 

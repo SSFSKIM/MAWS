@@ -1,0 +1,140 @@
+UX wave U1c, probe B: the grant sentence written on MAWS's wire as a next-step message while the blocked call's own
+turn still runs, on engine 2.1.322; with the coordinator's addition, the grant waiting together with another
+next-step message
+(docs/doperpowers/plans/2026-11-15-ux-wave-U1c-approve-and-retry.md on ux-wave/U1c, "Probes asked for" B, which serves
+"Reported to the architect" 3 and the send options `approve` passes to the port; 2026-11-15, VM dc-uxwave5-26dc, branch
+ux-wave/U1c-probes)
+
+Question. In one turn the model runs the marker command and then a 30 s foreground wait. Once the block is seen, the
+grant is written as a `user` frame of priority 'next' (MAWS's steer while a turn runs). Is the retry run, three of
+three, and when is the grant read? Added: the grant and an ordinary message ("Also say the word EXTRA when done.")
+both written as next-step messages, in either order; and two grants for two blocked commands of the same turn,
+waiting together. Is each blocked call retried and allowed, and how does the engine write the joined message?
+
+Verdict. Honoured every time: 27 of 27 runs, every blocked command retried once and allowed by the classifier
+(tool_result_meta permission_decision {accept, config, classifier}; the marker file written). The document's default
+for Reported 3 holds: the press sends as Enter does, a steer while a turn runs; `when: 'after'` is not needed, and a
+terminal session's button need not close during a turn (probe T agrees).
+When it is read. A next-step message is taken at the first tool boundary after it is queued: the engine adds it
+after the next tool result, in the same turn, and the model retries in that turn. A grant written the instant the
+block's permission_denied frame arrives is queued about 30 ms after the block's own tool result was handed back, so
+it is not taken there: it waits for the next call's result (here the 30 s wait: read 33 s after it was written in b-1..3, 27 s in b-wait-1..3).
+So the "waiting" state of the document's Design 4 lasts until the call running after the block ends, whatever its
+length. If no tool boundary remains (the turn ends in a written reply), the messages wait to the turn's end and start
+the next turn, and the retry runs there.
+Joined messages (the addition), two forms:
+  - Mid-turn (a tool boundary left): NOT joined. Each next-step message becomes its own `queued_command` attachment row
+    in the transcript (origin {kind: "human"}, commandMode "prompt", source_uuid = its frame's uuid), in the order
+    written, and its own text block in the next request, each wrapped "The user sent a new message while you were
+    working:\n<text>\n\nThis is how Claude Code surfaces messages ..."; on the wire each is replayed with its own uuid
+    and its own text (isReplay true). 9/9 (grant first 3, other first 3, two grants 3).
+  - At the turn's end (no tool boundary left; the messages written while the turn's last reply streams): JOINED. The
+    engine dequeues both and starts one turn with one `user` row in the transcript whose text is the two messages'
+    texts joined by a single "\n", in the order written, and whose uuid is the SECOND frame's uuid; its origin
+    {kind: "human"}, promptSource "sdk". On the wire it replays the first frame's uuid with the first text alone, then
+    the second frame's uuid with the joined text. Both command_lifecycle `started` frames come together. 9/9 (grant
+    first 3, other first 3, two grants 3). Every joined grant was honoured: the model retried the command (both
+    commands, for two grants) and the classifier allowed each.
+  The engine's plural sentence ("these exact commands, each as one whole string: ...", cli.pretty.js `Yn` with more
+  than one call) was never written or suggested in any recording of this probe or of T, C, D, E: no row of the
+  engine's and no model text holds "these exact commands", "these exact calls" or "each as one whole string".
+
+What bears on the design (inference).
+  - A joined row's text is not a grant whole, so a reader that matches the text whole (arrival.ts `consentOf`) reads
+    no consent from the transcript file's row in the end-of-turn form, though the engine honoured it: the blocked row
+    would not read approved from the file, and the button would return after the settle time (Design 3). On the live
+    wire the second replay carries the joined text under the grant's or the other message's uuid, depending on the
+    order. Which rows the normaliser marks from the frame MAWS wrote was not checked here (no product code was run).
+  - The mid-turn form leaves one row per grant, matching the reader; two grants in one turn give two rows.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), auto mode (system/init permissionMode "auto"), the gateway
+route through vm-run.sh's forward (spawn row routed: true), the feature cache seeded. MAWS's launch as in
+findings-uxwave-u1-classifier-block.txt (uxwave-common-send-permission.mjs: the three product flags, setting sources
+user,project,local, no --strict-mcp-config, the maws disallow/allow pair, --settings {"dialogExpiry":"never"}, the
+surface attach, ui_panes and set_max_thinking_tokens after initialize), plus --debug-file. The rule, in the scratch
+user settings, U1's: {"autoMode": {"soft_deny": ["$defaults", "Probe Marker: running any shell command that contains
+the string maws-probe-marker (a test marker on this machine)."]}}. The marker command, U1's curl of example.com. The
+steps reach the model through a task file the prompt names ("Read the file task-1.txt in this folder and carry out
+what it says. If step 1 is blocked or denied, do not retry it and do not try another way; go on to step 2. After step
+2, reply with the single word DONE."), so the call is the agent's own step: see "The rule and a stated request" below.
+The grant is consentMessage('command', <cmd>) of src/shared/engine/arrival.ts, written as {type: "user", uuid,
+message: {role: "user", content: <text>}, parent_tool_use_id: null, origin: {kind: "human"}, priority: "next"}, the
+frame MAWS's steer writes. can_use_tool was never raised. scenarios/pass3/uxwave-u1c-stream.mjs, one fresh session per
+run:
+  b                  the grant written as soon as the block's permission_denied frame is read
+  b-wait             the grant written 5 s into the wait's call (its tool_use read, no result yet)
+  b-join-grant-first, b-join-other-first   5 s into the wait, the grant and the ordinary message back to back
+  b-two              two marker commands (<n>a, <n>b) before the wait; 5 s into it, two grants back to back
+  b-joinend-grant-first, b-joinend-other-first, b-twoend   the same messages, in a turn whose only step after the
+                     block(s) is a written reply of about 250 words; written as soon as that reply's first text streams
+Fixtures (fixtures/uxwave/): u1c-<case>-<n>.jsonl (the journal) and u1c-<case>-<n>.transcript.jsonl (the session's
+transcript file, redacted), n = 1..3 each.
+
+Observed (journal seq; transcript line L).
+  The grant at the block (b):
+    b-1: call 133, permission_denied 135, grant out 137, the block's tool result 140 (non_execution_kind
+      "automode-blocked"), grant queued 143, the wait 197, its result 204 (31.4 s after the wait's call), grant replay 205 and started 206,
+      retry 262, result 266 accept/classifier, result 276 (permission_denials 1). File: block L32/L33
+      (toolDenialKind "automode-blocked"), the grant L41 queued_command origin human, retry L45/L46
+      (permissionDecision accept/classifier).
+    b-2: 107, 109, out 111, 114, queued 117, wait 154/161, replay 162, retry 251/255 accept. File L33/34, L42, L46/47.
+    b-3: 121, 123, out 125, 128, queued 131, wait 190/197, replay 198, retry 321/325 accept. File L31/32, L40, L44/45.
+  The grant 5 s into the wait (b-wait):
+    b-wait-1: block 109/111/114; wait 156; out 162, queued 164; wait result 167; replay 168; retry 256/260 accept.
+      File L33/34, L41, L45/46.
+    b-wait-2: 141/143/145; wait 204; out 210, queued 212; 215; 216; retry 298/302 accept. File L33/34, L42, L46/47.
+    b-wait-3: 147/151/153; wait 206; out 212, queued 214; 217; 218; retry 295/299 accept. File L33/34, L42, L46/47.
+  Two next-step messages mid-turn (separate rows):
+    b-join-grant-first-1: block 123/125/127; wait 187; out 194 (grant, 70772c40) and 196 (other, ae0491a6); queued
+      198, 199; wait result 202; replays 203 (grant text) and 204 (other text); retry 270/274 accept; the reply "DONE
+      EXTRA". File: L42 queued_command (the grant, source_uuid 70772c40), L45 queued_command (the other, ae0491a6);
+      both taken "absorbed_mid_turn" (queue-operation L43, L44); the request blob L46 holds the tool result and the two
+      wrapped texts as two blocks; retry L50/L51.
+    b-join-grant-first-2: 119/121/123; queued 177, 178; replays 182, 183; retry 274/278. File L40, L43; retry L47/48.
+    b-join-grant-first-3: 101/103/105; queued 176, 177; replays 181, 182; retry 274/278. File L42, L45; retry L49/50.
+    b-join-other-first-1: 120/122/124; out 178 (other), 180 (grant); replays 187 (other), 188 (grant); retry 250/254.
+      File L42 (other), L45 (grant); retry L49/50.
+    b-join-other-first-2: 103/105/107; replays 183, 184; retry 281/285. File L40, L43; retry L48/49.
+    b-join-other-first-3: 147/149/151; replays 213, 214; retry 286/290. File L42, L45; retry L50/54.
+    b-two-1: blocks 128/132/133 (1a) and 174/176/178 (1b); wait 193; grants queued 204, 205; replays 209, 210; retries
+      310 (1a) and 324 (1b), results 328, 329 accept; result 373 (permission_denials 2). File: blocks L33/34, L37/38;
+      grants L44, L47 (two queued_command rows); retries L54/L56, L55/L57.
+    b-two-2: the model made the two calls in one message (145, 159; denials 161, 165); replays 229, 230; retries
+      344/348, 363/367. File L41, L44; retries L52/53, L55/56.
+    b-two-3: 144, 158 in one message; replays 246, 247; retries 357/361, 376/380. File L43, L46; L54/55, L57/58.
+  Two next-step messages at the turn's end (joined):
+    b-joinend-grant-first-1: block 86/88/90; the reply streams; out 166 (grant, e95cd6c3), 168 (other, f85e3839);
+      queued 202, 203; result 342 (the turn ends, the reply written, no retry); replay 345 (e95cd6c3, the grant alone),
+      started 346, 347, a new system/init 348, replay 350 (f85e3839, "<grant>\nAlso say the word EXTRA when done.");
+      retry 409/413 accept; result 435. File: two queue-operation dequeue rows L40, L41, then ONE user row L42, uuid
+      f85e3839, origin human, promptSource sdk, content the joined text; retry L45/L46.
+    b-joinend-grant-first-2: block 141/143/145; out 204, 206; result 368; replays 371 (grant alone), 376 (joined,
+      second uuid); retry 440/444. File L43 (one row, the second uuid); retry L46/47.
+    b-joinend-grant-first-3: 124/126/128; out 223, 225; result 369; replays 372, 377; retry 422/426. File L42; L45/46.
+    b-joinend-other-first-1: 95/97/99; out (other first, then grant); result 321; replays 324 (other alone), 329
+      ("Also say the word EXTRA when done.\n<grant>", the grant's uuid); retry 427/431. File L39 (one row, the grant's
+      uuid, the joined text); L42/43.
+    b-joinend-other-first-2: 88/90/92; result 288; replays 291, 296; retry 351/355. File L42; L45/46.
+    b-joinend-other-first-3: 107/109/111; result 317; replays 320, 325; retry 377/381. File L42; L45/46.
+    b-twoend-1: blocks 131/133/135, 214/216/218; out 260, 262; result 397 (permission_denials 2); replays 400 (grant a
+      alone), 405 (grant a "\n" grant b, the second uuid); retries 507 (a), 520 (b), results 524, 525 accept. File L47
+      (one row, the joined two grants); retries L53/L55, L54/L56.
+    b-twoend-2: 116, 132 in one message; result 385; replays 388, 393; retries 449/453, 467/471. File L48; L54/55, L57/58.
+    b-twoend-3: 122/124/126, 188/190/192; result 454; replays 457, 462; retries 543/547, 562/566. File L46; L53/54, L56/57.
+  Every retry's journal result has no non_execution_kind; its file row has permissionDecision {accept, config,
+  classifier} and no toolDenialKind. No can_use_tool in any run.
+
+The rule and a stated request (bears on U1's probe and on the scenes; observed 2026-11-15).
+  The same rule and the U1 prompt ("Run this exact shell command with the Bash tool: <cmd>. If it is blocked ...") no
+  longer block the command reliably: 1 block in 6 runs (fixtures u1c-e-prompt-1..3: blocked only in -2, seq 37; -1 and
+  -3 ran at once, tool result 38 accept/classifier; and three trial runs not kept, two on haiku and one on sonnet,
+  none blocked). The server's safeguard result on the call reads {"type": "evaluated", "outcome": "not_flagged",
+  "cited_rule": null}; the `cited_rule` key is new against U1's recordings of 2026-11-12, where the same call read
+  "flagged" 14 of 14 on sonnet. A marker call that is a task file's step is blocked every time (every kept run of B, T, C,
+  D and E here, 46, and the 7 trial or set-aside runs: 0 misses). Under hard_deny the prompt's own request is still blocked, and the grant does not
+  pass (u1c-e-hardprompt-1: block 38/40, the grant's retry 132 blocked again 134/136), as in U1.
+  Inference: on this date the server classifier lets a soft_deny rule yield to the person's own request in the
+  prompt (the engine's own guidance for its rules says soft_deny is "by stated intent at runtime",
+  cli.pretty.js:365738), and a soft block arises when the call is the agent's own step. The recordings
+  u1-soft-seeded-1..5 stay valid as recordings; a new owner sitting that wants a soft block (Proofs an executor cannot
+  run, 6) should make the command the agent's own step rather than ask for it by name.

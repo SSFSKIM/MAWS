@@ -5,8 +5,8 @@
 // app (a plain build, as MAWS ships it) with the installed Claude Code (unmodified, D-1) under a scratch
 // CLAUDE_CONFIG_DIR under /tmp (`settings.json` `{}`, a `.claude.json` trusting the scratch project), through
 // ClaudeUsage's relay (GET /api/hello, one retry two minutes later, else the run is `blocked: relay`), on Haiku in default
-// permission mode with the session's `--max-budget-usd`, every permission allowed once through the request card docked
-// in the composer. The window is never shown (`launchMaws`'s quiet window).
+// permission mode with the session's `--max-budget-usd`, every permission allowed once through the request card at the
+// transcript’s end (UX wave U1b). The window is never shown (`launchMaws`'s quiet window).
 // One session, one prompt over a small web project whose `src/styles/variables.css` holds its CSS custom properties. The
 // system the agent made is then read as the store holds it, with no stand-in: moved into a Space linked to a scratch
 // directory, the host's linked-directory mirror writes its file view (`readFiles`: the law, the token file, the canon,
@@ -216,7 +216,7 @@ test('an agent asked to make a design system from a project creates a Design Sys
     prompted = true;
     await page.keyboard.press('Enter');
 
-    // the turn, every permission it asks allowed once through the card docked in the composer
+    // the turn, every permission it asks allowed once through the card at the transcript’s end (UX wave U1b)
     const idleNow = async () => {
       const status = await statusOf();
       return status.turn === null && status.pendingRequests === 0;

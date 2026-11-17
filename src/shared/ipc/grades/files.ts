@@ -12,4 +12,6 @@ export const grades = {
   'files.readResolved': 'internal', // P5 O3-E: main's own read for library.read; P5 O4 M3: served for OX1's window, library.read reads in process
   'files.upload': 'manage', // P5 O3-E: a write into the session's attachments directory, claimed by machine.op
   'files.readUploads': 'internal', // P5 O7 M8: the endpoint's read of a send's uploads, before the send reaches the engine host
+  'files.writeOutside': 'manage', // UX wave U6e: files.write's save, outside the session's directories
+  'files.grant': 'internal', // UX wave U6e: main's record of the person's choice in its chooser
 } as const satisfies CommandGrades<'files'>;

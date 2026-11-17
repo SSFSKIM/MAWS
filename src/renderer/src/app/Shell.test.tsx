@@ -5,10 +5,10 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge, PreloadBridge } from '@shared/ipc/schema';
-import { LAYOUT_DEFAULTS, type Strip, type TabRef } from '@shared/ipc/schema/layout';
-import { record, remoteRow } from '../../../../test/support/builders';
+import { EMPTY_STRIP, LAYOUT_DEFAULTS, type Strip, type TabRef } from '@shared/ipc/schema/layout';
+import { record, remoteRow, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
-import { addressOf } from '@shared/machine/address';
+import { addressOf, bareOf } from '@shared/machine/address';
 import { LANE_A_WORDS } from '../session/controls/lane-a';
 import { resetLaneAStore } from '../stores/lane-a';
 import { registerCloseGuard, registerAction, runAction } from '../keymap/actions-runtime';
@@ -19,7 +19,7 @@ import { useSessions } from '../stores/sessions';
 import { useMachines } from '../stores/machines';
 import { useSettings } from '../stores/settings';
 import { registerShellActions } from './shell-actions';
-import { fakeClient } from '../../../../test/support/fake-client';
+import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { connectQuitWait } from '../lifecycle/quit-wait';
 import { connectAttention } from '../attention/navigation';
 import { useNotices } from '../stores/notices';
@@ -42,6 +42,9 @@ import { surfaceTabs } from '../panel/surface-model';
 import { PanelHost } from '../panel/PanelHost';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { preloadOf } from '../test-support/preload-of';
+import { installResizeObserver } from '../test-support/resize';
+import { registerSidePane } from '../side/register';
+import { closeBtwCard, foldBtwCard, openBtwCard, resetSideQuestions, setBtwQuestion } from '../side/store';
 
 vi.mock('./Diagnostics', () => ({ Diagnostics: () => <section aria-label="Diagnostics">diagnostics</section> }));
 
@@ -1109,5 +1112,198 @@ describe('a page beside the sidebar', () => {
       expect(inView('terminal')).toBe(false);
       expect(useLayout.getState().settings).toEqual({ section: null });
     });
+  });
+});
+
+// UX wave U4b (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 4 and 5, Interfaces
+// B; the child's A18): a session's `/btw` card is the card column's foot while the column is drawn for that session, and
+// lies over its pane's corner otherwise; it is drawn once, and a move (a remount) loses neither a start in flight nor its
+// refusal. The foot is registered as the app registers it (`registerSidePane`).
+describe('the /btw card’s place', () => {
+  const B = at('app-b' as AppSessionId);
+  let fake: FakeClient;
+  const column = () => screen.queryByRole('complementary', { name: 'Session cards' });
+  // the title bar by its mark: the card's own header is a banner to the role query too
+  const cardsButton = () => within(document.querySelector<HTMLElement>('[data-toolbar]')!).getByRole('button', { name: 'Session cards' });
+  const btwCards = () => [...document.querySelectorAll<HTMLElement>('[data-btw-card]')];
+  const btwChips = () => [...document.querySelectorAll<HTMLElement>('[data-btw-chip]')];
+  // Each card drawn, in the document's order: its place and the question its field holds (which says whose it is).
+  const drawn = () => btwCards().map((card) => [card.dataset.btwCard, card.querySelector('textarea')!.value]);
+  const field = () => screen.getByRole('textbox', { name: 'Ask a side question' }) as HTMLTextAreaElement;
+  // The column's tree, its generated ids aside (`useId` numbers each render's ids afresh).
+  const shape = (element: HTMLElement) => element.outerHTML.replace(/ (id|aria-controls|aria-labelledby|aria-describedby)="[^"]*"/g, '');
+  const mount = () => {
+    registerSidePane();
+    return renderShell();
+  };
+  const opened = (id: AppSessionId, question: string) =>
+    act(() => {
+      openBtwCard(id);
+      setBtwQuestion(id, question);
+    });
+
+  beforeEach(() => {
+    resetSideQuestions();
+    fake = fakeClient({ 'side.question.list': { exchanges: [] } });
+    window.maws = fake.client as unknown as PreloadBridge;
+    useSessions.setState({ records: new Map([[A, record(A)], [B, record(B)]]) });
+    useLayout.setState({ main: withActive(sessionTab(A)) });
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    delete (window as { maws?: unknown }).maws;
+  });
+
+  it('with the column shown for the session, its open card is drawn once, in the column after the cards’ list, and none over the pane’s corner; folded, the chip is there', async () => {
+    mount();
+    opened(A, 'for A');
+    const aside = column()!;
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    const [card] = btwCards();
+    const list = aside.querySelector<HTMLElement>('[aria-label="Session cards"]')!;
+    expect(aside.contains(card)).toBe(true);
+    expect(list.contains(card)).toBe(false);
+    expect(list.nextElementSibling!.contains(card)).toBe(true);
+    await userEvent.click(within(card).getByRole('button', { name: 'Fold side chat' }));
+    expect(btwCards()).toEqual([]);
+    expect(btwChips().map((chip) => [chip.dataset.btwChip, aside.contains(chip)])).toEqual([['foot', true]]);
+  });
+
+  it('with the card closed, the column holds what it holds with nothing registered at its foot, before and after the card was open', () => {
+    renderShell(); // nothing registered at the foot
+    const nothing = shape(column()!);
+    act(() => registerSidePane());
+    expect(shape(column()!)).toBe(nothing);
+    opened(A, 'for A');
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    act(() => closeBtwCard(A));
+    expect(btwCards()).toEqual([]);
+    expect(shape(column()!)).toBe(nothing);
+  });
+
+  it('with the cards turned off, the card is over the pane’s corner; on again, it is the column’s foot', async () => {
+    mount();
+    opened(A, 'for A');
+    await userEvent.click(cardsButton());
+    expect(column()).toBeNull();
+    expect(drawn()).toEqual([['corner', 'for A']]);
+    expect(region('main').contains(btwCards()[0])).toBe(true);
+    await userEvent.click(cardsButton());
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    expect(column()!.contains(btwCards()[0])).toBe(true);
+  });
+
+  it('with a side surface open, or too little room for the column, the card is over the pane’s corner and no column holds one', () => {
+    mount();
+    opened(A, 'for A');
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    act(() => openSurface());
+    expect(column()).toBeNull();
+    expect(drawn()).toEqual([['corner', 'for A']]);
+    act(() => useLayout.setState({ panelBySession: new Map() }));
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    act(() => setWindowWidth(1100)); // 860 px right of the sidebar, under the column's 960
+    expect(column()).toBeNull();
+    expect(drawn()).toEqual([['corner', 'for A']]);
+  });
+
+  it('with a page open, the column keeps its place hidden and holds no card; the card is with the hidden pane, and at the foot again once the page is left', () => {
+    mount();
+    opened(A, 'for A');
+    act(() => useLayout.getState().openDestination({ kind: 'projects' }));
+    const aside = region('cards');
+    expect(aside.classList.contains('invisible')).toBe(true);
+    expect(drawn()).toEqual([['corner', 'for A']]);
+    expect(aside.contains(btwCards()[0])).toBe(false);
+    expect(document.querySelector('[data-behind-page]')!.contains(btwCards()[0])).toBe(true);
+    act(() => useLayout.getState().closeDestination());
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    expect(aside.contains(btwCards()[0])).toBe(true);
+  });
+
+  it('in a split, the focused pane’s card is the column’s foot and the other pane’s is over its own corner; moving the focus swaps them', () => {
+    const split: Strip = { ...EMPTY_STRIP, panes: [{ tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }, { tabs: [sessionTab(B)], activeTabId: sessionTab(B).id }], focusedPane: 0 };
+    useLayout.setState({ main: split });
+    mount();
+    opened(A, 'for A');
+    opened(B, 'for B');
+    const paneOf = (card: HTMLElement) => card.closest<HTMLElement>('[data-pane]')?.dataset.pane ?? null;
+    expect(drawn()).toEqual([['corner', 'for B'], ['foot', 'for A']]); // the panes come before the column
+    expect(paneOf(btwCards()[0])).toBe('1');
+    expect(column()!.contains(btwCards()[1])).toBe(true);
+    act(() => useLayout.getState().focusPane(1));
+    expect(drawn()).toEqual([['corner', 'for A'], ['foot', 'for B']]);
+    expect(paneOf(btwCards()[0])).toBe('0');
+  });
+
+  // Ticket six hundred ninety-two: in a split the column speaks of the session in view, the focused pane's or else the
+  // other pane's, so with an app-wide tab focused it speaks of the session beside it, and that session's card is its foot.
+  it('with an app-wide tab focused beside a pane that holds the session, the column speaks of that session and its card is the column’s foot', () => {
+    const diagnostics: TabRef = { id: 'diagnostics', kind: 'diagnostics', pinned: false };
+    useLayout.setState({ main: { ...EMPTY_STRIP, panes: [{ tabs: [diagnostics], activeTabId: diagnostics.id }, { tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }], focusedPane: 0 } });
+    mount();
+    opened(A, 'for A');
+    const aside = column()!;
+    expect(cardColumnNow(useLayout.getState(), window.innerWidth)).toMatchObject({ session: A, shown: true });
+    expect(drawn()).toEqual([['foot', 'for A']]);
+    expect(aside.contains(document.querySelector('[data-btw-card="foot"]'))).toBe(true);
+    expect(document.querySelector('[data-btw-card="corner"]')).toBeNull();
+  });
+
+  it('a session the split’s floating card draws keeps its card inside that card, whatever the column shows', () => {
+    const { resize } = installResizeObserver();
+    const split: Strip = { ...EMPTY_STRIP, panes: [{ tabs: [sessionTab(A)], activeTabId: sessionTab(A).id }, { tabs: [sessionTab(B)], activeTabId: sessionTab(B).id }], focusedPane: 0 };
+    useLayout.setState({ main: split });
+    mount();
+    act(() => useLayout.getState().floatSplit(sessionTab(B).id));
+    resize(document.querySelector('[data-floating-layer]')!, { width: 900, height: 700 });
+    opened(A, 'for A');
+    opened(B, 'for B');
+    // each card drawn, by its question: its place and whether it is inside the floating card
+    const placed = () => btwCards().map((card) => [card.querySelector('textarea')!.value, card.dataset.btwCard, card.closest('[data-pane="card"]') !== null]).sort();
+    expect(placed()).toEqual([
+      ['for A', 'foot', false],
+      ['for B', 'corner', true],
+    ]);
+    act(() => useLayout.getState().focusPane(1)); // the column now speaks of the floated session
+    expect(placed()).toEqual([
+      ['for A', 'corner', false],
+      ['for B', 'corner', true],
+    ]);
+  });
+
+  it('a start in flight is kept through a move: Enter where the card now stands asks nothing more, and the start’s answer asks one side question', async () => {
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
+    mount();
+    opened(A, '');
+    await userEvent.type(field(), 'More?{Enter}');
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+    await userEvent.click(cardsButton()); // the cards off: the card moves to the pane's corner
+    expect(drawn()).toEqual([['corner', 'More?']]);
+    await userEvent.type(field(), '{Enter}');
+    await userEvent.click(cardsButton()); // and on: back at the column's foot
+    expect(drawn()).toEqual([['foot', 'More?']]);
+    await userEvent.type(field(), '{Enter}');
+    while (fake.pending('session.acquire') > 0) await act(() => fake.reply('session.acquire', { status: 'ready', appSessionId: bareOf(A), launched: true, joined: false }));
+    expect(fake.invoked('session.sideQuestion')).toEqual([{ appSessionId: bareOf(A), question: 'More?' }]);
+    expect(fake.invoked('session.acquire')).toHaveLength(1);
+  });
+
+  it('a refused start still says why after a move to the corner, back to the foot, and after a fold', async () => {
+    useSessions.setState({ engine: new Map([[A, status(A, { process: 'exited' })]]) });
+    mount();
+    opened(A, '');
+    await userEvent.type(field(), 'More?{Enter}');
+    await act(() => fake.reply('session.acquire', { status: 'missing_directory', appSessionId: bareOf(A), directory: '/invented/gone' }));
+    const refusal = () => [btwCards()[0].dataset.btwCard, within(btwCards()[0]).getByRole('alert').textContent];
+    expect(refusal()).toEqual(['foot', 'Directory not found: /invented/gone']);
+    await userEvent.click(cardsButton());
+    expect(refusal()).toEqual(['corner', 'Directory not found: /invented/gone']);
+    await userEvent.click(cardsButton());
+    expect(refusal()).toEqual(['foot', 'Directory not found: /invented/gone']);
+    act(() => foldBtwCard(A));
+    act(() => openBtwCard(A));
+    expect(refusal()).toEqual(['foot', 'Directory not found: /invented/gone']);
+    expect(fake.invoked('session.sideQuestion')).toEqual([]);
   });
 });

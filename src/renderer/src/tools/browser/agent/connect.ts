@@ -2,8 +2,8 @@
 // from App.tsx's E4c block. Removed with the browser tools in E13 M4 and restored on the owner's decision for cua's
 // leases (P1 A-54, amended): main emits `browser.agent.acting` when a cua lease's first acting command arrives on a tab
 // (src/main/browser/cua/connection.ts), without selecting it. A window that shows the session opens the session's Browser
-// tool when none is open (a pinned one counts), activated, as E1's `connectAsks` opens the sheet; it never switches the
-// main view or the shown session.
+// tool when none is open (a pinned one counts), activated; it never switches the main view or the shown session. (E1's
+// `connectAsks` opened the Question sheet the same way until UX wave U1b, M6; an ask now opens nothing.)
 //
 // U12a (the UX wave's U12 execution document, M2 and Interfaces §C; ruling R2; A-54 reversed, "Yes, unless I use mine"):
 // the Browser that opens by itself shows the agent's tab. Only this window knows it is about to open the Browser by

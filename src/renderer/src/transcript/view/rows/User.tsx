@@ -4,9 +4,9 @@
 // export*; *Pasted content* under Derivation). A dropped prompt carries a quiet `Not sent`, or why it never ran when its
 // mount knows (`droppedRowMark`). W1: a message waiting for the engine (a `next` steer, or one held in MAWS's queue) is
 // dimmed with what it waits for, and a steer the engine took says it was sent during the turn it sits in. W2 (B2,
-// Codex's bubble): the time, Copy and Edit overlay beside the bubble on hover or focus instead of reserving a line under
-// it, and the collapse follows the rendered height (a long paragraph folds as a long list does), measured while folded
-// and again whenever the content's size changes. W3 (B6):
+// Codex's bubble): the collapse follows the rendered height (a long paragraph folds as a long list does), measured
+// while folded and again whenever the content's size changes. UX wave U3b (O-02, amending W2's B2): the time, Copy and
+// Edit sit on one line under the bubble, in the 16 px the message already has there, with the caption last. W3 (B6):
 // Edit edits the bubble in place: C7's registered editor stands in the bubble's place while its session edits it.
 // E3: an anchored comment opens with a chip naming what it is about (its kind's glyph and label; a chip with a path
 // opens the file at the line), above the comment, its screenshot drawn as the image attachment it is.
@@ -49,18 +49,22 @@ function segmentsOf(row: UserRowData): Segment[] {
 }
 
 export function UserRow({ row }: { row: UserRowData }) {
-  return row.consent ? <ConsentLine consent={row.consent} /> : <UserBubble row={row} />;
+  return row.consent ? <ConsentLine row={row} consent={row.consent} /> : <UserBubble row={row} />;
 }
 
 // UX wave U3 (UC-2, class `consent`; the U3a document, decision 10): MAWS's "Approve and retry" for a call auto mode
 // blocked is the person's act, not their prose: one line, "You approved `<subject>`", never a bubble, with no Copy and
-// no Edit. The subject is cut at the column's edge; its tooltip holds it whole.
-function ConsentLine({ consent }: { consent: NonNullable<UserRowData['consent']> }) {
+// no Edit. The subject is cut at the column's edge; its tooltip holds it whole. UX wave U1c (M1's review): a grant the
+// engine never ran carries the mark a dropped bubble carries, so the line never stands alone for it.
+function ConsentLine({ row, consent }: { row: UserRowData; consent: NonNullable<UserRowData['consent']> }) {
+  const actions = useActions();
+  const notSent = row.dropped ? (actions.droppedRowMark?.(row) ?? NOT_SENT) : null;
   return (
-    <div className="transcript-consent" data-consent={consent.kind}>
+    <div className="transcript-consent" data-consent={consent.kind} data-dropped={row.dropped ? '' : undefined}>
       <span className="transcript-line-text" title={consent.subject}>
         {CONSENT.approved} <code className="transcript-consent-subject">{consent.subject}</code>
       </span>
+      {notSent !== null && <span className="transcript-not-sent">{notSent}</span>}
     </div>
   );
 }
@@ -128,7 +132,15 @@ function UserBubble({ row }: { row: UserRowData }) {
           </button>
         )}
       </div>
-      <div className="transcript-user-actions">
+    </div>
+  );
+  // UX wave U3b (decision 10; R12 to R14, R20): one line under the bubble, at its side: the time, Copy and Edit (shown on
+  // hover or focus within, taking no width at rest yet in the tab order), then the caption last, flush with the
+  // bubble's edge; in a pane too narrow for the line the caption is what shrinks, its sentence as its title. It goes
+  // with the bubble: while the composer's editor stands in the bubble's place, the line is not drawn.
+  const line = (
+    <div className="transcript-user-line">
+      <span className="transcript-user-line-actions">
         <span>{formatClock(Date.parse(row.at))}</span>
         <button type="button" onClick={() => copyText(copiedUserText(row))}>
           Copy
@@ -138,19 +150,21 @@ function UserBubble({ row }: { row: UserRowData }) {
             Edit
           </button>
         )}
-      </div>
+      </span>
+      {notSent !== null && <span className="transcript-not-sent" title={notSent}>{notSent}</span>}
+      {caption !== null && <span className="transcript-user-caption" title={caption}>{caption}</span>}
     </div>
+  );
+  const bubble = (
+    <>
+      {body}
+      {line}
+    </>
   );
   return (
     <section className="transcript-user" aria-label={author === null ? 'Your message' : `${author}'s message`} data-author={author === null ? undefined : 'other'} data-pending={row.pending} data-steer={row.steer ? '' : undefined} data-dropped={row.dropped ? '' : undefined}>
       {author !== null && <div className="transcript-user-author">{author}</div>}
-      {renderEditor && variant === 'session' ? renderEditor({ storeKey, row, children: body }) : body}
-      {(notSent !== null || caption !== null) && (
-        <div className="transcript-user-meta">
-          {notSent !== null && <span className="transcript-not-sent">{notSent}</span>}
-          {caption !== null && <span className="transcript-user-caption">{caption}</span>}
-        </div>
-      )}
+      {renderEditor && variant === 'session' ? renderEditor({ storeKey, row, children: bubble }) : bubble}
     </section>
   );
 }
@@ -217,6 +231,25 @@ function AnchorChip({ anchor }: { anchor: Anchor }) {
     );
   }
   // E4d end
+  // UX wave U5b-2 (R8, decision 28): a comment on a commit's diff opens Review on that commit at that file, never the path
+  // as a file (it is the commit's, relative to the repository); a label where the mount has no `openCommit`
+  const { commit } = anchor;
+  if (commit !== undefined) {
+    const openCommit = actions.openCommit;
+    return (
+      <div className="transcript-user-anchor">
+        {openCommit !== undefined && session !== null ? (
+          <button type="button" className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator} onClick={() => openCommit(session, commit, path)}>
+            {content}
+          </button>
+        ) : (
+          <span className="transcript-chip" data-chip="anchor" data-anchor-kind={anchor.kind} title={anchor.locator}>
+            {content}
+          </span>
+        )}
+      </div>
+    );
+  }
   return (
     <div className="transcript-user-anchor">
       {path !== undefined ? (

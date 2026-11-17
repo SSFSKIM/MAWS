@@ -16,7 +16,7 @@ import { formatElapsed } from '../model/elapsed';
 import { isPending, restoreDraft, type Relay } from '../model/relay';
 import { isEnded, rowTitle, type TaskNode } from '../model/task-graph';
 import { relayKey, useRelays } from '../relay-store';
-import { useTicker } from './shared';
+import { endedUnrecorded, useTicker } from './shared';
 
 export interface DisabledReason {
   text: string;
@@ -27,11 +27,19 @@ export interface DisabledReason {
 // ended), then the parent (not live here), a relay still pending, and the background flag (a foreground child's parent
 // reads messages only after it returns; unknown when no start event was seen this launch). Only an `asked` relay blocks
 // (controller, M2 review): a `forwarded` one rests there for the child's whole run on 2.1.283, and a send replaces it.
+// Why an ended agent takes no relay, in the words its row reads (card C1: `endedUnrecorded`, the row's own rule).
+function endedReason(node: TaskNode): string {
+  const { disabled } = RELAY_COPY;
+  if (node.status === 'stopped') return disabled.stopped;
+  if (node.status === 'exited') return endedUnrecorded(node) ? disabled.ended : disabled.exited;
+  return disabled.finished;
+}
+
 export function relayDisabledReason({ node, status, relay, session }: { node: TaskNode | undefined; status: EngineSessionStatus | null; relay: Relay | undefined; session: string }): DisabledReason | null {
   const reason = (text: string, tooltip: string | null = null) => ({ text, tooltip });
   const { disabled } = RELAY_COPY;
   if (node?.status === 'unknown') return reason(disabled.diskOnly);
-  if (node && isEnded(node.status)) return reason(node.status === 'stopped' ? disabled.stopped : node.status === 'exited' ? disabled.exited : disabled.finished);
+  if (node && isEnded(node.status)) return reason(endedReason(node));
   if (status === null) return reason(disabled.notRunningHere);
   if (relay?.state.kind === 'asked') return reason(disabled.pending);
   if (node?.isBackground === false) return reason(disabled.foreground(session), disabled.foregroundTooltip);
@@ -85,8 +93,7 @@ function TellComposer({ agentId, node, draft, onDraft, onSent, controls }: Props
   const [line, setLine] = useState<{ text: string; failed: boolean } | null>(null);
   const title = node ? rowTitle(node) : agentId;
   const tell = controls.capability('tell');
-  const { disabled: words } = RELAY_COPY;
-  const reason = node && isEnded(node.status) ? (node.status === 'stopped' ? words.stopped : node.status === 'exited' ? words.exited : words.finished) : tell.available ? null : tell.reason;
+  const reason = node && isEnded(node.status) ? endedReason(node) : tell.available ? null : tell.reason;
   const canSend = reason === null && !sending && draft.trim() !== '';
   const send = async () => {
     if (!canSend) return;

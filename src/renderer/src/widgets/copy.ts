@@ -168,7 +168,7 @@ export const MCP = {
 // UX wave U11a (§D, l8-settings-03): an unstarted tab's Connectors and Skills dialogs, what the three dialogs and the
 // "+" › Connectors submenu say for a tab set to another machine, and the place named with no folder chosen.
 export const BEFORE_START = {
-  connectors: (place: string) => `Configured for ${place}. Connection state, and connectors from plugins, show once the chat starts.`,
+  connectors: (place: string) => `Configured for ${place}. Connection state shows once the chat starts.`, // UX wave U11h: a plugin's connectors are listed now
   skills: (place: string) => `On disk for ${place}. The chat may load more once it starts.`,
   remote: (machine: string) => `Shown once the chat starts on ${machine}`,
   userConfiguration: 'your user configuration',
@@ -491,7 +491,7 @@ export const RENAME = {
 // it has them, §10 Q9). The person's words; no provenance.
 export const LIBRARY = {
   searchPlugins: 'Search plugins',
-  show: 'Show',
+  show: 'Filter', // UX wave U11c (O-14): "Show" names Customize's row of kinds
   filter: { all: 'All plugins', enabled: 'Enabled', disabled: 'Disabled', loaded: 'Loaded in this session', otherProjects: 'Other projects' } as const,
   sortBy: 'Sort by',
   sort: { updated: 'Last updated', name: 'Name' } as const,
@@ -629,7 +629,7 @@ export const SKILLS_LIBRARY = {
   pluginOff: 'Off in the sessions MAWS runs: Settings › Sessions › Plugins in sessions',
   pluginsUnread: 'Reading Settings › Sessions › Plugins in sessions…',
   firstTitle: 'Add your first skills',
-  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Skills › Discover lists the plugins that carry skills.',
+  firstBody: 'Skills teach Claude how you work. Plugins bring them: Customize › Discover, with Show set to Skills, lists the plugins that carry skills.',
   failed: "Couldn't load your skills.",
   invoke: 'Type',
   plugin: 'Plugin',

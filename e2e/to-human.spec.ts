@@ -64,7 +64,9 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
     await page.keyboard.press('Enter');
     const must = pane.locator('[data-kind="assistant_text"]').filter({ hasText: TO_HUMAN.essential });
     await expect(must).toContainText(TO_HUMAN.essential, { timeout: 20_000 });
-    await expect(pane.getByRole('button', { name: 'Mark read', exact: true })).toBeVisible();
+    // UX wave U2b (decisions 20 and 21): the bar went with its unread count and its Mark read; "Mark all read" is a
+    // command of the palette, and a must-read's own Mark read is its card's in Needs you
+    await expect(pane.getByRole('button', { name: 'Mark read', exact: true })).toHaveCount(0);
     await expect(pane.locator('[data-owner-card]')).toHaveCount(0);
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();
     // Turn 2: a question, and its tool goes on running.
@@ -94,7 +96,11 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
         await needs.click();
         await page.mouse.move(700, 450);
         await expect(pane.locator(`[data-composer="${await addressed(page, asking)}"]`)).toBeVisible();
-        await expect(pane.getByRole('group', { name: 'Session view' }).getByRole('button', { name: 'Report' })).toHaveAttribute('aria-pressed', 'true');
+        // UX wave U2b: the report is the to-human view, its switch above the composer offering the full transcript; the
+        // mark is a message, in sight, so no record had to open for it (a jump into a record: e2e/transcript.spec.ts)
+        await expect(pane.locator('[data-view-switch]').getByRole('button', { name: 'full transcript ›', exact: true })).toBeVisible();
+        await expect(pane.getByRole('group', { name: 'Session view' })).toHaveCount(0);
+        await expect(pane.getByRole('button', { name: '‹ fold to report', exact: true })).toHaveCount(0);
         await expect.poll(() => page.evaluate(() => document.activeElement?.textContent?.includes('The migration drops the legacy_users table.') === true)).toBe(true);
       },
       () =>
@@ -132,7 +138,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
 });
 
 // P2-C2 start
-test('a style declaring the plugin’s message tool (6): the supplement once and no contract, the native ask withdrawn, unboxed <message> text and the plugin’s message call in source order, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
+test('a style declaring the plugin’s message tool (6): the supplement once and no contract, the native ask withdrawn, unboxed <message> text and the plugin’s message call in source order, an async maws ask answered in its capsule’s row, and a native ask on the wire still drawn', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c2-supplement-')));
   const repo = join(root, 'repo');
@@ -204,21 +210,26 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     expect(settings.hooks).toBeUndefined(); // P4-R7z: P4-R7y's SessionStart alias is gone
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
 
-    // The async ask: acknowledged at once, answered from its sheet, the answer written as a `next` steer.
+    // The async ask: acknowledged at once, answered in its capsule's row (UX wave U1b: its form stands there, and no sheet
+    // opens by itself), the answer written as a `next` steer.
     const capsule = pane.locator('section.transcript-ask');
     await expect(capsule).toHaveAttribute('data-ask-state', 'asked');
     // Decision Log 32: the waiting question is an async_input item, retired at the committed answer
     const waiting = async () => value(await invoke(page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.kind === 'async_input' && item.state === 'pending');
     await expect.poll(async () => (await waiting()).length).toBe(1);
-    const sheet = page.locator('[data-region="panel"] [data-ask-sheet]');
-    await sheet.locator('section[data-question-id="q1"]').getByRole('radio', { name: 'Yes' }).click();
+    const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+    await form.locator('section[data-question-id="q1"]').getByRole('radio', { name: 'Yes' }).click();
+    await expect(page.locator('[data-region="panel"] [data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
     await clearToasts(page);
-    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
     await expect.poll(async () => (await waiting()).length).toBe(0);
-    const steered = () => rows().some((r) => r.direction === 'out' && frameOf(r).type === 'user' && frameOf(r).priority === 'next' && String(frameOf(r).message?.content).includes(`${SUPPLEMENT.askQuestion} — Yes`));
-    await expect.poll(steered).toBe(true);
+    // board ticket 711: the steer names the question by its number and the pick by its place ("Yes" is the ask's first
+    // option), and holds no word of the model's
+    const steers = () => rows().filter((r) => r.direction === 'out' && frameOf(r).type === 'user' && frameOf(r).priority === 'next').map((r) => String(frameOf(r).message?.content)).filter((content) => content.startsWith('[MAWS ask '));
+    await expect.poll(() => steers().map((content) => content.split('\n')[1])).toEqual(['1. option 1']);
+    for (const content of steers()) expect(content, 'no word of the model’s in the steer').not.toContain(SUPPLEMENT.askQuestion);
     expect(metaEvents(rows())).toContain('maws_ask_answered');
     await expect(message(SUPPLEMENT.askReply)).toBeVisible({ timeout: 20_000 });
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();

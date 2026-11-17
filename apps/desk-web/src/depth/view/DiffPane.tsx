@@ -5,19 +5,19 @@
 // asked for when the tab opens and again on the reader's Refresh, never polled; the last answer stays drawn while a new
 // one is on its way. An answer the machine could not take says why: its `error` when git failed, and no base when the
 // session's directory is no git working tree. The body (the diff library, its stylesheet, and the highlighter) loads on
-// first use.
+// first use. Its one-file view state and the words only it says are its own (`diff-view-state.ts`).
 import { lazy, Suspense, useEffect, useMemo } from 'react';
 import { loadChunk } from '../../pwa/load-chunk';
 import { useStore } from 'zustand';
 import { createStore, type StoreApi } from 'zustand/vanilla';
+import { createDiffViewUi, DIFF_COPY, selectFile, type DiffViewUi } from './diff-view-state';
 import { REVIEW_COPY } from '../../../../../src/renderer/src/tools/code/copy';
 import '../../../../../src/renderer/src/tools/code/code.css';
 import { tooLarge } from '../../../../../src/renderer/src/tools/code/review/review-model';
-import { createReviewUi, selectFile, type ReviewUi } from '../../../../../src/renderer/src/tools/code/review/view-state';
 import { diffFiles, diffTotals, type DiffFile } from '../../../../../src/renderer/src/lane-a/diff/files';
 import type { PlaneTranscript, PlaneTranscriptState } from '../../../../../src/renderer/src/lane-a/plane-transcript';
 
-const ReviewView = lazy(() => loadChunk(() => import('../../../../../src/renderer/src/tools/code/review/ReviewView')));
+const ReviewView = lazy(() => loadChunk(() => import('./ReviewView')));
 
 const quiet = 'rounded-sm px-1.5 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg disabled:cursor-default disabled:opacity-40 disabled:hover:bg-transparent';
 const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-muted hover:bg-bg-hover hover:text-fg aria-pressed:bg-bg-active aria-pressed:text-fg';
@@ -25,10 +25,10 @@ const toggle = 'rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg-m
 const Loading = () => <p className="p-3 text-ui-sm text-fg-muted">{REVIEW_COPY.loading}</p>;
 
 /** The Diff tab's own view state (selection, hunk, mode, scroll, wrap), kept by the column so it outlives the tab. */
-export type DiffView = { ui: StoreApi<ReviewUi>; wrap: StoreApi<{ wrap: boolean }> };
+export type DiffView = { ui: StoreApi<DiffViewUi>; wrap: StoreApi<{ wrap: boolean }> };
 
 export function createDiffView(): DiffView {
-  return { ui: createReviewUi({ session: null }), wrap: createStore<{ wrap: boolean }>()(() => ({ wrap: false })) };
+  return { ui: createDiffViewUi(), wrap: createStore<{ wrap: boolean }>()(() => ({ wrap: false })) };
 }
 
 type Props = { controller: PlaneTranscript; state: PlaneTranscriptState; view: DiffView };
@@ -54,7 +54,7 @@ export function DiffPane({ controller, state, view }: Props) {
     <div data-review data-testid="depth-diff" className="flex h-full min-h-0 flex-col bg-bg">
       <div className="flex shrink-0 items-baseline gap-2 px-3 pt-2 pb-1">
         <p data-review-header className="m-0 min-w-0 flex-1 truncate text-ui font-medium text-fg">
-          {files && answer && based ? REVIEW_COPY.header(diffTotals(files).files, diffTotals(files).added, diffTotals(files).removed, `Since ${answer.base}`) : 'Diff'}
+          {files && answer && based ? DIFF_COPY.header(diffTotals(files).files, diffTotals(files).added, diffTotals(files).removed, answer.base) : 'Diff'}
         </p>
         <button type="button" className={quiet} data-testid="depth-diff-refresh" disabled={pending} onClick={() => controller.requestDiff()}>
           {pending && answer ? 'Refreshing…' : 'Refresh'}
@@ -105,7 +105,7 @@ function Counts({ file }: { file: DiffFile }) {
   );
 }
 
-function FileList({ files, selected, ui }: { files: readonly DiffFile[]; selected: string | null; ui: StoreApi<ReviewUi> }) {
+function FileList({ files, selected, ui }: { files: readonly DiffFile[]; selected: string | null; ui: StoreApi<DiffViewUi> }) {
   return (
     <ul role="listbox" aria-label="Changed files" className="m-0 max-h-[40%] shrink-0 list-none overflow-y-auto border-b border-border p-0 py-1">
       {files.map((file) => (
@@ -149,13 +149,13 @@ function FileSection({ file, files, view }: { file: DiffFile; files: readonly Di
     <section data-review-file={file.path} className="flex min-h-0 flex-1 flex-col">
       <div className="flex shrink-0 items-center gap-2 px-3 pt-2 pb-1">
         <span data-review-file-header className="min-w-0 flex-1 truncate text-ui-sm text-fg" title={file.path}>
-          {REVIEW_COPY.fileHeader(file.path, kindLabel(file))}
+          {DIFF_COPY.fileHeader(file.path, kindLabel(file))}
         </span>
         <span className="flex shrink-0 items-center">
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.previousFile} title={REVIEW_COPY.previousFile} disabled={index <= 0} onClick={() => goFile(files[index - 1])}>
+          <button type="button" className={quiet} aria-label={DIFF_COPY.previousFile} title={DIFF_COPY.previousFile} disabled={index <= 0} onClick={() => goFile(files[index - 1])}>
             ‹
           </button>
-          <button type="button" className={quiet} aria-label={REVIEW_COPY.nextFile} title={REVIEW_COPY.nextFile} disabled={index >= files.length - 1} onClick={() => goFile(files[index + 1])}>
+          <button type="button" className={quiet} aria-label={DIFF_COPY.nextFile} title={DIFF_COPY.nextFile} disabled={index >= files.length - 1} onClick={() => goFile(files[index + 1])}>
             ›
           </button>
         </span>

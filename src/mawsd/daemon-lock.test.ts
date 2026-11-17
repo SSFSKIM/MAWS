@@ -382,6 +382,23 @@ describe('the spine’s bindings (§A)', () => {
     await until(() => app.closed, 3_000, 'the app’s departure');
     expect(chunk.deps[0]!.browserSocket(id)).toBe(own);
   });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8, §B Wiring): the bundle
+  // each attached app tells reaches the spine as MAWS's own folders, as the browser socket does, and goes with its client
+  it('appBundles: the bundles the live clients told in machine.client, handed to the spine', async () => {
+    const chunk = standInChunk();
+    await scene.start({ spine: { load: chunk.load } });
+    const machine = await scene.app('machine');
+    expect(await machine.request('session.launchMode')).toMatchObject({ ok: true });
+    expect(chunk.deps[0]!.appBundles?.()).toEqual([]);
+    const other = await scene.app('machine', { appPid: 1 });
+    expect(await machine.request('machine.client', { browserSocket: null, bundle: '/work/build/MAWS Dev.app' })).toMatchObject({ ok: true });
+    expect(await other.request('machine.client', { browserSocket: null, bundle: '/Applications/MAWS.app' })).toMatchObject({ ok: true });
+    expect([...chunk.deps[0]!.appBundles!()].sort()).toEqual(['/Applications/MAWS.app', '/work/build/MAWS Dev.app']);
+    other.leave();
+    await until(() => other.closed, 3_000, 'the second client’s departure');
+    expect(chunk.deps[0]!.appBundles!()).toEqual(['/work/build/MAWS Dev.app']);
+  });
 });
 
 it('SPINE_LOCK_FILE is the spine lock’s own name', () => {

@@ -35,6 +35,10 @@
 // review, at its referrer stage after the local path answered 404 (an embed this Mac's store doesn't hold, of a page
 // another machine serves), so a referrer never takes a local artifact elsewhere.
 //
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M4 decision 6): a file frame's token is
+// the scheme's too. The window's session asks the file frames' responder before everything above; the capture partition
+// does not hold it. Both partitions' request filters ask the tokens' owner first (`installStorePolicies`).
+//
 // P5 O5 M4 (M4's "`artifacts.export` becomes `machine`"): the command is machine-owned, registered here through
 // `registerMachine`, which the router runs only while the attached `mawsd` does not render (an older daemon; the router's
 // fallback). A post-O5 `mawsd` posts its engine host's capture and export requests to no client, so the listeners below
@@ -49,8 +53,8 @@ import { composeRender } from '../../render/compose'; // P5 O5 M3
 import { installRenderSeams } from '../../render/e2e-seams'; // P5 O5 M3
 import { answerExportRequests, type ExporterRegistry, type ExportService } from '../../render/export';
 import type { DocumentAuthorDeps } from '../../render/export-document';
-import { appOriginOf, guardPermissions, installFramePolicies } from '../../render/policies';
-import { inOrder, serveArtifacts, type ContentLookup } from '../../render/scheme'; // P5 O5 M2; P5 O7 M5b: inOrder
+import { appOriginOf, guardPermissions, installFramePolicies, type StoreHostOwner } from '../../render/policies';
+import { inOrder, serveArtifacts, type ContentLookup, type SchemeResponder } from '../../render/scheme'; // P5 O5 M2; P5 O7 M5b: inOrder
 import type { RemoteResponder } from './remote-scheme'; // P5 O7 M5b
 import { presentationEmbeds } from '../presentations/present-embeds'; // P3-C M6
 import { MACHINE_ARTIFACTS_CAPABILITY } from '@shared/host/socket-protocol'; // P5 O5 M2
@@ -68,19 +72,22 @@ export interface ArtifactsDeps {
   artifactsSocket: string; // P5 O5 M2: `mawsd`'s artifacts.sock, proxied to while its welcome lists machine.artifacts
   authors?: DocumentAuthorDeps; // P5 O5 M3: a document's Word comment authors (WR 73), the root's to read
   remote?: RemoteResponder; // P5 O7 M5b: the scheme's remote responder (./remote-scheme.ts): after the embeds, and after a local 404
+  fileFrames?: SchemeResponder; // UX wave U6b-2: the file frames' responder (../file-frames/), first on the default partition alone
 }
 
 // The store frames' policies on the window's default session and on the capture partition (P3-L M6b; E2's, in
 // `startDeliverables` until the cutover): installed once, before the app's first window loads. `appUrl`: the app page's
-// URL (window.ts), whose origin the frame policies trust to reach every artifact (P3-A M7 fix wave 2).
-export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string): void {
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) installFramePolicies(target, env, appOriginOf(appUrl));
+// URL (window.ts), whose origin the frame policies trust to reach every artifact (P3-A M7 fix wave 2). UX wave U6b-2:
+// `ownerOf`, the file frames' tokens, whose owner's check the request filter asks first on both partitions (no capture
+// window owns a token, so every token asked there is cancelled).
+export function installStorePolicies(env: NodeJS.ProcessEnv, appUrl: string, ownerOf?: StoreHostOwner): void {
+  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) installFramePolicies(target, env, appOriginOf(appUrl), ownerOf);
   guardPermissions(session.defaultSession, 'store-frames'); // a store frame's requests and checks denied
   guardPermissions(session.fromPartition(CAPTURE_PARTITION), 'all'); // the partition holds captures alone
 }
 
 // P4-B5: `exports`, the export service itself (X31), for main's delivery (Send to), which exports as the library does
-export function startArtifacts({ hosts, register, registerMachine, emit, env, openWindow, root, artifactsSocket, authors, remote }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ExportService, 'exportForLibrary'> } {
+export function startArtifacts({ hosts, register, registerMachine, emit, env, openWindow, root, artifactsSocket, authors, remote, fileFrames }: ArtifactsDeps): { stop(): void; exporters: ExporterRegistry; exports: Pick<ExportService, 'exportForLibrary'> } {
   const deps = { dispatch: hosts.dispatch, postDocPort: hosts.postDocPort, closeDocPorts: hosts.closeDocPorts, channel: () => new MessageChannelMain() };
   register('artifacts.open', ({ artifactId, doc }, { client }) => openDocument(deps, artifactId, client, doc));
   // P3-A M7: the scheme and the export service
@@ -92,7 +99,10 @@ export function startArtifacts({ hosts, register, registerMachine, emit, env, op
   // P5 O7 M5b: the embeds, the remote responder by placement, this Mac's store (or its daemon's), the remote responder by referrer
   const first = remote === undefined ? embeds : inOrder(embeds, (request) => remote(request, 'placed'));
   const notFound = remote === undefined ? undefined : (request: Request) => remote(request, 'referred');
-  for (const target of [session.defaultSession, session.fromPartition(CAPTURE_PARTITION)]) serveArtifacts(target, content, first, endpoint, notFound);
+  // UX wave U6b-2: the default partition's chain asks the file frames' responder first; the capture partition's has none,
+  // so a token asked there reaches only the store's own path, which answers a host that is no artifact's id 404
+  serveArtifacts(session.defaultSession, content, fileFrames === undefined ? first : inOrder(fileFrames, first), endpoint, notFound);
+  serveArtifacts(session.fromPartition(CAPTURE_PARTITION), content, first, endpoint, notFound);
   // E3: the engine host's connection losses, counted for a dashboard export's one recapture across a restart
   let hostLosses = 0;
   const stopLosses = hosts.onState('engine-host', (state) => {

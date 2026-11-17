@@ -4,6 +4,7 @@ import type { DenialKind } from '@shared/graph/enums';
 import type { AskAnswer } from '@shared/maws/tools'; // E1
 import type { Cell, SubagentStatus, ToolCategory } from './rows';
 import { isCuaJsTool, MCP_TOOL } from './classify';
+import { isWebFetch } from '@shared/engine/web-fetch'; // UX wave U3b
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import { duration } from './time';
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U2
@@ -110,7 +111,7 @@ export type CellLabelInput =
   | { kind: 'shell'; command: string; status: 'running' | 'done' | 'error' | 'stopped'; durationMs: number; background: boolean }
   | { kind: 'edit'; path: string; change: 'create' | 'update' | 'delete'; added: number; removed: number }
   | { kind: 'read'; paths: string[] }
-  | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null }
+  | { kind: 'denied'; subject: string; disposition: 'denied' | 'auto_denied' | 'stopped'; denialKind: DenialKind; reason: string | null; again?: boolean; approved?: boolean } // UX wave U1c: `again` and `approved` are read for `auto_denied` alone
   | { kind: 'generic'; toolName: string; category: ToolCategory; detail?: string | null; scope?: string | null }
   | { kind: 'moved'; name: string; durationMs: number }; // UX wave U4a (decision 33): a call the engine moved to the background so a message sent now could be read
 
@@ -137,7 +138,8 @@ export function cellLabel(input: CellLabelInput): string {
       const reason = input.reason ? ` · ${input.reason}` : '';
       switch (input.disposition) {
         case 'denied': return `Denied: \`${input.subject}\`${reason}`;
-        case 'auto_denied': return `Auto mode blocked: \`${input.subject}\`${input.denialKind === 'automode-parsing-error' ? ' · review unreadable' : reason}`;
+        case 'auto_denied': // UX wave U1c (Interfaces §A): blocked again, and approved, as the rule over the rows says (blocked.ts)
+          return `Auto mode blocked${input.again ? ' again' : ''}: \`${input.subject}\`${input.denialKind === 'automode-parsing-error' ? ' · review unreadable' : reason}${input.approved ? ' · approved' : ''}`;
         case 'stopped': return `${stoppedLabel(input.subject, true)}${input.denialKind === 'automode-unavailable' ? ' · auto mode unavailable' : ''}`;
       }
       break;
@@ -146,14 +148,14 @@ export function cellLabel(input: CellLabelInput): string {
       return `Moved \`${input.name}\` to the background after ${duration(input.durationMs)}`;
     case 'generic': {
       if (isCuaJsTool(input.toolName)) return 'Used computer use'; // UX wave U12a: the computer-use plugin's call, under either name
+      const detail = input.detail ?? null;
+      if (isWebFetch(input.toolName)) return `Fetched ${detail ?? ''}`; // UX wave U3b (M5): the web plugin's fetch too, before the MCP form
       const mcp = MCP_TOOL.exec(input.toolName);
       if (mcp) return `Used ${mcp[1]} · ${mcp[2]}`;
-      const detail = input.detail ?? null;
       switch (input.toolName) {
         case 'Skill': return detail === null ? 'Ran a skill' : `Ran /${detail.replace(/^\//, '')}`; // UX wave U2 (decision 5): the row's words, once the view's
         case 'ToolSearch': return `Loaded ${plural(Number(detail ?? 0), 'tool')}`;
         case 'Grep': case 'Glob': return `Searched for \`${detail ?? ''}\`${input.scope ? ` in ${input.scope}` : ''}`;
-        case 'WebFetch': return `Fetched ${detail ?? ''}`;
         case 'WebSearch': return `Searched the web for ${detail ?? ''}`;
         case 'EnterPlanMode': return 'Entered plan mode';
         case 'EnterWorktree': return `Entered worktree ${detail ?? ''}`;
@@ -164,6 +166,16 @@ export function cellLabel(input: CellLabelInput): string {
   }
   return '';
 }
+
+// UX wave U1c (l4-approvals-12; Interfaces §A): the words of a call auto mode blocked beside its label: the button, and
+// the one muted line under a row blocked again that still offers it (`call` is unused until a later landing names a call)
+export const BLOCKED = {
+  approve: 'Approve and retry',
+  always: {
+    command: 'A rule that always denies this command blocks it every time. Change the rule or the mode to run it.',
+    call: 'A rule that always denies this call blocks it every time. Change the rule or the mode to run it.',
+  },
+} as const;
 
 // UX wave U2 (decision 23, R2): one form for every stopped call, a member of its run or a call with no result in a closed
 // turn: `Stopped: ` and the call's subject, in code marks but for a shell call's description, with no duration.
@@ -219,13 +231,16 @@ export const SAFEGUARD_LINE = { skipped: 'Auto mode · review skipped', not_flag
 // ---------------------------------------------------------------------------------------------------------------------
 // Subagents, agent messages, plans, questions, slots, boundaries, errors
 
-export function subagentSentence(names: string[], status: SubagentStatus): string {
+// `exited` (UX wave U3b, M5, decision 19): a row whose agents all ended with the session's process, a stopped row
+// whose sentence is U8's words for the same fact
+export function subagentSentence(names: string[], status: SubagentStatus | 'exited'): string {
   const subject = names.length <= 3 ? list(names) : `${names.slice(0, 2).join(', ')} and ${names.length - 2} more`;
   switch (status) {
     case 'started': case 'working': return `${subject} started working`;
     case 'finished': return `${subject} finished`;
     case 'finished_with_errors': return `${subject} finished with errors`;
     case 'stopped': return `${subject} was stopped`;
+    case 'exited': return `${subject} ended with the session`;
   }
 }
 
@@ -262,7 +277,9 @@ export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedb
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
 export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
-export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped' } as const;
+// UX wave U1b (decision 10): `dismissed`, every line of a question dismissed or declined whole; `skipped` stays an ask's
+// line for a question passed over.
+export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped', dismissed: 'Dismissed' } as const;
 
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 
@@ -317,7 +334,17 @@ const lostCopy = (lostAttentionCount: number, lostAskCount: number) => {
 export const processExitCopy = (reason: string, lostAttentionCount: number, lostAskCount = 0) =>
   reason === 'budget' ? RELEASED_COPY /* C12 */ : reason === 'idle' ? IDLE_RELEASED_COPY /* E10 */ : `Session process exited (${reason})${lostAttentionCount > 0 ? ` · ${lostCopy(lostAttentionCount, lostAskCount)} lost` : ''}`;
 export const bashHeader = (command: string) => `! ${command}`;
-export const LOCAL_COMMAND_HEADER = 'Command output';
+// UX wave U3b (O-18; Interfaces B and L): a slash command's output is a light line, `⎿` then the output, clipped at two
+// lines until opened; one that stands with no bubble of its command names the command the engine ran first
+export const COMMAND_LINE = { mark: '⎿', showMore: 'Show more', showLess: 'Show less' } as const;
+export const commandLead = (run: { command: string }) => `/${run.command} · `;
+// UX wave U3b (Interfaces §L): an answer's action row; a disabled Fork says U9's sentence (useForkUnavailable), never one of these
+export const ANSWER_ACTIONS = { copy: 'Copy', fork: 'Fork from here', forkTitle: 'Starts a new session from this point. This one stays as it is.' } as const;
+
+// UX wave U3b (decision 16, Interfaces §L): while a session compacts, the row at the transcript's end, with the time so
+// far in the turn line's format once it reaches a second ('' before), and the sidebar's hover card
+export const COMPACTING_SESSION = 'Compacting session…';
+export const compactingLine = (elapsed: string) => (elapsed === '' ? COMPACTING_SESSION : `${COMPACTING_SESSION} ${elapsed}`);
 export const NOT_SENT = 'Not sent'; // a dropped user row: a steer the engine cancelled, or an idle prompt dropped before its init
 // W1: a message sent while a turn runs, Claude Desktop's dimmed tail bubble with its caption until the engine takes it,
 // and a steer the engine took, inside the turn at the step where it arrived.
@@ -417,9 +444,10 @@ export const RECEIPT = {
 export const ASK = {
   title: 'Questions', // the capsule's heading when the ask has no title
   count: (n: number) => `Asked ${plural(n, 'question')}`,
-  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended' },
+  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended', dismissed: 'Dismissed' /* UX wave U1b: answered, every answer skipped */ },
   withdrawn: 'Cancelled, the turn was interrupted', // a cancelled ask whose call the engine withdrew (`cancelReason: 'withdrawn'`)
   open: 'Open',
+  openBeside: 'Open beside', // UX wave U1b: the capsule's button while its form stands in the row
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
   decideForMe: 'Decide for me',
@@ -428,10 +456,15 @@ export const ASK = {
 
 // The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
 // error, a withdrawn one its interrupt wording, every other its state's.
-export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; error: string | null; cancelReason: string | null }): string {
+// UX wave U1b: an answered ask every one of whose answers was skipped was dismissed, and says so (its lines read Skipped).
+export function askStateCopy(row: { state: Exclude<keyof typeof ASK.state, 'dismissed'> | 'error'; error: string | null; cancelReason: string | null; answers?: readonly AskAnswer[] | null }): string {
   if (row.state === 'error') return row.error ?? '';
+  if (row.state === 'answered' && row.answers != null && row.answers.length > 0 && row.answers.every((answer) => answer.status === 'skipped')) return ASK.state.dismissed;
   return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
 }
+
+/** A question's title as its ask's capsule shows it: the header, else the question. */
+export const askQuestionTitle = (question: { header?: string; question: string }): string => question.header ?? question.question;
 
 // One answer as the answered capsule's line reads it: the labels (and what was typed under Other), the text, the paths,
 // `<name> (<directory>)` for a repository, a design system by its name or the build request (P3-D), or the two
@@ -531,20 +564,42 @@ export const ARTIFACT = {
   neverAnswered: (name: string) => `Registering artifact ${name} was never answered`, // E11
   failed: (name: string, error: string) => `Could not register artifact ${name}: ${error}`,
   open: 'Open',
+  // UX wave U10b (M5, §C.4): an agent's delete
+  deleting: (title: string) => `Deleting ${title}…`, deleted: (title: string) => `Deleted ${title}`, restored: (title: string) => `Restored ${title}`,
+  neverAnsweredDelete: (title: string) => `Deleting ${title} was never answered`, // E11 (fix wave 1): the family's form, its turn closed first
+  couldNotDelete: (title: string, reason: string) => `Could not delete ${title}: ${reason}`, undo: 'Undo', notRestored: (sentence: string) => `Not restored: ${sentence}`,
 } as const;
+
+// UX wave U10b (M5, §C.4; R2, R3): the reason a refused delete's row gives the person, by the refusal's `why`. The agent's
+// sentence names the tool and "the user"; the row never does. A `why` this table lacks (a newer machine's) is drawn as
+// the refusal reader leaves the agent's sentence.
+const DELETE_REASONS: Readonly<Record<string, string>> = {
+  byUser: 'you made it. Delete it from the Library if you no longer need it.',
+  edited: 'you have edited it. Delete it from the Library if you no longer need it.',
+  otherSession: 'another session made it. Delete it from the Library if you no longer need it.',
+  unknown: 'MAWS cannot tell that only agents have written to it. Delete it from the Library if you no longer need it.',
+  designSystemInUse: 'it still styles other artifacts. Move them to another design system first.',
+};
 
 // The host's refusal is written for the model: the tool's own prefix and, last, which tool to call instead (P3-A: or the
 // refusal's machine-readable JSON). The human reads the reason alone, as the artifact cells show theirs.
 const refusalForHuman = (error: string) =>
   error
-    .replace(/^artifact_(create|update|publish): /, '')
+    .replace(/^artifact_(create|update|publish|delete): /, '') // UX wave U10b: the delete's prefix too
     .replace(/ \{"reason":.*\}$/, '')
     .replace(/; use artifact_(create|update|publish)$/, '');
 
 // The row's one line: its refusal, else Registering until the result is in (never answered when its turn closed first,
 // E11), else the version it registered (without a version when the result named none).
-export function artifactHeading(row: { action: 'create' | 'update'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true }): string {
+// UX wave U10b (M5, §C.4): a delete's heading is "Deleting <title>…" until its answer, then "Deleted <title>", or its refusal
+// in the person's words (never answered, E11, when its turn closed first). Whether the artifact is live again ("Restored <title>") is read by the row's view, not here.
+export function artifactHeading(row: { action: 'create' | 'update' | 'delete'; artifactId: string; title: string | null; version: number | null; error: string | null; answered: boolean; neverAnswered?: true; why?: string }): string {
   const name = row.title ?? row.artifactId;
+  if (row.action === 'delete') {
+    if (row.error !== null) return ARTIFACT.couldNotDelete(name, (row.why !== undefined ? DELETE_REASONS[row.why] : undefined) ?? refusalForHuman(row.error));
+    if (row.neverAnswered) return ARTIFACT.neverAnsweredDelete(name);
+    return row.answered ? ARTIFACT.deleted(name) : ARTIFACT.deleting(name);
+  }
   if (row.error !== null) return ARTIFACT.failed(name, refusalForHuman(row.error));
   if (row.neverAnswered) return ARTIFACT.neverAnswered(name);
   if (row.version === null && !row.answered) return ARTIFACT.registering(name);

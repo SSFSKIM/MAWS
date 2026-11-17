@@ -41,6 +41,18 @@ describe('the status patch', () => {
     expect(agentRows(graph, 'disk')).toEqual([]); // no recorded agent sits under "On disk"
   });
 
+  // Card C1 (option 2): an exited agent's row word turns on what its status rests on, so an exited node keeps it.
+  it('keeps on an exited node what its status rests on, and on no other node', () => {
+    const graph = patched([
+      entry('b', 'bridge', { status: 'exited', evidence: 'bridge', running: false }),
+      entry('p', 'parent', { status: 'exited', evidence: 'parent' }),
+      entry('s', 'session', { status: 'exited', evidence: 'session' }),
+      entry('r', 'running', { status: 'running', evidence: 'bridge', running: true }),
+      entry('c', 'completed', { status: 'completed', evidence: 'rows', outcome: { status: 'completed', raw: 'completed', at: AT } }),
+    ]);
+    expect(['b', 'p', 's', 'r', 'c'].map((id) => graph.tasks.get(id as never)!.evidence)).toEqual(['bridge', 'parent', 'session', undefined, undefined]);
+  });
+
   it('leaves an agent DX4 leaves unknown as unknown, under the section that says so', () => {
     const graph = patched([entry('a1', 'forked skill', { status: 'unknown', evidence: 'none' })]);
     expect(statusOf(graph, 'a1')).toBe('unknown');
@@ -53,6 +65,17 @@ describe('the status patch', () => {
     ]);
     const node = graph.tasks.get('a1' as never)!;
     expect(node).toMatchObject({ endedAt: AT, summary: 'read it', outputFile: '/tmp/x.output', startedAt: '2026-10-17T09:59:00.000Z' });
+  });
+
+  // UX wave U8d (§C, R2): this Mac's body carries when each agent's call was made, taken after the node's own start and
+  // before the agent file's first row.
+  it('starts a node at its own start, else at the entry’s startedAt, else at the agent file’s first row', () => {
+    const file = { size: 10, mtimeMs: 1, firstAt: '2026-10-17T09:50:00.000Z', lastAt: null };
+    const facts: SubagentStatusFacts = { status: 'running', evidence: 'rows', outcome: { status: 'running', raw: 'async_launched', at: AT }, file };
+    const called = '2026-10-17T09:55:00.000Z';
+    const metas = [{ ...entry('own', 'own start', facts), startedAt: called }, { ...entry('called', 'called', facts), startedAt: called }, entry('filed', 'filed', facts)];
+    const graph = withStatuses(taskGraphOf(metas, [started('own', 'own start')]), metas);
+    expect(['own', 'called', 'filed'].map((id) => graph.tasks.get(id as never)!.startedAt)).toEqual([AT, called, file.firstAt]);
   });
 
   it('places a nested agent under the parent its meta names, or failing that its spawn record', () => {

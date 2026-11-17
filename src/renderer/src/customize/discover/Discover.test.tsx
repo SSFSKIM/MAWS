@@ -4,16 +4,16 @@
 // + opens the install sheet with the add step for a marketplace the engine lacks, the contents and the runs-code
 // warning, and runs the add, then the install only once the add succeeded; a failed install leaves the marketplace
 // added and offers its removal; an installed card opens My items; Skills names the plugin and its skills.
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { QueryClient } from '@tanstack/react-query';
+import { act, cleanup, fireEvent, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CommandName, EventName, PreloadBridge } from '@shared/ipc/schema';
 import type { CatalogHome, CatalogItem, CatalogPage, CatalogQueryInput } from '@shared/ipc/schema/catalog';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
 import { useLibraryStore } from '../../widgets/plugins/library-store';
-import { PluginsLibrary } from '../../widgets/PluginsWidget';
-import { CustomizeView } from '../CustomizeView';
-import { SkillsDiscover, SkillsManage } from './SkillsDiscover';
+import { mountCustomize } from '../../test-support/customize-page';
+import { useLayout } from '../../stores/layout';
+import { useCustomizePage } from '../page';
 import { connectCatalogEvents } from './read';
 import { NO_CHOICES, useDiscoverStore } from './store';
 import { item } from './test-items';
@@ -107,6 +107,8 @@ function answer(name: CommandName, input: unknown): unknown {
       ];
     case 'catalog.icon':
       return { dataUrl: iconAnswer((input as { url: string }).url) };
+    case 'catalog.pluginIcons':
+      return { icons: (input as { plugins: { id: string }[] }).plugins.map(({ id }) => ({ id, iconUrl: null })) };
     case 'catalog.refresh':
       return answer('catalog.sources', {});
     case 'plugins.env':
@@ -174,6 +176,8 @@ afterEach(() => {
   useDiscoverStore.setState({ plugins: NO_CHOICES, skills: NO_CHOICES });
   useSessions.setState({ projects: new Map() });
   useCustomizeProject.setState({ projectId: undefined }, true);
+  useCustomizePage.setState({ search: '' });
+  useLayout.setState({ destination: null });
   forgetKeptOperations();
   delete (window as { maws?: PreloadBridge }).maws;
 });
@@ -186,14 +190,16 @@ const client = () => {
   disconnect = connectCatalogEvents(ipc, qc);
   return qc;
 };
-const mountPlugins = () =>
-  render(
-    <QueryClientProvider client={client()}>
-      <PluginsLibrary cwd={PROJECT} appSessionId={null} discover={{ cwd: PROJECT }} />
-    </QueryClientProvider>,
-  );
+// UX wave U11c: Customize's page on the project's folder, My items with Plugins chosen
+const mountAt = (show: 'plugins' | 'skills', view: 'mine' | 'discover' = 'mine') => {
+  useCustomizeProject.setState({ projectId: null, directory: PROJECT }, true);
+  return mountCustomize({ view, show }, client());
+};
+const mountPlugins = () => mountAt('plugins');
+const head = () => document.querySelector<HTMLElement>('[data-customize-header]')!;
+const press = (name: string) => fireEvent.click(within(head()).getByRole('radio', { name }));
 const discover = async () => {
-  fireEvent.click(screen.getByRole('radio', { name: 'Discover' }));
+  press('Discover');
   await screen.findByRole('region', { name: 'Featured' });
 };
 const card = (id: string) => document.querySelector<HTMLElement>(`[data-shelf] [data-catalog-card="${CSS.escape(id)}"]`)!;
@@ -217,7 +223,7 @@ const found = (selector: string) =>
   });
 const invoked = (name: string) => calls.filter((c) => c.name === name).map((c) => c.input);
 
-describe('Customize › Plugins › Discover', () => {
+describe('Customize › Discover, Show: Plugins', () => {
   it('is the library’s second view: Featured, the shelves, All; it reads the catalog with the page’s cwd and never the engine’s listing', async () => {
     mountPlugins();
     await discover();
@@ -234,8 +240,8 @@ describe('Customize › Plugins › Discover', () => {
     expect(h.querySelector('[data-trust]')!.getAttribute('data-trust')).toBe('Added by you');
     expect(h.querySelector('[data-trust]')!.getAttribute('title')).toBe('You added this marketplace. Anthropic hasn’t reviewed it.');
     expect(h.querySelector('[data-catalog-components]')!.textContent).toBe('hooks · runs code');
-    await waitFor(() => expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('image'));
-    expect(h.querySelector('[data-catalog-icon]')!.textContent).toBe('H');
+    await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
+    expect(h.querySelector('[data-item-image]')!.textContent).toBe('H');
   });
 
   it('See all filters to its shelf with a removable chip; a search lists results', async () => {
@@ -391,19 +397,30 @@ describe('Customize › Plugins › Discover', () => {
     expect(screen.getByRole('region', { name: 'Featured' }).querySelector('[data-marketplace-stays]')!.textContent).toContain('The marketplace claude-plugins-official stays added.');
   });
 
+  // UX wave U11c M1 (§C, the seed): an item is the same tile wherever it is drawn
+  it('an installed plugin draws one tile in My items and on its Discover card: the letter and colour of its install name', async () => {
+    mountPlugins();
+    const row = await found('[data-plugin-row="code-review@claude-plugins-official"] [data-item-image]');
+    expect([row.getAttribute('data-item-image'), row.getAttribute('data-item-kind'), row.textContent]).toEqual(['tile', 'plugin', 'C']);
+    const colour = row.getAttribute('data-tile-colour');
+    await discover();
+    const onCard = card(installedHere.id).querySelector('[data-item-image]')!;
+    expect([onCard.getAttribute('data-item-image'), onCard.getAttribute('data-item-kind'), onCard.textContent, onCard.getAttribute('data-tile-colour')]).toEqual(['tile', 'plugin', 'C', colour]);
+  });
+
   it('an icon main could not answer is asked again on Refresh, so main’s retry reaches an open window', async () => {
     let up = false;
     iconAnswer = (url) => (up && url.includes('plugin-icons') ? 'data:image/png;base64,iVBORw0KGgo=' : null);
     mountPlugins();
     await discover();
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(0));
-    expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('monogram');
+    expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     up = true;
     fireEvent.click(screen.getByRole('button', { name: 'Refresh' }));
-    await waitFor(() => expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('image'));
+    await waitFor(() => expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('icon'));
   });
 
-  it('an icon renders only as an image of its data: an SVG’s script and external reference neither run nor load; anything but image data is a monogram', async () => {
+  it('an icon renders only as an image of its data: an SVG’s script and external reference neither run nor load; anything but image data is the tile', async () => {
     const svg = '<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink" onload="window.__iconRan=1"><script>window.__iconRan=1</script><image xlink:href="https://evil.example/x.png" href="https://evil.example/x.png" width="10" height="10"/></svg>';
     const hostile = `data:image/svg+xml;base64,${btoa(svg)}`;
     iconAnswer = (url) => (url.includes('plugin-icons') ? hostile : null);
@@ -411,7 +428,7 @@ describe('Customize › Plugins › Discover', () => {
     mountPlugins();
     await discover();
     const tile = await waitFor(() => {
-      const el = card(frontend.id).querySelector('[data-catalog-icon="image"]');
+      const el = card(frontend.id).querySelector('[data-item-image="icon"]');
       if (!el) throw new Error('no icon yet');
       return el;
     });
@@ -422,11 +439,11 @@ describe('Customize › Plugins › Discover', () => {
     expect(fetched).not.toHaveBeenCalled();
     fetched.mockRestore();
     cleanup();
-    iconAnswer = (url) => (url.includes('plugin-icons') ? 'https://evil.example/x.png' : null); // not data: a monogram, never a request
+    iconAnswer = (url) => (url.includes('plugin-icons') ? 'https://evil.example/x.png' : null); // not data: the tile, never a request
     mountPlugins();
     await discover();
     await waitFor(() => expect(invoked('catalog.icon').length).toBeGreaterThan(1));
-    expect(card(frontend.id).querySelector('[data-catalog-icon]')!.getAttribute('data-catalog-icon')).toBe('monogram');
+    expect(card(frontend.id).querySelector('[data-item-image]')!.getAttribute('data-item-image')).toBe('tile');
     expect(card(frontend.id).querySelector('img')).toBeNull();
   });
 
@@ -468,14 +485,9 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
       useSessions.setState({ projects: new Map([[A, projectRecord(A, 0, { directory: PROJECT })], [B, projectRecord(B, 1, { directory: '/tmp/discover/project-b' })]]) });
       useCustomizeProject.setState({ projectId: A }, true);
       holding.add('marketplaces.add');
-      render(
-        <QueryClientProvider client={client()}>
-          <CustomizeView section={section} />
-        </QueryClientProvider>,
-      );
-      const tab = () => screen.getByRole('tabpanel', { name: panel });
+      mountCustomize({ view: 'mine', show: section }, client());
       const shelfCard = () => found(`[data-discover="${section}"] [data-shelf] [data-catalog-card="${CSS.escape(cardOf.id)}"]`);
-      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      press('Discover');
       fireEvent.click(within(await shelfCard()).getByRole('button', { name: `Add ${name}` }));
       await resolved();
       fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
@@ -484,21 +496,15 @@ describe('Customize: an add-then-install outlives a change of the page’s proje
       act(() => held.get('marketplaces.add')!());
       await waitFor(() => expect(invoked('plugins.install')).toEqual([expect.objectContaining({ cwd: PROJECT, plugin: `${name}@maws-discover-test` })]));
       fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: A } });
-      fireEvent.click(within(tab()).getByRole('radio', { name: 'Discover' }));
+      expect(head().querySelector('[data-state="on"]')!.textContent).toBe('Discover'); // the view is the page's, kept
       await waitFor(async () => expect(within(await shelfCard()).getByRole('status').textContent).toBe('done'));
     });
   }
 });
 
-describe('Customize › Skills › Discover', () => {
+describe('Customize › Discover, Show: Skills', () => {
   it('names the plugin that carries the skills, and notes that unknown contents are under Plugins', async () => {
-    render(
-      <QueryClientProvider client={client()}>
-        <SkillsManage cwd={PROJECT}>
-          <SkillsDiscover cwd={PROJECT} onOpenInstalled={() => {}} />
-        </SkillsManage>
-      </QueryClientProvider>,
-    );
+    mountAt('skills', 'discover');
     expect((await screen.findByText('Items whose contents are not known before install are under Plugins.')).tagName).toBe('P');
     expect(invoked('catalog.home')).toEqual([{ tab: 'skills', cwd: PROJECT }]);
     const shelf = await found(`[data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
@@ -511,26 +517,19 @@ describe('Customize › Skills › Discover', () => {
 
   it('an add-then-install asked here finishes after the person leaves for My items and for Plugins, its line still on the card', async () => {
     holding.add('marketplaces.add');
-    const qc = client();
-    const view = (section: 'plugins' | 'skills') => (
-      <QueryClientProvider client={qc}>
-        <CustomizeView section={section} />
-      </QueryClientProvider>
-    );
-    const { rerender } = render(view('skills'));
-    const skills = () => screen.getByRole('tabpanel', { name: 'Skills' });
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'Discover' }));
+    mountCustomize({ view: 'mine', show: 'skills' }, client());
+    press('Discover');
     const shelf = await found(`[data-discover="skills"] [data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     fireEvent.click(within(shelf).getByRole('button', { name: 'Add skills-only' }));
     await resolved();
     fireEvent.click(within(sheet()).getByRole('button', { name: 'Install' }));
     await waitFor(() => expect(held.has('marketplaces.add')).toBe(true)); // the add runs
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'My items' })); // Discover leaves
-    rerender(view('plugins')); // and so does the section
+    press('My items'); // Discover leaves
+    press('Plugins'); // and so does the kind
     act(() => held.get('marketplaces.add')!());
     await waitFor(() => expect(invoked('plugins.install')).toEqual([{ cwd: HOME, binary: BINARY, plugin: 'skills-only@maws-discover-test', scope: 'user' }]));
-    rerender(view('skills'));
-    fireEvent.click(within(skills()).getByRole('radio', { name: 'Discover' }));
+    press('Skills');
+    press('Discover');
     const back = await found(`[data-discover="skills"] [data-shelf] [data-catalog-card="${CSS.escape(skillsOnly.id)}"]`);
     await waitFor(() => expect(within(back).getByRole('status').textContent).toBe('done'));
   });

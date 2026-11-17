@@ -6,11 +6,10 @@ import { engineQuestionsOf, type TranscriptProps, type TranscriptSite } from '@s
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { ToolUseId } from '@shared/graph/ids';
 import { cellOf, turnContextOf, type ArtifactTitles, type ToolRecord, type TurnContext } from '../model/cells';
-import { artifactTitlesIn } from '../model/derive'; // UX wave U2
+import { artifactTitlesIn, turnCommandLine } from '../model/derive'; // UX wave U2; U3b
 import { rowId } from '../model/keys';
 import type { TranscriptState, TurnState } from '../model/reduce';
 import type { Cell, CellId, Row, RowId } from '../model/rows';
-import { userTextOf } from '../model/user-text';
 
 export interface RowInput<C extends TranscriptSite> { instanceId: string; props: TranscriptProps[C] }
 type RowOf<K extends Row['kind']> = Extract<Row, { kind: K }>;
@@ -190,19 +189,22 @@ export function groupInput(row: RowOf<'group'>, turn: TurnState | undefined, pen
   return { instanceId: `group:${tools[0].instanceId}`, props: { calls, isActive: tools.some((tool) => tool.props.isRunning), isExpanded: row.expanded } };
 }
 
+// UX wave U3b (decision 5): the command is the run the output's event carries, else, for an output under its command's
+// bubble, that command's line (`turnCommandLine`: the turn it is in, or on the file's routes the turn it is placed
+// after), else none; `isErrored` is the row's error. Nothing but that one turn is read.
 export function commandInput(row: RowOf<'local_command'>, state: TranscriptState | undefined, revealed?: RowId | CellId): RowInput<'CommandOutput'> | null {
   if (!row.text.trim() || row.id === revealed) return null;
-  let command = ''; let args = '';
-  if (state) {
-    const events = [...state.turns.values()].flatMap((t) => t.events).concat(state.loose).sort((a, b) => a.at.localeCompare(b.at));
-    for (const e of events) {
-      if (e.at > row.at || (e.kind === 'user.message' && (row.messageUuid !== null ? e.messageUuid === row.messageUuid : `local:${e.id}` === row.id))) break;
-      if (e.kind !== 'user.message' || e.isSynthetic || e.origin === 'local-command') continue;
-      const match = /^\/([^\s]+)(?:\s+([\s\S]*))?$/.exec(userTextOf(e.content).text);
-      command = match?.[1] ?? ''; args = match?.[2] ?? '';
-    }
-  }
-  return { instanceId: row.messageUuid ?? row.id, props: { command, args, text: row.text, isErrored: false } };
+  const { command, args } = row.run ?? commandTurnLine(row, state) ?? { command: '', args: '' };
+  return { instanceId: row.messageUuid ?? row.id, props: { command, args, text: row.text, isErrored: row.error === true } };
+}
+
+function commandTurnLine(row: RowOf<'local_command'>, state: TranscriptState | undefined): { command: string; args: string } | null {
+  if (row.lone || state === undefined) return null;
+  const own = (event: SessionEvent) => event.kind === 'user.message' && (event.messageUuid !== null ? rowId.local(event.messageUuid) : rowId.localOfEvent(event.id)) === row.id;
+  const placed = row.turnId === null ? state.loose.find(own) : undefined;
+  const turnId = row.turnId ?? (placed === undefined ? null : (state.placement.get(placed.id) ?? null));
+  const turn = turnId === null ? undefined : state.turns.get(turnId);
+  return turn === undefined ? null : turnCommandLine(turn);
 }
 
 export function resultInput(input: ToolInput): RowInput<'ToolResult'> | null {

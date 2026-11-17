@@ -24,7 +24,7 @@ import { createDraftWriter, docOfDraft, isEmptyDoc, registerLiveDraft, type Draf
 import type { EditorEnv } from './env';
 import { closeSuggestions, suggesting } from './extensions';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav, type Recall } from './history';
-import { classifyFile, classifyText, mentionPath, type FileAction } from './paste';
+import { classifyFile, classifyText, mentionPath, pathRefusal, type FileAction } from './paste';
 import { classifyRemoteFile, PICKED_BY_PATH } from './remote-uploads'; // P5 O7 M4
 import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
@@ -968,8 +968,10 @@ export class EditorController {
           if (file.data === null) {
             // P5 O7 M4: a path names nothing on another machine, and the + menu read no bytes of this file
             const machine = this.inputs.uploadsTo ?? null;
-            if (machine === null) this.insertMention(file.path);
-            else warn(PICKED_BY_PATH(file.name, machine));
+            const refusal = pathRefusal(file.name, file.path); // U1c: such a path is mentioned by no one (paste.ts)
+            if (machine !== null) warn(PICKED_BY_PATH(file.name, machine));
+            else if (refusal !== null) warn(refusal);
+            else this.insertMention(file.path);
           }
           else if (file.mediaType === 'application/pdf')
             this.addAttachment({ id: atomId('attachment'), kind: 'document', name: file.name, mediaType: 'application/pdf', bytes: file.bytes, data: file.data, persisted: true });
@@ -989,7 +991,8 @@ export class EditorController {
         return { text, cursor: text.length };
       },
       fill: (text, mode) => {
-        if (this.busy || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
+        // UX wave U6e (ticket 675): nor while a Send waits for a drop's conversion, whose serialise would carry the fill
+        if (this.busy || this.submitAfterConverting || submissions.has(this.inputs.appSessionId) || this.inputs.disabled !== null) return false;
         this.revision += 1; // even replacing an empty box with empty text supersedes a pending draft restore
         if (mode === 'replace') this.setDoc(textDoc(text), { silently: false, caret: 'end' });
         else if (mode === 'append') editor().chain().focus('end').insertContent(inlineContent(text)).run();

@@ -1,6 +1,7 @@
 // `window.__maws_harness.code` (C8c execution document, Interfaces *Harness API*; the types are `api.ts`): reads what
-// Review, Files and the viewer draw, from their DOM (the chips, the list, the counter, the tree rows, the notices) and
-// the stores behind it (the hunk texts, the viewer's text), and drives them with the clicks a reader would make.
+// Review, Files and the viewer draw, from their DOM (the chips, the stack's sections, the counter, the tree rows, the
+// notices) and the stores behind it (the hunk texts, the viewer's text), and drives them as a reader would (clicks, a
+// scroll, the View menu).
 import type { AppSessionId } from '@shared/graph/ids';
 import { workingFolder } from '@shared/sessions/working-folder';
 import { checkoutKey, machineFor } from '../../ipc/machine';
@@ -14,7 +15,7 @@ import { diffOf, fileDiffOf, turnKeyOf, useReview, type DiffTarget } from '../..
 import type { ReviewState } from '../../tools/code/review/ReviewTool';
 import { useViewer } from '../../tools/code/viewer/viewer-store';
 import { useTranscriptStore, type TurnId } from '../../transcript';
-import type { CodeHarnessApi, CodeHarnessReview, CodeHarnessViewer, ReviewSurface } from './api';
+import type { CodeHarnessApi, CodeHarnessReview, CodeHarnessSection, CodeHarnessViewer, ReviewSurface } from './api';
 import { transcriptKey } from './CodeHarnessBlock';
 
 const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
@@ -51,8 +52,6 @@ function click(root: ParentNode, selector: string, what: string): void {
   if (!el) throw new Error(`harness.code: no ${what}`);
   el.click();
 }
-
-const buttonNamed = (root: ParentNode, text: string) => [...root.querySelectorAll<HTMLButtonElement>('button')].find((b) => b.textContent === text) ?? null;
 
 // Which surface a root is, the session and directory it reviews, and its turn (Last turn's hunks come from the store).
 interface ReviewTarget {
@@ -95,14 +94,15 @@ function filesOf(target: ReviewTarget, scope: ReviewScope): { files: ReviewFile[
   const machine = machineFor(target.appSessionId);
   const status = useGit.getState().entries.get(checkoutKey(machine, target.directory))?.status ?? null;
   if (!status) return null;
+  // UX wave U5b-2: a target's key ends with the read it is made with and what it is against (review-store's `keys`)
   const prefix = `${checkoutKey(machine, target.directory)}\0${scope}\0`;
   const found = [...useReview.getState().diffs.keys()].find((key) => key.startsWith(prefix));
   if (!found) return null;
-  const base = found.slice(prefix.length);
-  const diffTarget: DiffTarget = { machine, directory: target.directory, scope, base: base === '' ? null : base };
+  const [read, against] = found.slice(prefix.length).split('\0') as [DiffTarget['read'], string];
+  const diffTarget: DiffTarget = { machine, directory: target.directory, scope, read, against: against === '' ? null : against };
   const diff = diffOf(useReview.getState(), diffTarget);
   if (diff?.status !== 'ok') return null;
-  return { files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status }), diff: diffTarget };
+  return { files: gitScopeFiles({ scope, repoRoot: status.repoRoot, files: diff.files, patch: diff.patch, status, untracked: diff.untracked ?? null }), diff: diffTarget };
 }
 
 function hunksOf(root: HTMLElement, scope: ReviewScope | null, selected: string | null): string[] | null {
@@ -116,16 +116,59 @@ function hunksOf(root: HTMLElement, scope: ReviewScope | null, selected: string 
   return fetched?.status === 'ok' ? (fetched.file?.hunks ?? []) : null;
 }
 
+// The stack's sections in order, and the one at the top of its scroller (the first before any has scrolled past).
+const sectionsOf = (root: HTMLElement) => [...root.querySelectorAll<HTMLElement>('[data-review-file]')];
+const stackOf = (root: HTMLElement) => root.querySelector<HTMLElement>('[data-review-stack]');
+const offsetIn = (scroller: HTMLElement, el: Element) => el.getBoundingClientRect().top - scroller.getBoundingClientRect().top + scroller.scrollTop;
+
+function topSection(root: HTMLElement): HTMLElement | null {
+  const scroller = stackOf(root);
+  const sections = sectionsOf(root);
+  if (!scroller) return null;
+  let top = sections[0] ?? null;
+  for (const section of sections) if (offsetIn(scroller, section) <= scroller.scrollTop + 1) top = section;
+  return top;
+}
+
+function sectionOf(root: HTMLElement, path: string): HTMLElement | null {
+  return sectionsOf(root).find((section) => section.dataset.reviewFile === path) ?? null;
+}
+
+const countOf = (text: string, sign: '+' | '−') => Number((sign === '+' ? /\+([\d,]+)/ : /−([\d,]+)/).exec(text)?.[1]?.replaceAll(',', '') ?? 0);
+
+// A section's row in `files`: what its header and attributes say.
+function fileOf(section: HTMLElement): CodeHarnessReview['files'][number] {
+  const counts = section.querySelector('[data-review-counts]')?.textContent ?? '';
+  return {
+    path: section.dataset.reviewFile!,
+    added: countOf(counts, '+'),
+    removed: countOf(counts, '−'),
+    viewed: section.hasAttribute('data-viewed'),
+    kind: section.dataset.kind ?? '',
+    folded: section.hasAttribute('data-folded'),
+  };
+}
+
+function section(path: string, surface?: ReviewSurface): CodeHarnessSection | null {
+  const root = reviewRoot(surface);
+  const found = root ? sectionOf(root, path) : null;
+  if (!root || !found) return null;
+  return { ...fileOf(found), hunks: hunksOf(root, (root.dataset.scope || null) as ReviewScope | null, path) };
+}
+
+function mustSection(path: string, surface?: ReviewSurface): HTMLElement {
+  const found = sectionOf(mustRoot(surface), path);
+  if (!found) throw new Error(`harness.code: no section for ${path}`);
+  return found;
+}
+
 function review(surface?: ReviewSurface): CodeHarnessReview | null {
   const root = reviewRoot(surface);
   if (!root) return null;
   const scope = (root.dataset.scope || null) as ReviewScope | null;
-  const files = [...root.querySelectorAll<HTMLButtonElement>('[role="option"] button[data-path]')].map((button) => {
-    const counts = /\+(\d+) −(\d+)/.exec(button.textContent ?? '');
-    return { path: button.dataset.path!, added: Number(counts?.[1] ?? 0), removed: Number(counts?.[2] ?? 0), viewed: button.hasAttribute('data-viewed'), kind: button.dataset.kind ?? '' };
-  });
-  const selected = root.querySelector<HTMLElement>('[role="option"][aria-selected="true"] button[data-path]')?.dataset.path ?? null;
-  const counter = /Showing hunk (\d+) of (\d+)/.exec(root.querySelector('[data-review-hunk]')?.textContent ?? '');
+  const files = sectionsOf(root).map(fileOf);
+  const selected = topSection(root)?.dataset.reviewFile ?? null;
+  const counter = /(\d+) of (\d+)/.exec(root.querySelector('[data-review-hunk]')?.textContent ?? '');
   return {
     scope,
     turnId: targetOf(root)?.turnId ?? null,
@@ -133,14 +176,33 @@ function review(surface?: ReviewSurface): CodeHarnessReview | null {
     selected,
     hunks: hunksOf(root, scope, selected),
     hunk: counter ? { index: Number(counter[1]), count: Number(counter[2]) } : null,
-    mode: buttonNamed(root, 'Split')?.getAttribute('aria-pressed') === 'true' ? 'split' : 'unified',
+    mode: root.dataset.mode === 'split' ? 'split' : 'unified',
     wrap: useViewer.getState().wrap,
     footer: root.querySelector('[data-review-footer]')?.textContent ?? '',
     header: root.querySelector('[data-review-header]')?.textContent ?? '',
   };
 }
 
-const fileButton = (path: string) => `[role="option"] button[data-path="${CSS.escape(path)}"]`;
+// A reader brings a file into view by scrolling its section to the top of the stack: a wheel, then the scroll, so the
+// stack reads it as the person's (a scroll with no input before it is a layout change to the stack).
+function bringIntoView(root: HTMLElement, path: string): HTMLElement {
+  const scroller = stackOf(root);
+  const section = sectionOf(root, path);
+  if (!scroller || !section) throw new Error(`harness.code: no section for ${path}`);
+  scroller.dispatchEvent(new WheelEvent('wheel', { bubbles: true }));
+  scroller.scrollTop = offsetIn(scroller, section);
+  return section;
+}
+
+// The View menu's item: the trigger opens on Enter as on a key press (Radix opens it on a pointer down or a key, not on a
+// click), then the item, drawn in a portal, is clicked. Answered by what `review()` reads next.
+async function viewItem(root: HTMLElement, item: 'unified' | 'split' | 'wrap'): Promise<void> {
+  const trigger = root.querySelector<HTMLElement>('[data-review-view]');
+  if (!trigger) throw new Error('harness.code: no View menu');
+  trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true }));
+  const found = await until(() => document.querySelector<HTMLElement>(`[data-review-view-item="${item}"]`), `the View menu's ${item}`);
+  found.click();
+}
 
 // ---- Files --------------------------------------------------------------------------------------------------------------
 
@@ -195,26 +257,29 @@ function viewer(): CodeHarnessViewer | null {
 export const codeProbes: CodeHarnessApi = {
   review,
   selectScope: (scope) => click(mustRoot('panel'), `[data-chip="${scope}"]`, `${scope} chip`),
-  selectFile: (path, surface) => click(mustRoot(surface), fileButton(path), `file ${path}`),
+  selectFile: (path, surface) => void bringIntoView(mustRoot(surface), path),
   nextHunk: (surface) => click(mustRoot(surface), 'button[aria-label="Next hunk"]', 'Next hunk'),
   prevHunk: (surface) => click(mustRoot(surface), 'button[aria-label="Previous hunk"]', 'Previous hunk'),
   setMode(mode, surface) {
-    const button = buttonNamed(mustRoot(surface), mode === 'split' ? 'Split' : 'Unified');
-    if (!button) throw new Error('harness.code: no mode toggle (the file has no hunks)');
-    button.click();
+    const root = mustRoot(surface);
+    if ((root.dataset.mode === 'split' ? 'split' : 'unified') === mode) return;
+    void viewItem(root, mode).catch((error: unknown) => console.error(error));
   },
   toggleWrap(surface) {
-    const button = buttonNamed(mustRoot(surface), 'Wrap');
-    if (!button) throw new Error('harness.code: no Wrap toggle');
-    button.click();
+    void viewItem(mustRoot(surface), 'wrap').catch((error: unknown) => console.error(error));
   },
   async markViewed(path, surface) {
-    click(mustRoot(surface), fileButton(path), `file ${path}`);
-    const section = await until(() => mustRoot(surface).querySelector<HTMLElement>(`[data-review-file="${CSS.escape(path)}"]`), `${path}'s section`);
-    const button = await until(() => buttonNamed(section, 'Mark viewed') ?? buttonNamed(section, 'Viewed'), 'Mark viewed');
-    if (button.textContent === 'Mark viewed') button.click();
+    const section = bringIntoView(mustRoot(surface), path);
+    const control = await until(() => section.querySelector<HTMLElement>('[data-review-viewed]'), `${path}'s Viewed`);
+    const marked = control instanceof HTMLInputElement ? control.checked : control.getAttribute('aria-pressed') === 'true';
+    if (!marked) control.click();
   },
-  openSelectedFile: (surface) => click(mustRoot(surface), '[data-open-file]', 'Open file ↗'),
+  section,
+  setFolded(path, folded, surface) {
+    const found = mustSection(path, surface);
+    if (found.hasAttribute('data-folded') !== folded) click(found, '[data-review-fold]', `${path}'s fold`);
+  },
+  openFileOf: (path, surface) => click(mustSection(path, surface), '[data-open-file]', `${path}'s Open file ↗`),
   files,
   async expand(path) {
     const row = await until(() => treeRow(path), `tree row ${path}`);

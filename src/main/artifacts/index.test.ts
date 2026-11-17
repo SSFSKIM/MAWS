@@ -9,6 +9,10 @@ import { join } from 'node:path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { serveOverHttp } from '../../services/artifacts/scheme/http';
 import { artifactSchemeHandler } from '../../render/scheme';
+import { endableClientRef } from '@shared/ipc/client';
+import { frameUrl } from '@shared/files/framed';
+import { fileFrameResponder } from '../file-frames/responder';
+import { createFrameTokens } from '../file-frames/tokens';
 
 const sessions = vi.hoisted(() => {
   const make = () => ({ protocol: { handle: vi.fn() } });
@@ -80,6 +84,42 @@ describe('startArtifacts', () => {
     started.stop();
     expect(started.exporters.get('html', 'pdf')).toBeUndefined();
     expect(started.exporters.get('document', 'pdf')).toBeUndefined();
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M4 decision 6; "Who owns a token"): the
+// default partition's chain asks the file frames' responder first; the capture partition's holds none, so with the
+// request filter set aside a live token asked there reaches only the store's own path, which answers 404.
+describe('the file frames’ responder in the chains (UX wave U6b-2)', () => {
+  it('the default partition’s chain asks the file responder first, and the capture partition’s chain has none: a live token asked there answers 404', async () => {
+    const tokens = createFrameTokens();
+    const bytes = Buffer.from('%PDF-1.4 an invented ledger');
+    let reads = 0;
+    const source = { read: async (offset: number, length: number) => (reads++, { bytes: new Uint8Array(bytes.subarray(offset, offset + length)), size: bytes.length, identity: 'one' }), close: async () => {} };
+    const issued = tokens.issue(endableClientRef('page:7.1'), 7, { name: 'ledger.pdf', framed: 'pdf', mime: 'application/pdf', csp: null, source });
+    if (typeof issued === 'string') throw new Error(`not issued: ${issued}`);
+    const url = frameUrl(issued.token, 'ledger.pdf');
+    const dispatch = vi.fn(async () => ({ ok: false, error: { code: 'invalid_input', message: 'no such artifact' } }));
+    const hosts = { dispatch, postDocPort: vi.fn(), closeDocPorts: vi.fn(), onState: () => () => {}, onStreaming: () => () => {}, onEvent: vi.fn(() => () => {}), peer: () => null };
+    sessions.default.protocol.handle.mockClear();
+    sessions.capture.protocol.handle.mockClear();
+    const started = startArtifacts({ hosts: hosts as unknown as ArtifactsDeps['hosts'], register: vi.fn() as never, registerMachine: vi.fn() as never, emit: vi.fn() as never, env: {}, openWindow: vi.fn() as never, root: '/tmp/artifacts', artifactsSocket: '/tmp/artifacts.sock', fileFrames: fileFrameResponder(tokens, () => {}) });
+    const onDefault = sessions.default.protocol.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
+    const onCapture = sessions.capture.protocol.handle.mock.calls.at(-1)![1] as (request: Request) => Promise<Response>;
+    const served = await onDefault(new Request(url));
+    expect(served.status).toBe(200);
+    expect(Buffer.from(await served.arrayBuffer()).equals(bytes)).toBe(true);
+    expect(dispatch).not.toHaveBeenCalled(); // neither the presenter's embeds nor the store were asked first
+    const before = reads;
+    const refused = await onCapture(new Request(url));
+    expect(refused.status).toBe(404);
+    expect(await refused.text()).not.toContain('ledger');
+    expect(reads).toBe(before); // the file's source was never read for it
+    expect(tokens.get(issued.token)).toBe(issued); // live throughout
+    // an artifact's page still goes down today's chain on the default partition
+    expect((await onDefault(new Request('maws-artifact://0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d/live/index.html'))).status).toBe(404);
+    expect(dispatch).toHaveBeenCalled();
+    started.stop();
   });
 });
 
