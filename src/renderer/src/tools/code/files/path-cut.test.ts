@@ -35,6 +35,16 @@ describe('folderFromEnd', () => {
     expect(folderFromEnd('a/', 1, chars)).toBeNull(); // even a folder that is shorter than two characters' room needs it
   });
 
+  // The task review's minor finding: in a proportional font a narrow folder fits a room below two characters' width, and
+  // is still not drawn there (M2 decision 9)
+  it('answers null below two characters of room even for a narrow folder that would fit it, in a proportional font', () => {
+    const glyph: Record<string, number> = { i: 0.3, '/': 0.4, '0': 1, '…': 1 };
+    const proportional = (text: string) => [...text].reduce((width, character) => width + (glyph[character] ?? 1), 0);
+    expect(proportional('i/')).toBeLessThan(1);
+    expect(folderFromEnd('i/', 1, proportional)).toBeNull();
+    expect(folderFromEnd('i/', 2, proportional)).toBe('i/'); // the control: at two characters' room it is drawn
+  });
+
   it('measures in the font it is given: a wide font fits fewer characters', () => {
     const wide = (text: string) => text.length * 2;
     expect(folderFromEnd(FOLDER, 40, wide)).toBe('…gauges/calibration/');

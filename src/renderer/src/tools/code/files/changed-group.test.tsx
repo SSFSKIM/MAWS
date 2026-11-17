@@ -20,7 +20,7 @@ import { installResizeObserver } from '../../../test-support/resize';
 import { REVIEW_COPY } from '../copy';
 import { resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
-import { filesTool, FILES_ROW_HEIGHT } from './FilesTool';
+import { CHANGED_ROW_FIXED, filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { measureWith } from './path-cut';
 import { useFiles } from './store';
 import { resetTreeState, treeOf, useTreeState } from './tree-state';
@@ -143,6 +143,19 @@ const firstInView = () => {
 };
 // The status's count as the git store holds it: the heading is not drawn while the list is scrolled past it.
 const heldCount = () => [...useGit.getState().entries.values()].find((held) => held.status !== null)?.status?.files.length ?? null;
+// happy-dom does not clamp a scroller's offset to its content. The browser does, also when the content shrinks under it
+// (the task review's first finding): this scroller reads and writes its offset within 0 and the content's height less
+// the 600 px viewport the suite gives it, the content's height being the tree's own (`[role="tree"]`'s style height).
+const clampScroller = () => {
+  const el = scroller();
+  let offset = el.scrollTop;
+  const max = () => Math.max(0, Number.parseFloat(el.querySelector<HTMLElement>('[role="tree"]')!.style.height) - 600);
+  Object.defineProperty(el, 'scrollTop', {
+    configurable: true,
+    get: () => (offset = Math.min(offset, max())),
+    set: (value: number) => void (offset = Math.max(0, Math.min(value, max()))),
+  });
+};
 const scrollTo = (top: number) => {
   scroller().scrollTop = top;
   fireEvent.scroll(scroller());
@@ -377,6 +390,78 @@ describe('the Changed group (U6b-3a)', () => {
     changed(main, statusOf([entry('src/f00.ts', '.M'), entry('src/f01.ts', '.M')]));
     await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('2'));
     expect(scroller().scrollTop).toBe(0);
+  });
+
+  // The task review's first finding: near the list's end a shrinking group lowers the most the offset can be, so the
+  // browser has clamped it before the correction runs; the correction starts from the offset before the change.
+  it('keeps the first tree row in view when the group shrinks with the list scrolled to its end, the offset clamped (S2)', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => file(`/r/src/f${String(i).padStart(2, '0')}.ts`));
+    const three = [entry('src/f00.ts', '.M'), entry('src/f01.ts', '.M'), entry('src/f02.ts', '.M')];
+    const main = changedMain({ ...TREE, '/r/src': many }, { '/r': statusOf(three) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('3'));
+    await expand('/r/src');
+    clampScroller();
+    scrollTo(100_000);
+    const end = scroller().scrollTop;
+    expect(end).toBe(70 * FILES_ROW_HEIGHT - 600); // four rows of the group, the root, three folders, sixty files, two files
+    const before = firstInView();
+    expect(before).toMatch(/^\/r\/src\/f/);
+    changed(main, statusOf(three.slice(0, 1))); // the group loses two rows
+    await waitFor(() => expect(heldCount()).toBe(1));
+    fireEvent.scroll(scroller());
+    expect(scroller().scrollTop).toBe(end - 2 * FILES_ROW_HEIGHT);
+    expect(firstInView()).toBe(before);
+  });
+
+  // The task review's second finding: a folded group's heading that goes with a clean status, or comes back, is a
+  // change of the group, not the person's press
+  it('keeps the first tree row in view when a folded group goes clean and comes back while scrolled into the tree (S2)', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => file(`/r/src/f${String(i).padStart(2, '0')}.ts`));
+    const main = changedMain({ ...TREE, '/r/src': many }, { '/r': statusOf([entry('src/f00.ts', '.M')]) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+    await expand('/r/src');
+    fireEvent.click(heading()!);
+    await waitFor(() => expect(heading()!.getAttribute('aria-expanded')).toBe('false'));
+    scrollTo(30 * FILES_ROW_HEIGHT + 5);
+    const before = firstInView();
+    expect(before).toMatch(/^\/r\/src\/f/);
+    changed(main, statusOf([])); // clean: the heading goes
+    await waitFor(() => expect(heldCount()).toBe(0));
+    fireEvent.scroll(scroller());
+    expect(scroller().scrollTop).toBe(29 * FILES_ROW_HEIGHT + 5);
+    expect(firstInView()).toBe(before);
+    changed(main, statusOf([entry('src/f01.ts', '.M')])); // and back, still folded
+    await waitFor(() => expect(heldCount()).toBe(1));
+    fireEvent.scroll(scroller());
+    expect(scroller().scrollTop).toBe(30 * FILES_ROW_HEIGHT + 5);
+    expect(firstInView()).toBe(before);
+    expect(treeOf(useTreeState.getState(), A).changedFolded).toBe(true);
+  });
+
+  // The architect's ruling 2 on CHANGED_ROW_FIXED (Decision Log 14): happy-dom applies no Tailwind, so the case reads the
+  // classes the constant mirrors off a drawn Changed row, and the inline indent, and sums their widths.
+  it('pins the fixed part of a Changed row’s width to the classes and indent the row is drawn with', async () => {
+    changedMain(TREE, { '/r': statusOf([entry('src/cart.ts', '.M')]) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(changedRow('/r/src/cart.ts')).not.toBeNull());
+    const button = changedRow('/r/src/cart.ts')!;
+    const box = button.parentElement!;
+    const mark = button.querySelector<HTMLElement>('[data-mark]')!;
+    const PX: Record<string, number> = { 'pr-1': 4, 'pr-2': 8, 'gap-1.5': 6, 'w-4': 16 };
+    const has = (element: Element, name: string) => expect(element.classList.contains(name), `${name} on ${element.outerHTML.slice(0, 80)}`).toBe(true);
+    has(box, 'pr-1');
+    has(button, 'pr-2');
+    has(button, 'gap-1.5');
+    has(mark, 'w-4');
+    const indent = Number.parseFloat(button.style.paddingLeft);
+    expect(indent).toBe(20);
+    // the list row's end, the button's end, one level's indent, the gap after the name and the gap before the slot, the slot
+    expect(CHANGED_ROW_FIXED).toBe(PX['pr-1'] + PX['pr-2'] + indent + 2 * PX['gap-1.5'] + PX['w-4']);
   });
 
   it('keeps Refresh on the first root’s row, with its room, while a Changed group stands above it, and with none', async () => {

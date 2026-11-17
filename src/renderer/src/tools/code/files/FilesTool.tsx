@@ -729,7 +729,7 @@ function ChangedHeading({ count, folded, fold }: { count: number; folded: boolea
 
 // What a Changed row leaves of its width for the folder, besides its name: the list row's end (pr-1), the button's end
 // (pr-2), one level's indent, the gap between the name and the folder, and the gap and slot of its letter.
-const CHANGED_ROW_FIXED = 4 + 8 + 20 + 6 + 6 + 16;
+export const CHANGED_ROW_FIXED = 4 + 8 + 20 + 6 + 6 + 16;
 
 // UX wave U6b-3a (decisions 6 and 8): a Changed row, one level in: its name, then its folder in the muted colour, cut at
 // its start where it does not fit and gone below two characters of room, then its letter.
