@@ -746,7 +746,8 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
     // The panel's tools over B's checkout. Each surface's rows, by path.
     const files = surface(page, 'files');
-    const treeRow = (name: string) => files.locator(`[role="treeitem"][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
+    // UX wave U6b-3a (Decision Log 14, ruling 1): tree rows by their `data-kind`, which a Changed row of the same path lacks
+    const treeRow = (name: string) => files.locator(`[role="treeitem"][data-kind][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
     // UX wave U5b-2: Source control is a page to read; its Uncommitted count is B's status
     const scm = surface(page, 'source-control').locator('[data-scm-page]');
     const uncommittedCount = scm.locator('[data-scm-part="uncommitted"] [data-scm-count]');
@@ -1143,13 +1144,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
       await openSurface(again, 'Files');
       const files = surface(again, 'files');
-      const checkoutRow = files.locator(`[role="treeitem"][data-path="${checkout}"]`);
+      const checkoutRow = files.locator(`[role="treeitem"][data-kind][data-path="${checkout}"]`);
       await expect(checkoutRow, `B's checkout in A's Files tool\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
       await expect(async () => {
         if ((await checkoutRow.getAttribute('aria-expanded')) !== 'true') await checkoutRow.click();
         await expect(checkoutRow).toHaveAttribute('aria-expanded', 'true', { timeout: 1_000 });
       }).toPass({ timeout: 30_000 });
-      const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      const pageRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, PAGE_ON_B.name)}"]`); // UX wave U6b-3a: the tree's row
       await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pageRow.click();
       const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
@@ -1175,7 +1176,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       rmSync(dirname(copy!), { recursive: true, force: true });
 
       // a PDF of B's checkout, drawn here from a copy by Chromium's viewer: its page's black square painted
-      const pdfRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PDF_ON_B)}"]`);
+      const pdfRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, PDF_ON_B)}"]`); // UX wave U6b-3a: the tree's row
       await expect(pdfRow, 'the PDF written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pdfRow.click();
       const pdfViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PDF_ON_B)}"]`);
@@ -1187,7 +1188,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
 
       // a file one byte past the copy's bound: its row says it is too large to show here, with its size, and offers no
       // Open externally, whose copy has the same bound (L4)
-      const largeRow = files.locator(`[role="treeitem"][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      const largeRow = files.locator(`[role="treeitem"][data-kind][data-path="${join(checkout, LARGE_ON_B)}"]`); // UX wave U6b-3a: the tree's row
       await expect(largeRow, 'the large file written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await largeRow.click();
       const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
