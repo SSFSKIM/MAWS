@@ -34,6 +34,8 @@ describe('the four rows', () => {
     const terminal = OFFERS.commands[TERMINAL_ACT];
     expect(terminal).toBeDefined();
     for (const name of OUTSIDE_ACTS) expect([name, OFFERS.commands[name]]).toEqual([name, { ...terminal, executor: 'machine' }]);
+    // condition (b): the grant stays main's own; a choice from another machine is its own act, which the daemon records
+    expect(Object.hasOwn(OFFERS.commands, 'files.grant')).toBe(false);
   });
 
   it('are made by outsideRows from the row it is handed, whatever that row holds', () => {
