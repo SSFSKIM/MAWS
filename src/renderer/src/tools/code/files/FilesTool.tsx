@@ -26,7 +26,7 @@
 // set of entries changed lists the drawn directories of its repository again (decision 14 (b)).
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
+import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
@@ -530,10 +530,30 @@ function rowFonts(): { name: string; folder: string } {
   return { name: `${token('--text-ui', '13px')} ${family}`, folder: `${token('--text-ui-sm', '12px')} ${family}` };
 }
 
-// A write of the list's offset, and the offset it came to (clamped), noted as the list's last seen (UX wave U6b-3a).
-function writeOffset(el: HTMLElement, top: number, seen: { current: number }): void {
-  el.scrollTop = top;
-  seen.current = el.scrollTop;
+// UX wave U6b-3a (S2; M2 decision 4; the task review's findings): when the Changed group gains or loses rows while a tree
+// row is the first row in view, the offset moves by the same height, so the tree does not move under the person's eyes as
+// the agent writes. A press on the heading moves nothing (`folded` is the person's fold, from the tree's state: a folded
+// heading that comes or goes with the status is a change of the group), nor does a group that changes while the list is
+// at its top (it grows in view) or while an offset is being restored. The offset it starts from is the list's real one
+// before the change, read from the page before React applies the commit: then the list still has its old height, so the
+// browser has clamped nothing, and a person's scroll whose event has not come yet is counted. A class, because only a
+// class reads the page before a commit is applied (`getSnapshotBeforeUpdate`); it draws nothing.
+class KeepTreeInView extends Component<{ scroller: RefObject<HTMLDivElement | null>; length: number; folded: boolean; restoring(): boolean }> {
+  override getSnapshotBeforeUpdate(previous: Readonly<{ length: number; folded: boolean }>): number | null {
+    if (previous.length === this.props.length || previous.folded !== this.props.folded) return null;
+    return this.props.scroller.current?.scrollTop ?? null;
+  }
+
+  override componentDidUpdate(previous: Readonly<{ length: number }>, _state: unknown, before: number | null): void {
+    const el = this.props.scroller.current;
+    if (before === null || el === null || this.props.restoring()) return;
+    if (before <= 0 || Math.floor(before / FILES_ROW_HEIGHT) < previous.length) return;
+    el.scrollTop = Math.max(0, before + (this.props.length - previous.length) * FILES_ROW_HEIGHT);
+  }
+
+  override render(): null {
+    return null;
+  }
 }
 
 // The rows as one virtual list. Its own component because the React Compiler skips any component that calls
@@ -575,14 +595,10 @@ function TreeList({
   // the scroller clamps the offset to the rows there are; the offset is then pending, re-applied as the rows arrive
   // until the content reaches it once, and dropped if the owner scrolls first. Unmounted while pending, it keeps it.
   const pending = useRef<number | null>(null);
-  // UX wave U6b-3a (the task review's first finding): the offset as the list last saw it, from a scroll's event or the
-  // list's own write. The group's correction below starts from it, not from the offset read after the commit, which the
-  // browser has already clamped when the content shrank near its end.
-  const seenOffset = useRef(0);
   useLayoutEffect(() => {
     const el = scroller.current!;
     const saved = treeOf(useTreeState.getState(), appSessionId).scrollTop;
-    writeOffset(el, saved, seenOffset);
+    el.scrollTop = saved;
     pending.current = el.scrollTop < saved ? saved : null;
     return () => {
       const kept = pending.current ?? el.scrollTop;
@@ -594,7 +610,7 @@ function TreeList({
     const want = pending.current;
     if (want === null) return;
     const el = scroller.current!;
-    writeOffset(el, want, seenOffset);
+    el.scrollTop = want;
     if (el.scrollTop >= want) pending.current = null;
   }, [total]);
   // UX wave U6b-3a (S4): a folder opened from its Changed row is scrolled into view in the first render in which its row
@@ -606,33 +622,22 @@ function TreeList({
     const el = scroller.current!;
     const top = revealAt * FILES_ROW_HEIGHT;
     const height = el.clientHeight || el.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
-    if (top < el.scrollTop) writeOffset(el, top, seenOffset);
-    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) writeOffset(el, top + FILES_ROW_HEIGHT - height, seenOffset);
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) el.scrollTop = top + FILES_ROW_HEIGHT - height;
     useTreeState.getState().revealed(appSessionId);
   }, [revealAt, appSessionId]);
-  // UX wave U6b-3a (S2; M2 decision 4): when the Changed group gains or loses rows while a tree row is the first row in
-  // view, the offset moves by the same height, so the tree does not move under the person's eyes as the agent writes. A
-  // press on the heading moves nothing (the person's fold, read from the tree's state: a folded heading that comes or goes
-  // with the status is a change of the group), nor does a group that changes while the list is at its top (it grows in
-  // view) or while an offset is being restored.
+  // UX wave U6b-3a (S2; M2 decision 4): the rows of the Changed group above the tree, and the person's fold of it
+  // (`KeepTreeInView`).
   const treeAt = rows.findIndex((row) => row.kind !== 'changed-heading' && row.kind !== 'changed');
   const sectionLength = treeAt < 0 ? rows.length : treeAt;
   const folded = useTreeState((s) => treeOf(s, appSessionId).changedFolded);
-  const drawnSection = useRef({ length: sectionLength, folded });
-  useLayoutEffect(() => {
-    const last = drawnSection.current;
-    drawnSection.current = { length: sectionLength, folded };
-    if (last.length === sectionLength || last.folded !== folded || pending.current !== null) return;
-    const before = seenOffset.current;
-    if (before <= 0 || Math.floor(before / FILES_ROW_HEIGHT) < last.length) return;
-    writeOffset(scroller.current!, Math.max(0, before + (sectionLength - last.length) * FILES_ROW_HEIGHT), seenOffset);
-  }, [sectionLength, folded]);
   const scrolledByOwner = () => {
     pending.current = null;
     useTreeState.getState().revealed(appSessionId);
   };
   return (
-    <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} onScroll={(event) => void (seenOffset.current = event.currentTarget.scrollTop)} className="min-h-0 flex-1 overflow-auto">
+    <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
+      <KeepTreeInView scroller={scroller} length={sectionLength} folded={folded} restoring={() => pending.current !== null} />
       <div ref={measureWidth} className="relative w-full">
         <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
