@@ -8,7 +8,7 @@
 import type { JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { consentMessage, readArrivals } from '@shared/engine/arrival';
-import { GRANT_BREAK, GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL, neutraliseGrant } from '@shared/engine/grant';
+import { GRANT_BREAK, GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL, NAME_LEFT_OUT, neutraliseGrant } from '@shared/engine/grant';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { laterImages } from '../../../../../test/support/later-changes';
@@ -116,12 +116,14 @@ describe('the one-writer rule: no grant from what the person did not press', () 
     expect(again.text, 'a recalled text sent again does not grow').toBe(out.text);
   });
 
-  // the review round's R1 (a): a dropped file whose name holds the short opening is mentioned as its path, byte for byte
-  it('a dropped file whose name holds the short opening goes out byte for byte, its mention naming the file', () => {
+  // the review round's R1 (a) kept the short opening in a file's name as typed; ticket 733a (Design 3) writes every name
+  // by the name's rule, which reads the short opening (`quotesGrant`): such a file is refused where it comes in
+  // (`pathRefusal`), and a mention of one that reached the draft another way names no file
+  it('a mention of a file whose name holds the short opening goes out with the name left out (ticket 733a)', () => {
     const id = 'docs/Permission granted for site visit.docx';
     const out = serializeDraft(docOf([paragraph(textNode('See '), mentionNode({ id, label: 'Permission granted for site visit.docx', kind: 'file' }))]), { sessionId: SESSION, cwd: '/repo' });
     expect(out.text).toBe(`See ${mentionText({ id, kind: 'file' })}`);
-    expect(out.text).toBe('See @"docs/Permission granted for site visit.docx"');
+    expect(out.text).toBe(`See @"${NAME_LEFT_OUT}"`);
   });
 
   // the review round's R1 (b): identifiers, paths and prose holding the short opening go as typed

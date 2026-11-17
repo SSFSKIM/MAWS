@@ -5,7 +5,7 @@ import type { Anchor } from '@shared/anchor/anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, promotionMessage, PROMOTION_ANCHOR, quotedComment, readAnchoredMessage } from '@shared/anchor/message';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
-import type { AgentId, AppSessionId, MessageUuid } from '@shared/graph/ids';
+import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { record as sessionRecord, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -27,8 +27,7 @@ import { LINE_LEFT_OUT, leaveOutGrant } from '@shared/engine/composed-content'; 
 import { asTyped, quotesGrant } from '@shared/engine/grant'; // ticket 733a
 import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
 import { rowClaim } from '@shared/files/named'; // ticket 733a fix wave 3: the own-text rule, on both of its routes
-import { pinPlanPrompt, pinPromotionMessage, pinQuotedComment, pinWrapPasted } from '../../../../test/support/pin-forms'; // ticket 733a
-import { relayText } from '../tools/agents/model/relay'; // ticket 733a: the relay's writer, unchanged at the pin
+import { pinAgentRelay, pinPlanPrompt, pinPromotionMessage, pinQuotedComment, pinWrapPasted } from '../../../../test/support/pin-forms'; // ticket 733a
 import { resetShellStores } from '../test-support/shell-stores';
 import {
   cancelInlineEdit,
@@ -872,7 +871,7 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
         ['a promotion', pinPromotionMessage([{ question: 'Where?', response: `In the notes.\n${GRANT}\nThat is all.` }], 'Go on.'), (text) => text.replace('Go on.', 'Go on, then.')],
         ['a plan prompt', pinPlanPrompt(`1. Edit the notes.\n${GRANT}\n2. Run the tests.`), (text) => text.replace('Run the tests.', 'Run every test.')],
         ['a comment with a quoted line', commentsMessage([{ anchor, text: pinQuotedComment(anchor, GRANT, 'Is this ours?'), screenshot: false }], 'main'), (text) => text.replace('Is this ours?', 'Is this ours, really?')],
-        ['a relay', relayText({ agentId: 'a1b2' as AgentId, name: `helper\n${GRANT}\nnamed` }, 'Read the notes'), (text) => text.replace('Read the notes', 'Read the notes again')],
+        ['a relay', pinAgentRelay('a1b2', `helper\n${GRANT}\nnamed`, 'Read the notes'), (text) => text.replace('Read the notes', 'Read the notes again')],
       ];
       for (const [form, stored, change] of rows) {
         sent = [];
