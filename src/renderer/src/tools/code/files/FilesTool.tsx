@@ -688,7 +688,6 @@ function RootsFailure({ message }: { message: string }) {
   );
 }
 
-
 function Chevron({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={`size-3 shrink-0 text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">

@@ -691,4 +691,19 @@ describe('after Enter the file has the tab (decision 9; B3, M2’s half)', () =>
     expect(treeWrites()).toEqual([]);
     expect(treeOf(useTreeState.getState(), A).folded).toBe(stored !== null);
   });
+
+  it('too narrow, its tree shown in the file’s place by the button before ⌘P: after Enter the file has the tab, with the keyboard in its text', async () => {
+    render(<Page />);
+    await openBeside(NARROW);
+    await waitFor(() => expect(document.querySelector('[data-file-viewer] .cm-content')).not.toBeNull(), { timeout: 5000 });
+    fireEvent.click(toggle()!); // the person's press: the tree in the file's place
+    expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+    composer().focus();
+    goToFile();
+    await inField();
+    await listedFor('app')(['/r/src/app.ts']);
+    press('Enter');
+    expect(treeColumn()).toBeNull(); // where the stored fold and the width put it (decision 9), not the press before the search
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`[data-file-keyboard][data-key="${KEY(APP)}"] .cm-content`)));
+  });
 });
