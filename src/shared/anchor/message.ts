@@ -123,11 +123,15 @@ export function slottedAnchor(anchor: Anchor, work?: { steps: number }): Anchor 
  * is charged what it does (the fields' tests, the text's assembly, the last pass), for the own-text rule's meter.
  */
 export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }, work?: { steps: number }): string {
+  return neutraliseGrant(anchoredBeforeLastPass(input, work), work);
+}
+
+function anchoredBeforeLastPass(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }, work?: { steps: number }): string {
   const { text, destination, screenshot } = input;
   const anchor = slottedAnchor(input.anchor, work);
   const message = `${anchorLead(anchor, screenshot)}\n${commentWords(text)}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
   if (work) work.steps += 2 * message.length + 1; // its parts written, then joined
-  return neutraliseGrant(message, work);
+  return message;
 }
 
 // Ticket 733a (its document, Designs 3 and 4): a comment's words as a message carries them, trimmed; words that begin
@@ -258,8 +262,18 @@ const unescapeLine = (line: string) => (ESCAPED.test(line) ? line.slice(1) : lin
  * and their join, the last pass), the count the own-text rule's meter takes for its reconstruction.
  */
 export function commentsMessage(comments: readonly MessageComment[], destination: Destination, work?: { steps: number }): string {
+  return neutraliseGrant(commentsMessageBeforeLastPass(comments, destination, work), work);
+}
+
+/**
+ * Ticket 733a (the architect's ruling on M3's numbers): `commentsMessage` before its last pass, `neutraliseGrant`, so
+ * that the own-text rule's meter (src/shared/files/named.ts, its only importer) runs the two as two calls, each inside
+ * one stretch at the length bound. What it returns is no message: it has not had the pass every text sent as the
+ * person's has. No sender imports it (test/support/person-sends.test.ts holds the importers to that one file).
+ */
+export function commentsMessageBeforeLastPass(comments: readonly MessageComment[], destination: Destination, work?: { steps: number }): string {
   if (comments.length < 1 || comments.length > MESSAGE_COMMENTS_MAX) throw new RangeError(`a message carries 1 to ${MESSAGE_COMMENTS_MAX} comments, not ${comments.length}`);
-  if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination }, work);
+  if (comments.length === 1) return anchoredBeforeLastPass({ ...comments[0]!, destination }, work);
   const blocks = comments.map(({ anchor: given, text, screenshot }, index) => {
     const anchor = slottedAnchor(given, work);
     const preamble = destination === 'thread' && index === comments.length - 1 ? `\n\n${SIDE_THREAD_PREAMBLE_MANY}` : '';
@@ -267,7 +281,7 @@ export function commentsMessage(comments: readonly MessageComment[], destination
   });
   const message = [framingLine(comments.length), ...blocks].join('\n\n');
   if (work) work.steps += 2 * message.length + 1; // the blocks written, then joined
-  return neutraliseGrant(message, work);
+  return message;
 }
 
 /**

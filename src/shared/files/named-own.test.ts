@@ -310,6 +310,23 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     expect(both(textOf)).toEqual([NAMES, NAMES]);
   });
 
+  // Ticket 733a (the architect's ruling on M3's numbers): the write-back runs as two calls, its assembly and its last
+  // pass, so the length a text counts up to stays 65,536 characters and no call of the reading, the write-back's two
+  // among them, passes one stretch at that length, on the characters that cost each part most and on ASCII
+  it.each([
+    ['U+1FB7 (the last pass’s costliest)', '\u1FB7'],
+    ['U+0130 (the fields’ test’s costliest)', '\u0130'],
+    ['ASCII', 'a'],
+  ])('no single call of the reading passes STRETCH_MAX at the length bound: comments on a page’s fields in %s', (_, ch) => {
+    expect(OWN_TEXT_MAX_CHARS).toBe(65_536);
+    const textOf = fieldsAt(ch, OWN_TEXT_MAX_CHARS);
+    expect(textOf.length).toBeGreaterThan(OWN_TEXT_MAX_CHARS - 4000);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX); // the most work between two pauses bounds every call
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+  });
+
   it('a paste opener with no closer makes the text not count', () => {
     expect(both(`Fix ${LINK}\n\n<pasted_content id="ab12">\nnever closed`)).toEqual([OTHER, OTHER]);
   });

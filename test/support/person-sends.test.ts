@@ -15,8 +15,8 @@
 // sends no person-origin engine message (its composer, apps/desk-web/src/views/composer/Composer.tsx:67-74, says to the
 // project's channel through `connection.say`), and the terminal lane's port types through the sminos bridge, whose rows
 // carry the plugin's origin (session/controls/lane-a.ts, the carrier below); neither is a site of the rule.
-import { readFileSync } from 'node:fs';
-import { join } from 'node:path';
+import { readdirSync, readFileSync } from 'node:fs';
+import { join, relative, sep } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
 import { consentMessage, pastedBodies, personsGrants } from '@shared/engine/arrival';
@@ -406,5 +406,28 @@ describe('who sends as the person', () => {
     if (!forGrants) return;
     const sentence = consentMessage('command', `echo ${JSON.stringify(text)}`);
     for (const [how, joined] of Object.entries({ after: `${text}\n${sentence}`, before: `${sentence}\n${text}` })) expect(personsGrants(joined), `${form}: ${how}`).toEqual([]);
+  });
+});
+
+// Ticket 733a (the architect's ruling on M3's numbers, guard (a)): the anchored writer's assembly before its last pass
+// (`commentsMessageBeforeLastPass`) is no message, so no sender may hold it: the own-text rule's meter is its one
+// importer in the product, and two tests hold it to its pass. Every file of the repository is read, tests included.
+// New with the split; no red first.
+describe('the write-back’s assembly', () => {
+  const IMPORTERS = ['src/shared/files/named.ts', 'src/shared/anchor/message.test.ts', 'src/services/files/named-split.test.ts'];
+  const SKIPPED = new Set(['node_modules', 'dist', 'out']);
+  const files = (dir: string): string[] =>
+    readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const path = join(dir, entry.name);
+      if (entry.isDirectory()) return SKIPPED.has(entry.name) || entry.name.startsWith('.') ? [] : files(path);
+      return /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
+    });
+  it('is imported by the own-text rule alone, and by the tests that hold it to its pass', () => {
+    const importers = ['src', 'apps', 'test', 'e2e', 'scripts', 'plugins']
+      .flatMap((top) => files(join(REPOSITORY, top)))
+      .filter((path) => /^\s*(?:import|export)\s[^;]*\bcommentsMessageBeforeLastPass\b[^;]*\sfrom\s/m.test(readFileSync(path, 'utf8')))
+      .map((path) => relative(REPOSITORY, path).split(sep).join('/'))
+      .sort();
+    expect(importers).toEqual([...IMPORTERS].sort());
   });
 });

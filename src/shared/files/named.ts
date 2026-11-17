@@ -6,12 +6,12 @@
 // asked path whole, byte for byte. Pure, and shared: the daemon's search (`src/services/files/named.ts`) and the window's
 // test (`src/renderer/src/tools/code/named-links.test.tsx`, which holds the window's readers to these copies) read the
 // same functions. A bare mention, a path inside a longer name and a path after a scheme name nothing.
-import { ANCHOR_TAG_OPENING, commentsMessage, readAnchoredMessage } from '../anchor/message';
+import { ANCHOR_TAG_OPENING, commentsMessageBeforeLastPass, readAnchoredMessage } from '../anchor/message';
 import { neutralisePastedTags } from '../composer/pasted-framing';
 import { framePasted } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
 import { CLAIMED_FOR_SAVES } from '../engine/composed-forms';
-import { GRANT_TEST_WORK_PER_CHAR } from '../engine/grant';
+import { GRANT_TEST_WORK_PER_CHAR, neutraliseGrant } from '../engine/grant';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1125,7 +1125,7 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // The costliest call is the anchored message's read, bounded by ANCHOR_READ_WORK_PER_CHAR units a character (its passes
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
-// person types, and a longer message still names its paths for a read; 32,768 since ticket 733a, below). Past the
+// person types, and a longer message still names its paths for a read; kept by ticket 733a, below). Past the
 // length, or past OWN_WORK_PER_CHAR units a character in all (the readers' counts sum to 49), the text does not count:
 // it fails closed. The grant's
 // test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
@@ -1137,17 +1137,18 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // the grant's bound, the costliest of them. The costliest text counted, an anchored comment at the length bound in
 // U+0130, took 51.97 units a character; the budget rose from 48 to 56, about the margin it had.
 // Ticket 733a's M3: the anchored message's writer now slots each anchor's fields (`nameSlot`, the grant's test on each)
-// and passes the whole through `neutraliseGrant`, and is charged what it counts (`commentsMessage`'s meter) where it was
-// charged a fixed 8 units a character. Its count is at most 12.025 units a character of the fields (U+0130's `nameSlot`),
-// 2 for its assembly, 12 for the last pass (11 on U+00DF's two case images, and 1 more where it puts a joiner in) and 2
-// for the compare and the search for a tag: 28.03 a character and a few units a field, the fields lying inside the text;
-// the costliest counted, sixteen comments on a page whose selector and accessible path are U+1FB7, 24.35. So the write
-// is now the costliest call, planned at ANCHOR_WRITE_WORK_PER_CHAR (32, the bound rounded up to a power of two) a
-// character of the longer of text and fold, and the length a text counts up to is the stretch over it: 32,768 characters
-// where it was 65,536 (the read's 16 a character). The costliest text counted, those comments in U+0130, takes 64.12
-// units a character in all; the budget rises from 56 to 70, about the margin it had.
+// and passes the whole through `neutraliseGrant`, and is charged what it counts (the writer's meter) where it was charged
+// a fixed 8 units a character. Written as one call it would be the costliest, about 24 a character counted (comments
+// on a page whose selector and accessible path are U+1FB7), so one call reached 1,526,916 units at 65,536 characters,
+// past STRETCH_MAX. So it runs as two calls (the architect's ruling): the assembly, the fields' tests and the joins
+// (`commentsMessageBeforeLastPass`: at most 12.025 a character of the fields, U+0130's `nameSlot`, and 2 for the
+// assembly), then the last pass with the compare and the search for a tag (at most 11 on U+00DF's two case images, 1
+// more where it puts a joiner in, and 2). Each is planned at ANCHOR_WRITE_WORK_PER_CHAR (16) a character of the longer
+// of text and fold, the read's own charge, so the length a text counts up to stays 65,536 characters. The costliest text
+// counted, those comments in U+0130, takes about 64.1 units a character in all; the budget rose from 56 to 70, about the
+// margin it had.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
-const ANCHOR_WRITE_WORK_PER_CHAR = 32; // the read comments written back by their writer (charged what it counts), the compare and the tag search
+const ANCHOR_WRITE_WORK_PER_CHAR = 16; // each of the write-back's two calls (charged what it counts): the assembly; the last pass, the compare and the tag search
 const CLAIM_WORK_PER_CHAR = GRANT_TEST_WORK_PER_CHAR; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / Math.max(ANCHOR_READ_WORK_PER_CHAR, ANCHOR_WRITE_WORK_PER_CHAR);
 export const OWN_WORK_PER_CHAR = 70;
@@ -1236,9 +1237,12 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
       });
       if (read === null || read.destination === null) return none; // a tag the reader does not take: MAWS's form
       const { comments, destination } = read;
-      // ticket 733a: the writer slots each anchor's fields and neutralises the whole, and is charged what it does
+      // ticket 733a: the writer slots each anchor's fields and neutralises the whole, charged what it does, as two calls
+      // (the architect's ruling): its assembly, then its last pass. Between them the reading may pause; it answers only
+      // once both have run, and no sender sees the assembly, which only this reading imports.
+      const assembled = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * Math.max(n, folded) + 1, (work) => commentsMessageBeforeLastPass(comments, destination, work));
       const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * Math.max(n, folded) + 1, (work) => {
-        const written = commentsMessage(comments, destination, work);
+        const written = neutraliseGrant(assembled, work);
         work.steps += 2 * (n + 1); // the compare, and the search of the comments' words for a tag
         return written === first && comments.every((comment) => !comment.text.includes(ANCHOR_TAG_OPENING));
       });
