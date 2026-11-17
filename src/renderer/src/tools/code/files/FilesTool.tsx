@@ -52,7 +52,7 @@ import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
-import { expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
+import { basename, expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
@@ -387,9 +387,17 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
   // A Changed row's click (decision 6): a file on disk opens as a tree row's does; a folder opens in the tree; a row with
   // nothing on disk, and one outside every listed root (R6), opens Review on Uncommitted at its entry.
   const rootPaths = rootEntries.map((root) => root.path);
+  // A link at a Changed row's path (the ruling on the panel's sweep 1): the status says so for a tracked path; for an
+  // untracked one, the listing the store holds of its folder, when it holds one. The viewer opens no link.
+  const isLink = (row: ChangedRow, inside: { path: string; ancestors: readonly string[] }) => {
+    if (row.link) return true;
+    const folder = inside.ancestors.at(-1);
+    const listing = folder === undefined ? undefined : useFiles.getState().listing(appSessionId, folder);
+    return listing?.status === 'ok' && listing.value.entries.some((entry) => entry.name === basename(inside.path) && entry.kind === 'symlink');
+  };
   const activateChanged = (row: ChangedRow, main: boolean) => {
     const inside = expandTo(rootPaths, row.path);
-    if (inside === null || !row.onDisk) {
+    if (inside === null || !row.onDisk || (!row.folder && isLink(row, inside))) {
       panelHost.addTool('review', { appSessionId, params: { scope: 'uncommitted', path: reviewEntry(row) } });
       return;
     }
@@ -405,7 +413,8 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     chosenFile(row.path, openFile(appSessionId, row.path, null));
   };
   const keepChanged = (row: ChangedRow) => {
-    if (row.onDisk && !row.folder && expandTo(rootPaths, row.path) !== null) openFile(appSessionId, row.path, null, { keep: true });
+    const inside = expandTo(rootPaths, row.path);
+    if (row.onDisk && !row.folder && inside !== null && !isLink(row, inside)) openFile(appSessionId, row.path, null, { keep: true });
   };
   const changed: ChangedProps = {
     marks,

@@ -270,7 +270,7 @@ describe('the Changed group (U6b-3a)', () => {
     // the tracked link in a folder the tree has not listed, so the status alone can say it is one
     const linked = { ...TREE, '/r/src': [file('/r/src/cart.ts'), file('/r/src/fresh.ts'), file('/r/src/merge.ts'), { ...file('/r/src/latest.ts'), kind: 'symlink' as const, target: 'cart.ts' }] };
     changedMain(linked, {
-      '/r': statusOf([entry('notes/today.md', '.M', { worktreeKind: 'link' } as Partial<GitFileStatus>), entry('src/merge.ts', 'UU', { worktreeKind: 'none' } as Partial<GitFileStatus>), entry('src/latest.ts', '??'), entry('src/fresh.ts', '??')]),
+      '/r': statusOf([entry('notes/today.md', '.M', { worktreeKind: 'link' }), entry('src/merge.ts', 'UU', { worktreeKind: 'none' }), entry('src/latest.ts', '??'), entry('src/fresh.ts', '??')]),
     });
     connect();
     await openTree();

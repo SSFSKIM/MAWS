@@ -14,7 +14,8 @@ export interface ChangedRow {
   oldRel: string | null; // a rename's source
   letter: ChangeLetter; // decision 4
   folder: boolean; // an untracked folder, or a submodule
-  onDisk: boolean; // false: D, and a conflict both sides deleted
+  onDisk: boolean; // false: D, a conflict both sides deleted, and an entry the work tree holds nothing at (`worktreeKind`)
+  link: boolean; // the work tree holds a symbolic link at the path, as the status says (the viewer opens no link)
 }
 
 export interface Marks {
@@ -60,7 +61,8 @@ export function changedRows(status: GitStatus): ChangedRow[] {
       oldRel: file.oldPath,
       letter,
       folder: file.path.endsWith('/') || file.submodule === true,
-      onDisk: letter !== 'D' && !(file.index === 'D' && file.worktree === 'D'),
+      onDisk: letter !== 'D' && !(file.index === 'D' && file.worktree === 'D') && file.worktreeKind !== 'none',
+      link: file.worktreeKind === 'link',
     };
     const held = byPath.get(rel);
     if (held === undefined || (!held.onDisk && row.onDisk)) byPath.set(rel, row);
