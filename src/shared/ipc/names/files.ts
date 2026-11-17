@@ -5,6 +5,7 @@ export const commands = [
   'files.list', 'files.read', 'files.watch', 'files.unwatch', 'files.openExternal',
   'files.write', // E5
   'files.writeOutside', // UX wave U6e: the save of a file outside the session's directories
+  'files.readOutside', 'files.listOutside', 'files.chooseOutside', // UX wave U6f: the open, the chooser's listing and the pick, from another machine
   'files.reveal', // E1
   'files.upload', // P5 O3-E: bridged, no caller yet (O7 M4's drag and drop)
 ] as const;
