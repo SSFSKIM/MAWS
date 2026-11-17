@@ -3,7 +3,7 @@
 // owner answered it). Structure only: which element holds what in each state, More… outside the list's element, the
 // titles, the mark's component and a link row's second act; the sizes are the scene's. Over the real model, whose
 // listings and choices the test answers by hand. Invented names and paths.
-import { act, cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult } from '@shared/ipc/schema';
