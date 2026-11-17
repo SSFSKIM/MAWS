@@ -48,7 +48,7 @@ export function parseStatus(out: string): ParsedStatus {
     // which it is in the work tree only while the work tree's mode there is a gitlink's: `sub` says S also for a
     // submodule a file, a link or nothing has replaced (the branch panel's scalpel 3)
     const mode = record.worktreeMode === undefined ? undefined : parts[record.worktreeMode];
-    const submodule = parts[2].startsWith('S') && mode === GITLINK_MODE;
+    const submodule = mode === GITLINK_MODE && parts[2].startsWith('S'); // an untracked record has neither field
     // the ruling on the panel's sweep 1 and scalpel 3: a link or nothing in the work tree, which XY does not say
     const worktreeKind = mode === undefined ? undefined : WORKTREE_KINDS[mode];
     status.files.push({ path, oldPath, index: xy[0], worktree: xy[1], untracked: record.untracked, ...(submodule ? { submodule: true as const } : {}), ...(worktreeKind === undefined ? {} : { worktreeKind }) });
