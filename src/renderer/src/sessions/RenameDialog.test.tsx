@@ -13,6 +13,8 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
+import { personsParts } from '@shared/engine/persons-message';
+import { askSteerText } from '@shared/maws/ask';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
@@ -71,6 +73,17 @@ describe('Regenerate’s description and an answer envelope (ticket 704)', () =>
     const template = firstPrompt('u704-end-env-first-1');
     const envelope = recordedJoin('u704-end-env-first-1').envelopes[0]!;
     expect(await regenerateWith([withContent(template, 'm1', [IMAGE]), withContent(template, 'm2', envelope)])).toBe('Kept title');
+  });
+
+  // the frontier review's input: decision 7 reads each text block by itself, so an envelope spread over two blocks is
+  // not read, and the transcript draws the message as the person's; the description reads it as the split does
+  it('made by hand: a message of two text blocks, an ask’s opening line and then its answered block, is no answer: its text is the description', async () => {
+    const template = firstPrompt('u704-end-env-first-1');
+    const [opening, ...block] = askSteerText('a', [], []).split('\n');
+    const content: ContentBlock[] = [{ type: 'text', text: opening! }, { type: 'text', text: block.join('\n') }];
+    expect(personsParts(content)).toEqual({ own: content, envelopes: [] }); // the split's reading
+    const events = [withContent(template, 'm1', [IMAGE]), withContent(template, 'm2', content), withContent(template, 'm3', 'Then this one')];
+    expect(await regenerateWith(events)).toBe(`${opening}\n${block.join('\n')}`);
   });
 
   it.each(['u704-end-prompt-first-1', 'u704-end-env-first-1', 'u704-end-image-1'])('%s: an older host’s whole joined message after a first message with no words gives the prompt alone', async (name) => {
