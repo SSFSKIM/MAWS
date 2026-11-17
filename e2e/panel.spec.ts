@@ -1974,35 +1974,42 @@ test.describe('the chat over an artifact (UX wave U10b, O-43)', () => {
     });
   });
 
-  // M7 decision 11 (ruled 2026-11-15 as F6): runs on a head that holds U1b, whose compact pane draws "Waiting for you · N"
-  // above the composer and docks nothing of a request in it.
+  // M7 decision 11 (ruled 2026-11-15 as F6), on a head that holds U1b: its compact pane draws "Waiting for you · N"
+  // above the composer (`SessionPane`'s compact branch) and docks nothing of a request in it, so the bar shows the line
+  // on its raised surface and the box stays the box.
   test('the combined scene with U1b: a request while the chat is hidden opens nothing; Show chat carries the waiting mark and brings the bar with “Waiting for you · 1”; Open conversation draws the request', async () => {
-    test.skip(true, 'waits for U1b on master: on this head a request is still docked in the composer, so the bar would draw it');
     await withScenario(async (maws, panel) => {
       const { page, app } = maws;
       const card = panel.getByRole('region', { name: 'Session card' });
       const bar = panel.getByRole('region', { name: 'Chat' });
       const showChat = panel.getByRole('button', { name: 'Show chat' });
+      const waitingLine = bar.getByRole('button', { name: /^Waiting for you · \d+$/ });
       await (await sidebarRow(page, CHARTER)).click(); // its permission arrives at 3 s on the scenario clock
       await openSurface(page, 'Session info');
       await menu(app, 'panel.float');
       await card.getByRole('button', { name: 'Close session card' }).click();
       await bar.getByRole('button', { name: 'Hide chat' }).click();
       await expect(showChat).toBeFocused();
+      await expect(showChat, 'nothing waits yet').not.toHaveAttribute('aria-description', /.+/);
 
       await advanceTo(app, 3000);
       await expect(showChat.locator('[data-session-mark="waiting"]')).toHaveCount(1);
-      await expect(card).toHaveCount(0);
+      await expect(showChat).toHaveAttribute('aria-description', 'Waiting for you');
+      await expect(card, 'a request while hidden opens nothing').toHaveCount(0);
       await expect(bar).toHaveCount(0);
       await expect(showChat, 'a request takes no keyboard').toBeFocused();
 
       await showChat.click();
       await expect(bar).toBeVisible();
-      await expect(bar.getByText('Waiting for you · 1')).toBeVisible();
-      await expect(bar.locator('[data-docked-frame]'), 'nothing of the request is drawn in the box').toHaveCount(0);
-      await expect(bar.getByRole('textbox', { name: 'Message' })).toBeVisible();
+      await expect(waitingLine).toHaveText('Waiting for you · 1');
+      await expect(bar.locator('[data-bar-surface][data-raised]'), 'the line stands on the raised surface').toHaveCount(1);
+      const [line, box] = [(await waitingLine.boundingBox())!, (await bar.locator('[data-composer-box]').boundingBox())!];
+      expect(line.y + line.height, 'the line above the box').toBeLessThanOrEqual(box.y);
+      await expect(bar.locator('[data-request-card]'), 'nothing of the request is drawn in the bar').toHaveCount(0);
+      await expect(bar.getByRole('textbox', { name: 'Message' }), 'the keyboard in the box, as after any Show chat').toBeFocused();
       await bar.getByRole('button', { name: 'Open conversation' }).click();
-      await expect(card.getByRole('group', { name: 'Approval needed' })).toBeVisible();
+      await expect(card.locator('[data-request-end]').getByRole('group', { name: 'Approval needed' }), 'the card draws the request').toBeVisible();
+      await expect(bar).toHaveCount(0);
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     });
   });
