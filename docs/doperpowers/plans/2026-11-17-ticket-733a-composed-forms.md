@@ -264,7 +264,7 @@ What is recorded about the id: with the system-prompt gate as seeded, the rule s
 
 **Two recognisers, each keyed on a mark only MAWS writes, not one rule by size.** The choice was between these and the one reader of the first document (every block of up to 20,000 characters in place), with only its callers for composed forms switched. The one reader cannot serve here: its cut is by size, the row of a composed form and the row of a person's message go through the same caller (`userTextOf`), and a size cannot tell a plan's segment from a person's chip. So 733a adds no general rule and leaves `splitPastedSegments` as it is.
 
-- **An anchored message.** A text that `readAnchoredMessage` reads (it ends in MAWS's own tag) has every segment in its comments' words, or in a promotion's text, drawn in place. This covers the promotion, a comment's quoted line, a message of several comments, and both after an edit.
+- **An anchored message.** A text that `readAnchoredMessage` reads (it ends in MAWS's own tag) as one of MAWS's own forms, under the promotion's anchor or as a comment with a destination (narrowed 2026-11-17, Decision Log), has every segment in its comments' words, or in a promotion's text, drawn in place. This covers the promotion, a comment's quoted line, a message of several comments, and both after an edit.
 - **A plan prompt.** A text that is exactly the writer's shape, `Implement this plan:`, the blank line, one segment and nothing after, has its segment drawn in place.
 
 In place, the frame's own line breaks are dropped and the form's are kept: the two before the opening tag and the one after the closing tag are `wrapPasted`'s.
