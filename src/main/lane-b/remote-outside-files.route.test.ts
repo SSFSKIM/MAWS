@@ -264,6 +264,33 @@ describe('“Open externally” on an outside file (remote.openCopy; P1, P2; dec
     expect(plainReads().filter((call) => ['named', 'agent', 'open', 'raw'].some((key) => key in (call.input as object)))).toEqual([]);
   });
 
+  // The branch review (sweep#1; Decision Log 33 (3)): "Open externally" carries `open` under layout.frameFile's rule
+  it('a copy of a file in a protected folder there: without open, the read’s protected refusal; with open from an app page, opened, the open on its act alone', async () => {
+    const page = appWindow().event;
+    expect(await invoke(page, 'remote.openCopy', copyOf(PRIVATE_PDF))).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
+    for (const act of outsideActs()) expect(act.request.args).not.toHaveProperty('open');
+    expect(opened).toEqual([]);
+    const before = outsideActs().length;
+    expect(await invoke(page, 'remote.openCopy', { ...copyOf(PRIVATE_PDF), open: true })).toEqual({ ok: true, value: { opened: true, message: null } });
+    const withOpen = outsideActs().slice(before);
+    expect(withOpen.length).toBeGreaterThan(0);
+    for (const act of withOpen) expect(act.request.args).toMatchObject({ path: PRIVATE_PDF, open: true });
+    for (const call of plainReads()) expect(call.input).not.toHaveProperty('open');
+    expect(opened).toHaveLength(1);
+    expect(readFileSync(opened[0]!)).toEqual(PDF_BYTES);
+  });
+
+  it('a copy asked with open by a caller that is no app page is refused before anything is read; the same request from an app page opens (the negative case)', async () => {
+    const withOpen = { ...copyOf(PRIVATE_PDF), open: true };
+    for (const [who, ask] of Object.entries(noPageCallers())) {
+      expect([who, await ask('remote.openCopy', withOpen)]).toEqual([who, { ok: false, error: { code: 'forbidden_sender', message: 'remote.openCopy with open may only be invoked by the app window' } }]);
+    }
+    expect(link.calls).toEqual([]);
+    expect(link.acts).toEqual([]);
+    expect(opened).toEqual([]);
+    expect(await invoke(appWindow().event, 'remote.openCopy', withOpen)).toEqual({ ok: true, value: { opened: true, message: null } });
+  });
+
   // The branch review (scalpel-3#1; Decision Log 33 (2)): a copy's act is bound, whole, to the channel of its first page
   it('a copy of two pages whose channel is replaced after the first: no page goes on the new channel, and nothing is opened', async () => {
     const big = Buffer.from('E'.repeat(300_000), 'utf8');

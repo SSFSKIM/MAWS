@@ -15,9 +15,10 @@ import { remoteSessionState } from '../../../lane-b/test-support/remote-session'
 import { useLayout } from '../../../stores/layout';
 import { useMachines } from '../../../stores/machines';
 import { ok } from '../../../test-support/code';
-import { installDisk } from '../../../test-support/code-disk';
+import { installDisk, leaveRl2, overRl2 } from '../../../test-support/code-disk';
 import { formatSize, VIEWER_COPY } from '../copy';
 import { useFiles } from '../files/store';
+import { forgetOpenedThere, openedThere } from '../files/elsewhere';
 import { ExternalRow, OpenExternally, rowWords } from './ExternalRow';
 import { FileViewer } from './FileViewer';
 import { useViewer, type EntryFrame, type ViewerEntry } from './viewer-store';
@@ -72,6 +73,40 @@ describe('Open externally', () => {
     render(<OpenExternally appSessionId={TERMINAL} path="/r/doc.pdf" />);
     fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
     expect(invoke).toHaveBeenCalledExactlyOnceWith('files.openExternal', { appSessionId: TERMINAL, path: '/r/doc.pdf' });
+  });
+});
+
+// UX wave U6f, the branch review (sweep#1; Decision Log 33 (3)): for a session that takes the remote route, Open externally
+// carries `open` under the rule a frame's ask follows: only for a path the person opened on that machine this run
+// (`openedThere`), as the tab's own reads carry it.
+describe('Open externally on another machine, a protected folder opened there (U6f)', () => {
+  const T = addressOf(OTHER_MACHINE, 'app-there' as AppSessionId);
+  const DOCS = '/home/someone/Documents';
+  afterEach(() => {
+    leaveRl2();
+    forgetOpenedThere();
+  });
+  const opensWith = (path: string) => {
+    const invoke = vi.spyOn(ipc, 'invoke').mockResolvedValue({ ok: true, value: { opened: true, message: null } } as never);
+    render(<OpenExternally appSessionId={T} path={path} />);
+    fireEvent.click(screen.getByRole('button', { name: 'Open externally' }));
+    return invoke;
+  };
+
+  it('sends open on the copy of a path under a folder the person opened on that machine this run', () => {
+    overRl2(T);
+    openedThere(OTHER_MACHINE).add(DOCS);
+    expect(opensWith(`${DOCS}/minutes.pdf`)).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: T, path: `${DOCS}/minutes.pdf` }, open: true });
+  });
+
+  it('the negative case: no open for a path the person did not open there, nor for one that leaves the opened folder by ".."', () => {
+    overRl2(T);
+    openedThere(OTHER_MACHINE).add(DOCS);
+    for (const path of ['/home/someone/Desktop/minutes.pdf', `${DOCS}/../Desktop/minutes.pdf`]) {
+      expect(opensWith(path), path).toHaveBeenCalledExactlyOnceWith('remote.openCopy', { machine: OTHER_MACHINE, source: { appSessionId: T, path } });
+      cleanup();
+      vi.restoreAllMocks();
+    }
   });
 });
 
