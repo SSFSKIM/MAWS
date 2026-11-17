@@ -2243,7 +2243,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
       await waitFor(() => expect(shown().dirty).toBe(true));
       rosterSays(T, { owner: false });
       main.answers.by = (name) => (name === 'files.read' ? refused('Not opened: only studio’s owners can', 'owners-only') : null);
-      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: OUT, kind: 'changed' }));
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: OUT, kind: 'changed' }, OTHER_MACHINE)); // from studio, its bare id lifted with it
       await waitFor(() => expect(shown().status).toBe('error'));
       expect(shown()).toMatchObject({ dirty: true, editable: false, pin: OUT });
       expect(readOnlyReason(shown())).toBe('elsewhere');
@@ -2312,7 +2312,9 @@ describe('a file outside the folders on another machine (U6f)', () => {
       await waitFor(() => expect(shown(INSIDE).dirty).toBe(true));
       expect(await act(() => useViewer.getState().save(shown(INSIDE).tabId))).toBe('ok');
       expect(main.callsOf('files.writeOutside')).toEqual([{ appSessionId: THERE, path: INSIDE, content: '+rota\n', expectedHash: fakeHash('rota\n'), real: INSIDE, open: true }]);
-      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: INSIDE, kind: 'changed' }));
+      const sent = reads(main).length;
+      act(() => main.emit('files.changed', { appSessionId: THERE as AppSessionId, path: INSIDE, kind: 'changed' }, OTHER_MACHINE));
+      await waitFor(() => expect(reads(main).length).toBeGreaterThan(sent)); // the change is read again
       await settle();
       expect(reads(main).slice(before).every((input) => input.open === true)).toBe(true);
     });
