@@ -11,7 +11,10 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { machineOf } from '@shared/machine/address';
 import { ipc } from '../../ipc/client';
 import { pathTarget } from '../../ipc/machine';
+import { toast } from '../../stores/notices'; // ticket 733a
 import { mentionNode, textNode } from '../editor/doc';
+import { slashText } from '../editor/mention-text'; // ticket 733a
+import { pathRefusal } from '../editor/paste'; // ticket 733a
 import { mentionLabel } from '../editor/recall';
 import { atItems, type AtItem } from './items';
 import { GroupLabel, Listbox, useDebounced, useListKeys, type PopupItem, type PopupProps } from './popup';
@@ -29,16 +32,25 @@ function insertMention(editor: Editor, range: Range, id: string, kind: 'file' | 
     .run();
 }
 
+// Ticket 733a (its document, Design 3, §E): a file whose path a drop or a pick would refuse (a line break in it, or the
+// grant's opening) is refused here too, with the same words, and the query typed for it goes as a choice's would
+function chooseFile(editor: Editor, range: Range, item: Extract<AtItem, { group: 'files' }>) {
+  const refusal = pathRefusal(item.path.split('/').filter(Boolean).at(-1) ?? item.path, item.path); // named as a drop names it
+  if (refusal === null) return insertMention(editor, range, item.path, 'file');
+  editor.chain().focus().deleteRange(range).run();
+  toast({ level: 'warning', text: refusal, actions: [], dismissible: true });
+}
+
 function rowOf(item: AtItem): Row {
   const key = `${item.group}:${item.group === 'files' ? item.path : item.name}`;
-  if (item.group === 'files') return { key, disabled: false, item, apply: (editor, range) => insertMention(editor, range, item.path, 'file') };
+  if (item.group === 'files') return { key, disabled: false, item, apply: (editor, range) => chooseFile(editor, range, item) };
   if (item.group === 'agents') return { key, disabled: false, item, apply: (editor, range) => insertMention(editor, range, item.name, 'agent') };
   return {
     key,
     disabled: false,
     item,
     apply: (editor, range) => {
-      editor.chain().focus().deleteRange(range).insertContentAt(1, `/${item.name} `).run();
+      editor.chain().focus().deleteRange(range).insertContentAt(1, slashText(item.name)).run(); // ticket 733a: the name's rule
     },
   };
 }

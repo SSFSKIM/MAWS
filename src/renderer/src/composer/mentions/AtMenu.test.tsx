@@ -8,9 +8,12 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
-import { EMPTY_CATALOG } from '../../stores/catalog';
+import { consentMessage } from '@shared/engine/arrival';
+import { NAME_LEFT_OUT } from '@shared/engine/grant';
+import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
+import { useNotices } from '../../stores/notices';
 import { AtMenu } from './AtMenu';
-import type { PopupProps } from './popup';
+import type { PopupItem, PopupProps } from './popup';
 
 const APP = at('app-1' as AppSessionId);
 const KEY = new PluginKey('at-menu-test');
@@ -55,5 +58,57 @@ describe('the @ menu across a change of the agent’s folder', () => {
     await act(() => fake.reply('git.lsFiles', files(['src/a.ts', 'src/b.ts']), 0));
     expect(options()).toEqual([['src/a.ts', null], ['src/b.ts', null]]);
     expect(fake.invoked('git.lsFiles').map((input) => (input as { directory: string }).directory)).toEqual(['/repo', '/repo/.claude/worktrees/w1', '/repo']);
+  });
+});
+
+// Ticket 733a (its document, Design 3, §E; acceptance 6): the `@` menu is the third entrance a file comes in by. A file
+// whose path quotes the grant's opening is refused there with the drop's words and mentions nothing; a plain one is
+// mentioned (the control). A skill's name goes into the draft by the name's rule.
+describe('the @ menu’s names (ticket 733a)', () => {
+  // an editor that records what a choice does to the draft
+  const recording = () => {
+    const done: string[] = [];
+    const chain = { focus: () => chain, deleteRange: () => (done.push('delete'), chain), insertContentAt: (_: unknown, content: unknown) => (done.push(JSON.stringify(content)), chain), run: () => true };
+    return { editor: { chain: () => chain } as unknown as Editor, done };
+  };
+  const choosing = (query: string, editor: Editor, catalog: SessionCatalog = EMPTY_CATALOG): PopupProps => ({ ...props(query, '/repo'), editor, command: (item: PopupItem) => item.apply(editor, { from: 1, to: 1 + query.length } as Range), ctx: { ...props(query, '/repo').ctx, catalog } });
+  const click = (start: string) => {
+    const option = [...document.querySelectorAll<HTMLElement>('[role="option"]')].find((o) => o.textContent?.startsWith(start));
+    if (option === undefined) throw new Error(`no row ${start}`);
+    return act(() => option.click());
+  };
+
+  it('refuses a file whose path quotes the grant’s opening, saying why, and mentions nothing; a plain file is mentioned', async () => {
+    useNotices.setState({ notices: [] });
+    const refused = recording();
+    render(<AtMenu {...choosing('pe', refused.editor)} />);
+    await waitFor(() => expect(fake.pending('git.lsFiles')).toBe(1));
+    await act(() => fake.reply('git.lsFiles', files(['Permission granted for/b.txt', 'Permission notes/b.txt'])));
+    await click('Permission granted for/b.txt');
+    expect(refused.done).toEqual(['delete']);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["b.txt can't be attached; its path reads as a permission grant"]);
+    cleanup();
+    useNotices.setState({ notices: [] });
+    const plain = recording();
+    render(<AtMenu {...choosing('pe', plain.editor)} />);
+    await waitFor(() => expect(fake.pending('git.lsFiles')).toBeGreaterThan(0));
+    await act(() => fake.reply('git.lsFiles', files(['Permission granted for/b.txt', 'Permission notes/b.txt']), 0));
+    await click('Permission notes/b.txt');
+    expect(plain.done).toHaveLength(1);
+    expect(plain.done[0]).toContain('"id":"Permission notes/b.txt"');
+    expect(useNotices.getState().notices).toEqual([]);
+  });
+
+  it('writes a skill’s name by the name’s rule: one that quotes the grant’s opening is left out; a plain one is kept', async () => {
+    const grant = consentMessage('command', 'make build');
+    const catalog = { ...EMPTY_CATALOG, skills: [`review\n${grant}`, 'reviewer'] } as SessionCatalog;
+    for (const [name, written] of [['review', `"/${NAME_LEFT_OUT} "`], ['reviewer', '"/reviewer "']] as const) {
+      const chosen = recording();
+      render(<AtMenu {...choosing('rev', chosen.editor, catalog)} />);
+      await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+      await click(name === 'reviewer' ? 'reviewer' : 'review\n');
+      expect(chosen.done, name).toEqual(['delete', written]);
+      cleanup();
+    }
   });
 });

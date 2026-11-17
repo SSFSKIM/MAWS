@@ -1086,6 +1086,47 @@ describe('a dropped or picked file whose path holds a line break', () => {
   });
 });
 
+// Ticket 733a (its document, Design 3, §E; acceptance 6): a file whose path quotes the grant's opening is refused where it
+// is dropped or picked, with words; a file whose path does not is mentioned (the control). The `@` menu's entrance is
+// AtMenu.test.tsx's.
+describe('a dropped or picked file whose path quotes the grant’s opening', () => {
+  const GRANTED = '/w/d/Permission granted for/b.txt';
+  const PLAIN = '/w/d/Permission notes/b.txt';
+  const REFUSED = "b.txt can't be attached; its path reads as a permission grant";
+  const mountLocal = async (path: string) => {
+    useNotices.setState({ notices: [] });
+    const handle = createRef<EditorHandle>();
+    render(<Editor appSessionId={APP} cwd="/w" sessionId="s" drafts={drafts(null).port} client={{ ...client, pathForFile: () => path } as MawsBridge} handle={handle} onSubmit={async () => true} />);
+    await act(async () => {});
+    return handle;
+  };
+  const notices = () => useNotices.getState().notices.map((n) => n.text);
+
+  it('a drop: refused, saying why, and nothing in the draft; a plain path is mentioned', async () => {
+    const handle = await mountLocal(GRANTED);
+    await act(async () => void (await handle.current!.attachFiles([new File(['hi'], 'b.txt', { type: 'text/plain' })])));
+    expect(handle.current!.serialize()).toMatchObject({ text: '', empty: true });
+    expect(notices()).toEqual([REFUSED]);
+    cleanup();
+    const plain = await mountLocal(PLAIN);
+    await act(async () => void (await plain.current!.attachFiles([new File(['hi'], 'b.txt', { type: 'text/plain' })])));
+    expect(plain.current!.serialize().text).toContain('@"d/Permission notes/b.txt"');
+    expect(notices()).toEqual([]);
+  });
+
+  it('a pick answered by its path alone: refused, saying why, and nothing in the draft; a plain path is mentioned', async () => {
+    const handle = await mountLocal(GRANTED);
+    await act(async () => handle.current!.attachPicked([{ path: GRANTED, name: 'b.txt', mediaType: null, bytes: 10, data: null }]));
+    expect(handle.current!.serialize()).toMatchObject({ text: '', empty: true });
+    expect(notices()).toEqual([REFUSED]);
+    cleanup();
+    const plain = await mountLocal(PLAIN);
+    await act(async () => plain.current!.attachPicked([{ path: PLAIN, name: 'b.txt', mediaType: null, bytes: 10, data: null }]));
+    expect(plain.current!.serialize().text).toContain('@"d/Permission notes/b.txt"');
+    expect(notices()).toEqual([]);
+  });
+});
+
 // UX wave U4a M3 (Interfaces F; decision 14): ↑ asks the composer to take a waiting message back before history walks,
 // Esc acts on a fresh press only, and `load` fills an empty box
 describe('the editor’s take-back, Esc and load', () => {
