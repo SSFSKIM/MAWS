@@ -195,7 +195,9 @@ export function createIgnoreCheck(
       const marker = await fs.promises.lstat(join(root, '.git'), { bigint: true }).catch(() => null);
       const asked = live();
       const held = await Promise.all(asked.map(async (ask) => marker !== null && sameMarker(marker, ask.marker!) && (await stillNames(ask.dir, ask.opened!))));
-      const found = held.includes(true) ? await repositoryAt(root, asking, rest()) : CHANGED;
+      // asked again after the awaits: an ask answered meanwhile (the stop, its bound) is no reason to start git
+      const stillAsked = !disposed && asked.some((ask, i) => held[i] && pending.has(ask));
+      const found = stillAsked ? await repositoryAt(root, asking, rest()) : CHANGED;
       if (typeof found !== 'string') named ??= found;
       asked.forEach((ask, i) => {
         if ((held[i] && typeof found !== 'string' && found.key === named!.key) || !pending.has(ask)) return;
@@ -359,9 +361,11 @@ interface Repository {
 // directory and the common directory, and the `config` in each where there is one, must be this user's by `stat`, which
 // follows a link to what git reads (git's own check reads a `.git` link's owner, not its target's; a root-owned one
 // passes git's only for git run as root, which the daemon never is). A path with a line break in it cannot be read out
-// of git's answer (`UNREADABLE`). A git that does not know `--path-format` takes it for a flag to show, prints it back
-// first and exits 0 (rev-parse's `show_flag`): `NO_PATH_FORMAT`, so the log says why nothing is marked. Any other
-// failure of git is thrown, as a call's is.
+// of git's answer, and nor can one that is no UTF-8: git's bytes are decoded with each that is no UTF-8 read as U+FFFD
+// (`execGit`), which names another path, one that may be another repository of this user's (`UNREADABLE`; a name that
+// truly holds U+FFFD is refused with them). A git that does not know `--path-format` takes it for a flag to show,
+// prints it back first and exits 0 (rev-parse's `show_flag`): `NO_PATH_FORMAT`, so the log says why nothing is marked.
+// Any other failure of git is thrown, as a call's is.
 async function repositoryAt(root: string, run: GitRun, timeoutMs: number): Promise<Repository | string> {
   let printed: string;
   try {
@@ -372,7 +376,7 @@ async function repositoryAt(root: string, run: GitRun, timeoutMs: number): Promi
   }
   const lines = printed.split('\n');
   if (lines[0] === '--path-format=absolute') return NO_PATH_FORMAT;
-  if (lines.length !== 4 || lines[3] !== '') return UNREADABLE;
+  if (lines.length !== 4 || lines[3] !== '' || printed.includes('\uFFFD')) return UNREADABLE;
   const [gitDir, commonDir, workTree] = lines as [string, string, string];
   if (workTree !== root) return ANOTHER_TREE;
   const dirs = [gitDir, commonDir];
