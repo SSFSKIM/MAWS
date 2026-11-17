@@ -267,7 +267,7 @@ export function startBrowser({ userData, settings, view, data, register, emit: e
   });
   data.reattach(sessionSnapshot(view));
   engineStatusesSeen();
-  const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit }) : null;
+  const inspector = env.MAWS_E2E === '1' ? browserInspector({ store, emit, placedOf: (entry) => views.placedOf(entry) }) : null;
   if (inspector) globalThis.__maws_browser = inspector;
   // E13: the e2e's fake host reads the socket and the leases; `trustRoot` makes a process (the test's own) a root beside
   // every session's engine, so a host the test runs is let in (the socket peer authentication spec, M2)

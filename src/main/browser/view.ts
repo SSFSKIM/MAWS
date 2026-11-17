@@ -80,6 +80,13 @@ export function shown(entry: TabEntry): boolean {
 }
 
 export type PlaceInput = CommandInput<'browser.view.place'>;
+// UX wave U6b-5b M1 (Interfaces §G, the e2e seam; decision 36): the last rect of `browser.view.place` the manager acted on
+// for a tab (the owner's report, a claim, or the owner's release, as `null`), as received, and how many it has acted on.
+// A report it ignores (another pane's, a window it does not know) is not counted: the acknowledgment says the view took it.
+export interface PlacedReport {
+  rect: PlaceInput['rect'];
+  count: number;
+}
 
 export interface ViewManagerDeps {
   store: TabStore;
@@ -103,6 +110,7 @@ export class ViewManager {
   private readonly staged = new WeakSet<TabEntry>(); // in the staging window for its still: left alone meanwhile
   private readonly added = new Set<(win: BrowserWindow) => void>(); // cua #90
   private readonly coverOn = new Set<(win: BrowserWindow) => void>(); // cua #90
+  private readonly acknowledged = new WeakMap<TabEntry, PlacedReport>(); // U6b-5b M1: read only by the e2e seam
   private readonly unhook: (() => void)[];
   private readonly now: () => number;
 
@@ -129,10 +137,14 @@ export class ViewManager {
     this.watch(win);
     const owns = entry.placement?.paneId === paneId;
     if (rect === null) {
-      if (owns) this.release(entry);
+      if (owns) {
+        this.acknowledge(entry, rect);
+        this.release(entry);
+      }
       return;
     }
     if (!owns && !claim) return;
+    this.acknowledge(entry, rect);
     entry.placement = {
       paneId,
       surface,
@@ -190,6 +202,12 @@ export class ViewManager {
   }
   // cua #90 end
 
+  // U6b-5b M1: the placement last acted on for the tab, for the e2e seam (inspect.ts); null before the first
+  placedOf(entry: TabEntry): PlacedReport | null {
+    const placed = this.acknowledged.get(entry);
+    return placed ? { rect: placed.rect && { ...placed.rect }, count: placed.count } : null;
+  }
+
   dispose(): void {
     for (const unhook of this.unhook) unhook();
   }
@@ -206,6 +224,10 @@ export class ViewManager {
   // cua #90: a page view joined the window, on top of it
   private viewAdded(win: BrowserWindow): void {
     for (const listener of [...this.added]) listener(win);
+  }
+
+  private acknowledge(entry: TabEntry, rect: PlaceInput['rect']): void {
+    this.acknowledged.set(entry, { rect: rect && { ...rect }, count: (this.acknowledged.get(entry)?.count ?? 0) + 1 });
   }
 
   private stamp(): string {

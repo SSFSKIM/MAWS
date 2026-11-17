@@ -104,6 +104,9 @@ const nativePopup: PopupMenu = (template, { window, x, y }) => Menu.buildFromTem
 export interface NativeMenuSeam {
   last(): MenuNode[] | null; // null once chosen from, or before any
   pick(path: string[]): boolean; // false when the path names no enabled item with an action
+  // UX wave U6b-5b M1 (Interfaces §G): the point the last menu was handed to the presenter with, as handed (kept through
+  // a pick); null before any
+  at(): { x: number; y: number } | null;
 }
 
 export interface MenuPresenter {
@@ -112,6 +115,7 @@ export interface MenuPresenter {
 
 export class NativeMenus implements MenuPresenter {
   private recorded: MenuSpec[] | null = null;
+  private recordedAt: { x: number; y: number } | null = null; // U6b-5b M1
   private readonly e2e: boolean;
   private readonly popup: PopupMenu;
   readonly seam: NativeMenuSeam;
@@ -121,6 +125,7 @@ export class NativeMenus implements MenuPresenter {
     this.popup = popup;
     this.seam = {
       last: () => (this.recorded === null ? null : toNodes(this.recorded)),
+      at: () => this.recordedAt && { ...this.recordedAt },
       pick: (path) => {
         let items = this.recorded;
         let item: MenuSpec | undefined;
@@ -137,7 +142,9 @@ export class NativeMenus implements MenuPresenter {
   }
 
   present(items: MenuSpec[], at: MenuAnchor): void {
-    if (this.e2e) this.recorded = items;
-    else this.popup(toTemplate(items), at);
+    if (this.e2e) {
+      this.recorded = items;
+      this.recordedAt = { x: at.x, y: at.y };
+    } else this.popup(toTemplate(items), at);
   }
 }
