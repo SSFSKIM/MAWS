@@ -1125,14 +1125,18 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
 // person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
-// units a character in all (the readers' bounds sum to 41), the text does not count: it fails closed. The grant's
+// units a character in all (the readers' bounds sum to 45), the text does not count: it fails closed. The grant's
 // test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
 // for the folded text too, decided by one fold before any reader runs; the budget follows the longer of the two, and
-// the grant's test on a counted text stays within one stretch.
+// the grant's test on a counted text stays within one stretch. Ticket 733a widened the grant's test (a second reading,
+// each character folded by itself in two case images): its count is at most 7 units a character of the longer of the
+// text and its fold (4 on ASCII text: the whole fold and its pass, 3, and one pass by character), the costliest of the
+// listed readers, and each of them is bounded by it; the readers' sum rose from 41 to 45, the budget from 48 to 52.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
 const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
+const CLAIM_WORK_PER_CHAR = 7; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
-export const OWN_WORK_PER_CHAR = 48;
+export const OWN_WORK_PER_CHAR = 52;
 const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
 const PASTE_OPENING = '<pasted_content id="'; // the head of the opener `framePasted` writes (composer/pasted-content.ts)
 
@@ -1206,7 +1210,7 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
   if (seen) seen.meter = m;
   try {
     charge(m, n + folded + 1); // the fold
-    for (const claims of CLAIMED) if (yield* inOneCall(m, 3 * n + 2, (work) => claims(first, work))) return none;
+    for (const claims of CLAIMED) if (yield* inOneCall(m, CLAIM_WORK_PER_CHAR * Math.max(n, folded) + 2, (work) => claims(first, work))) return none;
     let parts = [first];
     if (yield* inOneCall(m, n + 1, (work) => holds(ANCHOR_TAG_OPENING)(first, work))) {
       // an anchored message counts only when read whole: its read comments, written back by the same writer, are the

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { framePasted, PASTED_BLOCK, pastedPlaceholder } from './pasted-content';
-import { countLines, neutralisePastedTags, parsePlaceholders, pastedTagId, wrapPasted } from './pasted-framing';
+import { countLines, neutralisePastedTags, parsePlaceholders, pastedTagId, restorePastedTags, wrapPasted } from './pasted-framing';
 import { sha256Hex } from './sha256';
 
 const FIXTURES = join(__dirname, '../../../test/fixtures/composer');
@@ -76,6 +76,62 @@ describe("pasted framing matches the terminal's tags and neutralisation", () => 
     ]);
     for (const p of parsePlaceholders(text)) expect(text.slice(p.start, p.end)).toMatch(/^\[.*\]$/);
     expect(parsePlaceholders('nothing here')).toEqual([]);
+  });
+});
+
+// Ticket 733a (its document, Design 1): a body inside a segment must not be able to end it for a reader, so the tag is
+// read in the compatibility fold too; after the neutraliser, the NFKC lower-case fold holds neither spelling of the tag
+describe('neutralisePastedTags reads the tag in the compatibility fold', () => {
+  const fold = (text: string) => text.normalize('NFKC').toLowerCase();
+  const holdsTag = (text: string) => fold(text).includes('<pasted_content') || fold(text).includes('</pasted_content');
+  it.each([
+    ['a full-width bracket', '\uff1cpasted_content id="abcd">'],
+    ['a small bracket and a slash', 'a \ufe64/pasted_content id="abcd"> b'],
+    ['a full-width slash', '<\uff0fpasted_content id="abcd">'],
+    ['full-width letters and low line', 'x <ｐａｓｔｅｄ\uff3fｃｏｎｔｅｎｔ id="abcd">'],
+    ['full-width capitals after both full-width marks', '\uff1c\uff0fＰＡＳＴＥＤ_CONTENT'],
+    ['a long s, which folds to s', '</pa\u017fted_content>'],
+    ['a sign that folds to two of its letters', '<\u33a9sted_content id="abcd">'],
+    ['an ASCII tag beside a look-alike one', '<pasted_content id="abcd"> and \uff1c/pasted_content id="abcd">'],
+  ])('neutralises %s, and restores it', (_, text) => {
+    expect(holdsTag(text), 'the fold holds the tag before').toBe(true);
+    const out = neutralisePastedTags(text);
+    expect(holdsTag(out)).toBe(false);
+    expect(neutralisePastedTags(out), 'idempotent').toBe(out);
+    expect(restorePastedTags(out)).toBe(text);
+  });
+
+  it('leaves text with no tag in any spelling as it is, beyond ASCII too', () => {
+    for (const text of ['\uff1cb\uff1e and \uff0f', 'ｐａｓｔｅｄ content', '<pasted content>', 'é<pasted', '']) expect(neutralisePastedTags(text)).toBe(text);
+  });
+
+  it('a body holding a look-alike closing tag stays inside its one segment', () => {
+    const block = wrapPasted('abcd', 'a\n\uff1c/pasted_content id="abcd">\nb');
+    expect([...block.matchAll(PASTED_BLOCK)].map((m) => m[2])).toEqual(['a\n\uff1c\\/pasted_content id="abcd">\nb']);
+    const body = block.slice(block.indexOf('\n', 2) + 1, block.lastIndexOf('\n</pasted_content'));
+    expect(holdsTag(body)).toBe(false);
+  });
+
+  // mulberry32, a fixed seed's texts
+  it('over seeded texts: the fold holds no tag after, and restoring gives the text back', () => {
+    const PIECES = ['<', '\uff1c', '\ufe64', '/', '\uff0f', 'pasted_content', 'PASTED_CONTENT', 'ｐａｓｔｅｄ', '_', '\uff3f', 'content', 'pa', '\u017f', '\u33a9', 'sted_content', ' id="abcd">', 'x', 'é', 'e\u0301', '\n'];
+    let a = 0x733c;
+    const next = () => {
+      a = (a + 0x6d2b79f5) >>> 0;
+      let t = a;
+      t = Math.imul(t ^ (t >>> 15), t | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    };
+    let tagged = 0;
+    for (let n = 0; n < 3000; n += 1) {
+      const text = Array.from({ length: 1 + Math.floor(next() * 8) }, () => PIECES[Math.floor(next() * PIECES.length)]!).join('');
+      if (holdsTag(text)) tagged += 1;
+      const out = neutralisePastedTags(text);
+      expect(holdsTag(out), JSON.stringify(text)).toBe(false);
+      expect(restorePastedTags(out), JSON.stringify(text)).toBe(text);
+    }
+    expect(tagged, 'texts whose fold held a tag').toBeGreaterThan(100);
   });
 });
 

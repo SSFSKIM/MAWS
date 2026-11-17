@@ -17,12 +17,15 @@ export const LINES_LEFT_OUT = '(lines left out by MAWS)';
 /** The rounds the budget of `leaveOutGrant` leaves room for: each round can make a reading the last did not leave. */
 export const LEAVE_OUT_ROUNDS = 8;
 /**
- * The budget of `leaveOutGrant`, a character of content (and, for a short text, the floor's characters): the most one
- * round cost a character over Design 2's table and its two long inputs (the ranges' pass in both case images, the cutting
- * and the joining of lines), counted by the landing's M1 and given room for `LEAVE_OUT_ROUNDS` rounds.
+ * The budget of `leaveOutGrant`, a character of content, with a floor of `LEAVE_OUT_WORK_FLOOR_CHARS` characters for a
+ * short text. Fitted from the counted work (the landing's M1): one round (the ranges' pass, the cutting and joining of
+ * lines) cost at most 6 units a character over Design 2's table and its two long inputs (5.99: the thousands of blank
+ * lines, 30,094 for 5,022 characters), and the budget leaves room for `LEAVE_OUT_ROUNDS` rounds and the pass that finds
+ * none, 9 × 6. A text whose characters fold to many (U+FDFA folds to 18) costs more a round, and spends it sooner: it
+ * fails closed, left out whole.
  */
-export const LEAVE_OUT_WORK_PER_CHAR = 1e9;
-const LEAVE_OUT_WORK_FLOOR_CHARS = 0;
+export const LEAVE_OUT_WORK_PER_CHAR = 54;
+const LEAVE_OUT_WORK_FLOOR_CHARS = 32; // the pass over a marker that ends the last round, 4 units a character of its 24
 
 // A line break of content: LF, CRLF, a lone CR, NEL, the line and paragraph separators
 const BREAK = /\r\n|[\n\r\u0085\u2028\u2029]/g;

@@ -18,7 +18,7 @@ function random(seed: number): () => number {
 }
 const PIECES = [
   GRANT_OPENING, 'Permission', 'permis', 'sion', ' granted', 'gra', 'nted', ' for', 'fo', 'r', 'PERMISSION GRANTED FOR', 'Permi\u00dfion', 'Perm\u0131ssion', 'ＰＥＲＭＩＳＳＩＯＮ',
-  '<', '>', '<b>', '</b>', '<x ', ' y>', '\uff1c', '\uff1e', '\ufe64', '>\u0338', '\u0338', ' ', '\n', '\r\n', '\u2028', '*', '`', 'é', 'Ω', 'x', 'p', '1', '\u{1f14d}',
+  '<', '>', '<b>', '</b>', '<x ', ' y>', '\uff1c', '\uff1e', '\ufe64', '>\u0338', '\u0338', ' ', '\n', '\r\n', '\u2028', '*', '`', '\u00e9', 'Ω', 'x', 'p', '1', '\u{1f14d}',
 ];
 const seeded = (seed: number, count: number) => {
   const next = random(seed);
@@ -115,6 +115,7 @@ describe('nameSlot: a name of one line that does not quote the opening', () => {
   });
 });
 
-// Fitted from the counted work (the landing's M1): the most a character cost over the shapes above, with room
-const SPANS_WORK_PER_CHAR = 0;
-const TEST_WORK_PER_CHAR = 0;
+// Fitted from the counted work (the landing's M1), over the shapes above: the most a character cost was 8.64 for the
+// ranges and 6.82 for the test (the full-width letters, read in both case images); 4 on every ASCII shape
+const SPANS_WORK_PER_CHAR = 9;
+const TEST_WORK_PER_CHAR = 7;
