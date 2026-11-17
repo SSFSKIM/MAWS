@@ -11,11 +11,14 @@
 //
 // "A modal is open" is Radix's own lock: while any modal layer is mounted (a dialog, an alert dialog, a menu or a popover
 // drawn modal) Radix sets `pointer-events: none` on the body, and takes it off when the last one goes. The modal that holds
-// the keyboard is the one the focused element is in, since a modal traps focus.
+// the keyboard is the one the focused element is in, since a modal traps focus. A lender opened while the lock was
+// already on is over another modal (the task review's finding: a palette over a sheet): it remembers the layers it found
+// in the page and does not lend while any of them is still there, whatever holds the keyboard.
 import type { RefCallback } from 'react';
 
 interface Lender {
   content: HTMLElement;
+  over: readonly Element[]; // the layers in the page when it opened over another modal; none when nothing modal was open
   closeThen(run: () => void): void;
 }
 
@@ -23,16 +26,25 @@ const lenders = new Set<Lender>();
 const listeners = new Set<() => void>();
 const tell = () => listeners.forEach((listener) => listener());
 
+const locked = () => document.body.style.pointerEvents === 'none';
+
+// A layer Radix portals into the body: a dialog's content itself, or a popper's wrapper around a menu or a popover (never
+// a hover card or a tooltip). A dialog's overlay is no layer.
+const isLayer = (element: Element): boolean =>
+  element.matches('[role="dialog"], [role="alertdialog"]') ||
+  (element.matches('[data-radix-popper-content-wrapper]') && element.querySelector('[role="menu"], [role="dialog"]:not([data-hover-card])') !== null);
+
+// The lender the keyboard is in, when nothing it opened over is still in the page.
 function lenderHolding(): Lender | null {
   const active = document.activeElement;
   if (active === null) return null;
-  for (const lender of lenders) if (lender.content.contains(active)) return lender;
+  for (const lender of lenders) if (lender.content.contains(active)) return lender.over.some((layer) => layer.isConnected) ? null : lender;
   return null;
 }
 
-/** True while a modal holds the keyboard that does not lend itself: an action that moves the keyboard stays disabled. */
+/** True while a modal holds the keyboard that does not lend itself, or lies under one that does: an action that moves the keyboard stays disabled. */
 export function modalKeepsKeyboard(): boolean {
-  return document.body.style.pointerEvents === 'none' && lenderHolding() === null;
+  return locked() && lenderHolding() === null;
 }
 
 /**
@@ -46,7 +58,8 @@ export function handOffModal(run: () => void): boolean {
   return true;
 }
 
-// Radix's lock is a change of the body's style; the keyboard entering a modal, or leaving one, is a focus.
+// Radix's lock is a change of the body's style; a layer opening or closing, a change of the body's children; the keyboard
+// entering a modal, or leaving one, is a focus.
 let observer: MutationObserver | null = null;
 
 /** Calls `listener` whenever `modalKeepsKeyboard` may have changed; returns its removal. */
@@ -54,7 +67,7 @@ export function subscribeModalKeyboard(listener: () => void): () => void {
   listeners.add(listener);
   if (observer === null) {
     observer = new MutationObserver(tell);
-    observer.observe(document.body, { attributes: true, attributeFilter: ['style'] });
+    observer.observe(document.body, { attributes: true, attributeFilter: ['style'], childList: true });
     document.addEventListener('focusin', tell, true);
   }
   return () => {
@@ -88,7 +101,9 @@ export function modalHandoff(close: () => void): ModalHandoff {
   return {
     lend: (content) => {
       if (content === null) return;
-      const lender: Lender = { content, closeThen };
+      // Attached as the content mounts, before Radix's effect locks the body for it: a lock now is another modal's
+      const over = locked() ? [...document.body.children].filter((element) => element !== content && isLayer(element)) : [];
+      const lender: Lender = { content, over, closeThen };
       lenders.add(lender);
       return () => void lenders.delete(lender);
     },
