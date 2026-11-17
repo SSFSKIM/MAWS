@@ -37,6 +37,7 @@ import { REPO_ROOT } from './support/launch';
 import { latencyBudgets } from './support/latency';
 import { seedTranscript, SideJournal, solidPng, transcript } from './support/side-replay';
 import { hideSurface, sideColumn, sideTab } from './support/shell';
+import { holdForLook, PROBE_FACTORS, record, setAppZoom, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
 
 test.describe.configure({ timeout: 180_000 });
 
@@ -1566,5 +1567,51 @@ test('11. both themes: the chrome with the toggle pressed over the outlined page
     await expect(chip).toHaveText(INCREMENT_LABEL);
     await s.page.mouse.move(700, 20);
     await shoot(s, 'p1-e4d', 'e4d-transcript-chip');
+  });
+});
+
+// ---- UX wave U6b-5b M1: the zoom probe (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1) -----------------
+// Placement 4 (the comment's pin) at the factors 0.5, 0.8, 1.25 and 2, the app window's zoom set in main. The pin is the
+// docked card's caret, which the window draws at the pick's position (window points of the tab, from `pickPosition`)
+// read as CSS pixels. Where the picked element is drawn, in the window's CSS pixels, is the view's bounds plus the
+// element's box in the tab (points, the tab at its own 100 %), divided by the factor. "Off": the caret stands at the
+// position undivided. It records and asserts nothing about where the pin lands. Runs only under MAWS_ZOOM_PROBE=1.
+test('zoom probe: the pin', async () => {
+  zoomProbe();
+  await commentScene({ titles: ['U6b-5b: zoom probe, the pin'] }, async (s) => {
+    const [id] = s.ids as [AppSessionId];
+    const t = await openCommentPage(s, id);
+    let picks = 0;
+    for (const f of PROBE_FACTORS) {
+      await setAppZoom(s.maws.app, s.page, f);
+      const fullPane = await paneRect(paneIn(t.panel));
+      const view = (await viewOf(s, t.tabId))!;
+      await arm(s, t);
+      const button = await rectOf(t.page.locator('#increment'));
+      await t.page.mouse.move(centre(button).x, centre(button).y);
+      await expect(t.page.locator('maws-comment-overlay')).toBeVisible();
+      await t.page.mouse.down();
+      await t.page.mouse.up();
+      const card = cardOf(s, INCREMENT_LABEL);
+      await expect(card).toBeVisible(); // the card for this pick is drawn
+      const picked = await lastPicked(s, ++picks);
+      const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
+      await expect(caret).toHaveAttribute('data-card-caret', String(picked.position?.x));
+      const caretBox = (await caret.boundingBox())!;
+      const caretX = caretBox.x + caretBox.width / 2;
+      const bounds = view.bounds!;
+      const drawnAt = { x: (bounds.x + button.x + button.width / 2) / f, y: (bounds.y + button.y + button.height) / f };
+      const undivided = picked.position ? { x: fullPane.x + picked.position.x, y: fullPane.y + picked.position.y } : null;
+      record([
+        {
+          probe: 'pin', placement: 4, factor: f, pane: fullPane, viewBounds: bounds, button, position: picked.position ?? null,
+          caretCentreX: caretX, caretTopY: caretBox.y, drawnAt, undivided,
+          off: undivided !== null && Math.abs(caretX - undivided.x) <= 1.5 && Math.abs(caretX - drawnAt.x) > 1.5,
+        },
+      ]);
+      await holdForLook(s.page, `the pin at ${f}`);
+      await dismiss(s, t, card);
+    }
+    await setAppZoom(s.maws.app, s.page, 1);
   });
 });

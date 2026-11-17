@@ -22,9 +22,10 @@ import { menu } from './support/menu';
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
+import { appWindowState, edgeDeltas, holdForLook, PROBE_FACTORS, record, sameRect, setAppZoom, timesFactor, uncovered, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
 import {
   address, attachShot, browserIn, browserScene, chipOf, chipsIn, expectOnPane, hiddenAfter, launchBrowserScene, metrics, noticesIn, offPaneAfterFrames, openBrowser, overflow, pageAt, paneIn, preloadRuns,
-  preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
+  placedOn, preloadRunsAt, resizeWindow, shootBrowser, showPane, tabAt, tabState, tabsOf, viewOf,
 } from './support/browser-scene';
 
 test.describe.configure({ timeout: 180_000 });
@@ -1413,4 +1414,120 @@ test('U12a (copy screenshot, A4): Copy screenshot puts the page the pane shows o
       }
     });
   });
+});
+
+// ---- UX wave U6b-5b M1: the zoom probe (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1) -----------------
+// Placements 1 (the view), the pointer, 5 (the traffic lights) and 6 (the device box) at the factors 0.5, 0.8, 1.25 and 2,
+// the app window's zoom set in main as nothing of the product does yet. It records and asserts nothing about where they
+// land (support/zoom-probe.ts); each line says what the document calls "off" for it beside what was read. Runs only
+// under MAWS_ZOOM_PROBE=1; under MAWS_ZOOM_PROBE_HOLD=1 it stops at each factor for the look, on a page of numbered
+// cells whose presses the next line records.
+
+// macOS's standard window buttons, in points (three 14-point circles, 20 points apart): assumed, not read, since
+// Electron reports only the group's position; the look confirms where they stand
+const LIGHTS = { diameter: 14, span: 54 };
+
+test('zoom probe: the view, the lights, the device box', async () => {
+  zoomProbe();
+  const scratch = scratchProject({ titles: ['U6b-5b: zoom probe'] });
+  const server = await startBrowserServer();
+  const s = await launchBrowserScene(scratch, server);
+  try {
+    const [id] = s.ids as [AppSessionId];
+    await show(s, id);
+    const panel = await openBrowser(s);
+    const CELLS = s.server.url('/cells.html');
+    await address(panel, CELLS);
+    const t = await tabAt(s, id, CELLS);
+    const cells = await pageAt(s, CELLS);
+    const pane = paneIn(panel); // the page element: what the placement measures
+    const box = panel.locator('[data-browser-page-box]'); // its room
+    const chip = panel.locator('[data-browser-viewport-chip]');
+    await expectOnPane(s, t, pane, 'panel');
+
+    // placements 1 and 5 and the pointer, the page filling its room
+    for (const f of PROBE_FACTORS) {
+      await setAppZoom(s.maws.app, s.page, f);
+      const rect = await placedOn(s, t, pane); // main has the rect the pane now measures
+      const view = (await viewOf(s, t))!;
+      const bounds = view.bounds!;
+      const drawn = timesFactor(rect, f); // the frame as drawn, in window points
+      const edges = edgeDeltas(drawn, bounds);
+      const { lights, factor } = await appWindowState(s.maws.app);
+      const toolbar = await s.page.locator('[data-toolbar]').evaluate((el) => el.getBoundingClientRect().height);
+      const lightsCentre = lights && lights.y + LIGHTS.diameter / 2;
+      record([
+        { probe: 'view', placement: 1, factor: f, appFactor: factor, pane: rect, bounds, paneTimesFactor: drawn, placed: view.placed, off: sameRect(bounds, rect) && !sameRect(bounds, drawn) },
+        { probe: 'pointer', factor: f, frameNotView: uncovered(drawn, bounds), viewNotFrame: uncovered(bounds, drawn), edges, off: Math.max(...Object.values(edges).map(Math.abs)) > 1 },
+        {
+          probe: 'lights', placement: 5, factor: f, lights, assumed: LIGHTS,
+          toolbarPt: toolbar * f, lightsCentrePt: lightsCentre, toolbarCentrePt: (toolbar * f) / 2,
+          lightsRightPt: lights && lights.x + LIGHTS.span, clearPt: 78 * f,
+          off: lights === null || Math.abs(lightsCentre! - (toolbar * f) / 2) > 1 || lights.x + LIGHTS.span > 78 * f,
+        },
+      ]);
+      await cells.evaluate(() => void ((window as unknown as { __cellsPressed: number[] }).__cellsPressed = []));
+      await holdForLook(s.page, `the view, the lights and the title bar at ${f}: press each corner of the frame`);
+      record([{ probe: 'look: the cells pressed', factor: f, cells: await cells.evaluate(() => (window as unknown as { __cellsPressed: number[] }).__cellsPressed) }]);
+    }
+
+    // placement 6: Mobile chosen at 100 %, then at each factor the five numbers with the room ample, and the menu's
+    // offer with the room just under and just over 375 CSS pixels
+    await setAppZoom(s.maws.app, s.page, 1);
+    await (await viewportItem(s, panel, 'mobile')).click();
+    await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
+    const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
+    // the room dragged towards `width` CSS pixels by the panel's separator (the panel's own bounds may stop it short):
+    // the room's width it reached
+    const roomTo = async (width: number): Promise<number> => {
+      const before = (await rectOf(box)).width;
+      if (Math.abs(before - width) < 1) return before;
+      const handle = await rectOf(resizer);
+      const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
+      await s.page.mouse.move(hx, hy);
+      await s.page.mouse.down();
+      await s.page.mouse.move(hx + before - width, hy, { steps: 4 });
+      await s.page.mouse.up();
+      let after = before;
+      await expect.poll(async () => (after = (await rectOf(box)).width), { message: `the room moved from ${before} towards ${width}` }).not.toBe(before);
+      return after;
+    };
+    const offered = async (): Promise<boolean> => {
+      const item = await viewportItem(s, panel, 'mobile');
+      const disabled = (await item.getAttribute('aria-disabled')) === 'true';
+      await closeMenus(s);
+      return !disabled;
+    };
+    for (const f of PROBE_FACTORS) {
+      await setAppZoom(s.maws.app, s.page, f);
+      const room = await roomTo(440);
+      await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
+      const rect = await placedOn(s, t, pane);
+      const view = (await viewOf(s, t))!;
+      const [element, inner, text] = [(await rectOf(pane)).width, await cells.evaluate(() => window.innerWidth), (await chip.textContent())?.trim() ?? null];
+      const ample = room >= 375;
+      const offers: { room: number; offered: boolean; predicted: boolean }[] = [];
+      for (const target of [370, 380]) {
+        const at = await roomTo(target);
+        offers.push({ room: at, offered: await offered(), predicted: at >= 375 });
+      }
+      record([
+        {
+          probe: 'device box', placement: 6, factor: f, room, ample, placed: rect,
+          element: { read: element, predicted: Math.min(375, room) },
+          frameDrawnPt: { read: element * f, predicted: Math.min(375, room) * f },
+          view: { read: view.bounds?.width ?? null, predicted: Math.min(375, room) },
+          innerWidth: { read: inner, predicted: Math.min(375, room) },
+          chip: { read: text, predicted: `${Math.min(375, Math.round(room))} × …` },
+          offers,
+          off: { viewNotItsFrame: view.bounds !== null && Math.abs(view.bounds.width - element * f) > 1, offerIgnoresFactor: offers.every((o) => o.offered === o.predicted) },
+        },
+      ]);
+    }
+    await setAppZoom(s.maws.app, s.page, 1);
+  } finally {
+    await closeScene(s);
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
 });

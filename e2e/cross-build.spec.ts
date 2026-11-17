@@ -1325,6 +1325,76 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
   }
 });
 
+// UX wave U6b-5b M1 (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1, "(zoom probe)"; P7): what the peer
+// shows after this build's page was zoomed. This build's window is set to 150 % in main, once in isolated mode
+// (`setZoomMode('isolated')` first) and once in the default mode, and is left by an ordinary quit and, on a fresh
+// profile, by a forced exit (`s.killApp`); the peer is then launched on the profile and its page's factor read. It
+// records and asserts nothing about the factor: the lines decide P7 beside the harness's rows c and d
+// (spikes/zoom-probe/). Runs only under MAWS_ZOOM_PROBE=1, against `--peer-exact f1852de3a` and `--peer-exact
+// 2c7044231`; M3's "(zoom, both ways)" replaces it.
+const ZOOM_PROBE_ON = process.env.MAWS_ZOOM_PROBE === '1';
+// Every key path holding "zoom" in the profile's Preferences file (Chromium's own record of a zoom), with its value.
+function zoomPrefsOf(userData: string): { key: string; value: unknown }[] | null {
+  const path = join(userData, 'Preferences');
+  if (!existsSync(path)) return null;
+  const found: { key: string; value: unknown }[] = [];
+  const visit = (node: unknown, at: string[]) => {
+    if (node === null || typeof node !== 'object') return;
+    for (const [key, value] of Object.entries(node)) {
+      if (/zoom/i.test(key)) found.push({ key: [...at, key].join('.'), value });
+      else visit(value, [...at, key]);
+    }
+  };
+  visit(JSON.parse(readFileSync(path, 'utf8')), []);
+  return found;
+}
+// The app window's factor (the window the scenes' helpers find: the visible one), and its zoom mode where Electron reads one.
+const appZoomOf = (run: Run) =>
+  run.maws.app.evaluate(({ BrowserWindow }) => {
+    const wc = BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents as Electron.WebContents & { getZoomMode?: () => string };
+    return { factor: wc.getZoomFactor(), mode: typeof wc.getZoomMode === 'function' ? wc.getZoomMode() : null };
+  });
+
+test('(zoom probe) the factor the peer opens at, on a profile this build left at 150 % in isolated and in default zoom mode, by a quit and by a forced exit', async () => {
+  test.skip(!ZOOM_PROBE_ON, 'a probe of U6b-5b M1: runs only under MAWS_ZOOM_PROBE=1, on a Mac');
+  test.setTimeout(600_000);
+  const { here, peer } = builds();
+  for (const mode of ['isolated', 'default'] as const) {
+    for (const exit of ['quit', 'kill'] as const) {
+      await withScratch(`xb-zoom-probe-${mode}-${exit}`, async (s) => {
+        const first = await s.launch();
+        await s.ready(first.page);
+        const set = await first.maws.app.evaluate(({ BrowserWindow }, isolated) => {
+          const wc = BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents as Electron.WebContents & { setZoomMode?: (mode: string) => void };
+          const modeCall = typeof wc.setZoomMode === 'function';
+          if (isolated && modeCall) wc.setZoomMode!('isolated');
+          if (!isolated || modeCall) wc.setZoomFactor(1.5);
+          return { modeCall };
+        }, mode === 'isolated');
+        if (mode === 'isolated' && !set.modeCall) {
+          record([`(zoom probe) ${here.label} has no setZoomMode: the isolated mode is not probed`]);
+          await s.quit(first);
+          return;
+        }
+        await expect.poll(async () => (await appZoomOf(first)).factor, { message: `${here.label}'s page at 1.5` }).toBe(1.5);
+        const zoomed = await appZoomOf(first);
+        if (exit === 'quit') await s.quit(first);
+        else await s.killApp(first);
+        const prefsAfter = zoomPrefsOf(s.userData);
+
+        const old = await s.launch({}, peer.root);
+        await s.ready(old.page);
+        const opened = await appZoomOf(old);
+        await s.quit(old);
+        record([
+          `(zoom probe) ${mode} mode, left by ${exit === 'quit' ? 'a quit' : 's.killApp'}: ${here.label} at ${JSON.stringify(zoomed)}; ${peer.label} (wire ${wireOf(peer)}) opened at ${opened.factor}` +
+            `; Preferences' zoom keys after ${here.label}: ${JSON.stringify(prefsAfter)}; after ${peer.label}: ${JSON.stringify(zoomPrefsOf(s.userData))}`,
+        ]);
+      });
+    }
+  }
+});
+
 // P5 O3-D M6, acceptance 11's second half (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §L; the
 // architect's rulings D29 and D32). This build's app on the daemon shape leaves its private `mawsd` running the spine
 // over a post-D profile (the index at 14, the settings split); an O2-era app (the peer, before O3-A: it takes no

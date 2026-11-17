@@ -8,11 +8,15 @@ import { expect, type ElectronApplication } from '@playwright/test';
 export type MenuNode = { id: string; label: string; enabled?: false; children?: MenuNode[] } | { separator: true };
 
 interface MenuSeam {
-  __maws_browser: { menu: { last(): MenuNode[] | null; pick(path: string[]): boolean; openAllAsked(): number[] } };
+  __maws_browser: { menu: { last(): MenuNode[] | null; pick(path: string[]): boolean; at(): { x: number; y: number } | null; openAllAsked(): number[] } };
 }
 
 export const lastMenu = (app: ElectronApplication): Promise<MenuNode[] | null> =>
   app.evaluate(() => (globalThis as unknown as MenuSeam).__maws_browser.menu.last());
+
+// UX wave U6b-5b M1: the point main handed the last menu to its presenter with (kept through a pick); null before any.
+export const menuAt = (app: ElectronApplication): Promise<{ x: number; y: number } | null> =>
+  app.evaluate(() => (globalThis as unknown as MenuSeam).__maws_browser.menu.at());
 
 // The menu main built after `open` ran (a click that asks for one), polled until it differs from the one before.
 export async function menuAfter(app: ElectronApplication, open: () => Promise<void>): Promise<MenuNode[]> {

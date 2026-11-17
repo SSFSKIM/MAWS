@@ -60,7 +60,8 @@ import {
 import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, pageAt, paneIn, paneRect, preloadRunsAt, resizeWindow, tabAt, tabsOf, viewOf } from './support/browser-scene';
 import { invoke, value } from './support/c7-replay';
 import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
-import { menuAfter, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
+import { menuAfter, menuAt, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
+import { holdForLook, PROBE_FACTORS, record, setAppZoom, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -932,6 +933,85 @@ test('9, 10, 12: the extensions action bar: the probe\'s icon right of the addre
       throw error;
     }
     await closeScene(again);
+  } finally {
+    await server.close();
+    rmSync(scratch.root, { recursive: true, force: true });
+  }
+});
+
+// ---- UX wave U6b-5b M1: the zoom probe (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1) -----------------
+// Placements 2 (the extension's popup) and 3 (the bookmarks menu and an extension's action menu) at the factors 0.5,
+// 0.8, 1.25 and 2, the app window's zoom set in main. It records and asserts nothing about where they land
+// (support/zoom-probe.ts): the popup's bounds and the menus' points are window points, the icon's and the chip's boxes
+// CSS pixels of the window, and "off" is a placement standing by the box and not by the box times the factor. Runs only
+// under MAWS_ZOOM_PROBE=1.
+test('zoom probe: the popup and the menu', async () => {
+  zoomProbe();
+  const server = await startBrowserServer();
+  const { scratch, chrome } = importScratch(['U6b-5b: zoom probe, the popup and the menu'], { bookmarksOrigin: server.origin });
+  const probeId = chrome.extensions.probe.id;
+  const popupUrl = `chrome-extension://${probeId}/popup.html`;
+  try {
+    const s = await launchBarScene(scratch, server, chrome, { keychain: `file:${chrome.passwordFile}` });
+    const [id] = s.ids as [AppSessionId];
+    try {
+      await importThrough(s, { history: false, cookies: false });
+      await closeSheet(s);
+      await expect.poll(() => settingsFile(s.maws.userData).browser.profile).toBe('Default');
+      const panel = await browserPanel(s, id);
+      await address(panel, server.url('/a.html'));
+      await tabAt(s, id, server.url('/a.html'));
+      await overflow(s, panel, 'Open in tab'); // a main tab: the bar and the icons inline
+      const main = browserIn(s, 'main');
+      const probe = actionIn(main, probeId);
+      const folder = chipNamed(main, 'F');
+      await expect(probe).toBeVisible();
+      await expect(folder).toBeVisible();
+      for (const f of PROBE_FACTORS) {
+        await setAppZoom(s.maws.app, s.page, f);
+        await expect(probe).toBeVisible();
+        const icon = (await probe.boundingBox())!;
+        // placement 2: the popup, under its icon (its top on the icon's bottom, its right edge on the icon's)
+        await probe.click();
+        await expect.poll(async () => (await popupOf(s))?.url, { message: 'the seam answers the open popup' }).toBe(popupUrl);
+        const popup = (await popupOf(s))!;
+        const anchor = { right: icon.x + icon.width, bottom: icon.y + icon.height };
+        const anchorPt = { right: Math.round(anchor.right * f), bottom: Math.round(anchor.bottom * f) };
+        const standsBy = { right: popup.bounds.x + popup.bounds.width, top: popup.bounds.y };
+        record([
+          {
+            probe: 'popup', placement: 2, factor: f, icon, bounds: popup.bounds, iconCorner: anchor, iconCornerTimesFactor: anchorPt,
+            off: Math.abs(standsBy.right - anchor.right) <= 1 && Math.abs(standsBy.top - anchor.bottom) <= 1 && (Math.abs(standsBy.right - anchorPt.right) > 1 || Math.abs(standsBy.top - anchorPt.bottom) > 1),
+          },
+        ]);
+        await holdForLook(s.page, `the popup at ${f}`);
+        await probe.click();
+        await expect.poll(() => popupOf(s)).toBeNull();
+
+        // placement 3: the bookmarks menu at the chip's bottom-left corner; the action's menu at the press
+        await expect(folder).toBeVisible();
+        const chipBox = (await folder.boundingBox())!;
+        await menuAfter(s.maws.app, () => folder.click());
+        const folderAt = await menuAt(s.maws.app);
+        const corner = { x: Math.round(chipBox.x), y: Math.round(chipBox.y + chipBox.height) };
+        const iconNow = (await probe.boundingBox())!;
+        await menuAfter(s.maws.app, () => probe.click({ button: 'right' }));
+        const actionAt = await menuAt(s.maws.app);
+        const press = { x: Math.round(iconNow.x + iconNow.width / 2), y: Math.round(iconNow.y + iconNow.height / 2) };
+        const times = (p: { x: number; y: number }) => ({ x: Math.round(p.x * f), y: Math.round(p.y * f) });
+        const isOff = (at: { x: number; y: number } | null, css: { x: number; y: number }) =>
+          at !== null && Math.abs(at.x - css.x) <= 1 && Math.abs(at.y - css.y) <= 1 && (Math.abs(at.x - times(css).x) > 1 || Math.abs(at.y - times(css).y) > 1);
+        record([
+          { probe: 'menu: bookmarks folder', placement: 3, factor: f, chip: chipBox, at: folderAt, corner, cornerTimesFactor: times(corner), off: isOff(folderAt, corner) },
+          { probe: 'menu: extension action', placement: 3, factor: f, icon: iconNow, at: actionAt, press, pressTimesFactor: times(press), off: isOff(actionAt, press) },
+        ]);
+      }
+      await setAppZoom(s.maws.app, s.page, 1);
+    } catch (error) {
+      await s.maws.cleanup();
+      throw error;
+    }
+    await closeScene(s);
   } finally {
     await server.close();
     rmSync(scratch.root, { recursive: true, force: true });

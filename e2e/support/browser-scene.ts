@@ -33,6 +33,9 @@ export interface InspectedView {
   attached: boolean;
   windowId: number | null;
   owner: { paneId: string; surface: Surface; windowId: number } | null;
+  // UX wave U6b-5b M1: the last rect main acted on from `browser.view.place` for the tab, as received, and how many
+  // reports it has acted on; null before the first (src/main/browser/view.ts `placedOf`)
+  placed: { rect: Rect | null; count: number } | null;
 }
 interface BrowserInspector {
   tab(tabId: string): InspectedView | null;
@@ -215,6 +218,26 @@ export async function paneRect(pane: Locator): Promise<Rect> {
     const y = Math.round(r.top);
     return { x, y, width: Math.round(r.right) - x, height: Math.round(r.bottom) - y };
   });
+}
+
+// UX wave U6b-5b M1 (decision 36): the acknowledgment of a placement. Polls until the rect main last acted on for the tab
+// is the pane's rect as the window rounds it now, and answers that rect: a scene that changed the layout or the zoom
+// reads the view's native bounds only after it, never after a number of frames (the pane reports from its own
+// measuring, and an unchanged rect sends nothing).
+export async function placedOn(s: Scene, tabId: string, pane: Locator, timeout = 5_000): Promise<Rect> {
+  let rect: Rect | null = null;
+  await expect
+    .poll(
+      async () => {
+        const [view, now] = await Promise.all([viewOf(s, tabId), paneRect(pane)]);
+        rect = now;
+        const placed = view?.placed?.rect ?? null;
+        return placed !== null && placed.x === now.x && placed.y === now.y && placed.width === now.width && placed.height === now.height ? 'acknowledged' : JSON.stringify({ placed: view?.placed ?? null, pane: now });
+      },
+      { timeout, intervals: [16, 33, 50, 100], message: 'main acknowledged the pane’s rect for the tab' },
+    )
+    .toBe('acknowledged');
+  return rect!;
 }
 
 const within1 = (a: Rect, b: Rect) => Math.abs(a.x - b.x) <= 1 && Math.abs(a.y - b.y) <= 1 && Math.abs(a.width - b.width) <= 1 && Math.abs(a.height - b.height) <= 1;
