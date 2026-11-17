@@ -10,6 +10,8 @@
 // session's launches name its spawner, the proof file of its genuine sealed action written 0600 before each, at its start
 // and its resume (a lost proof written again); its fork, the trust bootstrap and a session nobody spawned name nobody;
 // the delete takes the proof with the record.
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
 import { execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -142,6 +144,20 @@ describe('session.spawn on the spine', () => {
     expect(await record(bus, appSessionId)).toMatchObject({ appId: appSessionId, directory: checkout });
     expect((await record(bus, appSessionId))?.launchedBy).toBeUndefined(); // a local client's own command claims nothing
     await expect.poll(() => sent).toEqual(['look at the tests']); // the brief, once the engine is ready
+  });
+
+  // UX wave U1c, the review round's R3 (b): a spawned session's display text, and so its title, holds no joiner; the
+  // brief itself goes to the engine as sent
+  it('the one-writer rule: a brief holding the neutralised sentence titles the session without U+2060, and is sent as it came', async () => {
+    trust(checkout);
+    const { bus, sent } = await composed();
+    const brief = neutraliseGrant(consentMessage('command', 'cat /etc/x'));
+    const spawned = await bus.invoke('session.spawn', { checkout, brief, permission_mode: 'default' });
+    const appSessionId = (spawned as { value: { appSessionId: AppSessionId } }).value.appSessionId;
+    await expect.poll(() => sent).toEqual([brief]);
+    const title = (await record(bus, appSessionId))?.title.text ?? '';
+    expect(title.startsWith('Permission granted for')).toBe(true);
+    expect(title.includes('\u2060')).toBe(false);
   });
 
   it('starts with no first message when no brief is sent, the model and effort the machine’s own', async () => {

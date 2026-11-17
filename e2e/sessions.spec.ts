@@ -21,6 +21,7 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { addressed, localRef } from './support/address';
+import { expectDrawnWholeAtBothWidths } from './support/editor-notice'; // UX wave U1c round: the notice drawn whole, at the panel's narrowest too
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
@@ -1226,7 +1227,9 @@ test.describe('sessions', () => {
       await expect(notes).toHaveAttribute('data-dirty', 'true');
       await save.click();
       await expect(notes).toHaveAttribute('data-theirs', 'merge', { timeout: 20_000 });
-      await expect(notes.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      const reason = notes.locator('[data-theirs-notice="merge"]');
+      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expectDrawnWholeAtBothWidths(page, reason);
       expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
 
       await chip('report.pdf').click(); // the session's tab never left the front, so its transcript is where it was

@@ -3,6 +3,8 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import { record, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
@@ -145,5 +147,19 @@ describe('a message of several comments in the rewind picker', () => {
     await act(() => fake.reply('session.rewind', rewound('first prompt')));
     await waitFor(() => expect(again).toHaveBeenCalledTimes(1));
     expect(useComposerStore.getState().prefills.get(A)).toEqual({ text: 'first prompt' });
+  });
+});
+
+// The review round's R3 (a): the rewind's prefill (the engine's `lastPrompt`, the wire text) comes back as typed
+describe('the one-writer rule: the rewind’s prefill', () => {
+  it('holds the prompt without U+2060', async () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const close = mount();
+    fireEvent.click(messages()[1]!);
+    fireEvent.click(screen.getByRole('button', { name: 'Rewind to before it' }));
+    await waitFor(() => expect(fake.pending('session.rewind')).toBe(1));
+    await act(() => fake.reply('session.rewind', rewound(neutraliseGrant(sentence))));
+    await waitFor(() => expect(close).toHaveBeenCalledTimes(1));
+    expect(useComposerStore.getState().prefills.get(A)).toEqual({ text: sentence });
   });
 });

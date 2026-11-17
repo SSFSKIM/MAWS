@@ -15,6 +15,7 @@ import type { ProjectId } from '@shared/graph/ids';
 import type { LaunchedBy } from '@shared/graph/session';
 import { PermissionModeSchema } from '@shared/graph/enums';
 import { EffortSchema } from '@shared/engine/launch-spec';
+import { asTyped } from '@shared/engine/grant';
 import type { HandlerContext } from '@shared/ipc/client';
 import type { CommandInput, CommandOutput } from '@shared/ipc/schema';
 import type { Location, SetupIntentPatch } from '@shared/sessions/intent';
@@ -83,7 +84,8 @@ async function spawn(bus: Pick<ServicesBus, 'onEmitted'>, deps: SpawnDeps, input
   const launching = untilLaunching((listener) => bus.onEmitted('session.setup', listener), appSessionId); // tapped before the start: its setup's events may precede its answer
   let outcome: StartOutcome;
   try {
-    const message = input.brief === undefined ? null : { content: input.brief, display: input.brief };
+    // UX wave U1c (the review round's R3): the display, and so the title, as typed; the brief goes as it came
+    const message = input.brief === undefined ? null : { content: input.brief, display: asTyped(input.brief) };
     // P5 O7 M9: the trust card answered on the asking device (an owner's alone, the endpoint's policy) runs the attested
     // bootstrap the local start runs for an accepted card; MAWS writes no trust itself
     outcome = await deps.sessions.startSession(appSessionId, { message, options: input.trust === 'accepted' ? { trust: 'accepted' } : {} });

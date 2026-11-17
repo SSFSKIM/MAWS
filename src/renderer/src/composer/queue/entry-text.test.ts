@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
 import { docOf, paragraph, pastedNode, textNode } from '../editor/doc';
 import { serializeDraft } from '../editor/serialize';
 import { entryDisplay, entryDoc } from './entry-text';
@@ -25,5 +26,16 @@ describe('a queued entry reads back as the stack’s text and as an editable doc
     expect(serializeDraft(entryDoc(content), ctx).content).toBe(content);
     const blocks = [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBO' } }, { type: 'text', text: 'look' }];
     expect(serializeDraft(entryDoc(blocks), ctx).content).toEqual(blocks);
+  });
+});
+
+// The review round's R3 (a): take-back meets the pasted body as pasted, without the writer's joiner
+describe('the one-writer rule: a taken-back entry', () => {
+  it('gives back its text and its pasted body without U+2060', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const { content } = serializeDraft(docOf([paragraph(textNode(sentence), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text #1', lines: 2, text: `said:\n${sentence}` }))]), ctx);
+    expect(JSON.stringify(content)).toContain('\u2060');
+    const back = entryDoc(content);
+    expect(JSON.stringify(back).includes('\u2060'), JSON.stringify(back)).toBe(false);
   });
 });
