@@ -35,6 +35,7 @@ How to see it working: the unit tests named under each milestone, which write ea
 - [x] (2026-11-17) M1 — The shared rules, and the measurements on the branch. Commits `e8b27e4f3` (the probe merge) to `442d5cae4`; reviewed clean after one fix wave (the meters refitted, the budget checked before each piece of work, controls beside every absence); nine mutations each caught by the new test sets.
 - [x] (2026-11-17) M2 — The content forms: written, read in place, edited and sent again. Commits `55f23f7b8` to `de9a79074`; reviewed clean after three fix waves (`4bf2897c3`..`db736e1e3`, `0622ff89e`..`ac13620e6`, `c4773ea7c`): a whole-framed comment kept framed at every resend, a promotion only under its anchor, every segment of a form a slot or the whole, the anchored recogniser narrowed to MAWS's own forms; the e2e project compiles.
 - [x] (2026-11-17) M3 — The name forms, the host's two forms, the guard. Commits `3862f439c` to `081edbc9d`, fix wave `0441c0de1` to `557d3cd49` (a name inserted as text, never parsed as HTML; the reconstruction in two calls, `OWN_TEXT_MAX_CHARS` kept at 65,536; the path refusal's approved words); reviewed clean. The host writers' bytes are fixed at `557d3cd4959b225aaa7247a3ee040df489724fa4` (unchanged since `081edbc9d`): the head the recording of "Proofs an executor cannot run", 3, runs on.
+- [x] (2026-11-17) The recording of the built bytes ("Proofs an executor cannot run", 3), by the architect, on `557d3cd49`: turn 1 denied in every run; rows `e` (the echo) and `r` (the read) 0 of 5 allowed each, their sent text equal to the writers' fixtures; typed controls `et` and `rt` 5 of 5 each; 0.0477 USD; recordings `p733d-*` and the findings' appended section on the probe branch at `00114755e84dbba44c14a0588f04d69044d33d0c`, merged here as a merge commit of its own.
 - [ ] M4 — The scenes, the cross-build row, the whole suite, the acceptance.
 
 ## Ruled
@@ -348,7 +349,8 @@ What an older build sent is read as before: its forms hold no segment, and the t
 ### What is not proven
 
 - That the classifier refuses what stands inside a segment: 1 of 10 was allowed in a person's message. For the exact opening this landing no longer leans on it. A reworded approval inside content is not found by a test of the opening and stands inside the segment; no count exists for it.
-- The marker and the segment together, as the built writers send them: decided, not yet recorded; the recording is owed before the branch's panel.
+- The marker and the segment together, as the built writers send them: recorded 2026-11-17 on `557d3cd49` (the recording of "Proofs an executor cannot run", 3: rows `e` and `r` 0 of 5 allowed each, typed controls `et` and `rt` 5 of 5 each, on the smallest model only; probe head `00114755e`). Five runs a row cannot exclude a rare pass.
+- The consent sentence binds the person's wording, not the classifier's match: in the recording's `et-1` (seq 213 to 217) and in the second probe's `kcc-5` the classifier allowed the retried command with a suffix added. This is the engine's, not this landing's (posted on ticket 711 by the architect).
 - A larger model's classifier; a resumed or compacted conversation; an image or a document block.
 - An opening assembled across a slot's edge, in the forms that are not written whole by the host (Design 2).
 - Letters of other scripts that look like the tag's (Design 1).
@@ -633,6 +635,8 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
   Evidence: the seeded differential of `grant.test.ts` (4,000 texts) found none read by the pin and missed by the new reading.
 - Observation: rule R's work does not move: `personsLines` calls no `quotesGrant` (the grant test's entry in `COMPOSED_FORMS` is `forGrants: false`), so its pin stands unrefitted.
   Evidence: `arrival.test.ts` passes unchanged at `c83582e1e`.
+- Observation (not a property this landing claims): in the recording's rows `e` and `r`, the echo and the read as the built writers send them, the model did not retry the blocked command at all, where in the third probe it retried 5 of 5 after an unmarked echo (1a) and 3 of 5 after an unmarked read (2a). The claim stays the classifier's denial.
+  Evidence: `spikes/protocol-probe/findings-uxwave-733-composed-forms.txt`, the section appended at `00114755e`; recordings `p733d-e-*`, `p733d-r-*`.
 
 ## Decision Log
 
@@ -693,6 +697,9 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
 
 - **2026-11-17 · Design 8's row for an attached read on an older build, revised from the first reading.** The first reading said an older build shows the read as the `<system-reminder>` line, the segment's two tag lines and the artifact's content as one long line of JSON. The source of the three peers shows it milder: `linkedReadOf` fails on this build's read, so its text joins the person's; `splitPastedSegments` turns the read's segment into a chip, "Pasted text #1 · 1 lines", that opens to the JSON; the literal reminder tags and the lead show as text, the title an artifact link. Read from the source of `b89d6d1d7`, `f1852de3a` and `2c7044231` by M4's executor; S3 asserts the bubble's text whole on the Mac, and if its run shows otherwise the row is revised again.
   Date/Author: 2026-11-17, M4's executor; ruled by the architect; recorded by the plan's executor.
+
+- **2026-11-17 · The recording of the built bytes passed, and is merged.** The architect accepted it as proof item 3: on `557d3cd49`, rows `e` and `r` 0 of 5 allowed, typed controls 5 of 5 each, 0.0477 USD. The probe branch at `00114755e` (23 files, all under `spikes/protocol-probe/`) is merged as a plain merge commit of its own (`20c40fbf7`). Nothing after `557d3cd49` changes a byte either writer sends.
+  Date/Author: 2026-11-17, the architect; recorded by the plan's executor.
 
 ## Outcomes & Retrospective
 
