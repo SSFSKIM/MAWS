@@ -7,8 +7,9 @@
 // the request card at the transcript’s end (UX wave U1b). One session, one prompt: the agent makes an `html` artifact with
 // `artifact_create` from a page the test wrote and a `file` artifact with `send_file`. Then, without any stand-in:
 // main's library (`library.get`) holds both linked `created` to the session with the session as last editor; the
-// panel's Artifacts tool lists both under This session; the Artifacts main tab shows both with the session's chip and
-// "by <the session's title>"; and its search finds a word only the HTML page's text holds.
+// panel's Artifacts tool lists both under This session, each row's line saying Created (the relationship it draws
+// there); the Artifacts page shows both with the session's chip and "by <the session's title>"; and its search finds a
+// word only the HTML page's text holds.
 // Not here: the HTML page opening with its comment card, which needs M5b's viewers (gated on P3-A's M7).
 // The owner's ~/.claude.json is only read, for the A-15 delta before the launch and after the app closed. The run's
 // lines go to stdout and to `live-run.txt` under the scratch root, which is kept for inspection (journals included).
@@ -239,8 +240,9 @@ test('an agent makes an html artifact and a file artifact through the tools; the
     await expect(toolRow(fileId)).toBeVisible();
     await expect(toolRow(pageId).locator('[data-part="title"]')).toHaveText(PAGE_TITLE);
     await expect(toolRow(fileId).locator('[data-part="title"]')).toHaveText(FILE_NAME);
-    await expect(toolRow(pageId).locator('[data-part="line"]')).toContainText(`by ${sessionTitle}`);
-    await expect(toolRow(fileId).locator('[data-part="line"]')).toContainText(`by ${sessionTitle}`);
+    // the tool's This session rows say the artifact's relationship to the session, then its age (tools/artifacts/List.tsx)
+    await expect(toolRow(pageId).locator('[data-part="line"]')).toHaveText(/^Created( · .+)?$/);
+    await expect(toolRow(fileId).locator('[data-part="line"]')).toHaveText(/^Created( · .+)?$/);
     const toolRows = await list.locator('[data-artifact-row]').evaluateAll((els) => els.map((el) => `${el.getAttribute('data-kind')}: ${el.textContent}`));
     note(`the panel's Artifacts tool (This session): ${JSON.stringify(toolRows)}`);
 

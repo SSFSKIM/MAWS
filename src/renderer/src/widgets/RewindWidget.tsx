@@ -61,7 +61,7 @@ export function RewindWidget({ appSessionId, close }: { appSessionId: AppSession
       const result = await ipc.invoke('session.rewind', { appSessionId, targetMessageUuid: target.messageUuid, lastSeenMessageUuid: lastSeen, files: what === 'both' });
       if (!result.ok) return setRefusal(result.error.message);
       if (!result.value.rewound) return setRefusal(REWIND.refused(result.value.reason ?? result.value.error ?? REWIND.noReason));
-      if (result.value.prefillText !== null && target.editable) prefillComposer(appSessionId, { text: result.value.prefillText }); // UX wave U5a
+      if (result.value.prefillText !== null && target.editable) prefillComposer(appSessionId, { text: typedFromRowText(result.value.prefillText) }); // UX wave U5a; U1c: as typed
       const files = result.value.files;
       if (files !== null && !files.canRewind) toast({ level: 'warning', text: REWIND.filesNotRestored(files.error ?? REWIND.noReason), actions: [], dismissible: true });
       close();

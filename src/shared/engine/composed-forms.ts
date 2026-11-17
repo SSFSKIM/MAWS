@@ -15,7 +15,7 @@ import { ASK_STEER_OPENING } from '../maws/ask';
 import { LINKED_READ_OPENING } from '../maws/linked-read';
 import { RELAY_CONTINUE } from '../maws/relay-text';
 import { answersOf } from '../owner/answer';
-import { COMMAND_NAME_OPENING, TYPED_COMMAND } from '../wire/local-command';
+import { COMMAND_NAME_OPENING, LOCAL_COMMAND_OUTPUT_OPENINGS, TYPED_COMMAND } from '../wire/local-command';
 import { quotesGrant } from './grant';
 import { BASH_INPUT_OPENING, PLAN_LEAD } from './host-prompts';
 
@@ -37,6 +37,7 @@ const holds = (needle: string) => (text: string, work: FormWork) => {
 // The typed command's pattern at any line's start: the engine reads one only at a message's start, and a message MAWS
 // joined to other words after a newline is read only all the same (the guard's forms, test/support/person-sends.test.ts)
 const COMMAND_LINE = new RegExp(TYPED_COMMAND.source, 'm');
+const LOCAL_COMMAND_OUTPUT = new RegExp(LOCAL_COMMAND_OUTPUT_OPENINGS.join('|')); // no character of the openings is special
 
 // In the order the save rule has always asked them.
 export const COMPOSED_FORMS: readonly ComposedForm[] = [
@@ -60,6 +61,17 @@ export const COMPOSED_FORMS: readonly ComposedForm[] = [
   { what: 'a side question promoted to a thread, the model’s answers in it (anchor/message.ts `promotionMessage`)', claims: holds(PROMOTION_HEAD), forSaves: true, forGrants: true },
   { what: 'a relay to an agent or a peer (renderer tools/agents/model/relay.ts)', claims: holds(RELAY_CONTINUE), forSaves: true, forGrants: true },
   { what: 'a slash command as the engine records it (ruling C)', claims: holds(COMMAND_NAME_OPENING), forSaves: true, forGrants: true },
+  // UX wave U1c, the review round's R4: a command's output is the command's words, not the person's; for saves as the `!`
+  // echo is, the same fail-closed direction (a text holding one names no path). One native pass for the four openings
+  {
+    what: 'a local command’s output as the engine records it (`<bash-stdout>`, `<bash-stderr>`, `<local-command-stdout>`, `<local-command-stderr>`)',
+    claims: (text, work) => {
+      work.steps += text.length + 1;
+      return LOCAL_COMMAND_OUTPUT.test(text);
+    },
+    forSaves: true,
+    forGrants: true,
+  },
   // Not for grants: a typed command's arguments are the person's own typing, so a sentence on a line after it is theirs
   {
     what: 'a slash command as typed (ruling C), at the start of any line of the text',
