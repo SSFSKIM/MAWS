@@ -228,8 +228,11 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
     await expect.poll(async () => (await waiting()).length).toBe(0);
-    const steered = () => rows().some((r) => r.direction === 'out' && frameOf(r).type === 'user' && frameOf(r).priority === 'next' && String(frameOf(r).message?.content).includes(`${SUPPLEMENT.askQuestion} — Yes`));
-    await expect.poll(steered).toBe(true);
+    // board ticket 711: the steer names the question by its number and the pick by its place ("Yes" is the ask's first
+    // option), and holds no word of the model's
+    const steers = () => rows().filter((r) => r.direction === 'out' && frameOf(r).type === 'user' && frameOf(r).priority === 'next').map((r) => String(frameOf(r).message?.content)).filter((content) => content.startsWith('[MAWS ask '));
+    await expect.poll(() => steers().map((content) => content.split('\n')[1])).toEqual(['1. option 1']);
+    for (const content of steers()) expect(content, 'no word of the model’s in the steer').not.toContain(SUPPLEMENT.askQuestion);
     expect(metaEvents(rows())).toContain('maws_ask_answered');
     await expect(message(SUPPLEMENT.askReply)).toBeVisible({ timeout: 20_000 });
     await expect.poll(turn, { timeout: 20_000 }).toBeNull();

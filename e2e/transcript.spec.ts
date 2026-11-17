@@ -1917,6 +1917,10 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     const rest = await measure(row);
     expect(rest.shown, `${name}: at rest the controls are hidden`).toBe('0');
     expect(rest.actions.width, `${name}, R20: at rest they take no width`).toBe(0);
+    // hidden, the three keep their widths: none of their boxes may lie past the end of the box that clips them, where a
+    // narrow pane or a phone's screen ends (the desk's phone scenes count a control whose box is past the screen). A
+    // button overhangs its place by its 2 px of side padding, as it does when shown.
+    for (const part of rest.parts.slice(0, 3)) expect(part.box.right, `${name}: at rest “${part.text}” ends at the line’s end`).toBeLessThanOrEqual(rest.actions.right + 2.5);
     expect(rest.row.height - rest.bubble.height, `${name}: the row is the bubble’s height plus 16 px`).toBe(16);
     await row.hover();
     await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on hover`).toHaveCSS('opacity', '1');
@@ -1935,7 +1939,9 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
     await atRest();
     await row.getByRole('button', { name: 'Copy' }).focus();
     await expect(row.locator('.transcript-user-line-actions'), `${name}: shown on focus within`).toHaveCSS('opacity', '1');
-    expect((await measure(row)).row.height, `${name}: focus adds no height`).toBe(rest.row.height);
+    const focused = await measure(row);
+    expect(focused.row.height, `${name}: focus adds no height`).toBe(rest.row.height);
+    expect(focused.parts.map((part) => part.box), `${name}: on keyboard focus the controls and the caption stand where they do on hover`).toEqual(hovered.parts.map((part) => part.box));
   };
   // at each transcript width
   await roomForWidths(harness);

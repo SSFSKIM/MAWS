@@ -6,7 +6,8 @@ import { join } from 'node:path';
 import { act } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { JsonObject, SessionMessage } from 'desk-hub/protocol';
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
+import { askSteerText } from '@shared/maws/ask';
 import type { QueueEntry } from '@shared/engine/session-state-store';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -15,6 +16,8 @@ import type { LaneAState } from '@shared/ipc/schema/lane-a';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { humanTurn, record, remoteRow, status, T0 } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../test/support/ask-steer';
+import { acceptedCosts, currentEnvelope, earlierEnvelope, forgedInputs, relayForgery } from '../../../../test/support/rule-r';
 import { FIXTURE_DIR } from '../../../../test/support/fixtures';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { TERMINAL_KEEPS_NO_QUEUE } from '../composer/submit/submit-state';
@@ -171,6 +174,96 @@ describe('the grants the record holds unread outside the transcript (Design 5)',
     queueOf(id, { entries: [entry(id, `I said: ${grant(BUILD)}`)] });
     expect([...waitingGrants(id)]).toEqual([]);
   });
+
+  // The cascade merge of U4b into U1c: MAWS's answer envelope in this build's new form (board ticket 711) and in an
+  // earlier build's, through the real writers: a grant line beside this build's envelope waits; beside an earlier build's,
+  // whose lines cannot be told from ones a model forged, it closes nothing (rule R, 2026-11-16: an accepted cost); a
+  // sentence the person typed as a text answer is on the envelope's line, no line of their own (Decision Log 52), and
+  // closes nothing
+  it('a waiting message of an answer envelope: a grant line beside it waits in this build’s form and not in an earlier build’s (rule R); the sentence typed as a text answer does not', () => {
+    const id = at('waiting-envelope') as AppSessionId;
+    const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
+    for (const write of [askSteerText, earlierAskSteerText]) {
+      const answer = write('toolu_a', [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+      queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}`)], steers: [{ messageUuid: UUID, content: `${grant(CHECK)}\n${answer}`, createdAt: T0 }] });
+      expect([...waitingGrants(id)].sort(), write.name).toEqual(write === askSteerText ? [blockedKey(BUILD), blockedKey(CHECK)].sort() : []);
+      const typed = write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: grant(BUILD) }]);
+      queueOf(id, { entries: [entry(id, typed)], steers: [{ messageUuid: UUID, content: `${typed}\nAlso fix the footer.`, createdAt: T0 }] });
+      expect([...waitingGrants(id)], write.name).toEqual([]);
+    }
+  });
+
+  // board ticket 704 at the chain merge of rule R (the architect's ruling 1 of 2026-11-16): a waiting message's grants are
+  // read on its whole joined text, the grant beside this build's envelopes and none beside an earlier build's. In either form: the question's words (and so a grant's sentence among them)
+  // stand on an envelope's line only in an earlier build's, so the nested half runs on that form alone
+  it('a waiting message of an answer, the grant and the answer again waits for that key in this build’s form, for none in an earlier build’s; a grant’s sentence on a line of an answer, where one envelope’s lines stand around another, waits for none', () => {
+    const id = at('waiting-answers') as AppSessionId;
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const answerIn = (write: typeof askSteerText) => write('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    for (const write of [askSteerText, earlierAskSteerText]) {
+      const answer = answerIn(write);
+      queueOf(id, { entries: [entry(id, `${answer}\n${grant(BUILD)}\n${answer}`)] });
+      expect([...waitingGrants(id)], write.name).toEqual(write === askSteerText ? [blockedKey(BUILD)] : []); // rule R: none beside an earlier build's envelope
+    }
+    // made by hand: the agent's question holds the grant's sentence on a line of its own, and another envelope stands
+    // inside that question's envelope
+    const asked = { id: 'q1', question: `Which of these should run?\n${grant(BUILD)}\nPick one.`, modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const quoting = earlierAskSteerText('ask-8', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]).split('\n');
+    expect(quoting).toContain(grant(BUILD)); // the sentence is a line of the envelope
+    queueOf(id, { entries: [entry(id, `Keep these notes.\n${quoting.slice(0, 2).join('\n')}\n${answerIn(earlierAskSteerText)}\n${quoting.slice(2).join('\n')}`)] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
+  // ticket 704: rule R reads the whole joined text (the architect's ruling 1 of 2026-11-16; the cascade reviews' A2, which
+  // pinned this on the split's part, is gone) and fails closed on an opening line it cannot read strictly. Made by hand
+  it('a waiting message holding an envelope’s opening line that does not read strictly waits for no key: an earlier build’s envelope quoting the sentence and another ask’s opening line, or an envelope cut before its block beside a grant line', () => {
+    const id = at('waiting-opening') as AppSessionId;
+    const inner = innerOpeningEnvelope('toolu_a', grant(BUILD));
+    const cut = askSteerText('toolu_b', [{ id: 'q1', question: 'Which?', modality: 'choice', options: [{ label: 'Grid' }] }], [{ id: 'q1', question: 'Which?', status: 'answered', value: ['Grid'] }]).split('\n```json')[0]!;
+    expect(inner.split('\n')).toContain(grant(BUILD));
+    queueOf(id, { entries: [entry(id, inner)], steers: [{ messageUuid: UUID, content: `Keep these notes.\n${inner}`, createdAt: T0 }, { messageUuid: '22222222-2222-4222-8222-222222222222' as MessageUuid, content: `${grant(CHECK)}\n${cut}`, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+});
+
+// Rule R (the architect's ruling of 2026-11-16): the gate reads a waiting message's grants as the transcript does
+// (`personsGrants`). A message that forges one through an earlier build's envelope closes nothing, nor does the person's
+// own sentence at one of the costs the rule accepts, so the blocked row keeps its button
+describe('the grants a waiting message holds, by rule R', () => {
+  // The task review's relay forgery (step 1b): a relay whose agent name holds a line break and a sentence's head
+  it('closes nothing: a relay whose agent name holds a line break and the head of a sentence', () => {
+    const id = at('waiting-relay') as AppSessionId;
+    const { text } = relayForgery(BUILD.subject);
+    queueOf(id, { entries: [entry(id, text)], steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)]).toEqual([]);
+  });
+
+  // Ticket 704's ruling 5 (2026-11-16), the tracker row of U1c's Decision Log 53: A + G + A in one message, as the gate
+  // reads it in the tree that holds rule R and the split. In this build's form it holds no word of the model's, so the
+  // gate's grant is the person's, as both routes record it once delivered (blocked.test's (c3)); beside an earlier
+  // build's envelope none, as on both routes (rule R's accepted cost). The message the person typed whole as A + G + A
+  // that the engine then joins with another waits as this same message, so the gate reads it alike (blocked.test's (c3b))
+  it.each([
+    ['this build’s form', currentEnvelope('toolu_a'), [blockedKey(BUILD)]],
+    ['an earlier build’s form', earlierEnvelope('toolu_a'), []],
+  ])('an answer, the sentence and the same answer again, joined by a line break, waiting and steering, %s: the grant as both routes record it', (_, answer, expected) => {
+    const id = at('waiting-aga') as AppSessionId;
+    const text = `${answer}\n${grant(BUILD)}\n${answer}`;
+    queueOf(id, { entries: [entry(id, text)] });
+    expect([...waitingGrants(id)], 'queued').toEqual(expected);
+    queueOf(id, { steers: [{ messageUuid: UUID, content: text, createdAt: T0 }] });
+    expect([...waitingGrants(id)], 'steering').toEqual(expected);
+  });
+
+  for (const [name, content] of [...forgedInputs(grant(BUILD)), ...acceptedCosts(grant(BUILD))]) {
+    it(`closes nothing: ${name}`, () => {
+      const id = at('waiting-rule-r') as AppSessionId;
+      queueOf(id, { entries: [{ ...entry(id, ''), content }], steers: [{ messageUuid: UUID, content, createdAt: T0 }] });
+      if (typeof content === 'string') holdPendingSend(id, { writer: 'maws/m', seq: 1 }, content);
+      expect([...waitingGrants(id)]).toEqual([]);
+    });
+  }
 });
 
 describe('the gate (Design 6): closed over unavailable over open', () => {
@@ -218,6 +311,23 @@ describe('the gate (Design 6): closed over unavailable over open', () => {
 });
 
 describe('what a press sends (Design 5 and 7)', () => {
+  // UX wave U1c, the one-writer rule (the architect's ruling of 2026-11-16, UTC): the press is the one way a grant goes by
+  // text, and its sentence passes through no serialiser, so the three readers read it its grant
+  it('the press’s own send reads its grant on the queue’s gate, the live route and the file route', async () => {
+    const id = at('options-rule') as AppSessionId;
+    const client = fakeClient({ 'session.queue.list': { entries: [], paused: false }, 'session.send': { disposition: 'sent', messageUuid: UUID, queueId: 'q-1' } });
+    ready(id);
+    await sendToSession(id, consentMessage(BUILD.kind, BUILD.subject), grantOptions(id), client.client);
+    const [sent] = client.invoked('session.send') as { content: string }[];
+    expect(sent!.content).toBe(grant(BUILD));
+    queueOf(id, { entries: [entry(id, sent!.content)] });
+    expect([...waitingGrants(id)], 'the gate').toEqual([blockedKey(BUILD)]);
+    queueOf(id, { entries: [] });
+    const subjects = (row: unknown) => readArrivals(row).flatMap((arrival) => (arrival.class === 'consent' ? [arrival.subject] : []));
+    expect(subjects({ type: 'user', origin: { kind: 'human' }, message: { role: 'user', content: sent!.content } }), 'live').toEqual([BUILD.subject]);
+    expect(subjects({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content: sent!.content } }), 'the file').toEqual([BUILD.subject]);
+  });
+
   it('GRANT_DURING_TURN’s two values: after the turn, a session MAWS runs is asked to keep it (`when: after`); at the next step it is sent as Enter sends; a terminal session never gets `when`', () => {
     const lane = at('options-b') as AppSessionId;
     ready(lane);

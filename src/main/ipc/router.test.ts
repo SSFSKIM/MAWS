@@ -256,6 +256,43 @@ describe('main ipc router', () => {
     });
 
   // P5 O6 M3: the local link's entry (src/main/machines/local-link.ts): the route minus the sender check
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, R8 c): a file frame of another
+  // machine's session is main's to issue, by copying the file here over that machine's link
+  describe('the file frames’ commands', () => {
+    const TOKEN = '3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b';
+
+    it('layout.frameFile for a session of another machine is answered here with that machine as its target', async () => {
+      const remote = vi.fn<RemoteDispatch>(async () => ({ ok: true, value: undefined }));
+      await load(DEV_URL, undefined, remote);
+      const targets: string[] = [];
+      router.registerMainHandler('layout.frameFile', (_input, context) => (targets.push(context.target), { status: 'row', why: 'too-large' }));
+      const input = { appSessionId: 'app-1', path: '/w/invented/ledger.pdf' };
+      await expect(invoke(appWindow(), 'layout.frameFile', input, OTHER)).resolves.toEqual({ ok: true, value: { status: 'row', why: 'too-large' } });
+      await expect(invoke(appWindow(), 'layout.frameFile', input, { machine: OTHER, session: 'app-1' })).resolves.toEqual({ ok: true, value: { status: 'row', why: 'too-large' } });
+      await expect(invoke(appWindow(), 'layout.frameFile', input)).resolves.toEqual({ ok: true, value: { status: 'row', why: 'too-large' } });
+      expect(targets).toEqual([OTHER, OTHER, LOCAL]);
+      expect(remote).not.toHaveBeenCalled();
+    });
+
+    it('a frame’s sender is refused both commands', async () => {
+      vi.spyOn(console, 'warn').mockImplementation(() => {});
+      const frameFile = vi.fn(() => ({ status: 'row' as const, why: 'unserved' as const }));
+      const releaseFrame = vi.fn();
+      router.registerMainHandler('layout.frameFile', frameFile);
+      router.registerMainHandler('layout.releaseFrame', releaseFrame);
+      const top = appWindow();
+      const subframe = { sender: top.sender, senderFrame: { url: DEV_URL, parent: top.senderFrame } };
+      const elsewhere = appWindow('maws-artifact://3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b/ledger.pdf');
+      for (const event of [subframe, elsewhere]) {
+        await expect(invoke(event, 'layout.frameFile', { appSessionId: 'app-1', path: '/w/invented/ledger.pdf' })).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+        await expect(invoke(event, 'layout.releaseFrame', { token: TOKEN })).resolves.toMatchObject({ ok: false, error: { code: 'forbidden_sender' } });
+      }
+      expect(frameFile).not.toHaveBeenCalled();
+      expect(releaseFrame).not.toHaveBeenCalled();
+      await expect(invoke(top, 'layout.releaseFrame', { token: TOKEN })).resolves.toEqual({ ok: true, value: undefined }); // the top frame's is the handler's
+    });
+  });
+
   describe('dispatchLocal', () => {
     const remoteClient = { id: 'remote:1/page:3.1', onGone: () => () => {} } as unknown as MainContext['client'];
 

@@ -73,6 +73,9 @@ const EXPECTED: Record<string, number> = {
   'git.branches': GIT + MARGIN,
   'git.diff': STATUS + GIT + MARGIN,
   'git.log': GIT + MARGIN,
+  'git.branchCommits': 6 * GIT + MARGIN, // UX wave U5b-2
+  'git.commitDiff': 2 * GIT + MARGIN,
+  'git.changesSince': 2 * GIT + MARGIN,
   'git.lsFiles': GIT + MARGIN,
   'scm.status': GH + 3 * GIT + MARGIN,
   'scm.stage': SCM_ADMIT_MS + GIT + STATUS + LOCAL_TIMEOUT_MS + STATUS + MARGIN,

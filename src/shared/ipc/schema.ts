@@ -75,7 +75,7 @@ import * as browserEngine from './schema/browser-engine'; // P5 O17
 import * as channel from './schema/channel'; // P5 O8 M7b
 import * as endpoint from './schema/endpoint'; // P5 O8 M6b
 import * as projects from './schema/projects'; // the project registry's M12
-export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint } from './schema/customization';
+export { CustomizationInventorySchema, type CustomizationInventory, type CustomizationSkill, type CustomizationServer, type CustomizationEndpoint, type CustomizationPluginServer, type CustomizationPluginEndpoint } from './schema/customization';
 
 export {
   HostPingSchema,

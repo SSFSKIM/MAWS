@@ -108,6 +108,11 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'session.fork': SESSION_ACTS_CAPABILITY, // in place, the machine's owners' (M2)
   'artifacts.undelete': 'rl2.artifact-undelete', // UX wave U10b (M4, §C.3): the undo of an agent's delete, the owners'
   'session.steer.sendNow': SEND_NOW_CAPABILITY, // U4b: offered later than the session acts, so a capability of its own
+  // UX wave U5b-2 (M8): the branch read, the commit read and the working-tree read (GIT_READS_CAPABILITY,
+  // ./schema/git.ts); reads, so no ACT_WORDS row
+  'git.branchCommits': 'rl2.git-reads',
+  'git.commitDiff': 'rl2.git-reads',
+  'git.changesSince': 'rl2.git-reads',
 };
 
 /**

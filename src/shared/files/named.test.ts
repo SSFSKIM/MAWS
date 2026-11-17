@@ -13,6 +13,9 @@ import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../te
 import { anchorPaths, callClass, chipPath, clickPath, EDIT_TOOLS, hrefOf, isMcpTool, linkPaths, linkWork, needlesOf, normalizeLexically, PAUSE, READ_TOOLS, rowClaim, rowClaimSteps, STRETCH_MAX, WORK_FLOOR, WORK_PER_CHAR } from './named';
 
 const P = '/work/out/report.md';
+// The cases that read large inputs assert counts of the scan's work, never a time: the runner's default limit only measured
+// the machine's load (2 to 4.6 seconds alone on a quiet machine, over 5 under load). A reader that never ends still fails here.
+const WORK_CASE_LIMIT = 30_000;
 
 describe('the link form: linkPaths', () => {
   it.each([
@@ -263,7 +266,7 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
     ['a thousand nested images, then links', `${'!['.repeat(1000)}${`[r](${P})`.repeat(1000)}`],
   ])('%s', (_, text) => {
     bounded(text);
-  });
+  }, WORK_CASE_LIMIT);
 
   // The round's fix pass (the task review): work the string probes cannot see. A table of a hundred rows of twelve
   // thousand pipes makes 1.2 million empty cells, each a context the inline pass is called for; every step of every
@@ -370,7 +373,7 @@ describe('the scan’s work, bounded by construction (Decision Log 24)', () => {
       worstStretch = Math.max(worstStretch, longest);
     }
     console.log(`named scan work: seed ${seed}, ${count} hostile texts, ${chars} characters, most work per character ${worstRatio.toFixed(1)} (bound ${WORK_PER_CHAR}), longest stretch ${worstStretch} (bound ${STRETCH_MAX})`);
-  });
+  }, WORK_CASE_LIMIT);
 });
 
 // §A, clickPath step 7 (Decision Log 12): the window parses `maws-path:<href>` as a URL before the click reads it; a
@@ -567,14 +570,21 @@ describe('rowClaim', () => {
     ['a Read call’s file_path, lexically normal once collapsed', assistant(call('t1', 'Read', { file_path: '/work/tmp/../out/report.md' }))],
     ['a user row’s string content', user(`Open ${LINK}`)],
     ['a user row’s text block', user([text(`Open ${LINK}`)])],
-    ['an anchored comment', user([text(anchored)])],
     ['a person’s queued prompt', queued(`Open ${LINK}`)],
     ['a person’s queued prompt in blocks', queued([text(`Open ${LINK}`)])],
+  ])('names the path: %s', (_, row) => {
+    expect(rowClaim(row, P)).toEqual(names);
+  });
+
+  // UX wave U6e, the architect's ruling B: an anchored comment's tag is MAWS's, so the anchor form names the path for a
+  // read only; the comment's own words still count (src/shared/files/named-own.test.ts)
+  it.each([
+    ['an anchored comment', user([text(anchored)])],
     ['a person’s queued anchored comment', queued(anchored)],
     ['the first of a message’s several comments (UX wave U5a)', user([text(several)])],
     ['the first of a queued message’s several comments (UX wave U5a)', queued(several)],
-  ])('names the path: %s', (_, row) => {
-    expect(rowClaim(row, P)).toEqual(names);
+  ])('names the path for a read only: %s', (_, row) => {
+    expect(rowClaim(row, P)).toEqual({ names: false, pending: [], other: true });
   });
 
   it.each([
@@ -667,10 +677,20 @@ describe('rowClaim: a user row the person did not write', () => {
     ['a peer session’s message the bridge delivered', peerByBridge, 'peer'],
     ['a background task’s notification', () => recorded('u3-tasks-r1', 38, 'Background command \\"uxw ok\\" completed (exit code 0)', `Wrote ${LINK}`), 'task'],
     ['MAWS’s consent message', () => user(consentMessage('command', `open ${LINK}`), { origin: { kind: 'human' } }), 'consent'],
-    ['MAWS’s answer envelope', () => user(askSteerText('toolu_f', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]), { origin: { kind: 'human' } }), 'answer'],
+    ['MAWS’s answer envelope', () => user(askSteerText('toolu_f', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: LINK }]), { origin: { kind: 'human' } }), 'answer'],
   ])('names it for a read only, as a tool’s result does: %s', (_, row, kind) => {
     expect(classes(row())).toContain(kind);
     expect(rowClaim(row(), P)).toEqual(OTHER);
+  });
+
+  // Board ticket 711: MAWS's answer envelope writes a picked option by its place and none of its label, which the model
+  // wrote. A path that only an option's label links is therefore in no text of the row: the row names nothing, not even
+  // for a read (the ask's own call is where the label stands).
+  it('names nothing by an answer envelope whose picked option’s label links the path: the envelope holds the pick by its place', () => {
+    const row = user(askSteerText('toolu_f', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]), { origin: { kind: 'human' } });
+    expect(classes(row)).toContain('answer');
+    expect(JSON.stringify(row)).not.toContain(P);
+    expect(rowClaim(row, P)).toEqual({ names: false, pending: [] });
   });
 
   it('asks the reader only of a row whose text links the path', () => {
@@ -738,7 +758,9 @@ describe('rowClaim: a queued prompt the person did not write', () => {
   const OTHER = { names: false, pending: [], other: true };
   const NOTHING = { names: false, pending: [] };
   const classes = (row: unknown) => readArrivals(row).map((arrival) => arrival.class);
-  const answer = askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: LINK }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [LINK] }]);
+  // board ticket 711: the envelope holds what the person typed and no label of an option, so the answer that carries the
+  // link is a typed one
+  const answer = askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: LINK }]);
 
   it('names the path for the person’s queued message, as for the same text typed at rest', () => {
     const queued = queuedPrompt(`Open ${LINK}`);
@@ -832,7 +854,7 @@ describe('rowClaim: decision 22’s table over the recorded transcripts', () => 
     expect(named).toBeGreaterThan(0);
     expect(waiting).toBeGreaterThan(0);
     expect(other).toBe(0); // no recorded row links a path in text someone else wrote; the case above writes them
-  });
+  }, WORK_CASE_LIMIT);
 });
 
 describe('needlesOf, and the fact it rests on', () => {

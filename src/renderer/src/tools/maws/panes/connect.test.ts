@@ -9,7 +9,7 @@ import { tabId } from '@shared/ipc/schema/layout';
 import { TOOL_ERRORS } from '@shared/maws/tools';
 import { fakeClient, type FakeClient } from '../../../../../../test/support/fake-client';
 import { TEST_MACHINE } from '../../../../../../test/support/machine';
-import { connectPanelHost, registerPanelTool } from '../../../panel/host';
+import { connectPanelHost, panelHost, registerPanelTool } from '../../../panel/host';
 import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { activeTab, allTabs } from '../../../stores/layout-model';
@@ -89,6 +89,37 @@ describe('the pane bridge, window side (E1)', () => {
     show(fake, { pane: 'diff', target: '/repo/src/a.ts' });
     await settle();
     expect(probe.created.map((init) => init.params)).toEqual([{ scope: 'uncommitted', path: '/repo/src/a.ts' }]);
+  });
+
+  // UX wave U5b-2 (decision 20; §H): Source control is a page with no file of its own, so a request for it that names a
+  // file opens Review at that file, as the agent asked it; with no file it opens the page
+  it('source-control with a file: Review at that file, asked by the agent, answered with Review’s tab; with none, the page', async () => {
+    const review = probeTool('review', { title: 'Review', multiInstance: false });
+    const scm = probeTool('source-control', { title: 'Source control', multiInstance: false });
+    registerPanelTool(review.tool);
+    registerPanelTool(scm.tool);
+    const add = vi.spyOn(panelHost, 'addTool');
+    show(fake, { pane: 'source-control', target: '/repo/src/a.ts' });
+    await settle();
+    expect(add).toHaveBeenCalledWith('review', expect.objectContaining({ appSessionId: A, params: { path: '/repo/src/a.ts' }, asked: 'agent' }));
+    add.mockRestore();
+    const [opened] = panelOf(A)!.tabs;
+    expect(opened!.toolId).toBe('review');
+    expect(review.probe.created.map((init) => init.params)).toEqual([{ path: '/repo/src/a.ts' }]);
+    expect(scm.probe.created).toEqual([]);
+    expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'review', tabId: opened!.id, title: 'Review' } } }]);
+    show(fake, { pane: 'source-control', target: null, requestId: 'r2' });
+    await settle();
+    expect(scm.probe.created).toHaveLength(1);
+    expect(fake.invoked('maws.pane.answer')[1]).toMatchObject({ requestId: 'r2', result: { ok: true, opened: { kind: 'panel-tool', toolId: 'source-control', title: 'Source control' } } });
+  });
+
+  it('source-control with a file where Review is not registered: the pane is not available', async () => {
+    registerPanelTool(probeTool('source-control', { title: 'Source control', multiInstance: false }).tool);
+    show(fake, { pane: 'source-control', target: '/repo/src/a.ts' });
+    await settle();
+    expect(fake.invoked('maws.pane.answer')).toEqual([{ appSessionId: A, requestId: 'r1', result: { ok: false, error: TOOL_ERRORS.paneUnavailable('source-control') } }]);
+    expect(panelOf(A)?.tabs ?? []).toEqual([]);
   });
 
   // UX wave U6d (O-44; Interfaces §D): the agent opens no artifact by itself. A request for the `artifact` pane, as an

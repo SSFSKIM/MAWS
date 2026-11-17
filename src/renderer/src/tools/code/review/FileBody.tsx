@@ -1,5 +1,5 @@
-// One file's diff in the stack (UX wave U5b, M3; the execution document's §F; the successor of ReviewView.tsx, which the
-// acting pane still draws through until U5b-2 deletes both): the file's blocks in `@git-diff-view/react`, unified or
+// One file's diff in the stack (UX wave U5b, M3; the execution document's §F; the successor of Review's old one-file
+// viewer, which left the renderer for the desk's web app in U5b-2): the file's blocks in `@git-diff-view/react`, unified or
 // split, wrapped or not, highlighted through `@git-diff-view/shiki` (which shares C6's shiki and creates its
 // highlighter when imported, so it is imported here only). Loaded on first use through React.lazy behind the section,
 // so the main chunk carries none of the library, its stylesheet or the highlighter (ruled 2026-09-29, O2).
@@ -17,7 +17,7 @@
 import { DiffModeEnum, DiffView, SplitSide } from '@git-diff-view/react';
 import '@git-diff-view/react/styles/diff-view.css';
 import { getDiffViewHighlighter } from '@git-diff-view/shiki';
-import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { Component, useEffect, useMemo, useRef, useState, useSyncExternalStore, type MouseEvent as ReactMouseEvent, type ReactNode } from 'react';
 import type { PassComment } from '../../../side/card/store';
 import { REVIEW_COPY } from '../copy';
 import type { LinePlace, LineSide } from './comment-place';
@@ -95,7 +95,7 @@ export default function FileBody({ path, data, mode, wrap }: FileBodyProps) {
   return (
     <>
       {data.map((block, index) => (
-        <div key={index} data-review-block={index} className={index > 0 ? 'border-t border-border' : undefined}>
+        <div key={index} data-review-block={index} onMouseDownCapture={keepKeyboard} className={index > 0 ? 'border-t border-border' : undefined}>
           <BlockBoundary block={block}>
             <DiffView<readonly PassComment[]>
               data={block}
@@ -122,6 +122,11 @@ export default function FileBody({ path, data, mode, wrap }: FileBodyProps) {
 }
 
 const NO_ROWS: readonly PlacedComment[] = [];
+// A press on a line's add button opens the card, which takes the keyboard (the library acts on the press); the
+// browser's own focus of the button pressed, after the press, would take it back and discard the empty card.
+const keepKeyboard = (event: ReactMouseEvent) => {
+  if (event.target instanceof Element && event.target.closest('.diff-add-widget')) event.preventDefault();
+};
 const sideOf = (side: SplitSide): LineSide => (side === SplitSide.old ? 'old' : 'new');
 type WidgetHook = { getReadonlyState(): { widgetSide?: SplitSide; widgetLineNumber?: number; setWidget(at: { side?: SplitSide; lineNumber?: number }): void } };
 

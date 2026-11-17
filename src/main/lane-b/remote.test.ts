@@ -17,6 +17,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { CallResult } from '../machines/remote/link';
 import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
@@ -1555,6 +1556,82 @@ describe('Send now (`rl2.send-now`), and the acts on a live launch alone', () =>
     expect(l.link.acts.map((a) => a.request.requires)).toEqual(['rl2.send-now']);
     l.link.acts[0].settle({ state: 'refused', reason: 'offline' });
     expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent now: mini is offline', issues: { refusal: 'offline' } } });
+  });
+});
+
+// The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+// branch read, the commit read and the working-tree read go only on a channel whose capabilities were read and list
+// `rl2.git-reads`, each naming the session it is made for, which the endpoint's checkout rule bounds it by. While no
+// channel's capabilities are known a read is refused at once, never held for the next channel; a channel that ends under
+// a read fails it, never resent to the next channel's peer. The router here is the composition root's: what the adapter
+// doesn't take goes by the manager's path, `dispatchOverLink` on the same link, where nothing reads REMOTE_NEEDS.
+describe('the git reads (`rl2.git-reads`)', () => {
+  const SERVES = ['rl2.executor.machine', 'rl2.call-session', 'rl2.git-reads'];
+  const OLDER = ['rl2.executor.machine', 'rl2.call-session']; // an endpoint of a build before the reads
+  const HASH = 'a'.repeat(40);
+  const commit = { sha: HASH, shortSha: 'aaaaaaa', author: 'Ada', authoredAt: '2026-11-15T00:00:00.000Z', subject: 'Add the parser', parents: [] };
+  const READS: Array<[CommandName, Record<string, unknown>, unknown]> = [
+    ['git.branchCommits', { directory: `/work/${APP}`, limit: 50 }, { base: null, upstream: null, commits: [], counts: null, behind: null }],
+    ['git.commitDiff', { directory: `/work/${APP}`, commit: HASH }, { commit, onHead: true, patch: '', files: [] }],
+    ['git.changesSince', { directory: `/work/${APP}`, against: HASH }, { patch: '', files: [], untracked: [] }],
+  ];
+  const readCalls = (l: ReturnType<typeof lab>) => l.link.calls.filter((c) => c.name.startsWith('git.'));
+  /** The router over the manager's path, each read made from the session's tab (the envelope's session). */
+  function routed(l: ReturnType<typeof lab>) {
+    const route = routeLaneB((_machine, name, input, ctx) => dispatchOverLink(l.link, name, input, ctx.session), (m) => (m === MINI ? l.link : null), l.adapter);
+    return (name: CommandName, input: unknown) => route(MINI, name, input, { client: endableClientRef('page-1'), target: MINI, session: APP as AppSessionId });
+  }
+
+  it('are taken by the adapter', () => {
+    const l = lab({ tabs: [] });
+    for (const [name] of READS) expect([name, l.adapter.handles(name)]).toEqual([name, true]);
+  });
+
+  it('go as calls to a peer that lists the capability, each naming the session it is made for', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SERVES);
+    for (const [name, input, output] of READS) {
+      l.link.answers.set(name, () => ({ ok: true, output }));
+      expect([name, await l.cmdFrom(name, input, APP)]).toEqual([name, { ok: true, value: output }]);
+    }
+    expect(readCalls(l)).toEqual(READS.map(([name, input]) => ({ name, input, session: { lane: 'B', id: APP } })));
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `host_unavailable` while the link’s capabilities are unknown, and an older peer connecting next is sent nothing', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    for (const [name, , output] of READS) l.link.answers.set(name, () => ({ ok: true, output }));
+    l.link.lose(); // still `up` for the grace: no channel current, no peer known
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toEqual([name, { ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } }]);
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toEqual([]);
+  });
+
+  it('fail when the channel they went on ends before the answer, and are not resent to the older peer on the next channel', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(SERVES);
+    for (const [name] of READS) l.link.answers.set(name, () => new Promise<never>(() => {}));
+    const answers: Array<CommandResult<CommandName> | undefined> = READS.map(() => undefined);
+    READS.forEach(([name, input], i) => void read(name, input).then((answer) => (answers[i] = answer)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readCalls(l)).toHaveLength(READS.length);
+    l.link.lose();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toEqual(READS.map(([name]) => ({ ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } })));
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toHaveLength(READS.length);
+  });
+
+  it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(OLDER);
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(readCalls(l)).toEqual([]);
   });
 });
 

@@ -21,10 +21,13 @@ import { runGit } from '../test/support/git-fixture';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import { addressed, localRef } from './support/address';
+import { expectDrawnWholeAtBothWidths } from './support/editor-notice'; // UX wave U1c round: the notice drawn whole, at the panel's narrowest too
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the linked PDF, drawn
+import { created } from './support/nothing-created'; // UX wave U6b-2: B8
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -1134,7 +1137,9 @@ test.describe('sessions', () => {
   // message that was typed and never delivered, not one another session links, not a request that does not ask by the
   // rule; its folder is not listed. Every file and both transcripts are invented, in temporary folders. UX wave U6b-1
   // (Interfaces §G): the linked file opens beside the chat, the text file and then the PDF's row in the session's one
-  // preview tab, and the main strip stays as it was, the session's tab in front.
+  // preview tab, and the main strip stays as it was, the session's tab in front. UX wave U6b-2 (docs/doperpowers/plans/
+  // 2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B4): the linked PDF is drawn in its frame, as one inside the folder is, its
+  // Open externally the bar's; a PDF the transcript does not name is refused a frame as it is refused a read.
   test("a file the transcript links opens from outside the session's folder, is edited, and is written only by Save; nothing else is", async () => {
     const repo = await ScratchRepo.create();
     const store = await StoreFixture.create();
@@ -1142,8 +1147,8 @@ test.describe('sessions', () => {
     try {
       const file = (name: string) => join(outside, name);
       const NOTES = 'Invented notes, kept outside the session’s folder.';
-      const texts: Record<string, string> = {
-        'notes.txt': `${NOTES}\n`, 'report.pdf': '%PDF-1.4\n% an invented report\n', 'unnamed.txt': 'never linked\n', 'typed-only.txt': 'typed, never sent\n', key: 'an invented key\n', 'key,backup': 'an invented backup\n',
+      const texts: Record<string, string | Buffer> = {
+        'notes.txt': `${NOTES}\n`, 'report.pdf': minimalPdf(), 'unnamed.txt': 'never linked\n', 'unnamed.pdf': minimalPdf(), 'typed-only.txt': 'typed, never sent\n', key: 'an invented key\n', 'key,backup': 'an invented backup\n',
       };
       for (const [name, text] of Object.entries(texts)) writeFileSync(file(name), text);
       const S = '5e551011-0000-4000-8000-0000000000e6';
@@ -1214,7 +1219,7 @@ test.describe('sessions', () => {
       await expect.poll(() => readFileSync(file('notes.txt'), 'utf8'), { timeout: 20_000, message: 'File › Save file wrote the typed text' }).toBe(EDITED);
       await expect(notes).toHaveAttribute('data-dirty', 'false');
       await expect(notes).toHaveAttribute('data-pending', '0');
-      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name)), `${name} untouched`).toEqual(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'));
 
       // A9: the file changed on disk meanwhile (no watch outside the folders): the next Save meets the merge view, and the
       // disk's version stays until the person resolves
@@ -1226,22 +1231,37 @@ test.describe('sessions', () => {
       await expect(notes).toHaveAttribute('data-dirty', 'true');
       await save.click();
       await expect(notes).toHaveAttribute('data-theirs', 'merge', { timeout: 20_000 });
-      await expect(notes.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      const reason = notes.locator('[data-theirs-notice="merge"]');
+      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expectDrawnWholeAtBothWidths(page, reason);
       expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
 
+      const before = await created(page, maws.userData, s!); // UX wave U6b-2: B8, nothing created by the frame
       await chip('report.pdf').click(); // the session's tab never left the front, so its transcript is where it was
       const report = side.locator(`[data-file-viewer][data-path="${file('report.pdf')}"]`);
-      await expect(report.locator('[data-external-row]')).toContainText('PDF files open outside MAWS', { timeout: 20_000 });
+      // UX wave U6b-2: drawn in its frame from a token whose URL names the file and no folder, with the side tab's fragment,
+      // its page's black square painted (not an error or blank page)
+      await expect(report, 'the linked PDF drawn').toHaveAttribute('data-frame', 'pdf', { timeout: 20_000 });
+      await expect(report.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+      await expect.poll(() => markPixels(maws.app, page, report.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+      await expect(report.locator('[data-external-row]'), 'no row').toHaveCount(0);
       await expect(side.locator(`[data-files-tab][data-file="${file('report.pdf')}"]`), 'in the preview tab the text file was shown in').toBeVisible();
       await expect(side.locator(`[data-files-tab][data-file="${file('notes.txt')}"]`)).toHaveCount(0);
       await asItWas();
-      await report.getByRole('button', { name: 'Open externally' }).click();
-      await expect.poll(() => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }), { timeout: 20_000 }).toBe(`${file('report.pdf')}\n`);
+      await report.getByRole('button', { name: 'Open externally' }).click(); // the bar's
+      // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+      const opened = () => readFileSync(openLog, { encoding: 'utf8', flag: 'a+' }).split('\n').filter((line) => line !== '' && !line.startsWith('frame-'));
+      await expect.poll(opened, { timeout: 20_000 }).toEqual([file('report.pdf')]);
+      expect(await created(page, maws.userData, s!), 'nothing created').toEqual(before);
 
       // A5: every other way is refused, and the bytes are read back
       const refusal = { ok: false, error: { code: 'internal', message: "path outside the session's directories" } };
       const read = (appSessionId: string, name: string, named: boolean) => invoke(page, 'files.read', { appSessionId: appSessionId as never, path: file(name), ...(named ? { named: true as const } : {}) });
       expect(await read(s!, 'unnamed.txt', true), 'written only in prose').toMatchObject(refusal);
+      // UX wave U6b-2: a PDF the transcript does not name: no read, and no frame (main's command refuses it with the
+      // files service's words)
+      expect(await read(s!, 'unnamed.pdf', true), 'a PDF the transcript does not name').toMatchObject(refusal);
+      expect(await invoke(page, 'layout.frameFile', { appSessionId: s! as never, path: file('unnamed.pdf') }), 'nor a frame of it').toMatchObject({ ok: false, error: { message: refusal.error.message } });
       expect(await read(s!, 'typed-only.txt', true), 'linked only in a message never delivered').toMatchObject(refusal);
       expect(await read(s!, 'key', true), 'the start of a longer linked name').toMatchObject(refusal);
       expect(await read(t!, 'notes.txt', true), 'linked only in another session').toMatchObject(refusal);
@@ -1254,7 +1274,7 @@ test.describe('sessions', () => {
       expect(await saveOutside(t!, 'notes.txt'), 'a save under a session that links nothing').toMatchObject(refusal);
       expect(await invoke(page, 'files.write', { appSessionId: s! as never, path: file('notes.txt'), content: 'overwritten', expectedHash: sha256Of(readFileSync(file('notes.txt'))) }), 'files.write takes the folders alone').toMatchObject(refusal);
       expect(readFileSync(file('notes.txt'), 'utf8')).toBe(THEIRS);
-      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name), 'utf8'), `${name} untouched`).toBe(text);
+      for (const [name, text] of Object.entries(texts)) if (name !== 'notes.txt') expect(readFileSync(file(name)), `${name} untouched`).toEqual(Buffer.isBuffer(text) ? text : Buffer.from(text, 'utf8'));
       expect(maws.consoleErrors()).toEqual([]);
     } finally {
       rmSync(outside, { recursive: true, force: true });

@@ -29,6 +29,15 @@
 // number when it is sent, and an answer sets it only when its number is above the last one that set it (`admit`); a
 // refused answer sets nothing. The document, its hash and the pin move only with the content the reads commit.
 //
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5; Interfaces §E; "The sequences that
+// must hold"): a PDF, an HTML page, a video or a sound (the kind `frame`) is drawn from a token main issues
+// (`layout.frameFile`). The store asks when a read of such a file lands, keeps one ask in flight per entry (a read that
+// lands meanwhile marks one more ask after the answer), applies an answer only to the ask it is the answer of, keeps the
+// frame drawn until the new token is ready and then releases the old one, and releases every token it no longer shows:
+// an entry removed, an answer that came too late, a frame that failed or turned into a row, a reset. A failed frame
+// (main's `layout.frameFailed`) starts nothing by itself: it is read again by the person (Open again, showing its tab
+// again, opening the file again: `revisitable`) or by a `files.changed`, never by a clock.
+//
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
 //
@@ -42,6 +51,7 @@
 // has seen theirs). A save's answer, and the conflict read it may start, land only on the entry incarnation that issued
 // them; the conflict read, like a load, only while no newer load was issued.
 import { create } from 'zustand';
+import type { FramedKind } from '@shared/files/framed';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, FILES_READ_MAX_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
@@ -105,7 +115,23 @@ export interface ViewerEntry {
   pin: string | null; // the real path of the document the entry holds; null for a document read with no `outside`
   agent: boolean; // the entry's reads carry `agent` (the tab's mark, decision 19)
   textEditable: boolean; // the baseline is a text the editor takes losslessly (`isEditable` where it landed); with the admission it decides `editable`
+  frame: EntryFrame | null; // UX wave U6b-2: a framed file's token, as main answered it
 }
+
+// UX wave U6b-2 (Interfaces §E): what a framed file's tab draws.
+export interface ReadyFrame {
+  status: 'ready';
+  token: string;
+  url: string;
+  framed: FramedKind;
+  neighbours?: boolean;
+}
+export type EntryFrame =
+  | { status: 'asking'; shown: ReadyFrame | null }
+  | ReadyFrame
+  | { status: 'failed' }
+  | { status: 'row'; why: 'too-large' | 'unserved' }
+  | { status: 'row'; why: 'unplayable'; from: string };
 
 // E5: what the disk holds past the baseline, shown as the notice (Changed on disk) or, once compared or a save found
 // it, as the merge view.
@@ -136,6 +162,7 @@ export interface ViewState {
   docOf: (() => string) | null; // the document as the file's text (the baseline's line breaks); the view's, live or left behind
   clean: unknown; // the view's own: CodeMirror's Text equal to the entry's `text`, never written here
   // E5 end
+  mediaAt: number; // UX wave U6b-2: a video's or a sound's position, seconds
 }
 
 export interface ViewerStore {
@@ -177,6 +204,10 @@ export interface ViewerStore {
   // UX wave U6b-1 (Decision 20b): a key on its way between two views (a move) is kept out of the ownership prune and the
   // cap until its next mount, or until no tab holds it
   holdKey(key: string): void;
+  // UX wave U6b-2 (Interfaces §E)
+  frameFailed(token: string): void;
+  frameUnplayable(tabId: string): void;
+  openAgain(tabId: string): void;
 }
 
 // E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
@@ -190,7 +221,7 @@ export const existingViewState = (tabId: string): ViewState | undefined => views
 
 export function viewState(tabId: string): ViewState {
   let view = views.get(tabId);
-  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false, docOf: null, clean: null }));
+  if (!view) views.set(tabId, (view = { editor: null, editorAt: null, codeScroll: 0, renderedScroll: 0, ratio: null, ratioPending: false, docOf: null, clean: null, mediaAt: 0 }));
   return view;
 }
 
@@ -255,7 +286,7 @@ export function readOnlyReason(entry: ViewerEntry): 'maws' | 'added' | 'result' 
   return 'loading';
 }
 
-async function settled<N extends 'files.read' | 'files.write' | 'files.writeOutside' | 'library.read'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
+async function settled<N extends 'files.read' | 'files.write' | 'files.writeOutside' | 'library.read' | 'layout.frameFile' | 'layout.releaseFrame'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
   try {
     return await call;
   } catch (error) {
@@ -281,14 +312,23 @@ type LoadedFile = Pick<ViewerEntry, 'kind' | 'mime' | 'encoding' | 'bytes' | 'te
 // `revisit`, or showing a failed or named tab again).
 type LoadCause = 'event' | 'revisit';
 
+// UX wave U6b-2: the token a frame holds: the one drawn, or the one kept drawn while a newer one is asked.
+const heldToken = (frame: EntryFrame | null): string | null =>
+  frame?.status === 'ready' ? frame.token : frame?.status === 'asking' ? (frame.shown?.token ?? null) : null;
+
+// UX wave U6b-2: what the window asks main for a framed file: the one place U6e's `agent` joins ("What this document
+// assumes of landings in flight"), for an entry that holds the agent's mark, as its own reads carry it (`readChunk`).
+const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path, ...(entry.agent ? { agent: true as const } : {}) });
+
 // U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
 // or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
 // change. An image's and a head's bytes are compared; an external kind is read for its size and type alone, which two
 // different files can share, so it is taken as unchanged only on a revisit: after an event it lands, as before. A watched
 // head keeps today's rule: its re-read follows an event, and lands.
+// UX wave U6b-2: a framed kind is read for its size and type alone too (M5, decision 6).
 const sameUnhashed = (entry: ViewerEntry, read: LoadedFile, cause: LoadCause) =>
   read.hash === null &&
-  (read.kind === 'image' || (read.kind === 'external' && cause === 'revisit') || (read.kind === 'head' && entry.named)) &&
+  (read.kind === 'image' || ((read.kind === 'external' || read.kind === 'frame') && cause === 'revisit') || (read.kind === 'head' && entry.named)) &&
   read.kind === entry.kind && read.mime === entry.mime && read.encoding === entry.encoding && read.bytes === entry.bytes &&
   read.loaded === entry.loaded && read.complete === entry.complete && read.text === entry.text && read.base64 === entry.base64;
 
@@ -310,6 +350,13 @@ export function createViewerStore(client: MawsBridge) {
   let lastAsk = 0; // the numbers reads that can set an admission draw when they are sent, rising
   const used = new Map<string, number>();
   const held = new Set<string>(); // UX wave U6b-1 (Decision 20b): keys on their way between two views
+  // UX wave U6b-2: each living entry's ask in flight, from a counter that only grows; whether a read landed while it was
+  // out (one more ask after its answer); and whether the entry has given its frame up (`obsolete`: the answer is released
+  // on arrival). Through a kind change or a refusal of the same entry the slot is held until the answer comes, so an entry
+  // never has two asks in flight (decision 5). An entry removed or replaced lets its slot go: its ask goes on alone and its
+  // answer, matching no slot, is released when it comes (the table's X row), so the next entry under the key asks at once.
+  const asks = new Map<string, { id: number; again: boolean; obsolete: boolean }>();
+  let lastFrameAsk = 0;
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
 
@@ -335,7 +382,24 @@ export function createViewerStore(client: MawsBridge) {
       return settled(client.invoke('files.read', { appSessionId: appSessionId!, path: entry.path, ...chunk, ...asking }));
     };
 
+    // UX wave U6b-2: a token main is told the window no longer shows; nothing to say if main no longer knows it.
+    const release = (token: string | null) => {
+      if (token !== null) void settled(client.invoke('layout.releaseFrame', { token }));
+    };
+    // The entry's frame is given up: its token released, and its ask in flight, if any, made obsolete (its answer released
+    // on arrival). The entry itself going (`gone`: removed, or replaced under its key) lets the slot go as well.
+    const dropFrame = (tabId: string, gone = false) => {
+      release(heldToken(get().entries.get(tabId)?.frame ?? null));
+      const out = asks.get(tabId);
+      if (gone) asks.delete(tabId);
+      else if (out) {
+        out.obsolete = true;
+        out.again = false;
+      }
+    };
+
     const remove = (tabId: string) => {
+      dropFrame(tabId, true);
       shownByAgent.delete(tabId);
       tabMarks.delete(tabId);
       admittedAt.delete(tabId);
@@ -398,7 +462,8 @@ export function createViewerStore(client: MawsBridge) {
     // current (a file the transcript names), and no load of it is in flight nor edits of it unsaved. A failed entry is
     // read as it was first (an `open` load), a shown one as a re-read (a `change` load, the content standing until the
     // new one is whole).
-    const revisitable = (entry: ViewerEntry) => (entry.status === 'error' || entry.named) && entry.pending === 0 && !unsaved(entry);
+    // UX wave U6b-2 (M5, decision 4; A4): and an entry whose frame failed.
+    const revisitable = (entry: ViewerEntry) => (entry.status === 'error' || entry.named || entry.frame?.status === 'failed') && entry.pending === 0 && !unsaved(entry);
     const reasonOf = (entry: ViewerEntry): 'open' | 'change' => (entry.status === 'error' && !unsaved(entry) ? 'open' : 'change');
 
     const fail = (tabId: string, message: string, reason: 'open' | 'change') => {
@@ -410,8 +475,9 @@ export function createViewerStore(client: MawsBridge) {
       // later read lands as any change load does. U6e (decision 6): a refusal moves neither the lock nor the pin, so the
       // label stays and a save asks the daemon, which decides.
       if (unsaved(entry)) return patch(tabId, { status: 'error', error: message, loadingMore: false, named: false, editable: entry!.textEditable && admits({ ...entry!, named: false }) });
+      dropFrame(tabId); // UX wave U6b-2: a refused file shows no frame
       patch(tabId, {
-        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false, textEditable: false,
+        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false, textEditable: false, frame: null,
       });
     };
 
@@ -449,6 +515,66 @@ export function createViewerStore(client: MawsBridge) {
       void _real;
       const textEditable = isEditable({ ...file, utf8 });
       patch(tabId, { ...ready, ...file, textEditable, editable: editableWith(entry, pin, textEditable), epoch: entry.epoch + 1, updated: entry.updated + 1 });
+    };
+
+    // UX wave U6b-2 (the entry's frame table, event L): a read of a framed file landed, so main is asked for a token; a
+    // read that lands while an ask is out marks one more ask after its answer, so there is never a second in flight. An
+    // entry read by its artifact alone (no session) asks nothing and draws the row (M5, decision 2).
+    const ask = (tabId: string) => {
+      const entry = get().entries.get(tabId);
+      if (!entry || entry.kind !== 'frame' || entry.appSessionId === null) return;
+      const shown = entry.frame?.status === 'ready' ? entry.frame : entry.frame?.status === 'asking' ? entry.frame.shown : null;
+      const out = asks.get(tabId);
+      if (out) {
+        // behind the ask in flight, an obsolete one's included: the entry shows that it asks, and asks on its answer
+        out.again = true;
+        if (entry.frame?.status !== 'asking') patch(tabId, { frame: { status: 'asking', shown } });
+        return;
+      }
+      const id = ++lastFrameAsk;
+      asks.set(tabId, { id, again: false, obsolete: false });
+      patch(tabId, { frame: { status: 'asking', shown } });
+      void settled(client.invoke('layout.frameFile', frameAsk(entry))).then((answer) => answered(tabId, id, answer));
+    };
+
+    // Events A+, A0 and A×, in one synchronous step: the answer frees its key's slot; it lands only when nothing gave the
+    // frame up meanwhile (an entry removed, replaced, refused or no longer framed made it obsolete, so its token is
+    // released here, and an ask queued behind it goes now); the token drawn before is released after the new frame is in
+    // place.
+    const answered = (tabId: string, id: number, answer: CommandResult<'layout.frameFile'>) => {
+      const out = asks.get(tabId);
+      if (out?.id === id) asks.delete(tabId);
+      if (out?.id !== id || out.obsolete) {
+        if (answer.ok && answer.value.status === 'ready') release(answer.value.token);
+        if (out?.id === id && out.again) ask(tabId);
+        return;
+      }
+      const before = heldToken(get().entries.get(tabId)?.frame ?? null);
+      if (!answer.ok) {
+        release(before);
+        patch(tabId, { frame: null });
+        return fail(tabId, answer.error.message, 'open'); // a read's failure, which `revisit` reads again
+      }
+      const value = answer.value;
+      const frame: EntryFrame =
+        value.status === 'ready'
+          ? { status: 'ready', token: value.token, url: value.url, framed: value.framed, ...(value.neighbours !== undefined && { neighbours: value.neighbours }) }
+          : value.why === 'unframed'
+            ? { status: 'failed' } // the file changed between its read and main's ("Decisions settled at authoring", 3)
+            : { status: 'row', why: value.why };
+      patch(tabId, { frame });
+      release(before);
+      if (out.again) ask(tabId);
+    };
+
+    // After a load committed: a framed file asks (event L); an entry that is no longer one gives its frame up.
+    const settleFrame = (tabId: string) => {
+      const entry = get().entries.get(tabId);
+      if (entry?.kind === 'frame') ask(tabId);
+      else if (entry?.frame) {
+        dropFrame(tabId);
+        patch(tabId, { frame: null });
+      }
     };
 
     // One load per tab at a time: a newer one (or the entry's removal) makes an older one's answers land nowhere. A
@@ -495,14 +621,17 @@ export function createViewerStore(client: MawsBridge) {
       const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
       // An open load puts the document on the entry, so the pin is the real path it read (decision 6).
       const commit = ({ utf8, real, ...loaded }: LoadedFile) => {
-        if (reason === 'change') return commitChange(tabId, { ...loaded, utf8, real }, cause);
-        const textEditable = isEditable({ ...loaded, utf8 });
-        patch(tabId, { ...opened, ...loaded, pin: real, textEditable, editable: editableWith(get().entries.get(tabId) ?? entry, real, textEditable) });
+        if (reason === 'change') commitChange(tabId, { ...loaded, utf8, real }, cause);
+        else {
+          const textEditable = isEditable({ ...loaded, utf8 });
+          patch(tabId, { ...opened, ...loaded, pin: real, textEditable, editable: editableWith(get().entries.get(tabId) ?? entry, real, textEditable) });
+        }
+        settleFrame(tabId); // UX wave U6b-2
       };
       // A markdown file opened at a line is shown as its source, where the line exists.
       const sourceView = kind === 'markdown' && get().entries.get(tabId)?.pendingJump != null ? true : undefined;
 
-      if (kind === 'external') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
+      if (kind === 'external' || kind === 'frame') return commit({ ...file, real: admissionOf(head).real, text: '', base64: null, loaded: 0, complete: true, hash: null, utf8: null });
       if (kind === 'image') {
         let whole = head;
         if (head.truncated) {
@@ -694,6 +823,7 @@ export function createViewerStore(client: MawsBridge) {
           tabMarks.set(tabId, agent);
           watchThenRead('change');
         } else if (!entry || entry.appSessionId !== appSessionId || entry.path !== path || entry.readOnly !== readOnly || !sameSource(entry.artifact, source)) {
+          dropFrame(tabId, true); // UX wave U6b-2: the entry replaced gives its token up, and its ask goes on alone
           holds.get(tabId)?.release();
           views.delete(tabId);
           stale.delete(tabId);
@@ -702,7 +832,7 @@ export function createViewerStore(client: MawsBridge) {
             tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false,
-            locked: null, pin: null, agent: asAgent, textEditable: false,
+            locked: null, pin: null, agent: asAgent, textEditable: false, frame: null,
           };
           incarnations.set(tabId, ++lastIncarnation);
           admittedAt.delete(tabId); // U6e: a new incarnation's admission is its own reads' alone
@@ -728,6 +858,8 @@ export function createViewerStore(client: MawsBridge) {
           if (!(marked && readUnderMark(tabId, entry))) {
             if (left !== undefined) readAgain(tabId, entry, left);
             else if (!marked && !moved && !byAgent && revisitable(entry)) readAgain(tabId, entry, 'revisit');
+            // UX wave U6b-2 (event M): a row for a daemon that could not serve a frame asks again each time it is shown
+            else if (entry.frame?.status === 'row' && entry.frame.why === 'unserved') ask(tabId);
           }
         }
         mounted.set(tabId, (mounted.get(tabId) ?? 0) + 1);
@@ -927,7 +1059,40 @@ export function createViewerStore(client: MawsBridge) {
         held.add(key);
       },
 
+      // UX wave U6b-2 (event F): main says a read for this token failed. Only the entry that holds it, or whose row came
+      // from it, hears it; the token is released, and nothing reads again by itself.
+      frameFailed(token) {
+        for (const [tabId, { frame }] of get().entries) {
+          if (frame?.status === 'asking' && frame.shown?.token === token) {
+            patch(tabId, { frame: { status: 'asking', shown: null } }); // the ask goes on, nothing drawn meanwhile
+            release(token);
+          } else if (frame?.status === 'ready' && frame.token === token) {
+            patch(tabId, { frame: { status: 'failed' } });
+            release(token);
+          } else if (frame?.status === 'row' && frame.why === 'unplayable' && frame.from === token) {
+            patch(tabId, { frame: { status: 'failed' } }); // its token went with the media error
+          }
+        }
+      },
+
+      // UX wave U6b-2 (event U; M5, decision 7): the media element reported an error. A drawn frame turns into its row and
+      // releases its token, remembering which it was, so a failure main tells for it afterwards is still heard.
+      frameUnplayable(tabId) {
+        const frame = get().entries.get(tabId)?.frame;
+        if (frame?.status !== 'ready') return;
+        patch(tabId, { frame: { status: 'row', why: 'unplayable', from: frame.token } });
+        release(frame.token);
+      },
+
+      // UX wave U6b-2 (M5, decision 3; L7): the failure body's button, the same act as showing the tab again.
+      openAgain(tabId) {
+        const entry = get().entries.get(tabId);
+        if (entry && revisitable(entry)) readAgain(tabId, entry, 'revisit');
+      },
+
       reset() {
+        for (const entry of get().entries.values()) release(heldToken(entry.frame)); // UX wave U6b-2 (M5, decision 10)
+        asks.clear(); // the store forgets everything (tests, a hot reload): an answer still out finds no slot and is released
         shownByAgent.clear();
         tabMarks.clear();
         admittedAt.clear();

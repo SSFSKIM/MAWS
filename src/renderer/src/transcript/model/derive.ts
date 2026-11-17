@@ -7,8 +7,8 @@ import type { QueueEntry } from '@shared/engine/session-state-store';
 import { ENGINE_COMPAT_NOTICE_KEY } from '@shared/engine/compat-notice'; // W13
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, RequestId, TaskId, ToolUseId } from '@shared/graph/ids';
-import { parseAskSteer, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
-import { readAnswerEnvelopes } from '@shared/engine/arrival'; // UX wave U4b: a join of envelopes alone
+import { askAnswersFromSteer /* board ticket 711 */, withQuestionIds, type AskCancelReason } from '@shared/maws/ask'; // E1
+import { answerEnvelopeOf } from '@shared/engine/persons-message'; // ticket 704: a steer read as the split reads it
 import { AskInputSchema, AskResultSchema, SendFileInputSchema, SendFileResultSchema, type AskAnswer, type AskInput, type DeliveredFile, type SendFileInput } from '@shared/maws/tools'; // E1
 import { ArtifactDeleteResultSchema, ArtifactDeliverySchema } from '@shared/maws/tools'; // E2; P3-A; UX wave U10b: the delete's answer
 import { MCP_TOOL, presentationOf, tableRowOf } from './classify';
@@ -35,7 +35,7 @@ import { needsSeparator, separatorLabel } from './time';
 import { commandLineOf, confirmsSettingChange, isInterruptionMarker, isLocalCommand, localCommandOutput, slashCommandLine, userTextOf, type UserText } from './user-text';
 import { handbackReport, messageText, parsePeerMessage, peerLabel, sendMessageOutcome, sminosFrameOwners } from '@shared/engine/peer-envelope'; // E7; P5 O15 M2b: sminosFrameOwners
 import { carriedOf, commandOf, type Arrival, type CarriedArrival } from '@shared/engine/arrival-schema'; // UX wave U3
-import { consentMessage, ownLines, ownWordsOf, readConsents } from '@shared/engine/arrival'; // UX wave U1c; U3b, ownWordsOf
+import { consentMessage, ownWordsOf, personsLines } from '@shared/engine/arrival'; // UX wave U1c, rule R; U3b, ownWordsOf
 import { localCommandParts } from '@shared/engine/engine-markers'; // UX wave U3b
 import { isWebFetch, webFetchUrl } from '@shared/engine/web-fetch'; // UX wave U3b
 import { headRole, opensTurn } from './head'; // UX wave U3; U4a
@@ -168,8 +168,9 @@ export function heldRow(entry: Pick<QueueEntry, 'queueId' | 'content' | 'created
 }
 
 // An async ask's answers reach the engine as a steer of their envelope (`[MAWS ask <id>]` and the answered result's
-// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message.
-export const askSteerOf = (content: string | ContentBlock[]): string | null => parseAskSteer(messageText(content))?.askId ?? null;
+// JSON, shared/maws/ask.ts): the ask a message's content answers that way, null for any other message. Read as the split
+// reads it (ticket 704): a content that is one envelope alone, so a message with an attachment is never hidden whole.
+export const askSteerOf = (content: string | ContentBlock[]): string | null => answerEnvelopeOf(content)?.call ?? null;
 
 // Whether such a steer answered a capsule this state holds (the reducer's recordAskSteer): the capsule then reads
 // Answered with the answers, and the envelope is no bubble, neither the steer's own nor (L276) the held one a Stop
@@ -452,25 +453,17 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   const dropped = (messageUuid: string | null) => messageUuid !== null && (retracted.has(messageUuid) || superseded.has(messageUuid));
   // an async ask's answer steer whose capsule this state answered is no bubble (askAnsweredHere; the reducer recorded
   // it when the steer arrived, so before this turn derives)
-  // UX wave U4b (the joined answer's task review): a message the engine joined from several envelopes alone, every one
-  // for an ask answered here, is no bubble either; one with an envelope whose ask is not answered here keeps its bubble
-  const envelopesAnsweredHere = (event: Event<'user.message'>): boolean => {
-    if (state === null) return false;
-    const { envelopes, rest } = readAnswerEnvelopes(messageText(event.content));
-    return envelopes.length > 0 && rest === '' && envelopes.every((envelope) => askAnsweredHere(state, envelope.askId));
+  const answersHeldAsk = (event: Event<'user.message'>): boolean => {
+    const askId = state === null ? null : askSteerOf(event.content);
+    return askId !== null && askAnsweredHere(state!, askId);
   };
-  // UX wave U4b (the architect's review of the joined answer, finding 2): no recording shows whether the engine joins a
-  // message holding image or document blocks with a waiting text, so a message with attachments is never hidden; where
-  // its text is envelopes alone, all answered here, its row draws the attachments without the text
-  const attachmentsAlone = (event: Event<'user.message'>): UserText => userTextOf(typeof event.content === 'string' ? [] : event.content.filter((block) => block.type !== 'text'));
-  const answersHeldAsk = (event: Event<'user.message'>): boolean => envelopesAnsweredHere(event) && attachmentsAlone(event).attachments.length === 0;
   // W1: a prompt waiting for the engine while another turn runs is a `next` steer (Enter while a turn runs); a `now`
   // one waits only until the engine has stopped that turn. Its bubble sits at the tail, dimmed, until the engine takes
   // it (the reducer re-derives every waiting turn when the running turn changes).
   const waiting = state !== null && turn.state === 'open' && !turn.accepted && runningTurn(state) !== null && !openerDropped;
   // U1c: a row drawn from given content (the words beside a message's grants, an approval's sentence) draws that content
   const userRow = (event: Event<'user.message'>, id: RowId, editable: boolean, steer = false, content?: Event<'user.message'>['content']): RowOf<'user'> => {
-    const text = content !== undefined ? userTextOf(content) : envelopesAnsweredHere(event) ? attachmentsAlone(event) : userTextOf(event.content);
+    const text = userTextOf(content ?? event.content);
     return {
       id, turnId: turn.id, at: event.at, kind: 'user', messageUuid: event.messageUuid, text: text.text, attachments: text.attachments, placeholders: text.placeholders, lines: text.lines, editable: editable && text.comments === null /* UX wave U5a: one text cannot hold several comments' framing */, steer, dropped: !steer && openerDropped,
       ...(waiting && !steer && { pending: 'next' as const }),
@@ -1364,13 +1357,16 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
   const { use, input, opened } = ask;
   const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
   const blocking = opened?.blocking ?? input?.blocking ?? true;
-  const answers = ask.answers ?? steers?.get(askId) ?? null;
+  const questions = opened?.questions ?? (input ? withQuestionIds(input.questions) : []);
+  // board ticket 711: a steer of this build names a pick by its place; the call's questions read it back to the label
+  const steered = steers?.get(askId);
+  const answers = ask.answers ?? (steered === undefined ? null : askAnswersFromSteer(questions, steered));
   const asked = ask.asked || opened?.blocking === false;
   const state: RowOf<'ask'>['state'] = answers !== null ? 'answered' : ask.cancelled !== null || ask.stopped ? 'cancelled' : ask.error !== null ? 'error' : asked ? 'asked' : !ask.resulted && context.closed ? 'cancelled' : 'pending';
   return {
     id: rowId.ask(use.toolUseId), turnId, at: use.at, kind: 'ask', toolUseId: use.toolUseId, askId,
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
-    questions: opened?.questions ?? (input ? withQuestionIds(input.questions) : []), state, answers, error: ask.error,
+    questions, state, answers, error: ask.error,
     cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
     ...(waitingForms?.has(use.toolUseId) === true && { waiting: true as const }), // UX wave U1b (§B, rule 2)
   };
@@ -1627,14 +1623,14 @@ function consentMarks(event: Event<'user.message'>): NonNullable<RowOf<'user'>['
 // exactly its marks, matched by the reader and nothing looser: null when no other line holds a character; undefined
 // when the lines do not give the marks, when the content holds anything but text (an image, a document: the whole
 // bubble keeps it), or when the words cannot be told apart from content that is not one string. The lines read are the
-// person's as the reader gives them (`ownLines`, Decision Log 52): MAWS's answer envelopes the engine joined in are no
-// words of theirs, so an envelope joined with grants and nothing else leaves no bubble, and a pasted segment's lines are
-// words, never grants.
+// person's as the reader gives them (`personsLines`, rule R): MAWS's answer envelopes the engine joined in are no words
+// of theirs, so an envelope joined with grants and nothing else leaves no bubble, and a pasted segment's lines are
+// words, never grants. A message rule R reads no grant in (the host marked a grant it wrote, which the engine joined with
+// an earlier build's envelope) keeps its whole bubble, beside its approval rows.
 function wordsBesideGrants(content: string | ContentBlock[], marks: readonly NonNullable<RowOf<'user'>['consent']>[]): string | null | undefined {
   if (typeof content !== 'string' && content.some((block) => block.type !== 'text')) return undefined;
-  const text = messageText(content);
-  const whole = readConsents(text);
-  const lines = whole.length > 0 ? [{ line: text, grants: whole }] : ownLines(text).map(({ line, pasted }) => ({ line, grants: pasted ? [] : readConsents(line) }));
+  const lines = personsLines(messageText(content));
+  if (lines === null) return undefined;
   const grants = lines.flatMap((line) => line.grants);
   if (grants.length !== marks.length || grants.some((grant, i) => grant.kind !== marks[i]!.kind || grant.subject !== marks[i]!.subject)) return undefined;
   const others = lines.filter((line) => line.grants.length === 0).map((line) => line.line);

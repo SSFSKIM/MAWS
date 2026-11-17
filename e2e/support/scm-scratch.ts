@@ -1,5 +1,5 @@
 // E6's scratch repository, fake `gh` and launch seam for `e2e/scm.spec.ts` (E6 execution document, Plan of Work T6.1 and
-// Interfaces *Harness and e2e*). Everything lives under one `mkdtemp` directory in /tmp (a realpath, `/private/tmp/…`,
+// Interfaces *Harness and e2e*; UX wave U5b-2, M11: Source control is a page to read, and the scratch serves its scenes). Everything lives under one `mkdtemp` directory in /tmp (a realpath, `/private/tmp/…`,
 // which is also the repository's trust key): the repository `repo` on `main`, tracked to a local bare `origin.git` and
 // one commit ahead of it, with one unstaged, one staged and two untracked entries; a second bare `push.git` for the
 // several-destinations case; a `pre-commit` hook that leaves a marker; and `bin/gh`, a shell script answering the gh
@@ -9,6 +9,11 @@
 // `prepareScm` is the launcher's `prepare`: the scratch shell home's `.zshrc`, the last file an interactive login zsh
 // reads (after `/etc/zprofile`'s path_helper), puts `bin/` first on the captured PATH, or for `gh: 'none'` replaces the
 // PATH with one that holds no gh; and with `trust` the launch's config home trusts the repository as the engine would.
+//
+// UX wave U5b-2 (M11): `holdReads` stages a branch read that is still out (the page's first read outstanding): the
+// services' git becomes `bin/hold-git` (MAWS_GIT), which holds a `rev-list`, the branch read's own run, while a file
+// says so and execs the real git otherwise; `conflict` writes one unmerged entry into the index as a merge leaves it;
+// and the fake gh fails `pr view` with a file's words when that file exists (`view.fail`).
 import { isolatedGitEnv } from '../../test/support/git-env';
 import { execFileSync } from 'node:child_process';
 import { accessSync, appendFileSync, chmodSync, constants, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -46,6 +51,10 @@ export interface ScmScratch {
   createLog(): string[]; // the arguments of every `gh pr create`, one per line
   writeHook(script: string): void; // replaces the pre-commit hook's body (after its shebang)
   slowGit(): void; // `bin/git`: a push says it waits and sleeps 3 s; every call then execs the real git (the reload case only)
+  holdReads(): void; // before the launch: the services' git holds every `rev-list` until `releaseReads`
+  releaseReads(): void;
+  readsHeld(): boolean; // whether a `rev-list` was held since `holdReads`
+  conflict(path: string): void; // `path` unmerged in the index (stages 1, 2 and 3 of three invented texts)
   cleanup(): void;
 }
 
@@ -81,6 +90,7 @@ case "$1 $2" in
     exit "$code" ;;
   "repo view") cat "$G/repo.json"; exit 0 ;;
   "pr view")
+    if [ -f "$G/view.fail" ]; then cat "$G/view.fail" >&2; exit 1; fi
     if [ -f "$G/view.none" ]; then echo 'no pull requests found for branch "main"' >&2; exit 1; fi
     cat "$G/view.json"; exit 0 ;;
   "pr checks")
@@ -113,6 +123,8 @@ function buildIn(root: string): ScmScratch {
   const bin = join(root, 'bin');
   const ghDir = join(root, 'gh');
   const marker = join(root, 'hook-ran');
+  const hold = join(root, 'hold-reads');
+  const held = join(root, 'reads-held.log');
   const hook = join(dir, '.git/hooks/pre-commit');
   const run = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8' }).trim();
   const write = (relative: string, content: string) => {
@@ -171,6 +183,9 @@ function buildIn(root: string): ScmScratch {
 
   const scenario = panelScenario(root, dir);
   const record = (JSON.parse(readFileSync(scenario, 'utf8')) as { sessions: { appId: string; title: { text: string } }[] }).sessions.find((s) => s.title.text === CHARTER)!;
+  // MAWS_GIT and MAWS_GH emptied, so nothing inherited overrides the programs the captured PATH resolves (holdReads
+  // names its wrapper here before the launch).
+  const scratchEnv: Record<string, string> = { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_HARNESS: '0', MAWS_SCENARIO_CLOCK: 'manual', MAWS_GIT: '', MAWS_GH: '' };
   return {
     root,
     dir,
@@ -179,8 +194,7 @@ function buildIn(root: string): ScmScratch {
     appSessionId: record.appId,
     ghPath,
     marker,
-    // MAWS_GIT and MAWS_GH emptied, so nothing inherited overrides the programs the captured PATH resolves.
-    env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_HARNESS: '0', MAWS_SCENARIO_CLOCK: 'manual', MAWS_GIT: '', MAWS_GH: '' },
+    env: scratchEnv,
     path: (relative) => join(dir, relative),
     git: (...args) => run(dir, ...args),
     head: (bare) => {
@@ -211,6 +225,37 @@ function buildIn(root: string): ScmScratch {
       ].join('\n');
       writeFileSync(wrapper, script);
       chmodSync(wrapper, 0o755);
+    },
+    holdReads: () => {
+      const wrapper = join(bin, 'hold-git');
+      // The subcommand found as slowGit finds it; a held `rev-list` is logged once, then waits for the file to go.
+      const script = [
+        '#!/bin/sh',
+        'sub=; skip=',
+        'for arg in "$@"; do',
+        '  if [ -n "$skip" ]; then skip=; continue; fi',
+        '  case "$arg" in -C|-c) skip=1; continue ;; -*) continue ;; esac',
+        '  sub=$arg; break',
+        'done',
+        `if [ "$sub" = rev-list ] && [ -f ${sh(hold)} ]; then`,
+        `  echo held >> ${sh(held)}`,
+        `  while [ -f ${sh(hold)} ]; do sleep 0.1; done`,
+        'fi',
+        `exec ${sh(realGit())} "$@"`,
+        '',
+      ].join('\n');
+      writeFileSync(wrapper, script);
+      chmodSync(wrapper, 0o755);
+      writeFileSync(hold, '');
+      scratchEnv.MAWS_GIT = wrapper;
+    },
+    releaseReads: () => rmSync(hold, { force: true }),
+    readsHeld: () => existsSync(held),
+    conflict: (path) => {
+      const blob = (text: string) => execFileSync('git', ['hash-object', '-w', '--stdin'], { cwd: dir, env: isolatedGitEnv(), input: text, encoding: 'utf8' }).trim();
+      const [base, ours, theirs] = ['the base text\n', 'our text\n', 'their text\n'].map(blob);
+      execFileSync('git', ['update-index', '--index-info'], { cwd: dir, env: isolatedGitEnv(), input: `100644 ${base} 1\t${path}\n100644 ${ours} 2\t${path}\n100644 ${theirs} 3\t${path}\n` });
+      write(path, 'our text\n');
     },
     cleanup: () => {
       // The app's will-quit dispose stops its remote runs; this stops only a leftover process whose argv names the

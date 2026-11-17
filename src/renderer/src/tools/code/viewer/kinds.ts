@@ -1,12 +1,14 @@
 // What the viewer draws for a file, decided once from the first `files.read` answer (C8c execution document, Interfaces
 // *Viewer kinds and caps*): markdown rendered, an image inline, an "Open externally" row, a bounded head of a text too
-// large to hold, or code. The binary decision is the service's per-file `encoding` (a NUL in the file's first
+// large to hold, or code. UX wave U6b-2 (M5, decision 1): a PDF, an HTML page, a video or a sound is drawn in a frame
+// main serves (`frame`), whatever its size; `externalKindOf` still names a row's kind. The binary decision is the service's per-file `encoding` (a NUL in the file's first
 // BINARY_SNIFF_BYTES, or a mime that is not text), never the extension alone, so a `.txt` full of NULs is external and a
 // `.dat` of text is code. Pure; no CodeMirror here (this module is in the main chunk).
+import { framedKindOf } from '@shared/files/framed';
 import { extensionOf } from '@shared/files/mime';
 import type { FilesReadOutput } from '@shared/ipc/schema/files';
 
-export type ViewerKind = 'code' | 'markdown' | 'image' | 'external' | 'head';
+export type ViewerKind = 'code' | 'markdown' | 'image' | 'frame' | 'external' | 'head';
 export type ExternalKind = 'PDF' | 'HTML' | 'Audio' | 'Video' | 'Image' | 'Binary';
 type Encoding = FilesReadOutput['encoding'];
 
@@ -32,6 +34,7 @@ export function externalKindOf({ mime, bytes, encoding }: { mime: string; bytes:
 
 export function kindOf(file: { name: string; mime: string; bytes: number; encoding: Encoding }): ViewerKind {
   if (isInlineImage(file.mime, file.bytes)) return 'image';
+  if (framedKindOf(file.mime) !== null) return 'frame'; // UX wave U6b-2
   if (externalKindOf(file) !== null) return 'external';
   if (file.bytes > CODE_CAP) return 'head';
   if (MARKDOWN.has(extensionOf(file.name)) && file.bytes <= MARKDOWN_RENDER_CAP) return 'markdown';

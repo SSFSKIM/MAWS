@@ -17,6 +17,7 @@ import { summary } from '../../../test/support/index-fixture';
 import { loadUxwaveTranscript } from '../../../test/support/fixtures';
 import { queuedNotification, queuedPeerMessage, queuedPrompt } from '../../../test/support/queued-rows';
 import { askSteerText } from '@shared/maws/ask';
+import { linkedReadBlock } from '@shared/maws/linked-read';
 import { Index } from '../index/index';
 import { fileAdmission } from './admission';
 import { openFileGrants, type FileGrants } from './grants';
@@ -94,6 +95,33 @@ function within<T>(promise: Promise<T>, ms: number): Promise<T> {
   const late = new Promise<T>((_, reject) => (timer = setTimeout(() => reject(new Error(`not answered within ${ms} ms`)), ms)));
   return Promise.race([promise, late]).finally(() => clearTimeout(timer));
 }
+
+// UX wave U6b-2: a raw read's identity as Interfaces §B writes it, from the path's own stat
+function identityAt(path: string): string {
+  const stat = statSync(path, { bigint: true });
+  return `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
+}
+// Returns once the file system's clock has moved past `path`'s change time, so a write made now gives the file another
+// one: Linux stamps a change from a coarse clock, and two changes inside one of its ticks carry the same time. Bounded,
+// since the loop is synchronous and the runner cannot interrupt it: a clock that does not move fails the case, with why.
+const CLOCK_TRIES = 100_000;
+const CLOCK_PATIENCE_MS = 5000;
+function pastChangeTime(path: string) {
+  const before = statSync(path, { bigint: true }).ctimeNs;
+  const probe = `${path}.tick`;
+  const deadline = Date.now() + CLOCK_PATIENCE_MS;
+  try {
+    for (let tries = 0; tries < CLOCK_TRIES && Date.now() < deadline; tries++) {
+      writeFileSync(probe, String(tries % 2)); // a write of one byte: each one stamps the probe's change time again
+      if (statSync(probe, { bigint: true }).ctimeNs > before) return;
+    }
+  } finally {
+    rmSync(probe, { force: true });
+  }
+  throw new Error(`the premise is not met: the file system's change time did not move past ${path}'s within ${CLOCK_TRIES} writes or ${CLOCK_PATIENCE_MS} ms`);
+}
+// The bytes a base64 answer carries
+const bytesOf = (answer: { encoding: string; content: string }) => Buffer.from(answer.content, answer.encoding as BufferEncoding);
 
 beforeEach(() => {
   base = realpathSync(mkdtempSync(join(tmpdir(), 'maws-files-')));
@@ -247,6 +275,17 @@ describe('files service boundary', () => {
       points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
       points['after-open'] = () => restore(inRoot('src'));
       await expect(service().read({ appSessionId: A, path: inRoot('src', 'a.ts') })).rejects.toThrow(OUT);
+      expect(points['after-open']).toBeDefined(); // no descriptor was opened
+      await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
+      restore(inRoot('src'));
+    });
+
+    // UX wave U6b-2 (probe 7, third part): a raw read takes the same open, so the same swap is refused at it
+    it.skipIf(process.platform !== 'darwin')('a raw read refuses an ancestor swapped outside before the open', async () => {
+      const open = vi.spyOn(fs.promises, 'open');
+      points['before-open'] = () => swapToLink(inRoot('src'), join(outside, 'src'));
+      points['after-open'] = () => restore(inRoot('src'));
+      await expect(service().read({ appSessionId: A, path: inRoot('src', 'a.ts'), raw: true })).rejects.toThrow(OUT);
       expect(points['after-open']).toBeDefined(); // no descriptor was opened
       await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
       restore(inRoot('src'));
@@ -1032,6 +1071,128 @@ describe('files service write', () => {
     });
   });
 });
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M2; Interfaces §B): `raw`, the bytes of
+// exactly the range asked as base64, never decoded and never re-cut, with the identity of the version they are of; for a
+// caller on this machine alone. The first three cases are the cut's named tests.
+describe('files service raw read', () => {
+  it('a raw read answers bytes that are not valid UTF-8 byte for byte, where the plain read answers replacement characters', async () => {
+    const invalid = Buffer.from([0x61, 0xff, 0xfe, 0x62, 0xc3, 0x0a]); // a, two bytes no UTF-8 holds, b, a lead byte with no continuation
+    write(inRoot('invalid.txt'), invalid);
+    const files = service();
+    const plain = await files.read({ appSessionId: A, path: inRoot('invalid.txt') });
+    expect(plain).toMatchObject({ encoding: 'utf8', mime: 'text/plain' });
+    expect(plain.content).toContain('\uFFFD');
+    expect(bytesOf(plain).equals(invalid)).toBe(false);
+    const raw = await files.read({ appSessionId: A, path: inRoot('invalid.txt'), raw: true });
+    expect(raw).toMatchObject({ encoding: 'base64', mime: 'text/plain', bytes: invalid.length, offset: 0, length: invalid.length, truncated: false });
+    expect(bytesOf(raw).equals(invalid)).toBe(true);
+  });
+
+  it('a raw range that begins and ends inside a multi-byte character is answered as asked, where the plain read moves its end', async () => {
+    const text = Buffer.from('ab€€cd', 'utf8'); // a b E2 82 AC E2 82 AC c d
+    write(inRoot('euros.txt'), text);
+    const files = service();
+    // from the second byte of the first € to the first byte of the second
+    expect(await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset: 3, length: 3 })).toMatchObject({ offset: 3, length: 2 });
+    const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset: 3, length: 3, raw: true });
+    expect(raw).toMatchObject({ encoding: 'base64', offset: 3, length: 3, truncated: true, bytes: text.length });
+    expect(bytesOf(raw).equals(text.subarray(3, 6))).toBe(true);
+  });
+
+  it('a replacement of the same size between two ranges answers another identity: by a rename over the file, and by a write into it', async () => {
+    write(inRoot('page.bin'), Buffer.alloc(64, 0x61));
+    const files = service();
+    const read = (offset: number) => files.read({ appSessionId: A, path: inRoot('page.bin'), offset, length: 32, raw: true });
+    const first = await read(0);
+    expect(first.identity).toEqual(expect.any(String));
+    write(at('replacement.bin'), Buffer.alloc(64, 0x62));
+    renameSync(at('replacement.bin'), inRoot('page.bin')); // another file of the same size, put in its place
+    const renamed = await read(32);
+    expect(renamed.identity).toEqual(expect.any(String));
+    expect(renamed.identity).not.toBe(first.identity);
+    expect(bytesOf(renamed).equals(Buffer.alloc(32, 0x62))).toBe(true);
+    pastChangeTime(inRoot('page.bin'));
+    writeFileSync(inRoot('page.bin'), Buffer.alloc(64, 0x63)); // the same inode, the same size, other bytes
+    const written = await read(32);
+    expect(written.identity).toEqual(expect.any(String));
+    expect(written.identity).not.toBe(renamed.identity);
+    expect(bytesOf(written).equals(Buffer.alloc(32, 0x63))).toBe(true);
+  });
+
+  it('a raw read of a text file answers base64 and the range as asked, with no settling at a CRLF', async () => {
+    write(inRoot('crlf.txt'), 'ab\r\ncd\r\n');
+    const files = service();
+    expect(await files.read({ appSessionId: A, path: inRoot('crlf.txt'), length: 3 })).toMatchObject({ encoding: 'utf8', content: 'ab', length: 2 });
+    const raw = await files.read({ appSessionId: A, path: inRoot('crlf.txt'), length: 3, raw: true });
+    expect(raw).toMatchObject({ encoding: 'base64', content: Buffer.from('ab\r').toString('base64'), offset: 0, length: 3, truncated: true, bytes: 8, mime: 'text/plain' });
+    // a one-byte range of the lone `\r` is that byte, where the plain read reads forward for the `\n`
+    expect(bytesOf(await files.read({ appSessionId: A, path: inRoot('crlf.txt'), offset: 2, length: 1, raw: true }))).toEqual(Buffer.from('\r'));
+  });
+
+  it('a raw read answers the identity, and two reads of an unchanged file answer the same one', async () => {
+    write(inRoot('ten.txt'), Buffer.from('0123456789'));
+    const files = service();
+    const first = await files.read({ appSessionId: A, path: inRoot('ten.txt'), length: 4, raw: true });
+    expect(first.identity).toBe(identityAt(inRoot('ten.txt')));
+    const second = await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 4, length: 4, raw: true });
+    expect(second.identity).toBe(first.identity);
+    expect(bytesOf(second)).toEqual(Buffer.from('4567'));
+  });
+
+  it('a raw read past the end answers no bytes and the file’s size', async () => {
+    write(inRoot('ten.txt'), Buffer.from('0123456789'));
+    expect(await service().read({ appSessionId: A, path: inRoot('ten.txt'), offset: 50, raw: true })).toEqual({
+      encoding: 'base64', content: '', bytes: 10, offset: 50, length: 0, truncated: false, mime: 'text/plain', hash: null, utf8: null, identity: identityAt(inRoot('ten.txt')),
+    });
+  });
+
+  it('a remote caller’s raw is passed over: the answer equals the plain read’s and carries no identity', async () => {
+    write(inRoot('euros.txt'), 'ab€€cd\r\n');
+    const files = service();
+    for (const [offset, length] of [[0, 3], [3, 3], [0, 100]]) {
+      const plain = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length }, true);
+      const raw = await files.read({ appSessionId: A, path: inRoot('euros.txt'), offset, length, raw: true }, true);
+      expect(raw, `${offset} ${length}`).toStrictEqual(plain);
+      expect(raw).not.toHaveProperty('identity');
+    }
+  });
+
+  it('a plain read’s answer is what it was', async () => {
+    write(inRoot('ten.txt'), '0123456789');
+    const files = service();
+    const answer = await files.read({ appSessionId: A, path: inRoot('ten.txt'), offset: 2, length: 3 });
+    expect(answer).toStrictEqual({ encoding: 'utf8', content: '234', bytes: 10, offset: 2, length: 3, truncated: true, mime: 'text/plain', hash: null, utf8: null });
+    expect(Object.keys(answer)).not.toContain('identity');
+    expect(Object.keys(await files.read({ appSessionId: A, path: inRoot('ten.txt'), hash: true }))).not.toContain('identity');
+  });
+
+  it('a raw read whose file changed while it was read is refused', async () => {
+    // and so is one that also asks the hash, whose bytes come from one read of the whole file
+    for (const hash of [false, true]) {
+      write(inRoot('page.bin'), Buffer.alloc(64, 0x61));
+      points['after-read'] = (path) => {
+        pastChangeTime(path);
+        writeFileSync(path, Buffer.alloc(64, 0x62)); // in place: the descriptor's file, the same size
+      };
+      await expect(service().read({ appSessionId: A, path: inRoot('page.bin'), length: 32, raw: true, hash }), `hash ${hash}`).rejects.toThrow(new Error(`changed while reading: ${inRoot('page.bin')}`));
+      expect(points['after-read'], `hash ${hash}`).toBeUndefined(); // the point was reached
+    }
+    // the point is a raw read's alone: a plain read never reaches it
+    points['after-read'] = () => {
+      throw new Error('a plain read reached after-read');
+    };
+    await expect(service().read({ appSessionId: A, path: inRoot('page.bin'), length: 32 })).resolves.toMatchObject({ length: 32 });
+  });
+
+  it('a raw read answers the hash as the plain read does when both are asked', async () => {
+    const bytes = Buffer.from('0123456789');
+    write(inRoot('ten.txt'), bytes);
+    const raw = await service().read({ appSessionId: A, path: inRoot('ten.txt'), offset: 2, length: 3, raw: true, hash: true });
+    expect(raw).toMatchObject({ encoding: 'base64', length: 3, hash: createHash('sha256').update(bytes).digest('hex'), identity: identityAt(inRoot('ten.txt')) });
+    expect(bytesOf(raw)).toEqual(Buffer.from('234'));
+  });
+});
+
 // E1 start: a delivered file's Reveal in Finder (E1 residue 8)
 describe('files reveal', () => {
   beforeEach(() => {
@@ -1293,6 +1454,21 @@ describe('files admission of named files', () => {
     expect(await files.read({ appSessionId: A, path: out('long.txt'), named: true, hash: true })).toMatchObject({ content: 'abcdefghij', hash: expect.stringMatching(/^[0-9a-f]{64}$/), utf8: true, named: true });
   });
 
+  // UX wave U6b-2: a raw read takes the plain read's admission whole
+  it('a raw read of a file outside the folders is admitted and refused exactly as the plain read with named', async () => {
+    const pdf = readFileSync(out('report.pdf'));
+    await transcriptOf(A, [said(link(out('report.pdf')))]);
+    const files = namedService();
+    const raw = await files.read({ appSessionId: A, path: out('report.pdf'), named: true, raw: true });
+    expect(raw).toMatchObject({ encoding: 'base64', bytes: pdf.length, length: pdf.length, named: true, identity: identityAt(out('report.pdf')) });
+    expect(bytesOf(raw).equals(pdf)).toBe(true);
+    // refused where the plain read is: without the key, from another machine, and a file the transcript does not name
+    for (const [input, remote] of [[{ path: out('report.pdf') }, false], [{ path: out('report.pdf'), named: true as const }, true], [{ path: out('unnamed.txt'), named: true as const }, false]] as const) {
+      await expect(files.read({ appSessionId: A, ...input }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+      await expect(files.read({ appSessionId: A, ...input, raw: true }, remote), JSON.stringify(input)).rejects.toThrow(new Error(OUT));
+    }
+  });
+
   it('never writes, lists, watches or reveals the named file, nor reads its neighbour', async () => {
     await transcriptOf(A, [said(link(out('notes.txt')))]);
     const files = namedService();
@@ -1393,6 +1569,18 @@ describe('files admission of named files', () => {
       };
       const answer = service({ named: async () => 'counted' as const, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true });
       await expect(answer).rejects.toThrow(OUT);
+    });
+
+    // UX wave U6b-2 (probe 7, third part): S1 for a raw read, the link put in place after the transcript's answer and
+    // gone again before anything could look at a descriptor, so the open alone refuses it
+    it.skipIf(process.platform !== 'darwin')('a raw read of a named file refuses a link put in its place after the transcript’s answer', async () => {
+      const open = vi.spyOn(fs.promises, 'open');
+      points['before-open'] = () => swapToLink(out('notes.txt'), out('unnamed.txt'));
+      points['after-open'] = () => restore(out('notes.txt'));
+      await expect(service({ named: async () => 'counted' as const, env: {} }).read({ appSessionId: A, path: out('notes.txt'), named: true, raw: true })).rejects.toThrow(OUT);
+      expect(points['after-open']).toBeDefined(); // no descriptor was opened
+      await expect(open.mock.results[0].value).rejects.toMatchObject({ code: 'ELOOP' });
+      restore(out('notes.txt'));
     });
 
     it('refuses a path whose folder is swapped for a link to another place after the search answered (S2)', async () => {
@@ -1687,11 +1875,29 @@ describe('files saves outside the folders', () => {
       await expect(files.writeOutside({ appSessionId: A, path: out('plugin.txt'), content: 'pwned\n', expectedHash: sha('plugin.txt as it was\n'), real: out('plugin.txt') })).rejects.toThrow(new Error(OUT));
       expect(readFileSync(out('plugin.txt'), 'utf8')).toBe('plugin.txt as it was\n');
     });
+
+    // UX wave U6e, board ticket 675: an artifact's read the host attached to the person's message is not the person's
+    // text, though the row is of the person's origin; a link in it (the artifact's content, which the agent can write)
+    // names the path for a read only. The person's own words in the same message then save it.
+    it('reads a path only an attached artifact read links, read-only, refuses its save, and saves it once the person’s own words link it (ticket 675)', async () => {
+      write(out('linked.txt'), 'linked.txt as it was\n');
+      const read = JSON.stringify({ status: 'read', artifactId: '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806', kind: 'document', title: 'Season plan', revision: 3, markdown: `# Season plan\n\n${link(out('linked.txt'))}\n` }, null, 2);
+      const message = (words: string) => ({ ...typed(''), message: { role: 'user', content: [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }] } });
+      await transcriptOf(A, [message('Make [Season plan](maws-artifact:4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806) warmer.')]);
+      const files = outsideService();
+      expect(await shown(files, A, out('linked.txt'))).toMatchObject({ content: 'linked.txt as it was\n', named: true, outside: { real: out('linked.txt'), writable: false, why: 'result' } });
+      await expect(saveShown(files, A, out('linked.txt'), 'pwned\n')).rejects.toThrow(new Error(OUT));
+      expect(readFileSync(out('linked.txt'), 'utf8')).toBe('linked.txt as it was\n');
+      await transcriptOf(A, [message(`Make it warmer, and ${link(out('linked.txt'))}`)]);
+      expect(await saveShown(files, A, out('linked.txt'), 'the person’s edit\n')).toEqual({ status: 'ok', hash: sha('the person’s edit\n') });
+    });
   });
 
   // The panel's finding 2: a prompt queued in a running turn counts for a save only when the person wrote it
   describe('which queued prompts count for a save', () => {
-    const answerNaming = (path: string) => askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', options: [{ label: link(path) }], modality: 'choice' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: [link(path)] }]);
+    // board ticket 711: the envelope holds what the person typed and no label of an option, so the answer names the path
+    // in a typed answer
+    const answerNaming = (path: string) => askSteerText('toolu_q', [{ question: 'Which file?', header: 'File', modality: 'text' }], [{ id: 'q1', question: 'Which file?', status: 'answered', value: link(path) }]);
 
     it('reads a path only MAWS’s queued answer names, read-only, never saves it by that, and saves it once the person’s queued message links it', async () => {
       await transcriptOf(A, [queuedPrompt(answerNaming(out('result.txt')))]);

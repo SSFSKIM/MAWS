@@ -10,7 +10,7 @@
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
-import { expect, type Locator, type Page } from '@playwright/test';
+import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { slugOf } from '../src/engine-host/fs/paths';
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
@@ -20,9 +20,11 @@ import type { CodeHarnessApi } from '../src/renderer/src/harness/code/api';
 import {
   addTool, documentEnd, expectHeaderSticks, expectLandedOn, expectPlaceAtTop, expectToolbarAsDrawn, expectViewMenuPlaced, hunkCounter, invoke, menu, notice, numstat, openInViewer, openReview,
   otherThemeColours, recordNotices, restoreWithTab, reveal, reviewSection, scrollIntoSection, sectionPaths, selectReviewFile, settledTop, shortWindow, sideFileTab, stackTop, toolbarLayout,
-  treeRow, withProduct,
+  treeRow, withProduct, type Product,
 } from './support/code-product';
 import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
+import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav, type Rgb } from './support/media-fixtures'; // UX wave U6b-2
+import { created } from './support/nothing-created'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
@@ -49,6 +51,60 @@ async function storedFiles(page: Page): Promise<{ beside: string[]; main: string
     return { beside: beside.sort(), main };
   });
 }
+
+// ---- UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6): a session's file in its frame --
+
+const PDF_VIEWER = 'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/'; // Chromium's PDF viewer, beneath a PDF's frame
+const UNLABELLED_WORDS = 'Café, naïve, Ελληνικά, 東京'; // an invented line of non-ASCII text, in a page that declares no charset
+
+// What Chromium's PDF viewer draws under the frame of `url` (a token's URL, no fragment): per viewer frame beneath it, its
+// toolbar's height (0 when hidden: the viewer always builds the element) and its document's title, read in the viewer's
+// own page; or `NOT_READY` for a viewer frame whose `pdf-viewer` or toolbar is not built yet, a value no matcher of the
+// scenes accepts, so a poll asks again (a throw would end the poll at once). A failure to run or parse the read still throws.
+const NOT_READY = 'not ready' as const;
+type ViewerRead = { toolbar: number; title: string } | typeof NOT_READY;
+async function pdfViewerOf(maws: MawsLaunch, url: string): Promise<ViewerRead[]> {
+  const reads = await maws.app.evaluate(
+    async ({ BrowserWindow }, { url, viewer }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.webContents.getURL().startsWith('file:'))!;
+      const script = `(() => {
+        const element = document.querySelector('pdf-viewer');
+        const toolbar = element && element.shadowRoot && element.shadowRoot.querySelector('viewer-toolbar');
+        return JSON.stringify(toolbar ? { toolbar: toolbar.getBoundingClientRect().height, title: document.title } : null);
+      })()`;
+      const shown: ({ toolbar: number; title: string } | null)[] = [];
+      for (const frame of win.webContents.mainFrame.framesInSubtree.filter((f) => f.url.startsWith(viewer) && (f.parent?.url ?? '').startsWith(url))) shown.push(JSON.parse(String(await frame.executeJavaScript(script, true))) as { toolbar: number; title: string } | null);
+      return shown;
+    },
+    { url, viewer: PDF_VIEWER },
+  );
+  return reads.map((read) => read ?? NOT_READY);
+}
+
+// How many pixels of a PDF frame are its page's square of `mark` (`minimalPdf`): drawn, not just framed.
+const drawnMark = (p: Product, frame: Locator, mark?: Rgb) => markPixels(p.maws.app, p.page, frame, mark);
+const DRAWN = 2_000; // pixels of the square, on a page fitted to a tab's width: tens of thousands; none on an error or blank page
+
+// The page drawn in a file viewer's HTML frame, as Playwright reaches it (its own document, another origin).
+async function frameOfViewer(page: Page, viewer: Locator): Promise<Frame> {
+  const src = (await viewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+  let found: Frame | undefined;
+  await expect.poll(() => (found = page.frames().find((frame) => frame.url() === src)) !== undefined, { message: `a frame at ${src}` }).toBe(true);
+  return found!;
+}
+
+// What the open seam received, less the file frames' own lines (`frame-decision`, `frame-entry`), which share its log.
+const openedFiles = (p: Product) => readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' }).split('\n').filter((line) => line !== '' && !line.startsWith('frame-'));
+
+// What the case compares before and after, to show the file's frame created nothing (B8; support/nothing-created.ts).
+const snapshot = (p: Product) => created(p.page, p.maws.userData, p.scratch.appSessionId);
+
+// The responder's entries for `url` (the e2e seam's `frame-entry <method> <range|-> <url>` lines): each request's range.
+const entryRanges = (p: Product, url: string) =>
+  readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' })
+    .split('\n')
+    .filter((line) => line.startsWith('frame-entry ') && line.endsWith(` ${url}`))
+    .map((line) => line.split(' ')[2]!);
 
 // The themes' scan (`otherThemeColours`) and the stub-mode product helpers live in `support/code-product.ts` (E5 M4),
 // shared with the editor spec.
@@ -652,14 +708,260 @@ test.describe('the product in stub mode over a scratch repository', () => {
     );
   });
 
-  test('a PDF is an Open externally row', async () => {
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6; B1, B8): a PDF a session's path
+  // names is drawn in its own tab by Chromium's viewer, from a token whose URL ends in the file's name; its toolbar is
+  // hidden beside the chat and kept in the main area (card 4); Open externally is the bar's; no artifact is made.
+  test("a PDF is drawn in its tab: Chromium's viewer in the frame with no toolbar beside the chat, its URL ending in the file's name; Open externally in the bar; nothing new in the Library; moved to the main area its frame is a new one with the main area's fragment", async () => {
+    await withProduct(
+      async (p) => {
+        const path = p.scratch.path('doc.pdf');
+        const before = await snapshot(p);
+        const viewer = await openInViewer(p, 'doc.pdf');
+        await expect(viewer).toHaveAttribute('data-kind', 'frame');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        await expect(viewer.locator('[data-external-row]')).toHaveCount(0);
+        await expect(viewer.getByText('PDF files open outside MAWS')).toHaveCount(0);
+        const frame = viewer.locator('[data-artifact-frame="pdf"]');
+        await expect(frame, 'a token and the file’s name, with the side tab’s fragment').toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
+        const side = (await frame.getAttribute('src'))!;
+        const url = side.slice(0, side.indexOf('#'));
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => (shown === NOT_READY ? shown : shown.toolbar)), { message: 'Chromium’s viewer in the frame, drawing no toolbar beside the chat' }).toEqual([0]);
+        await expect.poll(() => drawnMark(p, frame), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(DRAWN);
+
+        // Open externally in the bar, above the frame, handing the file itself to the system
+        const open = viewer.getByRole('button', { name: 'Open externally', exact: true });
+        const [button, drawn] = [(await open.boundingBox())!, (await frame.boundingBox())!];
+        expect(button.y + button.height, 'the button above the frame, in the bar').toBeLessThanOrEqual(drawn.y + 0.5);
+        await open.click();
+        await expect.poll(() => openedFiles(p)).toEqual([path]);
+
+        // moved to the main area: a new frame element, from the same token, with the main area's fragment, the viewer's
+        // toolbar shown and titled with the file's name
+        await frame.evaluate((element) => void ((element as unknown as { u6b2Side?: boolean }).u6b2Side = true));
+        await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+        const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] [data-artifact-frame="pdf"]`);
+        await expect(moved, 'the same token, the main area’s fragment').toHaveAttribute('src', `${url}#navpanes=0`, { timeout: 20_000 });
+        expect(await moved.evaluate((element) => (element as unknown as { u6b2Side?: boolean }).u6b2Side === true), 'a new frame element').toBe(false);
+        await expect.poll(async () => (await pdfViewerOf(p.maws, url)).map((shown) => (shown === NOT_READY ? shown : [shown.toolbar > 0, shown.title])), { message: 'the viewer’s toolbar, titled with the file’s name' }).toEqual([[true, 'doc.pdf']]);
+        await expect.poll(() => drawnMark(p, moved), { timeout: 15_000, message: 'the page drawn in the main area' }).toBeGreaterThan(DRAWN);
+
+        // nothing created: the Library, the session's artifacts and every artifact as they were, and nothing written
+        // under the profile's artifacts folder
+        expect(await snapshot(p), 'nothing created').toEqual(before);
+      },
+      (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
+    );
+  });
+
+  // UX wave U6b-2 (M6; B3): an HTML file by a path is drawn in the artifact store's sandboxed frame, alone: its inline
+  // script runs, the stylesheet and the script beside it are not loaded and one line under the bar says so (card 2); a
+  // self-contained page has no line; an unlabelled UTF-8 page is served as UTF-8 and a labelled one decoded by its label.
+  test('an HTML file by a path runs its own script and is drawn without the stylesheet beside it, with the line that says so; a self-contained page has no line; a UTF-8 page with no declared charset reads right', async () => {
+    await withProduct(
+      async (p) => {
+        const besideFiles = (viewer: Locator) => viewer.locator('[data-beside-files]');
+        const before = await snapshot(p);
+        const page = await openInViewer(p, 'web/page.html');
+        await expect(page).toHaveAttribute('data-frame', 'html');
+        const pageFrame = await frameOfViewer(p.page, page);
+        await expect(pageFrame.locator('#marker'), 'its inline script ran').toHaveText('SCRIPT_RAN');
+        await expect(besideFiles(page), 'the line under the bar').toHaveText('Shown without the files beside it');
+        expect(await pageFrame.evaluate(() => getComputedStyle(document.getElementById('marker')!).color), 'the stylesheet beside it is not loaded').not.toBe('rgb(255, 0, 0)');
+        expect(await pageFrame.evaluate(() => document.documentElement.dataset.external ?? 'none'), 'nor the script beside it').toBe('none');
+        await page.getByRole('button', { name: 'Open externally', exact: true }).click();
+        await expect.poll(() => openedFiles(p), { message: 'the page handed to the system whole' }).toEqual([p.scratch.path('web/page.html')]);
+
+        const alone = await openInViewer(p, 'web/alone.html');
+        await expect(alone).toHaveAttribute('data-frame', 'html');
+        await expect((await frameOfViewer(p.page, alone)).locator('#marker')).toHaveText('SCRIPT_RAN');
+        await expect(besideFiles(alone), 'a self-contained page has no line').toHaveCount(0);
+
+        const unlabelled = await openInViewer(p, 'web/unlabelled.html');
+        await expect((await frameOfViewer(p.page, unlabelled)).locator('#words'), 'an unlabelled UTF-8 page reads right').toHaveText(UNLABELLED_WORDS);
+        await expect(besideFiles(unlabelled)).toHaveCount(0);
+        const labelled = await openInViewer(p, 'web/labelled.html');
+        await expect((await frameOfViewer(p.page, labelled)).locator('#words'), 'a labelled page decoded by its own label').toHaveText('Café naïve');
+        expect(await snapshot(p), 'nothing created').toEqual(before);
+      },
+      (scratch) => {
+        mkdirSync(scratch.path('web'));
+        writeFileSync(scratch.path('web/page.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Styled page</title><link rel="stylesheet" href="style.css"><script src="app.js"></script></head><body><p id="marker">waiting</p><script>document.getElementById("marker").textContent = "SCRIPT_RAN";</script></body></html>');
+        writeFileSync(scratch.path('web/style.css'), '#marker { color: rgb(255, 0, 0); }\n');
+        writeFileSync(scratch.path('web/app.js'), 'document.documentElement.dataset.external = "ran";\n');
+        writeFileSync(scratch.path('web/alone.html'), '<!doctype html><html><head><meta charset="utf-8"><title>Alone</title><style>#marker { font-weight: 600; }</style></head><body><p id="marker">waiting</p><script>document.getElementById("marker").textContent = "SCRIPT_RAN";</script></body></html>');
+        writeFileSync(scratch.path('web/unlabelled.html'), `<!doctype html><html><head><title>Unlabelled</title></head><body><p id="words">${UNLABELLED_WORDS}</p></body></html>`);
+        writeFileSync(scratch.path('web/labelled.html'), Buffer.from('<!doctype html><html><head><meta charset="windows-1252"><title>Labelled</title></head><body><p id="words">Café naïve</p></body></html>', 'latin1'));
+      },
+      // the page's own console: the stylesheet and the script beside it, each refused by the frame's CSP; nothing else
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the stylesheet '[^']*\/style\.css' because it violates the following Content Security Policy directive: "style-src /, /^maws-artifact:\/\/[0-9a-f]{32}\/page\.html Refused to load the script '[^']*\/app\.js' because it violates the following Content Security Policy directive: "script-src /] },
+    );
+  });
+
+  // UX wave U6b-2 (M6; B2): a video by a path plays and seeks in the artifact store's player and starts by itself never;
+  // its position is the tab's, so moved to the main area the new element is at the time it left, paused. A sound plays,
+  // and seeks to a time it has not loaded: two minutes of WAV at 44.1 kHz (10.6 MB, as the scene of record's), of which
+  // the player, preloading metadata, holds the start; the seek near its end is answered by a ranged request for it.
+  // Playing, hidden by the tree in its place, it leaves no element, and comes back paused at its time (Decision Log 29).
+  test('a video by a path plays and seeks, and a sound plays and seeks to a time not yet loaded by a ranged request; moved to the main area the video is at the time it left', async () => {
     await withProduct(async (p) => {
-      const viewer = await openInViewer(p, 'doc.pdf');
-      await expect(viewer.locator('[data-external-row]')).toContainText('PDF files open outside MAWS');
-      await viewer.getByRole('button', { name: 'Open externally' }).click();
-      await expect.poll(() => (readFileSync(p.scratch.openLog, { encoding: 'utf8', flag: 'a+' }))).toBe(`${p.scratch.path('doc.pdf')}\n`);
-      await expect(p.page.locator('iframe, embed, object')).toHaveCount(0);
+      writeFileSync(p.scratch.path('clip.webm'), await recordedWebm(p.page));
+      writeFileSync(p.scratch.path('long.wav'), silentWav(120, 44_100));
+      const before = await snapshot(p);
+      const path = p.scratch.path('clip.webm');
+      const viewer = await openInViewer(p, 'clip.webm');
+      await expect(viewer).toHaveAttribute('data-frame', 'video');
+      const video = viewer.locator('video[data-artifact-media="video"]');
+      await expect(video).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/clip\.webm$/);
+      await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.readyState)).toBeGreaterThanOrEqual(1);
+      expect(await video.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'it does not start by itself').toEqual([true, 0]);
+      await video.evaluate(async (v: HTMLVideoElement) => {
+        v.muted = true;
+        await v.play();
+      });
+      await expect.poll(() => video.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'it plays' }).toBeGreaterThan(1.2);
+      const seeked = await video.evaluate(
+        (v: HTMLVideoElement) =>
+          new Promise<number>((resolve) => {
+            v.pause();
+            v.addEventListener('seeked', () => resolve(v.currentTime), { once: true });
+            v.currentTime = 1;
+          }),
+      );
+      expect(seeked).toBeCloseTo(1, 1);
+
+      await sideColumn(p.page).locator(`[data-files-tab][data-file="${path}"] [data-move-to-main]`).click();
+      const moved = p.page.locator(`[data-region="main"] [data-file-viewer][data-path="${path}"] video[data-artifact-media="video"]`);
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.currentTime), { message: 'at the time it left' }).toBeCloseTo(1, 1);
+      // paused (Decision Log 33): once it could play (HAVE_FUTURE_DATA), an observation window as B15's, bounded and no
+      // barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => moved.evaluate((v: HTMLVideoElement) => v.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const movedStill = await moved.evaluate((v: HTMLVideoElement) => v.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await moved.evaluate((v: HTMLVideoElement) => [v.paused, v.currentTime]), 'paused').toEqual([true, movedStill]);
+
+      const sound = await openInViewer(p, 'long.wav');
+      await expect(sound).toHaveAttribute('data-frame', 'audio');
+      const audio = sound.locator('audio[data-artifact-media="audio"]');
+      const src = (await audio.getAttribute('src'))!;
+      expect(src).toMatch(/^maws-artifact:\/\/[0-9a-f]{32}\/long\.wav$/);
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.duration)).toBeCloseTo(120, 0);
+      // it does not start by itself (Decision Log 33): once it could (HAVE_FUTURE_DATA), an observation window as B15's,
+      // bounded and no barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const soundStill = await audio.evaluate((a: HTMLAudioElement) => a.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await audio.evaluate((a: HTMLAudioElement) => [a.paused, a.currentTime]), 'it does not start by itself').toEqual([true, soundStill]);
+      await audio.evaluate(async (a: HTMLAudioElement) => {
+        a.muted = true;
+        await a.play();
+      });
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'it plays' }).toBeGreaterThan(0);
+
+      // staged: paused, and the target outside every range the element holds
+      const target = 108;
+      const held = await audio.evaluate((a: HTMLAudioElement, target) => {
+        a.pause();
+        const ranges: [number, number][] = [];
+        for (let k = 0; k < a.buffered.length; k++) ranges.push([a.buffered.start(k), a.buffered.end(k)]);
+        return { ranges, holds: ranges.some(([start, end]) => start <= target && target <= end) };
+      }, target);
+      expect(held.holds, `the target, ${target} s, is not loaded yet: ${JSON.stringify(held.ranges)}`).toBe(false);
+      const entriesBefore = entryRanges(p, src).length; // a request made before the seek (a metadata tail read) does not count
+      const landed = await audio.evaluate(
+        (a: HTMLAudioElement, target) =>
+          new Promise<number>((resolve) => {
+            a.addEventListener('seeked', () => resolve(a.currentTime), { once: true });
+            a.currentTime = target;
+          }),
+        target,
+      );
+      expect(landed, 'the seek succeeded').toBeCloseTo(target, 0);
+      // a ranged request, made after the seek, from at least 90 s into the file's bytes (44-byte header, 88,200 bytes a second)
+      const from = 44 + 90 * 88_200;
+      await expect
+        .poll(() => entryRanges(p, src).slice(entriesBefore).some((range) => Number(/^bytes=(\d+)-/.exec(range)?.[1] ?? -1) >= from), { message: `a ranged request from byte ${from} or later reached the responder` })
+        .toBe(true);
+
+      // Decision Log 29: the sound playing, the tree shown in the file's place takes its element out of the document; shown
+      // again it is paused at the time it left. The side column at its least width leaves the tab room for the file alone,
+      // so the tree's button shows the tree in the file's place. The time is read and the button pressed in one turn of the
+      // page, so the time the tab keeps (the element's last report while it played) is at most that time.
+      await audio.evaluate(async (a: HTMLAudioElement) => {
+        a.muted = true;
+        await a.play();
+      });
+      await expect.poll(() => audio.evaluate((a: HTMLAudioElement) => a.paused), { message: 'the sound plays' }).toBe(false);
+      await p.page.getByRole('separator', { name: 'Resize right panel' }).press('Home');
+      const soundTab = `[data-files-tab][data-file="${p.scratch.path('long.wav')}"]`;
+      await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree]`), 'a tab too narrow for the tree beside the file').toHaveCount(0);
+      const left = await p.page.evaluate((tab) => {
+        const time = document.querySelector<HTMLAudioElement>(`${tab} audio[data-artifact-media="audio"]`)!.currentTime;
+        document.querySelector<HTMLElement>(`${tab} [data-files-tree-toggle]`)!.click();
+        return time;
+      }, soundTab);
+      await expect(sideColumn(p.page).locator(`${soundTab} [data-files-tree][data-place="instead"]`), 'the tree in the file’s place').toBeVisible();
+      await expect(p.page.locator('audio[data-artifact-media="audio"]'), 'no audio element left').toHaveCount(0);
+      await sideColumn(p.page).locator(`${soundTab} [data-files-tree-toggle]`).click();
+      const back = sound.locator('audio[data-artifact-media="audio"]');
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { timeout: 20_000 }).toBeGreaterThanOrEqual(1);
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.currentTime), { message: 'at the time it left' }).toBeCloseTo(left, 0);
+      // paused (Decision Log 33's form): once it could play (HAVE_FUTURE_DATA), an observation window as B15's, bounded and
+      // no barrier (no event says that playback is not coming), across which it stays paused at the same time
+      await expect.poll(() => back.evaluate((a: HTMLAudioElement) => a.readyState), { message: 'it could play' }).toBeGreaterThanOrEqual(3);
+      const backStill = await back.evaluate((a: HTMLAudioElement) => a.currentTime);
+      await p.page.waitForTimeout(2_000);
+      expect(await back.evaluate((a: HTMLAudioElement) => [a.paused, a.currentTime]), 'paused').toEqual([true, backStill]);
+      expect(await snapshot(p), 'nothing created').toEqual(before);
     });
+  });
+
+  // UX wave U6b-2 (M6; B16): a clip the player cannot play is no disabled player: its row says so and keeps Open
+  // externally (decision 16; card 3).
+  test('a clip the player cannot play shows its sentence and Open externally', async () => {
+    await withProduct(
+      async (p) => {
+        const before = await snapshot(p);
+        const viewer = await openInViewer(p, 'broken.mp4');
+        await expect(viewer).toHaveAttribute('data-kind', 'frame');
+        await expect(viewer, 'the row in the player’s place').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+        const row = viewer.locator('[data-external-row]');
+        await expect(row.getByText('This video can’t be played here.', { exact: true })).toBeVisible();
+        await expect(viewer.locator('video, [data-artifact-media]')).toHaveCount(0);
+        await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+        await expect.poll(() => openedFiles(p)).toEqual([p.scratch.path('broken.mp4')]);
+        expect(await snapshot(p), 'nothing created').toEqual(before);
+      },
+      (scratch) => writeFileSync(scratch.path('broken.mp4'), Buffer.from('These invented bytes are no video at all.\n'.repeat(64))),
+    );
+  });
+
+  // UX wave U6b-2 (M6; B7): a PDF replaced on disk is read again on its folder's event, which asks for a new token: the
+  // frame is made again from it, the bar flashes Updated, and the new version is what is drawn (its square red, the first's
+  // black).
+  test('a PDF replaced on disk is drawn again', async () => {
+    await withProduct(
+      async (p) => {
+        const before = await snapshot(p);
+        const viewer = await openInViewer(p, 'doc.pdf');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        const frame = viewer.locator('[data-artifact-frame="pdf"]');
+        await expect.poll(() => drawnMark(p, frame), { timeout: 15_000, message: 'the first version drawn: its black square' }).toBeGreaterThan(DRAWN);
+        const first = (await frame.getAttribute('src'))!;
+        await expect(viewer.locator('[data-updated]')).toHaveCount(0);
+        writeFileSync(p.scratch.path('doc.pdf'), minimalPdf(undefined, INVENTED_RED));
+        await expect.poll(() => frame.getAttribute('src'), { timeout: 20_000, message: 'the frame drawn from a new token' }).not.toBe(first);
+        await expect(frame).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/doc\.pdf#toolbar=0&navpanes=0$/);
+        await expect(viewer.locator('[data-updated]')).toHaveText('Updated');
+        await expect(viewer).toHaveAttribute('data-frame', 'pdf');
+        const after = (await frame.getAttribute('src'))!;
+        await expect.poll(async () => (await pdfViewerOf(p.maws, after.slice(0, after.indexOf('#')))).filter((shown) => shown !== NOT_READY).length, { message: 'Chromium’s viewer, built, in the new frame' }).toBe(1);
+        await expect.poll(() => drawnMark(p, frame, INVENTED_RED), { timeout: 15_000, message: 'the new version drawn: its red square' }).toBeGreaterThan(DRAWN);
+        expect(await drawnMark(p, frame), 'the first version’s black square gone').toBeLessThan(DRAWN / 10);
+        expect(await snapshot(p), 'nothing created').toEqual(before);
+      },
+      (scratch) => writeFileSync(scratch.path('doc.pdf'), minimalPdf()),
+    );
   });
 
   test('a binary is an Open externally row', async () => {
@@ -736,20 +1038,24 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const review = await openReview(p);
       const sum = numstat(p.scratch);
       expect(sum).toEqual({ files: 2, added: 4, removed: 0 });
-      await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added} −${sum.removed}`); // the scope is the pressed chip's (card 1)
+      // UX wave U5b-2 (§I; Decision Log 29, 4): the new files' lines are counted (scratch.txt's one line and link-out's
+      // target, one line), and big.log, past the per-file cap, is named after the totals; the scope is the pressed chip's
+      await expect(review.locator('[data-review-header]')).toHaveText(`5 files changed · +${sum.added + 2} −${sum.removed}, and 1 untracked file not counted`);
       // over the product's stack, the View menu opens against its button inside the window (measured)
       await expectViewMenuPlaced(review);
       await p.page.keyboard.press('Escape');
       await expect(p.page.getByRole('menu')).toHaveCount(0);
-      // every file a section, in the list's order: its kind, and its counts (a new file +N alone; an untracked one none until
-      // U5b-2 counts it)
+      // every file a section, in the list's order: its kind, and its counts (a new file +N alone, an untracked one too once
+      // counted; big.log, not counted, none)
       const rows = await review.locator('[data-review-stack] > [data-review-file]').evaluateAll((sections) =>
         sections.map((s) => ({ path: s.getAttribute('data-review-file'), kind: s.getAttribute('data-kind'), counts: s.querySelector('[data-review-counts]')?.textContent?.replace(/\s+/g, ' ').trim() ?? null })),
       );
       expect(rows).toEqual([
         { path: 'src/app.ts', kind: 'modified', counts: '+3 −0' },
         { path: 'src/staged.ts', kind: 'added', counts: '+1' },
-        ...['big.log', 'link-out', 'scratch.txt'].map((path) => ({ path, kind: 'untracked', counts: null })),
+        { path: 'big.log', kind: 'untracked', counts: null },
+        { path: 'link-out', kind: 'untracked', counts: '+1' },
+        { path: 'scratch.txt', kind: 'untracked', counts: '+1' },
       ]);
       // the counter across the stack: src/app.ts's three hunks (the TypeScript and Open file scenes land on its first and
       // third), then one each for src/staged.ts, link-out and scratch.txt
@@ -786,7 +1092,8 @@ test.describe('the product in stub mode over a scratch repository', () => {
       const reset = Date.now();
       await expect.poll(() => staged.count(), { timeout: MEASURED_WAIT_MS, intervals: [25] }).toBe(0);
       within('Staged gone after git reset', Date.now() - reset, 1_000, 'Staged gone within a second of the reset');
-      await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +3 −0');
+      // src/staged.ts, untracked now, keeps its one line in the totals (UX wave U5b-2: a new file's lines are counted)
+      await expect(review.locator('[data-review-header]')).toHaveText('5 files changed · +6 −0, and 1 untracked file not counted');
       await expect(reviewSection(review, 'src/staged.ts')).toHaveAttribute('data-kind', 'untracked');
     });
   });
@@ -831,7 +1138,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
       // a change above the place: README.md's section is drawn before src/app.ts's
       writeFileSync(p.scratch.path('README.md'), `${readFileSync(p.scratch.path('README.md'), 'utf8')}One more line.\n`);
       await expect(reviewSection(review, 'README.md')).toHaveCount(1, { timeout: 5_000 });
-      await expect(review.locator('[data-review-header]')).toHaveText('6 files changed · +5 −0');
+      await expect(review.locator('[data-review-header]')).toHaveText('6 files changed · +7 −0, and 1 untracked file not counted');
       expect((await sectionPaths(review))[0], 'the new section stands above the place').toBe('README.md');
       await expectPlaceAtTop(review, before, 'the same file and line at the top after the refresh');
     });
@@ -998,6 +1305,15 @@ test.describe('the product in stub mode over a scratch repository', () => {
         const locked = await reveal(p, 'locked');
         await locked.click();
         await expect(p.panel.locator('[data-tool="files"] [data-notice="refused"]')).toContainText(`Refused: ${REFUSAL}`);
+        // UX wave U6b-2 (M6; Interfaces §H): a framed file whose load failed, its body the sentence and Open again. A PDF
+        // kept in its tab is removed (its folder's watch says so, and its frame, already drawn, stays); shown again after
+        // another tab, its frame asks its URL once more and the read for it fails.
+        const stopped = await openInViewer(p, 'gone.pdf');
+        await expect(stopped).toHaveAttribute('data-frame', 'pdf');
+        await sideFileTab(p.page, 'gone.pdf').getByRole('tab').dblclick();
+        await expect(sideFileTab(p.page, 'gone.pdf'), 'kept').not.toHaveAttribute('data-preview', 'true');
+        rmSync(p.scratch.path('gone.pdf'));
+        await expect(notice(stopped)).toHaveText('File removed');
         for (const theme of ['dark', 'light'] as const) {
           await menu(p.maws, `theme.${theme}`);
           await expect(p.page.locator('html')).toHaveAttribute('data-theme', theme);
@@ -1005,18 +1321,31 @@ test.describe('the product in stub mode over a scratch repository', () => {
             ['src/app.ts', '[data-code-view] .cm-line'],
             ['README.md', '[data-markdown-view] h1'],
             ['img/dot.png', '[data-image-view] img'],
-            ['doc.pdf', '[data-external-row]'],
+            ['doc.pdf', '[data-artifact-frame="pdf"]'], // UX wave U6b-2: drawn in its frame, the bar judged with Open externally in it
           ] as const) {
             const viewer = await openInViewer(p, file);
             await expect(viewer.locator(ready).first()).toBeVisible();
+            if (file === 'doc.pdf') await expect(viewer.getByRole('button', { name: 'Open externally', exact: true }), 'the bar’s Open externally').toBeVisible();
             // UX wave U6b-1: the scan covers the tree's column at the file's left and the preview tab's italic title
             await expect(p.panel.locator('[data-files-tree][data-place="beside"]')).toBeVisible();
             await expect(sideFileTab(p.page, basename(file))).toHaveAttribute('data-preview', 'true');
             expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row beside ${file}, its tab the preview`).toEqual([]);
           }
+          // UX wave U6b-2: the failure body and its button
+          await sideFileTab(p.page, 'gone.pdf').getByRole('tab').click();
+          await expect(stopped, 'the read for its frame failed').toHaveAttribute('data-frame', 'failed', { timeout: 20_000 });
+          await expect(stopped.locator('[data-frame-stopped]').getByRole('button', { name: 'Open again', exact: true })).toBeVisible();
+          expect(await otherThemeColours(p.page), `${theme}: the failure body of a framed file, and its Open again`).toEqual([]);
         }
       },
-      (scratch) => mkdirSync(scratch.path('locked'), { mode: 0o000 }),
+      (scratch) => {
+        mkdirSync(scratch.path('locked'), { mode: 0o000 });
+        // UX wave U6b-2: a PDF the viewer can draw in place of the scratch's placeholder, and one to remove
+        writeFileSync(scratch.path('doc.pdf'), minimalPdf());
+        writeFileSync(scratch.path('gone.pdf'), minimalPdf());
+      },
+      // UX wave U6b-2: the removed PDF's frame asking its URL again, answered 404 before a byte (the responder's one answer)
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/gone\.pdf(#\S*)? Failed to load resource: the server responded with a status of 404 \(Not Found\)$/] },
     );
   });
 });
@@ -1114,7 +1443,10 @@ test.describe('the product over a session discovered from its transcript', () =>
         await openSurface(page, 'Source control');
         return surface(page, 'source-control');
       };
-      const scmActs = (tool: Locator) => tool.locator('[data-scm-action], [data-scm-remote-action="push"], [data-scm-remote-action="pr"]');
+      // UX wave U5b-2: Source control is a page that reads only; its Where line names the checkout (the session's folder as
+      // its title, "· worktree" for a linked one) and its Uncommitted line counts that checkout's changed files.
+      const where = (tool: Locator) => tool.locator('[data-scm-where]');
+      const uncommittedCount = (tool: Locator) => tool.locator('[data-scm-uncommitted] [data-scm-count]');
       // The terminals: a tab of the side column's strip by its id, its worktree warning when in view.
       const shownTab = () => sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip] [data-tab-id]:has([role="tab"][aria-selected="true"])');
       const showTerminal = async (tabId: string) => {
@@ -1167,10 +1499,10 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(root).toHaveAttribute('data-path', worktree, { timeout: 20_000 });
       await expect(root).toContainText('working folder');
       let scm = await sourceControl();
-      await expect(scm.locator('[data-scm-row][data-path="worktree-note.txt"]')).toBeVisible({ timeout: 20_000 });
-      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toHaveCount(0);
-      await expect(scmActs(scm), 'no Push, no Open PR, no button on a row or a group').toHaveCount(0);
-      await expect(scm.getByRole('textbox', { name: 'Commit message' }), 'no commit form').toHaveCount(0);
+      await expect(where(scm), 'the page reads the worktree').toHaveAttribute('title', worktree, { timeout: 20_000 });
+      await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ worktree-w1');
+      await expect(where(scm).locator('[data-scm-where-worktree]')).toHaveText('· worktree');
+      await expect(uncommittedCount(scm), 'its one change, worktree-note.txt, and not the repository’s').toHaveText('1');
       await expect(await showTerminal(before), 'the terminal opened before stays in the repository').toContainText(`This terminal is in ${repo.root}; the session now runs in ${worktree}.`);
       expect(await shellAnswer(), 'and its shell is still there').toBe(repo.root);
       await sideColumn(page).locator('section[data-side-group]:has([data-surface="terminal"]) [data-side-strip]').getByRole('button', { name: 'Add a tool', exact: true }).click();
@@ -1210,9 +1542,10 @@ test.describe('the product over a session discovered from its transcript', () =>
       await expect(root).toHaveAttribute('data-path', repo.root, { timeout: 20_000 });
       await expect(root).toContainText('directory');
       scm = await sourceControl();
-      await expect(scm.locator('[data-scm-row][data-path="README.md"]')).toBeVisible({ timeout: 20_000 });
-      await expect(scmActs(scm).first(), 'every act is back').toBeVisible();
-      await expect(scm.getByRole('textbox', { name: 'Commit message' })).toBeVisible();
+      await expect(where(scm), 'the page reads the repository again').toHaveAttribute('title', repo.root, { timeout: 20_000 });
+      await expect(where(scm).locator('[data-scm-where-branch]')).toHaveText('⎇ main');
+      await expect(where(scm).locator('[data-scm-where-worktree]'), 'no worktree word').toHaveCount(0);
+      await expect(uncommittedCount(scm), 'its one change, README.md').toHaveText('1');
       await expect(await showTerminal(before), 'the first terminal is where the session is again').toHaveCount(0);
       await expect(await showTerminal(after), 'the second says it is in the worktree').toContainText(`This terminal is in ${worktree}; the session now runs in ${repo.root}.`);
       expect(await shellAnswer(), 'where its shell still is').toBe(worktree);

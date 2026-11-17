@@ -8,6 +8,7 @@ import { expect, type Page } from '@playwright/test';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@shared/ipc/schema';
+import type { AskQuestion } from '@shared/maws/tools';
 import { launchDefaults } from '../../src/shared/composer/launch-defaults';
 import { consentMessage } from '../../src/shared/engine/arrival';
 import { REPO_ROOT } from './launch';
@@ -183,6 +184,33 @@ export function steerStopJournal(dir: string, name: string, releases: 1 | 2 = 1)
   return writeJournal(dir, `${name}-steer-stop`, rows);
 }
 
+// UX wave U4b (M4, the waiting answer's scene; the architect's ruling after the cascade merge with board ticket 711):
+// `steerStopJournal` with the agent's async ask in its running turn, so the window holds the ask's row and a waiting
+// answer to it reads through the ask's questions. The ask is `pass3/p1-maws-ask-async`'s: its call (seq 95, the
+// assistant's `mcp__maws__ask` tool use) and the host's acknowledgement as the engine echoes it (107, `asked`), placed
+// after the prompt's echo (9) and before the turn's first message starts (10), under this recording's session. The host
+// serves no call here (the `tools/call` and its permission are not replayed): the transcript reads the ask from the call
+// and its result, as a session read from the engine's transcript does.
+const ASK_ASYNC = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const asyncAskRows = () => {
+  const rows = rowsOf(ASK_ASYNC);
+  return [rows.find((r) => r.seq === 95)!, rows.find((r) => r.seq === 107)!];
+};
+/** The recorded async ask's id (its call's tool use id) and questions, as its call holds them. */
+export function asyncAsk(): { askId: string; questions: AskQuestion[] } {
+  const [call] = asyncAskRows();
+  const use = (call!.frame.message as { content: { id: string; input: { questions: AskQuestion[] } }[] }).content[0]!;
+  return { askId: use.id, questions: use.input.questions };
+}
+export function askedSteerStopJournal(dir: string, name: string): string {
+  const rows = (readFileSync(steerStopJournal(dir, name), 'utf8').trim().split('\n').map((l) => JSON.parse(l) as Row));
+  const echo = rows.findIndex((r) => r.seq === 9);
+  const session = rows.find((r) => r.seq === 150)!.frame.session_id;
+  const asked = asyncAskRows().map((r, k): Row => ({ ...r, seq: 9 * 100 + k, at: rows[echo]!.at, frame: { ...r.frame, session_id: session } }));
+  rows.splice(echo + 1, 0, ...asked);
+  return writeJournal(dir, `${name}-asked-steer-stop`, rows);
+}
+
 // UX wave U4a (M8, the Send now scene): Send now behind a running command, as `uxwave/u4p2-a-1` recorded it on engine
 // 2.1.322 under the environment MAWS's launch sets. C3's prelude stands in for the probe's handshake (seq 3 to 11, and
 // the answer to its thinking-display write at 14, which the host's own write is answered in place of); then the probe's
@@ -295,4 +323,27 @@ function swapping(pairs: [string, string][]): (row: Row) => Row {
         : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, walk(entry)]))
           : value;
   return (row) => ({ ...row, frame: walk(row.frame) as Row['frame'] });
+}
+
+// The UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, M3's scene): a prompt and MAWS's answer
+// envelope waiting together, which the engine joined into one message, as probe 1 recorded it on engine 2.1.322 with a
+// real non-blocking ask served by a `maws` server (`uxwave/u704-end-prompt-first-1`; spikes/protocol-probe/
+// findings-uxwave-u704-envelope-split.txt). C3's prelude stands in for the probe's handshake (seq 3 to 17, the `maws`
+// server's own MCP handshake among them, which the host's server does not need: it answers each message by itself);
+// then the first prompt (18), the engine's `tools/list` (20) and its `ask` call (109) for the host's server to answer,
+// the prompt at the next step (159) and the envelope after it (161) for the host to write, the turn's end (673, 674) and
+// the joined replay (680) under the envelope's uuid, read as the second turn. The answer to the probe's thinking-display
+// write (22) goes, as the host's own write is answered in place of it, and so do the meta rows, the exit (730) with them,
+// so the replay waits for the test's end. The replay maps each recorded uuid onto the one the host minted.
+export const JOINED_ANSWER_RECORDING = 'spikes/protocol-probe/fixtures/uxwave/u704-end-prompt-first-1.jsonl';
+export function joinedAnswerJournal(dir: string, name: string): string {
+  const rows = rowsOf(JOINED_ANSWER_RECORDING).filter((r) => r.seq >= 18 && r.seq !== 22 && r.direction !== 'meta');
+  return writeJournal(dir, `${name}-joined-answer`, [...rowsOf('test/fixtures/engine/replay-handshake.jsonl'), ...rows]);
+}
+/** What the recording holds that the scene writes or reads: the frame MAWS wrote at `seq`, and the answers the host journaled. */
+export function joinedAnswerRecorded(): { first: string; prompt: string; answers: unknown[] } {
+  const rows = rowsOf(JOINED_ANSWER_RECORDING);
+  const content = (seq: number) => ((rows.find((r) => r.seq === seq)!.frame as { message: { content: string } }).message.content);
+  const answered = rows.find((r) => r.direction === 'meta' && r.frame.event === 'maws_ask_answered')!.frame as { answers: unknown[] };
+  return { first: content(18), prompt: content(159), answers: answered.answers };
 }

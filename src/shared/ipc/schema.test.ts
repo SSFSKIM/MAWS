@@ -184,7 +184,7 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by machine (P5 O3-E), with the diff and log bounds', () => {
-      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
+      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branchCommits' /* UX wave U5b-2 */, 'git.branches', 'git.changesSince' /* U5b-2 */, 'git.commitDiff' /* U5b-2 */, 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
       for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('machine'); // P5 O3-E: mawsd's with the spine
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
@@ -194,6 +194,38 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
     });
     // end C4
+
+    // UX wave U5b-2 (Interfaces §C): the three reads take a commit as a whole object id and nothing else, so nothing a
+    // caller sends reaches git as an option, a ref name or an abbreviation
+    it('holds the three reads to their bounds: a commit or an against that is not a whole hash is refused', () => {
+      const sha1 = 'a'.repeat(40);
+      const sha256 = 'b'.repeat(64);
+      expect(validateCommandInput('git.branchCommits', { directory: '/r', limit: 50 }).ok).toBe(true);
+      for (const limit of [0, 201, 1.5]) expect(validateCommandInput('git.branchCommits', { directory: '/r', limit }).ok, String(limit)).toBe(false);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, path: 'a.ts', context: 20, patch: false }).ok).toBe(true);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha256 }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: 'HEAD' }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: sha256, path: 'a.ts', context: 0 }).ok).toBe(true);
+      for (const bad of ['-' + 'a'.repeat(39), '--output=/tmp/x', 'a'.repeat(39), 'A'.repeat(40), 'main', 'HEAD~1', `${sha1}\n`, 'a'.repeat(41)]) {
+        expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: bad }).ok, bad).toBe(false);
+        expect(validateCommandInput('git.changesSince', { directory: '/r', against: bad }).ok, bad).toBe(false);
+      }
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: 'HEAD' }).ok).toBe(false); // only the working-tree read takes HEAD
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, context: 21 }).ok).toBe(false);
+    });
+
+    // UX wave U5b-2 (the branch read's one snapshot, Decision Log 52): a count is of commits, so none is below 0; an answer
+    // with a negative one is refused at the schema, whichever count it is
+    it('refuses a branch read whose count of commits is negative', () => {
+      const answer = (counts: { all: number; notPushed: number | null; pushed: number | null } | null, behind: number | null) => validateCommandOutput('git.branchCommits', { base: null, upstream: null, commits: [], counts, behind }).ok;
+      expect(answer({ all: 3, notPushed: 1, pushed: 2 }, 0)).toBe(true);
+      expect(answer({ all: 0, notPushed: 0, pushed: 0 }, null)).toBe(true);
+      expect(answer({ all: 3, notPushed: null, pushed: null }, null)).toBe(true);
+      expect(answer({ all: -1, notPushed: 0, pushed: 0 }, 0), 'all').toBe(false);
+      expect(answer({ all: 1, notPushed: 2, pushed: -1 }, 0), 'pushed').toBe(false);
+      expect(answer({ all: 1, notPushed: -1, pushed: 2 }, 0), 'notPushed').toBe(false);
+      expect(answer({ all: 1, notPushed: 1, pushed: 0 }, -1), 'behind').toBe(false);
+    });
 
     // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
     it('accepts the E6 untracked scope on git.diff', () => {

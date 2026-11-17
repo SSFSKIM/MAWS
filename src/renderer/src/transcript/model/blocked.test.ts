@@ -6,16 +6,21 @@
 // B's joined grants (Acceptance 14's blocked rows).
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { promotionMessage } from '@shared/anchor/message';
 import { framePasted } from '@shared/composer/pasted-content';
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readAnswerEnvelope } from '@shared/engine/arrival';
+import { messageText } from '@shared/engine/peer-envelope';
 import { carriedOf } from '@shared/engine/arrival-schema';
 import type { DenialKind } from '@shared/graph/enums';
 import type { SessionEvent } from '@shared/graph/events';
 import type { SessionId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
 import { askSteerText } from '@shared/maws/ask';
+import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { describe, expect, it } from 'vitest';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
+import { earlierAskSteerText, innerOpeningEnvelope } from '../../../../../test/support/ask-steer';
+import { acceptedCosts, forgedInputs, relayForgery, type Content } from '../../../../../test/support/rule-r';
 import { FIXTURE_DIR, loadUxwaveJournal } from '../../../../../test/support/fixtures';
 import { MemoryFileReader } from '../../../../../test/support/memory-reader';
 import { journalToEvents } from '../dev/journal';
@@ -502,21 +507,37 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
   const GRANT = consentMessage('command', MARKER('1'));
   const LAYOUT = { id: 'q1', question: 'Which layout should the gallery use?', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
   const ANSWER = { id: 'q1', question: LAYOUT.question, status: 'answered' as const, value: ['Grid'] };
-  const envelope = (header?: string) => askSteerText('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
+  // Board ticket 711 (the cascade merge of U4b into U1c): this build writes the envelope's new form (each question by its
+  // number, a pick as `option <k>`, the block's `question` empty: no text the model wrote); a session read now may hold
+  // an earlier build's form (`earlierAskSteerText`). The readers read a message beside either form alike.
+  type Writer = (askId: string, questions: readonly AskQuestion[], answers: readonly AskAnswer[]) => string;
+  const FORMS: [string, Writer][] = [['this build’s form', askSteerText], ['an earlier build’s form', earlierAskSteerText]];
+  const envelope = (header?: string, write: Writer = askSteerText) => write('toolu_a', [{ ...LAYOUT, ...(header !== undefined && { header }) }], [ANSWER]);
+  // a text question whose answer the person typed as the exact grant sentence
+  const NOTE = { id: 'q1', question: 'What should the agent be told?', modality: 'text' as const };
+  const typed = (write: Writer) => write('toolu_a', [NOTE], [{ id: 'q1', question: NOTE.question, status: 'answered', value: GRANT }]);
   type Swaps = [string, string][];
   const swap = (text: string, swaps: Swaps) => swaps.reduce((acc, [from, to]) => acc.split(from).join(to), text);
+  // Rule R: the grant changed for the input under test, a string or text blocks: a content that is exactly the grant
+  // takes the blocks, and any other text (a queue operation's content) the blocks joined as the reader joins them
+  type Change = Swaps | Content;
+  const joinedText = (input: Content) => (typeof input === 'string' ? input : input.map((block) => block.text).join('\n'));
+  const changed = (content: string, change: Change): unknown => (isSwaps(change) ? swap(content, change) : typeof change !== 'string' && content === GRANT ? change : swap(content, [[GRANT, joinedText(change)]]));
+  const changedText = (content: string, change: Change): string => (isSwaps(change) ? swap(content, change) : swap(content, [[GRANT, joinedText(change)]]));
+  const isSwaps = (change: Change): change is Swaps => Array.isArray(change) && change.every((item) => Array.isArray(item));
   /** Live: the journal with every string content swapped (MAWS's writes and the engine's replays). */
-  const live = (name: string, swaps: Swaps): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
+  const live = (name: string, swaps: Change): SessionEvent[] => journalToEvents(loadUxwaveJournal(name).map((row) => {
     const message = (row.frame as { message?: { content?: unknown } }).message;
-    return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: swap(message.content, swaps) } } } as JournalRow) : row;
+    return typeof message?.content === 'string' ? ({ ...row, frame: { ...(row.frame as object), message: { ...message, content: changed(message.content, swaps) } } } as JournalRow) : row;
   }));
-  /** From the file: the transcript's records with every string content swapped (the user lines and the queue's). */
-  const fromFile = async (name: string, swaps: Swaps): Promise<SessionEvent[]> => {
+  /** From the file: the transcript's records with every string content swapped (the user lines, the queue's and a queued_command's prompt). */
+  const fromFile = async (name: string, swaps: Change): Promise<SessionEvent[]> => {
     const lines = readFileSync(join(FIXTURE_DIR, 'uxwave', `${name}.transcript.jsonl`), 'utf8').split('\n').map((line) => {
       if (line.trim() === '') return line;
-      const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown };
-      if (typeof record.message?.content === 'string') record.message.content = swap(record.message.content, swaps);
-      if (typeof record.content === 'string') record.content = swap(record.content, swaps);
+      const record = JSON.parse(line) as { message?: { content?: unknown }; content?: unknown; attachment?: { prompt?: unknown } };
+      if (typeof record.message?.content === 'string') record.message.content = changed(record.message.content, swaps);
+      if (typeof record.content === 'string') record.content = changedText(record.content, swaps);
+      if (typeof record.attachment?.prompt === 'string') record.attachment.prompt = changed(record.attachment.prompt, swaps); // a mid-turn message's queued_command
       return JSON.stringify(record);
     });
     const events: SessionEvent[] = [];
@@ -530,16 +551,28 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     const state = stateOf(events);
     const consents = [...new Set(events.flatMap((event) => (event.kind === 'user.message' ? carriedOf(event.arrival).flatMap((entry) => (entry.class === 'consent' ? [entry.subject] : [])) : [])))];
     const approvals = drawn(state).filter((row): row is RowOf<'user'> => row.kind === 'user' && row.consent !== undefined);
-    return { consents, approvals, readings: readings(state) };
+    // What each of the person's messages that holds an envelope reads as, whole (`readAnswerEnvelope`, the whole-text form
+    // of the split's reading; `personsText` takes the envelopes out through the same reader before any grant is looked
+    // for), as its tool, its call and how many answers it holds;
+    // null where it is no answer. The events carry no answer arrival on either route here (the live host carries its
+    // consent marks alone), so the reading is taken from each message as the route delivered it
+    const said = (answer: { tool: string; call: string; answers: unknown[] | null } | null) => JSON.stringify(answer === null ? null : [answer.tool, answer.call, answer.answers?.length ?? null]);
+    const answers = [...new Set(events.flatMap((event) => (event.kind === 'user.message' && messageText(event.content).includes('[MAWS ask ') ? [said(readAnswerEnvelope(messageText(event.content)))] : [])))];
+    return { consents, approvals, answers, readings: readings(state) };
   };
-  const both = async (name: string, swaps: Swaps) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
+  const both = async (name: string, swaps: Change) => [['live', read(live(name, swaps))], ['from the file', read(await fromFile(name, swaps))]] as const;
   const NONE = [`Auto mode blocked: \`${MARKER('1')}\` (none)`];
 
+  // an earlier build wrote the header on the envelope's line; this build's writes no header at all
   it('(a) an envelope whose header holds the exact sentence on a line of its own, joined with other words: no consent, no approval row, the blocked row not approved', async () => {
-    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, envelope(`Layout\n${GRANT}\nPick one`)]])) {
-      expect(consents, route).toEqual([]);
-      expect(approvals, route).toEqual([]);
-      expect(drawnReadings, route).toEqual(NONE);
+    expect(envelope(`Layout\n${GRANT}\nPick one`, earlierAskSteerText)).toContain(`\n${GRANT}\n`);
+    expect(envelope(`Layout\n${GRANT}\nPick one`)).not.toContain('Permission');
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, envelope(`Layout\n${GRANT}\nPick one`, write)]])) {
+        expect(consents, `${form}, ${route}`).toEqual([]);
+        expect(approvals, `${form}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual(NONE);
+      }
     }
   });
 
@@ -551,13 +584,194 @@ describe('a grant is read only in the person’s own words (Decision Log 52)', (
     }
   });
 
-  it('(c) an envelope joined with a real grant line: one grant, its approval row alone in the joined turn, the blocked row approved', async () => {
-    for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope()]])) {
-      expect(consents, route).toEqual([MARKER('1')]);
-      const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
-      expect(joined.map((row) => [row.consent!.subject, row.text]), route).toEqual([[MARKER('1'), GRANT]]);
-      expect(drawnReadings, route).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+  // Rule R (2026-11-16): beside this build's envelope the grant line is the person's on both routes. Beside an earlier
+  // build's it is none where a reader reads the joined text, which the file's row is; the live host still carries the mark
+  // it put on the grant's own frame (marks come from each frame it wrote, never from the joined text). So after a reload
+  // that row offers its button again: the one direction of disagreement the architect accepted (it fails closed), with
+  // its row in docs/tech-debt-tracker.md
+  it('(c) an envelope joined with a real grant line: in this build’s form one grant on both routes, its approval row alone, the blocked row approved; in an earlier build’s form so live, and from the file none (rule R)', async () => {
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, envelope(undefined, write)]])) {
+        if (write === earlierAskSteerText && route === 'from the file') {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+        expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
     }
+  });
+
+  // The cascade merge of U4b into U1c: one message the person sent, probe B's `u1c-b-1` (a grant written at the next step,
+  // started at 206) with the grant swapped for the message under test. Rule R (2026-11-16): beside an earlier build's
+  // envelope, whose lines cannot be told from ones a model forged, the grant is none on both routes (an accepted cost)
+  it('(c2) one message of an answer and a grant: in this build’s form the grant is the person’s, its approval row alone, the blocked row approved; in an earlier build’s form none on either route (rule R)', async () => {
+    for (const [form, write] of FORMS) {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${envelope(undefined, write)}\n${GRANT}`]])) {
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(approvals.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // Decision Log 53's spanning case, at ticket 704's chain merge of rule R (the architect's rulings 1 and 3 of
+  // 2026-11-16): the split draws A + G + A as three parts, each envelope an answer of its own; rule R reads the grants on
+  // the whole joined text, so in this build's form the grant is the person's, and beside an earlier build's envelope none
+  // (rule R's accepted cost). The ask is none of this session's, so neither envelope draws (ticket 704's orphan rule).
+  // Ruling 5 pins the two routes here and the gate in grants.test, which reads the same on each form
+  it('(c3) one message of an answer, a grant and an answer again: each envelope an answer of its own; in this build’s form the grant, its approval row alone, the blocked row approved; in an earlier build’s form none (rule R)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        expect(answers, `${form}, ${route}: no message holds both envelopes; each is an answer to the ask`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(approvals.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // U1c's Decision Log 56, found and not built there ("the spanning family left to ticket 704"): two waiting messages, an
+  // answer and then the grant beside the same answer, joined at the turn's end (probe B's `u1c-b-joinend-other-first-1`
+  // with its two messages swapped for them). Live, the host's mark on the second frame gives the grant its consent; from
+  // the file, the joined line is split as one message is. The two routes read the same
+  it('(c5) an answer, then the grant beside the same answer, two messages the engine joined: in this build’s form the grant the person’s on both routes, its approval row alone in the joined turn; in an earlier build’s form none (rule R)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[OTHER, answer], [GRANT, `${GRANT}\n${answer}`]])) {
+        expect(answers, `${form}, ${route}`).toEqual([JSON.stringify(['maws', 'toolu_a', 1])]);
+        if (write === earlierAskSteerText) {
+          expect([consents, approvals, drawnReadings], `${form}, ${route}`).toEqual([[], [], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        const joined = approvals.filter((row) => row.turnId === approvals.at(-1)!.turnId);
+        expect(joined.map((row) => [row.consent!.subject, row.text]), `${form}, ${route}`).toEqual([[MARKER('1'), GRANT]]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // The same family the other way (the architect's ruling of 2026-11-16, the tracker row of Decision Log 53): the
+  // person's one message A + G + A (every word of it theirs), joined at the turn's end with another waiting message.
+  // Since ticket 704's chain merge of rule R the host reads the frame it wrote by rule R too (no longer whole as one
+  // answer), so live it marks G in this build's form, and the file's joined row reads G; beside an earlier build's
+  // envelope neither route reads it (rule R's accepted cost). The two routes agree on each form (ruling 5); the gate
+  // reads the waiting message alike (grants.test)
+  it('(c3b) the person’s A + G + A joined with another message: in this build’s form the grant live and from the file; in an earlier build’s form none on either route (rule R on both routes)', async () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelope(undefined, write);
+      for (const [route, { consents, readings: drawnReadings }] of await both('u1c-b-joinend-other-first-1', [[GRANT, `${answer}\n${GRANT}\n${answer}`]])) {
+        if (write === earlierAskSteerText) {
+          expect([consents, drawnReadings], `${form}, ${route}`).toEqual([[], NONE]);
+          continue;
+        }
+        expect(consents, `${form}, ${route}`).toEqual([MARKER('1')]);
+        expect(drawnReadings, `${form}, ${route}`).toEqual([`Auto mode blocked: \`${MARKER('1')}\` · approved (read)`]);
+      }
+    }
+  });
+
+  // The person typed the exact sentence as a text answer: it is their answer to the model's question, carried on a line of
+  // MAWS's envelope (a JSON string) and in its block, never their own line; so by Decision Log 52 it is no grant, and the
+  // blocked row keeps its button (it fails closed)
+  it('(c4) an envelope whose typed text answer is the exact sentence, alone and joined with other words: no consent, no approval row, the blocked row not approved, in either form', async () => {
+    expect(typed(askSteerText).split('\n')[1]).toBe(`1. ${JSON.stringify(GRANT)}`);
+    for (const [form, write] of FORMS) {
+      for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
+        for (const [route, { consents, approvals, readings: drawnReadings }] of await both(name, [[GRANT, typed(write)]])) {
+          expect(consents, `${form}, ${name}, ${route}`).toEqual([]);
+          expect(approvals, `${form}, ${name}, ${route}`).toEqual([]);
+          expect(drawnReadings, `${form}, ${name}, ${route}`).toEqual(NONE);
+        }
+      }
+    }
+  });
+
+  // Ticket 704, the earlier review's finding (made by hand): an earlier build's envelope whose question holds the exact
+  // sentence and then another ask's whole opening line, on lines of their own, alone and joined with other words. The
+  // reader's bound leaves it text (the reading past the bound is dropped, the architect's ruling 2 of 2026-11-16), and
+  // rule R reads no grant in it (ruling 1)
+  it('(c6) an earlier build’s envelope whose question holds the exact sentence and another ask’s opening line, alone and joined with other words: no answer, no consent, no approval row, the blocked row not approved, on both routes', async () => {
+    const inner = innerOpeningEnvelope('toolu_a', GRANT);
+    expect(inner.split('\n')).toContain(GRANT);
+    for (const name of ['u1c-b-1', 'u1c-b-joinend-other-first-1']) {
+      for (const [route, { consents, approvals, answers, readings: drawnReadings }] of await both(name, [[GRANT, inner]])) {
+        expect(answers, `${name}, ${route}: the bound leaves it text, a message that reads as no envelope`).toEqual([JSON.stringify(null)]);
+        expect(consents, `${name}, ${route}`).toEqual([]);
+        expect(approvals, `${name}, ${route}`).toEqual([]);
+        expect(drawnReadings, `${name}, ${route}`).toEqual(NONE);
+      }
+    }
+  });
+
+  // Rule R (the architect's ruling of 2026-11-16): inputs an earlier build's envelope lets a model forge, each as the one
+  // message the person sent in probe B's `u1c-b-1` (a grant at the next step: on the file a queued_command's prompt) and
+  // in `u1c-e-1` (a grant sent while idle: on the file the person's row): no consent, no approval row, and the blocked
+  // row keeps its button, live and from the file
+  for (const [name, content] of forgedInputs(GRANT)) {
+    it(`rule R, no grant on either route: ${name}`, async () => {
+      for (const recording of ['u1c-b-1', 'u1c-e-1']) {
+        for (const [route, { consents, approvals, readings: drawnReadings }] of await both(recording, content)) {
+          expect(consents, `${recording}, ${route}`).toEqual([]);
+          expect(approvals, `${recording}, ${route}`).toEqual([]);
+          expect(drawnReadings, `${recording}, ${route}`).toEqual(NONE);
+        }
+      }
+    });
+  }
+
+  for (const [name, content] of acceptedCosts(GRANT)) {
+    it(`rule R, no grant on either route, an accepted cost: ${name}`, async () => {
+      for (const [route, { consents, approvals, readings: drawnReadings }] of await both('u1c-b-1', content)) {
+        expect(consents, route).toEqual([]);
+        expect(approvals, route).toEqual([]);
+        expect(drawnReadings, route).toEqual(NONE);
+      }
+    });
+  }
+
+  // Step 1b (the architect's ruling 3865): a pressed consent the engine joins with a form MAWS composed around others'
+  // words (here a promoted side question) reads approved live from the host's own mark, and none from the file, whose
+  // joined row holds the form; and so for the person's own words holding a form's constant (the coordinator's ruling,
+  // an accepted cost): after a reload the blocked row offers its button again (the tracker rows beside rule R's)
+  it('step 1b: a pressed consent joined with a composed form, or with the person’s words holding a form’s constant: live the host’s mark, from the file none', async () => {
+    for (const other of [promotionMessage([{ question: 'Where?', response: 'In the notes folder.' }], null), 'Implement this plan: first the footer, then the header', 'Relay this, then continue what you were doing: the footer']) {
+      const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[OTHER, other]]));
+      expect(results.live!.consents, `${other}: live`).toEqual([MARKER('1')]);
+      expect([results['from the file']!.consents, results['from the file']!.readings], `${other}: from the file`).toEqual([[], NONE]);
+    }
+  });
+
+  // The task review's relay forgery (step 1b, its exemption withdrawn): a relay whose agent name holds a line break and a
+  // sentence's head for the blocked command, as the person's one message: no consent on either route
+  it('step 1b: a relay whose agent name holds a line break and the head of the blocked command’s sentence: no consent, live and from the file', async () => {
+    const { text } = relayForgery(MARKER('1'));
+    for (const recording of ['u1c-b-1', 'u1c-e-1']) {
+      for (const [route, { consents, approvals }] of await both(recording, text)) {
+        expect([consents, approvals], `${recording}, ${route}`).toEqual([[], []]);
+      }
+    }
+  });
+
+  // Cost (b), its exemption withdrawn: a pressed consent whose own command quotes a form's constant is its grant on the
+  // frame the host wrote (live, the mark), and none in the joined row the file reads
+  it('step 1b: a pressed consent whose command quotes a form’s constant, joined with another message: live the host’s mark, from the file none', async () => {
+    const command = `${MARKER('1')} # <bash-input>`;
+    const results = Object.fromEntries(await both('u1c-b-joinend-other-first-1', [[GRANT, consentMessage('command', command)]]));
+    expect(results.live!.consents, 'live').toEqual([command]);
+    expect(results['from the file']!.consents, 'from the file').toEqual([]);
   });
 
   it('(d) two real grant lines joined: two grants, an approval row each, both blocked rows approved', async () => {

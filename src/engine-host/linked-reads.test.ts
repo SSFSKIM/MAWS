@@ -5,6 +5,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
 import { linkedReadBlock, linkedReadOf, LINKED_READ_CAP_BYTES, utf8Bytes } from '@shared/maws/linked-read';
 import type { StdinFrame } from '@shared/wire/frames';
@@ -68,6 +69,21 @@ describe('withLinkedReads', () => {
     expect(undone).toEqual([C, A]);
   });
 
+  // U1c, the review of rule R (F1): a consent's subject is the blocked call's text, quoted; a link in it is the model's,
+  // not the person's words, and a read on the consent's own frame would leave the frame no sentence whole
+  it('attaches nothing to a consent whole, a string or one text block, whatever its subject links; a consent among words still carries the reads', async () => {
+    for (const consent of [consentMessage('command', `open maws-artifact:${A}`), consentMessage('call', JSON.stringify({ note: `see maws-artifact:${A} for the plan` }))]) {
+      for (const content of [consent, [{ type: 'text' as const, text: consent }]]) {
+        const asked: string[] = [];
+        const out = await withLinkedReads(content, reader(() => readOf(A, 1), asked));
+        expect(out.content, consent).toBe(content);
+        expect(asked, consent).toEqual([]);
+      }
+    }
+    const beside = `${consentMessage('command', `open maws-artifact:${A}`)}\nAlso see [b](maws-artifact:${B}).`;
+    expect((await withLinkedReads(beside, reader((id) => readOf(id, 1)))).attached.map((a) => a.artifactId)).toEqual([A, B]);
+  });
+
   it('attaches nothing a cap cannot hold, and leaves the message as it is', async () => {
     const out = await withLinkedReads(`[a](maws-artifact:${A})`, reader(() => readOf(A, 1)), 10);
     expect(out.content).toBe(`[a](maws-artifact:${A})`);
@@ -128,6 +144,40 @@ describe('a human message on an EngineSession (scripted, the real store)', () =>
     expect(stale.content[0]!.text).toContain('p1');
     run.transport.exit(0);
     await run.session.exited;
+  });
+
+  // U1c, the review of rule R (F1): Approve pressed while no turn runs is a send the queue prepares. A blocked call whose
+  // subject links a readable artifact goes as the consent alone, so its frame is the sentence whole on every route.
+  const SUBJECTS = [['command', (id: string) => `open maws-artifact:${id}`], ['call', (id: string) => JSON.stringify({ note: `see maws-artifact:${id} for the plan` })]] as const;
+  const pressedConsent = async (kind: 'command' | 'call', subjectOf: (artifactId: string) => string) => {
+    const run = scriptedSession({ spec: { cwd }, session: { appVersion: '0.9.0', artifacts: () => documents.store } });
+    await run.session.start();
+    const id = 'mcp-made' as RequestId;
+    run.transport.push({ type: 'control_request', request_id: id, request: { subtype: 'mcp_message', server_name: 'maws', message: { jsonrpc: '2.0', id: 1, method: 'tools/call', params: { name: 'artifact_create', arguments: { kind: 'document', title: 'Plan', content: '# Plan ^h1\n\nWe meet on Friday. ^p1' }, _meta: { 'claudecode/toolUseId': 'toolu_made' } } } } });
+    let made: { response: { response: { mcp_response: { result: { content: { text: string }[] } } } } } | undefined;
+    for (let i = 0; i < 2000 && !made; i++) {
+      made = run.transport.writes.find((f) => f.type === 'control_response' && (f as { response: { request_id: string } }).response.request_id === id) as typeof made;
+      if (!made) await new Promise((r) => setTimeout(r, 5));
+    }
+    const subject = subjectOf((JSON.parse(made!.response.response.mcp_response.result.content[0]!.text) as { artifactId: string }).artifactId);
+    const consent = consentMessage(kind, subject);
+    await run.session.send(consent);
+    const users = () => run.transport.writes.filter((f): f is Extract<StdinFrame, { type: 'user' }> => f.type === 'user');
+    for (let i = 0; i < 2000 && users().length === 0; i++) await new Promise((r) => setTimeout(r, 5));
+    run.transport.exit(0);
+    await run.session.exited;
+    return { run, consent, grant: [{ class: 'consent', kind, subject }], frame: users()[0]! };
+  };
+
+  it.each(SUBJECTS)('a pressed consent for a %s whose subject links a readable artifact, live: its frame is the consent as written, and the host marks it its grant', async (kind, subjectOf) => {
+    const { run, consent, grant, frame } = await pressedConsent(kind, subjectOf);
+    expect(frame.message.content).toBe(consent);
+    expect(run.events.flatMap((event) => (event.kind === 'user.message' && event.origin === 'human' ? [event.arrival ?? []] : []))).toEqual([grant]);
+  });
+
+  it.each(SUBJECTS)('a pressed consent for a %s whose subject links a readable artifact, from the file: the engine’s row of its frame reads its grant', async (kind, subjectOf) => {
+    const { grant, frame } = await pressedConsent(kind, subjectOf);
+    expect(readArrivals({ type: 'user', uuid: frame.uuid, origin: { kind: 'human' }, message: frame.message })).toEqual(grant);
   });
 
   it('leaves the session’s memory of an artifact as it was when its read is not attached: a page it never saw stays unread', async () => {

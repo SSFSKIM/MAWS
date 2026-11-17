@@ -53,10 +53,12 @@ afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offs
 // still evaluating (lazy.tsx's comment), and the slot then drew nothing in any case (the U4a landing's unit shard).
 // After that, everything a render or an event sets off is promise-chained (the fake IPC's answers, the store's batches,
 // React's renders and effects): `settle` drains it inside act by yielding the event loop once, and the expectation is
-// read once, so load can slow a case but not fail it.
+// read once, so load can slow a case but not fail it. The hook's own work is the chunk's first load (real module loading
+// and transform), which in a full unit shard has taken 6 to 10 seconds under the compiled project, at the hook's
+// 10-second default: it gets a limit of its own, 60 seconds, and a load that never settles still fails there.
 beforeAll(async () => {
   await Promise.all([chunksSettled, import('../../lane-a/view/RemoteTranscriptSlot') /* P5 O9 M9 */, import('../../lane-a/view/RemoteAgentTranscript') /* 2026-11-06 */]);
-});
+}, 60_000);
 const settle = () => act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
 
 const disposers: (() => void)[] = [];
@@ -373,7 +375,7 @@ describe('TranscriptSlot', () => {
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} />);
     await settle();
-    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers: answers.map((answer) => ({ ...answer, question: '' })) }); // the steer's block: no question's words (board ticket 711)
     const heldTexts = [...document.querySelectorAll('[data-pending="held"]')].map((bubble) => bubble.querySelector('[data-bubble]')?.textContent ?? '');
     expect(heldTexts).toHaveLength(2);
     expect(heldTexts[0]).toBe('Then run the tests');
@@ -398,7 +400,7 @@ describe('TranscriptSlot', () => {
     window.maws = { localMachine: TEST_MACHINE, invoke, on: vi.fn(() => () => {}) } as unknown as PreloadBridge;
     render(<TranscriptSlot appSessionId={id} waiting="stacked" />);
     await settle();
-    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers });
+    expect(useTranscriptStore.getState().rows(id).find((row) => row.kind === 'ask')).toMatchObject({ state: 'answered', answers: answers.map((answer) => ({ ...answer, question: '' })) }); // the steer's block: no question's words (board ticket 711)
     expect(document.querySelectorAll('[data-pending="held"]')).toHaveLength(0);
     expect(document.body.textContent).not.toContain('Then run the tests');
     expect(document.body.textContent).not.toContain('[MAWS ask');

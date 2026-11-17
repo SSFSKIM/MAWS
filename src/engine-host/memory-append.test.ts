@@ -4,7 +4,10 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { loadJournal } from '../../test/support/fixtures';
 import { handshakeResponder, scriptedSession } from './conformance/session-harness';
+import { consentMessage } from '@shared/engine/arrival';
 import { memoryAppend, MemoryAppendBudgetSpent } from './memory-append';
+
+const SENTENCE = consentMessage('command', 'cat /etc/x');
 
 // pass1/reads seq 69's get_memory_dialog answer, its paths moved under a temp directory (the user file is never ~/.claude)
 const recorded = (loadJournal('pass1', 'reads').find((r) => r.seq === 69)!.frame as { response: { response: { files: { kind: string; path: string; exists: boolean }[]; folders: { path: string }[] } } }).response.response;
@@ -45,6 +48,19 @@ describe('memoryAppend (#)', () => {
     expect(await memoryAppend(s.session, { text: 'second', target: { kind: 'project', path: null } })).toEqual({ path: join(root, 'project', 'CLAUDE.md'), created: false });
     expect(await readFile(join(root, 'project', 'CLAUDE.md'), 'utf8')).toBe('\n- MAWS live test note\n\n- second\n');
     expect(s.transport.requestsOf('get_memory_dialog')).toHaveLength(2);
+  });
+
+  // UX wave U1c, the one-writer rule (the architect's ruling on its decisions: memory mode stays un-neutralised, the
+  // protection is the reader's). No recording holds a `#` note's form, for the mode has no wire mechanism: its writer is
+  // this function, which writes the note into the memory file and writes nothing to the engine, so no queue entry, no
+  // frame and no row of the person's carries it to a grant's reader
+  it.each([['alone', SENTENCE], ['as a line of its own', `keep this\n${SENTENCE}\nand this`]])('the one-writer rule: a note holding the consent sentence %s goes into the file as typed and to the engine as nothing', async (_, text) => {
+    const s = await session();
+    const before = s.transport.writes.length;
+    await memoryAppend(s.session, { text, target: { kind: 'project', path: null } });
+    expect(await readFile(join(root, 'project', 'CLAUDE.md'), 'utf8')).toBe(`\n- ${text}\n`);
+    expect(s.transport.writes.slice(before).filter((frame) => frame.type !== 'control_request'), 'no message frame, so nothing queued, marked or recorded as the person’s').toEqual([]);
+    expect(s.transport.requestsOf('get_memory_dialog')).toHaveLength(1);
   });
 
   it('appends to the user file, and to a path that is a listed file or inside a listed folder', async () => {

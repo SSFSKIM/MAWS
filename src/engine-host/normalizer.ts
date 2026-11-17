@@ -47,6 +47,7 @@ import { TranscriptRecordSchema } from '@shared/wire/transcript'; // P5 O16 M3
 import { createBackfillContext, recordToEvents } from './fs/backfill'; // P5 O16 M3: a gap's reseed
 import { isHookMadeMessageId, isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7z
 import { carriedOf, commandEntry, commandFactsOf, readArrivals, type Arrival } from '@shared/engine/arrival'; // UX wave U3 (UC-2)
+import { personsWords, splitPersonsMessage } from '@shared/engine/persons-message'; // UX wave, ticket 704
 import { localCommandText } from '@shared/engine/engine-markers';
 import { notificationText, taskNotificationBlocks } from '@shared/engine/task-notification';
 import {
@@ -669,11 +670,13 @@ export class Normalizer {
       if (parsed?.success) out.emit({ kind: 'plugin.panes', ...rosterOf(parsed.data) }, attribution);
       return;
     }
+    // A rewind's prefill is the engine's copy of the message's whole text: the person's words alone, null when none are
+    // left (UX wave, ticket 704: a message the engine joined holds MAWS's answer envelope too)
     if (sent.subtype !== 'rewind_conversation' || frame.response.subtype !== 'success') return;
     const parsed = RewindConversationResponseSchema.safeParse(frame.response.response);
     if (!parsed.success || !parsed.data.rewound) return;
     const target = parsed.data.targetMessageUuid ?? (sent.request as { target_message_uuid?: unknown }).target_message_uuid;
-    out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText ?? null }, attribution);
+    out.emit({ kind: 'boundary.rewind', targetMessageUuid: String(target) as MessageUuid, precedingAssistantUuid: (parsed.data.precedingAssistantUuid ?? null) as MessageUuid | null, prefillText: parsed.data.prefillText === null ? null : personsWords(parsed.data.prefillText) }, attribution);
   }
 
   // `context.sample` from a successful `get_context_usage` answer (reads.jsonl seq 57): the engine's own count and window,
@@ -864,8 +867,15 @@ class Emitter implements EventSink {
     this.sessionId = () => state.sessionId ?? ('unknown' as SessionId);
   }
 
-  // P5 O16 M3: `restored`, an event a gap's reseed rebuilt from the transcript (its record's time, `reseeded: true`)
+  // P5 O16 M3: `restored`, an event a gap's reseed rebuilt from the transcript (its record's time, `reseeded: true`).
+  // UX wave, ticket 704 (docs/doperpowers/plans/2026-11-15-envelope-split.md, Interfaces D): every `user.message` passes
+  // the one split, so a message the engine joined from the person's prompt and MAWS's answer envelopes is emitted as the
+  // person's message and then one message per envelope, each under the emitter's next id
   emit(payload: EventPayload, attribution: Attribution | null, restored?: { at: string; reseeded: true }): void {
+    for (const part of payload.kind === 'user.message' ? splitPersonsMessage(payload) : [payload]) this.push(part, attribution, restored);
+  }
+
+  private push(payload: EventPayload, attribution: Attribution | null, restored?: { at: string; reseeded: true }): void {
     const id = `${this.appSessionId}:${this.launchId}:${this.row.seq}:${this.events.length}` as EventId;
     this.events.push({
       id, sessionId: this.sessionId(), at: restored?.at ?? this.at, seq: this.row.seq,

@@ -4,7 +4,8 @@
 import { describe, expect, it } from 'vitest';
 import type { CustomizationEndpoint } from '@shared/ipc/schema';
 import type { ConnectorRoute } from '@shared/ipc/schema/catalog';
-import { configurationFingerprint, posturesOf, type ListedConnector } from './postures';
+import type { CustomizationPluginEndpoint } from '@shared/ipc/schema';
+import { configurationFingerprint, pluginPosturesOf, posturesOf, type ListedConnector } from './postures';
 
 const route = (over: Partial<ConnectorRoute>): ConnectorRoute => ({ kind: 'connector', name: 'x', url: null, urlPattern: null, urlOptions: [], transport: 'http', authPosture: 'auth_required', ...over });
 const LINEAR = route({ name: 'linear', url: 'https://mcp.linear.app/mcp' });
@@ -75,5 +76,29 @@ describe('connector postures', () => {
     const MIRROR = { route: route({ name: 'moorings-mirror', url: 'https://mcp.moorings.example/mcp' }), iconUrl: 'https://icons.example/mirror.png' };
     const postures = posturesOf([at('my-tides', 'user', 'https://mcp.tides.example/mcp'), at('moorings', 'user', 'https://mcp.moorings.example/mcp'), at('buoy', 'user', 'https://buoy.internal.example/mcp'), at('local', 'user', null)], [TIDES, MOORINGS, MIRROR], NO_PRINT);
     expect(postures.map((p) => p.iconUrl)).toEqual(['https://icons.example/tides.svg', null, null, null]);
+  });
+
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M1): a plugin's connector, row for
+  // row with the engine host's `pluginServers`, by the rule a configured row has: the posture the records its address
+  // matches agree on, the icon of the one record it matches, main's fingerprint and the host's revision
+  it('answers each plugin connector’s posture, icon, fingerprint and revision by the rule a configured row has', () => {
+    const print = configurationFingerprint(Buffer.alloc(32, 7));
+    const plugin = (server: string, url: string | null, revision: string | null = null): CustomizationPluginEndpoint => ({ plugin: 'key-tides@harbour-market', pluginName: 'mani-tides', server, name: `plugin:mani-tides:${server}`, version: '1.2.0', path: '/plugins/tides/.mcp.json', transport: url === null ? 'stdio' : 'http', url, revision });
+    const TIDES = { route: route({ name: 'tides', url: 'https://mcp.tides.example/mcp' }), iconUrl: 'https://icons.example/tides.svg' };
+    const MIRROR = { route: route({ name: 'open-mirror', url: 'https://open.example/mcp', authPosture: 'auth_required' }), iconUrl: 'https://icons.example/mirror.png' };
+    const postures = pluginPosturesOf([
+      plugin('tides-http', 'https://mcp.tides.example/mcp?key=SECRET', 'rev-tides'),
+      plugin('open', 'https://open.example/mcp'), // two records, which disagree
+      plugin('elsewhere', 'https://elsewhere.internal.example/mcp'),
+      plugin('clock', null),
+    ], [TIDES, ...listed(OPEN), MIRROR], print);
+    expect(postures).toEqual([
+      { plugin: 'key-tides@harbour-market', server: 'tides-http', path: '/plugins/tides/.mcp.json', authPosture: 'auth_required', fingerprint: print({ transport: 'http', url: 'https://mcp.tides.example/mcp?key=SECRET' }), revision: 'rev-tides', iconUrl: 'https://icons.example/tides.svg' },
+      { plugin: 'key-tides@harbour-market', server: 'open', path: '/plugins/tides/.mcp.json', authPosture: null, fingerprint: print({ transport: 'http', url: 'https://open.example/mcp' }), revision: null, iconUrl: null },
+      { plugin: 'key-tides@harbour-market', server: 'elsewhere', path: '/plugins/tides/.mcp.json', authPosture: null, fingerprint: print({ transport: 'http', url: 'https://elsewhere.internal.example/mcp' }), revision: null, iconUrl: null },
+      { plugin: 'key-tides@harbour-market', server: 'clock', path: '/plugins/tides/.mcp.json', authPosture: null, fingerprint: null, revision: null, iconUrl: null },
+    ]);
+    expect(pluginPosturesOf([plugin('open', 'https://open.example/mcp')], listed(OPEN), print)[0]!.authPosture).toBe('no_auth'); // one record: its posture
+    expect(JSON.stringify(postures)).not.toMatch(/SECRET|tides\.example\/mcp|internal\.example/);
   });
 });

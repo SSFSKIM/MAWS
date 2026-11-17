@@ -14,9 +14,10 @@
 //      streams to A as deltas, a permission card A answers, a pasted image B's transcript records;
 //      then (M4) a text file dropped into the composer goes up to B's desk-uploads and the message names its path there;
 //      the panel's tools work on B's checkout (a git repository of B's): the Files tool lists it and the editor saves a
-//      file there, read back over B's machine.sock; a file the spec writes on B shows in A's tree and in the Source
-//      control tool's status with no click, and so does one written while A's way to B is cut (the scene's pipe to the
-//      hub), once the link is up again; the Source control tool commits;
+//      file there, read back over B's machine.sock; a file the spec writes on B shows in A's tree and in Source control's
+//      Uncommitted count with no click, and so does one written while A's way to B is cut (the scene's pipe to the
+//      hub), once the link is up again; Source control's page names B and lists a commit made on B first under "Not
+//      pushed", which opens in Review with its diff read on B (UX wave U5b-2: the page changes nothing);
 //      then (M3) the Terminal tool opens a shell on B in the session's checkout, where `pwd` prints it; a reload of A's
 //      window re-attaches the same shell (one pty on B, its label the tab's) and shows what it printed; a dev server
 //      started in that shell (`python3 -m http.server`, dual-stack) opens from the `[::]` link B's reply names in A's
@@ -70,6 +71,8 @@ import { machineProjectId } from '../src/shared/machine/project-ids'; // the UX 
 import type { MachineRef } from '../src/shared/machine/ref';
 import { REMOTE_ACT_PENDING_MS, REMOTE_ATTACH_PENDING_MS } from '../src/shared/machine/remote-pending';
 import { worktreeDirName } from '../src/shared/sessions/worktree';
+import { REMOTE_COPY_MAX_BYTES } from '../src/shared/ipc/schema/remote'; // UX wave U6b-2: the copy's bound, one byte past it
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: a PDF of B's checkout, drawn on A
 import { SERVERS_COPY as S } from '../src/renderer/src/tools/artifacts/viewers/connectors/copy';
 import { addedListeners, loopbackPort } from './support/connector-direct-checks';
 import { browserOpens, connectionWords } from './support/connector-direct-oauth';
@@ -164,12 +167,16 @@ const SEARCHED = 'hello';
 // M5a: what B's first session makes at A's ask, through its `maws` tools (served by B's engine host, so each artifact is
 // linked to the session): a text file it wrote in B's checkout, delivered as a File artifact, and an HTML page, whose
 // PDF B's render host exports; the title A renames the File artifact to; an HTML file of B's checkout A opens a copy of
+// (UX wave U6b-2: and draws from a copy, its inline script marking that it ran; a PDF drawn from a copy; a file one byte
+// past the copy's bound)
 const MAKE_ASK = 'Make the notes and the report.';
 const MADE_REPLY = 'Both are in B’s library.';
 const NOTES_ARTIFACT = { file: 'b-notes.txt', title: 'B notes', text: 'Notes the session on B delivered.\n' };
 const RENAMED = 'B notes, renamed on A';
 const REPORT = { title: 'B report', html: '<!doctype html><html><body><h1>Report from B</h1><p>Rendered on B, saved on A.</p></body></html>' };
-const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p>A page in the checkout on B.</p>\n' };
+const PAGE_ON_B = { name: 'b-page.html', content: '<!doctype html><title>B page</title><p id="said">A page in the checkout on B.</p><script>document.body.dataset.ran = "yes";</script>\n' };
+const LARGE_ON_B = 'b-large.pdf'; // UX wave U6b-2: REMOTE_COPY_MAX_BYTES + 1 bytes, past what A copies to draw
+const PDF_ON_B = 'b-drawn.pdf'; // UX wave U6b-2: a PDF of B's checkout, drawn on A from a copy
 // M5b: a document B's first session starts at A's ask (an empty one, linked to the session on B), and what A types in it
 // M5c: the servers of B's user settings, by their names there (the rows server's and its tool's are the
 // dashboard-live-data fixture's, connector-scene.ts's SERVER and TOOL); the rows it answers, first and at the schedule
@@ -452,6 +459,13 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
   const openLog = join(root, 'a-open.log'); // M5a: what A's main hands the OS to open (MAWS_E2E_OPEN_LOG)
   for (const dir of [checkout, journals, hooks, aCheckout, savedOnA]) mkdirSync(dir);
   checkoutRepository(checkout, hooks);
+  // UX wave U5b-2 (M11): B's checkout tracks a bare `origin` of its own, so Source control's page measures B's commits
+  // against `origin/main` and says which are not pushed
+  const bOrigin = join(root, 'b-origin.git');
+  git(root, 'init', '--quiet', '--bare', '-b', 'main', bOrigin);
+  git(checkout, 'remote', 'add', 'origin', bOrigin);
+  git(checkout, 'push', '--quiet', '-u', 'origin', 'main');
+  git(checkout, 'remote', 'set-head', 'origin', 'main');
   checkoutRepository(aCheckout, hooks); // a repository too: New chat offers Worktree only in git
   let scene: RemoteScene | null = null;
   let a: MawsLaunch | null = null;
@@ -733,8 +747,9 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     // The panel's tools over B's checkout. Each surface's rows, by path.
     const files = surface(page, 'files');
     const treeRow = (name: string) => files.locator(`[role="treeitem"][data-path="${name === '' ? checkout : join(checkout, name)}"]`);
-    const scm = surface(page, 'source-control').locator('[data-scm]');
-    const scmRow = (group: 'staged' | 'unstaged' | 'untracked', path: string) => scm.locator(`[data-scm-group="${group}"] [data-scm-row][data-path="${path}"]`);
+    // UX wave U5b-2: Source control is a page to read; its Uncommitted count is B's status
+    const scm = surface(page, 'source-control').locator('[data-scm-page]');
+    const uncommittedCount = scm.locator('[data-scm-part="uncommitted"] [data-scm-count]');
 
     await test.step('M4: the Files tool lists B’s checkout, and the editor saves a file there', async () => {
       await openSurface(page, 'Files');
@@ -780,15 +795,16 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await moveSideTab(page, 'Source control', 'below');
       await expect(sideGroup(page, 'lower')).toHaveAttribute('aria-label', 'Source control');
       await expect(sideGroup(page, 'upper')).toHaveAttribute('aria-label', 'Files');
-      await expect(scm.locator('[data-scm-header]'), `B's repository in A's Source control tool\n${mainSaid(page)}`).toContainText('⎇ main', { timeout: 60_000 });
-      await expect(scmRow('unstaged', NOTES), 'the saved file is a change in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(scm.locator('[data-scm-where-branch]'), `B's repository in A's Source control page\n${mainSaid(page)}`).toHaveText('⎇ main', { timeout: 60_000 });
+      await expect(scm.locator('[data-scm-where]'), 'the page names B').toContainText(B_NAME);
+      await expect(uncommittedCount, 'the saved file is a change in B’s status').toHaveText('1', { timeout: 60_000 });
       await expect(files, 'both tools are on screen').toBeVisible();
       await expect(treeRow(NOTES)).toBeVisible();
 
       // Nothing is clicked from here on in this step: each change reaches the tools through the checkout's feed.
       writeFileSync(join(checkout, ON_B), 'Written on B.\n');
       await expect(treeRow(ON_B), `B's new file in A's tree\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
-      await expect(scmRow('untracked', ON_B), 'and in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(uncommittedCount, 'and in B’s status').toHaveText('2', { timeout: 60_000 });
 
       // A's way to B cut (the relay through the hub; the direct dial already fails): the link goes down, the file is
       // written, and A is let back.
@@ -802,18 +818,77 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
         .poll(async () => (await machineOf(page, b.ref))?.state, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` })
         .toBe('up');
       await expect(treeRow(WHILE_CUT), `the file written while cut off, in A's tree after the reconnect\n${mainSaid(page)}`).toBeVisible({ timeout: 60_000 });
-      await expect(scmRow('untracked', WHILE_CUT), 'and in B’s status').toBeVisible({ timeout: 60_000 });
+      await expect(uncommittedCount, 'and in B’s status').toHaveText('3', { timeout: 60_000 });
     });
 
-    await test.step('M4: the Source control tool commits on B', async () => {
-      await scmRow('unstaged', NOTES).getByRole('button', { name: `Stage ${NOTES}`, exact: true }).click();
-      await expect(scmRow('staged', NOTES)).toBeVisible({ timeout: 60_000 });
-      await scm.getByRole('textbox', { name: 'Commit message' }).fill(COMMIT);
-      await scm.getByRole('button', { name: 'Commit', exact: true }).click();
-      await expect(scm.locator('[data-scm-last-commit]')).toHaveText(new RegExp(`^[0-9a-f]{7} · ${COMMIT}$`), { timeout: 60_000 });
-      expect(git(checkout, 'log', '-1', '--format=%s'), 'B’s repository has the commit').toBe(COMMIT);
+    // UX wave U5b-2 (frames' S4; Decision Log 30, 31 and 44): B's label on the page's Where line, the one place a
+    // machine's label is drawn (this Mac's page draws none). At 360 and at 280 px it is required drawn, on the first line
+    // or moved whole to the second, then measured: one unbroken rectangle inside the Where line, its words not cut at
+    // the line's edge, and on the first line as wide as its measured word (a span that draws `· B` by `::before`).
+    await test.step('UX wave U5b-2: B’s label on the Where line, measured at 360 and 280 px (frames’ S4)', async () => {
+      const divider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+      const columnAt = async (width: number) => {
+        const now = Number(await divider.getAttribute('aria-valuenow'));
+        const grip = (await divider.boundingBox())!;
+        const [x, y] = [grip.x + grip.width / 2, grip.y + grip.height / 2];
+        await page.mouse.move(x, y);
+        await page.mouse.down();
+        await page.mouse.move(x - (width - now), y, { steps: 8 });
+        await page.mouse.up();
+        await expect.poll(async () => Number(await divider.getAttribute('aria-valuenow')), `the column at ${width} px`).toBe(width);
+      };
+      const before = Number(await divider.getAttribute('aria-valuenow'));
+      const whereLine = scm.locator('[data-scm-where]');
+      const label = whereLine.locator('[data-scm-where-machine], [data-scm-where-below]');
+      const measured: string[] = [];
+      for (const width of [360, 280]) {
+        await columnAt(width);
+        await expect(label, `${width} px: B's label drawn, once`).toHaveCount(1);
+        await expect(label).toHaveText(/^(· )?B$/);
+        const m = await whereLine.evaluate((line) => {
+          const box = (r: DOMRect) => ({ left: r.left, right: r.right, top: r.top, bottom: r.bottom, width: r.width });
+          const el = line.querySelector<HTMLElement>('[data-scm-where-machine], [data-scm-where-below]')!;
+          const range = document.createRange();
+          range.selectNodeContents(el);
+          return {
+            below: el.hasAttribute('data-scm-where-below'),
+            line: box(line.getBoundingClientRect()),
+            label: box(el.getBoundingClientRect()),
+            words: box(range.getBoundingClientRect()),
+            rects: el.getClientRects().length,
+            measuredWord: line.querySelector('[data-scm-measure="machine"]')?.getBoundingClientRect().width ?? 0,
+          };
+        });
+        const inLine = (b: { left: number; right: number; top: number; bottom: number }) => b.left >= m.line.left - 0.5 && b.right <= m.line.right + 0.5 && b.top >= m.line.top - 0.5 && b.bottom <= m.line.bottom + 0.5;
+        expect(m.rects, `${width} px: the label unbroken, one rectangle`).toBe(1);
+        expect(inLine(m.label), `${width} px: the label inside the Where line`).toBe(true);
+        expect(inLine(m.words), `${width} px: the label's words not cut at the line's edge`).toBe(true);
+        expect(m.measuredWord, `${width} px: the measured word laid out`).toBeGreaterThan(0);
+        if (!m.below) expect(Math.abs(m.measuredWord - m.label.width), `${width} px: the label as wide as its measured word`).toBeLessThanOrEqual(1);
+        measured.push(`${width} px: ${m.below ? 'second line' : 'first line'}, ${Math.round(m.words.width)} px, measured word ${Math.round(m.measuredWord)} px`);
+      }
+      test.info().annotations.push({ type: 'measured (S4, B’s label)', description: measured.join('; ') });
+      await columnAt(before); // the column as the steps after this one found it
+    });
+
+    await test.step('UX wave U5b-2: a commit made on B is first under Not pushed on the page, and opens in Review read on B', async () => {
+      // the commit is made on B by git itself, as the agent would make it: the window commits nothing
+      git(checkout, 'add', NOTES);
+      git(checkout, 'commit', '--quiet', '-m', COMMIT, '--', NOTES);
+      const sha = git(checkout, 'rev-parse', 'HEAD');
       expect(git(checkout, 'show', 'HEAD:notes.txt'), 'with the saved file').toBe(`${TYPED}\n${NOTES_TEXT}`.trim());
-      await expect(scmRow('staged', NOTES)).toHaveCount(0);
+      const row = scm.locator('[data-scm-part="commits"] button[data-scm-commit]').first();
+      await expect(row, `the commit first on A's page, read on B\n${mainSaid(page)}`).toHaveAccessibleName(`Open commit ${sha.slice(0, 7)} in Review`, { timeout: 60_000 });
+      await expect(row).toContainText(COMMIT);
+      await expect(scm.locator('[data-scm-commit-group="not-pushed"]')).toContainText('Not pushed');
+      await expect(scm.locator('[data-scm-commit-group="not-pushed"] [data-scm-count]')).toHaveText('1');
+      await expect(uncommittedCount, 'the two files written on B are left').toHaveText('2', { timeout: 60_000 });
+      await row.click();
+      const review = surface(page, 'review');
+      await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`, { timeout: 60_000 });
+      await expect(review.locator('[data-chip="commit"]')).toHaveAttribute('aria-pressed', 'true');
+      await expect(review.locator('[data-review-header]'), `the commit's diff, read on B\n${mainSaid(page)}`).toHaveText('1 file changed · +1 −0', { timeout: 60_000 });
+      await expect(review.locator(`[data-review-file="${NOTES}"] [data-review-block]`).first()).toContainText(TYPED, { timeout: 60_000 });
     });
 
     // M3: the session's shells on B, as B's own pty host lists them
@@ -977,7 +1052,7 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
     await rowAgain.click();
     await expect(main(again).getByText(IMAGE_REPLY).first(), `B's history over the direct carrier\n${mainSaid(again)}`).toBeVisible({ timeout: 60_000 });
 
-    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, a file of B’s checkout opens as a copy, and the Browser tool reads B’s reason', async () => {
+    await test.step('M5a: B’s session’s artifacts list and read in A, a rename shows in B’s library, a PDF export of B’s saves on A, an HTML file and a PDF of B’s checkout are drawn from a copy and the page opens as a copy, one past the copy’s bound shows its row, nothing is created, and the Browser tool reads B’s reason', async () => {
       const sessionTab = mainTabById(again, `session:${address}`);
       const bLines = (pattern: RegExp) => b.log().split('\n').filter((line) => pattern.test(line)).slice(-30).join('\n');
 
@@ -1046,8 +1121,22 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       await expect(again.getByRole('region', { name: /^Notifications/ }).getByText(`Saved to ${pdf}`)).toBeVisible();
       console.log(`[e2e:remote] M5a: B's PDF export saved on A, ${readFileSync(pdf).length} bytes`);
 
-      // Open externally on an HTML file of B's checkout: a copy paged here is what main hands the OS (the open seam)
+      // An HTML file of B's checkout, drawn here from a copy, and Open externally in its bar: a copy paged here is what main
+      // hands the OS (the open seam). UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M6;
+      // B6, B16): the copy a frame draws from has no name while a byte is in it, so A's frame-copies folder lists nothing
       writeFileSync(join(checkout, PAGE_ON_B.name), PAGE_ON_B.content);
+      writeFileSync(join(checkout, PDF_ON_B), minimalPdf());
+      writeFileSync(join(checkout, LARGE_ON_B), Buffer.concat([Buffer.from('%PDF-1.4\n'), Buffer.alloc(REMOTE_COPY_MAX_BYTES + 1 - 9)]));
+      const frameCopies = () => { const dir = join(aUserData, 'frame-copies'); return existsSync(dir) ? readdirSync(dir) : []; }; // prettier-ignore
+      // B8: what the frames must not create: B's Library, B's session's artifacts and every artifact of B's, and the files
+      // under A's artifacts folder (a refused read throws in b.request)
+      const createdNow = async () => ({
+        library: (await b.request<Rows>('library.list', {})).rows.map((row) => row.id).sort(),
+        sessionArtifacts: (await b.request<Linked>('artifacts.list', { filter: { appSessionId: app } })).artifacts.map((x) => x.id).sort(),
+        artifacts: (await b.request<Linked>('artifacts.list', {})).artifacts.map((x) => x.id).sort(),
+        aArtifactFiles: existsSync(join(aUserData, 'artifacts')) ? readdirSync(join(aUserData, 'artifacts'), { recursive: true }).map(String).sort() : [],
+      });
+      const createdBefore = await createdNow();
       // UX wave U7b (O-40): Open library opened the library as a page beside the sidebar; its Back shows the session's tab
       // again (the strip is inert under a page, so the tab is not clicked)
       await backToTabs(again);
@@ -1063,17 +1152,54 @@ test('A reaches B’s mawsd over RL2, through the hub and then directly, and dri
       const pageRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
       await expect(pageRow, 'the page written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
       await pageRow.click();
-      const external = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"] [data-external-row]`);
-      const open = external.getByRole('button', { name: 'Open externally', exact: true });
+      const pageViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PAGE_ON_B.name)}"]`);
+      await quoting(expect(pageViewer, 'B’s page drawn here from a copy').toHaveAttribute('data-frame', 'html', { timeout: 60_000 }), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const pageSrc = (await pageViewer.locator('[data-artifact-frame="html"]').getAttribute('src'))!;
+      expect(pageSrc, 'a token and the file’s name, no folder of B’s').toMatch(new RegExp(`^maws-artifact://[0-9a-f]{32}/${PAGE_ON_B.name.replace('.', '\\.')}$`));
+      let drawn: ReturnType<Page['frames']>[number] | undefined;
+      await expect.poll(() => (drawn = again.frames().find((frame) => frame.url() === pageSrc)) !== undefined, { message: 'the page’s frame' }).toBe(true);
+      await expect(drawn!.locator('#said')).toHaveText('A page in the checkout on B.');
+      await expect.poll(() => drawn!.evaluate(() => document.body.dataset.ran ?? ''), { message: 'its inline script ran' }).toBe('yes');
+      await expect(pageViewer.locator('[data-external-row]'), 'no row').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the page is drawn').toEqual([]);
+      const open = pageViewer.getByRole('button', { name: 'Open externally', exact: true }); // the bar's
       await expect(open).toHaveAttribute('title', `Opens a copy of this file from ${B_NAME} on this Mac`, { timeout: 60_000 });
       await open.click();
-      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`));
-      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the row: ${await external.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      // the open seam's lines for the file, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+      const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line.endsWith(`/${PAGE_ON_B.name}`) && !line.startsWith('frame-'));
+      await quoting(expect.poll(() => opened().length, { timeout: 60_000, message: 'main hands the OS a copy of B’s file' }).toBe(1), async () => `the viewer: ${await pageViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
       const [copy] = opened();
       expect(copy, 'a copy under this Mac’s copies of B’s files, not B’s path').toContain(`/maws-remote-copies/${b.ref}/`);
       expect(readFileSync(copy!, 'utf8'), 'holding the file’s bytes').toBe(PAGE_ON_B.content);
-      await expect(external.getByRole('alert'), 'nothing refused').toHaveCount(0);
+      await expect(pageViewer.getByRole('alert'), 'nothing refused').toHaveCount(0);
       rmSync(dirname(copy!), { recursive: true, force: true });
+
+      // a PDF of B's checkout, drawn here from a copy by Chromium's viewer: its page's black square painted
+      const pdfRow = files.locator(`[role="treeitem"][data-path="${join(checkout, PDF_ON_B)}"]`);
+      await expect(pdfRow, 'the PDF written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await pdfRow.click();
+      const pdfViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, PDF_ON_B)}"]`);
+      await quoting(expect(pdfViewer, 'B’s PDF drawn here from a copy').toHaveAttribute('data-frame', 'pdf', { timeout: 60_000 }), async () => `the viewer: ${await pdfViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const pdfFrame = pdfViewer.locator('[data-artifact-frame="pdf"]');
+      await expect(pdfFrame, 'a token and the file’s name, no folder of B’s').toHaveAttribute('src', new RegExp(`^maws-artifact://[0-9a-f]{32}/${PDF_ON_B.replace('.', '\\.')}#toolbar=0&navpanes=0$`));
+      await expect.poll(() => markPixels(againApp, again, pdfFrame), { timeout: 30_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry while the PDF is drawn').toEqual([]);
+
+      // a file one byte past the copy's bound: its row says it is too large to show here, with its size, and offers no
+      // Open externally, whose copy has the same bound (L4)
+      const largeRow = files.locator(`[role="treeitem"][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await expect(largeRow, 'the large file written on B, in A’s tree').toBeVisible({ timeout: 60_000 });
+      await largeRow.click();
+      const largeViewer = again.locator(`[data-file-viewer][data-path="${join(checkout, LARGE_ON_B)}"]`);
+      await quoting(expect(largeViewer, 'its row, not a frame').toHaveAttribute('data-frame', 'row', { timeout: 60_000 }), async () => `the viewer: ${await largeViewer.innerText().catch(() => '')}\n${mainSaid(again)}`);
+      const largeShown = largeViewer.locator('[data-external-row]');
+      await expect(largeShown.getByText('Too large to show here: MAWS copies at most 64.0 MB from another machine.', { exact: true })).toBeVisible();
+      await expect(largeShown.getByText('64.0 MB', { exact: true }), 'its size').toBeVisible();
+      await expect(largeViewer.getByRole('button', { name: 'Open externally' }), 'no act that can only fail').toHaveCount(0);
+      expect(frameCopies(), 'A’s frame-copies folder lists no entry after the refused copy').toEqual([]);
+      rmSync(join(checkout, LARGE_ON_B));
+      rmSync(join(checkout, PDF_ON_B));
+      expect(await createdNow(), 'nothing created by the frames, on B or on A').toEqual(createdBefore);
 
       // The session's agent has a browser on B, seen from here by screencast (P5 O17's local stage, §I): B's own front reads
       // it, A's main answers it for B's session over the link (M5a's capability read), and A's Browser tool shows the

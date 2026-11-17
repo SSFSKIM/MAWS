@@ -5,15 +5,20 @@
 // waiting message is offered behind a capability of its own, and it and taking a message back have their words.
 import { describe, expect, it } from 'vitest';
 import { ACT_WORDS, disabledWords, failureWords, REMOTE_NEEDS, REMOTE_UNAVAILABLE, refusalWords, SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY, type RemoteStanding } from './remote-unavailable';
+import { GIT_READS_CAPABILITY } from './schema/git';
 
 const M = 'Loft';
 const UP: RemoteStanding = { machine: M, phase: 'up', capabilities: [SESSION_ACTS_CAPABILITY], owner: true };
 const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fields });
+/** The UX wave U5b-2's three reads (M8), behind a capability of their own (below). */
+const GIT_READS = ['git.branchCommits', 'git.commitDiff', 'git.changesSince'] as const;
+/** What other capabilities than the session acts' gate, each pinned in its own block below. */
+const OWN_CAPABILITY: readonly string[] = ['artifacts.undelete', ...GIT_READS];
 
 describe('the acts the wave offers', () => {
   it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
     const built = ['session.archive', 'session.update', 'session.rename', 'session.list', 'attention.acknowledge', 'session.steer.cancel', 'maws.pane.answer', 'session.fork'] as const;
-    expect(Object.keys(REMOTE_NEEDS).filter((command) => command !== 'artifacts.undelete').sort()).toEqual([...built, 'session.steer.sendNow'].sort()); // U10b's own, below
+    expect(Object.keys(REMOTE_NEEDS).filter((command) => !OWN_CAPABILITY.includes(command)).sort()).toEqual([...built, 'session.steer.sendNow'].sort()); // U10b's and U5b's own, below
     for (const command of built) {
       expect(REMOTE_NEEDS[command], command).toBe('rl2.session-acts');
       expect(REMOTE_UNAVAILABLE[command], command).toBeUndefined();
@@ -144,6 +149,19 @@ describe('the undelete over the link', () => {
     expect(refusalWords('artifacts.undelete', M, 'offline')).toBe('Not restored: Loft is offline');
     expect(refusalWords('artifacts.undelete', M, 'owners-only')).toBe('Not restored: only Loft’s owners can');
     expect(failureWords('artifacts.undelete', 'this artifact was deleted in the Library, not by an agent')).toBe('Not restored: this artifact was deleted in the Library, not by an agent');
+  });
+});
+
+// UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D): the branch read, the
+// commit read and the working-tree read go only to a machine whose endpoint lists `rl2.git-reads`. A read is not an act:
+// it has no words here; Review and Source control's page word its failures themselves.
+describe('the git reads over the link', () => {
+  it('each need `rl2.git-reads`, are not declared, and have no act’s words', () => {
+    expect(GIT_READS_CAPABILITY).toBe('rl2.git-reads');
+    for (const command of GIT_READS) {
+      expect([command, REMOTE_NEEDS[command]]).toEqual([command, GIT_READS_CAPABILITY]);
+      expect([command, REMOTE_UNAVAILABLE[command], ACT_WORDS[command]]).toEqual([command, undefined, undefined]);
+    }
   });
 });
 

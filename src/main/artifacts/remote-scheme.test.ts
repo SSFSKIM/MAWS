@@ -14,7 +14,7 @@ import { FakeLink } from '../../../test/lane-b/fake-link';
 import { StreamTable, type StreamRequest, type StreamSink } from '../machines/remote/streams';
 import type { LinkState } from '../machines/manager';
 import { ArtifactMachines } from './machines';
-import { createRemoteScheme, HTTP_STREAM_CREDIT, HTTP_STREAMS_PER_LINK } from './remote-scheme';
+import { artifactIdOfUrl, createRemoteScheme, HTTP_STREAM_CREDIT, HTTP_STREAMS_PER_LINK } from './remote-scheme';
 
 const sessions = vi.hoisted(() => {
   const make = () => ({ protocol: { handle: vi.fn() } });
@@ -193,6 +193,26 @@ describe('the referrer rule', () => {
     await s.handler(new Request(url(EMBED, 'assets/a.png'), { referrer: 'http://localhost:5173/' }));
     expect(s.link.sent).toEqual([]);
     expect(s.asked.filter((line) => line.startsWith('local:artifacts.content'))).toHaveLength(2);
+  });
+});
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, "Main's decisions, each with a token
+// host"): a file frame's token host is no artifact's id, so the remote responder never sends it to another machine, at
+// either stage, whichever page refers to it
+describe('a file frame’s token host', () => {
+  const TOKEN = '3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b';
+  const FILE = `maws-artifact://${TOKEN}/ledger%20draft.pdf`;
+
+  it('answers null for a token host at both stages, whatever the referrer', async () => {
+    const s = scene();
+    expect(artifactIdOfUrl(FILE)).toBeNull();
+    expect(artifactIdOfUrl(`maws-artifact://${TOKEN.toUpperCase()}/x`)).toBeNull();
+    for (const referrer of [undefined, url(PAGE, 'index.html', 3), `maws-artifact://${PAGE}/`, url(HERE), `maws-artifact://c0ffee11d00d4e5fa6b7c8d9e0f1a2b3/notes.html`]) {
+      const request = () => new Request(FILE, referrer === undefined ? {} : { referrer });
+      expect(await s.scheme.respond(request(), 'placed'), String(referrer)).toBeNull();
+      expect(await s.scheme.respond(request(), 'referred'), String(referrer)).toBeNull();
+    }
+    expect(s.link.sent).toEqual([]);
   });
 });
 

@@ -336,7 +336,7 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }] }));
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }], plugins: [] }));
   const mountWith = (client: QueryClient) => mountCustomize({ view: 'mine', show: 'connectors' }, client);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
@@ -350,7 +350,7 @@ describe('Connectors', () => {
     const ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/tides.svg';
     const at = (name: string, iconUrl: string | null) => ({ name, scope: 'user', path: '/config/.claude.json', authPosture: null, fingerprint: null, revision: null, iconUrl });
     backend.script('customization.inventory', () => ({ skills: [], servers: ['tides', 'buoy'].map((name) => ({ name, scope: 'user', path: '/config/.claude.json', transport: 'http' })), warnings: [], serversRead: true }));
-    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)] }));
+    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)], plugins: [] }));
     backend.script('catalog.icon', () => ({ dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }));
     mountWith(fresh());
     const imageOf = (name: string) => document.querySelector<HTMLElement>(`[data-connector="${name}"] [data-item-image]`)!;
@@ -428,7 +428,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -460,7 +460,7 @@ describe('Connectors', () => {
     backend.script('catalog.postures', () => ({ servers: [
       { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null, iconUrl: null },
       { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null, iconUrl: null },
-    ] }));
+    ], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
     const here = { ...pageStatus('here'), cwd: '/one' };
@@ -488,7 +488,7 @@ describe('Connectors', () => {
   // host of an earlier build) it offers nothing, and with no such session it says to open one.
   describe('a row of MAWS’s own list', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
-    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }] }));
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }], plugins: [] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
     // the disk row, not the live list's line of the same name below it
     const ownRow = () => waitFor(() => {
@@ -528,6 +528,23 @@ describe('Connectors', () => {
       fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
       await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'idle', entry: { revision: 'rev-1' } }]));
       expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
+    // UX wave U11h, the branch panel's ruling (2026-11-16, UTC): the attached session's answer, once it exists, is its list
+    // whole; the init's list counts only before it
+    it('a server the attached session’s mcp_status no longer lists is not read from its init’s list: the session that holds it signs it in', async () => {
+      const bare = holding('bare', '/one', ['fx-own']); // the page's attached session, whose init listed it
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[bare.appSessionId, bare], [holder.appSessionId, holder]]) });
+      backend.script('session.mcpStatus', () => ({ mcpServers: [] })); // its answer does not
+      ownPosture('rev-1');
+      const client = fresh();
+      mountWith(client);
+      const row = await ownRow();
+      await waitFor(() => expect(client.getQueryCache().getAll().some((query) => query.queryKey[1] === 'session.mcpStatus' && query.state.data !== undefined)).toBe(true));
+      await act(async () => {});
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'holder', entry: { revision: 'rev-1' } }]));
     });
 
     it('offers no Sign in while the row has no revision', async () => {

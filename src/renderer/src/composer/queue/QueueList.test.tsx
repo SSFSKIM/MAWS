@@ -11,6 +11,7 @@ import { askSteerText } from '@shared/maws/ask';
 import { consentMessage } from '@shared/engine/arrival'; // UX wave U1c
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
 import { humanTurn, remoteRow, status } from '../../../../../test/support/builders';
+import { earlierAskSteerText } from '../../../../../test/support/ask-steer';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
 import { connectKeys } from '../../keymap/dispatcher';
@@ -215,13 +216,19 @@ describe('a waiting answer (UX wave U4b, X-049)', () => {
 
   it('reads "Answer to <header>: <words>" where the window holds the ask under a folded turn, and the question’s own text where it holds none', () => {
     const { client } = bridge();
-    const view = () => <QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, askSteerText('toolu_a', [LAYOUT], [GRID]))] })} client={client} />;
-    const { rerender } = render(view());
+    // board ticket 711: the host writes the new form, which holds no text the model wrote; without the ask, the bare
+    // words and the pick by its place; the question's own text is an earlier build's envelope's
+    const view = (content: string) => <QueueList appSessionId={APP} busy queue={queue([], { steers: [steer(U1, content)] })} client={client} />;
+    const { rerender } = render(view(askSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer: option 1']);
+    rerender(view(earlierAskSteerText('toolu_a', [LAYOUT], [GRID])));
     expect(texts()).toEqual(['Answer to Which layout should the gallery use?: Grid']);
     asked([LAYOUT]);
-    rerender(view());
+    rerender(view(askSteerText('toolu_a', [LAYOUT], [GRID])));
     expect(texts()).toEqual(['Answer to Layout: Grid']);
     expect(mark(rows()[0])).toBe('Next step');
+    rerender(view(earlierAskSteerText('toolu_a', [LAYOUT], [GRID])));
+    expect(texts()).toEqual(['Answer to Layout: Grid']);
   });
 
   it('reads the same once a Stop holds it, marked Held', () => {

@@ -78,6 +78,11 @@ export const FilesReadInputSchema = z.strictObject({
   // UX wave U6e (decision 19): the open was asked by the agent (`show_pane`), so no grant admits the file; a peer that does
   // not know the key drops it
   agent: z.literal(true).optional(),
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B): the bytes of exactly
+  // the range asked, as base64 whatever the type, never decoded and never re-cut, answered with the file's `identity`;
+  // honoured for a caller on the file's machine alone (a remote caller's is passed over and the plain read answered).
+  // Sent by main alone, to serve a file's frame; a daemon that does not know the key drops it and answers the plain read.
+  raw: z.literal(true).optional(),
 });
 export type FilesReadInput = z.infer<typeof FilesReadInputSchema>;
 
@@ -111,6 +116,10 @@ export const FilesReadOutputSchema = z.strictObject({
   // UX wave U6e (decision 8): the file is under one of MAWS's own folders (its profile folder, an app bundle of it), which no
   // write reaches; on any read, inside the directories too
   own: z.literal(true).optional(),
+  // UX wave U6b-2: the version of the file the bytes are of (its device, inode, size, modification and change times, as
+  // the opened descriptor knows them); present exactly in the answer to a raw read, so two raw reads that answer the same
+  // identity read the same version, and a read whose file changed while it was read is refused instead
+  identity: z.string().min(1).optional(),
 });
 export type FilesReadOutput = z.infer<typeof FilesReadOutputSchema>;
 
@@ -171,8 +180,8 @@ export type FilesGrantOutput = z.infer<typeof FilesGrantOutputSchema>;
 // Main-only: a page could otherwise read any absolute path outside every session's allowlist. `path` must be absolute,
 // which the files service refuses (`path must be absolute`), as `library.read`'s caller has always been told. UX wave
 // U6c: `named` is left out as the session is; the caller's resolution is the admission. U6e: `agent` too; its answer is
-// the read's, and sets neither `outside` nor `own`.
-export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, agent: true });
+// the read's, and sets neither `outside` nor `own`. UX wave U6b-2: `raw` too.
+export const FilesReadResolvedInputSchema = FilesReadInputSchema.omit({ appSessionId: true, named: true, agent: true, raw: true });
 export type FilesReadResolvedInput = z.infer<typeof FilesReadResolvedInputSchema>;
 
 // P5 O3-E (Interfaces §F; D7; O7's C8): bounded bytes written into a session's attachments directory on its machine,

@@ -2,11 +2,12 @@
 // C10's fork path with a guard of its own (a running turn does not refuse it), lineage from the intent, the anchored
 // first message, the thread named by its anchor, and `side.thread.opened` in the parent's stream; and C10's own Fork
 // now carrying `fork` lineage.
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message';
-import type { Anchor } from '@shared/anchor/anchor';
+import * as z from 'zod';
+import { anchoredMessage, commentsMessage, promotionMessage, readAnchoredMessage } from '@shared/anchor/message';
+import { AnchorSchema, type Anchor } from '@shared/anchor/anchor';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { LaunchSpec } from '@shared/engine/launch-spec';
@@ -258,6 +259,49 @@ describe('side threads', () => {
     await h.settled(outcome.appSessionId);
     expect(h.index.sessions.get(outcome.appSessionId)!.lineage).toEqual({ kind: 'fork', parentAppSessionId: parent.appId, parentEngineSessionId: SID, openedBy: 'fork' });
     expect(parentEvents(parent.appId)).toEqual([]); // a fork is no side thread: no row in the parent
+  });
+
+  // UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A and §K; decision 25): a
+  // thread opened from a comment on a commit's diff. Both builds that bind hold a stored lineage's anchor to a strict
+  // schema with no `commit`, so the lineage keeps neither the commit nor its repository-relative path; the commit stays in
+  // the first message's lead and tag.
+  describe('from a comment on a commit’s diff (UX wave U5b-2)', () => {
+    // The anchor schema's keys as build 2c7044231 has them (`git show 2c7044231:src/shared/anchor/anchor.ts`), held here
+    const KEYS_2C7044231 = ['kind', 'locator', 'label', 'pageUrl', 'path', 'line', 'screenshot', 'side', 'prNumber', 'css', 'role', 'name', 'a11y', 'box', 'artifactId', 'threadId', 'artifactKind', 'artifactTarget'] as const;
+    const Older = z.strictObject(AnchorSchema.pick(Object.fromEntries(KEYS_2C7044231.map((key) => [key, true])) as Record<(typeof KEYS_2C7044231)[number], true>).shape);
+    const SHA = '3f9a1c27b84e5d60a1f2c3b4d5e6f708192a3b4c';
+    const onCommit = (): Anchor => ({ kind: 'file-line', locator: `src/x.ts#L42@${SHA}`, label: 'x.ts:42 · 3f9a1c2', path: 'src/x.ts', line: 42, side: 'new', commit: SHA });
+    const inLineage = { kind: 'file-line', locator: `src/x.ts#L42@${SHA}`, label: 'x.ts:42 · 3f9a1c2', line: 42, side: 'new' };
+    const lineageOf = (child: AppSessionId) => h.index.sessions.get(child)!.lineage as { anchor?: unknown } | null;
+
+    it('stores a lineage whose anchor has no commit and no path on the record the index answers, its opened event the same, and the full hash in the first message’s tag', async () => {
+      const parent = parentRecord();
+      const outcome = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor: onCommit(), text: 'Why this order?', screenshot: null });
+      const child = outcome.appSessionId;
+      expect(await h.settled(child)).toMatchObject({ phase: 'ready', outcome: { firstTurn: 'sent' } });
+      const kept = lineageOf(child)!.anchor;
+      expect(kept).toEqual(inLineage);
+      expect(Older.safeParse(kept).success).toBe(true);
+      expect(parentEvents(parent.appId)).toEqual([expect.objectContaining({ kind: 'side.thread.opened', childAppSessionId: child, anchor: inLineage })]);
+      const [[first]] = sent(child) as [[{ type: 'text'; text: string }]];
+      expect(first.text).toBe(anchoredMessage({ anchor: onCommit(), text: 'Why this order?', destination: 'thread', screenshot: false }));
+      expect(first.text).toContain(` commit="${SHA}"/>`);
+      expect(readAnchoredMessage(first.text)!.comments[0]!.anchor.commit).toBe(SHA);
+    });
+
+    it('writes the same lineage to the setup intent on disk, and the record made from it after a quit holds it too', async () => {
+      const parent = parentRecord();
+      h.hangPut = (intent) => intent.progress.send !== null; // the app dies as it records the handoff: the intent before it is on disk
+      const outcome = await h.service.openSideThread(parent.appId, { kind: 'comment', anchor: onCommit(), text: 'Why this order?', screenshot: null });
+      const child = outcome.appSessionId;
+      await h.until(() => h.gateReached);
+      const stored = JSON.parse(readFileSync(join(h.userData, 'sessions', 'intents', `${child}.json`), 'utf8')) as { lineage: { anchor: unknown } };
+      expect(stored.lineage.anchor).toEqual(inLineage);
+      expect(Older.safeParse(stored.lineage.anchor).success).toBe(true);
+      await h.restart({ keep: false });
+      expect(lineageOf(child)!.anchor).toEqual(inLineage);
+      expect(Older.safeParse(lineageOf(child)!.anchor).success).toBe(true);
+    });
   });
 
   // P2-E1 start (2026-10-09): the artifact scope beside the launch spec (D10)

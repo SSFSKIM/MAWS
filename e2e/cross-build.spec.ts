@@ -119,6 +119,8 @@
 // (sidebar, both ways), and its rows are in the same table.
 // UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
+// Board ticket 711: (envelope, to the peer) and (envelope, from the peer), an async ask's answer envelope one build's host
+// writes and the other build's window reads; their block is at the end of this file, and their row is in the same table.
 // UX wave U10b-4: (space instructions, both ways), a key of the artifact store's `meta` the older builds never read, and
 // a draft's chip named for them, read across the two builds in both directions; its block is at the end of this file,
 // and its rows are in U13a's UC-14 coverage table (the table's first rows for the artifact store).
@@ -127,6 +129,12 @@
 // U13a's UC-14 coverage table.
 // UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
 // other build's window as the row the build that reads the frames makes; its block is at the end of this file.
+// UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
+// its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
+// UX wave U5b: (reads, on the peer's daemon), (source control, from the peer), (a commit's comment, to the peer) and (a
+// commit's side thread, to the peer), no new stored form: the git reads an older daemon lacks, its acting pane over this
+// build's daemon, and a commit's comment in a message's words and a side thread's lineage; their block is at the end of
+// this file, and their row is in U13a's UC-14 coverage table.
 // UX wave U2b: (to-human, from the peer) and (to-human, to the peer), the to-human view across the cutover (who draws, the
 // launch's reservation, the summaries' switch); their block is at the end of this file, and their rows are in U13a's
 // UC-14 coverage table.
@@ -171,12 +179,18 @@ import { REPO_ROOT } from './support/launch';
 import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
 import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
-import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
+import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf; UX wave U5b: a new chat, the parent of a side thread
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, firstPrompt /* board ticket 711 */, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec, type StubEngine } from './support/stub-engine'; // P5 O16 M3c
+import { askFixture } from './support/maws-tools'; // board ticket 711: the recorded ask with ids the model chose
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
+import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's anchor on a commit's line
+import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
+import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
+import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
 import { NATIVE_TO_HUMAN_ENV } from '../src/shared/owner/contract'; // UX wave U2b: the advertisement's variable
 import { FOLD_SUMMARIES_ENV, FOLD_SUMMARIES_OFF } from '../src/shared/owner/folds'; // UX wave U2b: the summaries' value
 import { installToHumanPlugin } from '../test/support/to-human-plugin'; // UX wave U2b: the plugin's style, its installation and its declaration
@@ -1808,6 +1822,9 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
 //   |                                               | build finds                                           | standing beside the message, each said             |
+//   | an async ask's answer envelope (board ticket  | (envelope, to the peer): F draws the answer on its    | (envelope, from the peer): this build draws the    |
+//   | 711): the user message the host writes, kept  | question's row, whole, and never the envelope as raw  | answer of the form F writes the same way           |
+//   | in the session's journal and transcript       | text                                                  |                                                    |
 //   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
 //   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
 //   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
@@ -1827,6 +1844,17 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
 //   |                                               |                                                       | replays; both peers keep a tab's params whole      |
 //   |                                               |                                                       | (U6b-1's row)                                      |
+//   | U6b-2: nothing stored. On the wire,           | (file frame, both ways): on the peer's mawsd this     | the second half: the peer's app on this build's    |
+//   | `files.read`'s `raw` and its answer's         | build's window draws the PDF's row, with the          | unit mawsd draws its row as it always did, Open    |
+//   | `identity` (`src/shared/ipc/schema/files.ts`) | sentence for a service that cannot serve it, and      | externally reaching the seam, nothing refused. A   |
+//   |                                               | no frame; the peer's daemon drops `raw`, refuses      | peer from before O4 is refused by this build's     |
+//   |                                               | nothing, and its Open externally reaches the seam;    | mawsd: "not run: <reason>", held by                |
+//   |                                               | on this build's own mawsd the tab draws the PDF       | service.test.ts "a plain read's answer is what it  |
+//   |                                               |                                                       | was" and files.test.ts "an answer with identity is |
+//   |                                               |                                                       | read by a reader that does not know it as the      |
+//   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
+//   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
+//   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
 //   | `owner_channel_sessions.advertised` (UX wave  | (to-human, to the peer): the peer opens the index,    | (to-human, from the peer): a launch the peer       |
 //   | U2b): the launch's reservation, an added      | lists the session, draws its own bar and record row,  | decided at 8 reads as MAWS's to draw (`drawnBy`    |
 //   | nullable column                               | launches the session again (8, no summaries value),   | `maws`, the mirror); the return of (to-human, to   |
@@ -3351,6 +3379,147 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
   });
 });
 
+// ---- Board ticket 711: an async ask's answer envelope, read across the two builds -----------------------------------
+// The answer to an asynchronous `mcp__maws__ask` reaches the engine as a user-role message, its envelope
+// (src/shared/maws/ask.ts, askSteerText), which the session's journal and the engine's transcript keep and every build
+// that opens the session reads (parseAskSteer: the transcript's capsule and bubbles, the queue's row, the arrivals
+// reader). From this landing it holds no text the model wrote: each question by its number (in the block, `q<n>`), a
+// picked option by its place (`option <k>`), the other answers as JSON strings, the block's `question` empty and each
+// answer's question named by its place, which this build's reader joins back to the question's own id. The builds
+// before it write the question's words and the label on its line and in its block. Both scenes play the recorded async
+// ask (pass3/p1-maws-ask-async) on the stub engine under a session host, answer it through `maws.ask.answer` as the
+// Question sheet does, and quit with the session kept; the other build opens the session.
+//   (envelope, to the peer)   this build's host writes the new form for the recorded ask with its question's id chosen
+//                             by the model (askFixture); the peer draws the capsule on the question's row, whole, with
+//                             no console error and no "[MAWS ask" text in the session's transcript. Its row reads the
+//                             label ("Yes") where it holds the host's `maws.ask.answered` event, which wins over the
+//                             steer; on the steer alone, `option 1`, or "Not answered" where its reader joins the
+//                             block's place `q1` to no question (the stated residue of the ids by place, measured
+//                             here). The scene records which it met and fails on any other.
+//   (envelope, from the peer) the peer's host writes its form; this build draws the label ("Yes") the same. Run only
+//                             with a peer that writes the earlier form (its ask.ts keeps the question's words in the
+//                             block); skipped otherwise, saying so.
+// This build's window draws "Yes" either way: from the event, or from the steer read back with the call
+// (askAnswersFromSteer). The envelope is read all the same, since only a reader that parsed it draws it as no bubble.
+// The steer as the answers' only source (a session read from the engine's transcript alone) is held by the unit tests
+// (src/renderer/src/transcript/model/maws.test.ts and disk.test.ts). Its row is in UC-14's coverage table (U13a's
+// block).
+const ASK_ASYNC_FIXTURE = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const ENVELOPE_ANSWERS = [{ id: 'q1', question: 'Proceed?', status: 'answered' as const, value: ['Yes'] }]; // as the sheet sends them
+// (envelope, to the peer): the recorded ask with its question named by the model (askFixture rewrites the call's
+// arguments in each frame that carries them), so the block's place `q1` is not the question's id
+const CHOSEN_ID = 'proceed-or-stop';
+const CHOSEN_ASK = { blocking: false, questions: [{ id: CHOSEN_ID, question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
+const CHOSEN_ANSWERS = [{ ...ENVELOPE_ANSWERS[0]!, id: CHOSEN_ID }];
+const NOT_ANSWERED = 'Not answered'; // transcript/model/copy.ts ASK.notAnswered, in this build and in build F
+// a peer whose writer is this landing's or later: its ask.ts reads the new form back (askAnswersFromSteer, which no
+// build before this landing has: 0 at f1852de3a and at 2c7044231)
+const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes('export function askAnswersFromSteer');
+const writesNewEnvelopeWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) writes the envelope this build writes (its src/shared/maws/ask.ts has askAnswersFromSteer): no earlier form to read; the run of record is the merge-base peer's or build F's, --peer-exact f1852de3a`;
+
+// The envelope the session's host wrote for the ask: the `user` frame it sent opening with the ask's tag
+function envelopeIn(s: Scratch, id: AppSessionId, askId: string): string | null {
+  for (const row of s.journal(id)) {
+    const content = row.direction === 'out' && row.frame.type === 'user' ? (row.frame.message as { content?: unknown } | undefined)?.content : undefined;
+    if (typeof content === 'string' && content.startsWith(`[MAWS ask ${askId}] `)) return content;
+  }
+  return null;
+}
+
+// The recorded async ask played and answered on `page`'s build: the prompt, the ask's call allowed, the ask answered as
+// the Question sheet answers it, the envelope that build's host wrote, and both main turns ended (the reply the
+// second's)
+async function answerAsyncAsk(page: Page, s: Scratch, id: AppSessionId, answers: readonly { id: string }[] = ENVELOPE_ANSWERS): Promise<{ askId: string; envelope: string }> {
+  value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt(ASK_ASYNC_FIXTURE) }));
+  const requested = await untilRequested(page, id);
+  value(await invoke(page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  type Opened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+  let opened: Opened | undefined;
+  await expect.poll(async () => (opened = (await eventsOf(page, id)).find((e): e is Opened => e.kind === 'maws.ask.opened')), { timeout: 60_000, message: 'the ask opened' }).toBeDefined();
+  expect(opened!.blocking, 'the recorded ask does not wait').toBe(false);
+  value(await invoke(page, 'maws.ask.answer', { appSessionId: id, askId: opened!.askId, answers: answers as typeof ENVELOPE_ANSWERS }));
+  let envelope: string | null = null;
+  await expect.poll(() => (envelope = envelopeIn(s, id, opened!.askId)), { timeout: 60_000, message: 'the host wrote the answer’s envelope' }).not.toBeNull();
+  type Ended = Extract<SessionEvent, { kind: 'turn.ended' }>;
+  await expect
+    .poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).filter((e): e is Ended => e.kind === 'turn.ended' && e.parentToolUseId === null && !e.isEchoReceipt).length >= 2, { timeout: 90_000, message: 'both main turns ended, the reply the second’s' })
+    .toBe(true);
+  return { askId: opened!.askId, envelope: envelope! };
+}
+
+// The session as `run`'s window draws it: its tab shown, the ask's capsule answered on its one question's row,
+// "Proceed?" → one of `answers` (the label, the pick by its place, or "Not answered" where an older window joins no
+// answer to a question whose id the model chose), and no "[MAWS ask" text in its transcript (an envelope no reader
+// parsed would be a bubble of it), with no console error. Returns what the row read.
+async function drawsAnswered(run: Run, id: AppSessionId, askId: string, answers: readonly string[] = ['Yes']): Promise<string> {
+  await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+  const main = run.page.locator('[data-region="main"]');
+  const capsule = main.locator(`section.transcript-ask[data-ask-id="${askId}"]`);
+  await expect(capsule, 'the ask’s capsule reads answered').toHaveAttribute('data-ask-state', 'answered', { timeout: 30_000 });
+  const line = capsule.locator('[data-ask-answer]');
+  await expect(line, 'one row, the question’s').toHaveCount(1);
+  await expect(line.locator('.transcript-question-label'), 'the question’s words, from the call').toHaveText('Proceed?');
+  const answer = line.locator('.transcript-question-answer');
+  await expect.poll(async () => answers.includes((await answer.textContent()) ?? ''), { message: `the answer on its question’s row, whole: one of ${answers.join(', ')}` }).toBe(true);
+  await expect(main.locator('[data-transcript-scroller]').getByText('[MAWS ask', { exact: false }), 'the envelope is drawn as no text').toHaveCount(0);
+  expect(run.maws.consoleErrors()).toEqual([]);
+  return (await answer.textContent()) ?? '';
+}
+
+test('(envelope, to the peer) this build’s host delivers an async ask’s answer by the question’s number alone; the peer draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  await withScratch('xb-envelope-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) answers an async ask; ${peer.label} (wire ${wireOf(peer)}) opens the session`];
+    s.useStub();
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    await s.launchSession(run.page, id, askFixture(s.root, ASK_ASYNC_FIXTURE, CHOSEN_ASK), { cwd: s.repo });
+    const { askId, envelope } = await answerAsyncAsk(run.page, s, id, CHOSEN_ANSWERS);
+    expect(envelope.split('\n').slice(0, 3), 'this build’s host wrote the new form').toEqual([`[MAWS ask ${askId}] The user answered the questions you asked:`, '1. option 1', '```json']);
+    for (const words of ['Proceed?', 'Yes', CHOSEN_ID]) expect(envelope, 'with no words of the model’s').not.toContain(words);
+    expect(envelope, 'the block names the question by its place').toContain('"id": "q1"');
+    await drawsAnswered(run, id, askId);
+    await s.quit(run);
+    said.push(`  ${here.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn here answered`);
+
+    const old = await launchServed(s, id, peer.root);
+    const read = await drawsAnswered(old, id, askId, ['Yes', 'option 1', NOT_ANSWERED]);
+    await s.quit(old);
+    const how = read === 'Yes' ? 'the label, from the host’s event' : read === 'option 1' ? 'the pick by its place, from the steer' : 'no answer joined: the block’s q1 is not the id the model chose (the stated residue)';
+    said.push(`  ${peer.label}: the capsule answered, "Proceed?" → ${JSON.stringify(read)} on its row (${how}), no envelope drawn, no console error`);
+    record(said);
+  });
+});
+
+test('(envelope, from the peer) the peer’s host delivers an async ask’s answer in the form the earlier builds write; this build draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(writesNewEnvelope(peer), writesNewEnvelopeWhy(peer));
+  await withScratch('xb-envelope-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) answers an async ask; ${here.label} (wire ${wireOf(here)}) opens the session`];
+    s.useStub();
+    const old = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const input = fitTo(commandOf(peer, 'session.launch')!.input, { spec: stubSpec(s.stub!, id, ASK_ASYNC_FIXTURE, { cwd: s.repo }) });
+    expect(value(await invoke(old.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+    await expect.poll(async () => value(await invoke(old.page, 'session.status', { appSessionId: id })).process, { timeout: 30_000 }).toBe('ready');
+    const { askId, envelope } = await answerAsyncAsk(old.page, s, id);
+    expect(envelope.split('\n')[1], 'the peer’s host wrote the earlier form, the question’s words and the label on its line').toBe('1. Proceed? — Yes');
+    await drawsAnswered(old, id, askId);
+    await s.quit(old);
+    said.push(`  ${peer.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn there answered`);
+
+    const back = await launchServed(s, id);
+    await drawsAnswered(back, id, askId);
+    await s.quit(back);
+    said.push(`  ${here.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
+    record(said);
+  });
+});
+
 // ---- UX wave U10b-1: a document's page, read across the two builds -------------------------------------------------------
 
 // UX wave U10b-1 (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, §G and M3; the wave's root, UC-14): a
@@ -3779,10 +3948,11 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 // U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
 // build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
 // Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
-// `file` tab of U6b-1's shape. Its two peers are build F (`f1852de3a`) and master at its parent pin (`2c7044231`), told
-// apart by the peer's checked-out commit (the gate's peer is a worktree at it, .github/scripts/gate-peer.sh); each scene
-// skips, saying so, for a peer that is neither, and the runs of record are `--peer-exact f1852de3a` and `--peer-exact
-// 2c7044231`.
+// `file` tab of U6b-1's shape. Its peers are the builds from before it, read from marks in the peer's source as the file's
+// other scenes read theirs (`u6ePeer`): a peer whose source names `files.grant` has U6e, and each scene skips, saying so;
+// any other is told by whether its files service answers `named`. One that does not is build F's behaviour (`f1852de3a`);
+// one that does, with no `outside`, is a master from before U6e (its parent pin `2c7044231`, or a later one such as
+// `b89d6d1d7`).
 //   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
 //                                         File… (the pick seam), saves one beside the chat and moves the other to the
 //                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
@@ -3800,17 +3970,16 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 //                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
 // The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
 // (test/cross-build/files-schema.test.ts), as §A says.
-const U6E_PEERS = { f1852de3a: 'build F', '2c7044231': 'master at U6e’s parent pin' } as const;
+const U6E_PEERS = { dropsNamed: 'build F’s files service, which drops `named`', answersNamed: 'a master from before U6e, whose files service answers `named` with no `outside`' } as const;
 type U6ePeer = keyof typeof U6E_PEERS;
+const peerSource = (build: Build, path: string) => readFileSync(join(build.root ?? REPO_ROOT, path), 'utf8');
 function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
-  let head = '';
-  try {
-    head = execFileSync('git', ['-C', peer.root ?? REPO_ROOT, 'rev-parse', 'HEAD'], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
-  } catch {
-    // no commit to read: neither peer can be told
+  if (peerSource(peer, 'src/shared/ipc/names/files.ts').includes("'files.grant'")) {
+    return { which: null, why: `the peer (wire ${wireOf(peer)}) names files.grant (its src/shared/ipc/names/files.ts): a build from U6e on, which knows a grant` };
   }
-  const which = (Object.keys(U6E_PEERS) as U6ePeer[]).find((sha) => head.startsWith(sha)) ?? null;
-  return { which, why: `the peer (wire ${wireOf(peer)}) is at ${head || 'a commit git cannot read'}: U6e's cross-build scenes are written for f1852de3a and 2c7044231 (--peer-exact)` };
+  // the files service's answer to a read asked with `named` (`{ ...answer, named: true }` in a master before U6e; F's has none)
+  const which = peerSource(peer, 'src/services/files/service.ts').includes('named: true') ? 'answersNamed' : 'dropsNamed';
+  return { which, why: '' };
 }
 const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
 const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
@@ -3940,7 +4109,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
-      if (known.which === 'f1852de3a') {
+      if (known.which === 'dropsNamed') {
         await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
@@ -3961,7 +4130,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
       expect(run.maws.consoleErrors()).toEqual([]);
-      said.push(`  the link: ${known.which === 'f1852de3a' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
       await s.quit(run);
       record(said);
     });
@@ -4063,6 +4232,439 @@ test('(a command’s output, both ways) a session kept with a slash command’s 
       record(said);
     });
   }
+});
+
+// ---- UX wave U6b-2: a file frame across builds (UC-14; B13) -----------------------------------------------------------
+// U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B, M6 decision 3) stores nothing and
+// adds `raw` to `files.read`'s input and `identity` to its answer. This build's main draws a PDF, an HTML page, a video or
+// a sound in its frame from raw reads of this Mac's daemon; a daemon of an older build drops the key it does not know and
+// answers the plain read, with no identity, so main serves nothing and the tab shows the row with the sentence for a
+// service that cannot serve it. Each build's mawsd runs as the profile's unit (a LaunchAgent, which the other build's app
+// leaves as it is), as in (update, render). One scene, both ways, with a peer from before this landing (its `files.read`
+// knows no `raw`); a direction that cannot run against a peer is not counted (C2), and a run in which the first half was
+// skipped is not a run of record:
+//   (file frame, both ways)  this build's app on the peer's unit mawsd opens a PDF of the session's folder from Files'
+//                            tree: its row, the sentence for a service that cannot serve it and Open externally, no
+//                            frame; Open externally reaches the open seam through the peer's mawsd; neither main's log nor
+//                            the peer's mawsd's holds a refusal of the read. This build again, on its own mawsd: the tab
+//                            shown again draws the PDF. Then the peer's app on this build's unit mawsd opens the same PDF:
+//                            its row, as it always drew it, Open externally reaching the seam, and no refusal. Where this
+//                            build's mawsd refuses the peer's app (one from before O4), that half says it is not run.
+const knowsRaw = (build: Build) => (commandOf(build, 'files.read')?.input as { properties?: Record<string, unknown> } | undefined)?.properties?.raw !== undefined;
+const knowsRawWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.read's raw: a daemon of this landing or later serves a frame; the runs of record have build F and build M as the peer, --peer-exact f1852de3a and 2c7044231`;
+const OLDER_SERVICE = 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.'; // this build's row (tools/code/copy.ts)
+const PEER_ROW = 'PDF files open outside MAWS'; // the row of both peers (tools/code/copy.ts at f1852de3a and at 2c7044231)
+// What either end would log had it refused the other's read: the validation's own words (src/shared/ipc/validate.ts)
+const READ_REFUSED = /invalid (?:input for|output of) files\.read/;
+
+test('(file frame, both ways) this build’s window on the peer’s unit mawsd draws a PDF’s row with the sentence for a service that cannot serve it, no frame, and nothing refused; on its own mawsd the PDF is drawn; the peer’s app on this build’s unit mawsd draws its row as it always did', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsRaw(peer), knowsRawWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-file-frame', async (s) => {
+    const said = [`${here.label} (wire ${wireOf(here)}) asks files.read with raw to draw a framed file; ${peer.label} (wire ${wireOf(peer)}) knows no raw`];
+    const pdf = join(s.repo, 'report.pdf');
+    writeFileSync(pdf, minimalPdf());
+    const openLog = join(s.root, 'open.log');
+    // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+    const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line !== '' && !line.startsWith('frame-'));
+    const refusals = (text: string) => text.split('\n').filter((line) => READ_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-file-frame-peer', async (unit) => {
+      said.push(`  ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      await treeRow(run.page, 'report.pdf').click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+      await expect(viewer, 'a framed file, beside the chat').toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });
+      await expect(viewer, 'its row, no frame').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+      const row = viewer.locator('[data-external-row]');
+      await expect(row.getByText(OLDER_SERVICE, { exact: true })).toBeVisible();
+      await expect(viewer.locator('iframe, video, audio'), 'nothing drawn in a frame').toHaveCount(0);
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(opened, { timeout: 20_000, message: `${peer.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${peer.label}'s mawsd refuses no read ${here.label} sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the row: "${OLDER_SERVICE}" with Open externally, which reached the seam; no refusal in either log; ${s.daemonLog().split('\n').filter((line) => DROPPED.test(line)).length} dropped-field lines in the mawsd log`);
+      await s.quit(run);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    await endProfileProcesses(s.userData);
+
+    // this build again, on its own mawsd: the tab, shown again, draws the PDF
+    const back = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    await showSession(back.page, id, `session:${address}`);
+    await openSurface(back.page, 'Files');
+    await sideTab(sideColumn(back.page), 'report.pdf').click({ timeout: 20_000 });
+    const drawn = sideColumn(back.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+    await expect(drawn, 'drawn once a daemon of this build serves').toHaveAttribute('data-frame', 'pdf', { timeout: 30_000 });
+    await expect(drawn.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+    await expect.poll(() => markPixels(back.maws.app, back.page, drawn.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${here.label} again, on its own mawsd: the tab shown again draws the PDF`);
+
+    // the second half: the peer's app on this build's unit mawsd
+    if (!appObeysConnectors(peer)) {
+      const why = `not run: ${here.label}'s mawsd refuses an app from before O4 (${peer.label}, wire ${wireOf(peer)}); held by service.test.ts "a plain read's answer is what it was" and files.test.ts "an answer with identity is read by a reader that does not know it as the answer without it"`;
+      test.info().annotations.push({ type: 'skipped check', description: `the second half, ${why}` });
+      said.push(`  the second half ${why}`);
+      record(said);
+      return;
+    }
+    await withUnit(s, here, 'xb-file-frame-here', async (unit) => {
+      said.push(`  ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog }, peer.root);
+      await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'report.pdf', exact: true }).click({ timeout: 20_000 });
+      const row = old.page.locator(`[data-file-viewer][data-path="${pdf}"] [data-external-row]`);
+      await expect(row, `${peer.label}'s row, as it always drew it`).toContainText(PEER_ROW, { timeout: 20_000 });
+      await expect(old.page.locator('iframe[src^="maws-artifact:"]'), `${peer.label} frames no file`).toHaveCount(0);
+      const before = opened().length;
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(() => opened().slice(before), { timeout: 20_000, message: `${here.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${here.label}'s mawsd refuses no read ${peer.label} sent`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s row: "${PEER_ROW}" with Open externally, which reached the seam; no refusal in either log`);
+      await s.quit(old);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    record(said);
+  });
+});
+
+// ---- UX wave U5b: the git reads, the acting pane and a commit's comment, the two older builds (UC-14) -----------------
+// U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §K and M11) stores no new form: Review's
+// and Source control's view state stays in the window's memory. What crosses is what it sends: the three git reads
+// (`git.branchCommits`, `git.commitDiff`, `git.changesSince`), which a daemon before them does not serve; the ten
+// `scm.*` commands, which this build's window no longer sends and its daemon still serves; and a comment on a commit's
+// line, whose anchor carries `commit`, a key the older builds' strict anchor schema refuses: whole in a message's words
+// and tag, which every build reads as text, and without `commit` and `path` in a side thread's lineage (`lineageAnchor`),
+// which their daemons hold to that schema. Its peers are build F (`f1852de3a`) and master at its parent pin
+// (`2c7044231`), the runs of record `--peer-exact f1852de3a` and `--peer-exact 2c7044231`; every scene holds against
+// both. Each is guarded by a probe of the peer's source alone, never by its wire, so it runs in the equal-wire mode as
+// well. A scene that puts one build's app on the other's daemon runs that daemon as the profile's unit (`withUnit`: a
+// private daemon of another build is restarted at the app's first status read) and asserts which build serves, by
+// `daemon.status`'s `build.buildId` against that build's out/main/mawsd.js, before anything else.
+//   (reads, on the peer's daemon)          run while the peer's src/shared/ipc/names/git.ts names no
+//                                          `git.branchCommits`. This build's app on the peer's unit: Source control draws
+//                                          Where, Uncommitted and the Pull request part (the folder is not trusted, so the
+//                                          part's sentence stands whatever GitHub CLI the Mac has), and Commits reads
+//                                          "Commits unavailable: this Mac’s MAWS service is older than this window" with
+//                                          no refresh control and no row; Review's Uncommitted lists the repository's two
+//                                          files, the new one "Untracked" with no count, and "This branch" is disabled
+//                                          with its title.
+//   (source control, from the peer)        run while the peer has src/renderer/src/tools/scm/CommitForm.tsx. The peer's
+//                                          app on this build's unit: its acting pane, by its own locators (a group's
+//                                          `data-scm-row`, the row's Stage, the commit form), stages one file and commits
+//                                          it, and the repository's HEAD moved: the commands stay served. The scene that
+//                                          drives build F's pane against this build's daemon, (build F's app, unit
+//                                          mawsd), stays as it is.
+//   (a commit's comment, to the peer)      run while the peer's src/shared/anchor/anchor.ts names no `commit` in its
+//                                          anchor schema: the key its tag reader and its lineage refuse. A session's
+//                                          transcript holds a comment on a commit's line, its text written by this build's
+//                                          `commentsMessage`; the peer, on its own daemon, draws the message's words with
+//                                          the full hash and the quoted line as code, and no chip.
+//   (a commit's side thread, to the peer)  the same probe. This build, on its own daemon, opens a commit from Source
+//                                          control in Review, comments on a line with "Send to main" unticked, and the
+//                                          side thread starts on the replay, its first message the tag with the hash.
+//                                          Then the peer's daemon, the profile's unit, answers `session.list` (the list
+//                                          loads and holds the child) and `session.get` for the child (its lineage as this
+//                                          build stored it, with no `commit` and no `path`), and the peer's app over it
+//                                          opens the parent and draws its side-thread row: the case a transcript alone
+//                                          does not prove.
+const sourceOf = (build: Build, path: string) => {
+  const file = join(build.root ?? REPO_ROOT, path);
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+};
+const servesGitReads = (build: Build) => sourceOf(build, 'src/shared/ipc/names/git.ts')?.includes("'git.branchCommits'") ?? false;
+const servesGitReadsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names git.branchCommits in its src/shared/ipc/names/git.ts: its daemon serves the reads; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const hasActingPane = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/scm/CommitForm.tsx'));
+const hasActingPaneWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has no src/renderer/src/tools/scm/CommitForm.tsx: its window sends no scm.* command; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const knowsCommitAnchor = (build: Build) => /^\s*commit:/m.test(sourceOf(build, 'src/shared/anchor/anchor.ts') ?? '');
+const knowsCommitAnchorWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names commit in its src/shared/anchor/anchor.ts: it reads a commit's anchor as this build does; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+// A build's `mawsd` as `daemon.status` names it: 16 hex of the SHA-1 of its out/main/mawsd.js (src/shared/ipc/schema/daemon.ts)
+const mawsdBuildOf = (build: Build) => createHash('sha1').update(readFileSync(join(build.root ?? REPO_ROOT, 'out', 'main', 'mawsd.js'))).digest('hex').slice(0, 16);
+const U5B_APP = 'src/app.ts';
+const U5B_LINES = Array.from({ length: 8 }, (_, i) => `export const v${i + 1} = ${i + 1};`);
+const U5B_CHANGED = 'export const v3 = sumOf([1, 2]);'; // line 3 as the second commit has it
+const U5B_SUBJECT = 'An invented change to v3';
+const U5B_COMMENT = 'Why does v3 call sumOf here?';
+const U5B_PEER_COMMIT = 'An invented commit made by the peer’s pane';
+const U5B_PARENT = 'e5b20000-0000-4000-8000-000000000001'; // the engine ids the replay pins: the parent, its side thread
+const U5B_CHILD = 'e5b20000-0000-4000-8000-000000000002';
+const U5B_FIRST_PROMPT = 'Read src/app.ts and say what v3 holds.';
+const U5B_FIRST_REPLY = 'v3 holds the sum of a short list.';
+const U5B_THREAD_REPLY = 'sumOf keeps v3 in step with the list it names.';
+const COMMITS_OLDER = 'Commits unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null)
+const BRANCH_NEEDS_READS = 'This branch needs this Mac’s MAWS service to be updated'; // tools/code/copy.ts, branchNeedsReads(null)
+const PR_UNTRUSTED = 'Trust this folder to see PR state'; // panel/copy.ts, SUMMARY_COPY.prUntrusted
+
+// The scratch's repository made a git repository on `main` with its own identity, no signing and no hooks: src/app.ts
+// and notes.txt in a first commit, line 3 of src/app.ts changed in a second; answers the second's full hash
+function u5bRepo(s: Scratch): string {
+  mkdirSync(join(s.repo, 'src'), { recursive: true });
+  mkdirSync(join(s.root, 'no-hooks'));
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.join('\n')}\n`);
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  const config: [string, string][] = [['user.name', 'MAWS Fixture'], ['user.email', 'fixture@maws.invalid'], ['commit.gpgsign', 'false'], ['core.hooksPath', join(s.root, 'no-hooks')]];
+  for (const [key, value] of config) gitAt(s.repo, 'config', key, value);
+  gitAt(s.repo, 'add', '-A');
+  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.map((line, i) => (i === 2 ? U5B_CHANGED : line)).join('\n')}\n`);
+  gitAt(s.repo, 'commit', '-q', '-am', U5B_SUBJECT);
+  return gitAt(s.repo, 'rev-parse', 'HEAD').trim();
+}
+// The anchor Review makes for a new line of a commit's diff (`commitLineAnchor`, src/renderer/src/tools/code/anchor/anchor.ts)
+const commitAnchor = (path: string, line: number, commit: string): Anchor => ({ kind: 'file-line', locator: `${path}#L${line}@${commit}`, label: `${basename(path)}:${line} · ${commit.slice(0, 7)}`, path, line, side: 'new', commit });
+// The add control the diff library draws on a new line of Review while the line is hovered, pressed; answers the card
+async function commentOnCommitLine(review: Locator, path: string, line: number, label: string): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-new-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator('[data-add-widget="new"] button'));
+  const card = review.getByRole('dialog', { name: `Comment on ${label}` });
+  await expect(card).toBeVisible();
+  return card;
+}
+// A new chat in the repository's project, its route direct (the replay's `get_status` answers a direct session, so its
+// side thread is direct too), started with its first prompt; answers once its first turn has ended (e2e/side.spec.ts)
+async function startCommentParent(page: Page, repo: string): Promise<AppSessionId> {
+  const project = value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible({ timeout: 20_000 });
+  const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
+  value(await invoke(page, 'session.start', { appSessionId: id, message: { content: U5B_FIRST_PROMPT, display: U5B_FIRST_PROMPT }, options: {} }));
+  await expect(page.locator('[data-region="main"]').getByText(U5B_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await statusOf(page, id)).turn, { timeout: 20_000 }).toBeNull();
+  return id;
+}
+// The side thread of `parent`, once its record exists (its setup creates it before the engine runs)
+async function sideThreadOf(page: Page, parent: AppSessionId): Promise<AppSessionId> {
+  let child = '';
+  await expect
+    .poll(async () => (child = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? ''), { timeout: 20_000, message: 'the side thread has a record' })
+    .not.toBe('');
+  return child as AppSessionId;
+}
+
+test('(reads, on the peer’s daemon) this build’s app on the peer’s unit mawsd: Source control draws Where, Uncommitted and the Pull request part, and Commits says this Mac’s service is older; Review lists Uncommitted with the new file uncounted, and This branch is disabled with its title', async () => {
+  const { here, peer } = builds();
+  test.skip(servesGitReads(peer), servesGitReadsWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-reads', async (s) => {
+    u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    writeFileSync(join(s.repo, 'added.txt'), 'a new file\nof two lines\n');
+    await withUnit(s, peer, 'xb-u5b-reads', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      const page = run.page;
+      const id = await s.record(page);
+      await showSession(page, id, `session:${await addressed(page, id)}`);
+
+      // Source control: three parts drawn; Commits the older service's sentence, with nothing asked and nothing to ask again
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-where]'), 'Where').toContainText('⎇ main', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="uncommitted"] [data-scm-count]'), 'Uncommitted, its two files').toHaveText('2', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="pr"]'), 'the Pull request part, its sentence for a folder not trusted').toContainText(PR_UNTRUSTED, { timeout: 20_000 });
+      const commits = scm.locator('[data-scm-part="commits"]');
+      await expect(commits.locator('[data-scm-failure]'), 'Commits: the older service').toHaveText(COMMITS_OLDER, { timeout: 20_000 });
+      await expect(commits.locator('[data-scm-refresh]'), 'no refresh control').toHaveCount(0);
+      await expect(commits.locator('[data-scm-commit]'), 'no row').toHaveCount(0);
+      said.push(`  Source control: Where, Uncommitted 2 and the Pull request part drawn; Commits "${COMMITS_OLDER}"`);
+
+      // Review: Uncommitted read as before the reads, the new file uncounted; This branch disabled with its reason
+      await showTool(page, 'Review');
+      const review = toolBody(page, 'Review');
+      await expect(review.locator('[data-chip="uncommitted"]'), 'Review on Uncommitted').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+      const listed = () => review.locator('[data-review-file]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-review-file') ?? '').sort());
+      await expect.poll(listed, { timeout: 20_000, message: 'the repository’s two changed files' }).toEqual(['added.txt', 'notes.txt']);
+      const added = review.locator('[data-review-file="added.txt"]');
+      await expect(added.locator('[data-review-badge]'), 'the new file’s badge').toHaveText('Untracked');
+      await expect(added.locator('[data-review-counts]'), 'and no count').toHaveCount(0);
+      const branch = review.locator('[data-chip="branch"]');
+      await expect(branch, 'This branch disabled').toBeDisabled();
+      await expect(branch, 'with its title').toHaveAttribute('title', BRANCH_NEEDS_READS);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  Review: added.txt Untracked with no count beside notes.txt; This branch disabled, "${BRANCH_NEEDS_READS}"`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(source control, from the peer) the peer’s app on this build’s unit mawsd: its acting pane stages one file and commits it by its own locators, and the repository’s HEAD moved', async () => {
+  const { here, peer } = builds();
+  test.skip(!hasActingPane(peer), hasActingPaneWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-acts', async (s) => {
+    const before = u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    trustIn(s, [s.repo]); // the pane commits only in a trusted folder
+    await withUnit(s, here, 'xb-u5b-acts', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      const page = run.page;
+      const id = await s.record(page);
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-header]'), 'the peer’s pane on main').toContainText('⎇ main', { timeout: 20_000 });
+      const row = (group: string) => scm.locator(`section[data-scm-group="${group}"] li[data-scm-row][data-path="notes.txt"]`);
+      await expect(row('unstaged'), 'notes.txt unstaged').toBeVisible({ timeout: 20_000 });
+      await row('unstaged').hover();
+      await row('unstaged').getByRole('button', { name: 'Stage notes.txt', exact: true }).click();
+      await expect(row('staged'), 'notes.txt staged').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => gitAt(s.repo, 'diff', '--cached', '--name-only').trim(), { timeout: 20_000, message: 'the index holds notes.txt' }).toBe('notes.txt');
+      const form = scm.locator('[data-scm-commit]');
+      await form.getByRole('textbox', { name: 'Commit message', exact: true }).fill(U5B_PEER_COMMIT);
+      await form.getByRole('button', { name: 'Commit', exact: true }).click();
+      await expect.poll(() => gitAt(s.repo, 'rev-parse', 'HEAD').trim(), { timeout: 20_000, message: 'HEAD moved' }).not.toBe(before);
+      expect(gitAt(s.repo, 'log', '-1', '--format=%s%n%P').trim().split('\n'), 'the peer’s commit, on the last').toEqual([U5B_PEER_COMMIT, before]);
+      expect(gitAt(s.repo, 'show', '--name-only', '--format=', 'HEAD').trim(), 'holding the staged file').toBe('notes.txt');
+      expect(gitAt(s.repo, 'status', '--porcelain'), 'nothing left uncommitted').toBe('');
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the peer's pane staged notes.txt and committed it: HEAD ${before.slice(0, 7)} → ${gitAt(s.repo, 'rev-parse', '--short', 'HEAD').trim()}`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words and the quoted line, with no chip', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.setTimeout(180_000);
+  await withScratch('xb-u5b-comment', async (s) => {
+    const sha = u5bRepo(s);
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
+    const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
+
+    const run = await s.launch({}, peer.root);
+    await s.ready(run.page, () => true, 60_000);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const bubble = run.page.locator('[data-region="main"] [data-bubble]').filter({ hasText: U5B_COMMENT });
+    await expect(bubble, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(bubble, 'its words name the commit by its full hash').toContainText(`commit ${sha}`);
+    await expect(bubble.locator('code'), 'the quoted line, as code').toHaveText([U5B_CHANGED]);
+    await expect(bubble.locator('[data-chip="anchor"]'), 'no chip').toHaveCount(0);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line as code, no chip`);
+    await s.quit(run);
+    record(said);
+  });
+});
+
+test('(a commit’s side thread, to the peer) a side thread this build opened from a comment on a commit’s line is listed and read by the peer’s unit mawsd, its lineage with no commit, and the peer draws the parent’s side-thread row', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-u5b-thread', async (s) => {
+    const sha = u5bRepo(s);
+    trustIn(s, [s.repo]);
+    writeFileSync(join(s.userData, 'claude-config', 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the journals' mode, so the host corrects none
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const journals = join(s.root, 'journals');
+    mkdirSync(journals);
+    const parentJournal = new SideJournal(U5B_PARENT, s.repo);
+    parentJournal.turn(U5B_FIRST_REPLY);
+    const threadJournal = new SideJournal(U5B_CHILD, s.repo);
+    const first = threadJournal.prompt();
+    threadJournal.rename(anchor.label); // `finishBinding`'s title: the lineage's label, which keeps the short hash
+    threadJournal.reply(first, U5B_THREAD_REPLY);
+    threadJournal.completed(first);
+    const fixtures = [parentJournal.write(journals, 'parent'), threadJournal.write(journals, 'thread')].join(',');
+    const said = [`${here.label} (wire ${wireOf(here)}) opens a side thread from a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) reads the profile`];
+
+    // this build, on its own daemon: the commit opened from Source control, a comment on its line 3 sent to a side thread
+    const ours = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: fixtures });
+    const own = await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    expect(own.daemon!.build.buildId, `${here.label} on its own mawsd`).toBe(mawsdBuildOf(here));
+    const page = ours.page;
+    const parent = await startCommentParent(page, s.repo);
+    await showTool(page, 'Source control');
+    await toolBody(page, 'Source control').getByRole('button', { name: `Open commit ${sha.slice(0, 7)} in Review`, exact: true }).click({ timeout: 20_000 });
+    const review = toolBody(page, 'Review');
+    await expect(review.locator('[data-chip="commit"]'), 'Review on the commit').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`);
+    await expect(review.locator(`[data-review-file="${U5B_APP}"] [data-review-body] table`).first(), 'the commit’s diff').toBeVisible({ timeout: 20_000 });
+    const card = await commentOnCommitLine(review, U5B_APP, 3, anchor.label);
+    const toMain = card.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain, 'Review asks for main').toBeChecked();
+    await toMain.uncheck();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(U5B_COMMENT);
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent);
+    const pane = page.locator('[data-region="panel"]').locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
+    const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
+    expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
+    // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
+    const parentTranscript = transcriptRecords({ sessionId: U5B_PARENT, cwd: s.repo, start: Date.UTC(2026, 10, 15, 12, 0, 0) });
+    parentTranscript.user('e5b2e000-0000-4000-8000-000000000001', U5B_FIRST_PROMPT);
+    parentTranscript.text('e5b2e000-0000-4000-8000-000000000002', U5B_FIRST_REPLY);
+    parentTranscript.turnEnd('e5b2e000-0000-4000-8000-000000000003');
+    seedTranscript(join(s.userData, 'claude-config'), s.repo, U5B_PARENT, parentTranscript.records);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's daemon runs next, as the profile's unit
+    said.push(`  ${here.label}: thread ${child} from ${anchor.label}, its first message's tag with the full hash, its lineage with no commit and no path`);
+
+    // the peer's daemon as the profile's unit: the list and the record load; the peer's app draws the parent's row
+    await withUnit(s, peer, 'xb-u5b-thread', async (unit) => {
+      expect((await unit.status()).build.buildId, `${peer.label}'s mawsd serves`).toBe(mawsdBuildOf(peer));
+      type Listed = { sessions: { appId: string; lineage: unknown }[] };
+      const listed = await unit.request<Listed>('session.list', {});
+      expect(listed.sessions.map((r) => r.appId), 'session.list loads and holds the parent and the child').toEqual(expect.arrayContaining([parent, child]));
+      expect(listed.sessions.find((r) => r.appId === child)?.lineage, 'the child listed with its lineage').toEqual(lineage);
+      const got = await unit.request<{ lineage: unknown } | null>('session.get', { appSessionId: child });
+      expect(got?.lineage, 'session.get: the lineage parses, with no commit').toEqual(lineage);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `${peer.label}'s app on its unit`).toBe(mawsdBuildOf(peer));
+      await (await sidebarRow(run.page, { appSessionId: parent })).click();
+      const row = run.page.locator(`[data-region="main"] [data-side-thread$=${JSON.stringify(child)}]`);
+      await expect(row, 'the parent’s side-thread row').toBeVisible({ timeout: 20_000 });
+      await expect(row.locator('.transcript-side-thread-label'), 'named by the lineage’s label').toHaveText(anchor.label);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s unit mawsd (pid ${unit.pid}): session.list holds ${listed.sessions.length} records with the child, session.get its lineage; its app draws the parent's row`);
+      await s.quit(run);
+      record(said);
+    });
+  });
 });
 
 // ---- UX wave U2b (docs/doperpowers/plans/2026-11-15-ux-wave-U2b-to-human-view.md, §F and §H): the to-human view -------

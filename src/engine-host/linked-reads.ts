@@ -4,7 +4,9 @@
 // answer, whole), in link order, and attached while the reads' total stays within the cap; a read refused or above what
 // is left is not attached, the session's memory of the artifact put back as it was (`read`'s side), and the agent reads
 // it as it would have. The reads attached keep their effects only if the frame carrying them is written (`settle`). The
-// message the queue keeps and shows is the human's: the reads go only into the frame.
+// message the queue keeps and shows is the human's: the reads go only into the frame. A consent whole goes with none
+// (`consentWhole`).
+import { readConsents } from '@shared/engine/arrival';
 import { LINKED_READ_CAP_BYTES, linkedArtifacts, linkedReadBlock, utf8Bytes, type LinkedArtifact } from '@shared/maws/linked-read';
 import type { SendContent } from '@shared/engine/session-state-store';
 
@@ -24,8 +26,18 @@ export interface LinkedReadOutcome {
 // before keeping what the read changed: a read `admit` refuses must leave the session as it found it.
 export type LinkedReader = (link: LinkedArtifact, admit: (text: string | null) => Admission) => Promise<ReadAnswer>;
 
+// UX wave U1c (the review of rule R, F1): a submission that is the consent sentence whole, a string or one text block (the
+// test rule R's step 0 reads it by, `readConsents`), carries no read. Its subject is the blocked call's text, quoted, so
+// a link in it is the model's and not the person's words; and a read beside it would leave its frame no sentence whole,
+// so the press would register as no grant on the live route and the file's.
+function consentWhole(content: SendContent): boolean {
+  const block = typeof content === 'string' || content.length !== 1 ? null : content[0]!;
+  const text = typeof content === 'string' ? content : block?.type === 'text' && typeof block.text === 'string' ? block.text : null;
+  return text !== null && readConsents(text).length > 0;
+}
+
 export async function withLinkedReads(content: SendContent, read: LinkedReader, cap = LINKED_READ_CAP_BYTES): Promise<LinkedReadOutcome> {
-  const links = linkedArtifacts(content);
+  const links = consentWhole(content) ? [] : linkedArtifacts(content);
   const undos: (() => void)[] = [];
   const outcome: LinkedReadOutcome = {
     content, attached: [], skipped: [],

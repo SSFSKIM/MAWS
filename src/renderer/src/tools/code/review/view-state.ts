@@ -7,7 +7,7 @@
 import { createStore, type StoreApi } from 'zustand/vanilla';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { TurnId } from '../../../transcript';
-import type { ReviewParams, ReviewScope } from './review-model';
+import { isFullHash, type ReviewParams, type ReviewScope } from './review-model';
 import type { FoldChoice } from './stack-model';
 
 export type ReviewMode = 'unified' | 'split';
@@ -25,6 +25,9 @@ export interface ReviewUi {
   directory: string | null; // the working folder it was decided in (UX wave U8c-2: the agent moving starts it over); null until known
   scope: ReviewScope | null; // null until decided: defaultScope once the status (and This branch's availability) is known
   turnId: TurnId | null; // Last turn's turn (a receipt's, or the latest turn with files when the chip is chosen)
+  // UX wave U5b-2 (§E): the commit a chip is listed for, set by a request that names one and replaced by another; choosing
+  // another chip leaves it listed; `forSession` drops it. Its subject once its read answered (the chip's title).
+  commit: { sha: string; subject: string | null } | null;
   hunk: number; // the counter's hunk across the stack, 0-based
   navigate: number; // bumped by ↑ and ↓: the stack scrolls to `hunk` when it changes
   mode: ReviewMode; // the stored choice; a stack too narrow for Split draws Unified without changing it
@@ -42,6 +45,7 @@ export function createReviewUi(init: { session: AppSessionId | null; directory?:
     directory: init.directory ?? null,
     scope: null,
     turnId: null,
+    commit: null,
     hunk: 0,
     navigate: 0,
     mode: init.mode ?? 'unified',
@@ -59,7 +63,7 @@ export function createReviewUi(init: { session: AppSessionId | null; directory?:
 // The mode, the viewed marks, the folds and the places (keyed by directory and scope, so a checkout's are found on
 // return) stay; a reveal does not outlive the session it was asked for.
 export function forSession(session: AppSessionId | null, directory: string | null): Partial<ReviewUi> {
-  return { session, directory, scope: null, turnId: null, hunk: 0, redecide: null, reveal: null };
+  return { session, directory, scope: null, turnId: null, commit: null, hunk: 0, redecide: null, reveal: null };
 }
 
 // A request that names a file: the stack brings that file's section into view and unfolds it (§F).
@@ -67,11 +71,19 @@ const revealOf = (ui: ReviewUi, path: string): ReviewUi['reveal'] => ({ path, n:
 
 // An open() (X5 re-targeting): a receipt's `{ scope: 'turn', turnId, path }` chooses the turn and reveals the path; a
 // scope with a path chooses both; no scope decides the default again, revealing the path it names, if any.
+// UX wave U5b-2 (§E): `{ scope: 'commit', commit, path? }` lists that commit's chip and shows it; a request that names the
+// commit Review already shows changes nothing but the file it names, which is brought into view.
 export function applyRequest(ui: ReviewUi, params: ReviewParams): Partial<ReviewUi> {
   const next: Partial<ReviewUi> = { request: null };
   if (params.scope === 'turn') {
     if (!params.turnId) return next;
     return { ...next, scope: 'turn', turnId: params.turnId, redecide: null, ...moved(ui, 'turn', params.turnId, params.path) };
+  }
+  if (params.scope === 'commit') {
+    if (!params.commit || !isFullHash(params.commit)) return next;
+    const same = ui.commit?.sha === params.commit;
+    const commit = same ? ui.commit : { sha: params.commit, subject: null };
+    return { ...next, scope: 'commit', commit, redecide: null, ...(same ? moved(ui, 'commit', ui.turnId, params.path) : { hunk: 0, reveal: params.path ? revealOf(ui, params.path) : null }) };
   }
   if (params.scope) return { ...next, scope: params.scope, redecide: null, ...moved(ui, params.scope, ui.turnId, params.path) };
   return { ...next, redecide: { path: params.path ?? null } };
@@ -105,9 +117,13 @@ export function selectLastTurn(ui: ReviewUi, latest: TurnId | null): Partial<Rev
 
 // The key of a scope's marks, folds and place (§E): the folder and the scope, with the turn for Last turn and the commit's
 // hash for the commit's scope, so a commit's are its own (S18). A commit named beside another scope (its chip listed) is not part of that scope's key.
-const COMMIT_SCOPE: string = 'commit'; // a ReviewScope from M9
 export const placeKey = (directory: string, scope: ReviewScope, turnId: TurnId | null, commit: string | null): string =>
-  `${directory}\0${scope}${scope === 'turn' ? `\0${turnId ?? ''}` : ''}${scope === COMMIT_SCOPE ? `\0${commit ?? ''}` : ''}`;
+  `${directory}\0${scope}${scope === 'turn' ? `\0${turnId ?? ''}` : ''}${scope === 'commit' ? `\0${commit ?? ''}` : ''}`;
+
+// UX wave U5b-2: the listed commit's subject, once its read answered (the chip's title); another commit's answer is not it.
+export function commitSubject(ui: ReviewUi, sha: string, subject: string): Partial<ReviewUi> {
+  return ui.commit?.sha === sha && ui.commit.subject !== subject ? { commit: { sha, subject } } : {};
+}
 
 // Marked, and the file is what it was when marked (`viewedSignature`; a stale mark is worse than none).
 export function isViewed(viewed: ReviewUi['viewed'], key: string, path: string, signature: string): boolean {
