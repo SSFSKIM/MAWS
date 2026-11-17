@@ -1,5 +1,7 @@
 # UX wave · ticket 733 · what MAWS and a paste put into a person's message goes as pasted content (2026-11-17)
 
+> **Superseded in part (2026-11-17).** For the forms MAWS composes, this document is superseded by `docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md` (733a, the first landing). What a person pastes is the second landing, 733b: this document awaits its revision as 733b and is not to be built from as it stands.
+
 > **Parent:** `docs/doperpowers/specs/2026-11-12-ux-wave-design.md` (the UX wave's composite spec, cited below as *root*). This landing is not a child of that spec: the root binds it only through the wave's laws and UC-8, UC-10, UC-11 and UC-14. **Board ticket:** 733 (P1), spawned by ticket 711. **Parent pin:** `bdbfe863e6b2f59031c10f0c51873c4a0210b00b`, the head of branch `ux-wave/733-paste-consent`: master `77af813a4` plus the eight landings of the wave's chain that are in review. Every statement about the code below was checked at that commit.
 >
 > **The statement of work** is the ticket's body and comments, read with `gh issue view 733 -R SSFSKIM/MAWS --json body,comments`: the body (the writers and the work), the architect's ruling in the comment of 2026-11-17T00:58Z ("a message MAWS composes carries model text inside a pasted segment AND neutralised by the joiner as the last step"), the first comment's finding on `quotesGrant`, the two probes' counts, and the owner's answer on pastes, which "The owner's answer" below records word for word.
