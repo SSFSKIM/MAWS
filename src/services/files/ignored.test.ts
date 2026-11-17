@@ -4,10 +4,10 @@
 // disposal, on a clock the test moves, and once over a real process group held open.
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -237,6 +237,46 @@ describe('the ignore check over a real repository', () => {
     await repo.write('.gitignore', '*.out\n');
     expect(sorted(await check.names(repo.path('deep'), ['a.gen', 'b.out']))).toEqual(['b.out']);
   });
+  // The panel's scalpel 2, second finding, with its input: the folder's `.git` is a gitdir pointer to another repository
+  // whose `core.worktree` names the folder above it. Git's own discovery would take that folder as the work tree and
+  // judge the names by its rules too; the check pins git to the folder the walk found (`GIT_WORK_TREE`).
+  it('judges a folder by its own rules when its .git points to another repository whose core.worktree names the folder above', async () => {
+    const above = temp();
+    writeFileSync(join(above, '.gitignore'), '*.log\n'); // a rule of the folder above, outside the tree the check is asked about
+    const tree = join(above, 'inner');
+    mkdirSync(tree);
+    writeFileSync(join(tree, '.gitignore'), '*.tmp\n');
+    for (const name of ['plain.txt', 'x.log', 'y.tmp']) writeFileSync(join(tree, name), 'x\n');
+    const other = await repository();
+    await other.git('config', 'core.worktree', above);
+    writeFileSync(join(tree, '.git'), `gitdir: ${other.path('.git')}\n`);
+    const check = checkOf({ env: other.serviceEnv() });
+    expect(sorted(await check.names(tree, ['plain.txt', 'x.log', 'y.tmp']))).toEqual(['y.tmp']); // the folder's own rule answers; the rule above does not
+  });
+
+  // Git checks who owns a repository it discovers, and skips the check for an explicit GIT_DIR (seen on the build VM's
+  // git through its own test switch): the check, which sets GIT_DIR, makes that check itself
+  it('rests on git checking who owns a repository it discovers, and not one named by GIT_DIR', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('a.log', 'x\n');
+    const env = { PATH: process.env.PATH, HOME: repo.home, GIT_CONFIG_NOSYSTEM: '1', GIT_TEST_ASSUME_DIFFERENT_OWNER: '1' };
+    const ask = (more: NodeJS.ProcessEnv) => () => execFileSync('/usr/bin/git', ['-C', repo.root, 'check-ignore', '--no-index', './a.log'], { env: { ...env, ...more }, encoding: 'utf8', stdio: 'pipe' });
+    expect(ask({})).toThrow(/dubious ownership/);
+    expect(ask({ GIT_DIR: repo.path('.git'), GIT_WORK_TREE: repo.root })()).toBe('./a.log\n');
+  });
+
+  it('gives no answer for a repository another user owns, as git does for one it discovers, beside the same repository answering as this user’s', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('a.log', 'x\n');
+    const check = checkOf({ env: repo.serviceEnv() });
+    expect(sorted(await check.names(repo.root, ['a.log']))).toEqual(['a.log']); // the control
+    const uid = process.getuid!();
+    vi.spyOn(process, 'getuid').mockReturnValue(uid + 1); // every file of the repository now another user's
+    expect(await check.names(repo.root, ['a.log'])).toBeNull();
+  });
+
 });
 
 // A repository as the check finds one, by its `.git` entry, for a spawn function that stands in for git
@@ -258,6 +298,7 @@ interface HeldRun {
   args: string[]; // as git is given them after `-C <directory>`
   directory: string;
   input: string | undefined;
+  env: NodeJS.ProcessEnv;
   answer(error: Error | null, stdout: string): void;
 }
 // A spawn function whose runs are held by the test: each call is kept, with what it was asked, until the test answers
@@ -274,6 +315,7 @@ function heldRuns() {
       args: args.slice(2),
       directory: args[1]!,
       input: options.input,
+      env: options.env,
       answer: (error, stdout) => {
         live--;
         callback(error as never, stdout, '');
@@ -302,6 +344,72 @@ async function drain(pending: HeldRun[], answers: Promise<unknown>[], reply: (ru
     if (run) reply(run);
   }
 }
+
+// The panel's scalpel 2: git runs only in the repository the walk found, for folders that are still the objects the
+// service confirmed at the spelling git is handed, checked before each of a run's calls
+describe('where git runs', () => {
+  it('names the repository the walk found to git as GIT_DIR and its folder as GIT_WORK_TREE, in every call of a run', async () => {
+    const repo = fakeRepo('harbor');
+    const { execFile, pending, made } = heldRuns();
+    const answer = checkOf({ execFile }).names(join(repo, 'harbor'), ['debug.log']);
+    await drain(pending, [answer]);
+    expect(sorted(await answer)).toEqual(['debug.log']);
+    expect(made.map((run) => [run.directory, run.env.GIT_DIR, run.env.GIT_WORK_TREE])).toEqual([
+      [repo, join(repo, '.git'), repo],
+      [repo, join(repo, '.git'), repo],
+    ]);
+  });
+
+  it('gives no answer and asks git nothing for a folder moved away, or replaced by a link, between its walk and its run, while the run answers the folder that stayed', async () => {
+    const repo = fakeRepo('seed', 'kept', 'moved', 'linked');
+    const elsewhere = temp();
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile, allowanceMs: 600_000 });
+    const seed = check.names(join(repo, 'seed'), ['s.log']);
+    await reached(1); // the seed's run holds the repository: the asks below join its next run
+    const kept = check.names(join(repo, 'kept'), ['a.log']);
+    const moved = check.names(join(repo, 'moved'), ['b.log']);
+    const linked = check.names(join(repo, 'linked'), ['c.log']);
+    await settle();
+    renameSync(join(repo, 'moved'), join(repo, 'moved-away'));
+    mkdirSync(join(repo, 'moved')); // another folder at the same spelling
+    renameSync(join(repo, 'linked'), join(repo, 'linked-away'));
+    symlinkSync(elsewhere, join(repo, 'linked'));
+    await drain(pending, [seed, kept, moved, linked]);
+    expect([sorted(await seed), sorted(await kept), await moved, await linked]).toEqual([['s.log'], ['a.log'], null, null]);
+    expect(made.slice(2).map((run) => (isLsFiles(run) ? run.args.slice(4) : run.input))).toEqual([['kept/'], './kept/a.log\0']);
+  });
+
+  it('gives no answer and asks git nothing for a folder that is not the object the service confirmed, beside the same ask with its identity', async () => {
+    const repo = fakeRepo('harbor');
+    const { execFile, pending, counts } = heldRuns();
+    const check = checkOf({ execFile });
+    const own = statSync(join(repo, 'harbor'), { bigint: true });
+    const other = statSync(repo, { bigint: true });
+    expect(await check.names(join(repo, 'harbor'), ['a.log'], { dev: other.dev, ino: other.ino })).toBeNull();
+    expect(counts().calls).toBe(0);
+    const answer = check.names(join(repo, 'harbor'), ['a.log'], { dev: own.dev, ino: own.ino }); // the control
+    await drain(pending, [answer]);
+    expect(sorted(await answer)).toEqual(['a.log']);
+  });
+
+  it('gives no answer and asks git nothing for the asks of a repository whose .git was replaced between the walk and the run, beside a repository that answers', async () => {
+    const repo = fakeRepo('kept');
+    const control = fakeRepo();
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile, allowanceMs: 600_000 });
+    const seed = check.names(repo, ['s.log']);
+    await reached(1);
+    const late = check.names(join(repo, 'kept'), ['a.log']);
+    await settle();
+    renameSync(join(repo, '.git'), join(repo, '.git-away'));
+    mkdirSync(join(repo, '.git'));
+    const answered = check.names(control, ['b.log']);
+    await drain(pending, [seed, late, answered]);
+    expect([sorted(await seed), await late, sorted(await answered)]).toEqual([['s.log'], null, ['b.log']]);
+    expect(made.filter((run) => run.directory === repo)).toHaveLength(2); // the seed's two calls, and none for the late ask
+  });
+});
 
 describe('the bound and the places', () => {
   it('gives no answer when the test’s clock reaches the bound, and nothing more past the runner’s own kill delay', async () => {
@@ -535,6 +643,32 @@ describe('the bound and the places', () => {
       for (const child of children) close(child);
       await disposed;
     }
+  });
+
+  // The panel's scalpel 1: the walk to the repository reads the disk one folder at a time, and stops once its ask is
+  // answered (its bound passed, the check disposed)
+  it('stops its walk to the repository once the ask has expired or the check is disposed, beside a walk that reaches the top', async () => {
+    const deep = join(temp(), 'a', 'b', 'c', 'd', 'e', 'f');
+    mkdirSync(deep, { recursive: true });
+    const spied = vi.spyOn(fs.promises, 'lstat');
+    const walked = () => spied.mock.calls.filter(([path]) => String(path).endsWith(`${sep}.git`)).length;
+    expect(await checkOf({}).names(deep, ['a.log'])).toBeNull(); // the control: no repository, every folder up to the top read
+    expect(walked()).toBeGreaterThanOrEqual(7);
+    spied.mockClear();
+    const disposed = checkOf({});
+    const gone = disposed.names(deep, ['a.log']);
+    void disposed.dispose();
+    expect(await gone).toBeNull();
+    await settle();
+    expect(walked()).toBe(1); // the one read in flight at the disposal
+    spied.mockClear();
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const expiring = checkOf({});
+    const late = expiring.names(deep, ['a.log']);
+    vi.advanceTimersByTime(IGNORED_CHECK_MS);
+    expect(await late).toBeNull();
+    await settle();
+    expect(walked()).toBe(1);
   });
 
   it('never starts the run of a check that waited for a place its whole bound', async () => {
