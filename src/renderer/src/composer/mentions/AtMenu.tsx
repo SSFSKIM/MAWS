@@ -50,7 +50,7 @@ function rowOf(item: AtItem): Row {
     disabled: false,
     item,
     apply: (editor, range) => {
-      editor.chain().focus().deleteRange(range).insertContentAt(1, slashText(item.name)).run(); // ticket 733a: the name's rule
+      editor.chain().focus().deleteRange(range).insertContentAt(1, textNode(slashText(item.name))).run(); // ticket 733a: the name's rule, as text (never parsed as HTML)
     },
   };
 }

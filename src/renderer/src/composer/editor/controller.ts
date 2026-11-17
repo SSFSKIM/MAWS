@@ -30,6 +30,11 @@ import { mentionLabel, prefillToDoc } from './recall';
 import { modeOf, plainTextOf, serializeDraft, type Serialized } from './serialize';
 import { submitSerialized } from './submit';
 
+// Ticket 733a (the M3 review): what `insertText` is given (a widget's insertion, Mark-up's draft, a queued text) goes into
+// the draft as text, never parsed as HTML: its writer checked these bytes, and a parse would decode entities and break
+// lines after the check. An empty text inserts nothing, as before (a text node may not be empty).
+const asText = (text: string) => (text === '' ? text : textNode(text));
+
 // Where the draft lives: C4's `session.drafts.*` by default; C10's intent on an unstarted session (M4 passes it).
 export interface DraftPort {
   load(): Promise<Draft | null>;
@@ -950,11 +955,11 @@ export class EditorController {
         if (this.busy) return;
         const at = editor().isFocused ? editor().chain() : editor().chain().focus(this.caretLeft ? null : 'end'); // `null`: the kept selection
         if (!options?.separated) {
-          at.insertContent(text).run();
+          at.insertContent(asText(text)).run();
           return;
         }
         at.run(); // P3-G: the caret first, so the text before it can be read
-        editor().chain().insertContent(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text).run();
+        editor().chain().insertContent(asText(needsLeadingSpace(editor().state, editor().state.selection.from) ? ` ${text}` : text)).run();
       },
       doc: () => editor().getJSON(),
       serialize: () => serializeDraft(editor().getJSON(), { sessionId: this.inputs.sessionId, cwd: this.inputs.cwd }),

@@ -28,7 +28,7 @@ export type FileAction = { kind: 'image' } | { kind: 'pdf' } | { kind: 'mention'
 // Design 3, §E): a path that quotes the grant's opening is refused the same way, at a drop, a pick and the `@` menu.
 export function pathRefusal(name: string, path: string): string | null {
   if (MENTION_BREAKS.test(path)) return `${name} can't be attached; its path holds a line break or another control character`;
-  return quotesGrant(path) ? `${name} can't be attached; its path reads as a permission grant` : null;
+  return quotesGrant(path) ? `${name} can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it` : null; // ticket 733a, §E as revised
 }
 
 export function classifyFile(file: { name: string; type: string; size: number }, path: string): FileAction {
