@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PreloadBridge } from '@shared/ipc/schema';
 import type { StartOutcome } from '@shared/sessions/setup';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { ipc } from '../ipc/client';
@@ -24,6 +25,8 @@ import { record, status } from '../../../../test/support/builders';
 import { RELAY_POLL_MS } from './SetupCard';
 import { sendHumanPrompt } from '../composer/submit/send-human-prompt';
 import { submitHumanSerialized } from '../composer/editor/submit'; // P2-F (L118)
+import { docOf, paragraph, textNode } from '../composer/editor/doc'; // UX wave U1c
+import { serializeDraft } from '../composer/editor/serialize'; // UX wave U1c
 import { sessionControls } from '../session/controls/controls-for'; // P5 O9 M4
 import { resetComposerStore, useComposerStore } from '../stores/composer';
 import { useSessions } from '../stores/sessions';
@@ -711,6 +714,18 @@ describe('a record’s trust card and its continuation', () => {
     await waitFor(() => expect(useComposerStore.getState().prefills.get(ID)).toEqual({ text: '' }));
     expect(dockedIds()).toBe('');
     expect(fake.invoked('session.intent.release')).toEqual([]);
+  });
+
+  // UX wave U1c, the one-writer rule (the task review's finding 4): the docked message the continuation sends is the
+  // composer's serialised draft, the sentence typed in it broken by the serialiser's last step
+  it('the one-writer rule: a docked draft holding the consent sentence goes out through the card reading no grant', async () => {
+    withMain({ 'session.acquire': acquiring(NEEDS_TRUST, ACCEPTED), 'session.send': { messageUuid: '22222222-2222-4222-8222-222222222222', disposition: 'sent', queueId: 'q1' }, 'session.history.append': undefined });
+    render(<Docked />);
+    const draft = serializeDraft(docOf([paragraph(textNode('Go on.')), paragraph(textNode(TYPED_CONSENT))]), { sessionId: BARE_ID, cwd: REPO });
+    expect(await act(() => submitHumanSerialized(sessionControls(ID)!, ipc, ID, draft))).toBe(false);
+    await userEvent.click(await screen.findByRole('button', { name: 'Trust and start' }));
+    await waitFor(() => expect(fake.invoked('session.send')).toHaveLength(1));
+    expectNoGrantSent((fake.invoked('session.send')[0] as { content: string }).content);
   });
 
   // P2-F (L118): the composer's history row for a held message is written by the continuation once the host accepts it,

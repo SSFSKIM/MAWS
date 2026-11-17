@@ -127,7 +127,7 @@ export class SessionMaws {
 
   // P4-A3: a human message the queue submits, with the reads of the artifacts its words link (link order, within the
   // cap; `../linked-reads`), and what keeps or undoes those reads once the queue knows whether the frame was written;
-  // content linking nothing readable comes back as it was, and so does any content when the reads fail. A read is the
+  // content linking nothing readable, or a consent whole (U1c), comes back as it was, and so does any content when the reads fail. A read is the
   // session's own `artifact_read` answer at this moment (no tool-use id: it joins no call's operation), so it resolves,
   // migrates and answers exactly as the agent's read would.
   async withLinkedReads(content: SendContent): Promise<Prepared> {

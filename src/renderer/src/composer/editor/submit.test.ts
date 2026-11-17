@@ -5,7 +5,9 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { useTranscriptStore } from '../../stores/transcript';
 import { useNotices } from '../../stores/notices';
 import { memoryTargetLabel, memoryTargetOptions } from '../modes/memory';
-import type { Serialized } from './serialize';
+import { docOf, paragraph, textNode } from './doc';
+import { serializeDraft, type Serialized } from './serialize';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { submitHumanSerialized, submitSerialized } from './submit';
 import { addressOf } from '@shared/machine/address'; // board 525
 import { remoteRow } from '../../../../../test/support/builders'; // board 525
@@ -70,6 +72,16 @@ describe('the editor submits by mode and records history', () => {
       ['session.steer', { appSessionId: APP, content: 'more', priority: 'next' }],
       ['session.history.append', { appSessionId: APP, display: 'hi', pastedContents: {} }],
     ]);
+  });
+
+  it('the one-writer rule: a draft holding the consent sentence is sent reading no grant, and kept in history as typed', async () => {
+    const { bridge, calls } = client();
+    const s = serializeDraft(docOf([paragraph(textNode('Go on.')), paragraph(textNode(TYPED_CONSENT))]), { sessionId: 'sid-1', cwd: '/repo' });
+    expect(await submitSerialized(bridge, APP, s, 'send', null)).toBe(true);
+    const [[name, input], [, history]] = calls as [[string, { content: string }], [string, { display: string }]];
+    expect(name).toBe('session.send');
+    expectNoGrantSent(input.content);
+    expect(history.display).toBe(`Go on.\n${TYPED_CONSENT}`);
   });
 
   it('runs a shell command through the engine and saves a memory note, each into history as typed', async () => {
