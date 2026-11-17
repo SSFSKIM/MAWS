@@ -641,6 +641,14 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
 - **2026-11-17 · Revised a second time, to the architect's ruling on older builds and a re-read of Design 5.** The segment stays around the read's JSON and the three older peers draw this build's reads as text, recorded by the cross-build scene and said in Design 8 in a person's words; the update window is meant to be short. Design 5's table is keyed on the form's own reader: a slot goes through the leave-out and a segment whatever the row's ranges, and no stored form is recognised by `holdsGrantForm`. A read that is not attached is a stated limit.
   Date/Author: 2026-11-17, the architect and the re-read; recorded by the document's author.
 
+- **2026-11-17 · The architect's rulings on the author's last points, recorded before M1.**
+  (1) A promotion's exchange holds the person's questions; at a resend the whole exchange goes through the leave-out, so a question of theirs that quotes the opening is left out. Accepted, as Design 5 states it.
+  (2) Inside a recognised form's slot every chip is opened to its body before the leave-out. Accepted.
+  (3) A person's message whose first line is exactly `Implement this plan:` followed by a blank line is read as the form at an edit. Accepted as the one stated case where an edit rewrites a person's own text; a unit case of `composedPrefill` pins it (the message, typed by a person with that first line and a line quoting the opening after it, edited and sent: the line left out, the rest in one segment).
+  (4) The relay row of Design 5 stands whether or not Edit is offered on a relay's row. At `bdbfe863e` it is offered: a relay goes as a `user.message` with a message id, and `derive.ts` marks such a row `editable` unless it holds several comments (`messageRows(event, rowId.user(event.messageUuid), true)`, `editable && text.comments === null`); nothing there tests for a relay.
+  (5) If S3's harness can read only part of an older peer's bubble text, what it can assert comes to the architect before the scene is settled.
+  Date/Author: 2026-11-17, the architect; recorded by the plan's executor.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
