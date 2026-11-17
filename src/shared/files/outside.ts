@@ -12,3 +12,9 @@ export const OUTSIDE_ACTS = ['files.readOutside', 'files.listOutside', 'files.ch
 
 /** What an endpoint lists in its handshake once it serves the four acts; the device sends none of them to one that does not. */
 export const OUTSIDE_FILES_CAPABILITY = 'rl2.outside-files';
+
+/**
+ * `issues.refusal` of an answer the services' ledger did not keep (a read's bytes, a listing's names: §C), which the
+ * device's projection of an act's outcome keeps (§D), so a copy of the operation is asked afresh.
+ */
+export const NOT_KEPT_REFUSAL = 'not-kept';

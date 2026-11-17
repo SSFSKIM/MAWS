@@ -86,7 +86,7 @@ import { restoreWindowState, trackWindowState } from './window-state';
 // C5 end
 // C7 start
 import { pickFiles } from './files/pick';
-import { appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
+import { APP_PAGE_ONLY, appPageOnly, isAppPage, openChosenFile } from './files/open-file'; // UX wave U6e
 import { onEmitted } from './ipc/events';
 import { claudeConfigDir } from '@shared/engine/config-dir';
 import { ClaudeUsageReader, claudeUsageDir } from './usage/claude-usage-reader';
@@ -557,8 +557,9 @@ function startMain(launch: LaunchShape, { local, localName }: { local: MachineRe
   // UX wave U5a (Decision Log 52): a side thread of several comments the attached daemon predates is refused in the
   // card's words, never sent to be opened from its first comment alone (./machines/side-thread-peer.ts)
   beforeCommand(SIDE_THREAD_COMMANDS, refuseUnservedSideThreads(() => hosts.peer('machine'), localName));
-  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding
-  guardCommand(['files.writeOutside', 'layout.openFile'], appPageOnly(appUrl));
+  // UX wave U6e (decision 9): an outside save and the chooser only for a live page of an app window, before any forwarding;
+  // U6f: and the open, the listing and the pick of a file outside a session's folders on another machine
+  guardCommand(APP_PAGE_ONLY, appPageOnly(appUrl));
   installRouter({ appUrl, local, dispatchToHost, remote: routeLaneB(routeLaneA(machines.dispatch, (ref) => machines.remote(ref), remoteLaneA), (ref) => machines.remote(ref), remoteLaneB), machine: { kind: 'host', daemonRenders, daemonDelivers } });
   // P5 O3-C (Interfaces §A): the services bus, bound here to the router and `emit`, so every tap main's own code holds
   // (the menu's) hears mawsd's events, and main's own calls take main's own route. P5 O15 M2: no library registers its

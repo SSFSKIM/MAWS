@@ -21,6 +21,7 @@
 // The UX wave (U9, UC-7; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §3): an act offered
 // since then leaves the set and names the capability a machine's endpoint lists once it serves it (`REMOTE_NEEDS`), and
 // one function words, for every act, why its control is disabled and why it ended without its effect (UC-7.5).
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
 import { gradeOf } from './grades';
 import type { CommandName } from './schema';
 
@@ -68,7 +69,6 @@ export const REMOTE_UNAVAILABLE: Readonly<Partial<Record<CommandName, string>>> 
   'session.ui.answer': notYet('mod surfaces'),
   // on the asking client
   'files.openExternal': notYet('opening a file there; open a copy here instead'),
-  'files.writeOutside': notYet('saving a file outside that session’s folders'), // UX wave U6e (Decision Log 10)
   'files.reveal': notYet('showing a file in that machine’s Finder'),
   'side.screenshot.preview': notYet('screenshots'),
   // the owner channel, attention, the side thread, the mods
@@ -110,6 +110,8 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
   'git.branchCommits': 'rl2.git-reads',
   'git.commitDiff': 'rl2.git-reads',
   'git.changesSince': 'rl2.git-reads',
+  // UX wave U6f (§C): the open, the chooser's listing, the pick and the save of a file outside a session's folders there
+  ...(Object.fromEntries(OUTSIDE_ACTS.map((name) => [name, OUTSIDE_FILES_CAPABILITY])) as Record<(typeof OUTSIDE_ACTS)[number], string>),
 };
 
 /**

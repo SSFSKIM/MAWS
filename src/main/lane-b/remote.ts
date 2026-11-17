@@ -94,6 +94,7 @@
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
+import { OUTSIDE_ACTS } from '@shared/files/outside';
 import { requestDigestOf } from '@shared/host/request-digest';
 import type { SessionEvent } from '@shared/graph/events';
 import { ipcError, type IpcErrorCode } from '@shared/ipc/errors';
@@ -282,6 +283,8 @@ export const MACHINE_ACTS: ReadonlySet<CommandName> = new Set<CommandName>([
   // the UX wave (U9): behind `rl2.session-acts`; archive, unarchive and rename `manage`, a dismissal `converse`; M2: a fork
   // in place, the machine's owners', stepped up and answered within its command's budget, never through the spawn table
   'session.archive', 'session.update', 'session.rename', 'attention.acknowledge', 'session.fork',
+  // the UX wave (U6f): behind `rl2.outside-files`; a file outside a session's folders opened, listed, chosen and saved
+  ...OUTSIDE_ACTS,
 ]);
 /**
  * The project registry (Interfaces §G, "Older peers"): what goes only to a machine whose RL2 handshake lists

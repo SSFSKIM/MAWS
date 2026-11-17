@@ -5,6 +5,7 @@
 // waiting message is offered behind a capability of its own, and it and taking a message back have their words.
 import { describe, expect, it } from 'vitest';
 import { ACT_WORDS, disabledWords, failureWords, REMOTE_NEEDS, REMOTE_UNAVAILABLE, refusalWords, SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY, type RemoteStanding } from './remote-unavailable';
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
 import { GIT_READS_CAPABILITY } from './schema/git';
 
 const M = 'Loft';
@@ -13,7 +14,7 @@ const at = (fields: Partial<RemoteStanding>): RemoteStanding => ({ ...UP, ...fie
 /** The UX wave U5b-2's three reads (M8), behind a capability of their own (below). */
 const GIT_READS = ['git.branchCommits', 'git.commitDiff', 'git.changesSince'] as const;
 /** What other capabilities than the session acts' gate, each pinned in its own block below. */
-const OWN_CAPABILITY: readonly string[] = ['artifacts.undelete', ...GIT_READS];
+const OWN_CAPABILITY: readonly string[] = ['artifacts.undelete', ...GIT_READS, ...OUTSIDE_ACTS];
 
 describe('the acts the wave offers', () => {
   it('leave the declared set and each needs `rl2.session-acts`, Fork among them (M2)', () => {
@@ -161,6 +162,19 @@ describe('the git reads over the link', () => {
     for (const command of GIT_READS) {
       expect([command, REMOTE_NEEDS[command]]).toEqual([command, GIT_READS_CAPABILITY]);
       expect([command, REMOTE_UNAVAILABLE[command], ACT_WORDS[command]]).toEqual([command, undefined, undefined]);
+    }
+  });
+});
+
+// UX wave U6f (M2; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C): a file outside a
+// session's folders opened, listed, chosen and saved there goes only to a machine whose endpoint lists
+// `rl2.outside-files`; the save leaves the declared set U6e put it in. M3 gives the four their words.
+describe('the outside acts over the link', () => {
+  it('each need `rl2.outside-files`, and none is declared', () => {
+    expect(OUTSIDE_FILES_CAPABILITY).toBe('rl2.outside-files');
+    for (const command of OUTSIDE_ACTS) {
+      expect([command, REMOTE_NEEDS[command]]).toEqual([command, OUTSIDE_FILES_CAPABILITY]);
+      expect([command, REMOTE_UNAVAILABLE[command]]).toEqual([command, undefined]);
     }
   });
 });

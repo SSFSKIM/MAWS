@@ -1,9 +1,10 @@
 // Open File… and the sender's guard (UX wave U6e, docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md,
 // §C; write rule line 2, decisions 3, 9 and 14).
 //
-// The guard: `files.writeOutside` and `layout.openFile` are answered only for a live page of an app window, the window
-// `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's own origin test,
-// ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a web contents that
+// The guard: `files.writeOutside` and `layout.openFile` (and, UX wave U6f, the open, the chooser's listing and the pick of
+// a file outside a session's folders on another machine: `APP_PAGE_ONLY`) are answered only for a live page of an app
+// window, the window `createWindow` registered (`appWindows()`), whose main frame is at the app's origin (the router's
+// own origin test, ../ipc/app-origin.ts). The router's sender check already refuses, for a page's invoke, a subframe, a web contents that
 // is no window's and a page at another origin; this refuses, too, a window of the app's origin that is not an app window
 // (a presentation, the repair window), main's in-process callers, whose asker is no page, and, through `dispatchLocal`
 // and `invokeOwn`, which have no sender check, a page an app window navigated to elsewhere. The app registers it with
@@ -16,9 +17,10 @@
 // session's id is bare here and its machine is the router's target: `layout.*` is graded `client`, so a session of
 // another machine is refused by the router before this runs.
 import type { ClientPort, PickAnswer } from '@shared/client/port';
+import { OUTSIDE_ACTS } from '@shared/files/outside';
 import type { ClientRef } from '@shared/ipc/client';
 import { ipcError } from '@shared/ipc/errors';
-import type { CommandInput, CommandResult } from '@shared/ipc/schema';
+import type { CommandInput, CommandName, CommandResult } from '@shared/ipc/schema';
 import type { OpenFileOutput } from '@shared/ipc/schema/layout';
 import { atAppOrigin } from '../ipc/app-origin';
 import { pageOf } from '../ipc/clients';
@@ -31,6 +33,9 @@ export function isAppPage(client: ClientRef, appUrl: string): boolean {
   const page = pageOf(client);
   return page !== null && appWindows().some((win) => win.webContents === page) && atAppOrigin(page.mainFrame.url, appUrl);
 }
+
+/** The commands the guard answers only for a live page of an app window: U6e's save and Open File…, and U6f's three acts. */
+export const APP_PAGE_ONLY: readonly CommandName[] = [...OUTSIDE_ACTS, 'layout.openFile'];
 
 export const appPageOnly =
   (appUrl: string): CommandGuard =>

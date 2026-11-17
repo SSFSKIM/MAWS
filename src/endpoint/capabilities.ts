@@ -81,4 +81,9 @@ export const ENDPOINT_CAPABILITIES = [
   // a device sends a machine none of them unless its `h2` listed it, since an older one has no row for them and answers
   // `not-offered`.
   'rl2.git-reads',
+  // The UX wave (U6f; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C): this endpoint
+  // offers `files.readOutside`, `files.listOutside`, `files.chooseOutside` and `files.writeOutside` on the terminal's
+  // row (OUTSIDE_FILES_CAPABILITY); a device sends a machine none of them unless its `h2` listed it, since an older one
+  // has no row for them and answers `not-offered`.
+  'rl2.outside-files',
 ] as const;
