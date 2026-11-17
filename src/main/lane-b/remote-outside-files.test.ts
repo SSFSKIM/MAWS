@@ -429,7 +429,9 @@ describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', 
       if (act.request.action !== 'files.readOutside') return;
       if (!l.link.peers.includes(OUTSIDE_FILES_CAPABILITY)) return act.settle({ state: 'refused', reason: 'not-offered' }); // as an older build answers a name it has no row for
       act.settle({ state: 'done', result: answerOf(textOf(), act.request.args as Record<string, unknown>, { named: true, outside: { real: NOTES, writable: true } }) });
-      if (first) (first = false), then();
+      if (!first) return;
+      first = false;
+      then();
     };
   }
   const switchTo = (l: ReturnType<typeof lab>, peers: string[]) => () => {
