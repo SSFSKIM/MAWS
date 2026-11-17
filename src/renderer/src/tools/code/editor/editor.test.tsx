@@ -662,6 +662,42 @@ describe('editor', () => {
       expect(theirsNotice()).toBe('Changed on disk since you opened it');
     });
 
+    // U1c (the architect's ruling on the notice cut at the side panel's width): the reason, in both its forms and where it
+    // says why the disk's version cannot be merged, carries nothing that cuts its text, and the controls' row wraps, so in
+    // a narrow bar the counter and the buttons move to a further line in their own order rather than squeezing the reason;
+    // the row's order is the reading and tab order.
+    it('never cuts the reason, in either form or why the disk cannot be merged, and wraps the controls after it in their order', async () => {
+      const CUTS = ['truncate', 'overflow-hidden', 'text-ellipsis', 'whitespace-nowrap'];
+      const REASON = '[data-theirs-notice], [data-disk-unusable]';
+      const row = () => document.querySelector<HTMLElement>('[data-editor-controls]')!;
+      const parts = () =>
+        Array.from(row().children).map((part) =>
+          part.matches(REASON) ? 'reason' : part.querySelector('[data-merge-changes]') ? 'changes' : (part.textContent ?? ''),
+        );
+      const expectLaidOut = (order: string[]) => {
+        const reason = row().querySelector(REASON)!;
+        expect(reason.className.split(/\s+/).filter((name) => CUTS.includes(name)), 'what would cut the reason').toEqual([]);
+        expect(row().className.split(/\s+/)).toContain('flex-wrap');
+        expect(parts()).toEqual(order);
+        const moved = Array.from(row().querySelectorAll<HTMLElement>('*')).filter((el) => el.tabIndex > 0 || /(^|\s)order-/.test(el.className));
+        expect(moved, 'nothing reordered for the eye or the keyboard').toEqual([]);
+      };
+      const { disk } = await open({ [APP]: 'const a = 1;\n' });
+      type('// mine\n');
+      disk.files[APP] = { text: 'caf\uFFFD\n', bytes: 5, utf8: false };
+      changed(disk);
+      await waitFor(() => expect(document.querySelector('[data-disk-unusable]')?.textContent).toBe('Changed on disk: no longer UTF-8, so it cannot be merged'));
+      expectLaidOut(['reason', 'Save']);
+      disk.files[APP] = 'const a = 2;\n';
+      changed(disk);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk'));
+      expectLaidOut(['reason', 'Reload', 'Keep mine', 'Compare', 'Save']);
+      fireEvent.click(saveButton()!);
+      await waitFor(() => expect(theirsNotice()).toBe('Changed on disk since you opened it'));
+      await waitFor(() => expect(row().querySelector('[data-merge-changes]')).not.toBeNull());
+      expectLaidOut(['reason', 'changes', 'Reload', 'Keep mine', 'Save']);
+    });
+
     it('reads the file whole into the merge view when a save conflicts on a change the tab never saw', async () => {
       const { disk } = await open({ [APP]: 'const a = 1;\n' });
       type('// mine\n');

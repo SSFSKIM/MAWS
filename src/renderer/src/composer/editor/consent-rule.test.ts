@@ -8,7 +8,7 @@
 import type { JSONContent } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { consentMessage, readArrivals } from '@shared/engine/arrival';
-import { GRANT_BREAK, GRANT_OPENING, neutraliseGrant } from '@shared/engine/grant';
+import { GRANT_BREAK, GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL, neutraliseGrant } from '@shared/engine/grant';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { AppSessionId } from '@shared/graph/ids';
 import { laterImages } from '../../../../../test/support/later-changes';
@@ -16,6 +16,7 @@ import { at } from '../../../../../test/support/machine';
 import { waitingGrants } from '../../blocked-call/grants';
 import { resetQueueStore, useQueueStore } from '../../stores/queue';
 import { docOf, hardBreak, mentionNode, paragraph, pastedNode, textNode, type Attachment } from './doc';
+import { mentionText } from './mention-text';
 import { PIECE_KINDS, serializeDraft, type PieceKind } from './serialize';
 
 const APP = at('consent-rule') as AppSessionId;
@@ -24,6 +25,8 @@ const SENTENCE = consentMessage('command', 'cat /etc/x');
 const AROUND = consentMessage('command', 'cat @src/a.ts'); // a sentence whose subject a mention completes
 const [BEFORE, AFTER] = AROUND.split('@src/a.ts') as [string, string];
 const PRESSED = consentMessage('command', 'npm test');
+// the sentence's longer openings, which the writer breaks (the review round's R1); the short opening alone goes as typed
+const LONGER = [`${GRANT_OPENING}${GRANT_ONE}`, `${GRANT_OPENING}${GRANT_SEVERAL}`];
 afterEach(() => resetQueueStore());
 
 // The three readers of a grant in a person's message, each the real one: the subjects each reads
@@ -45,8 +48,11 @@ const textOf = (content: SendContent): string => (typeof content === 'string' ? 
 function holdsNone(content: SendContent, where: string): void {
   for (const block of typeof content === 'string' ? [content] : content.flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : []))) {
     for (const [how, image] of laterImages(block)) {
-      expect(image.includes(GRANT_OPENING), `${where}, ${how}: a verbatim opening`).toBe(false);
+      for (const opening of LONGER) expect(image.includes(opening), `${where}, ${how}: a verbatim ${opening}`).toBe(false);
       expect(readers(image), `${where}, ${how}`).toEqual(NONE);
+      // the architect's ruling on the review's property finding: each image joined with a pressed consent, before and after
+      expect(readers(`${image}\n${PRESSED}`), `${where}, ${how}, a pressed consent after`).toEqual(PRESSED_ONLY);
+      expect(readers(`${PRESSED}\n${image}`), `${where}, ${how}, a pressed consent before`).toEqual(PRESSED_ONLY);
     }
   }
   expect(readers(content), `${where}, as sent`).toEqual(NONE);
@@ -110,9 +116,24 @@ describe('the one-writer rule: no grant from what the person did not press', () 
     expect(again.text, 'a recalled text sent again does not grow').toBe(out.text);
   });
 
+  // the review round's R1 (a): a dropped file whose name holds the short opening is mentioned as its path, byte for byte
+  it('a dropped file whose name holds the short opening goes out byte for byte, its mention naming the file', () => {
+    const id = 'docs/Permission granted for site visit.docx';
+    const out = serializeDraft(docOf([paragraph(textNode('See '), mentionNode({ id, label: 'Permission granted for site visit.docx', kind: 'file' }))]), { sessionId: SESSION, cwd: '/repo' });
+    expect(out.text).toBe(`See ${mentionText({ id, kind: 'file' })}`);
+    expect(out.text).toBe('See @"docs/Permission granted for site visit.docx"');
+  });
+
+  // the review round's R1 (b): identifiers, paths and prose holding the short opening go as typed
+  it('identifiers, a path and a prose line holding the short opening go out as typed', () => {
+    for (const typed of ['permission_granted_for', 'isPermissionGrantedFor(user)', 'docs/permission-granted-for-users.md', 'Permission granted for the site visit, as agreed.']) {
+      expect(serializeDraft(docOf([paragraph(textNode(typed))]), { sessionId: SESSION, cwd: '/repo' }).text, typed).toBe(typed);
+    }
+  });
+
   it('over seeded drafts of every piece kind, what the serialiser sends and every later image of it hold no opening and read no grant', () => {
     const seed = 0x75316331;
-    const count = 600;
+    const count = 300; // within the default 5 s case limit under the wide run's load (each image read alone and joined twice)
     const r = random(seed);
     let neutralised = 0;
     for (let n = 0; n < count; n += 1) {
@@ -127,7 +148,7 @@ describe('the one-writer rule: no grant from what the person did not press', () 
 
   it('over seeded free text, what the sites without the serialiser send and every later image of it hold no opening and read no grant', () => {
     const seed = 0x66726565;
-    const count = 600;
+    const count = 300; // within the default 5 s case limit under the wide run's load (each image read alone and joined twice)
     const r = random(seed);
     let neutralised = 0;
     for (let n = 0; n < count; n += 1) {

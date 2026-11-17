@@ -10,7 +10,7 @@
 // reaches the transcript read apart (ticket 704: the person's message, then the envelope as a message of its own), so a
 // row's text is the person's words and the recall takes it as drawn. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { GRANT_BREAK } from '@shared/engine/grant';
+import { asTyped } from '@shared/engine/grant';
 import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
@@ -45,14 +45,15 @@ type UserRow = Extract<Row, { kind: 'user' }>;
 // around pasted placeholders (the transcript's rows put newlines there), with the bodies in placeholder order.
 const PLACEHOLDER_SPACE = /\s*(\[Pasted text #\d+ \+\d+ lines\])\s*/g;
 const ATTACHMENT_PLACEHOLDER = /\s*\[(?:Image|PDF) #\d+\]/g;
-const keyOf = (display: string, bodies: (string | null)[]) => `${display.replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies)}`;
+// UX wave U1c (the review round's R3): both sides as typed (`asTyped`), so one prompt is one entry whichever path it came back by
+const keyOf = (display: string, bodies: (string | null)[]) => `${asTyped(display).replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies.map((body) => (body === null ? null : asTyped(body))))}`;
 
 function rowPrefill(row: UserRow): Prefill {
   const dataUrl = (url: string) => /^data:([^;,]+);base64,(.*)$/s.exec(url);
   return {
     text: typedFromRowText(row.text),
-    // UX wave U1c: a body as pasted, without the joiner the one-writer rule put in the grant's opening (recall.ts `typedFromRowText`)
-    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text!.replaceAll(GRANT_BREAK, '') })),
+    // UX wave U1c: a body as pasted (shared/engine/grant.ts `asTyped`)
+    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: asTyped(a.text!) })),
     images: row.attachments.flatMap((a) => {
       const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
       return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts[1], data: parts[2] }] : [];
@@ -106,7 +107,7 @@ export const recallDoc = (recall: Recall): ComposerDoc => (recall.source === 'se
 export const recallLine = (index: number, count: number): string => `History ${count - index}/${count} · ↓ to restore your draft`;
 
 // The text a search reads in a recall: what the box shows for it, its placeholders included.
-export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : recall.entry.display);
+export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : asTyped(recall.entry.display)); // UX wave U1c: as typed
 
 const holds = (text: string, query: string) => text.toLowerCase().includes(query.toLowerCase());
 

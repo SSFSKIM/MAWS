@@ -1,6 +1,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
+import { GRANT_ONE, GRANT_OPENING, neutraliseGrant } from '@shared/engine/grant';
 import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
 import { FIXTURE_DIR, loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
@@ -486,5 +488,43 @@ describe("the newest row's folder", () => {
 
   it('is null for a file of bookkeeping rows only', () => {
     expect(of(whole({ type: 'custom-title', customTitle: 't' }, { type: 'relocated', relocatedCwd: '/repo' })).newestCwd).toBeNull();
+  });
+});
+
+// The review round's R3 (b): the first-prompt title holds no joiner, so a search for a word it shows finds it; no consent
+// reader reads the title (the row's own reading is the file route's, of the row text)
+describe('the one-writer rule: the first-prompt title', () => {
+  it('is the prompt without U+2060, and the row it comes from reads no grant', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const row = { type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-11-17T10:00:00.000Z', origin: { kind: 'human' }, message: { role: 'user', content: neutraliseGrant(sentence) } };
+    const bytes = Buffer.from(line(row), 'utf8');
+    const title = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+    expect(title).toBe(sentence.slice(0, title?.length));
+    expect(title!.includes('\u2060')).toBe(false);
+    expect(readArrivals(row).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+  });
+
+  // The chain merge of U1c's review round into ticket 704: both apply to one value, so the title is the person's words
+  // with the envelope taken out (ticket 704) and every U+2060 removed from them (R3), on the first prompt's row and on
+  // its `last-prompt` fallback. Made by hand: words holding the grant's longer opening, as the writer sends them, joined
+  // with a recorded envelope.
+  const envelope = recordedJoin('u704-end-prompt-first-1').envelopes[0]!;
+  const words = `Is ${GRANT_OPENING}${GRANT_ONE} command a sentence I may type?`;
+  const asTitled = (text: string) => {
+    const bytes = Buffer.from(text, 'utf8');
+    return summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+  };
+
+  it('made by hand: a joined row of the person’s neutralised words and an envelope titles with the words, without U+2060', () => {
+    expect(neutraliseGrant(words)).toContain('\u2060');
+    const joined = `${neutraliseGrant(words)}\n${envelope}`;
+    expect(asTitled(line({ type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', origin: { kind: 'human' }, message: { role: 'user', content: joined } }))).toBe(words);
+  });
+
+  it('made by hand: the last-prompt fallback of that joined message titles with the words, without U+2060', () => {
+    const imageAlone = line({ type: 'user', uuid: 'u0', parentUuid: null, cwd: '/d', origin: { kind: 'human' }, message: { role: 'user', content: [{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAAA' } }] } });
+    const oneLine = `${neutraliseGrant(words)} ${envelope}`.replaceAll('\n', ' ');
+    expect(oneLine.length).toBeGreaterThan(200);
+    expect(asTitled(imageAlone + line({ type: 'last-prompt', lastPrompt: `${oneLine.slice(0, 199)}…`, leafUuid: 'u0', sessionId: 'S' }))).toBe(words);
   });
 });

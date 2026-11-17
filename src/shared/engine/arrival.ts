@@ -25,7 +25,7 @@ import type { ContentBlock } from '../graph/events';
 import type { Arrival, CommandFacts } from './arrival-schema';
 import { askAnswers, DISMISSED } from './ask-delivery';
 import { INTERRUPT_MARKER, localCommandParts } from './engine-markers';
-import { GRANT_OPENING } from './grant';
+import { GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL } from './grant';
 import { handbackReport, messageText, parsePeerMessage, peerEventsOf, sminosFrameAlias, sminosFrameOwners, sminosFrameSender, sminosParts } from './peer-envelope';
 import { BRIDGE_PLUGINS, BRIDGE_WAKE_LINE, deliveredPrompts, deliveredText, firstLine, isBridgeWake, markedSteerWords, STEER_LINE } from './sminos-delivery';
 import { notificationText, taskNotificationBlocks } from './task-notification';
@@ -221,10 +221,11 @@ const quoted = (subject: string): string => JSON.stringify(subject).replace(INVI
 /** The engine's sentence for one call or for several (`Yn`), its subjects already quoted. */
 function grantSentence(kind: GrantKind, subjects: readonly string[]): string {
   const one = subjects.length === 1;
-  const these = one ? `this exact ${kind}` : `these exact ${kind}s`;
+  const these = one ? `${GRANT_ONE} ${kind}` : `${GRANT_SEVERAL} ${kind}s`;
   return `${grantHead(kind, one)}${subjects.join(', ')}. This does not approve any other ${kind}, any part of ${one ? 'this one' : 'these'}, or running ${one ? 'it' : 'them'} with added options such as turning off the sandbox, extra network access, or running in the background. You may now retry ${these} if you would like.`;
 }
-const grantHead = (kind: GrantKind, one: boolean): string => `${GRANT_OPENING}${one ? `this exact ${kind}` : `these exact ${kind}s`} only, ${one ? 'as one whole string' : 'each as one whole string'}: `;
+// the review round's R1: built from the two words the writer's patterns are (grant.ts `GRANT_ONE`, `GRANT_SEVERAL`)
+const grantHead = (kind: GrantKind, one: boolean): string => `${GRANT_OPENING}${one ? `${GRANT_ONE} ${kind}` : `${GRANT_SEVERAL} ${kind}s`} only, ${one ? 'as one whole string' : 'each as one whole string'}: `;
 
 /**
  * The grants a text is, whole, from its first word to its last, in order: the sentence for one call or the engine's

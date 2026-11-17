@@ -4,7 +4,7 @@
 // (person-sends.test.ts) holds each site to its named case.
 import { expect } from 'vitest';
 import { consentMessage, personsGrants, readArrivals } from '@shared/engine/arrival';
-import { GRANT_OPENING } from '@shared/engine/grant';
+import { GRANT_ONE, GRANT_OPENING, GRANT_SEVERAL } from '@shared/engine/grant';
 import { messageText } from '@shared/engine/peer-envelope';
 import type { ContentBlock } from '@shared/graph/events';
 
@@ -26,8 +26,8 @@ export function grantsReadFrom(content: Content): { gate: string[]; live: string
   };
 }
 
-/** What a site sent for a text holding `TYPED_CONSENT`: no verbatim opening, and no grant on any route. */
+/** What a site sent for a text holding `TYPED_CONSENT`: no verbatim longer opening of the sentence, and no grant on any route. */
 export function expectNoGrantSent(content: Content): void {
-  expect(messageText(content as string | ContentBlock[]).includes(GRANT_OPENING), 'a verbatim opening went out').toBe(false);
+  for (const opening of [`${GRANT_OPENING}${GRANT_ONE}`, `${GRANT_OPENING}${GRANT_SEVERAL}`]) expect(messageText(content as string | ContentBlock[]).includes(opening), `a verbatim ${opening} went out`).toBe(false);
   expect(grantsReadFrom(content)).toEqual({ gate: [], live: [], file: [] });
 }
