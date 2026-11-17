@@ -5,7 +5,20 @@
 // An ask finds its repository as git's own discovery does in read mode, with no process: the nearest folder at or
 // above the listed directory that holds a `.git` entry, a folder or a file (a worktree's, a submodule's), so a folder
 // inside a submodule or a nested repository is judged by that repository's own rules. A directory inside a `.git`
-// folder, and one in no repository, starts no git and has no answer. The asks of one repository share its runs: while
+// folder, and one in no repository, starts no git and has no answer.
+//
+// Git runs only in the repository the walk found, for folders that are still what the files service confirmed (the
+// branch panel's security findings): each call names that `.git` as GIT_DIR and its folder as GIT_WORK_TREE, so neither
+// git's own discovery nor a `core.worktree` in the configuration a gitdir pointer leads to can judge the names by
+// another tree's rules; and before each call every ask's folder is confirmed at the very spelling git is handed (its
+// realpath that spelling, the object the service opened) and the `.git` as the walk found it, so a substitution made
+// between the walk and the run is refused before git reads anything. An explicit GIT_DIR skips git's own check of who
+// owns a repository, so the walk makes it: the folder and its `.git` must be this user's. The threat model, and what
+// it leaves: whoever can write a `.git` the daemon user owns already runs code as that user (a hook,
+// in a terminal's git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that
+// stands when the listing's last confirmation runs is refused there; one made and undone while git itself runs is not
+// seen, and can answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a
+// restore between a listing's reads and its last confirmation can show outside names (service.ts). The asks of one repository share its runs: while
 // a run of the repository is in flight, or waits for a place, the asks that arrive join its next run (Decision Log 10).
 // A run is two git calls in read mode in the repository's root: `git --literal-pathspecs ls-files -z -- <dir>/…` for
 // the joined directories, whose paths name what is tracked in each, then `git check-ignore --no-index -z --stdin` on
@@ -27,16 +40,19 @@
 // stop) can end the process group of each run still alive. After a crash nothing is disposed: a run alive then reads
 // its input to the end, answers into a pipe nobody reads and exits (decision 13's last paragraph).
 import type { ChildProcess } from 'node:child_process';
-import fs from 'node:fs';
+import fs, { type BigIntStats } from 'node:fs';
 import { dirname, join, relative, sep } from 'node:path';
 import { createGitRunner, execGit, GitCommandError, GitTimeoutError, NotARepositoryError, type ExecFileFn, type GitRun } from '../git/runner';
+import { sameIdentity, type Identity } from './watch';
 
 export const IGNORED_CHECK_MS = 2_000; // one check's whole allowance, its wait for a place included
 export const IGNORED_CHECK_CONCURRENCY = 4; // runs at once in one daemon
 
 export interface IgnoreCheck {
   // The names among `names` that git ignores in `dir`; null when git gives no answer within the allowance, and after `dispose`.
-  names(dir: string, names: readonly string[]): Promise<ReadonlySet<string> | null>;
+  // `opened`: the object the files service confirmed at `dir`, which git is asked about only while `dir` still names it;
+  // absent, the object `dir` names when it is asked.
+  names(dir: string, names: readonly string[], opened?: Identity): Promise<ReadonlySet<string> | null>;
   // One synchronous call: later asks and waiting asks get null, and the process group of every live run gets SIGKILL.
   // The promise settles when every child the check started has closed (the tests wait on it; the stop does not).
   dispose(): Promise<void>;
@@ -47,10 +63,13 @@ export interface IgnoreCheck {
 export type IgnoreCheckEvent = { kind: 'run'; waitedMs: readonly number[] } | { kind: 'expired'; waiting: boolean };
 
 interface Ask {
+  dir: string; // as asked: the spelling git is handed, from its repository's root
   names: readonly string[];
   asked: number; // Date.now() when asked
   deadline: number; // Date.now() at which the allowance ends
   rel: string; // the directory from its repository's root; '' for the root itself
+  opened: Identity | null; // the object `dir` must still name, once known
+  marker: Identity | null; // the repository's `.git` as the walk found it
   batch: Batch | null; // the run it joined, once its repository is known
   answer(value: ReadonlySet<string> | null): void; // the first call settles; later ones do nothing
 }
@@ -76,10 +95,12 @@ export function createIgnoreCheck(
   const idle: (() => void)[] = []; // `dispose`'s waiters, called when `children` is empty
   // Each run's own runner, over a spawn function that keeps every child it starts, in the check's set and in the run's,
   // until that child's `close`: after a timeout the runner gives a run up at its SIGKILL, before the child has closed,
-  // and the run's place is freed only once its own set is empty (Decision Log 12)
-  const runnerFor = (owned: Owned) => {
+  // and the run's place is freed only once its own set is empty (Decision Log 12). Every call names the repository the
+  // walk found to git, its `.git` and its folder as the work tree (the panel's security findings).
+  const runnerFor = (owned: Owned, root: string) => {
+    const pinned = { GIT_DIR: join(root, '.git'), GIT_WORK_TREE: root };
     const keeping: ExecFileFn = (file, args, execOptions, callback) => {
-      const child = execFile(file, args, execOptions, callback);
+      const child = execFile(file, args, { ...execOptions, env: { ...execOptions.env, ...pinned } }, callback);
       if (child) {
         children.add(child);
         owned.children.add(child);
@@ -144,7 +165,7 @@ export function createIgnoreCheck(
       const now = Date.now();
       observe?.({ kind: 'run', waitedMs: batch.asks.map((ask) => now - ask.asked) });
       const owned: Owned = { children: new Set(), closed: [] };
-      void carry(batch, runnerFor(owned))
+      void carry(batch, runnerFor(owned, batch.root))
         .then(() => allClosed(owned))
         .finally(() => {
           running--; // the run has really ended, its every child closed: its place, and its repository, are free
@@ -158,12 +179,26 @@ export function createIgnoreCheck(
     const deadline = Math.max(...asks.map((ask) => ask.deadline));
     const rest = () => Math.max(1, deadline - Date.now()); // both calls share the latest deadline the run carries
     const live = () => asks.filter((ask) => pending.has(ask));
+    // Before each call: the asks whose folder and repository are still what was confirmed; the others get no answer
+    const holding = async (): Promise<Ask[]> => {
+      const marker = await fs.promises.lstat(join(root, '.git'), { bigint: true }).catch(() => null);
+      const asked = live();
+      const held = await Promise.all(asked.map(async (ask) => marker !== null && sameIdentity(marker, ask.marker!) && (await stillNames(ask.dir, ask.opened!))));
+      asked.forEach((ask, i) => {
+        if (held[i] || !pending.has(ask)) return;
+        noAnswer('the folder or its repository changed before git ran');
+        ask.answer(null);
+      });
+      return live();
+    };
     try {
-      const rels = [...new Set(asks.map((ask) => ask.rel))];
+      const listed = await holding();
+      if (listed.length === 0) return; // nothing left to ask: no git runs
+      const rels = [...new Set(listed.map((ask) => ask.rel))];
       const listing = await run(root, ['--literal-pathspecs', 'ls-files', '-z', '--', ...rels.map((rel) => (rel === '' ? '.' : `${rel}/`))], { timeoutMs: rest() });
       const tracked = trackedBeneath(listing, rels);
-      const carried = live();
-      if (carried.length === 0) return; // every ask answered meanwhile (the bounds, the stop): the second call is not made
+      const carried = await holding();
+      if (carried.length === 0) return; // every ask answered meanwhile (the bounds, the stop, a substitution): the second call is not made
       const byPath = new Map<string, Ask[]>(); // `./<rel>/<name>` as sent and as git answers it
       const answers = new Map<Ask, Set<string>>(carried.map((ask) => [ask, new Set<string>()]));
       for (const ask of carried) {
@@ -193,16 +228,19 @@ export function createIgnoreCheck(
   }
 
   return {
-    names(dir, names) {
+    names(dir, names, opened) {
       if (disposed) return Promise.resolve(null);
       if (names.length === 0) return Promise.resolve(new Set<string>());
       return new Promise((resolve) => {
         const asked = Date.now();
         const ask: Ask = {
+          dir,
           names,
           asked,
           deadline: asked + allowanceMs,
           rel: '',
+          opened: opened ?? null,
+          marker: null,
           batch: null,
           answer: (value) => {
             if (!pending.delete(ask)) return;
@@ -221,11 +259,18 @@ export function createIgnoreCheck(
           ask.answer(null);
         }, allowanceMs);
         pending.add(ask);
-        void repositoryOf(dir).then((root) => {
+        const known = opened === undefined ? fs.promises.stat(dir, { bigint: true }).catch(() => null) : Promise.resolve(opened);
+        void Promise.all([repositoryOf(dir, () => pending.has(ask)), known]).then(([found, identity]) => {
           if (!pending.has(ask)) return;
-          if (root === null) return ask.answer(null); // no repository, or inside a `.git` folder: no answer, and silent
-          ask.rel = relative(root, dir);
-          enter(root, ask);
+          if (found === null || identity === null) return ask.answer(null); // no repository, inside a `.git` folder, or gone: no answer, and silent
+          if (found === OWNED_ELSEWHERE) {
+            noAnswer('the repository belongs to another user');
+            return ask.answer(null);
+          }
+          ask.rel = relative(found.root, dir);
+          ask.opened = identity;
+          ask.marker = found.marker;
+          enter(found.root, ask);
         });
       });
     },
@@ -249,20 +294,40 @@ export function createIgnoreCheck(
   };
 }
 
-// The repository that holds `dir` (an absolute realpath), as git's discovery finds it from there in read mode (no
-// GIT_DIR, no ceiling): the nearest folder at or above it with a `.git` entry. Null inside a `.git` folder, where no
-// work tree is, and in no repository. Unlike git it does not stop at a mount point; a folder whose `.git` is no
-// repository is handed to git, which then answers by the repository above or fails.
-async function repositoryOf(dir: string): Promise<string | null> {
+const OWNED_ELSEWHERE = 'owned elsewhere';
+
+// The repository that holds `dir` (an absolute realpath), as git's discovery finds it from there in read mode: the
+// nearest folder at or above it with a `.git` entry, and that entry's identity. Null inside a `.git` folder, where no
+// work tree is, in no repository, and once `live` says the ask is answered (its bound passed, the check disposed: the
+// branch panel's scalpel 1); `OWNED_ELSEWHERE` when the folder or its `.git` is another user's, which git's discovery
+// refuses and an explicit GIT_DIR would not. Unlike git it does not stop at a mount point, and a folder whose `.git` is
+// no repository is judged by nothing: git, named that `.git`, fails, where its discovery would go on to the one above.
+async function repositoryOf(dir: string, live: () => boolean): Promise<{ root: string; marker: BigIntStats } | typeof OWNED_ELSEWHERE | null> {
   if (dir.split(sep).includes('.git')) return null;
-  for (let at = dir; ; at = dirname(at)) {
-    const found = await fs.promises.lstat(join(at, '.git')).then(
-      () => true,
-      () => false,
-    );
-    if (found) return at;
+  for (let at = dir; live(); at = dirname(at)) {
+    const marker = await fs.promises.lstat(join(at, '.git'), { bigint: true }).catch(() => null);
+    if (marker !== null) {
+      const folder = await fs.promises.lstat(at, { bigint: true }).catch(() => null);
+      if (folder === null) return null;
+      return ownedHere(marker) && ownedHere(folder) ? { root: at, marker } : OWNED_ELSEWHERE;
+    }
     if (dirname(at) === at) return null;
   }
+  return null;
+}
+
+// Whether this process's user owns the entry, as git's own check of a discovered repository asks (`lstat`'s owner)
+function ownedHere(stat: BigIntStats): boolean {
+  const uid = process.getuid?.();
+  return uid === undefined || stat.uid === BigInt(uid);
+}
+
+// Whether `dir` still names `opened`, at that very spelling: its realpath is the spelling itself, so no link stands on
+// its way, and the object there is the one confirmed
+async function stillNames(dir: string, opened: Identity): Promise<boolean> {
+  if ((await fs.promises.realpath(dir).catch(() => null)) !== dir) return false;
+  const now = await fs.promises.stat(dir, { bigint: true }).catch(() => null);
+  return now !== null && sameIdentity(now, opened);
 }
 
 // For each directory of `rels` (from the root; '' the root), the names in it that are tracked or hold a tracked file:

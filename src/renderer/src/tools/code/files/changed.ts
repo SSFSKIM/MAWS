@@ -70,6 +70,15 @@ export function changedRows(status: GitStatus): ChangedRow[] {
   return [...rows.filter((row) => row.letter === '!').sort(byRel), ...rows.filter((row) => row.letter !== '!').sort(byRel)];
 }
 
+// The entry Review on Uncommitted lists for a row (decision 6's rows that open Review): an untracked folder's with its
+// slash, as the status lists it; a rename whose new path the working tree has lost by its source, which is all
+// `git diff HEAD` lists of it (the branch panel's scalpel 3); every other row by its own path.
+export function reviewEntry(row: ChangedRow): string {
+  if (row.folder && row.letter === 'U') return `${row.rel}/`;
+  if (row.letter === 'D' && row.oldRel !== null) return row.oldRel;
+  return row.rel;
+}
+
 // A path's normal form for matching, as `sameFile` matches (the same but for case, or the `/private` spelling). A mark
 // is drawn and grants nothing.
 const normal = (path: string): string => {
