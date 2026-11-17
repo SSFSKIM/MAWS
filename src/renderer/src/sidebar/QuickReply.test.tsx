@@ -6,7 +6,7 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { useQuickReply } from './QuickReply';
 
-const sendToSession = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => ({ disposition: 'queued' as const, started: false })));
+const sendToSession = vi.hoisted(() => vi.fn<(id: unknown, content: unknown, options: unknown) => Promise<{ disposition: 'queued'; started: false }>>(async () => ({ disposition: 'queued', started: false })));
 vi.mock('../session/controls/controls-for', () => ({ sendToSession }));
 
 describe('the quick reply', () => {

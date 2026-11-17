@@ -9,7 +9,7 @@ import { docOf, paragraph, textNode } from './editor/doc';
 import { serializeDraft } from './editor/serialize';
 import { PENDING_SEND, PendingSends } from './PendingSends';
 
-const send = vi.hoisted(() => vi.fn(async (..._args: unknown[]) => ({ disposition: 'sent' as const, started: false })));
+const send = vi.hoisted(() => vi.fn<(content: unknown, options: unknown) => Promise<{ disposition: 'sent'; started: false }>>(async () => ({ disposition: 'sent', started: false })));
 vi.mock('../session/controls/controls-for', () => ({ sessionControls: () => ({ send }) }));
 vi.mock('../ipc/client', () => ({ ipc: {} }));
 
