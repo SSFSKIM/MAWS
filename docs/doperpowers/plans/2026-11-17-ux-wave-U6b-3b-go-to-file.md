@@ -27,7 +27,7 @@ How to see it working: with the side column closed and the caret in the composer
 - [x] (2026-11-17) U6b-3a built, and this landing's branch cut from its head (`05556372c`); "Statements to check again" read on it: every row holds (Decision Log 8).
 - [x] (2026-11-17) The example drawn at real sizes by the architect and its 24 notes ruled; the owner's answer on the card ("Show it, then fold again"); a delta review of both documents and the rulings on it. Revision 2: all folded in (Decision Log 5 to 7).
 - [x] (2026-11-17 15:10Z) M1 — The action and the field: ⌘P puts the keyboard above the tree. Commits `c663edbe1`..`fd49c9b7e`; task review clean after two fix rounds (Decision Log 9).
-- [ ] M2 — The search and the open: the list, its keys, the keyboard in the file.
+- [x] (2026-11-17 18:40Z) M2 — The search and the open: the list, its keys, the keyboard in the file. Commits `2c41c66b9`..`4fe467660`; task review clean after one fix round (Decision Log 10 to 12).
 - [ ] M3 — The scenes, the record, and the acceptance run.
 - [ ] The proof an executor does not run ("Proof that an executor does not run", 1 to 7).
 
