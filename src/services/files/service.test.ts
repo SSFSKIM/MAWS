@@ -2926,6 +2926,39 @@ describe('files saves outside the folders', () => {
         expect(await list(remoteService(), { path: at('shown') })).toEqual({ status: 'listed', path: at('first'), parent: base, home, entries: [{ name: 'one.txt', path: at('first', 'one.txt'), kind: 'file', protected: false }], cursor: null });
         expect(relinked, 'the link moved between the walk and the listing').toEqual([at('shown')]);
       });
+
+      // The architect's ruling on item 6 (b): U6e's step 4 resolves the typed path as before, and a claimed path whose walk
+      // answered is refused FILES_MOVED where step 4's real path is not the walk's, before anything is opened
+      it('refuses a claimed read and save FILES_MOVED where a link moved between the walk and the resolution, opening nothing; unmoved, each reads and saves', async () => {
+        write(at('first', 'file.txt'), 'first as it was\n');
+        write(at('second', 'file.txt'), 'second as it was\n');
+        symlinkSync(at('first'), at('via'));
+        const path = at('via', 'file.txt');
+        for (const real of [at('first', 'file.txt'), at('second', 'file.txt')]) grants.add(A, real); // either is the session's to read and save
+        const files = remoteService();
+        // the read
+        let seen = recordTouches();
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(readThere(files, A, path)).rejects.toThrow(new Error(FILES_MOVED));
+        expect(relinked, 'the link moved between the walk and the resolution').toEqual([at('via')]);
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        // the save of what an unmoved read showed
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        const read = await readThere(files, A, path);
+        expect(read).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        seen = recordTouches();
+        points['after-outside-walk'] = relink(at('via'), at('second'));
+        await expect(files.writeOutside({ appSessionId: A, path, content: 'pwned\n', expectedHash: read.hash!, real: read.outside!.real }, claimed('op-save'))).rejects.toThrow(new Error(FILES_MOVED));
+        expect(seen.filter((entry) => entry.startsWith('open ')), 'nothing is opened past the refusal').toEqual([]);
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['first as it was\n', 'second as it was\n']);
+        // the control: no move, and the same read and save answer
+        touches.on = false;
+        relink(at('via'), at('first'))();
+        expect(await readThere(files, A, path)).toMatchObject({ content: 'first as it was\n', outside: { real: at('first', 'file.txt'), writable: true } });
+        expect(await saveThere(files, A, path, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect([readFileSync(at('first', 'file.txt'), 'utf8'), readFileSync(at('second', 'file.txt'), 'utf8')]).toEqual(['saved there\n', 'second as it was\n']);
+      });
     });
 
     // Decision 18: no act of another machine reads or writes inside a private folder of this one unasked
