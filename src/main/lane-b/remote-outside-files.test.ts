@@ -328,19 +328,30 @@ describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', 
   // Fix wave 3 (the re-review's first Important): the attempt whose keys a peer's list chose is bound, whole, to that
   // channel; a channel replaced between two of its requests (the link's switch from the relay to the direct carrier is
   // one, at once) ends it, and decision 5 starts again on the channel current now. Nothing of the old keys goes on.
-  it('a channel replaced between the too-large answer and the first page, by an older build: the pages are not asked, and the read starts again with today’s keys', async () => {
-    const l = lab();
-    let switched = false;
-    l.reads((input) => {
-      if (!switched && input.length === 4 * 1024 * 1024) {
-        switched = true;
-        l.link.lose(); // the switch: the old channel's end and the new one current before the next request
-        l.link.relink([...OLDER]);
-        return { ok: false, error: { code: 'too-large' } };
+  /** The link's switch right after the first request's answer came in, before the next is asked (relay to direct). */
+  function switchAfterFirst(l: ReturnType<typeof lab>, peers: string[]) {
+    const call = l.link.call.bind(l.link);
+    let n = 0;
+    l.link.call = async (name, input, options) => {
+      const result = await call(name, input, options);
+      if (name === 'files.read' && ++n === 1) {
+        l.link.lose();
+        l.link.relink([...peers]);
       }
-      if ('named' in input || 'agent' in input || 'open' in input) return { ok: false, error: { code: 'malformed' } }; // as the older build answers
-      return inside(input);
-    });
+      return result;
+    };
+  }
+  /** The whole read is too large for the channel; a page is answered; an older build refuses the keys it does not read. */
+  const pagedFile = (input: Record<string, unknown>): CallResult => {
+    if (input.length === 4 * 1024 * 1024) return { ok: false, error: { code: 'too-large' } };
+    return inside(input);
+  };
+
+  it('a channel replaced by an older build between the too-large answer and the first page: no page is asked of it, and the read starts again with today’s keys', async () => {
+    const l = lab();
+    switchAfterFirst(l, OLDER);
+    // as the older build answers: a key its schema does not hold is malformed
+    l.reads((input) => (!l.link.peers.includes(OUTSIDE_FILES_CAPABILITY) && ['named', 'agent', 'open'].some((key) => key in input) ? { ok: false, error: { code: 'malformed' } } : pagedFile(input)));
     expect(await answered(l.cmd('files.read', keyed({ length: 4 * 1024 * 1024, agent: true })))).toMatchObject({ ok: true, value: { content: 'inside the checkout\n' } });
     const [checked, ...older] = l.files().map((call) => call.input as Record<string, unknown>);
     expect(checked).toMatchObject({ named: true, agent: true, length: 4 * 1024 * 1024 }); // the one request on the checked channel
@@ -348,21 +359,12 @@ describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', 
     for (const input of older) expect(['named', 'agent', 'open'].filter((key) => key in input)).toEqual([]);
   });
 
-  it('a channel replaced by a capable build between two pages: the attempt ends, and the read starts again, whole, on the channel current now', async () => {
+  it('a channel replaced by a capable build between the too-large answer and the first page: the attempt ends, and the read starts again, whole, on the channel current now', async () => {
     const l = lab();
-    let switched = false;
-    l.reads((input) => {
-      if (input.length === 4 * 1024 * 1024) return { ok: false, error: { code: 'too-large' } };
-      if (!switched) {
-        switched = true;
-        l.link.lose();
-        l.link.relink([...SERVES]);
-      }
-      return inside(input);
-    });
+    switchAfterFirst(l, SERVES);
+    l.reads(pagedFile);
     expect(await answered(l.cmd('files.read', keyed({ length: 4 * 1024 * 1024 })))).toMatchObject({ ok: true, value: { content: 'inside the checkout\n' } });
-    // the whole read and its page were the first channel's; on the next, decision 5 again from its first call
-    expect(l.files().map((call) => (call.input as { length: number }).length)).toEqual([4 * 1024 * 1024, expect.any(Number), 4 * 1024 * 1024, expect.any(Number)]);
+    expect(l.files().map((call) => (call.input as { length: number }).length)).toEqual([4 * 1024 * 1024, 4 * 1024 * 1024, expect.any(Number)]);
   });
 
   // Fix wave 3 (the re-review's second Important): the hold's end binds a channel already current too.
