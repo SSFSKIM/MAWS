@@ -374,7 +374,8 @@ describe('the one-writer rule: a local command’s output holding the consent se
   };
   const classesOnFile = (content: string) => readArrivals({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content } }).map((arrival) => arrival.class);
   const liveConsents = (content: string) => {
-    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', origin: { kind: 'human' }, message: { role: 'user', content } } };
+    // a frame the stdin schema takes (`parent_tool_use_id` is required), so the normaliser reads it rather than raising
+    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content } } };
     return journalToEvents([parseJournalRow(frame)]).flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent');
   };
   it.each(OUTPUT_OPENINGS)('%s in the second part of a joined text: the first part’s sentence reads no grant on any route, and the envelope is still an answer (made by hand)', (opening) => {
