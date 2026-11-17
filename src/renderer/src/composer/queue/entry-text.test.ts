@@ -49,13 +49,29 @@ describe('the one-writer rule: a taken-back entry', () => {
 // the text the pin's writer gave; a person's queued message still names its pasted blocks (the control above).
 describe('a queued form reads in place', () => {
   const anchor: Anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 };
+  const removed: Anchor = { kind: 'file-line', locator: '/work/out/total.ts#L3', label: 'total.ts:3', path: '/work/out/total.ts', line: 3, side: 'old' };
   it.each([
     ['a comment with a quoted line', commentsMessage([{ anchor, text: quotedComment(anchor, 'return total;', 'Count it.', 'a1b2'), screenshot: false }], 'main'), commentsMessage([{ anchor, text: pinQuotedComment(anchor, 'return total;', 'Count it.'), screenshot: false }], 'main')],
     ['a promotion', promotionMessage([{ question: 'Where?', response: 'Here.' }], 'Go on.', 'a1b2'), pinPromotionMessage([{ question: 'Where?', response: 'Here.' }], 'Go on.')],
     ['a plan prompt', planPrompt('one\ntwo', 'a1b2'), pinPlanPrompt('one\ntwo')],
+    // M4's fix wave: a message of several comments, one on a removed line (its caption above the quote)
+    [
+      'a message of several comments',
+      commentsMessage([{ anchor, text: quotedComment(anchor, 'return total;', 'Count it.', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'const sum = 0;', 'Why did this go?', 'a1b2'), screenshot: false }], 'main'),
+      commentsMessage([{ anchor, text: pinQuotedComment(anchor, 'return total;', 'Count it.'), screenshot: false }, { anchor: removed, text: pinQuotedComment(removed, 'const sum = 0;', 'Why did this go?'), screenshot: false }], 'main'),
+    ],
   ])('%s: no placeholder, the pin’s text', (_, sent, pin) => {
+    expect(sent, 'the form holds a segment').toContain('<pasted_content id="a1b2">');
     expect(entryDisplay(sent)).toBe(entryDisplay(pin));
     expect(entryDisplay(sent)).not.toContain('[Pasted text');
+  });
+
+  // M4's fix wave (the control beside the forms): a message of several comments whose framing line is gone is no form, so
+  // its segments are placeholders, as any person's pasted blocks are
+  it('several comments without their framing are no form: their quoted lines placeholders', () => {
+    const several = commentsMessage([{ anchor, text: quotedComment(anchor, 'return total;', 'Count it.', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'const sum = 0;', 'Why did this go?', 'a1b2'), screenshot: false }], 'main');
+    const unframed = several.split('\n').slice(1).join('\n');
+    expect(entryDisplay(unframed)).toContain('[Pasted text #1 +1 lines]');
   });
 
   it('a paste before a typed anchor tag with no destination is no form: its block a placeholder, as at the pin (fix wave 3)', () => {

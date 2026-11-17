@@ -10,8 +10,8 @@ import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
 import type { ContentBlock } from '@shared/graph/events';
 import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
 import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
-import { commentsMessage, quotedComment } from '@shared/anchor/message'; // ticket 733a
-import { pinPlanPrompt, pinQuotedComment } from '../../../test/support/pin-forms'; // ticket 733a
+import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message'; // ticket 733a
+import { pinPlanPrompt, pinPromotionMessage, pinQuotedComment } from '../../../test/support/pin-forms'; // ticket 733a
 
 const ROOT = join(__dirname, '../../..');
 const fixture = (name: string) => join(ROOT, 'test/fixtures/transcripts', `${name}.jsonl`);
@@ -70,6 +70,27 @@ describe('recentTurnsOf', () => {
       const answer = recentTurnsOf(records(user('u1', null, sent), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
       expect(prompts(answer)).toEqual([expected.slice(0, RECENT_TURN_PROMPT_MAX)]);
     }
+  });
+  // Ticket 733a (M4's fix wave, acceptance 7): the promotion and a message of several comments, each read in place as the
+  // pin's writer wrote it, with no tag of a segment; the control beside each is the same text with its form's mark gone (a
+  // promotion's tag, the several comments' destination framing), which reads as any person's text, its tags kept
+  it('a promotion and a message of several comments read in place, as the pin’s writers wrote them; without the form’s mark, as written', () => {
+    const exchanges = [{ question: 'Where is the total kept?', response: 'In report.ts, line 12.' }, { question: 'And the rounding?', response: 'Two places.' }];
+    const added = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 } as const;
+    const removed = { kind: 'file-line', locator: '/work/out/total.ts#L3', label: 'total.ts:3', path: '/work/out/total.ts', line: 3, side: 'old' } as const;
+    const several = commentsMessage([{ anchor: added, text: quotedComment(added, 'return total;', 'Count it.', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'const sum = 0;', 'Why did this go?', 'a1b2'), screenshot: false }], 'main');
+    const pinSeveral = commentsMessage([{ anchor: added, text: pinQuotedComment(added, 'return total;', 'Count it.'), screenshot: false }, { anchor: removed, text: pinQuotedComment(removed, 'const sum = 0;', 'Why did this go?'), screenshot: false }], 'main');
+    const promotion = promotionMessage(exchanges, 'Go on.', 'a1b2');
+    const preview = (sent: string) => prompts(recentTurnsOf(records(user('u1', null, sent), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false))[0];
+    for (const [sent, pin] of [[promotion, pinPromotionMessage(exchanges, 'Go on.')], [several, pinSeveral]] as const) {
+      expect(sent, 'the form holds a segment').toContain('<pasted_content id="a1b2">');
+      expect(preview(sent)).toBe(pin.slice(0, RECENT_TURN_PROMPT_MAX));
+      expect(preview(sent)).not.toContain('pasted_content');
+    }
+    // the controls: the promotion without its anchor tag's line, and the comments' lines without their framing, are no form
+    const untagged = promotion.slice(0, promotion.lastIndexOf('\n\n<maws_anchor'));
+    expect(preview(untagged), 'a promotion with no tag: as written, its tags kept').toBe(untagged.slice(0, RECENT_TURN_PROMPT_MAX).trim());
+    expect(preview(untagged)).toContain('pasted_content');
   });
 
   it('one turn per human prompt, its last answer and its tool calls (a steer the engine took folds into its turn)', () => {
