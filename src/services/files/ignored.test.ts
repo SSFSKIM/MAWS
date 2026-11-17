@@ -671,6 +671,50 @@ describe('where git runs', () => {
     }
   });
 
+  // The architect's 4314: a consumer that stops the check in the reaction to an ask the run's confirmation answered
+  // (no child alive then, so the stop has nothing to end) must find no read started after it. A joined run of a folder
+  // that changed and one that did not, the change made before the call each case names.
+  for (const site of ['ls-files', 'check-ignore'] as const) {
+    it(`starts no ${site} once the check is stopped in the reaction to a joined ask its confirmation answered, beside the same timing without the stop`, async () => {
+      for (const stopping of [false, true]) {
+        const repo = fakeRepo('seed', 'kept', 'moved');
+        const { execFile, pending, made, reached } = heldRuns();
+        const check = checkOf({ execFile, allowanceMs: 600_000 });
+        const seed = check.names(join(repo, 'seed'), ['s.log']);
+        await reached(1); // the seed's run holds the repository: the two asks below join its next run
+        const kept = check.names(join(repo, 'kept'), ['a.log']);
+        const moved = check.names(join(repo, 'moved'), ['b.log']);
+        if (stopping) void moved.then(() => void check.dispose()); // the changed ask's reaction
+        await settle();
+        const change = () => {
+          renameSync(join(repo, 'moved'), join(repo, 'moved-away'));
+          mkdirSync(join(repo, 'moved'));
+        };
+        if (site === 'ls-files') change();
+        echo(pending.shift()!); // the seed's ls-files
+        await reached(2);
+        echo(pending.shift()!); // the seed's check-ignore
+        expect(sorted(await seed)).toEqual(['s.log']);
+        if (site === 'check-ignore') {
+          await reached(3); // the joined run's ls-files, held
+          change();
+          echo(pending.shift()!);
+        }
+        expect(await moved).toBeNull();
+        const joined = () => made.slice(2).map((run) => run.args[isLsFiles(run) ? 1 : 0]);
+        if (stopping) {
+          expect(await kept).toBeNull();
+          await settle();
+          expect(joined()).toEqual(site === 'ls-files' ? [] : ['ls-files']);
+        } else {
+          await drain(pending, [kept]);
+          expect(sorted(await kept)).toEqual(['a.log']); // the control
+          expect(joined()).toEqual(['ls-files', 'check-ignore']);
+        }
+      }
+    });
+  }
+
   it('gives no answer and asks git nothing for a folder that is not the object the service confirmed, beside the same ask with its identity', async () => {
     const repo = fakeRepo('harbor');
     const { execFile, pending, counts } = heldRuns();
