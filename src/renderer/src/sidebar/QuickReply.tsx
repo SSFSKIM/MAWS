@@ -1,8 +1,7 @@
 import { useRef, useState } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
-import { frameConsentLines } from '@shared/composer/consent-lines';
-import { sessionPastedTag } from '../composer/submit/pasted-tag';
+import { neutraliseGrant } from '@shared/engine/grant';
 import { sendToSession } from '../session/controls/controls-for'; // P5 O9 M4
 import { displayTitle } from '../sessions/title';
 
@@ -29,8 +28,8 @@ export function useQuickReply(appSessionId: AppSessionId): QuickReplyState {
     setSending(true);
     setMessage(null);
     try {
-      // UX wave U1c: the one-writer rule (shared/composer/consent-lines.ts): a line of it that reads as a consent goes as data
-      const result = await sendToSession(appSessionId, frameConsentLines(content, sessionPastedTag(appSessionId)), { origin: 'reply' });
+      // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+      const result = await sendToSession(appSessionId, neutraliseGrant(content), { origin: 'reply' });
       const refused = result.disposition === 'refused' || result.disposition === 'held';
       setMessage({ failed: refused, text: refused ? result.reason ?? 'Reply was not sent' : result.disposition === 'sent' ? 'Sent' : 'Queued' });
       if (!refused) setValue((current) => (current === content ? '' : current));

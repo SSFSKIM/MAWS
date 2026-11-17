@@ -19,6 +19,7 @@
 //   them. The machine reads no upload written more than a day ago, so a send that would name one kept longer says so
 //   first (a warning, not a block), and a send the machine refused for its uploads forgets them, to go up again.
 import { create } from 'zustand';
+import { neutraliseGrant } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { MawsBridge } from '@shared/ipc/schema';
@@ -226,7 +227,7 @@ export async function composeRemoteSend(client: MawsBridge, appSessionId: AppSes
 export function remoteMessage(s: Serialized, inline: readonly Attachment[], paths: readonly string[], cwd: string): Serialized {
   const mentions = paths.map((path) => mentionText({ id: mentionPath(path, cwd), kind: 'file' })).join(' ');
   const join = (head: string) => (mentions === '' ? head : head.trim() === '' ? mentions : `${head}\n\n${mentions}`);
-  const text = join(s.text);
+  const text = neutraliseGrant(join(s.text)); // UX wave U1c: the one-writer rule's last step, the paths' mentions joined
   const blocks = inline.map(imageBlock);
   const content: string | ContentBlock[] = blocks.length === 0 ? text : text.trim() === '' ? blocks : [...blocks, { type: 'text', text }];
   const rest: Serialized = { ...s };
