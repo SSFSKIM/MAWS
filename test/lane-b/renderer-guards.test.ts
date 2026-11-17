@@ -202,12 +202,39 @@ describe('the chooser’s two acts on another machine', () => {
     return found;
   };
 
-  // Parsed only where the source holds an act's name at all (a quoted string, a template or a sum of parts holds its tail):
-  // parsing every renderer module again took the case past the 5 s default under the whole suite's load (M5's run)
-  const mayName = (source: string) => source.includes('listOutside') || source.includes('chooseOutside');
+  // Parsed only where the source may hold an act's name: parsing every renderer module again took the case past the 5 s
+  // default under the whole suite's load (M5's run). The text is read with every backslash escape a string or a template
+  // can hold taken as the character it may stand for, and a line continuation as nothing, so a name spelt with escapes
+  // still reaches the parser; a regular expression or a comment that holds escapes only costs a parse
+  const ESCAPE = /\\(?:u\{([0-9a-fA-F]+)\}|u([0-9a-fA-F]{4})|x([0-9a-fA-F]{2})|([0-7]{1,3})|(?:\r\n|[\n\r\u2028\u2029])|([\s\S]))/g;
+  const unescaped = (source: string) =>
+    source.includes('\\')
+      ? source.replace(ESCAPE, (_, braced?: string, four?: string, two?: string, octal?: string, other?: string) => {
+          const code = braced ?? four ?? two;
+          if (code !== undefined) return String.fromCodePoint(Math.min(parseInt(code, 16), 0x10ffff));
+          if (octal !== undefined) return String.fromCharCode(parseInt(octal, 8));
+          return other ?? '';
+        })
+      : source;
+  const mayName = (source: string) => {
+    const text = unescaped(source);
+    return text.includes('listOutside') || text.includes('chooseOutside');
+  };
+  const naming = (list: readonly Module[]) => list.filter((m) => !m.path.startsWith('test-support/') && mayName(m.source) && issues(m.path, m.source)).map((m) => m.path);
+
   it('are named by no renderer source but the chooser’s model', () => {
-    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && mayName(m.source) && issues(m.path, m.source)).map((m) => m.path);
-    expect(naming).toEqual(['tools/code/files/remote-chooser.ts']);
+    expect(naming(modules)).toEqual(['tools/code/files/remote-chooser.ts']);
+  });
+
+  it('are found by the scan when the name is spelt with escapes', () => {
+    const found = naming([
+      moduleOf('plain.ts', "void ipc.invoke('files.listOutside', input);"),
+      moduleOf('escaped-string.ts', "void ipc.invoke('files.list\\u004Futside', input);"),
+      moduleOf('escaped-template.ts', 'void ipc.invoke(`files.\\x63hoose\\u{4F}utside`, input);'),
+      moduleOf('continued.ts', "void ipc.invoke('files.choose\\\nOutside', input);"),
+      moduleOf('unrelated.ts', "void ipc.invoke('files.read', { path: '\\x2F' });"),
+    ]);
+    expect(found).toEqual(['plain.ts', 'escaped-string.ts', 'escaped-template.ts', 'continued.ts']);
   });
 
   it('take a call of the command for an issue, and a question to the helper or a type for none', () => {
