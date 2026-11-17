@@ -95,6 +95,30 @@ describe('grantSpans: the reading told with its places', () => {
   });
 });
 
+// The own-text rule plans each call of the forms' list by GRANT_TEST_WORK_PER_CHAR units a character of the longer of the
+// text and its compatibility fold: the test's count stays within it on the characters that cost it most, each by its
+// own count (the most a character costs, over every code point: U+0130 at 11, which lower-casing lengthens; then the
+// Greek letters an upper-casing lengthens, and the sharp s)
+describe('quotesGrant: its count within the bound the own-text rule plans it by', () => {
+  it.each([
+    ['plain words', (n: number) => 'word '.repeat(n / 5)],
+    ['a capital I with a dot above, which lower-casing makes two', (n: number) => '\u0130'.repeat(n)],
+    ['a sharp s, which upper-casing makes two', (n: number) => '\u00df'.repeat(n)],
+    ['an iota with dialytika and tonos, which upper-casing makes three', (n: number) => '\u0390'.repeat(n)],
+    ['full-width letters', (n: number) => 'ＰＥＲＭＩＳＳＩＯＮ '.repeat(n / 11)],
+    ['a character that folds to eighteen', (n: number) => '\ufdfa'.repeat(n / 18)],
+    ['every beginning saved, then full-width brackets', (n: number) => `p<e<r<m<i<s<s<i<o<n<g<r<a<n<t<e<d<f<o<>${'\uff1c\uff1e'.repeat(n / 2)}`],
+    ['mixed', (n: number) => 'Permi\u00df\u0130on \u0390<\uff1c>'.repeat(n / 16)],
+  ])('%s', (_, shape) => {
+    for (const n of [2_000, 80_000]) {
+      const text = shape(n);
+      const work = { steps: 0 };
+      quotesGrant(text, work);
+      expect(work.steps, `${n}`).toBeLessThanOrEqual(GRANT_TEST_WORK_PER_CHAR * Math.max(text.length, text.normalize('NFKC').length) + 2);
+    }
+  });
+});
+
 describe('nameSlot: a name of one line that does not quote the opening', () => {
   it('leaves a name with no break and no opening as it is', () => {
     for (const name of ['Explore', 'notes.md', 'Permission slips', 'a b', '']) {
