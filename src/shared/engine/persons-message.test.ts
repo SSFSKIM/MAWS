@@ -765,7 +765,7 @@ describe('made by hand: takeEnvelopesOut reads at most 16 passes', () => {
     }
     return joinedText(WORDS, inner);
   };
-  const counting = <T>(slice: (text: string) => { members: { text: string; read: T }[]; rest: string }) => {
+  const counting = <T>(slice: (text: string) => { members: { text: string; read: T }[]; rest: string; over: boolean }) => {
     const count = { calls: 0 };
     return { count, slice: (text: string) => {
       count.calls += 1;
@@ -795,14 +795,14 @@ describe('made by hand: takeEnvelopesOut reads at most 16 passes', () => {
   });
 
   it('a slicer that takes a member on every pass and never shortens the text: called 16 times, the text left whole', () => {
-    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text }));
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text, over: false }));
     expect(takeEnvelopesOut('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
     expect(count.calls).toBe(16);
   });
 
   it('the bound holds from the loop’s own source too, as the search text’s worker runs it', () => {
     const again = isolated(takeEnvelopesOut);
-    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text }));
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text, over: false }));
     expect(again('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
     expect(count.calls).toBe(16);
   });
@@ -826,6 +826,14 @@ describe('made by hand: a later pass over the slicer’s cap leaves the text who
     const second = readAnswerEnvelopesWithCost(first.rest);
     expect(second.cost.checks).toBe(MAX_ENVELOPE_CHECKS);
     expect(second).toMatchObject({ envelopes: [], rest: first.rest });
+  });
+
+  it('the slicer says which reading gave up: the first is within its cap, the second over it, and a text with nothing to take is within it', () => {
+    const first = slicesOf(text);
+    expect(first).toMatchObject({ over: false, members: [{ read: { askId: 'inner' } }] });
+    expect(slicesOf(first.rest)).toEqual({ members: [], rest: first.rest, over: true });
+    expect(slicesOf('Just a prompt.')).toEqual({ members: [], rest: 'Just a prompt.', over: false });
+    expect(isolated(envelopeSlices)(first.rest, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS).over).toBe(true);
   });
 
   it('the loop takes no envelope and leaves the text whole, from the module and from its own source as the search text’s worker runs it', () => {

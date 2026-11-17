@@ -109,11 +109,12 @@ const TAG_OPENS = ASK_STEER_OPENING; // an envelope's tag, either form
  * members, the newline that separated each envelope gone; a text that is all envelope has an empty rest. Each member is
  * the slice's bytes and what `read` made of it. A text that would cost more than `maxChecks` calls of `read` (each a
  * join and a scan of a slice; `MAX_ENVELOPE_CHECKS`) is left whole: no member, the rest the text unchanged, so every
- * reader sees one ordinary text. It uses its arguments alone: the search text's worker runs its source (ticket 704,
- * decision 8), so its helpers live inside it.
+ * reader sees one ordinary text, and `over` says so, so a caller that reads again (`takeEnvelopesOut`) tells a reading
+ * that gave up from one that found nothing. It uses its arguments alone: the search text's worker runs its source
+ * (ticket 704, decision 8), so its helpers live inside it.
  */
-export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: (lines: readonly string[]) => boolean[], read: (slice: string) => T | null, maxChecks: number): { members: { text: string; read: T }[]; rest: string } {
-  const whole = { members: [] as { text: string; read: T }[], rest: text };
+export function envelopeSlices<T>(text: string, opening: (askId: string) => string, pasted: (lines: readonly string[]) => boolean[], read: (slice: string) => T | null, maxChecks: number): { members: { text: string; read: T }[]; rest: string; over: boolean } {
+  const whole = { members: [] as { text: string; read: T }[], rest: text, over: false };
   if (!text.includes('[MAWS ask ')) return whole; // read on every user text the transcript draws
   // A line that opens an envelope: the whole first line the writer writes. A line that only begins with the tag (the
   // model's question, header and labels are written verbatim) opens nothing. The tag's id as `parseAskSteer` reads it.
@@ -145,7 +146,7 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
   const kept: string[] = [];
   for (let i = 0; i < lines.length; ) {
     const found = !inPasted[i] && opens(lines[i]!) ? envelopeAt(i) : null;
-    if (found === 'over') return whole;
+    if (found === 'over') return { ...whole, over: true };
     if (found === null) {
       kept.push(lines[i]!);
       i += 1;
@@ -154,7 +155,7 @@ export function envelopeSlices<T>(text: string, opening: (askId: string) => stri
     members.push(found.member);
     i = found.next;
   }
-  return { members, rest: kept.join('\n') };
+  return { members, rest: kept.join('\n'), over: false };
 }
 
 /**
@@ -428,22 +429,24 @@ const readOut = (text: string) => takeEnvelopesOut(text, (own) => envelopeSlices
  * The envelopes `slice` reads in a text, read again until a reading takes nothing out (ticket 704, decision 17): where
  * one envelope's lines stand around another whole envelope, the first reading takes the inner one and leaves the outer
  * one whole, and the next takes it. At most 16 readings (the architect's ruling 4 of 2026-11-16), so a text costs at
- * most 16 of `slice`'s own bound. A text whose 16th reading still takes an envelope is over the bound and is left
- * whole, no envelope taken, as `envelopeSlices` leaves a text over its cap: it draws as the person's one message, the
- * envelopes' lines and blocks as its text, and no answer is read from it. The envelopes in the order they were taken,
- * and what is left. The one loop: `readPersonsContent` reads through it, and the search text's worker runs its source,
- * so it uses its arguments alone.
+ * most 16 of `slice`'s own bound. A text over either bound, a reading that `slice` gave up on (`over`, its cap) or a
+ * 16th reading that still takes an envelope, is left whole, no envelope taken, whichever reading it was and whatever the
+ * readings before it took (the frontier review of ticket 704): it draws as the person's one message, the envelopes'
+ * lines and blocks as its text, and no answer is read from it. The envelopes in the order they were taken, and what is
+ * left. The one loop: `readPersonsContent` reads through it, and the search text's worker runs its source, so it uses
+ * its arguments alone.
  */
-export function takeEnvelopesOut<T>(text: string, slice: (text: string) => { members: { text: string; read: T }[]; rest: string }): { own: string; envelopes: { text: string; read: T }[] } {
+export function takeEnvelopesOut<T>(text: string, slice: (text: string) => { members: { text: string; read: T }[]; rest: string; over: boolean }): { own: string; envelopes: { text: string; read: T }[] } {
   const envelopes: { text: string; read: T }[] = [];
   let own = text;
   for (let pass = 0; pass < 16; pass += 1) {
-    const { members, rest } = slice(own);
+    const { members, rest, over } = slice(own);
+    if (over) break;
     if (members.length === 0) return { own, envelopes };
     envelopes.push(...members);
     own = rest;
   }
-  return { own: text, envelopes: [] }; // over the bound
+  return { own: text, envelopes: [] }; // over a bound: the slicer's cap in a reading, or the 16 readings
 }
 const leftOf = (read: { own: string; envelopes: readonly unknown[] }): string | null => (read.own === '' || (read.envelopes.length > 0 && read.own.trim() === '') ? null : read.own);
 
