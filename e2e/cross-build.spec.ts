@@ -145,6 +145,7 @@
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
 import { createHash, randomUUID } from 'node:crypto'; // UX wave U6e: createHash, the files service's content hash
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os'; // UX wave U6b-5b M1
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import { expect, test, type Locator, type Page } from '@playwright/test';
@@ -188,6 +189,7 @@ import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's
 import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
 import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
 import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
+import { holdsMachinePath, scrubPaths } from './support/zoom-probe'; // UX wave U6b-5b M1: the zoom probe's records
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -1325,14 +1327,22 @@ test('(export folder) the last export’s folder, kept as main’s layout key, s
   }
 });
 
-// UX wave U6b-5b M1 (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1, "(zoom probe)"; P7): what the peer
-// shows after this build's page was zoomed. This build's window is set to 150 % in main, once in isolated mode
-// (`setZoomMode('isolated')` first) and once in the default mode, and is left by an ordinary quit and, on a fresh
-// profile, by a forced exit (`s.killApp`); the peer is then launched on the profile and its page's factor read. It
-// records and asserts nothing about the factor: the lines decide P7 beside the harness's rows c and d
-// (spikes/zoom-probe/). Runs only under MAWS_ZOOM_PROBE=1, against `--peer-exact f1852de3a` and `--peer-exact
-// 2c7044231`; M3's "(zoom, both ways)" replaces it.
+// UX wave U6b-5b M1 (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-5b-zoom.md, M1, "(zoom probe)"; P7): what a build
+// shows after this build's page was zoomed. Chromium keys a default-mode zoom of a file: page by its whole URL (the
+// harness's rows a and b), and the peer loads its own renderer file, so the peer's factor speaks to P7 only when its
+// page's URL is this build's; each line says whether they match, and an observation across unmatched URLs is recorded
+// as that, not as P7 evidence. The same-URL reading is this build relaunched on the profile after the peer: in default
+// mode it is the control (a kept zoom must show there, 1.5), in isolated mode it is P7's own observation (1 expected).
+// Three ways out of this build's zoomed run, each on a fresh profile: a quit; a forced exit (`s.killApp`) once a
+// default-mode write control (a hidden window of a scratch file, zoomed to 1.25) has had its key written to
+// `Preferences`, waited on the file and bounded, and "not established" when it never is; and a forced exit at once, a
+// labelled extra that can land before any write. This build's window is set to 150 % in main, in isolated mode by
+// `setZoomMode('isolated')` first (this build's window has no mode of its own). It records and asserts nothing about a
+// factor; every line names its builds and its scratch by placeholder and is refused if a path of the machine is left.
+// Runs only under MAWS_ZOOM_PROBE=1, against `--peer-exact f1852de3a` and `--peer-exact 2c7044231`; M3's
+// "(zoom, both ways)" replaces it.
 const ZOOM_PROBE_ON = process.env.MAWS_ZOOM_PROBE === '1';
+const ZOOM_CONTROL_FILE = 'zoom-control.html'; // the write control's page, in the scratch folder
 // Every key path holding "zoom" in the profile's Preferences file (Chromium's own record of a zoom), with its value.
 function zoomPrefsOf(userData: string): { key: string; value: unknown }[] | null {
   const path = join(userData, 'Preferences');
@@ -1348,20 +1358,28 @@ function zoomPrefsOf(userData: string): { key: string; value: unknown }[] | null
   visit(JSON.parse(readFileSync(path, 'utf8')), []);
   return found;
 }
-// The app window's factor (the window the scenes' helpers find: the visible one), and its zoom mode where Electron reads one.
+// The app window's factor, its zoom mode where Electron reads one, and its page's URL (the window the scenes' helpers
+// find: the visible one).
 const appZoomOf = (run: Run) =>
   run.maws.app.evaluate(({ BrowserWindow }) => {
     const wc = BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents as Electron.WebContents & { getZoomMode?: () => string };
-    return { factor: wc.getZoomFactor(), mode: typeof wc.getZoomMode === 'function' ? wc.getZoomMode() : null };
+    return { factor: wc.getZoomFactor(), mode: typeof wc.getZoomMode === 'function' ? wc.getZoomMode() : null, url: wc.getURL() };
   });
+const pageOf = (url: string) => url.split(/[?#]/, 1)[0]!;
 
-test('(zoom probe) the factor the peer opens at, on a profile this build left at 150 % in isolated and in default zoom mode, by a quit and by a forced exit', async () => {
+test('(zoom probe) the factor a build opens at, on a profile this build left at 150 % in isolated and in default zoom mode, by a quit, by a forced exit after a write, and by a forced exit at once', async () => {
   test.skip(!ZOOM_PROBE_ON, 'a probe of U6b-5b M1: runs only under MAWS_ZOOM_PROBE=1, on a Mac');
-  test.setTimeout(600_000);
+  test.setTimeout(1_200_000);
   const { here, peer } = builds();
   for (const mode of ['isolated', 'default'] as const) {
-    for (const exit of ['quit', 'kill'] as const) {
-      await withScratch(`xb-zoom-probe-${mode}-${exit}`, async (s) => {
+    for (const exit of ['quit', 'kill after the control wrote', 'kill at once (an extra)'] as const) {
+      await withScratch(`xb-zoom-probe-${mode}-${exit.split(' ')[0]}${exit.includes('once') ? '-once' : ''}`, async (s) => {
+        const scrub = (text: string) => scrubPaths(text, { '<this build>': REPO_ROOT, '<the peer>': peer.root ?? REPO_ROOT, '<scratch>': s.root, '<home>': homedir() });
+        const say = (line: string) => {
+          const clean = scrub(line);
+          expect(holdsMachinePath(clean), 'a probe record names no path of the checkout or the home folder').toBe(false);
+          record([clean]);
+        };
         const first = await s.launch();
         await s.ready(first.page);
         const set = await first.maws.app.evaluate(({ BrowserWindow }, isolated) => {
@@ -1372,24 +1390,59 @@ test('(zoom probe) the factor the peer opens at, on a profile this build left at
           return { modeCall };
         }, mode === 'isolated');
         if (mode === 'isolated' && !set.modeCall) {
-          record([`(zoom probe) ${here.label} has no setZoomMode: the isolated mode is not probed`]);
+          say(`(zoom probe) ${here.label} has no setZoomMode: the isolated mode is not probed`);
           await s.quit(first);
           return;
         }
         await expect.poll(async () => (await appZoomOf(first)).factor, { message: `${here.label}'s page at 1.5` }).toBe(1.5);
         const zoomed = await appZoomOf(first);
+
+        let established: boolean | null = null; // the write control, for the kill after it
         if (exit === 'quit') await s.quit(first);
-        else await s.killApp(first);
+        else if (exit === 'kill at once (an extra)') await s.killApp(first);
+        else {
+          const control = join(s.root, ZOOM_CONTROL_FILE);
+          writeFileSync(control, '<!doctype html><html><head><meta charset="utf-8"><title>Zoom write control</title></head><body>The write control</body></html>');
+          await first.maws.app.evaluate(({ BrowserWindow }, file) =>
+            new Promise<void>((resolve) => {
+              const win = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } });
+              win.webContents.once('did-finish-load', () => {
+                win.webContents.setZoomFactor(1.25);
+                resolve();
+              });
+              void win.loadFile(file);
+            }), control);
+          try {
+            await expect.poll(() => JSON.stringify(zoomPrefsOf(s.userData) ?? []).includes(ZOOM_CONTROL_FILE), { timeout: 60_000, message: 'the write control’s key in Preferences' }).toBe(true);
+            established = true;
+          } catch {
+            established = false;
+          }
+          await s.killApp(first);
+        }
         const prefsAfter = zoomPrefsOf(s.userData);
+        if (established === false) {
+          say(`(zoom probe) ${mode} mode, ${exit}: not established: the write control's key never reached Preferences within 60 s, so the kill's timing shows nothing; Preferences' zoom keys: ${JSON.stringify(prefsAfter)}`);
+          return;
+        }
 
         const old = await s.launch({}, peer.root);
         await s.ready(old.page);
-        const opened = await appZoomOf(old);
+        const theirs = await appZoomOf(old);
         await s.quit(old);
-        record([
-          `(zoom probe) ${mode} mode, left by ${exit === 'quit' ? 'a quit' : 's.killApp'}: ${here.label} at ${JSON.stringify(zoomed)}; ${peer.label} (wire ${wireOf(peer)}) opened at ${opened.factor}` +
-            `; Preferences' zoom keys after ${here.label}: ${JSON.stringify(prefsAfter)}; after ${peer.label}: ${JSON.stringify(zoomPrefsOf(s.userData))}`,
-        ]);
+        const again = await s.launch();
+        await s.ready(again.page);
+        const ours = await appZoomOf(again);
+        await s.quit(again);
+        const peerMatches = pageOf(theirs.url) === pageOf(zoomed.url);
+        const sameUrl = pageOf(ours.url) === pageOf(zoomed.url);
+        const sameReading = mode === 'default' ? `the control (a kept default-mode zoom shows here): ${ours.factor === 1.5 ? 'established' : 'NOT established'}` : 'P7’s same-URL observation';
+        say(
+          `(zoom probe) ${mode} mode, ${exit}${established === true ? ' (the write control’s key was in Preferences)' : ''}: ${here.label} was at ${JSON.stringify({ factor: zoomed.factor, mode: zoomed.mode })} on ${zoomed.url}` +
+            `; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs.factor} on ${theirs.url}, ${peerMatches ? 'the same page URL' : 'another page URL: not P7 evidence'}` +
+            `; ${here.label} relaunched opened at ${ours.factor} on ${sameUrl ? 'the same page URL' : `another page URL (${ours.url})`}, ${sameReading}` +
+            `; Preferences' zoom keys after ${here.label}'s run: ${JSON.stringify(prefsAfter)}`,
+        );
       });
     }
   }

@@ -61,7 +61,7 @@ import { address, addressOf, browserIn, chipOf, chipsIn, openBrowser, overflow, 
 import { invoke, value } from './support/c7-replay';
 import { clearToasts, closeScene, show, type Scratch } from './support/maws-tools';
 import { menuAfter, menuAt, menuIds, menuShape, openAllAsked, pickMenu } from './support/native-menu';
-import { holdForLook, PROBE_FACTORS, record, setAppZoom, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
+import { appWindowState, holdForLook, popupPlace, PROBE_FACTORS, record, sameRect, setAppZoom, timesFactor, zoomProbe } from './support/zoom-probe'; // UX wave U6b-5b M1
 
 test.describe.configure({ timeout: 240_000 });
 
@@ -975,13 +975,18 @@ test('zoom probe: the popup and the menu', async () => {
         await probe.click();
         await expect.poll(async () => (await popupOf(s))?.url, { message: 'the seam answers the open popup' }).toBe(popupUrl);
         const popup = (await popupOf(s))!;
-        const anchor = { right: icon.x + icon.width, bottom: icon.y + icon.height };
-        const anchorPt = { right: Math.round(anchor.right * f), bottom: Math.round(anchor.bottom * f) };
-        const standsBy = { right: popup.bounds.x + popup.bounds.width, top: popup.bounds.y };
+        // the two predictions, each through popupBounds' own clamp (popupPlace) with the popup's real size and the
+        // window's content size in points: the anchor as the window sends it (the icon's box rounded, ActionBar.tsx),
+        // and that anchor times the factor. "Off": the popup stands at the first and not at the second
+        const { content } = await appWindowState(s.maws.app);
+        const anchor = { x: Math.round(icon.x), y: Math.round(icon.y), width: Math.round(icon.width), height: Math.round(icon.height) };
+        const unscaled = popupPlace(anchor, popup.bounds, content);
+        const scaled = popupPlace(timesFactor(anchor, f), popup.bounds, content);
         record([
           {
-            probe: 'popup', placement: 2, factor: f, icon, bounds: popup.bounds, iconCorner: anchor, iconCornerTimesFactor: anchorPt,
-            off: Math.abs(standsBy.right - anchor.right) <= 1 && Math.abs(standsBy.top - anchor.bottom) <= 1 && (Math.abs(standsBy.right - anchorPt.right) > 1 || Math.abs(standsBy.top - anchorPt.bottom) > 1),
+            probe: 'popup', placement: 2, factor: f, icon, anchor, content, bounds: popup.bounds, predictedUnscaled: unscaled, predictedScaled: scaled,
+            unscaledClamped: !sameRect(unscaled, { ...anchor, x: anchor.x + anchor.width - unscaled.width, y: anchor.y + anchor.height, width: unscaled.width, height: unscaled.height }),
+            off: sameRect(popup.bounds, unscaled) && !sameRect(popup.bounds, scaled),
           },
         ]);
         await holdForLook(s.page, `the popup at ${f}`);

@@ -571,6 +571,20 @@ Found while this document was written and reviewed; each changed a decision abov
 8. **2026-11-17 (UTC) · M1: `tab(id).placed` counts only the reports `place` acts on** (ruled by the architect on the executor's report). These are the owner's report, a claim, and the owner's release (`rect: null`). Each rect is kept as received. A report that `place` ignores, from another pane or an unknown window, is neither kept nor counted, since the acknowledgment must mean that the view took the rect. The record is a `WeakMap` in `ViewManager` (`placedOf`), which the e2e inspector reads through an optional dependency. In the product the map is written and nothing reads it: it is inert. Step 2 of Concrete Steps says the browser's suites pass "with no case edited". That holds for every case but one: the case in `index.test.ts` that pins the seam's whole shape (`toEqual` on `tab()`) now reads `placed: null`, because the seam's shape is the thing M1 changes.
 9. **2026-11-17 (UTC) · M1: how the probes measure.** (i) The app window's zoom is set in main on the visible window (`setZoomFactor`), the window the scenes' other helpers use. A probe waits until the page's `devicePixelRatio` equals the display's scale times the factor, which is a state of the page, not a number of frames. (ii) Electron reports only the position of the traffic lights. Their size is taken as macOS's standard (three 14-point buttons, a 54-point span) and named as assumed in every line, and the look confirms it. (iii) For the device box, the room is dragged by the panel's separator towards 440, 370 and 380 CSS pixels. Every line records the room's actual width, since the panel's bounds can stop a drag short. (iv) The look's page of numbered cells is `/cells.html` on the scenes' test server. (v) The cross-build probe uses a fresh profile for each mode and each way of exiting. This build's window has no zoom mode, so the isolated mode is set at run time with `setZoomMode('isolated')`. (vi) In the harness, row f's capture is judged by the vertical extent of a red line of text against the control at factor 1, within 10 %. The `Preferences` file is read by every key whose name holds "zoom".
 
+10. **2026-11-17 (UTC) · M1: the independent review's nine findings, as the architect ruled them.**
+    - The cross-build probe:
+      - It names each build's page URL and whether they match. A peer on another URL is not P7 evidence.
+      - This build relaunched is the same-URL reading: the control in default mode, P7's observation in isolated mode.
+      - The forced exit is taken after a default-mode write control's key reaches `Preferences`, bounded, and is "not established" otherwise. The kill at once stays as a labelled extra.
+    - The harness:
+      - Row h needs the page laid out at the factor, and f3 needs a painted frame before the show. Either failing is an experiment that did not stand.
+      - Row g's 500 ms is replaced by a propagation control.
+      - Windows show inactive unless `--look`.
+    - The popup's predictions go through `popupBounds`' clamp. It is mirrored in the e2e, which loads no main code; that mirror is what we used, not an unclamped anchor.
+    - The device box takes its ample room by Expand surface where the separator or the sheet cannot give it.
+    - Paths: every printed record replaces the builds' roots, the scratch and the home folder by placeholders, and is refused if a path of the machine is left. `scrub.test.mjs` holds the harness's scrub to that, and `record` checks each probe line.
+    - The placement map's running outside the e2e stands as accepted and is stated plainly. Decision Log 8's "inert" means only that nothing reads it.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.

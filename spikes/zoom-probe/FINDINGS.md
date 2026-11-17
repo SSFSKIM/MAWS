@@ -10,7 +10,10 @@ scenes, and the look. The second holds the results of each run, copied in with t
 `main.mjs`, run on the repository's own Electron (44.4.5 at the pin) with a scratch profile of its own under
 `runs/<time>/profiles/`. `runs/` is ignored by git. The harness imports nothing from `src/` and has no dependency of
 its own. Its window is made the way `createWindow` makes the app's: a `file:` page, sandboxed, context-isolated, with
-no Node. On Linux with no display, `run.mjs` runs itself again under `xvfb-run`.
+no Node. Every window is shown inactive (`showInactive`), so a run on a shared Mac never takes the keyboard; `--look`
+shows them in front for a person looking. On Linux with no display, `run.mjs` runs itself again under `xvfb-run`. What
+it prints and stores names this folder `<harness>`, the checkout `<checkout>` and the home folder `<home>`, and a record
+that would still hold a path of the machine stops the run (`scrub.mjs`, held by `node --test scrub.test.mjs`).
 
 It prints one line per row:
 
@@ -25,9 +28,9 @@ It prints one line per row:
 | c | as a, the window made with `zoomMode: 'isolated'` | PASS when the stand-in opens at 1 (by `getZoomFactor()` and by the page's own `devicePixelRatio`) |
 | d | as c, ended by SIGKILL at once and 15 s later | PASS, as c, for both |
 | e | isolated, at 0.5 and at 2: a reload, then a load of the same file with another query | RECORD: the factor after each load (`applyAfterLoad` is built when it is lost) |
-| f | isolated, at 0.5 and at 2: f1 `webPreferences.zoomFactor`; f2 a call at `dom-ready`; f3 a call at `ready-to-show` and the window shown at the next painted frame; f0, the control at 1 | PASS when a way has the factor in force at the show and the capture taken at the show has the red line's ink at the factor times f0's height, within 10 %, at both factors; `openAt` is the first such way. FAIL (a stop) when no way passes |
-| g | the page at 1.5, once in default mode and once isolated, beside the same file with another query (the presenter's shape) and another file (the repair page's shape), each opened before the zoom and again after it | RECORD: the other windows' factors |
-| h | isolated, at 0.5 and at 2: a `WebContentsView` of another partition placed over the page's box by decision 27's rule | PASS when the view's factor is 1, its bounds are the box times the factor edge by edge, and its page is that many CSS pixels wide |
+| f | isolated, at 0.5 and at 2: f1 `webPreferences.zoomFactor`; f2 a call at `dom-ready`; f3 a call at `ready-to-show` and the window shown at the next painted frame; f0, the control at 1 | PASS when a way stood (f3: a frame was painted after the call before the show; a show after the wait's bound is a fixed delay, so f3 did not stand) and has the factor in force at the show, with the capture taken at the show holding the red line's ink at the factor times f0's height, within 10 %, at both factors; `openAt` is the first such way. FAIL (a stop) when no way passes |
+| g | the page at 1.5, once in default mode and once isolated, beside the same file with another query (the presenter's shape) and another file (the repair page's shape), each opened before the zoom and again after it; and a propagation control: in default mode a window at the page's own URL, which the zoom must reach; in isolated mode a default-mode window of a third file zoomed through a twin at its URL | RECORD: the other windows' factors, read once the control's page has reached 1.5 (bounded); a control that never does is `FAIL (an experiment did not stand)` |
+| h | isolated, at 0.5 and at 2: a `WebContentsView` of another partition placed over the page's box by decision 27's rule | PASS when the page laid out at the factor (else `FAIL (an experiment did not stand)`), the view's factor is 1, its bounds are the box times the factor edge by edge, and its page is that many CSS pixels wide |
 | i | isolated | PASS when `setZoomMode` is a function and `getZoomMode()` answers `isolated`; without the getter the preference is not shown to have taken: FAIL |
 | j | row h's window at 1.25, moved to a display of another scale and back | NOT RUN only when the launch reports no such display (a launch with no answer is a FAIL); otherwise, once the window has reached each display and the page has settled at 1.25 there, PASS when the app's factor stays 1.25 and the view stays on the box times the factor. `devicePixelRatio` is recorded but not judged |
 
@@ -46,7 +49,20 @@ which is the document's condition for that placement, computed from the numbers 
 | "zoom probe: the view, the lights, the device box" | `e2e/browser.spec.ts` | `placedOn` (main's acknowledgment of the pane's rect); for the device box, `placedOn` after Mobile is chosen |
 | "zoom probe: the popup and the menu" | `e2e/browser-chrome.spec.ts` | the seam's `popup()` answering; the menu record changing (`menuAfter`), then `at()` |
 | "zoom probe: the pin" | `e2e/browser-comment.spec.ts` | the card for the pick being drawn, and its caret naming the pick's position |
-| "(zoom probe) …" | `e2e/cross-build.spec.ts` | each launch's `s.ready(page)` |
+| "(zoom probe) …" | `e2e/cross-build.spec.ts` | each launch's `s.ready(page)`; for the kill after a write, the write control's key in `Preferences` (bounded; "not established" when it never comes) |
+
+The cross-build probe names each build's page URL (by placeholder: `<this build>`, `<the peer>`) and whether it is
+this build's: a default-mode zoom is keyed by the whole file URL, so the peer's factor is P7 evidence only on the same
+URL. This build relaunched on the profile is the same-URL reading: the control in default mode (1.5 shows a kept zoom
+can be seen), P7's own observation in isolated mode. The forced exit at once is a labelled extra. The device box's
+ample room is taken by the separator, by the sheet as it stands, or by Expand surface; the menu's threshold needs a
+separator and is otherwise recorded as one sample, unestablished. The popup's two predictions go through
+`popupBounds`' clamp, mirrored in `e2e/support/zoom-probe.ts` (`popupPlace`), with the popup's real size and the
+window's content size.
+
+**The seams.** `tab(id).placed` is written in the product too: `ViewManager` keeps its `WeakMap` for every placement it
+acts on, whether or not the e2e runs, and only the e2e inspector reads it (Decision Log 8, accepted). The menu seam's
+`at()` is recorded only on the e2e path.
 
 The look: run the first scene with `MAWS_ZOOM_PROBE_HOLD=1 MAWS_E2E_QUIET=0`. At each factor it stops with the window
 shown (`page.pause()`) on a page of 48 numbered cells (`/cells.html`). After you resume, the next line records which

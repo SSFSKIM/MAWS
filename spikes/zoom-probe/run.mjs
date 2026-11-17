@@ -4,7 +4,10 @@
 // with each launch's output, to runs/<time>/results.json. On Linux without a display it re-runs itself under xvfb-run,
 // as spikes/viewer-frame/run.mjs does.
 //
-//   node run.mjs [--only=<row,row>] [--setuid-sandbox]
+//   node run.mjs [--only=<row,row>] [--setuid-sandbox] [--look]
+//
+// --look: the windows come to the front (a person is looking); without it every window is shown inactive, so a run on
+// a shared Mac never takes the keyboard.
 //
 // --setuid-sandbox: on a host whose kernel restricts unprivileged user namespaces (Ubuntu 24.04), Chromium's sandbox
 // needs its setuid helper; this sets it on the repository's Electron with `sudo -n` (spikes/viewer-frame/FINDINGS.md,
@@ -17,7 +20,9 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
+import { homedir } from 'node:os';
+import { pathsIn, scrubber } from './scrub.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const argv = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.join('=') || true]; }));
@@ -48,7 +53,17 @@ if (process.platform === 'linux') {
 
 // What the run prints and stores names this folder as `<harness>`, never by its absolute path (a Preferences key holds
 // the page's whole file URL), so a line can be copied into FINDINGS.md as it is.
-const scrub = (text) => text.split(pathToFileURL(here).href).join('<harness>').split(here).join('<harness>');
+// A text that still holds a path of the checkout or of the home folder after the scrub is not printed or stored: the run
+// stops on it (scrub.test.mjs holds the scrub to that).
+// The checkout (Electron's own lines name its node_modules) and the home folder (anything else under it) get theirs too.
+const checkout = join(here, '..', '..');
+const scrubOnly = scrubber({ '<harness>': here, '<checkout>': checkout, '<home>': homedir() });
+const scrub = (text) => {
+  const clean = scrubOnly(text);
+  const left = pathsIn(clean, [here, checkout, homedir()]);
+  if (left.length > 0) throw new Error('a record would print a path of this machine; nothing was written');
+  return clean;
+};
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const runs = join(here, 'runs', stamp);
 const profiles = join(runs, 'profiles');
@@ -59,7 +74,7 @@ const LAUNCH_MS = 120_000; // a launch that has not exited by then is ended and 
 // One launch of main.mjs. `kill`: 'now' sends SIGKILL at the `ZOOMED` line, a number of ms that long after it.
 function launch(label, args, { kill = null } = {}) {
   return new Promise((resolve) => {
-    const child = spawn(electron, [here, ...args], { env: { ...process.env, ELECTRON_ENABLE_LOGGING: '' } });
+    const child = spawn(electron, [here, ...args, ...(argv.look ? ['--look'] : [])], { env: { ...process.env, ELECTRON_ENABLE_LOGGING: '' } });
     let out = '';
     let err = '';
     let killedAt = null;
@@ -203,9 +218,11 @@ if (want('f')) {
     for (const f of [0.5, 2]) {
       const shown = part(await launch(`f-${way}-${f}`, ['--job=show', `--profile=${profile(`f-${way}-${f}`)}`, `--way=${way}`, `--factor=${f}`]), 'shown');
       const ratio = shown && base && shown.inkAtShow !== null ? shown.inkAtShow / base : null;
-      const atFactor = shown !== null && shown.atShow === f && ratio !== null && Math.abs(ratio / f - 1) <= 0.1;
+      // a way passes only where it stood (f3: a painted frame before the show), with the factor in force at the show
+      const stood = shown !== null && shown.stood === true;
+      const atFactor = stood && shown.atShow === f && ratio !== null && Math.abs(ratio / f - 1) <= 0.1;
       all &&= atFactor;
-      parts.push({ part: `${way} at ${f}`, ...(shown ?? { failed: 'no result' }), inkRatioAtShow: ratio === null ? null : Math.round(ratio * 1000) / 1000, atFactorWhenShown: atFactor });
+      parts.push({ part: `${way} at ${f}`, ...(shown ?? { failed: 'no result' }), stood, inkRatioAtShow: ratio === null ? null : Math.round(ratio * 1000) / 1000, atFactorWhenShown: atFactor });
     }
     if (all) passing.push(way);
   }
@@ -217,9 +234,11 @@ if (want('g')) {
   const parts = [];
   for (const mode of ['default', 'isolated']) {
     const got = await launch(`g-${mode}`, ['--job=windows', `--profile=${profile(`g-${mode}`)}`, `--mode=${mode}`]);
-    parts.push({ part: mode, ...(part(got, 'others') ?? { failed: got.stderrTail }) });
+    const others = part(got, 'others');
+    // the others' factors count only where the propagation control took the zoom (and first was at it)
+    parts.push({ part: mode, ...(others ?? { failed: got.stderrTail }), established: !!others && others.firstReflects && others.control.took });
   }
-  rows.g = { verdict: 'RECORD', parts };
+  rows.g = { verdict: parts.every((p) => p.established) ? 'RECORD' : 'FAIL (an experiment did not stand)', parts };
 }
 
 // Row h: the child view's own factor is 1 and its bounds are the box's rect times the factor, edge by edge.
@@ -228,9 +247,9 @@ if (want('h')) {
   const parts = [];
   for (const f of [0.5, 2]) {
     const placed = part(await launch(`h-${f}`, ['--job=view', `--profile=${profile(`h-${f}`)}`, `--factor=${f}`]), 'placed');
-    parts.push({ part: `factor ${f}`, ...(placed ?? { failed: 'no result' }), ok: !!placed && placed.viewFactor === 1 && placed.appFactor === f && sameRect(placed.viewBounds, placed.want) && placed.viewInner.width === placed.want.width });
+    parts.push({ part: `factor ${f}`, ...(placed ?? { failed: 'no result' }), stood: !!placed && placed.reflected, ok: !!placed && placed.reflected && placed.viewFactor === 1 && placed.appFactor === f && sameRect(placed.viewBounds, placed.want) && placed.viewInner.width === placed.want.width });
   }
-  rows.h = { verdict: parts.every((p) => p.ok) ? 'PASS' : 'FAIL', parts };
+  rows.h = { verdict: parts.some((p) => !p.stood) ? 'FAIL (an experiment did not stand)' : parts.every((p) => p.ok) ? 'PASS' : 'FAIL', parts };
 }
 
 // Row i: the call exists and the preference took.
@@ -265,8 +284,8 @@ const brief = {
   c: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
   d: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
   e: (r) => r.parts.map((p) => ({ at: p.part, afterReload: p.afterReload?.factor, afterLoad: p.afterLoad?.factor })),
-  f: (r) => ({ openAt: r.openAt, ways: r.parts.map((p) => ({ way: p.part, atDomReady: p.atDomReady, atShow: p.atShow, inkRatio: p.inkRatioAtShow, ok: p.atFactorWhenShown })) }),
-  g: (r) => r.parts.map((p) => ({ mode: p.part, first: p.first, openBefore: p.openBefore, openedAfter: p.openedAfter })),
+  f: (r) => ({ openAt: r.openAt, ways: r.parts.map((p) => ({ way: p.part, stood: p.stood, atDomReady: p.atDomReady, atShow: p.atShow, inkRatio: p.inkRatioAtShow, ok: p.atFactorWhenShown })) }),
+  g: (r) => r.parts.map((p) => ({ mode: p.part, established: p.established, control: p.control, first: p.first, openBefore: p.openBefore, openedAfter: p.openedAfter })),
   h: (r) => r.parts.map((p) => ({ at: p.part, viewFactor: p.viewFactor, want: p.want, bounds: p.viewBounds, inner: p.viewInner })),
   i: (r) => r.parts[0],
   j: (r) => (r.verdict === 'NOT RUN' ? r.parts[0] : { there: r.parts[0].there?.againstBox, back: r.parts[0].back?.againstBox, dpr: [r.parts[0].before?.page?.dpr, r.parts[0].there?.page?.dpr, r.parts[0].back?.page?.dpr] }),

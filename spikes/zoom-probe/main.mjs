@@ -5,7 +5,10 @@
 // `WebContentsView` in a partition of its own).
 //
 //   electron . --job=<zoom|standin|reload|show|windows|view|api> --profile=<dir> [--mode=<default|isolated>]
-//              [--factor=<n>] [--end=<quit|hold>] [--way=<f0|f1|f2|f3>] [--move]
+//              [--factor=<n>] [--end=<quit|hold>] [--way=<f0|f1|f2|f3>] [--move] [--look]
+//
+// Every window is shown inactive (`showInactive`), so a run on a shared Mac never takes the keyboard from whoever uses
+// it; `--look` (run.mjs passes it on) shows them in front, for a person looking.
 //
 // zoom     the window in `--mode`, its page set to `--factor`; `--end=quit` quits, `--end=hold` waits to be killed
 // standin  the window as a build that knows no zoom makes it: no zoom mode, no zoom call; reads the factor it opens at
@@ -30,11 +33,15 @@ const job = String(argv.job);
 const factor = argv.factor === undefined ? 1 : Number(argv.factor);
 const PAGE = join(here, 'page', 'index.html');
 const OTHER = join(here, 'page', 'other.html');
+const CONTROL = join(here, 'page', 'control.html'); // row g's propagation control in isolated mode
 app.setPath('userData', String(argv.profile));
 
 const result = (part, observed) => console.log(`RESULT ${JSON.stringify({ job, part, ...observed })}`);
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const round = (n, places = 4) => Math.round(n * 10 ** places) / 10 ** places;
+
+// Shown without taking the keyboard, unless a person asked to look (--look).
+const showWindow = (win) => (argv.look ? win.show() : win.showInactive());
 
 // The window as `createWindow` (src/main/window.ts) makes the app's, less what the probe does not need (a preload, the
 // traffic lights' position): shown when ready, unless the job shows it itself.
@@ -43,7 +50,7 @@ function makeWindow({ mode = null, show = true, zoomFactor = null, width = 900, 
   if (mode) webPreferences.zoomMode = mode;
   if (zoomFactor !== null) webPreferences.zoomFactor = zoomFactor;
   const win = new BrowserWindow({ width, height, show: false, backgroundColor: '#ffffff', webPreferences });
-  if (show) win.once('ready-to-show', () => win.show());
+  if (show) win.once('ready-to-show', () => showWindow(win));
   return win;
 }
 const loaded = (wc) => new Promise((resolve) => wc.once('did-finish-load', resolve));
@@ -169,9 +176,12 @@ const jobs = {
       seen.atReadyToShow = win.webContents.getZoomFactor();
       if (way === 'f3') {
         win.webContents.setZoomFactor(factor);
+        // f3 stands only when the page painted a frame after the call before the show; a show after nextFrame's
+        // bound instead is a show after a fixed delay, which f3 is not (run.mjs reads `stood`)
         seen.frameBeforeShow = await nextFrame(win.webContents);
       }
-      win.show();
+      seen.stood = way !== 'f3' || seen.frameBeforeShow === true;
+      showWindow(win);
     });
     void win.loadFile(PAGE);
     await shown;
@@ -191,8 +201,10 @@ const jobs = {
   // row g: the page, the same file with another query (the presenter's shape), another file (the repair page's shape)
   async windows() {
     const isolated = argv.mode === 'isolated';
+    let openedFirst = false; // only the first window is made in the mode asked; every other, as a build makes it
     const open = async (file, query) => {
-      const win = makeWindow({ mode: file === PAGE && !query && isolated ? 'isolated' : null });
+      const win = makeWindow({ mode: file === PAGE && !query && isolated && !openedFirst ? 'isolated' : null });
+      openedFirst = true;
       const ready = loaded(win.webContents);
       void win.loadFile(file, query ? { query } : {});
       await ready;
@@ -201,15 +213,22 @@ const jobs = {
     const first = await open(PAGE);
     const present = await open(PAGE, { present: '1' });
     const repair = await open(OTHER);
+    // the propagation control, whose page reaching 1.5 (bounded) shows that a shared zoom has had the time to reach
+    // the others: their staying at 1 counts only when it did. In default mode it is a window at first's own URL, which
+    // first's zoom must reach. In isolated mode, where first's zoom must reach nothing, it is a default-mode window of
+    // a third file, zoomed through a twin at that URL, so its zoom touches neither first's URL nor the repair page's.
+    const control = isolated ? await open(CONTROL) : await open(PAGE);
+    const controlTwin = isolated ? await open(CONTROL) : null;
     first.webContents.setZoomFactor(1.5);
-    await untilPageAt(first, 1.5);
-    await sleep(500); // a shared zoom reaches the other pages of the host through the browser process
+    const firstReflects = await untilPageAt(first, 1.5);
+    if (controlTwin) controlTwin.webContents.setZoomFactor(1.5);
+    const controlTook = await untilPageAt(control, 1.5, 10_000);
     const openBefore = { present: present.webContents.getZoomFactor(), repair: repair.webContents.getZoomFactor() };
     const presentAfter = await open(PAGE, { present: '2' });
     const repairAfter = await open(OTHER);
     await nextFrame(repairAfter.webContents);
     const openedAfter = { present: presentAfter.webContents.getZoomFactor(), repair: repairAfter.webContents.getZoomFactor() };
-    result('others', { mode: argv.mode, first: first.webContents.getZoomFactor(), openBefore, openedAfter });
+    result('others', { mode: argv.mode, first: first.webContents.getZoomFactor(), firstReflects, control: { by: isolated ? 'a twin at a third file' : 'first, at its own URL', took: controlTook, factor: control.webContents.getZoomFactor() }, openBefore, openedAfter });
     app.quit();
   },
 
@@ -220,7 +239,7 @@ const jobs = {
     void win.loadFile(PAGE);
     await ready;
     win.webContents.setZoomFactor(factor);
-    await untilPageAt(win, factor);
+    const reflected = await untilPageAt(win, factor); // false: the page never laid out at the factor, so the row did not stand
     const view = new WebContentsView({ webPreferences: { partition: 'zoom-probe-tab', sandbox: true, contextIsolation: true } });
     win.contentView.addChildView(view);
     const viewReady = loaded(view.webContents);
@@ -240,7 +259,7 @@ const jobs = {
       display: screen.getDisplayMatching(win.getBounds()).id,
     });
     const placed = await read();
-    result('placed', { factor, want, ...placed });
+    result('placed', { factor, reflected, want, ...placed });
     if (!argv.move) return app.quit();
 
     // row j: to a display of another scale and back

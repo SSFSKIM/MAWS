@@ -1496,7 +1496,7 @@ test('zoom probe: the view, the lights, the device box', async () => {
       return last;
     };
     // the room dragged towards `width` CSS pixels by the panel's separator, and the width it settled at (the panel's
-    // own bounds may stop it short); null when the panel has no separator (a sheet)
+    // own bounds may stop it short); null when the panel has no separator (a sheet), which the caller checks first
     const roomTo = async (width: number): Promise<number | null> => {
       if ((await resizer.count()) === 0) return null;
       const before = await settledRoom();
@@ -1517,26 +1517,40 @@ test('zoom probe: the view, the lights, the device box', async () => {
     };
     for (const f of PROBE_FACTORS) {
       await setAppZoom(s.maws.app, s.page, f);
-      const room = await roomTo(440);
-      if (room === null) {
-        record([{ probe: 'device box', placement: 6, factor: f, workArea, established: false, why: 'the panel is a sheet at this factor: no separator, no room to set' }]);
-        continue;
+      // the ample room: dragged to 440 where the panel has a separator; as the sheet has it where it is a sheet; and
+      // by the panel's Expand surface where either is under 375, restored after the five numbers are read
+      const sheet = (await resizer.count()) === 0;
+      const sheetRoom = sheet ? await settledRoom() : null;
+      let room = sheet ? sheetRoom! : (await roomTo(440))!;
+      const expanded = room < 375;
+      if (expanded) {
+        await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Expand surface', exact: true }).click();
+        room = await settledRoom();
       }
       await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
       const rect = await placedOn(s, t, pane);
       const view = (await viewOf(s, t))!;
       const [element, inner, text] = [(await rectOf(pane)).width, await cells.evaluate(() => window.innerWidth), (await chip.textContent())?.trim() ?? null];
       const ample = room >= 375;
+      if (expanded) {
+        await s.page.locator('[data-region="panel"]').getByRole('button', { name: 'Restore surface', exact: true }).click();
+        await settledRoom();
+      }
+      // the offer's samples, just under and just over 375: by the separator only; a sheet's one room is recorded as
+      // one sample, and the threshold stays unestablished there
       const offers: { room: number; offered: boolean; predicted: boolean }[] = [];
-      for (const target of [370, 380]) {
-        const at = (await roomTo(target))!;
-        offers.push({ room: at, offered: await offered(), predicted: at >= 375 });
+      if (sheet) offers.push({ room: sheetRoom!, offered: await offered(), predicted: sheetRoom! >= 375 });
+      else {
+        for (const target of [370, 380]) {
+          const at = (await roomTo(target))!;
+          offers.push({ room: at, offered: await offered(), predicted: at >= 375 });
+        }
       }
       // the offer's verdict needs one sample on each side of 375 CSS pixels; without them it is not established
       const straddles = offers.some((o) => o.room < 375) && offers.some((o) => o.room >= 375);
       record([
         {
-          probe: 'device box', placement: 6, factor: f, workArea, room, ample, straddles, placed: rect,
+          probe: 'device box', placement: 6, factor: f, workArea, sheet, sheetRoom, ampleBy: expanded ? 'Expand surface' : sheet ? 'the sheet' : 'the separator', room, ample, straddles, placed: rect,
           element: { read: element, predicted: Math.min(375, room) },
           frameDrawnPt: { read: element * f, predicted: Math.min(375, room) * f },
           view: { read: view.bounds?.width ?? null, predicted: Math.min(375, room) },
