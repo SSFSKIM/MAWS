@@ -122,12 +122,12 @@ function chipsAtTheirPlaces(row: UserRow): { text: string; bodies: Record<string
   // compared as the opening reads a spelling: by its numbers, whatever digits write them (the architect's ruling 4376)
   const keyOf = (n: number, lines: number) => pastedPlaceholder(n, lines);
   const shared = spellings.some((spelling) => !chips.some((chip) => chip.from === spelling.start) && chips.some((chip) => keyOf(chip.n, chip.lines) === keyOf(spelling.n, spelling.lines)));
-  let n = shared ? Math.max(0, ...spellings.map((spelling) => spelling.n)) : 0;
+  const fresh = freshNumbers(spellings);
   const bodies: Record<string, string> = {};
   let text = '';
   let from = 0;
   for (const chip of chips) {
-    const spelling = shared ? keyOf((n += 1), chip.lines) : spellingAt(chip.from, chip.to);
+    const spelling = shared ? keyOf(fresh(), chip.lines) : spellingAt(chip.from, chip.to);
     text += row.text.slice(from, chip.from) + spelling;
     from = chip.to;
     if (chip.attachment.text !== null) bodies[spelling] = asTyped(chip.attachment.text); // UX wave U1c: as pasted
@@ -199,10 +199,23 @@ function opened(slot: string, bodies: Readonly<Record<string, string>>): string 
 
 // The edit with each of `ranges` (in order, apart) of its text one pasted atom: the slot opened and left out, under a
 // placeholder no other in the text or the edit's bodies holds; an empty slot is no atom
+// The smallest positive numbers no spelling of `taken` holds, one per call (the reviewer's last re-read: a number past
+// the largest a text spells is not safe, since a typed spelling can be 2^53, where adding one changes nothing, or past
+// 1e21, which no parser reads back). Each is at most the count of spellings and calls, so it reads back as written.
+function freshNumbers(taken: readonly { n: number }[]): () => number {
+  const held = new Set(taken.map((spelling) => spelling.n));
+  let n = 0;
+  return () => {
+    do n += 1;
+    while (held.has(n));
+    return n;
+  };
+}
+
 function slotsAt(edit: Edit, ranges: readonly Range[]): Prefill {
   const bodies = edit.bodies ?? {};
   const others = parsePlaceholders([edit.text, ...Object.keys(bodies)].join('\n')).filter((placeholder) => placeholder.kind === 'pasted');
-  let n = Math.max(0, ...others.map((placeholder) => placeholder.n));
+  const fresh = freshNumbers(others);
   const added: Record<string, string> = {};
   let text = '';
   let at = 0;
@@ -210,8 +223,7 @@ function slotsAt(edit: Edit, ranges: readonly Range[]): Prefill {
     const content = leaveOutGrant(opened(edit.text.slice(from, to), bodies));
     text += edit.text.slice(at, from);
     if (content !== '') {
-      n += 1;
-      const key = pastedPlaceholder(n, countLines(content));
+      const key = pastedPlaceholder(fresh(), countLines(content));
       text += key;
       added[key] = content;
     }
