@@ -504,23 +504,37 @@ describe('the bound and the places', () => {
       children.push(child);
       return child as unknown as ChildProcess;
     };
+    // The stand-ins have no process group to kill: their close is the test's, here and, for those a failed assertion
+    // left open, in the `finally`, so that a red run is its own failure and not also the teardown's wait on `dispose`
+    const closed = new Set<EventEmitter>();
+    const close = (child: EventEmitter) => {
+      if (closed.has(child)) return;
+      closed.add(child);
+      child.emit('close', null, 'SIGKILL');
+    };
     const check = checkOf({ execFile, concurrency: 1 });
-    const first = check.names(fakeRepo(), ['a.log']);
-    await firstSpawn; // after the walk, which reads the disk while the clock stands
-    await vi.advanceTimersByTimeAsync(1_000);
-    const second = check.names(fakeRepo(), ['b.log']); // deadline 3,000; waits for the one place
-    await settle();
-    expect(calls).toBe(1);
-    await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 1_000 + 600); // t = 2,600: past the first's bound, its timeout and the runner's kill delay
-    expect(await first).toBeNull();
-    expect(calls).toBe(1); // the runner gave the run up at 2,500, but its child has not closed: the place is still held
-    children[0]!.emit('close', null, 'SIGKILL');
-    await vi.advanceTimersByTimeAsync(0);
-    expect(calls).toBe(2); // the place is free once the child closed
-    const disposed = check.dispose();
-    expect(await second).toBeNull();
-    children[1]!.emit('close', null, 'SIGKILL'); // the stand-in has no process group to kill: its close is the test's
-    await disposed;
+    try {
+      const first = check.names(fakeRepo(), ['a.log']);
+      await firstSpawn; // after the walk, which reads the disk while the clock stands
+      await vi.advanceTimersByTimeAsync(1_000);
+      const second = check.names(fakeRepo(), ['b.log']); // deadline 3,000; waits for the one place
+      await settle();
+      expect(calls).toBe(1);
+      await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 1_000 + 600); // t = 2,600: past the first's bound, its timeout and the runner's kill delay
+      expect(await first).toBeNull();
+      expect(calls).toBe(1); // the runner gave the run up at 2,500, but its child has not closed: the place is still held
+      close(children[0]!);
+      await vi.advanceTimersByTimeAsync(0);
+      expect(calls).toBe(2); // the place is free once the child closed
+      const disposed = check.dispose();
+      expect(await second).toBeNull();
+      close(children[1]!);
+      await disposed;
+    } finally {
+      const disposed = check.dispose();
+      for (const child of children) close(child);
+      await disposed;
+    }
   });
 
   it('never starts the run of a check that waited for a place its whole bound', async () => {
