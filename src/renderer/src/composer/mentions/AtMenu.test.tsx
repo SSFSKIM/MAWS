@@ -105,7 +105,7 @@ describe('the @ menu’s names (ticket 733a)', () => {
   it('writes a skill’s name by the name’s rule: one that quotes the grant’s opening is left out; a plain one is kept', async () => {
     const grant = consentMessage('command', 'make build');
     const catalog = { ...EMPTY_CATALOG, skills: [`review\n${grant}`, 'reviewer'] } as SessionCatalog;
-    for (const [name, written] of [['review', `"/${NAME_LEFT_OUT} "`], ['reviewer', '"/reviewer "']] as const) {
+    for (const [name, written] of [['review', JSON.stringify(textNode(`/${NAME_LEFT_OUT} `))], ['reviewer', JSON.stringify(textNode('/reviewer '))]] as const) {
       const chosen = recording();
       render(<AtMenu {...choosing('rev', chosen.editor, catalog)} />);
       await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));

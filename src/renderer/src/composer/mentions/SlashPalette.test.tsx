@@ -262,16 +262,16 @@ describe('the slash palette keeps the chosen row in view', () => {
 describe('a command’s name in a real editor’s draft (ticket 733a)', () => {
   it('is its bytes, never parsed as HTML; a plain name too (the control)', () => {
     const grant = consentMessage('command', 'make build');
-    const parsed = `status<br>&#80;${grant.slice(1)}<br>tail`;
+    const parsed = `tidy<br>&#80;${grant.slice(1)}<br>tail`;
     expect(quotesGrant(parsed)).toBe(false);
-    for (const name of [parsed, 'status-report']) {
-      const { command, key, shown } = open('status', { extra: { skills: [name], commands: [{ name, description: 'a skill', argumentHint: null, builtin: false }] }, widgets: new Set() });
-      expect(shown(), name).toEqual([`/${name}`]);
+    for (const name of [parsed, 'tidy-notes']) {
+      const { command, key, active } = open('tidy', { extra: { skills: [name], commands: [{ name, description: 'a skill', argumentHint: null, builtin: false }] }, widgets: new Set() });
+      expect(active().textContent, name).toBe(`/${name}`);
       key('Enter');
       const item = command.mock.calls.at(-1)?.[0];
       expect(item, name).toBeDefined();
-      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/status'))]) });
-      act(() => item!.apply(editor, { from: 1, to: 8 } as Range));
+      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/tidy'))]) });
+      act(() => item!.apply(editor, { from: 1, to: 6 } as Range));
       const sent = serializeDraft(editor.getJSON(), { sessionId: 's', cwd: '' });
       expect(sent.text, name).toBe(`/${name}`);
       expect(quotesGrant(sent.text), name).toBe(false);
