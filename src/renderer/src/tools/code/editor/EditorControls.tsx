@@ -6,8 +6,9 @@
 // UX wave U6e (K1, K14, K15; the named exception of docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md
 // §D): the last save's failure is `SaveFailure`, which the bar lays out on a line of its own at its full width, wrapped
 // and never cut, in every file tab. UX wave U1c (the architect's ruling on the notice cut at the side panel's width): the
-// reason why the disk's version is offered keeps its whole width, its words wrapping where the bar is narrower than the
-// sentence, and the controls' row wraps, so the counter and the buttons move to a further line, in their order.
+// reasons, why the disk's version is offered and why it cannot be, keep their whole width, their words wrapping where
+// the bar is narrower than the sentence, and the controls' row wraps, so the counter and the buttons move to a further
+// line, in their order.
 import { useChordHint } from '../../../app/IconButton';
 import { EDITOR_COPY } from '../copy';
 import { useViewer, type ViewerEntry } from '../viewer/viewer-store';
@@ -51,7 +52,7 @@ export function EditorControls({ entry }: { entry: ViewerEntry }) {
   return (
     <span data-editor-controls className="flex min-w-0 shrink flex-wrap items-center gap-1">
       {diskUnusable !== null && theirs === null ? (
-        <span role="status" data-disk-unusable={diskUnusable} title={EDITOR_COPY.diskUnusable[diskUnusable]} className="min-w-0 truncate text-warning">
+        <span role="status" data-disk-unusable={diskUnusable} title={EDITOR_COPY.diskUnusable[diskUnusable]} className="text-warning">
           {EDITOR_COPY.diskUnusable[diskUnusable]}
         </span>
       ) : null}
