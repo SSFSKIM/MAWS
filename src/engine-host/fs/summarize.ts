@@ -4,6 +4,7 @@
 // window's cut edge is dropped), rather than scanned for byte needles, because 64 KiB parses in well under a
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
+import { asTyped } from '@shared/engine/grant';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
 import { isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
@@ -59,7 +60,8 @@ export function summarize(
     // The conversation's first prompt (charter §19, the title rule): the engine's `last-prompt` follows the latest one,
     // a relay's steer included, so it stands in only when the first prompt's record is cut by the head window, and
     // then its earliest copy the windows hold (debt wave 4).
-    firstPrompt: firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt'),
+    // UX wave U1c (the review round's R3): as typed, so a search for a word the title shows finds it
+    firstPrompt: nullable(asTyped, firstUserText(headRecords) ?? firstOfType([...headRecords, ...tailRecords], 'last-prompt', 'lastPrompt')),
     lastAssistantText: lastAssistant,
     // W9 (H2): the latest the windows hold; HEAD (a non-repository or a detached checkout) or empty is no branch
     gitBranch: branchName(firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch')),
@@ -212,6 +214,8 @@ function lastString(records: TranscriptRecord[], type: string, field: string): s
 }
 
 // The engine's head-scanning first-prompt extractor, reduced: skip tool results and meta records, cap at 200 characters.
+const nullable = (f: (text: string) => string, text: string | null): string | null => (text === null ? null : f(text));
+
 function firstUserText(records: TranscriptRecord[]): string | null {
   for (const record of records) {
     if (record.type !== 'user' || record.isMeta === true) continue;
