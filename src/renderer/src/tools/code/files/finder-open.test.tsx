@@ -119,7 +119,8 @@ function Page() {
 const composer = () => screen.getByRole('textbox', { name: 'Composer' });
 const field = () => document.querySelector<HTMLInputElement>('[data-files-filter]');
 const body = (path: string, region: 'main' | 'panel') => document.querySelector<HTMLElement>(`[data-region="${region}"] [data-file-keyboard][data-key="${KEY(path)}"]`);
-const textOf = (path: string, region: 'main' | 'panel') => body(path, region)?.querySelector<HTMLElement>('.cm-content') ?? null;
+// The file's text, found by its viewer, so the cases read where the keyboard is whether or not the body takes it.
+const textOf = (path: string, region: 'main' | 'panel') => document.querySelector<HTMLElement>(`[data-region="${region}"] [data-file-viewer][data-path="${path}"] .cm-content`);
 const settle = () => act(() => new Promise((resolve) => setTimeout(resolve, 0)));
 const holdRead = (path: string) => {
   const gate = deferred<void>();
