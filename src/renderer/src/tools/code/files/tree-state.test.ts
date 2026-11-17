@@ -207,6 +207,64 @@ describe('the session’s tree state', () => {
   });
 });
 
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 7 and 11, S4, M2
+// decision 7): the Changed group's fold and a folder to show are this run's only; opening a folder's ancestors is the
+// person's act, stored as a click on each would be.
+describe('the Changed group’s fold and a folder to show', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('folds the Changed group for the session and writes nothing for it, beside a folder’s toggle that does write', async () => {
+    const fake = fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    vi.useFakeTimers();
+    expect(treeOf(store.getState(), A).changedFolded).toBe(false); // open at first in every session
+    store.getState().foldChanged(A, true);
+    expect([treeOf(store.getState(), A).changedFolded, treeOf(store.getState(), B).changedFolded]).toEqual([true, false]);
+    vi.advanceTimersByTime(DELAY * 4);
+    expect(fake.invoked('layout.set')).toEqual([]);
+    store.getState().foldChanged(A, false);
+    expect(treeOf(store.getState(), A).changedFolded).toBe(false);
+    vi.advanceTimersByTime(DELAY * 4);
+    expect(fake.invoked('layout.set')).toEqual([]);
+    store.getState().toggle(A, '/r'); // the control: a person's toggle is written
+    vi.advanceTimersByTime(DELAY);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [A]: { width: null, folded: false, expanded: ['/r'] } }) }]);
+  });
+
+  it('is open again after a relaunch: the fold is never read from what is stored', async () => {
+    const fake = fakeClient({ 'layout.get': { value: stored({ [A]: { width: null, folded: false, expanded: ['/r'] } }) } });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    expect(treeOf(store.getState(), A)).toMatchObject({ changedFolded: false, reveal: null });
+  });
+
+  it('opens a folder and the closed folders above it as the person’s act, selects it and notes it to show; written as toggles', async () => {
+    const fake = fakeClient({ 'layout.get': { value: stored({ [A]: { width: null, folded: false, expanded: ['/r'] } }) }, 'layout.set': undefined });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    vi.useFakeTimers();
+    store.getState().revealIn(A, '/r/a/b/new', ['/r', '/r/a', '/r/a/b']);
+    expect(treeOf(store.getState(), A)).toMatchObject({ selected: '/r/a/b/new', reveal: '/r/a/b/new' });
+    expect([...treeOf(store.getState(), A).expanded]).toEqual(['/r', '/r/a', '/r/a/b', '/r/a/b/new']); // '/r' was open: left where it was
+    vi.advanceTimersByTime(DELAY);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [A]: { width: null, folded: false, expanded: ['/r', '/r/a', '/r/a/b', '/r/a/b/new'] } }) }]);
+  });
+
+  it('drops the note when it is shown, and when the person selects another row', async () => {
+    const store = createTreeStateStore(fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined }).client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    store.getState().revealIn(A, '/r/notes', ['/r']);
+    store.getState().revealed(A);
+    expect(treeOf(store.getState(), A).reveal).toBeNull();
+    store.getState().revealIn(A, '/r/notes', ['/r']);
+    store.getState().select(A, '/r/notes'); // the same row: the note stands
+    expect(treeOf(store.getState(), A).reveal).toBe('/r/notes');
+    store.getState().select(A, '/r/src');
+    expect(treeOf(store.getState(), A)).toMatchObject({ reveal: null, selected: '/r/src' });
+  });
+});
+
 // The branch review's first finding: an unstarted chat has no record yet, only its setup intent; the window knows it, so
 // a write keeps its tree.
 describe('the sessions the window knows', () => {

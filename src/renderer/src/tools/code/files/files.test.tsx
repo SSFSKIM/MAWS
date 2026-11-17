@@ -209,6 +209,28 @@ describe('files store', () => {
     expect(main.callsOf('files.list')).toEqual([{ appSessionId: MAIN_S, path: '/r/src' }]);
   });
 
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decision 14 (a)): a change of an
+  // entry called `.gitignore` lists again every listing the session holds at or beneath its directory, and no other
+  it('applyChanged of a .gitignore re-lists every listing at or beneath its directory, and no other', async () => {
+    const tree = { '/r': [dir('/r/src')], '/r/src': [dir('/r/src/deep')], '/r/src/deep': [], '/r/srcs': [], '/r/other': [] };
+    const main = mainWith(tree);
+    for (const path of Object.keys(tree)) useFiles.getState().list(S, path);
+    useFiles.getState().list(at('app-b' as AppSessionId), '/r/src/deep'); // another session's listing
+    await flush();
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignore', kind: 'changed' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r/src', '/r/src/deep']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/src/.gitignored-not', kind: 'changed' }); // the control: another name lists its directory alone
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path)).toEqual(['/r/src']);
+    main.calls.splice(0);
+    useFiles.getState().applyChanged({ appSessionId: S, path: '/r/.gitignore', kind: 'created' });
+    await flush();
+    expect(main.callsOf('files.list').map((input) => input.path).sort()).toEqual(['/r', '/r/other', '/r/src', '/r/src/deep', '/r/srcs']);
+  });
+
   it('counts watches per directory, installs once and unwatches only after the grace', async () => {
     vi.useFakeTimers();
     const main = mainWith({ '/r': [] });

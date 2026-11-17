@@ -49,9 +49,11 @@ export interface SessionTree {
   scrollTop: number; // this run's
   defaultRoot: string | null; // this run's: the first root, opened once
   restored: boolean; // read from the stored value: its first root is noted, not opened
+  reveal: string | null; // UX wave U6b-3a (stub)
+  changedFolded: boolean; // UX wave U6b-3a (stub)
 }
 
-const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false };
+const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false, reveal: null, changedFolded: false };
 
 export interface TreeStateStore {
   loaded: boolean; // the read has answered (or failed): the tree can be drawn
@@ -63,6 +65,9 @@ export interface TreeStateStore {
   select(appSessionId: AppSessionId, path: string): void;
   scrolled(appSessionId: AppSessionId, scrollTop: number): void;
   firstRoot(appSessionId: AppSessionId, root: string): void; // the session's first root, opened once
+  revealIn(appSessionId: AppSessionId, path: string, ancestors: readonly string[]): void; // UX wave U6b-3a (stub)
+  revealed(appSessionId: AppSessionId): void;
+  foldChanged(appSessionId: AppSessionId, folded: boolean): void;
 }
 
 export const treeOf = (state: Pick<TreeStateStore, 'trees'>, appSessionId: AppSessionId): SessionTree => state.trees.get(appSessionId) ?? NEW_TREE;
@@ -187,6 +192,9 @@ export function createTreeStateStore(
         const noted = tree.restored && tree.defaultRoot === null; // after a relaunch: the stored folders stand as the person left them
         change(id, (current) => ({ defaultRoot: root, ...(noted || current.expanded.has(root) ? {} : { expanded: new Set([...current.expanded, root]) }) }));
       },
+      revealIn() {},
+      revealed() {},
+      foldChanged() {},
     };
   });
   resets.set(store, () => {
