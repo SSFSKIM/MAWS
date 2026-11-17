@@ -532,6 +532,7 @@ Working directory for every command: the branch's worktree (the controller's bri
 | `tools/code/files/FilesTool.tsx`, `tree-state.ts`; `tools/code/copy.ts` | U6; edited by U6b-3a just before | the field above the tree and the list in its place; two run-only fields and one input of `treePlace`; keys of `FILES_COPY` |
 | `tools/code/viewer/FileViewer.tsx`, `CodeView.tsx` | U6; `FileViewer` edited by U6b-2 | one optional prop and the body's taking of the keyboard; the editor's taking it from the body |
 | `tools/code/editor/register.ts` | U6 | one connection |
+| `palette/CommandPalette.tsx` and its test | U6 | `files.goToFile` among the actions the palette runs after its close (`afterClose`), so that Esc's second step finds the palette's opener (Decision Log 9) |
 | `src/services/git/ls-files.ts` and its test | no child | `load`: one flag on its one git call and the reading of its answer (decision 14); the tests of decision 4 and of a submodule |
 | `e2e/remote.spec.ts`, `e2e/browser.spec.ts` | the P5 work; U12 | one scene each |
 | `docs/tech-debt-tracker.md`, the register | the wave's record | rows |
@@ -626,6 +627,15 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
 - Observation: git lists a clean submodule among a repository's files, as its path with no trailing slash, and says what it is only with `--stage` (the delta review's finding 5).
   Evidence: a scratch repository on a Mac, with a tracked file, an untracked file whose name holds a tab, and a submodule: `ls-files --cached --others --exclude-standard -z` answers `…|a.txt|vendor/sub|`; with `--stage` the tracked entries are `100644 <id> 0`, a tab and the path, the untracked ones the bare path, and the submodule `160000 <id> 0`, a tab and `vendor/sub`.
 
+- Observation (M1): the palette runs an action while its own input holds the keyboard; the actions that must start from the shell's own focus wait for its close (`afterClose`, `palette/CommandPalette.tsx`).
+  Evidence: the red case "runs Go to file after the palette gives the keyboard back to its opener…" (`CommandPalette.test.tsx`), which saw the palette's input recorded for Esc.
+- Observation (M1): the tree's first read of a run replaced a stored session's tree whole, run-only fields included, so a ⌘P made before it answered lost its finding tab and its text.
+  Evidence: the red case added at `fbd580486` (`tree-state.test.ts`), fixed at `5b4499468` by carrying the two run-only fields over the read.
+- Observation (M1): `showFiles` lands in a tab that holds a file only through `lastInViewOf`, which the panel host notes (`connectPanelHost`); a unit test that does not connect it gets a new tree-only tab.
+  Evidence: `files/tabs.ts` `showFiles`; the M1 test commit `e0dcf5b2d`.
+- Observation (M1): the narrow window's surface sheet closes on any window Esc that is not prevented (`PanelRegion`); the field prevents the Esc it acts on.
+  Evidence: `SurfaceSheetDismissal` in `panel/`.
+
 ## Decision Log
 
 1. **2026-11-17 (UTC) · The verification call.** The first writing of U6b-3, which held this landing as its third milestone, got an adversarial review before any executor started (entry 2); this document is its revision and goes to the architect, who decides whether the half as rewritten gets a second review. The branch gets `doperpowers:review-code` with one reviewer at the high rung, ruled on R3: the window and one function of the lister, nothing stored, nothing sent. Class 1a on GitHub Actions is the gate of record. The pull request's body is the short form: the proof, what differs from the plan, what is left over.
@@ -647,6 +657,19 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
    - Notes 1 to 5, 14, 16 and 18 to 21 are about the Changed group and the tree: U6b-3a's log.
 7. **2026-11-17 (UTC) · The owner's answer on the card "⌘P while the file tree is folded away"** (recorded on ticket 672, comment 6943042432), verbatim: "Show it, then fold again (Recommended)". It is option A, which decision 9 built from the first writing on; nothing moves but the card's wording.
 8. **2026-11-17 (UTC) · The parent pin, and decision 14's limit.** The branch is cut at U6b-3a's head `05556372c407df2cd92549d9b9fc785de3f16ec1`, which is this document's parent pin until the architect names a later head of 3a to merge. Concrete Steps 1 found U6b-3a in the tree, and every row of "Statements to check again" was read against it and holds (the table's last column). The architect asked for decision 14's one stated limit (an untracked path whose name begins with an index entry's head is read as one): it is written beside decision 14, with a tracker row (M3 decision 5) and a unit case that pins today's reading (M2 decision 8). The Observation on the submodule names no version of git.
+9. **2026-11-17 (UTC) · M1's decisions** (executor's report, folded by the controller).
+   - The field's component is `files/FinderView.tsx` (and `FinderView.test.tsx`), not `files/Finder.tsx`, wherever this document names `Finder.tsx`: beside `finder.ts` the two names differ only in case, and on a Mac's case-insensitive disk `import './Finder'` resolves `finder.ts`. M2's list goes in `FinderView.tsx`.
+   - `treePlace`'s `finding` input is optional (absent is false), so U6b-1's cases stand unedited (Constraint 5); `FilesTab` always passes it.
+   - ⌘P records the element that has the keyboard unless it is the body or the field, which keeps an earlier record (S2's "⌘P twice"); the Esc that uses a record consumes it.
+   - The tree's button pressed while finding ends finding and hides the column it showed; with room for both it writes the fold only when the stored fold differs from hidden, so a tab the person folded writes nothing, and outside finding the button does what it did.
+   - Finding ends when the field loses the keyboard while empty, and not when only the window loses focus (the field is still the active element).
+   - The field calls `preventDefault` on every Esc it acts on, a repeating one included, so the narrow window's surface sheet does not close under it.
+   - The field takes a request only while its tab is visible.
+   - `KeyboardRequest` carries both halves from M1; M2 adds the file's taker on the same calls.
+   - The two run-only fields (`filter`, `finding`) are carried over the tree's first read of a run.
+   - The field also has `bg-transparent`, `text-fg`, `autoComplete="off"` and `spellCheck={false}`.
+   - `palette/CommandPalette.tsx`: `files.goToFile` joins `afterClose` (U6's file, added to §F; the architect told), so that "Go to file" chosen in the palette records the palette's opener for Esc. Red first (`670af724c`), fixed at `e21424434`.
+   - Until M2 draws the list, the field's `aria-controls` names an id no element has; M2 closes it.
 
 ## Outcomes & Retrospective
 
