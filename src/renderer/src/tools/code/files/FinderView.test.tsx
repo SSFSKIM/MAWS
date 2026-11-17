@@ -2,19 +2,23 @@
 // decisions 5, 9 and 10, sequence S2, "The look"): ⌘P puts the keyboard in the field of the tab it lands in, when that
 // field draws or at once; a key or a press before it draws keeps the keyboard where that act put it; ⌘P again selects the
 // field's text; Esc empties the field, then gives the keyboard back to where ⌘P found it. A tab whose tree is folded, or
-// too narrow for both, shows the tree column for the search and stores no fold. With text in it the tree stays drawn: M2
-// draws the list. Invented paths.
+// too narrow for both, shows the tree column for the search and stores no fold.
+// M2 (decisions 4 to 7 and 9, M2 decisions 2 and 3; B1, B3's second half, B8's window half): with text the list stands in
+// the tree's place, a `listbox` of the files the search answered with the field naming its highlighted row, or one line
+// that says why there is none; Enter opens and the file has the tab, the search ended and nothing stored. Invented paths.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
+import { EditorView } from '@codemirror/view';
 import type { FilesEntry } from '@shared/ipc/schema/files';
 import { record } from '../../../../../../test/support/builders';
+import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
 import { runAction } from '../../../keymap/actions-runtime';
 import { connectPanelHost, registerPanelTool } from '../../../panel/host';
 import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
-import { fail, installFakeMain, ok as answer } from '../../../test-support/code';
+import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { installResizeObserver } from '../../../test-support/resize';
 import { CommandPalette, usePalette } from '../../../palette/CommandPalette';
@@ -23,10 +27,13 @@ import { openFile, resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
 import { connectGoToFile } from './finder';
+import { RESULT_ROW_FIXED, resultsId } from './FinderView';
+import { measureWith } from './path-cut';
 import { useFiles } from './store';
 import { FILE_WIDTH_MIN, resetTreeState, treeOf, TREE_WIDTH_DEFAULT, useTreeState } from './tree-state';
 
 const APP = '/r/src/app.ts';
+const KEY = (path: string) => `file:${TEST_MACHINE}:${path}`;
 const WIDE = 700;
 const NARROW = TREE_WIDTH_DEFAULT + FILE_WIDTH_MIN - 1;
 const dir = (path: string): FilesEntry => ({ name: path.slice(path.lastIndexOf('/') + 1), path, kind: 'dir', size: 0, mtimeMs: 0, target: null });
@@ -37,6 +44,29 @@ const REPO: Record<string, FilesEntry[]> = {
   '/r/src': [file(APP)],
 };
 const FOLDED = { version: 1, sessions: { [A]: { width: null, folded: true, expanded: ['/r'] } } };
+
+// What git.lsFiles answers for a query (the paths from the working folder, folders with their slash), and the reads a
+// case holds or fails.
+type Answer = ReturnType<typeof answer>;
+const listed = (...paths: string[]): Answer => answer({ paths, truncated: false, source: 'git' });
+const LISTING = ['src/app.ts', 'notes.md', 'src/', 'vendor/', 'vendor/harbor-lib/'];
+let search: (query: string) => Answer | Promise<Answer>;
+let searches: { query: string; reply: ReturnType<typeof deferred<Answer>> }[];
+let heldReads: Map<string, ReturnType<typeof deferred<void>>>;
+let failedReads: Set<string>;
+let contents: Record<string, string>;
+const holdSearches = () => {
+  search = (query) => {
+    const reply = deferred<Answer>();
+    searches.push({ query, reply });
+    return reply.promise;
+  };
+};
+const holdRead = (path: string) => {
+  const gate = deferred<void>();
+  heldReads.set(path, gate);
+  return gate;
+};
 
 // The virtual list draws rows only in a scroller with a height (happy-dom lays nothing out).
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -49,9 +79,10 @@ beforeAll(() => {
   });
 });
 afterAll(() => Object.defineProperty(HTMLElement.prototype, 'offsetHeight', offsetHeight));
+beforeAll(() => import('../viewer/CodeView')); // the editor's chunk, loaded once before the cases that draw a file
 
 function finderMain(stored: unknown = null) {
-  return installFakeMain((name, input) => {
+  return installFakeMain(async (name, input) => {
     if (name === 'layout.get') return answer({ value: input.key === 'files.tree' ? stored : null });
     if (name === 'layout.set' || name === 'files.watch' || name === 'files.unwatch' || name === 'git.unwatch') return answer();
     if (name === 'git.watch') return fail('not a git repository');
@@ -61,8 +92,12 @@ function finderMain(stored: unknown = null) {
       const found = REPO[path];
       return found === undefined ? fail(`not found: ${path}`) : answer({ root: path === '' ? null : '/r', path, entries: found, truncated: false });
     }
+    if (name === 'git.lsFiles') return search(input.query as string);
     if (name === 'files.read') {
-      const content = `// ${String(input.path)}\n`;
+      const path = String(input.path);
+      await heldReads.get(path)?.promise;
+      if (failedReads.has(path)) return fail(`denied: ${path}`);
+      const content = contents[path] ?? `// ${path}\n`;
       return answer({ encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null });
     }
     return fail(`unexpected ${name}`);
@@ -86,6 +121,7 @@ let observer: ReturnType<typeof installResizeObserver>;
 const field = () => document.querySelector<HTMLInputElement>('[data-files-filter]');
 const composer = () => screen.getByRole('textbox', { name: 'Composer' });
 const filesTab = () => document.querySelector<HTMLElement>('[data-files-tab]');
+const filesTabs = () => (useLayout.getState().panelBySession.get(A)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
 const treeColumn = () => document.querySelector<HTMLElement>('[data-files-tree]');
 const toggle = () => document.querySelector<HTMLElement>('[data-files-tree-toggle]');
 const finding = () => treeOf(useTreeState.getState(), A).finding;
@@ -102,6 +138,11 @@ const openBeside = async (width: number) => {
 };
 
 beforeEach(() => {
+  search = (query) => listed(...LISTING.filter((path) => path.includes(query)));
+  searches = [];
+  heldReads = new Map();
+  failedReads = new Set();
+  contents = {};
   resetPanelStores();
   resetKeptOpens();
   resetTreeState();
@@ -118,6 +159,7 @@ afterEach(() => {
   vi.unstubAllGlobals();
   resetKeptOpens();
   useTreeState.setState({ setFolded: SET_FOLDED });
+  measureWith(null);
   window.dispatchEvent(new KeyboardEvent('keydown', { key: 'Shift' })); // no request held over into the next case
 });
 
@@ -237,7 +279,7 @@ describe('Esc in the field', () => {
 });
 
 describe('the field', () => {
-  it('stands above the tree, outside its menu, with its roles, its words and the app’s own text-field outline; with text the tree stays drawn', async () => {
+  it('stands above the tree, outside its menu, with its roles, its words and the app’s own text-field outline; with text the list stands in the tree’s place', async () => {
     render(<Page />);
     goToFile();
     await inField();
@@ -252,7 +294,9 @@ describe('the field', () => {
     expect(input.compareDocumentPosition(scroller) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(scroller.contains(input)).toBe(false);
     type('src');
-    expect(screen.getByRole('tree', { name: FILES_COPY.title })).toBeTruthy();
+    const list = await waitFor(() => screen.getByRole('listbox'));
+    expect(input.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.queryByRole('tree', { name: FILES_COPY.title })).toBeNull(); // M2: the list stands in the tree's place
   });
 
   it('a right-click in it opens no “Open File…”; in the tree it does', async () => {
@@ -409,5 +453,252 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
     act(() => composer().focus());
     expect(finding()).toBeNull();
     expect(treeColumn()).toBeNull();
+  });
+});
+
+// ---- M2: the list in the tree's place -------------------------------------------------------------------------------------
+
+const results = () => document.querySelector<HTMLElement>('[data-files-results]');
+const options = () => [...document.querySelectorAll<HTMLElement>('[role="option"]')];
+const shownPaths = () => options().map((option) => option.getAttribute('data-path'));
+const lineOf = () => document.querySelector<HTMLElement>('[data-files-line]');
+const press = (key: string, init: KeyboardEventInit & { keyCode?: number } = {}) => fireEvent.keyDown(field()!, { key, ...init });
+const searched = () => main.callsOf('git.lsFiles');
+const reply = (index: number, value: Answer) => act(() => searches[index].reply.resolve(value));
+const listedFor = (text: string) => async (paths: string[]) => {
+  type(text);
+  await waitFor(() => expect(shownPaths()).toEqual(paths));
+};
+
+describe('the list (decision 4; M2 decisions 2 and 3)', () => {
+  it('lists the files the search answered, no folder and no submodule among them, as the listbox the field names; ↓ and ↑ move the highlight the field names', async () => {
+    render(<Page />);
+    composer().focus();
+    goToFile();
+    await inField();
+    await listedFor('s')(['/r/src/app.ts', '/r/notes.md']);
+    expect(searched()).toEqual([{ directory: '/r', query: 's', limit: 200 }]);
+    const list = results()!;
+    expect(list.getAttribute('role')).toBe('listbox');
+    expect(list.id).toBe(resultsId(finding()!));
+    expect(field()!.getAttribute('aria-controls')).toBe(list.id);
+    expect(field()!.getAttribute('aria-expanded')).toBe('true');
+    expect(list.hasAttribute('aria-busy')).toBe(false);
+    const ids = options().map((option) => option.id);
+    expect(new Set(ids).size).toBe(2);
+    const selected = () => options().map((option) => option.getAttribute('aria-selected'));
+    expect(selected()).toEqual(['true', 'false']);
+    expect(field()!.getAttribute('aria-activedescendant')).toBe(ids[0]);
+    press('ArrowDown');
+    expect(selected()).toEqual(['false', 'true']);
+    expect(field()!.getAttribute('aria-activedescendant')).toBe(ids[1]);
+    press('ArrowDown'); // stops at the end
+    expect(field()!.getAttribute('aria-activedescendant')).toBe(ids[1]);
+    press('ArrowUp');
+    expect(field()!.getAttribute('aria-activedescendant')).toBe(ids[0]);
+    expect(document.querySelector('[data-files-scroller]')).toBeNull(); // the tree's list is gone with the Changed group's rows
+    expect(document.activeElement).toBe(field()); // the keyboard stays in the field
+  });
+
+  it('while the text’s answer is awaited: “Searching files…” with nothing drawn; the earlier rows, none highlighted and the list busy, once something is', async () => {
+    holdSearches();
+    render(<Page />);
+    goToFile();
+    await inField();
+    type('s');
+    await waitFor(() => expect(searches).toHaveLength(1));
+    expect([lineOf()?.getAttribute('data-line'), lineOf()?.textContent, lineOf()?.getAttribute('role')]).toEqual(['searching', 'Searching files…', 'status']);
+    expect(field()!.getAttribute('aria-expanded')).toBe('false');
+    reply(0, listed('src/app.ts', 'notes.md'));
+    await waitFor(() => expect(shownPaths()).toEqual(['/r/src/app.ts', '/r/notes.md']));
+    expect(lineOf()).toBeNull();
+    type('sr');
+    await waitFor(() => expect(results()?.getAttribute('aria-busy')).toBe('true'));
+    expect(shownPaths()).toEqual(['/r/src/app.ts', '/r/notes.md']);
+    expect(options().map((option) => option.getAttribute('aria-selected'))).toEqual(['false', 'false']);
+    expect(field()!.hasAttribute('aria-activedescendant')).toBe(false);
+    expect(field()!.getAttribute('aria-expanded')).toBe('true');
+    await waitFor(() => expect(searches).toHaveLength(2));
+    reply(1, listed('src/app.ts'));
+    await waitFor(() => expect(results()?.hasAttribute('aria-busy')).toBe(false));
+    expect(shownPaths()).toEqual(['/r/src/app.ts']);
+    expect(field()!.getAttribute('aria-activedescendant')).toBe(options()[0].id);
+  });
+
+  it('says “No matching files”, says “Files could not be searched.” for a failed read, and shows a walk’s files with no line', async () => {
+    render(<Page />);
+    goToFile();
+    await inField();
+    type('zzz');
+    await waitFor(() => expect(lineOf()?.getAttribute('data-line')).toBe('none'));
+    expect(lineOf()!.textContent).toBe('No matching files');
+    expect(results()).toBeNull();
+    search = () => fail('fatal: bad config line 1 in file .git/config'); // a repository git refuses (decision 4; B8)
+    type('zz');
+    await waitFor(() => expect(lineOf()?.getAttribute('data-line')).toBe('failed'));
+    expect(lineOf()!.textContent).toBe('Files could not be searched.');
+    expect(lineOf()!.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-ui-sm', 'text-danger']));
+    search = () => answer({ paths: ['loose.txt', 'drafts/'], truncated: false, source: 'walk' }); // a folder that is no repository
+    type('z');
+    await waitFor(() => expect(shownPaths()).toEqual(['/r/loose.txt']));
+    expect(lineOf()).toBeNull();
+  });
+
+  it('a line wraps to as many lines as it needs and is never cut (its classes; the 160 px box is scene G7’s)', async () => {
+    render(<Page />);
+    goToFile();
+    await inField();
+    type('zzz');
+    const line = await waitFor(() => lineOf()!);
+    const classes = line.className.split(/\s+/);
+    expect(classes).toEqual(expect.arrayContaining(['text-ui-sm', 'text-fg-muted', 'break-words', 'whitespace-normal']));
+    expect(classes.filter((name) => ['truncate', 'whitespace-nowrap', 'overflow-hidden'].includes(name))).toEqual([]);
+  });
+
+  it('a row: its name, then its folder from the working folder in the muted colour, cut at its start when it does not fit and gone below two characters; its title the path from the working folder; no status letter', async () => {
+    search = () => listed('src/deep/harbor/app.ts');
+    render(<Page />);
+    goToFile();
+    await inField();
+    await listedFor('app')(['/r/src/deep/harbor/app.ts']);
+    const row = () => options()[0];
+    const folder = () => row().querySelector('[data-folder]');
+    expect(row().getAttribute('title')).toBe('src/deep/harbor/app.ts');
+    expect(row().querySelector('[data-name]')!.textContent).toBe('app.ts');
+    expect(folder()!.textContent).toBe('src/deep/harbor/'); // the list has no width yet: drawn whole
+    expect(folder()!.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-ui-sm', 'text-fg-muted']));
+    expect(row().querySelector('[data-mark]')).toBeNull();
+    expect(row().className.split(/\s+/)).toEqual(expect.arrayContaining(['h-6', 'bg-bg-active']));
+    measureWith((_font, text) => text.length * 6);
+    observer.resize(results()!, { width: RESULT_ROW_FIXED + 'app.ts'.length * 6 + 60, height: 600 });
+    expect(folder()!.textContent).toBe('…harbor/');
+    observer.resize(results()!, { width: RESULT_ROW_FIXED + 'app.ts'.length * 6 + 11, height: 600 });
+    expect(folder()).toBeNull();
+  });
+
+  it('Esc with text empties the field and the tree is back at the scroll offset it had', async () => {
+    const own = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollTop');
+    const scrollTop = own ?? Object.getOwnPropertyDescriptor(Element.prototype, 'scrollTop')!;
+    const offsets = new WeakMap<Element, number>();
+    Object.defineProperty(HTMLElement.prototype, 'scrollTop', {
+      configurable: true,
+      get(this: HTMLElement) {
+        return this.hasAttribute('data-files-scroller') ? (offsets.get(this) ?? 0) : scrollTop.get!.call(this);
+      },
+      set(this: HTMLElement, value: number) {
+        if (this.hasAttribute('data-files-scroller')) offsets.set(this, value);
+        else scrollTop.set!.call(this, value);
+      },
+    });
+    try {
+      render(<Page />);
+      goToFile();
+      await inField();
+      const scroller = () => document.querySelector<HTMLElement>('[data-files-scroller]');
+      await waitFor(() => expect(scroller()).not.toBeNull());
+      act(() => void (scroller()!.scrollTop = 48));
+      await listedFor('s')(['/r/src/app.ts', '/r/notes.md']);
+      expect(scroller()).toBeNull();
+      esc();
+      expect(field()!.value).toBe('');
+      expect(document.activeElement).toBe(field());
+      await waitFor(() => expect(scroller()?.scrollTop).toBe(48));
+      expect(results()).toBeNull();
+    } finally {
+      if (own) Object.defineProperty(HTMLElement.prototype, 'scrollTop', own);
+      else delete (HTMLElement.prototype as { scrollTop?: number }).scrollTop;
+    }
+  });
+
+  it('⌘P again with the text unchanged asks again, and so does the field taking the keyboard again; with no act nothing is asked', async () => {
+    render(<Page />);
+    composer().focus();
+    goToFile();
+    await inField();
+    await listedFor('s')(['/r/src/app.ts', '/r/notes.md']);
+    await settle();
+    expect(searched()).toHaveLength(1);
+    goToFile(); // with the keyboard in the field
+    await waitFor(() => expect(searched()).toHaveLength(2));
+    act(() => composer().focus());
+    await settle();
+    expect(searched()).toHaveLength(2); // the absence: losing the keyboard asks nothing
+    act(() => field()!.focus());
+    await waitFor(() => expect(searched()).toHaveLength(3));
+    expect(searched().every((input) => input.query === 's')).toBe(true);
+  });
+
+  it('a click on a result opens it in the preview tab and moves no keyboard into it', async () => {
+    render(<Page />);
+    goToFile();
+    await inField();
+    await listedFor('notes')(['/r/notes.md']);
+    fireEvent.click(options()[0]);
+    await waitFor(() => expect(document.querySelector('[data-files-tab][data-file="/r/notes.md"]')).not.toBeNull());
+    const tab = filesTabs().find((ref) => (useLayout.getState().panelParams[ref.id] as { file?: string } | undefined)?.file === '/r/notes.md')!;
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/r/notes.md', line: null, preview: true });
+    expect(finding()).toBeNull();
+    await settle();
+    expect(document.activeElement?.closest('[data-file-keyboard]') ?? null).toBeNull();
+  });
+
+  it('an Enter that commits an input method’s composition opens nothing; a plain Enter opens the highlighted file as a kept tab', async () => {
+    render(<Page />);
+    goToFile();
+    await inField();
+    await listedFor('notes')(['/r/notes.md']);
+    press('Enter', { isComposing: true });
+    press('Enter', { keyCode: 229 });
+    await settle();
+    expect(document.querySelector('[data-files-tab][data-file="/r/notes.md"]')).toBeNull();
+    press('Enter'); // the control
+    await waitFor(() => expect(document.querySelector('[data-files-tab][data-file="/r/notes.md"]')).not.toBeNull());
+    const tab = filesTabs().find((ref) => (useLayout.getState().panelParams[ref.id] as { file?: string } | undefined)?.file === '/r/notes.md')!;
+    expect(useLayout.getState().panelParams[tab.id]).toEqual({ file: '/r/notes.md', line: null });
+  });
+
+  it('name:42 then Enter lands on line 42, with the keyboard in the file’s text', async () => {
+    contents[APP] = Array.from({ length: 60 }, (_, i) => `const line${i + 1} = ${i + 1};`).join('\n');
+    render(<Page />);
+    goToFile();
+    await inField();
+    await listedFor('app.ts:42')(['/r/src/app.ts']);
+    expect(searched().at(-1)).toEqual({ directory: '/r', query: 'app.ts', limit: 200 });
+    press('Enter');
+    const text = await waitFor(() => {
+      const content = document.querySelector<HTMLElement>(`[data-file-keyboard][data-key="${KEY(APP)}"] .cm-content`);
+      expect(document.activeElement).toBe(content);
+      return content!;
+    }, { timeout: 5000 });
+    const view = EditorView.findFromDOM(text.closest<HTMLElement>('.cm-editor')!)!;
+    await waitFor(() => expect(view.state.doc.lineAt(view.state.selection.main.head).number).toBe(42));
+  });
+});
+
+describe('after Enter the file has the tab (decision 9; B3, M2’s half)', () => {
+  it.each([
+    ['folded by the person, with room', WIDE, FOLDED],
+    ['too narrow for both', NARROW, null],
+  ])('%s: Enter on a result ends the search, the file has the whole tab with the keyboard in its text, and the fold is never written', async (_name, width, stored) => {
+    main = finderMain(stored);
+    render(<Page />);
+    await openBeside(width);
+    await waitFor(() => expect(useTreeState.getState().loaded).toBe(true));
+    await waitFor(() => expect(document.querySelector('[data-file-viewer] .cm-content')).not.toBeNull(), { timeout: 5000 });
+    const setFolded = vi.fn(useTreeState.getState().setFolded);
+    useTreeState.setState({ setFolded });
+    composer().focus();
+    goToFile();
+    expect(treeColumn()?.getAttribute('data-place')).toBe(width === WIDE ? 'beside' : 'instead');
+    await inField();
+    await listedFor('app')(['/r/src/app.ts']);
+    press('Enter');
+    expect(finding()).toBeNull();
+    expect(treeColumn()).toBeNull();
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector(`[data-file-keyboard][data-key="${KEY(APP)}"] .cm-content`)));
+    expect(document.activeElement!.closest('[hidden], [inert]')).toBeNull();
+    expect(setFolded).not.toHaveBeenCalled();
+    expect(treeWrites()).toEqual([]);
+    expect(treeOf(useTreeState.getState(), A).folded).toBe(stored !== null);
   });
 });

@@ -10,7 +10,7 @@ import { project, record } from '../../../test/support/builders';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
 import { intentFor } from '../../../test/support/session-host';
 import { FileLister, followSpineRoots, listableRoots, spineAdmitted, spineRoots, WALK_MAX_ENTRIES } from './ls-files';
-import { createGitRunner } from './runner';
+import { createGitRunner, NotARepositoryError } from './runner';
 
 let repo: GitFixture;
 let plain: string;
@@ -225,5 +225,68 @@ describe('git lsFiles and the folders the records’ facts name', () => {
       ],
     });
     expect((await spineAdmitted(view)()).sort()).toEqual([p.beside, p.main].sort());
+  });
+});
+
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decisions 4 and 14, M2 decision 8; B8):
+// three folders side by side over real git, and what the lister reads from git's index entries. Every name is invented.
+describe('git lsFiles beside a refused repository, and a submodule as the folder it is', () => {
+  it('walks a folder that is no repository, fails one git refuses (not as no repository), and lists a good one from git', async () => {
+    const refused = await GitFixture.create();
+    try {
+      writeFileSync(join(plain, 'loose.txt'), 'x\n');
+      writeFileSync(join(refused.root, '.git/config'), '[core\n\tthis line git cannot read\n'); // a configuration git cannot read
+      const l = lister(() => [plain, refused.root, repo.root]);
+      const walked = await l.list({ directory: plain, query: '', limit: 200 });
+      expect([walked.source, walked.paths]).toEqual(['walk', ['loose.txt']]);
+      const failure = await l.list({ directory: refused.root, query: '', limit: 200 }).then(() => null, (error: unknown) => error);
+      expect(failure).toBeInstanceOf(Error);
+      expect(failure).not.toBeInstanceOf(NotARepositoryError);
+      const good = await l.list({ directory: repo.root, query: '', limit: 200 });
+      expect(good.source).toBe('git');
+      expect(good.paths).toEqual(expect.arrayContaining(['README.md', 'src/main.ts', 'docs/main-notes.md', 'untracked.txt', 'src/', 'docs/']));
+    } finally {
+      refused.dispose();
+    }
+  });
+
+  it('lists a clean submodule as <path>/ and under no other spelling, a conflicted path once, and an untracked name that holds a tab unharmed', async () => {
+    const library = await GitFixture.create();
+    try {
+      await repo.git('-c', 'protocol.file.allow=always', 'submodule', 'add', '-q', library.root, 'vendor/harbor-lib');
+      await repo.git('commit', '-q', '-m', 'a submodule');
+      await repo.write('tides.txt', 'low\n');
+      await repo.git('add', 'tides.txt');
+      await repo.git('commit', '-q', '-m', 'tides');
+      await repo.git('checkout', '-q', '-b', 'spring');
+      await repo.write('tides.txt', 'spring\n');
+      await repo.git('commit', '-q', '-am', 'spring tide');
+      await repo.git('checkout', '-q', 'main');
+      await repo.write('tides.txt', 'neap\n');
+      await repo.git('commit', '-q', '-am', 'neap tide');
+      await repo.git('merge', '-q', 'spring').catch(() => undefined); // the conflict leaves tides.txt at three stages
+      expect((await repo.git('ls-files', '--stage', 'tides.txt')).trim().split('\n')).toHaveLength(3);
+      await repo.write('tab\there.txt', 'x\n');
+      const answer = LsFilesSchema.parse(await lister(() => [repo.root]).list({ directory: repo.root, query: '', limit: 200 }));
+      expect(answer.source).toBe('git');
+      expect(answer.paths.filter((path) => path.startsWith('vendor/harbor-lib'))).toEqual(['vendor/harbor-lib/']);
+      expect(answer.paths).toContain('vendor/');
+      expect(answer.paths.filter((path) => path === 'tides.txt')).toHaveLength(1);
+      expect(answer.paths).toContain('tab\there.txt');
+      expect(answer.paths).toEqual(expect.arrayContaining(['README.md', '.gitmodules', 'src/main.ts', 'untracked.txt']));
+    } finally {
+      library.dispose();
+    }
+  });
+
+  // Decision 14's one limit, pinned so that a change of the reading is seen: an untracked path whose own name begins with
+  // an index entry's head (a mode, an object id, a stage and a tab) is read as an index entry.
+  it('reads an untracked name that begins with an index entry’s head as that entry: listed as what follows its tab', async () => {
+    const id = 'a'.repeat(40);
+    await repo.write(`100644 ${id} 0\tdecoy.txt`, 'x\n');
+    await repo.write(`160000 ${id} 0\tdecoy-link`, 'x\n');
+    const answer = await lister(() => [repo.root]).list({ directory: repo.root, query: '', limit: 200 });
+    expect(answer.paths).toEqual(expect.arrayContaining(['decoy.txt', 'decoy-link/']));
+    expect(answer.paths.filter((path) => path.includes(id))).toEqual([]);
   });
 });
