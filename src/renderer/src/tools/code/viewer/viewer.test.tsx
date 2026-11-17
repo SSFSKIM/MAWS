@@ -2078,6 +2078,7 @@ describe('a file outside the folders on another machine (U6f)', () => {
     forgetOpenedThere();
     forgetStarts();
     overRl2(T);
+    offs.push(connectCodeEvents()); // a file event reaches the store
   });
   afterEach(() => {
     document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
