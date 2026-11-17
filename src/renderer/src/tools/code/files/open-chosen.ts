@@ -91,8 +91,11 @@ function openChosenElsewhere(appSessionId: AppSessionId): Promise<void> {
   };
   const chosen = (path: string) => {
     close();
-    // C4: the session went from the page's records while the sheet was open; its tab is gone, so nothing opens
-    if (useLayout.getState().knownSession(appSessionId)) opened(appSessionId, path);
+    // C4: the session went from the page's records while the sheet was open; its tab is gone, so nothing opens. The branch
+    // review (Decision Log 33 (4)): nor once the owners' offer went, which the sheet hears only in an effect
+    if (!useLayout.getState().knownSession(appSessionId)) return;
+    if (ownersOnly(remoteStandingOf(appSessionId), 'files.chooseOutside') !== null) return;
+    opened(appSessionId, path);
   };
   sheet = { closed };
   root.render(createElement(RemoteChooser, { appSessionId, chooser, onClose: close, onChosen: chosen }));

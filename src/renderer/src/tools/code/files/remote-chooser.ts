@@ -7,8 +7,10 @@
 //
 // - Order: one ask at a time is the newest. Every listing and choice draws a number when it is sent, and only the newest
 //   one's answer lands (C1); after Cancel nothing lands and nothing is asked (C3).
-// - A listing that never answers says so at the pending bound, the one an act gets, with Try again (C2); one the link
-//   could not carry says the machine is not reachable (C5). Every refusal in UC-7's words stands as main worded it.
+// - A listing that never answers says so at the pending bound, the one an act gets, with Try again (C2), and the bound ends
+//   the ask: its answer then lands nowhere (the branch review, Decision Log 33 (5)). One the link could not carry says
+//   the machine is not reachable (C5). Every refusal in UC-7's words stands as main worded it. A More… that failed is
+//   asked again by Try again, its page appended to the listing it continues, the selection standing.
 // - A private folder asks first (`asking`): the person's Open sends the listing or the choice again with `open: true` and
 //   adds the folder to what was opened there (`openedThere`), so every path under it carries `open` after, a tab's
 //   reads and saves included. A folder the walk ended at through a link joins it too.
@@ -120,6 +122,7 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
   let declined: (() => void) | null = null; // and its Back
   let choice: ((path: string | null) => void) | null = null; // the open choice's answer
   let withdrawn: string | null = null; // the offer's sentence once it went: nothing more is sent
+  let again: Listing | null = null; // a More that failed, which Try again asks once more, appending to the listing shown
 
   const set = (next: ChooserState) => {
     if (closed) return;
@@ -176,15 +179,25 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     return words !== null;
   };
 
+  // A listing that failed: its sentence where the list stands; a More's is asked again by Try again (`again`)
+  const failedListing = (how: Listing, words: string) => {
+    again = how.cursor !== undefined ? how : null;
+    set({ at: 'failed', path: how.path, words });
+  };
+
   function list(how: Listing): void {
     if (closed || refusedNow()) return;
     const ask = ++newest;
     stopTimer();
+    again = null;
     if (how.cursor === undefined) set({ at: 'reading', path: how.path });
-    // C2: the pending bound an act gets; the ask stays the newest, so its answer still lands when it comes
+    // C2: the pending bound an act gets. The branch review (Decision Log 33 (5)): it ends the ask, so an answer that comes
+    // after it lands nowhere; Try again asks afresh
     timer = setTimeout(() => {
       timer = null;
-      if (ask === newest) set({ at: 'failed', path: how.path, words: REMOTE_CHOOSER_COPY.noAnswer(deps.machine()) });
+      if (ask !== newest) return;
+      newest += 1;
+      failedListing(how, REMOTE_CHOOSER_COPY.noAnswer(deps.machine()));
     }, REMOTE_ACT_PENDING_MS);
     const input: ListInput = { appSessionId, ...(how.path !== null && { path: how.path }), ...(opens(how.path, how.open) && { open: true as const }), ...(how.cursor !== undefined && { cursor: how.cursor }) };
     void settled(() => deps.list(input), (error): CommandResult<'files.listOutside'> => ({ ok: false, error: error as never })).then((answer) => listed(ask, how, input, answer));
@@ -193,7 +206,7 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
   function listed(ask: number, how: Listing, input: ListInput, answer: CommandResult<'files.listOutside'>): void {
     if (closed || ask !== newest) return; // C1: an ask no longer the newest lands nowhere
     stopTimer();
-    if (!answer.ok) return set({ at: 'failed', path: how.path, words: words(answer.error) });
+    if (!answer.ok) return failedListing(how, words(answer.error));
     const value = answer.value;
     if (value.status === 'refused') {
       const at = how.path ?? '~';
@@ -220,7 +233,8 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     }
     if (input.open === true) opened.add(value.path); // the folder the walk ended at, the request having carried open
     lastShown.set(machine, value.path);
-    const more = how.cursor !== undefined && state.at === 'listed' && state.path === value.path ? state : null;
+    // a further page continues the listing shown, which a failed More's Try again finds behind its sentence
+    const more = how.cursor !== undefined && shown !== null && shown.path === value.path && shown.cursor === how.cursor ? shown : null;
     const entries = more ? [...more.entries, ...value.entries] : value.entries;
     const picked = how.select === undefined ? null : (entries.find((entry) => entry.name === how.select && selectable(entry))?.path ?? null);
     const next: Extract<ChooserState, { at: 'listed' }> = { at: 'listed', path: value.path, parent: value.parent, home: value.home, entries, cursor: value.cursor, selected: (more ? more.selected : null) ?? picked };
@@ -238,6 +252,9 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     const input: ChooseInput = { appSessionId, path: entry.path, ...(opens(entry.path, open) && { open: true as const }) };
     void settled(() => deps.choose(input), (error): CommandResult<'files.chooseOutside'> => ({ ok: false, error: error as never })).then((answer) => {
       if (closed || ask !== newest) return;
+      // the branch review (Decision Log 33 (4)): the offer as it stands now, since the sheet hears it go only in an effect
+      // that may not have run yet; gone, the choice answers nothing and its sentence stands
+      if (refusedNow()) return;
       if (!answer.ok) {
         answerChoice(null);
         return set({ at: 'failed', path: from.path, words: words(answer.error) });
@@ -311,7 +328,8 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
       if (state.at !== 'listed') return;
       const entry = state.entries.find((candidate) => candidate.path === path);
       if (entry === undefined || !selectable(entry) || state.selected === path) return;
-      set({ ...state, selected: path });
+      shown = { ...state, selected: path }; // the listing a further page continues, its selection with it
+      set(shown);
     },
     confirm() {
       if (state.at !== 'asking' || confirmed === null) return;
@@ -336,7 +354,8 @@ export function createRemoteChooser(appSessionId: AppSessionId, deps: ChooserDep
     },
     // Try again, and the sheet's own ask when the link drops under a listing (C5): the folder in the path field, read again
     retry() {
-      if (state.at === 'failed' || state.at === 'listed') list({ path: state.path });
+      if (state.at === 'failed' && again !== null && again.path === state.path) list(again);
+      else if (state.at === 'failed' || state.at === 'listed') list({ path: state.path });
     },
     cancel() {
       stopTimer();
