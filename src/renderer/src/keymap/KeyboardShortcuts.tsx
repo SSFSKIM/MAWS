@@ -17,7 +17,7 @@ export function KeyboardShortcuts() {
   const focus = useDialogFocus();
   // UX wave U6b-3b (Decision Log 16): a reference that holds nothing a person would lose, so it lends itself to an action
   // that moves the keyboard (modal-handoff.ts): Go to file from the menu closes it and runs from its close
-  const [handoff] = useState(() => modalHandoff(closeShortcuts));
+  const [{ lend, closed }] = useState(() => modalHandoff(closeShortcuts));
   const search = useRef<HTMLInputElement>(null);
   return (
     <Dialog.Root open={open} onOpenChange={(open) => useShortcuts.setState({ open })}>
@@ -27,8 +27,8 @@ export function KeyboardShortcuts() {
         </Dialog.Overlay>
         <Dialog.Content
           {...focus}
-          ref={handoff.lend}
-          onCloseAutoFocus={(event) => { focus.onCloseAutoFocus(event); handoff.closed(); }}
+          ref={lend}
+          onCloseAutoFocus={(event) => { focus.onCloseAutoFocus(event); closed(); }}
           onOpenAutoFocus={(event) => { focus.onOpenAutoFocus(); event.preventDefault(); search.current?.focus(); }}
           className="fixed top-[10%] left-1/2 z-50 flex max-h-[80vh] w-[min(600px,90vw)] -translate-x-1/2 flex-col overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg shadow-float"
         >

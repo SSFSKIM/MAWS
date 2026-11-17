@@ -120,14 +120,14 @@ export function CommandPalette() {
   const focus = useDialogFocus();
   // UX wave U6b-3b (Decision Log 16): the palette holds nothing a person would lose, so it lends itself to an action that
   // moves the keyboard, from its own row and from the menu alike (keymap/modal-handoff.ts)
-  const [handoff] = useState(() => modalHandoff(closePalette));
+  const [{ lend, closeThen, closed }] = useState(() => modalHandoff(closePalette));
   const run = (id: ActionId) => {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
     // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
     // U6b-3b: Go to file records where the keyboard is for Esc's second step, which is the opener, not the palette's field.
     const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile';
     if (afterClose) {
-      handoff.closeThen(() => runAction(id));
+      closeThen(() => runAction(id));
       return;
     }
     usePalette.setState({ open: false });
@@ -138,10 +138,10 @@ export function CommandPalette() {
       <Dialog.Portal>
         <Dialog.Content
           {...focus}
-          ref={handoff.lend}
+          ref={lend}
           onCloseAutoFocus={(event) => {
             focus.onCloseAutoFocus(event);
-            handoff.closed();
+            closed();
           }}
           aria-describedby={undefined}
           className="fixed top-[16%] left-1/2 z-50 w-[min(560px,90vw)] -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg"
