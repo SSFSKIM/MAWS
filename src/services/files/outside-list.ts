@@ -11,12 +11,12 @@ import { OUTSIDE_LIST_PAGE, type FilesListOutsideOutput, type OutsideEntry } fro
 import { isProtected, walk, type Home, type Resolved } from '@shared/machine/home-folders';
 
 /**
- * `path` (absolute) walked to its real path. `open`: the person said to open the protected folders on the way, a link's
- * target included (they confirmed the folder the chooser or the tab named, which may lie behind a link); without it a
- * protected folder answers `protected` before anything inside it is touched.
+ * `path` (absolute) walked to its real path. `open`: the person said to open the protected folders the path names, and
+ * those its last component's target lies in when that is a link (the walk's own `open`); a protected folder any other
+ * link on the way leads into, and every one without it, answers `protected` before anything inside it is touched.
  */
 export function walkOutside(path: string, where: Home, open: boolean): Promise<Resolved> {
-  return walk(path, where, { opened: () => open, file: true, outside: true });
+  return walk(path, where, { opened: () => false, open, file: true, outside: true });
 }
 
 const refused = (reason: Extract<FilesListOutsideOutput, { status: 'refused' }>['reason']): FilesListOutsideOutput => ({ status: 'refused', reason });
