@@ -1421,6 +1421,19 @@ test('a command’s output is a dim line under its command, cut at the bottom of
         column: { left: box(element).left + parseFloat(frameStyle.paddingLeft), right: box(element).right - parseFloat(frameStyle.paddingRight) },
         mark: { box: box(line.querySelector('.transcript-command-mark')!), color: getComputedStyle(line.querySelector('.transcript-command-mark')!).color },
         output: box(output),
+        fragments: (() => {
+          // the first drawn text fragments, from the output's top (what the row's own measure reads)
+          const origin = output.getBoundingClientRect().top;
+          const range = document.createRange();
+          const walker = document.createTreeWalker(output, NodeFilter.SHOW_TEXT);
+          const out: { top: number; bottom: number }[] = [];
+          for (let node = walker.nextNode(); node !== null && out.length < 4; node = walker.nextNode()) {
+            if (!node.textContent?.trim()) continue;
+            range.selectNodeContents(node);
+            for (const rect of range.getClientRects()) if (out.length < 4) out.push({ top: rect.top - origin, bottom: rect.bottom - origin });
+          }
+          return out;
+        })(),
         text: output.textContent,
         type: { size: style.fontSize, lineHeight: parseFloat(style.lineHeight), color: style.color, font: style.fontFamily },
         mask: style.maskImage || style.webkitMaskImage || 'none',
@@ -1453,7 +1466,7 @@ test('a command’s output is a dim line under its command, cut at the bottom of
   expect(closed.block, 'R2: a text with a line end is a block').toBe(true);
   expectNear(closed.mark.box.left, closed.column.left, 'R2: the mark at the column’s left edge');
   expect(closed.output.left, 'R2: the output starts after the mark').toBeGreaterThan(closed.mark.box.right);
-  expectNear(closed.output.height, 2 * closed.type.lineHeight, 'R19 and acceptance 1: closed at the bottom of its second drawn line, two lines of its type');
+  expectNear(closed.output.height, 2 * closed.type.lineHeight, `R19 and acceptance 1: closed at the bottom of its second drawn line, two lines of its type (its first text fragments: ${JSON.stringify(closed.fragments)})`);
   const fade = /calc\((?:100% - ([\d.]+)px|-([\d.]+)px \+ 100%)\)/.exec(closed.mask); // either order a computed calc() may take
   expect(fade, `R3: the closed line fades out (${closed.mask})`).not.toBeNull();
   expect(Number(fade![1] ?? fade![2]), 'R3: the fade is at most a third of one line, ending at the bound').toBeLessThanOrEqual(closed.type.lineHeight / 3);
@@ -1628,13 +1641,16 @@ test('a code block wraps its long lines in one frame the column’s width, with 
       return { top: Math.round(own.top - outer.top), right: Math.round(outer.right - own.right) };
     };
     const before = place();
+    const scroller = frame.closest<HTMLElement>('[data-transcript-scroller]');
+    const [outer, port] = [frame.getBoundingClientRect(), scroller?.getBoundingClientRect()];
+    const stands = { frameTop: Math.round(outer.top - (port?.top ?? 0)), frameHeight: Math.round(outer.height), viewport: scroller?.clientHeight ?? null, scrolled: Math.round(scroller?.scrollTop ?? -1), window: window.innerHeight };
     viewport.scrollTop = 200;
-    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop, before, after: place() };
+    return { overflow: getComputedStyle(viewport).overflowY, offset: viewport.scrollTop, before, after: place(), stands };
   });
   expect(['auto', 'scroll'], `the code’s viewport scrolls down (${codeScroll.overflow})`).toContain(codeScroll.overflow);
   expect(codeScroll.offset, 'an offset set on the code’s viewport holds').toBeGreaterThan(0);
   expect(codeScroll.after, 'R8: scrolling the code leaves the control in its place').toEqual(codeScroll.before);
-  expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)})`).toBe(true);
+  expect(codeScroll.before.top <= 16 && codeScroll.before.right <= 16, `R8: that place is the frame’s top right (${JSON.stringify(codeScroll.before)}; the frame in the list’s viewport: ${JSON.stringify(codeScroll.stands)})`).toBe(true);
   // sticky: with the frame's top scrolled 160 px above the transcript's viewport, the control stays in view inside it.
   // The fence ends the fixture and the list has no trailing space, so in a 900 px window the scroll would stop short:
   // for this step the viewport is capped at 300 px, shorter than the frame, so the list can carry its top that far up (the
@@ -1953,7 +1969,7 @@ test('the owner’s time, Copy and Edit sit on one line under the bubble, shown 
       expectNear(line.top - target.top, 6, `${width} px, R21: ${name}’s target overhangs 6 px up`);
       expectNear(target.bottom - line.bottom, 2, `${width} px, R21: and 2 px down`);
       expect(target.height, `${width} px, R9 and R21: ${name} is a 24 px target`).toBeGreaterThanOrEqual(24);
-      expect(overlaps(target, turnButton), `${width} px, R21: ${name}’s target clear of the turn line’s button`).toBe(false);
+      expect(overlaps(target, turnButton), `${width} px, R21: ${name}’s target clear of the turn line’s button (${JSON.stringify({ target, turnButton, line })})`).toBe(false);
     }
     expect(overlaps(copyBox, editBox), `${width} px, R21: Copy’s and Edit’s targets do not overlap`).toBe(false);
   }
@@ -2102,7 +2118,9 @@ test('child transcript renders the subagent\u2019s events only', async ({ harnes
   await page.getByRole('button', { name: 'Show child · Read and report one.txt content' }).click();
   const child = page.locator('[data-harness-child]');
   await expect(child.locator('.transcript')).toHaveCount(1);
-  await expect(child.locator('[data-kind="assistant_text"]')).toHaveText(['ONE']);
+  // the answer's words: the row also holds its action row (UX wave U3b: Copy and the time; a child draws no Fork)
+  await expect(child.locator('[data-kind="assistant_text"]')).toHaveCount(1);
+  await expect(child.locator('[data-kind="assistant_text"] :is(.transcript-answer, .transcript-commentary)')).toHaveText(['ONE']);
   // The parent reported the child finished, so the child's turn is closed: its divider has settled (not "Working for …")
   // and, like any closed turn, its work area opens from the divider.
   const childDivider = child.locator('[data-kind="divider"] button[aria-expanded]').first();
@@ -2664,7 +2682,7 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await expect(report).toContainText('Concise reference style');
     await expect(report).toContainText('Friendly guide style');
     await expect(report).not.toContainText('Checked the tree first: it is clean.');
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not([data-kind="assistant_text"] > .transcript-answer-actions button)')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not(:scope > .transcript-answer-actions button)')).toHaveCount(0);
     // UX wave U3b, statement 13: the turn's answer is this closed stretch's head, an owner prompt after it: Copy under it
     await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await expect(pane.getByText('To you', { exact: true })).toHaveCount(0);
@@ -2719,7 +2737,7 @@ test('the to-human view folds work by stretch, draws each message as the mod doe
     await closedLines.nth(1).click();
     await expect(report).toContainText('Checked the tree first: it is clean.');
     await expect(report.locator('.transcript-prose')).toHaveCount(1);
-    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not([data-kind="assistant_text"] > .transcript-answer-actions button)')).toHaveCount(0);
+    await expect(report.locator('[data-owner-card], .owner-card-label, .owner-insights, button:not(:scope > .transcript-answer-actions button)')).toHaveCount(0);
     // its stretch opened, the head is the turn's last drawn answer block: the same action row under it (statement 13)
     await expect(report.locator(':scope > .transcript-answer-actions').getByRole('button', { name: 'Copy', exact: true })).toHaveCount(1);
     await pane.getByRole('button', { name: '‹ fold to report', exact: true }).click();
