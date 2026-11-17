@@ -2722,6 +2722,14 @@ describe('files saves outside the folders', () => {
         expect(await list(files, { path: at('to-documents'), open: true })).toMatchObject({ status: 'listed', path: inHome('Documents'), entries: [{ name: 'deep' }, { name: 'private.txt' }] });
       });
 
+      it('refuses a folder reached through a link on the way into a private folder even with open, touching nothing inside it', async () => {
+        symlinkSync(inHome('Documents'), at('to-documents'));
+        const files = remoteService();
+        const seen = recordTouches();
+        for (const open of [undefined, true] as const) expect(await list(files, { path: join(at('to-documents'), 'deep'), ...(open && { open }) }), `open ${open}`).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Documents'));
+      });
+
       it('answers unreadable for a folder it cannot read, not-a-folder for a file, no-folder for a missing or relative path, and an unknown session', async () => {
         write(at('locked', 'inside.txt'), 'x');
         const files = remoteService();
@@ -2859,7 +2867,7 @@ describe('files saves outside the folders', () => {
         expect(readFileSync(secret(), 'utf8')).toBe('saved there\n');
       });
 
-      it('answers protected for a link outside every private folder that leads into one, and reads where it leads with open', async () => {
+      it('answers protected for a link on the way, outside every private folder, that leads into one, with open or without, touching nothing inside it', async () => {
         symlinkSync(inHome('Documents'), at('docs-link'));
         const via = at('docs-link', 'private.txt');
         await transcriptOf(A, [said(link(via))]);
@@ -2867,16 +2875,16 @@ describe('files saves outside the folders', () => {
         const seen = recordTouches();
         await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
         await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret() }, claimed())).rejects.toMatchObject(protectedRefusal);
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
         nothingTouchedIn(seen, inHome('Documents'));
-        touches.on = false;
-        expect(await readThere(files, A, via, 'op-read', { open: true })).toMatchObject({ content: 'private as it was\n', outside: { real: secret(), writable: true } });
+        nothingAsked();
         expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
       });
 
-      // Decision Log 17, a stated limit of decision 18: `open: true` opens every private folder the walk meets, so a path
-      // under an opened private folder, on which a link leads into a second one, is read with it; without it, neither
-      // folder is touched
-      it('reads with open a path under an opened private folder whose link leads into a second private folder, and without open answers protected touching neither', async () => {
+      // Decision 18 as ruled (Decision Log 17): `open: true` covers the private folders the path names and the target of a
+      // link that is its last component, never a link met on the way into another one
+      it('answers protected for a path under an opened private folder whose link on the way leads into a second one, with open or without, touching nothing inside the second', async () => {
         write(inHome('Desktop', 'far.txt'), 'far as it was\n');
         symlinkSync(inHome('Desktop'), inHome('Documents', 'to-desktop'));
         const via = inHome('Documents', 'to-desktop', 'far.txt');
@@ -2886,9 +2894,23 @@ describe('files saves outside the folders', () => {
         await expect(readThere(files, A, via)).rejects.toMatchObject(protectedRefusal);
         nothingTouchedIn(seen, inHome('Documents'));
         nothingTouchedIn(seen, inHome('Desktop'));
+        await expect(readThere(files, A, via, 'op-read', { open: true })).rejects.toMatchObject(protectedRefusal);
+        await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('far as it was\n'), real: inHome('Desktop', 'far.txt'), open: true }, claimed())).rejects.toMatchObject(protectedRefusal);
+        nothingTouchedIn(seen, inHome('Desktop'));
         nothingAsked();
-        touches.on = false;
-        expect(await readThere(files, A, via, 'op-read', { open: true })).toMatchObject({ content: 'far as it was\n', named: true, outside: { real: inHome('Desktop', 'far.txt'), writable: true } });
+        expect(readFileSync(inHome('Desktop', 'far.txt'), 'utf8')).toBe('far as it was\n');
+      });
+
+      it('opens with open the target in a private folder of a link that is the path’s last component, by the choice, and reads the file it grants', async () => {
+        write(inHome('Desktop', 'far.txt'), 'far as it was\n');
+        symlinkSync(inHome('Desktop', 'far.txt'), out('to-far'));
+        const files = remoteService();
+        const seen = recordTouches();
+        expect(await choose(files, out('to-far'))).toEqual({ status: 'refused', reason: 'protected' });
+        nothingTouchedIn(seen, inHome('Desktop'));
+        expect(await choose(files, out('to-far'), 'op-choose', { open: true })).toEqual({ status: 'granted', path: inHome('Desktop', 'far.txt') });
+        expect(await readThere(files, A, inHome('Desktop', 'far.txt'), 'op-read', { open: true })).toMatchObject({ content: 'far as it was\n', outside: { real: inHome('Desktop', 'far.txt'), writable: true } });
+        nothingTouchedIn(seen, inHome('Documents'));
       });
 
       it('walks no path under one of the caller’s roots: a root inside a private folder reads and saves without open', async () => {
