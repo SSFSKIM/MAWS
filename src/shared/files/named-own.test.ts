@@ -230,6 +230,10 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     ['plain words', () => near('word ')],
     ['many answer-shaped lines', () => near('Answering "x\n')],
     ['many anchor-tag openings', () => near('\n<maws_anchor kind="x"')],
+    // ticket 733a: the characters the grant's test costs most on, which case mapping lengthens
+    ['a capital I with a dot above', () => near('\u0130')],
+    ['a sharp s', () => near('\u00df')],
+    ['an iota with dialytika and tonos', () => near('\u0390')],
   ])('linear work, bounded between pauses, with a pause inside the text: %s', (_, shape) => {
     const textOf = shape();
     expect(textOf.length).toBeLessThanOrEqual(OWN_TEXT_MAX_CHARS);
@@ -238,6 +242,20 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
     expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
     expect(read.pauses).toBeGreaterThanOrEqual(2);
+  });
+
+  // ticket 733a: the costliest text counted, an anchored comment at the length bound in the character the grant's test
+  // costs most on; it counts, within the budget and one stretch between pauses
+  it('an anchored comment at the length bound, in a capital I with a dot above, counts within the budget', () => {
+    const anchor = { kind: 'file-line' as const, label: 'notes.md', locator: `${P}:3`, path: P, line: 3 };
+    const words = near('\u0130', `Compare ${LINK} `).slice(0, OWN_TEXT_MAX_CHARS - 200);
+    const textOf = anchoredMessage({ anchor, text: words, destination: 'main', screenshot: false });
+    expect(textOf.length).toBeLessThanOrEqual(OWN_TEXT_MAX_CHARS);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.texts).toHaveLength(1);
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
   });
 
   it('a paste opener with no closer makes the text not count', () => {

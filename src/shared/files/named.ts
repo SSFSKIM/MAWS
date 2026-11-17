@@ -1126,20 +1126,20 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
 // person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
-// units a character in all (the readers' counts sum to 45), the text does not count: it fails closed. The grant's
+// units a character in all (the readers' counts sum to 49), the text does not count: it fails closed. The grant's
 // test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
 // for the folded text too, decided by one fold before any reader runs; the budget follows the longer of the two, and
 // the grant's test on a counted text stays within one stretch. Ticket 733a widened the grant's test (a second reading,
-// each character folded by itself in two case images): its count is at most 7 units a character of the longer of the
-// text and its fold (4 on ASCII text: the whole fold and its pass, 3, and one pass by character), where it was 3, so the
-// readers' counts sum to 45 where they summed to 41, and each call of the forms' list is planned for at the grant's
-// bound, the costliest of them. The costliest text counted, a full-width anchored comment at the length bound, took 47.6
-// units a character; the budget rose from 48 to 52, the margin it had.
+// each character folded by itself in two case images): its count is at most GRANT_TEST_WORK_PER_CHAR (11) units a
+// character of the longer of the text and its fold (4 on ASCII text; 11 on U+0130, which lower-casing lengthens), where
+// it was 3, so the readers' counts sum to 49 where they summed to 41, and each call of the forms' list is planned for at
+// the grant's bound, the costliest of them. The costliest text counted, an anchored comment at the length bound in
+// U+0130, took 51.97 units a character; the budget rose from 48 to 56, about the margin it had.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
 const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
 const CLAIM_WORK_PER_CHAR = GRANT_TEST_WORK_PER_CHAR; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
-export const OWN_WORK_PER_CHAR = 52;
+export const OWN_WORK_PER_CHAR = 56;
 const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
 const PASTE_OPENING = '<pasted_content id="'; // the head of the opener `framePasted` writes (composer/pasted-content.ts)
 

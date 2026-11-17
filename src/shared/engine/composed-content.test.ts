@@ -239,8 +239,9 @@ describe('segmentsInPlace: a form’s segments read where they stand', () => {
   it('leaves a text with no segment, or with tags that are not one, as it is', () => {
     for (const text of ['', 'plain words', 'Implement this plan:\n\nstep 1', `x\n\n<pasted_content id="abcd">\nnever closed`, `x\n${framePasted('abcd', 'one break before')}\n`]) {
       expect(segmentsInPlace(text), JSON.stringify(text)).toEqual({ text, composed: [] });
-      // the control: a segment the writer wrote after the same text is found
-      expect(segmentsInPlace(`${text}${wrapPasted('abcd', 'found')}`).composed, `${JSON.stringify(text)}, the control`).toEqual([[text.length, text.length + 'found'.length]]);
+      // the control: a segment the writer wrote after the same text is found (of another id: the unclosed opening's
+      // body would run to the first closing tag of its own)
+      expect(segmentsInPlace(`${text}${wrapPasted('beef', 'found')}`).composed, `${JSON.stringify(text)}, the control`).toEqual([[text.length, text.length + 'found'.length]]);
     }
   });
 
