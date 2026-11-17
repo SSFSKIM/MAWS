@@ -5,6 +5,8 @@ import { describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { Row } from '../transcript';
 import { askSteerText } from '@shared/maws/ask';
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
 import { rowsOf } from '../transcript/model/derive';
 import { applyEvents, createState } from '../transcript/model/reduce';
 import { builder } from '../transcript/model/test-events';
@@ -39,5 +41,16 @@ describe('Edit on a joined answer and prompt', () => {
     b.turn('u1', `${envelope}\nAlso fix the footer.`);
     const row = rowsOf(applyEvents(createState(null, null), b.events)).find((r): r is UserRow => r.kind === 'user')!;
     expect(rowPrefill(row).text).toBe('Also fix the footer.');
+  });
+});
+
+// The review round's R3 (a): a bubble's edit meets the text and the pasted body as typed
+describe('the one-writer rule: a bubble edited in place', () => {
+  it('prefills its text and its pasted body without U+2060', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const broken = neutraliseGrant(sentence);
+    const prefill = rowPrefill(user({ text: `${broken}\n[Pasted text #1 +2 lines]`, attachments: [{ kind: 'text', name: 'Pasted text #1', bytes: 9, dataUrl: null, mediaType: 'text/plain', text: `said:\n${broken}` }] }) as UserRow);
+    expect(prefill.text.includes('\u2060')).toBe(false);
+    expect(prefill.pasted?.map((p) => p.text)).toEqual([`said:\n${sentence}`]);
   });
 });

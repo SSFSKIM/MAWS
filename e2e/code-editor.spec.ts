@@ -11,6 +11,7 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { menu, openInViewer, otherThemeColours, sideFileTab, withProduct, type Product } from './support/code-product';
 import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
+import { expectDrawnWhole, expectDrawnWholeAtBothWidths } from './support/editor-notice';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
@@ -57,8 +58,11 @@ async function expectDirtyTab(page: Page, name: string, dirty: boolean): Promise
   }
 }
 
+
 async function awaitNotice(viewer: Locator): Promise<void> {
-  await expect(viewer.locator('[data-theirs-notice="notice"]')).toHaveText('Changed on disk', { timeout: MEASURED_WAIT_MS });
+  const notice = viewer.locator('[data-theirs-notice="notice"]');
+  await expect(notice).toHaveText('Changed on disk', { timeout: MEASURED_WAIT_MS });
+  await expectDrawnWhole(notice, 'at the width the scene has');
   await expect(viewer).toHaveAttribute('data-theirs', 'notice');
 }
 
@@ -204,6 +208,24 @@ test.describe('the editor in stub mode over a scratch repository', () => {
     });
   });
 
+  // U1c (the coordinator's item after the architect's ruling): the reason the disk's version cannot be merged is drawn
+  // whole, like the notice beside it: the disk's copy rewritten under unsaved edits as bytes that are no UTF-8 (an
+  // invented Latin-1 é), so the bar says why and offers Save alone
+  test('a disk copy that is no longer UTF-8 under unsaved edits: the bar says why it cannot be merged, drawn whole', async () => {
+    await withProduct(async (p) => {
+      const original = read(p, APP);
+      const viewer = await openEditor(p, APP);
+      await typeAtTop(p, viewer, TYPED);
+      writeFileSync(p.scratch.path(APP), Buffer.concat([Buffer.from('// caf'), Buffer.from([0xe9]), Buffer.from(' changed on disk\n'), Buffer.from(original)]));
+      const reason = viewer.locator('[data-disk-unusable]');
+      await expect(reason).toHaveText('Changed on disk: no longer UTF-8, so it cannot be merged', { timeout: MEASURED_WAIT_MS });
+      await expect(reason).toHaveAttribute('data-disk-unusable', 'encoding');
+      await expect(viewer, 'no version on offer').toHaveAttribute('data-theirs', '');
+      await expect(viewer, 'the edit still in the tab').toHaveAttribute('data-dirty', 'true');
+      await expectDrawnWholeAtBothWidths(p.page, reason);
+    });
+  });
+
   test('a save over a changed file opens the merge view, and Save writes the resolution', async () => {
     await withProduct(async (p) => {
       const original = read(p, APP);
@@ -216,7 +238,9 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // Saved from the notice, the stale baseline's hash answers conflict: the merge view, mine against the disk's.
       await barButton(viewer, 'Save').click();
       await expect(viewer).toHaveAttribute('data-theirs', 'merge');
-      await expect(viewer.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      const reason = viewer.locator('[data-theirs-notice="merge"]');
+      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expectDrawnWholeAtBothWidths(p.page, reason);
       const changes = viewer.locator('[data-merge-changes]');
       await expect(changes).toHaveText('2 changes from disk');
       const chunks = viewer.locator('.cm-deletedChunk');
