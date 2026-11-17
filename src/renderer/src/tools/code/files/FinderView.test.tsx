@@ -11,6 +11,7 @@ import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { EditorView } from '@codemirror/view';
 import type { FilesEntry } from '@shared/ipc/schema/files';
+import type { GitStatus } from '@shared/ipc/schema/git';
 import { record } from '../../../../../../test/support/builders';
 import { TEST_MACHINE } from '../../../../../../test/support/machine';
 import { connectCodeEvents } from '../../../ipc/events';
@@ -53,6 +54,7 @@ const LISTING = ['src/app.ts', 'notes.md', 'src/', 'vendor/', 'vendor/harbor-lib
 let search: (query: string) => Answer | Promise<Answer>;
 let searches: { query: string; reply: ReturnType<typeof deferred<Answer>> }[];
 let contents: Record<string, string>;
+let watched: GitStatus | null; // what git.watch answers for the working folder; none, not a repository
 const holdSearches = () => {
   search = (query) => {
     const reply = deferred<Answer>();
@@ -78,7 +80,7 @@ function finderMain(stored: unknown = null) {
   return installFakeMain((name, input) => {
     if (name === 'layout.get') return answer({ value: input.key === 'files.tree' ? stored : null });
     if (name === 'layout.set' || name === 'files.watch' || name === 'files.unwatch' || name === 'git.unwatch') return answer();
-    if (name === 'git.watch') return fail('not a git repository');
+    if (name === 'git.watch') return watched === null ? fail('not a git repository') : answer(watched);
     if (name === 'fs.workflows') return answer({ runs: [] });
     if (name === 'files.list') {
       const path = (input.path as string | undefined) ?? '';
@@ -132,6 +134,7 @@ beforeEach(() => {
   search = (query) => listed(...LISTING.filter((path) => path.includes(query)));
   searches = [];
   contents = {};
+  watched = null;
   resetPanelStores();
   resetKeptOpens();
   resetTreeState();
@@ -465,6 +468,7 @@ describe('the list (decision 4; M2 decisions 2 and 3)', () => {
     composer().focus();
     goToFile();
     await inField();
+    await waitFor(() => expect(document.querySelector('[data-files-scroller]')).not.toBeNull()); // the tree's list, before the text
     await listedFor('s')(['/r/src/app.ts', '/r/notes.md']);
     expect(searched()).toEqual([{ directory: '/r', query: 's', limit: 200 }]);
     const list = results()!;
@@ -546,9 +550,15 @@ describe('the list (decision 4; M2 decisions 2 and 3)', () => {
 
   it('a row: its name, then its folder from the working folder in the muted colour, cut at its start when it does not fit and gone below two characters; its title the path from the working folder; no status letter', async () => {
     search = () => listed('src/deep/harbor/app.ts');
+    watched = {
+      repoRoot: '/r', gitDir: '/r/.git', commonDir: '/r/.git', isWorktree: false, branch: 'main', head: 'c0ffee', upstream: null, remoteUrl: null, ahead: 0, behind: 0, dirty: true,
+      files: ['notes.md', 'src/deep/harbor/app.ts'].map((path) => ({ path, oldPath: null, index: '.', worktree: 'M', untracked: false })), stashCount: 0, checkedAt: '2026-11-17T10:00:00.000Z',
+    };
     render(<Page />);
     goToFile();
     await inField();
+    // the control: the same status draws the tree's row its letter
+    await waitFor(() => expect(document.querySelector('[role="treeitem"][data-kind][data-path="/r/notes.md"] [data-mark]')).not.toBeNull());
     await listedFor('app')(['/r/src/deep/harbor/app.ts']);
     const row = () => options()[0];
     const folder = () => row().querySelector('[data-folder]');
@@ -630,6 +640,11 @@ describe('the list (decision 4; M2 decisions 2 and 3)', () => {
     expect(finding()).toBeNull();
     await settle();
     expect(document.activeElement?.closest('[data-file-keyboard]') ?? null).toBeNull();
+    goToFile(); // the control: Enter on the same result moves the keyboard into it
+    await inField();
+    await listedFor('notes')(['/r/notes.md']);
+    press('Enter');
+    await waitFor(() => expect(document.activeElement?.closest('[data-file-viewer][data-path="/r/notes.md"][data-file-keyboard]')).not.toBeNull(), { timeout: 5000 });
   });
 
   it('an Enter that commits an input method’s composition opens nothing; a plain Enter opens the highlighted file as a kept tab', async () => {
@@ -669,7 +684,7 @@ describe('after Enter the file has the tab (decision 9; B3, M2’s half)', () =>
   it.each([
     ['folded by the person, with room', WIDE, FOLDED],
     ['too narrow for both', NARROW, null],
-  ])('%s: Enter on a result ends the search, the file has the whole tab with the keyboard in its text, and the fold is never written', async (_name, width, stored) => {
+  ])('%s: Enter on a result ends the search, the file has the whole tab with the keyboard in its text, and the fold is never written; the person’s press after is', async (_name, width, stored) => {
     main = finderMain(stored);
     render(<Page />);
     await openBeside(width);
@@ -690,6 +705,10 @@ describe('after Enter the file has the tab (decision 9; B3, M2’s half)', () =>
     expect(setFolded).not.toHaveBeenCalled();
     expect(treeWrites()).toEqual([]);
     expect(treeOf(useTreeState.getState(), A).folded).toBe(stored !== null);
+    if (width === NARROW) observer.resize(filesTab()!, { width: WIDE, height: 600 }); // room for both: the button is the fold's
+    fireEvent.click(toggle()!); // the control: the person's press, not the search, is the stored fold, and it is written
+    expect(setFolded).toHaveBeenCalledWith(A, stored === null);
+    await waitFor(() => expect(treeWrites()).toHaveLength(1));
   });
 
   it('too narrow, its tree shown in the file’s place by the button before ⌘P: after Enter the file has the tab, with the keyboard in its text', async () => {

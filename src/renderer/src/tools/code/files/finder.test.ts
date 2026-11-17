@@ -328,7 +328,7 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
     expect(state()).toEqual({ status: 'answered', rows: files, at: 0, refreshing: false });
   });
 
-  it('an empty text is no ask; the text becoming empty drops what is on its way', async () => {
+  it('an empty text is no ask; the text becoming empty drops what is on its way; a text that stays is asked and answered', async () => {
     const { state, type } = mount();
     wait(60_000);
     expect(asks).toHaveLength(0);
@@ -339,6 +339,11 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
     expect(state()).toEqual({ status: 'empty' });
     await reply(0, listed('tide.md'));
     expect(state()).toEqual({ status: 'empty' });
+    type('tides'); // the control: the same hook, a text that stays
+    wait();
+    expect(queries()).toEqual(['tide', 'tides']);
+    await reply(1, listed('tides.md'));
+    expect(state()).toEqual({ status: 'answered', rows: ['/r/tides.md'], at: 0, refreshing: false });
   });
 
   describe('an answer is taken only for the request that asked (decision 3; the review’s finding 3)', () => {
@@ -546,7 +551,7 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
       }
     });
 
-    it('Enter does nothing with no row, after a failure, or with an empty field', async () => {
+    it('Enter does nothing with no row, after a failure, or with an empty field; with a row it opens', async () => {
       const finder = await answered();
       expect(finder.state()).toEqual({ status: 'answered', rows: [], at: 0, refreshing: false });
       finder.press('Enter');
@@ -557,9 +562,14 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
       finder.type('');
       finder.press('Enter');
       expect(opened()).toEqual([]);
+      finder.type('tide'); // the control: the same finder with a row
+      wait();
+      await reply(2, listed('tide.md'));
+      finder.press('Enter');
+      expect(opened()).toEqual([{ file: '/r/tide.md', line: null, kept: true }]);
     });
 
-    it('a click on a row opens the preview tab, a double-click keeps it, ⌘ opens a main tab, each at the text’s line, and asks no keyboard', async () => {
+    it('a click on a row opens the preview tab, a double-click keeps it, ⌘ opens a main tab, each at the text’s line, and asks no keyboard; Enter on it does', async () => {
       const finder = mount();
       finder.type('tide:7');
       wait();
@@ -571,6 +581,9 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
       expect(opened()).toEqual([{ file: '/r/tide.md', line: 7, kept: true }]);
       act(() => void finder.view.result.current.choose(1, { keep: false, main: true }));
       expect(useLayout.getState().main.panes.flatMap((pane) => pane.tabs).filter((tab) => tab.kind === 'file')).toEqual([expect.objectContaining({ path: '/r/tide.ts', line: 7 })]);
+      expect(takeKeyboard({ into: 'file', key: fileKey(TEST_MACHINE, '/r/tide.ts') })).toBe(false);
+      finder.press('Enter'); // the control: Enter on the same row asks it
+      expect(takeKeyboard({ into: 'file', key: fileKey(TEST_MACHINE, '/r/tide.md') })).toBe(true);
     });
   });
 
@@ -661,25 +674,29 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
       } else {
         expect(opened()).toEqual([]);
         expect(finder.state()).toEqual({ status: 'waiting', shown: null, held: false });
+        await reply(1, listed('tide.md')); // the control: the owed refresh's row, and an Enter on it, opens
+        finder.press('Enter');
+        expect(opened()).toEqual([{ file: '/r/tide.md', line: null, kept: true }]);
       }
     });
 
-    it.each([
-      ['a change of the text between clears what was owed', true],
-      ['with no change between, the owed refresh asks (the control)', false],
-    ])('%s', async (_name, changed) => {
-      const finder = mount();
-      finder.type('tide');
-      wait();
-      refresh(finder);
-      if (changed) finder.type('tides');
-      wait();
-      await reply(0, listed('tide.md'));
-      if (changed) {
-        expect(queries()).toEqual(['tide', 'tides']);
-        await reply(1, listed('tides.md'));
-        expect(queries()).toEqual(['tide', 'tides']);
-      } else expect(queries()).toEqual(['tide', 'tide']);
+    it('a change of the text between clears what was owed; with no change between, the owed refresh asks (the control)', async () => {
+      for (const changed of [true, false]) {
+        cleanup();
+        asks = [];
+        const finder = mount();
+        finder.type('tide');
+        wait();
+        refresh(finder);
+        if (changed) finder.type('tides');
+        wait();
+        await reply(0, listed('tide.md'));
+        if (changed) {
+          expect(queries()).toEqual(['tide', 'tides']);
+          await reply(1, listed('tides.md'));
+          expect(queries()).toEqual(['tide', 'tides']);
+        } else expect(queries()).toEqual(['tide', 'tide']);
+      }
     });
 
     it('a refresh after a failure asks again at once; with the field empty a refresh asks nothing', async () => {
