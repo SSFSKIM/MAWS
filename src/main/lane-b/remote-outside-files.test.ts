@@ -325,6 +325,80 @@ describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', 
     expect(l.files().map((call) => (call.input as { length: number }).length)).toEqual([4 * 1024 * 1024, expect.any(Number), 4 * 1024 * 1024, expect.any(Number)]);
   });
 
+  // Fix wave 3 (the re-review's first Important): the attempt whose keys a peer's list chose is bound, whole, to that
+  // channel; a channel replaced between two of its requests (the link's switch from the relay to the direct carrier is
+  // one, at once) ends it, and decision 5 starts again on the channel current now. Nothing of the old keys goes on.
+  it('a channel replaced between the too-large answer and the first page, by an older build: the pages are not asked, and the read starts again with today’s keys', async () => {
+    const l = lab();
+    let switched = false;
+    l.reads((input) => {
+      if (!switched && input.length === 4 * 1024 * 1024) {
+        switched = true;
+        l.link.lose(); // the switch: the old channel's end and the new one current before the next request
+        l.link.relink([...OLDER]);
+        return { ok: false, error: { code: 'too-large' } };
+      }
+      if ('named' in input || 'agent' in input || 'open' in input) return { ok: false, error: { code: 'malformed' } }; // as the older build answers
+      return inside(input);
+    });
+    expect(await answered(l.cmd('files.read', keyed({ length: 4 * 1024 * 1024, agent: true })))).toMatchObject({ ok: true, value: { content: 'inside the checkout\n' } });
+    const [checked, ...older] = l.files().map((call) => call.input as Record<string, unknown>);
+    expect(checked).toMatchObject({ named: true, agent: true, length: 4 * 1024 * 1024 }); // the one request on the checked channel
+    expect(older.length).toBeGreaterThan(0);
+    for (const input of older) expect(['named', 'agent', 'open'].filter((key) => key in input)).toEqual([]);
+  });
+
+  it('a channel replaced by a capable build between two pages: the attempt ends, and the read starts again, whole, on the channel current now', async () => {
+    const l = lab();
+    let switched = false;
+    l.reads((input) => {
+      if (input.length === 4 * 1024 * 1024) return { ok: false, error: { code: 'too-large' } };
+      if (!switched) {
+        switched = true;
+        l.link.lose();
+        l.link.relink([...SERVES]);
+      }
+      return inside(input);
+    });
+    expect(await answered(l.cmd('files.read', keyed({ length: 4 * 1024 * 1024 })))).toMatchObject({ ok: true, value: { content: 'inside the checkout\n' } });
+    // the whole read and its page were the first channel's; on the next, decision 5 again from its first call
+    expect(l.files().map((call) => (call.input as { length: number }).length)).toEqual([4 * 1024 * 1024, expect.any(Number), 4 * 1024 * 1024, expect.any(Number)]);
+  });
+
+  // Fix wave 3 (the re-review's second Important): the hold's end binds a channel already current too.
+  it('a channel replaced after the hold’s end, the next one already current: today’s sentence, and no request after the hold', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    l.link.onAct = () => {}; // the first page of the act goes out, and its answer never comes
+    const read = l.cmd('files.read', keyed());
+    await answered(read);
+    expect(l.link.acts).toHaveLength(1);
+    await vi.advanceTimersByTimeAsync(HOLD + 1);
+    l.link.lose(); // the act's channel replaced, the next one current at once
+    l.link.relink([...SERVES]);
+    expect(await answered(read)).toEqual(lasting);
+    expect(l.files()).toHaveLength(1);
+    expect(l.link.acts).toHaveLength(1);
+  });
+
+  it('the control: the same replacement inside the hold reads afresh on the channel current now', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    let acts = 0;
+    l.link.onAct = (act) => {
+      if (++acts === 1) return;
+      act.settle({ state: 'done', result: answerOf('far\n', act.request.args as Record<string, unknown>, { named: true, outside: { real: NOTES, writable: true } }) });
+    };
+    const read = l.cmd('files.read', keyed());
+    await answered(read);
+    await vi.advanceTimersByTimeAsync(HOLD - 1);
+    l.link.lose();
+    l.link.relink([...SERVES]);
+    expect(await answered(read)).toMatchObject({ ok: true, value: { content: 'far\n' } });
+    expect(l.files()).toHaveLength(2);
+    expect(l.link.acts).toHaveLength(2);
+  });
+
   it('a promoted read whose act’s channel ends before it answers is read afresh on the next: a new plain call, a new act, the file', async () => {
     const l = lab();
     l.reads(() => refused);
