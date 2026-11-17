@@ -36,6 +36,7 @@ const GROUP_OF_PREFIX: Readonly<Record<string, string>> = {
   main: 'pane', // Expand pane among the pane items
   attention: 'session', // Next Needs-you among the session steps
   comments: 'looks', theme: 'looks', accounts: 'looks', // Comments ▸, Appearance ▸ and Usage
+  files: 'palette', // UX wave U6b-3b (decision 11): Go to file directly under Command palette
 };
 const group = (id: ActionId) => {
   if (id === 'artifacts.open') return 'tab'; // Artifacts beside Overview: a place, as Overview is
@@ -81,6 +82,7 @@ const SHELL_FOCUS_ACTIONS: ReadonlySet<ActionId> = new Set([
   'region.focusNext', 'region.focusPrevious', 'sidebar.focus', 'tab.stripNext', 'tab.stripPrevious', 'pane.focusOther',
   'shortcuts.open', 'palette.open',
   'file.open', // UX wave U6e (decision 13): the chosen file opens beside the chat, so a browser page does not keep the keyboard
+  'files.goToFile', // UX wave U6b-3b (decision 11): the keyboard goes to Files' field
 ]);
 
 function dispatchAction(id: ActionId, arg: number | null, emit: Emit, menuWindow?: BaseWindow): void {

@@ -39,8 +39,9 @@ describe('treePlace: the tree at the file’s left, and in the file’s place wh
 // whatever the stored fold, and in the file's place where it has not
 describe('treePlace while a tab is finding', () => {
   const W = TREE_WIDTH_DEFAULT;
-  const place = (input: Omit<Parameters<typeof treePlace>[0], 'finding'>, finding: boolean) => treePlace({ ...input, finding } as Parameters<typeof treePlace>[0]);
-  const cases: [string, Omit<Parameters<typeof treePlace>[0], 'finding'>, TreePlace, TreePlace][] = [
+  type Input = Omit<Parameters<typeof treePlace>[0], 'finding'>;
+  const place = (input: Input, finding: boolean) => treePlace({ ...input, finding });
+  const cases: [string, Input, TreePlace, TreePlace][] = [
     ['no file: the tree alone', { holdsFile: false, tabWidth: 900, treeWidth: W, folded: true, shown: false }, 'alone', 'alone'],
     ['room for both, folded by the person: beside for the search', { holdsFile: true, tabWidth: 900, treeWidth: W, folded: true, shown: false }, 'folded', 'beside'],
     ['room for both, exactly, folded: beside for the search', { holdsFile: true, tabWidth: W + FILE_WIDTH_MIN, treeWidth: W, folded: true, shown: false }, 'folded', 'beside'],
@@ -295,7 +296,7 @@ describe('the field’s text and the finding tab', () => {
     const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
     await store.getState().load();
     vi.useFakeTimers();
-    const state = store.getState() as ReturnType<typeof store.getState> & { setFilter(id: AppSessionId, text: string): void; setFinding(id: AppSessionId, tabId: string | null): void };
+    const state = store.getState();
     expect(treeOf(store.getState(), A)).toMatchObject({ filter: '', finding: null }); // at first in every session
     state.setFilter(A, 'tide');
     state.setFinding(A, 'files:one');

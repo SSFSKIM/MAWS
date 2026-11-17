@@ -227,14 +227,14 @@ describe('keymap: the table', () => {
   // menu's row directly after the palette, at ⌘P; build F knows it not, so it takes no rebinding and gives ⌘P up to a
   // stored rebinding of another row that holds it
   it('carries files.goToFile in Go at ⌘P, the row after palette.open, which takes no rebinding and yields ⌘P to a stored one', () => {
-    expect(ACTIONS['files.goToFile' as ActionId]).toEqual({ title: 'Go to file', chord: 'Cmd+P', sink: 'menu', menu: 'go', scope: 'app' });
-    expect(ACTION_IDS.indexOf('files.goToFile' as ActionId)).toBe(ACTION_IDS.indexOf('palette.open') + 1);
+    expect(ACTIONS['files.goToFile']).toEqual({ title: 'Go to file', chord: 'Cmd+P', sink: 'menu', menu: 'go', scope: 'app' });
+    expect(ACTION_IDS.indexOf('files.goToFile')).toBe(ACTION_IDS.indexOf('palette.open') + 1);
     expect(BUILD_F_ACTION_IDS as readonly string[]).not.toContain('files.goToFile');
-    expect(isRebindable('files.goToFile' as ActionId)).toBe(false);
-    expect(effectiveChord('files.goToFile' as ActionId, {})).toBe('Cmd+P');
-    expect(effectiveChord('files.goToFile' as ActionId, { 'attention.next': 'Cmd+P' })).toBeNull(); // a stored rebinding wins
-    expect(effectiveChord('files.goToFile' as ActionId, { 'attention.next': 'Cmd+Shift+P' })).toBe('Cmd+P'); // the control
-    expect(effectiveChord('files.goToFile' as ActionId, over('files.goToFile' as ActionId, 'Cmd+Alt+P'))).toBe('Cmd+P'); // a stored value is never read
+    expect(isRebindable('files.goToFile')).toBe(false);
+    expect(effectiveChord('files.goToFile', {})).toBe('Cmd+P');
+    expect(effectiveChord('files.goToFile', { 'attention.next': 'Cmd+P' })).toBeNull(); // a stored rebinding wins
+    expect(effectiveChord('files.goToFile', { 'attention.next': 'Cmd+Shift+P' })).toBe('Cmd+P'); // the control
+    expect(effectiveChord('files.goToFile', over('files.goToFile', 'Cmd+Alt+P'))).toBe('Cmd+P'); // a stored value is never read
   });
 });
 

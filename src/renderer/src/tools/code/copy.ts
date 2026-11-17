@@ -38,6 +38,9 @@ export const FILES_COPY = {
   containsChanges: 'Contains changes',
   ignored: 'Ignored by git',
   outside: (path: string) => `${path} · Outside the folders this session works in`,
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, "The sentences a person reads"): the
+  // field's placeholder and its accessible name
+  goToFile: 'Go to file',
 } as const;
 
 export const VIEWER_COPY = {

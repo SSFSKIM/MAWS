@@ -34,11 +34,14 @@ export const FILE_WIDTH_MIN = 320; // what the file keeps beside the tree
 export type TreePlace = 'alone' | 'beside' | 'folded' | 'instead';
 
 // `treeWidth`: the tree's width as the person set it (or the default); `folded`: the session's stored choice; `shown`: the
-// button pressed in this tab while it is too narrow for both (not stored).
-export function treePlace(input: { holdsFile: boolean; tabWidth: number; treeWidth: number; folded: boolean; shown: boolean }): TreePlace {
+// button pressed in this tab while it is too narrow for both (not stored). UX wave U6b-3b
+// (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 9; the owner's answer on the card): `finding`,
+// the tab Go to file chose while the search lasts, shows the column whatever the fold: beside where there is room for
+// both, in the file's place where there is not. Absent: not finding.
+export function treePlace(input: { holdsFile: boolean; tabWidth: number; treeWidth: number; folded: boolean; shown: boolean; finding?: boolean }): TreePlace {
   if (!input.holdsFile) return 'alone';
-  if (input.tabWidth >= input.treeWidth + FILE_WIDTH_MIN) return input.folded ? 'folded' : 'beside';
-  return input.shown ? 'instead' : 'folded';
+  if (input.tabWidth >= input.treeWidth + FILE_WIDTH_MIN) return input.finding || !input.folded ? 'beside' : 'folded';
+  return input.finding || input.shown ? 'instead' : 'folded';
 }
 
 export interface SessionTree {
@@ -52,9 +55,12 @@ export interface SessionTree {
   // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 7 and 11, S4): this run's
   reveal: string | null; // a folder to scroll into view once, when its row is first in the list
   changedFolded: boolean; // the Changed group folded by its heading; open at first in every session, never stored
+  // UX wave U6b-3b (decision 9; "What is stored and sent"): this run's
+  filter: string; // Go to file's field's text
+  finding: string | null; // the tab Go to file chose, while the search lasts
 }
 
-const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false, reveal: null, changedFolded: false };
+const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false, reveal: null, changedFolded: false, filter: '', finding: null };
 
 export interface TreeStateStore {
   loaded: boolean; // the read has answered (or failed): the tree can be drawn
@@ -72,6 +78,9 @@ export interface TreeStateStore {
   revealIn(appSessionId: AppSessionId, path: string, ancestors: readonly string[]): void;
   revealed(appSessionId: AppSessionId): void;
   foldChanged(appSessionId: AppSessionId, folded: boolean): void; // this run's: never written
+  // UX wave U6b-3b: this run's, never written
+  setFilter(appSessionId: AppSessionId, text: string): void;
+  setFinding(appSessionId: AppSessionId, tabId: string | null): void; // null: the search ended
 }
 
 export const treeOf = (state: Pick<TreeStateStore, 'trees'>, appSessionId: AppSessionId): SessionTree => state.trees.get(appSessionId) ?? NEW_TREE;
@@ -206,6 +215,12 @@ export function createTreeStateStore(
       },
       foldChanged(id, folded) {
         change(id, () => ({ changedFolded: folded }));
+      },
+      setFilter(id, text) {
+        if (treeOf(get(), id).filter !== text) change(id, () => ({ filter: text }));
+      },
+      setFinding(id, tabId) {
+        if (treeOf(get(), id).finding !== tabId) change(id, () => ({ finding: tabId }));
       },
     };
   });

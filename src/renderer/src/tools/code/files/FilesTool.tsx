@@ -24,6 +24,10 @@
 // store's watch of the working folder; a Changed group of what git lists as changed stands as the list's first rows, the
 // tree's rows carry the same letters and a dot above each change, and the entries git ignores are muted. A status whose
 // set of entries changed lists the drawn directories of its repository again (decision 14 (b)).
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, M1; decision 9, "The look"): Go to
+// file's field stands above the tree in every tree column, outside the tree's context menu; in the file's place, under the
+// "Files" bar. A tab Go to file chose is finding: its column is drawn for the search whatever the fold, and the tree's
+// button ends that before it does what it did.
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -47,6 +51,7 @@ import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
+import { FinderField } from './FinderView';
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
 import { listingKey, useFiles } from './store';
@@ -170,30 +175,38 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   if (shown.file !== file) setShown({ file, on: false });
   const treeWidth = Math.max(TREE_WIDTH_MIN, tree.width ?? TREE_WIDTH_DEFAULT);
   const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
-  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on });
+  const finding = tree.finding === tabId; // U6b-3b (decision 9): Go to file chose this tab
+  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on, finding });
   useEffect(() => (visible && key !== null && fileColumn && place !== 'instead' ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn, place]);
   const inView = visible && place !== 'instead'; // UX wave U6b-2 (Decision Log 29)
   // The button: with room for both it folds the tree for the session (stored); too narrow, it shows the tree in the file's
-  // place in this tab, until a file is chosen or it is pressed again.
+  // place in this tab, until a file is chosen or it is pressed again. U6b-3b (M1 decision 6): it ends finding first, then
+  // hides the column it showed, so a fold the person had needs no write.
   const toggleTree = () => {
     if (held === null) return;
-    if (roomy) useTreeState.getState().setFolded(appSessionId, !tree.folded);
-    else setShown({ file, on: place !== 'instead' });
+    if (finding) useTreeState.getState().setFinding(appSessionId, null);
+    const hide = place === 'beside' || place === 'instead';
+    if (roomy) {
+      if (tree.folded !== hide) useTreeState.getState().setFolded(appSessionId, hide);
+    } else setShown({ file, on: !hide });
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} />;
   const treeId = `files-tree-${tabId}`;
   const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
+  const field = <FinderField appSessionId={appSessionId} tabId={tabId} visible={visible} />; // U6b-3b: above the tree, outside its menu
   return (
     <div ref={measure} data-files-tab data-file={file ?? ''} onDoubleClick={(event) => keepChosen(tabId, event.target)} className="flex h-full min-h-0 min-w-0">
       {place === 'alone' ? (
-        <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 min-w-0 flex-1">
-          {sessionTree}
+        <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          {field}
+          <div className="min-h-0 flex-1">{sessionTree}</div>
         </div>
       ) : null}
       {place === 'beside' ? (
         <>
-          <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 shrink-0 border-r border-border" style={{ width: treeWidth }}>
-            {sessionTree}
+          <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 shrink-0 flex-col border-r border-border" style={{ width: treeWidth }}>
+            {field}
+            <div className="min-h-0 flex-1">{sessionTree}</div>
           </div>
           <Resizer
             label={FILES_COPY.resizeTree}
@@ -214,6 +227,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
             {button}
             <span className="truncate text-fg-muted">{FILES_COPY.title}</span>
           </div>
+          {field}
           <div className="min-h-0 flex-1">{sessionTree}</div>
         </div>
       ) : null}

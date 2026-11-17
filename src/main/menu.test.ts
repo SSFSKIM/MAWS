@@ -399,7 +399,7 @@ describe('File ▸ Open File…', () => {
 // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11; B4): Go ▸ Go to file
 describe('Go ▸ Go to file', () => {
   const go = (overrides: KeymapOverrides, enabled: ReadonlySet<ActionId>) => top(menuTemplate(ACTIONS, overrides, enabled, vi.fn()), 'Go')!.submenu as Item[];
-  const goToFile = 'files.goToFile' as ActionId;
+  const goToFile: ActionId = 'files.goToFile';
 
   it('stands directly under Command palette at ⌘P with no separator between them, and a separator after it', () => {
     expect(go({}, ALL).slice(0, 3).map((item) => item.id ?? item.type)).toEqual(['palette.open', 'files.goToFile', 'separator']);
@@ -415,7 +415,7 @@ describe('Go ▸ Go to file', () => {
     const taken = go({ 'attention.next': 'Cmd+P' }, ALL);
     expect(byId(taken, 'files.goToFile')!.accelerator).toBeUndefined();
     expect(byId(taken, 'attention.next')!.accelerator).toBe('Cmd+P');
-    expect(byId(go({ 'files.goToFile': 'Cmd+Alt+P' } as KeymapOverrides, ALL), 'files.goToFile')!.accelerator).toBe('Cmd+P'); // its own stored value is never read
+    expect(byId(go({ 'files.goToFile': 'Cmd+Alt+P' }, ALL), 'files.goToFile')!.accelerator).toBe('Cmd+P'); // its own stored value is never read
   });
 
   it('keeps its chord from a page of the in-app browser, which leaves ⌘P to the menu', () => {
