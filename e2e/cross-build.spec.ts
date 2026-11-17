@@ -1860,7 +1860,7 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
 //   | ticket 733a: a form with a segment (a         | (composed forms, to the peer): the peer draws the     | no older build writes a segment into a form; this  |
 //   | promotion's exchange, a plan, a comment's     | promotion as a side question, its exchange behind a   | build's reading of what they wrote is held by      |
-//   | quoted line), the user message kept in the   | pasted chip that opens to it, never the tags; (a      | composed-rows.test.ts "a row of no form carries no |
+//   | quoted line), the user message kept in the    | pasted chip that opens to it, never the tags; (a      | composed-rows.test.ts "a row of no form carries no |
 //   | session's journal and transcript              | commit's comment, to the peer): the quoted line       | ranges; the pin's writers' rows are the pin's      |
 //   |                                               | behind that chip                                      | rows"; the return: this build draws it in place    |
 //   | ticket 733a: an attached read whose JSON      | (composed forms, to the peer): the peer recognises no | the return: the file chip, "<title>, read at       |
