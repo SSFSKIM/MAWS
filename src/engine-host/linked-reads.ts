@@ -6,6 +6,9 @@
 // it as it would have. The reads attached keep their effects only if the frame carrying them is written (`settle`). The
 // message the queue keeps and shows is the human's: the reads go only into the frame. A consent whole goes with none
 // (`consentWhole`).
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): each read stands inside a pasted
+// segment of `tagId`, the session's; a read whose block would still quote the grant's opening is not attached, refused
+// as a read the tool refused is.
 import { readConsents } from '@shared/engine/arrival';
 import { LINKED_READ_CAP_BYTES, linkedArtifacts, linkedReadBlock, utf8Bytes, type LinkedArtifact } from '@shared/maws/linked-read';
 import type { SendContent } from '@shared/engine/session-state-store';
@@ -36,7 +39,7 @@ function consentWhole(content: SendContent): boolean {
   return text !== null && readConsents(text).length > 0;
 }
 
-export async function withLinkedReads(content: SendContent, read: LinkedReader, cap = LINKED_READ_CAP_BYTES): Promise<LinkedReadOutcome> {
+export async function withLinkedReads(content: SendContent, read: LinkedReader, tagId: string, cap = LINKED_READ_CAP_BYTES): Promise<LinkedReadOutcome> {
   const links = consentWhole(content) ? [] : linkedArtifacts(content);
   const undos: (() => void)[] = [];
   const outcome: LinkedReadOutcome = {
@@ -50,7 +53,7 @@ export async function withLinkedReads(content: SendContent, read: LinkedReader, 
   let used = 0;
   for (const link of links) {
     const admitted = await read(link, (text) => {
-      const block = text === null ? null : blockOf(text);
+      const block = text === null ? null : blockOf(text, tagId);
       if (block === null) return { ok: false, why: 'refused' };
       const bytes = utf8Bytes(block.text);
       return used + bytes > cap ? { ok: false, why: 'over the cap' } : { ok: true, block: block.text, revision: block.revision, bytes };
@@ -70,10 +73,11 @@ export async function withLinkedReads(content: SendContent, read: LinkedReader, 
   return outcome;
 }
 
-function blockOf(text: string): { text: string; revision: number } | null {
+function blockOf(text: string, tagId: string): { text: string; revision: number } | null {
   try {
     const revision = (JSON.parse(text) as { revision?: unknown }).revision;
-    return typeof revision === 'number' ? { text: linkedReadBlock(text), revision } : null;
+    const block = typeof revision === 'number' ? linkedReadBlock(text, tagId) : null;
+    return block === null ? null : { text: block, revision }; // null: a read whose block quotes the grant's opening
   } catch {
     return null; // not a read answer (linkedReadBlock refuses one that is not of status read)
   }

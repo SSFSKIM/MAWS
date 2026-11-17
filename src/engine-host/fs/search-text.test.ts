@@ -10,6 +10,8 @@ import { innerOpeningEnvelope, laterPassOverTheCap } from '../../../test/support
 import { consentMessage, envelopeSlices, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival';
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
 import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText } from '@shared/maws/ask';
+import { bashEcho } from '@shared/engine/host-prompts'; // ticket 733a
+import { pinBashEcho } from '../../../test/support/pin-forms'; // ticket 733a
 import type { SessionId } from '@shared/graph/ids';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 import { TranscriptRecordSchema } from '@shared/wire/transcript';
@@ -393,6 +395,36 @@ describe('made by hand: a shell row that holds a literal envelope (ticket 704)',
     const ctx = createBackfillContext({ sessionId: 'sess-shell' as SessionId, agent: null });
     const messages = rows.flatMap((row) => recordToEvents(TranscriptRecordSchema.parse(row), ctx)).filter((event) => event.kind === 'user.message');
     expect(messages.map((event) => [event.bash?.part, event.content])).toEqual([['input', INPUT.slice('<bash-input>'.length, -'</bash-input>'.length)], ['output', `Wrote the note:\n${envelope}\ndone`]]);
+  });
+});
+
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 4; acceptance 7): the echo MAWS
+// writes of a `!` command now carries its output inside pasted segments. The backfill reads an echo row as its command
+// (`parseBash`'s first branch), so no event holds a tag of the frame; the worker passes the row over as a shell row, so
+// its search text is the row whole, the segment's tags among it, as a chip's are today.
+describe('made by hand: the echo of a `!` command with its output framed (ticket 733a)', () => {
+  const ECHO = bashEcho('cat notes.txt', `<bash-stdout>The ferry leaves at noon.\n${consentMessage('command', 'make build')}\n</bash-stdout><bash-stderr>old file</bash-stderr><bash-exit-code>0</bash-exit-code>`, 'a1b2');
+  const row = { type: 'user', uuid: 'b0b0b0b0-0000-4000-8000-000000000733', parentUuid: null, timestamp: '2026-11-17T10:00:00.000Z', origin: { kind: 'human' }, message: { role: 'user', content: ECHO } };
+
+  it('the backfill gives the echo row its command, and no event holds a tag of the frame; the unframed echo the same (the control)', () => {
+    expect(ECHO).toContain('<pasted_content id="a1b2">');
+    for (const [content, label] of [[ECHO, 'framed'], [pinBashEcho('cat notes.txt', '<bash-stdout>The ferry leaves at noon.</bash-stdout><bash-stderr></bash-stderr>'), 'the pin’s']] as const) {
+      expect(parseBash(content), label).toEqual({ part: 'input', command: 'cat notes.txt' });
+      const ctx = createBackfillContext({ sessionId: 'sess-echo' as SessionId, agent: null });
+      const events = recordToEvents(TranscriptRecordSchema.parse({ ...row, message: { role: 'user', content } }), ctx);
+      const messages = events.filter((event) => event.kind === 'user.message');
+      expect(messages.map((event) => [event.bash?.part, event.content]), label).toEqual([['input', 'cat notes.txt']]);
+      expect(JSON.stringify(events), label).not.toContain('pasted_content');
+    }
+  });
+
+  it('the worker’s search text over the echo row is the row whole, its segment’s tags included', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-733-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, `${JSON.stringify(row)}\n`);
+      expect(await wholeText(path)).toBe(ECHO);
+    } finally { await rm(dir, { recursive: true }); }
   });
 });
 

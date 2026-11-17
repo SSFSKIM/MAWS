@@ -13,6 +13,7 @@ import { serializeRows } from './serialize';
 import { builder, uuid } from './test-events';
 import { confirmsSettingChange, copiedUserText, slashCommandLine, splitPastedSegments, untaggedUserText, userTextOf } from './user-text';
 import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
+import { pinLinkedReadBlock } from '../../../../../test/support/pin-forms'; // ticket 733a
 import { askSteerText } from '@shared/maws/ask'; // UX wave U4b
 
 // The golden fixture: one 40-line block wrapped exactly as the grammar frames it, typed text before and after.
@@ -180,9 +181,16 @@ describe('a linked read sent with the message', () => {
   const read = JSON.stringify({ status: 'read', artifactId: ID, kind: 'document', title: 'Garden plan', revision: 25, markdown: 'Welcome. ^p1\n' }, null, 2);
 
   it('is a chip, never text', () => {
-    const text = userTextOf([{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }]);
+    const text = userTextOf([{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read, 'a1b2')! }]);
     expect(text.text).toBe(words);
     expect(text.attachments).toEqual([{ kind: 'file', name: 'Garden plan, read at revision 25', bytes: null, dataUrl: null, mediaType: 'sent with the message: the document as artifact_read returned it', text: null }]);
+  });
+
+  // ticket 733a (acceptance 7): a read written before the landing, with no segment, is still the chip it was
+  it('a read written before this landing is the same chip', () => {
+    const text = userTextOf([{ type: 'text', text: words }, { type: 'text', text: pinLinkedReadBlock(read) }]);
+    expect(text.text).toBe(words);
+    expect(text.attachments).toEqual(userTextOf([{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read, 'a1b2')! }]).attachments);
   });
 
   it('leaves the same words typed in a message alone', () => {

@@ -56,7 +56,7 @@ describe('recentTurnsOf', () => {
     const id = '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806';
     const read = JSON.stringify({ status: 'read', artifactId: id, kind: 'document', title: 'Plan', revision: 3, markdown: 'x ^p1\n' }, null, 2);
     const words = `Fix [the plan](maws-artifact:${id}).`;
-    const answer = recentTurnsOf(records(user('u1', null, [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }]), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
+    const answer = recentTurnsOf(records(user('u1', null, [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read, 'a1b2')! }]), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
     expect(prompts(answer)).toEqual([words]);
   });
   // Ticket 733a (its document, Design 4; acceptance 7): a prompt of one of MAWS's forms reads with its segments in place,

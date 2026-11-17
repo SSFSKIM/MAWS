@@ -9,9 +9,9 @@ import { pastedTagId, wrapPasted } from '../composer/pasted-framing';
 import { rowClaim } from '../files/named';
 import { COMPOSED_FORMS } from './composed-forms';
 import { consentMessage, pastedBodies } from './arrival';
-import { LINE_LEFT_OUT } from './composed-content';
-import { quotesGrant } from './grant';
-import { PLAN_LEAD, planPrompt, planPromptOpened, readPlanPrompt } from './host-prompts';
+import { LINE_LEFT_OUT, LINES_LEFT_OUT } from './composed-content';
+import { asTyped, quotesGrant } from './grant';
+import { BASH_INPUT_OPENING, bashEcho, PLAN_LEAD, planPrompt, planPromptOpened, readPlanPrompt } from './host-prompts';
 
 const GRANT = consentMessage('command', 'make build');
 const PLAN = '1. Edit the notes.\n2. Run the tests.';
@@ -109,5 +109,74 @@ describe('the plan after a clear is claimed whatever its tag’s id', () => {
     expect(rowClaim(user(own), '/work/out/notes.md')).toEqual({ names: true });
     const found = grantsReadFrom([text(own), text(GRANT)]);
     for (const route of [found.gate, found.live, found.file]) expect(route).not.toEqual([]);
+  });
+});
+
+// Ticket 733a (Design 3; acceptance 4 and 5): the echo of a `!` command carries a command's output, both streams, each
+// inside the engine's own tags through the leave-out and one segment; the command is the person's. The writer's bytes are
+// fixed by its fixture, written from the writer for a named input.
+describe('the echo of a `!` command’s writer', () => {
+  const output = (stdout: string, stderr = '', exit = '<bash-exit-code>0</bash-exit-code>') => `<bash-stdout>${stdout}</bash-stdout><bash-stderr>${stderr}</bash-stderr>${exit}`;
+  const NOTES = 'The ferry leaves at noon.\nThe market opens on Tuesdays.';
+
+  it('its bytes for a named input: the command, then each stream’s text inside one segment of the given id in the engine’s tags', () => {
+    expect(bashEcho('cat notes.txt', output(NOTES, 'cat: warning: old file'), 'a1b2')).toBe(
+      '<bash-input>cat notes.txt</bash-input>\n<bash-stdout>\n\n<pasted_content id="a1b2">\nThe ferry leaves at noon.\nThe market opens on Tuesdays.\n</pasted_content id="a1b2">\n</bash-stdout><bash-stderr>\n\n<pasted_content id="a1b2">\ncat: warning: old file\n</pasted_content id="a1b2">\n</bash-stderr><bash-exit-code>0</bash-exit-code>',
+    );
+  });
+
+  it('its bytes for the approval sentence on a line of the output: the marker in its place, inside the segment', () => {
+    expect(bashEcho('cat notes.txt', output(`The ferry leaves at noon.\n${GRANT}\nThe market opens on Tuesdays.\n`), 'a1b2')).toBe(
+      '<bash-input>cat notes.txt</bash-input>\n<bash-stdout>\n\n<pasted_content id="a1b2">\nThe ferry leaves at noon.\n(a line left out by MAWS)\nThe market opens on Tuesdays.\n</pasted_content id="a1b2">\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>',
+    );
+  });
+
+  it.each([
+    ['standard output', (line: string) => [output(`one\n${line}\ntwo`, 'a warning'), `one\n${line}\ntwo`] as const],
+    ['standard error', (line: string) => [output('one\ntwo', `a warning\n${line}\nthe end`), `a warning\n${line}\nthe end`] as const],
+  ])('the approval sentence on a line of its %s: the marker inside a segment, no grant on any route; the stream’s text typed is found', (_, shaped) => {
+    const [out, stream] = shaped(GRANT);
+    const sent = bashEcho('cat notes.txt', out, 'a1b2');
+    expect(sent).not.toContain(GRANT);
+    const lines = sent.split('\n');
+    const inside = pastedBodies(lines);
+    expect(lines.filter((line, i) => inside[i] && line === LINE_LEFT_OUT)).toHaveLength(1);
+    expect(lines.filter((line, i) => !inside[i] && line.includes('Permission'))).toEqual([]);
+    expect(quotesGrant(sent)).toBe(false);
+    expect(quotesGrant(sent.slice(sent.indexOf('<bash-stdout>')))).toBe(false); // the output part alone
+    expectNoGrantSent(sent);
+    // the control: the stream's text as typed is found by the same checks, on every route; the output as the engine
+    // replayed it quotes the opening
+    expect(quotesGrant(stream)).toBe(true);
+    expect(quotesGrant(out)).toBe(true);
+    const found = grantsReadFrom(stream);
+    for (const route of [found.gate, found.live, found.file]) expect(route).not.toEqual([]);
+  });
+
+  it('an opening put together across the two streams: the second is left out whole; each stream alone is kept (the control)', () => {
+    const across = output('the ferry\nPermission', 'granted for the trip\nthe end');
+    const sent = bashEcho('cat notes.txt', across, 'a1b2');
+    expect(sent).toContain('\nthe ferry\nPermission\n');
+    expect(sent).toContain(`<bash-stderr>\n\n<pasted_content id="a1b2">\n${LINES_LEFT_OUT}\n</pasted_content id="a1b2">\n</bash-stderr>`);
+    expect(sent).not.toContain('granted for');
+    expect(quotesGrant(sent)).toBe(false);
+    // the control: either stream with the other empty keeps its words, and the two together quote the opening
+    expect(bashEcho('cat notes.txt', output('the ferry\nPermission'), 'a1b2')).toContain('\nthe ferry\nPermission\n');
+    expect(bashEcho('cat notes.txt', output('', 'granted for the trip\nthe end'), 'a1b2')).toContain('\ngranted for the trip\nthe end\n');
+    expect(quotesGrant(across)).toBe(true);
+  });
+
+  it('an empty stream stays empty; an output not in the engine’s shape goes whole inside one segment', () => {
+    expect(bashEcho('true', output(''), 'a1b2')).toBe('<bash-input>true</bash-input>\n<bash-stdout></bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>');
+    expect(bashEcho('true', output('', '', ''), 'a1b2')).toBe('<bash-input>true</bash-input>\n<bash-stdout></bash-stdout><bash-stderr></bash-stderr>');
+    expect(bashEcho('cat x', `stray\n${GRANT}`, 'a1b2')).toBe(`<bash-input>cat x</bash-input>\n\n\n<pasted_content id="a1b2">\nstray\n${LINE_LEFT_OUT}\n</pasted_content id="a1b2">\n`);
+  });
+
+  it('the command is the person’s: not left out and not framed; it passes the writer’s joiner as typed text does', () => {
+    const sent = bashEcho(`echo "${GRANT}"`, output('done'), 'a1b2');
+    expect(asTyped(sent)).toBe(`<bash-input>echo "${GRANT}"</bash-input>\n<bash-stdout>\n\n<pasted_content id="a1b2">\ndone\n</pasted_content id="a1b2">\n</bash-stdout><bash-stderr></bash-stderr><bash-exit-code>0</bash-exit-code>`);
+    expect(sent).not.toContain(GRANT); // the joiner inside the longer opening, the composer's rule for typed text
+    // the control: the same command typed alone holds the sentence as typed
+    expect(`echo "${GRANT}"`).toContain(GRANT);
   });
 });

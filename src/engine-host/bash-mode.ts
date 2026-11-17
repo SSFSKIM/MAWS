@@ -5,7 +5,11 @@
 // `<bash-input>${command}</bash-input>\n` plus the replayed stdout frame's content verbatim, with the engine's
 // closed origin vocabulary on the wire (`human`); the normaliser marks its event `bash_echo` from the out row, and the
 // empty `result` that follows is the echo receipt. No output within 30 s posts a warning notice and writes no echo.
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): the output is a command's, so
+// the echo carries each stream inside a pasted segment (`bashEcho`), its tag id the session's, read off the replayed
+// output frame (`session_id`; four random digits where a frame carries none).
 import { randomUUID } from 'node:crypto';
+import { pastedTagId } from '@shared/composer/pasted-framing'; // ticket 733a
 import { bashEcho } from '@shared/engine/host-prompts'; // UX wave U6e: the echo's one copy
 import type { ContentBlock } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
@@ -80,7 +84,7 @@ export class BashMode {
   // An inbound frame (already journaled): the engine's replayed `<bash-input>` and `<bash-stdout>` frames, in order.
   // C12: the output also ends the command's run, whether or not the echo still waits for it.
   observe(frame: unknown): void {
-    const f = frame as { type?: unknown; parent_tool_use_id?: unknown; message?: { content?: unknown } };
+    const f = frame as { type?: unknown; parent_tool_use_id?: unknown; session_id?: unknown; message?: { content?: unknown } };
     if (f.type !== 'user' || (typeof f.parent_tool_use_id === 'string' && f.parent_tool_use_id.length > 0) || (this.pending.length === 0 && this.running.length === 0)) return;
     const content = f.message?.content;
     if (typeof content !== 'string' && !Array.isArray(content)) return;
@@ -94,7 +98,7 @@ export class BashMode {
       const live = this.running.find((r) => r.inputSeen) ?? this.running[0]; // C12
       if (live) this.finish(live);
       const entry = this.pending.find((p) => p.inputSeen);
-      if (entry) this.echo(entry, content as string);
+      if (entry) this.echo(entry, content as string, typeof f.session_id === 'string' ? f.session_id : null);
     }
   }
 
@@ -120,12 +124,12 @@ export class BashMode {
     if (index >= 0) this.running.splice(index, 1);
   }
 
-  private echo(entry: Pending, stdout: string): void {
+  private echo(entry: Pending, stdout: string, sessionId: string | null): void {
     this.drop(entry);
     if (!this.deps.canWrite()) return;
     const frame: StdinFrame = {
       type: 'user', uuid: randomUUID(), shouldQuery: false, parent_tool_use_id: null, origin: { kind: 'human' },
-      message: { role: 'user', content: bashEcho(entry.command, stdout) },
+      message: { role: 'user', content: bashEcho(entry.command, stdout, pastedTagId(sessionId)) },
     };
     this.deps.write(frame).catch((error: unknown) => this.deps.log(`! echo for ${entry.uuid} not written: ${error instanceof Error ? error.message : String(error)}`));
   }

@@ -1882,7 +1882,7 @@ describe('files saves outside the folders', () => {
     it('reads a path only an attached artifact read links, read-only, refuses its save, and saves it once the person’s own words link it (ticket 675)', async () => {
       write(out('linked.txt'), 'linked.txt as it was\n');
       const read = JSON.stringify({ status: 'read', artifactId: '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806', kind: 'document', title: 'Season plan', revision: 3, markdown: `# Season plan\n\n${link(out('linked.txt'))}\n` }, null, 2);
-      const message = (words: string) => ({ ...typed(''), message: { role: 'user', content: [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }] } });
+      const message = (words: string) => ({ ...typed(''), message: { role: 'user', content: [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read, 'a1b2')! }] } });
       await transcriptOf(A, [message('Make [Season plan](maws-artifact:4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806) warmer.')]);
       const files = outsideService();
       expect(await shown(files, A, out('linked.txt'))).toMatchObject({ content: 'linked.txt as it was\n', named: true, outside: { real: out('linked.txt'), writable: false, why: 'result' } });

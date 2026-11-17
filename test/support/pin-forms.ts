@@ -52,3 +52,16 @@ export function pinWrapPasted(id: string, body: string): string {
   const neutral = body.replace(/<(?!\\)(?=\/?pasted_content)/gi, '<\\');
   return `\n\n${framePasted(id, neutral.endsWith('\n') ? neutral.slice(0, -1) : neutral)}\n`;
 }
+
+// M3: the host's two forms at the pin (`src/shared/engine/host-prompts.ts` `bashEcho`, `src/shared/maws/linked-read.ts`
+// `linkedReadBlock`), copied: an echo and an attached read written before this landing.
+
+/** `bashEcho` at the pin: the command, then the engine's output frame verbatim. */
+export const pinBashEcho = (command: string, output: string): string => `<bash-input>${command}</bash-input>\n${output}`;
+
+/** `linkedReadBlock` at the pin: the lead, then the read tool's text whole, between the reminder's tags. */
+export function pinLinkedReadBlock(read: string): string {
+  const head = JSON.parse(read) as { artifactId: string; title: string };
+  const linkText = (title: string) => title.replace(/[[\]\\]/g, (c) => `\\${c}`);
+  return `<system-reminder>\nThe user's message links the MAWS artifact [${linkText(head.title)}](maws-artifact:${head.artifactId}). Its content as mcp__maws__artifact_read returns it, read when the message was sent:\n${read}\n</system-reminder>`;
+}
