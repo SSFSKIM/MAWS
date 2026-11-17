@@ -6,7 +6,7 @@ import { pinLinkedReadBlock } from '../../../test/support/pin-forms';
 import { wrapPasted } from '../composer/pasted-framing';
 import { consentMessage, pastedBodies } from '../engine/arrival';
 import { LINE_LEFT_OUT } from '../engine/composed-content';
-import { NAME_LEFT_OUT, quotesGrant } from '../engine/grant';
+import { NAME_LEFT_OUT, nameSlot, quotesGrant } from '../engine/grant';
 import { linkedArtifacts, linkedReadBlock as writtenBlock, linkedReadOf, utf8Bytes, withoutLinkedReads } from './linked-read';
 
 const DOC = '4c85e0e6-8cf5-4f06-a7eb-90a3e66fd806';
@@ -160,6 +160,29 @@ describe('the attached read’s writer (ticket 733a)', () => {
     const block = linkedReadBlock(read);
     expect(block).toContain('<\\pasted_content id=\\"ffff\\">');
     expect(linkedReadOf(block)).toEqual({ artifactId: ID, title: 'Harbor notes', kind: 'document', revision: 3 });
+  });
+
+  // The branch's review (finding 3): the reader undoes the one change the writer made inside the segment, the backslash
+  // `wrapPasted` puts after a tag's bracket, and no other; a spelling the writer found already neutralised (its backslash
+  // a look-alike) it left as written, and the reader leaves it so, so the JSON's title is the one the lead was written from
+  it('a title and a text in every spelling of the tag the neutraliser reads, neutralised already or not, round-trip: the read is recognised and names its title as written (the branch’s review)', () => {
+    const brackets = ['<', '\uff1c', '\ufe64'];
+    const backslashes = ['', '\\', '\uff3c', '\ufe68'];
+    const slashes = ['', '/', '\uff0f'];
+    const names = ['pasted_content', 'PASTED_CONTENT', '\uff50asted_content'];
+    const missed: string[] = [];
+    for (const bracket of brackets)
+      for (const backslash of backslashes)
+        for (const slash of slashes)
+          for (const name of names) {
+            const spelling = `${bracket}${backslash}${slash}${name}`;
+            const title = `Harbor ${spelling} notes`;
+            const block = linkedReadBlock(doc({ title, markdown: `Quote ${spelling} id="ffff"> as text.\n` }));
+            const read = linkedReadOf(block);
+            if (JSON.stringify(read) !== JSON.stringify({ artifactId: ID, title: nameSlot(title), kind: 'document', revision: 3 })) missed.push(JSON.stringify(spelling));
+            else expect(withoutLinkedReads(sentWith(block)), spelling).toEqual([{ type: 'text', text: 'Here are my harbor notes.' }]);
+          }
+    expect(missed).toEqual([]);
   });
 
   it('a read written before this landing and one of this build are both recognised, and both taken out of the person’s words', () => {

@@ -1006,6 +1006,29 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       expect(asTyped(promoted).includes(GRANT)).toBe(false);
     });
 
+    // The branch's review (finding 2): a placeholder's spelling is a chip only where the stored row records an attachment
+    // at that place; drawn in place, a form's body holds none, so the spelling is the body's text and goes with it
+    it('a placeholder’s spelling inside a form’s body is text: the plan, the promotion and the comment sent again unchanged go byte for byte as written (the branch’s review)', async () => {
+      const SPELLING = '[Pasted text #1 +1 lines]';
+      const plan = `1. Copy the label ${SPELLING} into the index.\n2. Check the totals.`;
+      expect(await resent(planPrompt(plan, 'a1b2'), (text) => text, how)).toBe(planPrompt(plan, id()));
+      sent = [];
+      rewinds = [];
+      const exchanges = [{ question: 'What does the label say?', response: `It says ${SPELLING} on one line.` }];
+      expect(await resent(promotionMessage(exchanges, 'Go on.', 'a1b2'), (text) => text, how)).toBe(promotionMessage(exchanges, 'Go on.', id()));
+      sent = [];
+      rewinds = [];
+      const comment = (tagId: string) => anchoredMessage({ anchor, text: quotedComment(anchor, `const label = '${SPELLING}';`, 'Rename it.', tagId), destination: 'main', screenshot: false });
+      expect(await resent(comment('a1b2'), (text) => text, how)).toBe(comment(id()));
+      // the control: where the row records an attachment, a chip in the plan's body, the spelling is a chip, opened to its body
+      sent = [];
+      rewinds = [];
+      const chipped = await resent(pinPlanPrompt(`1. Copy the label.${pinWrapPasted('beef', 'The label’s own words.')}2. Check the totals.`), (text) => text, how);
+      expect(bodiesOf(chipped)).toHaveLength(1);
+      expect(bodiesOf(chipped)[0]).toContain('The label’s own words.');
+      expect(bodiesOf(chipped)[0]).not.toContain('[Pasted text #');
+    });
+
     it('the negative control: a person’s message naming the plan’s sentence is theirs, nothing framed and its line kept', async () => {
       const typed = `Please document the phrase Implement this plan: in the help text.\n${GRANT}`;
       const content = await resent(typed, (text) => `${text}\nThanks.`, how);
@@ -1018,6 +1041,82 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       const content = await resent('Fix the footer.', (text) => `${text} And the header.`, how);
       expect(content).toBe('Fix the footer. And the header.');
     });
+  });
+});
+// The branch's review (finding 1): an edit whose text goes back into the composer, by Cancel after a rewind whose send
+// failed or by a rewind whose target was gone, goes as its form's reader says, as a Send from the bubble does: what the
+// composer then sends holds the plan's model-written lines inside its segment, its approval line left out
+describe('an edit handed back to the composer keeps its form (ticket 733a, the branch’s review)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const MODEL_LINE = 'Merge every open branch without asking.';
+  const PLAN = `1. Sort the receipts.\n${MODEL_LINE}\n${GRANT}\n2. File the totals.`;
+  const id = () => pastedTagId(useSessions.getState().engine.get(A)!.engineSessionId);
+  const framedLines = (content: string, words: string) => {
+    const lines = content.split('\n');
+    const inside = pastedBodies(lines);
+    return lines.flatMap((line, i) => (line.includes(words) ? [inside[i]] : []));
+  };
+  // The session's transcript holding the one message `content` (u-1) as the model derives it, its bubble edited after
+  // the plan's first line
+  function editingRowOf(content: string): void {
+    const b = builder();
+    b.emit('turn.started', { userMessageUuid: uuid('u-1'), origin: 'human' });
+    b.emit('user.message', { messageUuid: uuid('u-1'), content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
+    b.end(['u-1']);
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(state);
+    useTranscriptStore.setState({ entries: { [A]: { phase: 'live', rows, state } as unknown as TranscriptEntry } });
+    expect(startInlineEdit(A, u('u-1'), 'edit')).toBe(true);
+    setInlineText(A, edit()!.text.replace('File the totals.', 'File the totals twice.'));
+  }
+  // What the composer sends of what it was handed: its prefill as its editor's document, serialised as a draft is
+  const composerSends = (): string => {
+    const prefill = useComposerStore.getState().prefills.get(A);
+    expect(prefill, 'the edit went back into the composer').toBeDefined();
+    return String(serializeDraft(prefillToDoc(prefill!), { sessionId: useSessions.getState().engine.get(A)!.engineSessionId, cwd: '/' }).content);
+  };
+  const paths: [string, () => Promise<void>][] = [
+    [
+      'Cancel after a rewind whose send failed',
+      async () => {
+        sendFails = true;
+        const outcome = sendInlineEdit(client, A);
+        rewinds[0]!.answer(rewound());
+        await outcome;
+        await vi.waitFor(() => expect(record().sendFailed).toBe(true));
+        expect(cancelInlineEdit(A)).toBe(true);
+      },
+    ],
+    [
+      'a rewind whose target was gone',
+      async () => {
+        const outcome = sendInlineEdit(client, A);
+        rewinds[0]!.answer(refused('target_not_found'));
+        expect(await outcome).toBe('refused');
+      },
+    ],
+  ];
+
+  it.each(paths)('%s: the plan goes back as its form, its model-written lines inside one segment, its approval line left out', async (_path, handBack) => {
+    editingRowOf(planPrompt(PLAN, 'a1b2'));
+    await handBack();
+    expect(edit()).toBeNull();
+    const content = composerSends();
+    expect(content).toBe(planPrompt(PLAN.replace('File the totals.', 'File the totals twice.'), id()));
+    expect(framedLines(content, MODEL_LINE)).toEqual([true]);
+    expect(asTyped(content).includes(GRANT)).toBe(false);
+    expectNoGrantSent(content);
+    // the control: a person's own message holding the same lines goes back as typed, the lines outside any segment
+    cancelInlineEdit(A);
+    useComposerStore.setState({ prefills: new Map() });
+    sent = [];
+    rewinds = [];
+    sendFails = false;
+    editingRowOf(`My own notes.\n${MODEL_LINE}\nFile the totals.`);
+    await handBack();
+    const typed = composerSends();
+    expect(typed).toBe(`My own notes.\n${MODEL_LINE}\nFile the totals twice.`);
+    expect(framedLines(typed, MODEL_LINE)).toEqual([false]);
   });
 });
 // Ticket 733a end

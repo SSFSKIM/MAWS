@@ -72,8 +72,8 @@ describe('recentTurnsOf', () => {
     }
   });
   // Ticket 733a (M4's fix wave, acceptance 7): the promotion and a message of several comments, each read in place as the
-  // pin's writer wrote it, with no tag of a segment; the control beside each is the same text with its form's mark gone (a
-  // promotion's tag, the several comments' destination framing), which reads as any person's text, its tags kept
+  // pin's writer wrote it, with no tag of a segment; the control beside each is the same text with its form's mark gone
+  // (its anchor tags' lines), which reads as any person's text, its segments' tags kept
   it('a promotion and a message of several comments read in place, as the pin’s writers wrote them; without the form’s mark, as written', () => {
     const exchanges = [{ question: 'Where is the total kept?', response: 'In report.ts, line 12.' }, { question: 'And the rounding?', response: 'Two places.' }];
     const added = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 } as const;
@@ -87,10 +87,17 @@ describe('recentTurnsOf', () => {
       expect(preview(sent)).toBe(pin.slice(0, RECENT_TURN_PROMPT_MAX));
       expect(preview(sent)).not.toContain('pasted_content');
     }
-    // the controls: the promotion without its anchor tag's line, and the comments' lines without their framing, are no form
+    // the controls: the promotion without its anchor tag's line, and the several comments without theirs, are no form
     const untagged = promotion.slice(0, promotion.lastIndexOf('\n\n<maws_anchor'));
     expect(preview(untagged), 'a promotion with no tag: as written, its tags kept').toBe(untagged.slice(0, RECENT_TURN_PROMPT_MAX).trim());
     expect(preview(untagged)).toContain('pasted_content');
+    const untaggedSeveral = several
+      .split('\n')
+      .filter((line) => !line.startsWith('<maws_anchor'))
+      .join('\n');
+    expect(untaggedSeveral, 'the control holds no anchor tag').not.toContain('<maws_anchor');
+    expect(preview(untaggedSeveral), 'several comments with no tag: as written, their tags kept').toBe(untaggedSeveral.trim().slice(0, RECENT_TURN_PROMPT_MAX));
+    expect(preview(untaggedSeveral)).toContain('pasted_content');
   });
 
   it('one turn per human prompt, its last answer and its tool calls (a steer the engine took folds into its turn)', () => {
