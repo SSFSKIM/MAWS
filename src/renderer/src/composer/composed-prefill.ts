@@ -91,14 +91,17 @@ function standsOnceAt(text: string, body: string, at: number, separator: string)
   return text.indexOf(body, at + 1) < 0 && (end === text.length || text.startsWith(separator, end));
 }
 
-// The slot's text with every chip in it opened to the body it named when the edit began (one that named none sends nothing,
-// as the serialiser sends an unavailable atom)
+// The slot's text with every chip in it opened to the body it named when the edit began. A placeholder's spelling is a
+// chip only where the stored row recorded an attachment under it (the edit's `bodies`, keyed by the placeholder); any
+// other is the slot's own text, a form's body drawn in place holding none (the branch's review: a model's text that
+// spells a placeholder goes as it was written, never left out as an unavailable chip)
 function opened(slot: string, bodies: Readonly<Record<string, string>>): string {
   let out = '';
   let from = 0;
   for (const placeholder of parsePlaceholders(slot)) {
-    if (placeholder.kind !== 'pasted') continue;
-    out += slot.slice(from, placeholder.start) + (bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] ?? '');
+    const body = placeholder.kind === 'pasted' ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : undefined;
+    if (body === undefined) continue;
+    out += slot.slice(from, placeholder.start) + body;
     from = placeholder.end;
   }
   return out + slot.slice(from);

@@ -30,7 +30,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import { machineOf } from '@shared/machine/address';
 import { workingFolder } from '@shared/sessions/working-folder'; // UX wave U8c-2
 import { acquireSession, refusalWords } from '../sessions/acquire'; // P2-A
-import { inlineEditOf, prefillComposer, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
+import { inlineEditOf, resubmitRecordOf, setInlineEdit, setResubmit, useComposerStore, type InlineEdit, type Resubmit, type ResubmitState } from '../stores/composer';
 import { useLayout } from '../stores/layout';
 import { toast } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -39,6 +39,7 @@ import { useTranscriptStore } from '../transcript';
 import { focusedSession } from './ComposerAppKeys';
 import { newestUserUuid, rowPrefill, type UserRow } from './edit-prefill';
 import { composedPrefill, storedFormOf } from './composed-prefill'; // ticket 733a
+import { handBackEdit } from './hand-back'; // ticket 733a, the branch's review
 import { bodiesByPlaceholder, prefillToDoc } from './editor/recall';
 import { serializeDraft, type Serialized } from './editor/serialize';
 import { anchoredTextOf } from '../transcript/model/user-text';
@@ -170,17 +171,15 @@ function end(appSessionId: AppSessionId): void {
   setResubmit(appSessionId, 'idle');
 }
 
-// The edit's text as the composer takes it: each pasted placeholder with the body it named when the edit began.
-const editPrefill = (edit: InlineEdit) => ({ text: edit.text, bodies: edit.bodies, images: edit.images });
-
 // Cancel, Keep editing's way out, or the dock line's ×. Refused while the rewind is in flight or unconfirmed, or the
-// edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere.
+// edit is being sent. After a rewind (the bubble is gone) the edited text goes into the composer rather than nowhere,
+// each pasted placeholder with the body it named when the edit began; ticket 733a: as its form's reader says (`handBackEdit`).
 export function cancelInlineEdit(appSessionId: AppSessionId): boolean {
   if (inFlight(appSessionId) && !starting.has(appSessionId)) return false; // P2-A: a session still starting for the edit may be left
   const edit = editOf(appSessionId);
   const rewound = record(appSessionId).state === 'rewound_awaiting_send';
   end(appSessionId);
-  if (rewound && edit) prefillComposer(appSessionId, editPrefill(edit));
+  if (rewound && edit) handBackEdit(appSessionId, edit);
   return true;
 }
 
@@ -454,7 +453,7 @@ async function issueRewind(client: MawsBridge, appSessionId: AppSessionId): Prom
   if (result.ok && result.value.reason === 'target_not_found') {
     // the target left the conversation (an earlier rewind applied): the edit cannot apply, and its text is not lost
     end(appSessionId);
-    prefillComposer(appSessionId, editPrefill(edit));
+    handBackEdit(appSessionId, edit); // ticket 733a: as its form's reader says
     toast({ level: 'info', text: REWOUND_COPY, actions: [], dismissible: true });
     return 'refused';
   }

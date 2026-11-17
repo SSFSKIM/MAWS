@@ -6,7 +6,7 @@
 // words takes it for them. The read is the `artifact_read` tool's own answer, whole, revision included: an edit from a
 // read gone stale is refused by that revision as any read's is. Pure.
 import { parseArtifactLink } from '../artifacts/link';
-import { restorePastedTags, wrapPasted } from '../composer/pasted-framing'; // ticket 733a
+import { wrapPasted } from '../composer/pasted-framing'; // ticket 733a
 import { leaveOutGrant, takeSegment } from '../engine/composed-content'; // ticket 733a
 import { NAME_LEFT_OUT, nameSlot, neutraliseGrant, quotesGrant } from '../engine/grant'; // ticket 733a
 
@@ -126,16 +126,37 @@ export interface LinkedReadSummary {
   revision: number;
 }
 
+// The character's compatibility fold, as the tag's neutraliser reads it (`neutralisePastedTags`)
+const fold = (character: string) => character.normalize('NFKC').toLowerCase();
+const TAG_NAME = /^\/?pasted_content/;
+
+// Ticket 733a, the branch's review (finding 3): the segment's body with the one change its writer made undone, and no
+// other. `wrapPasted` neutralises a tag's spelling by putting an ASCII backslash after its bracket; a spelling it found
+// already neutralised (its backslash a look-alike, U+FF3C say) it left as written, and so does this, so the title the JSON
+// gives back is the one the lead was written from. `JSON.stringify` writes no lone ASCII backslash before the tag's name,
+// so every one that stands after a bracket there is the writer's.
+function writersBackslashesRemoved(body: string): string {
+  const characters = [...body];
+  return characters
+    .filter((character, i) => {
+      if (character !== '\\' || i === 0 || !fold(characters[i - 1]!).endsWith('<')) return true;
+      let after = '';
+      for (let k = i + 1; k < characters.length && after.length < '/pasted_content'.length; k += 1) after += fold(characters[k]!);
+      return !TAG_NAME.test(after);
+    })
+    .join('');
+}
+
 // What an attached read names, or null for any other text (a near miss, words typed in its shape around it). Ticket
-// 733a: this build's read stands inside one pasted segment, taken out and its neutralised tags restored before it is
-// parsed; a read written before it, with no segment, is read as before.
+// 733a: this build's read stands inside one pasted segment, taken out and the writer's neutralising backslashes removed
+// before it is parsed; a read written before it, with no segment, is read as before.
 export function linkedReadOf(text: string): LinkedReadSummary | null {
   if (!text.startsWith(LINKED_READ_OPENING) || !text.endsWith(CLOSE)) return null;
   const at = text.indexOf(READ_LINE);
   if (at < 0) return null;
   const from = at + READ_LINE.length;
   const segment = takeSegment(text, from);
-  const json = segment !== null && segment.end === text.length - CLOSE.length ? restorePastedTags(segment.body) : text.slice(from, text.length - CLOSE.length);
+  const json = segment !== null && segment.end === text.length - CLOSE.length ? writersBackslashesRemoved(segment.body) : text.slice(from, text.length - CLOSE.length);
   const head = headOf(json);
   if (!head || !text.startsWith(`${LINKED_READ_OPENING}[${linkText(head.title)}](maws-artifact:${head.artifactId})${READ_LINE}`)) return null;
   return { artifactId: head.artifactId, title: head.title, kind: head.kind, revision: head.revision };
