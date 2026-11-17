@@ -34,6 +34,15 @@ export function lineBoxes(fragments: readonly LineBox[]): LineBox[] {
   return lines;
 }
 
+/** A text fragment as a range measures it: its client rect, which is the font's box (14.5 px of 12 px type), not the
+ *  line's, and the line height of the type of the element that holds its text. */
+export interface TextFragment extends LineBox { lineHeight: number }
+
+/** The drawn lines of a set of text fragments. */
+export function textLines(fragments: readonly TextFragment[]): LineBox[] {
+  return lineBoxes(fragments);
+}
+
 /** One line of an element's own type, in pixels: its computed line height (a font's normal line where none is set). */
 export function lineHeightOf(element: HTMLElement): number {
   const style = window.getComputedStyle(element);
