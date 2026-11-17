@@ -12,7 +12,7 @@ export const LATER_CHANGES: readonly (readonly [string, (text: string) => string
   ['angle-bracket pairs removed', (t) => t.replace(/<[^>]*>/g, '')],
   ['emphasis and code marks removed', (t) => t.replace(/[*_~`]/g, '')],
   ['compatibility-folded', (t) => t.normalize('NFKC')],
-  ['upper-cased, then the opening capitalised', (t) => t.toUpperCase().replace(/PERMISSION/g, 'Permission').replace(/GRANTED FOR/g, 'granted for')],
+  ['upper-cased, then lower-cased with the opening capitalised', (t) => t.toUpperCase().toLowerCase().replace(/permission granted for/g, 'Permission granted for')],
 ];
 const ALL_IN_A_ROW = (text: string) => LATER_CHANGES.reduce((t, [, change]) => change(t), text);
 
