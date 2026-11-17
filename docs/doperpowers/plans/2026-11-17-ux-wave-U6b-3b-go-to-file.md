@@ -635,6 +635,10 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
   Evidence: `files/tabs.ts` `showFiles`; the M1 test commit `e0dcf5b2d`.
 - Observation (M1): the narrow window's surface sheet closes on any window Esc that is not prevented (`PanelRegion`); the field prevents the Esc it acts on.
   Evidence: `SurfaceSheetDismissal` in `panel/`.
+- Observation (M2): only the front main tab's body is mounted (`main/Pane.tsx`, `TabBody key={active.id}`), so a main tab brought forward by Enter reads its file afresh: the keyboard is on the body first, then in the editor.
+  Evidence: `finder-open.test.tsx`'s main-tab case.
+- Observation (M2): the file view's body is focusable now (`tabIndex={-1}`), so a click on a part of the view that takes no focus (the bar's empty space, a notice) puts the keyboard on the body rather than the page's body; ⌘S and the comment key then act there. U6b-2's framed-file scenes are read with this in mind.
+  Evidence: `FileBody` in `viewer/FileViewer.tsx` at M2's head.
 
 ## Decision Log
 
@@ -671,6 +675,22 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
    - `palette/CommandPalette.tsx`: `files.goToFile` joins `afterClose` (U6's file, added to §F; the architect told), so that "Go to file" chosen in the palette records the palette's opener for Esc. Red first (`670af724c`), fixed at `e21424434`.
    - Until M2 draws the list, the field's `aria-controls` names an id no element has; M2 closes it.
    - From M1's task review (fixed at `8ae4f86a5`, red first): while finding, the tree's button prevents `mousedown`'s default, so a press leaves the keyboard in the field and the click acts on the column the person pressed (before, the empty field's blur ended finding first and the click unfolded and wrote the fold). Esc in an empty field ends finding synchronously (`flushSync`), so a file the search hid in a narrow tab is shown and no longer inert, and only then gives the keyboard back to the recorded element (`keyboardBefore`, once; null when it has left the page, and then the keyboard and the search stay in the field). Chromium's refusal of focus on a hidden or inert element is not modelled by the unit tests' DOM; scene G2 covers the narrow tab on a Mac.
+10. **2026-11-17 (UTC) · M2's decisions** (executor's report, folded by the controller).
+   - The S1 machine is one `Search` object that `useFinder` holds for its mount (read through `useSyncExternalStore`); the generation is its field, and each ask's two handlers compare it before they touch anything.
+   - `useFinder` also answers `left()` (the field lost the keyboard: a held Enter ends), and `choose` answers `Opened | null`, so Files' double-click pair keeps a narrow tab's file on a row's second click. Any blur of the field ends a held Enter, the window's included (Desktop's rule); M1's end of finding still ignores a window blur.
+   - While the machine is offline, a change of the text stays offline and asks nothing; emptied it is `empty`; when the link is back the text is asked at once (decision 4's "nothing is asked" over S1's "any").
+   - A query in a session whose working folder the window does not know (no record) shows the failure line, "Files could not be searched." (a case the document did not foresee, with one of its fixed sentences; the architect told).
+   - A refresh from `failed` sets no later ask (S1's row as written).
+   - `parseQuery`: `name:0` is line 1; a line past the safe integer range is capped there (the tab's `line` is an integer); `:42` alone and `name:` are queries with no line.
+   - Arrows and Enter with a modifier are the text field's own; a plain arrow is prevented in `answered` and `waiting`.
+   - An earlier empty answer is no drawn rows: typing after "No matching files" shows "Searching files…" until the new answer.
+   - `FinderColumn` (`FinderView.tsx`) draws the field and the list in each tree column; while the list stands, `SessionTree` stays mounted and draws nothing (its git and files holds stand) and `TreeList` unmounts, which saves and restores the tree's offset. A column drawn with text in the field asks at once.
+   - The tree's row measures (`FILES_ROW_HEIGHT`, `indent`, `useWidth`, `rowFonts`) moved verbatim to `files/row-metrics.ts`, re-exported by `FilesTool.tsx`, so that `FinderView` imports no cycle.
+   - While a tab is finding, the narrow tab's press of the tree's button (`shown`) is turned off, so after Enter the file is in the tab and can take the keyboard; Esc in that state gives the file back (decision 9's "where the stored fold and the tab's width put it").
+   - The editor takes the keyboard from the body by a `CodeView` prop (`onEditor`), never by a focus listener on the body: a click in the bar's empty part focuses the body and does not jump into the text.
+   - The result list stands outside `FilesMenu`; the listbox's accessible name is `FILES_COPY.goToFile` (no new sentence).
+   - Above a gitlink the lister lists its parent folders too (`vendor/` for `vendor/sub/`), as for any path.
+   - S3's cases are in `files/finder-open.test.tsx`, which draws the main area and the side column as the shell does; one sits a level below Enter, so that its red reads at its own line.
 
 ## Outcomes & Retrospective
 
