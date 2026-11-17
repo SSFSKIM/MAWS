@@ -29,6 +29,7 @@ export interface FilesHandlerDeps {
   grants?: FilesServiceOptions['grants'];
   sent?: FilesServiceOptions['sent'];
   own?: FilesServiceOptions['own'];
+  ignored?: FilesServiceOptions['ignored']; // UX wave U6b-3a: the daemon's ignore check (./ignored.ts); none: nothing is marked
 }
 
 // The service, plus the live clients it follows (for tests and diagnostics: an ended client leaves no entry behind).

@@ -40,7 +40,9 @@ export function parseStatus(out: string): ParsedStatus {
     const oldPath = record.source ? entries[++i] : null;
     if (!record.listed) continue;
     const xy = record.untracked ? '??' : parts[1];
-    status.files.push({ path, oldPath, index: xy[0], worktree: xy[1], untracked: record.untracked });
+    // UX wave U6b-3a (R2): the `sub` field of a `1`, `2` or `u` record begins with S for a submodule (`N...` otherwise)
+    const submodule = !record.untracked && parts[2].startsWith('S');
+    status.files.push({ path, oldPath, index: xy[0], worktree: xy[1], untracked: record.untracked, ...(submodule ? { submodule: true as const } : {}) });
   }
   return status;
 }

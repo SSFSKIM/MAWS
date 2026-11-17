@@ -12,6 +12,7 @@ import type { SpineView } from '@shared/spine/view';
 import { fileAdmission } from './files/admission';
 import { allowlistOf } from './files/allowlist';
 import type { FileGrants } from './files/grants';
+import { createIgnoreCheck } from './files/ignored';
 import { createNamedPaths } from './files/named';
 import { registerFilesHandlers } from './files/register';
 import type { FilesService } from './files/service';
@@ -68,6 +69,9 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
   // session's own transcript links, read-only, for this machine's callers that ask by name: one search and its queue for
   // the daemon (./files/named.ts)
   const uploadLog = (line: string) => console.warn(`[files] ${line}`);
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): which entries of
+  // a listing git ignores, one bounded check per listing, at most four at once; its runs end at the stop, before files'
+  const ignore = createIgnoreCheck();
   const files = registerFilesHandlers(allowlistOf(view), {
     bus,
     emit: (payload) => void bus.emit('files.changed', payload),
@@ -77,6 +81,7 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
     ...(grants === null ? {} : { grants }), // U6e
     sent,
     own,
+    ignored: ignore.names,
     upload: uploadRoots ? createUpload({ sessions: view, roots: uploadRoots, git: createGitRunner(), log: uploadLog }) : undefined,
     readUploads: createUploadReader({ sessions: view }), // P5 O7 M8: a remote send's uploads, read for the endpoint
   });
@@ -105,6 +110,7 @@ export function startCheckouts({ view, bus, clientPort, engineEnv, env, uploadRo
       stopParts('checkouts', [
         ['git', () => git.dispose()],
         ['git.lsFiles roots', unfollowRoots],
+        ['ignore check', () => void ignore.dispose()],
         ['files', () => files.dispose()],
         ['upload sweep', stopUploadSweep],
         ['scm', () => scm.dispose()],

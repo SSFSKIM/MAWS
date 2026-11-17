@@ -17,6 +17,9 @@ export const GitFileStatusSchema = z.strictObject({
   index: z.string(),
   worktree: z.string(),
   untracked: z.boolean(),
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §A, R2): the entry is a
+  // submodule (porcelain v2's `sub` begins with S); sent only when true
+  submodule: z.literal(true).optional(),
 });
 export type GitFileStatus = z.infer<typeof GitFileStatusSchema>;
 

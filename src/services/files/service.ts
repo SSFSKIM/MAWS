@@ -203,7 +203,7 @@ interface Confirmed {
   mark: Mark | null; // U6e: what admitted it by the outside rule; null for a root's file and for a delivered one read without the key
 }
 
-export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */ }: FilesServiceOptions): FilesService {
+export function createFilesService({ records, hooks, emit = () => {}, port, env = process.env, admitted /* E2 */, homes = machineHomes, named /* U6c */, grants, sent, own /* U6e */, ignored /* U6b-3a */ }: FilesServiceOptions): FilesService {
   const at = async (point: BoundaryPoint, path: string) => {
     await hooks?.at?.(point, path);
   };
@@ -346,10 +346,21 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
       await at('after-readdir', path);
       // Private until the final confirmation below; an entry whose lstat or readlink fails is dropped unnamed.
       const collected = (await mapBounded(names, LIST_STAT_CONCURRENCY, (name) => entryAt(real, name))).filter((entry) => entry !== null);
-      await confirm(path, roots, stat);
       const sorted = collected.sort((a, b) => Number(b.kind === 'dir') - Number(a.kind === 'dir') || a.name.localeCompare(b.name));
+      const entries = sorted.slice(0, FILES_LIST_MAX_ENTRIES);
+      // U6b-3a (decisions 12 and 13): which of the answered entries git ignores, asked in the confirmed directory before
+      // the last confirmation, so a swap while git runs refuses the listing as a swap after the reads does; no answer marks
+      // nothing, and a name the answer holds that the listing does not carry is dropped
+      await at('before-ignored', path);
+      const marked = ignored === undefined ? null : await ignored(real, entries.map((entry) => entry.name));
+      await confirm(path, roots, stat);
       const root = roots.filter((candidate) => under(candidate, real)).sort((a, b) => b.length - a.length)[0] ?? null;
-      return { root, path: real, entries: sorted.slice(0, FILES_LIST_MAX_ENTRIES), truncated: sorted.length > FILES_LIST_MAX_ENTRIES };
+      return {
+        root,
+        path: real,
+        entries: marked === null || marked.size === 0 ? entries : entries.map((entry) => (marked.has(entry.name) ? { ...entry, ignored: true as const } : entry)),
+        truncated: sorted.length > FILES_LIST_MAX_ENTRIES,
+      };
     } finally {
       await handle.close();
     }
