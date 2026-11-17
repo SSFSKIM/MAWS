@@ -163,6 +163,29 @@ describe('command palette', () => {
     await vi.waitFor(() => expect(document.activeElement).toBe(screen.getByRole('button', { name: destination })));
   });
 
+  // UX wave U6b-3b (M1, fix 1): Go to file records where the keyboard is for Esc's second step, so it runs once the
+  // palette has given the keyboard back to its opener, as the region steps do; an action that moves no keyboard runs at once
+  it('runs Go to file after the palette gives the keyboard back to its opener; another action runs while the palette holds it', async () => {
+    const user = userEvent.setup();
+    const seen: Record<string, Element | null> = {};
+    offs.push(registerAction('files.goToFile', () => void (seen.goToFile = document.activeElement)));
+    offs.push(registerAction('diagnostics.open', () => void (seen.diagnostics = document.activeElement)));
+    render(<><textarea aria-label="Composer" /><CommandPalette /></>);
+    const composer = screen.getByRole('textbox', { name: 'Composer' });
+    act(() => composer.focus());
+    act(() => runAction('palette.open'));
+    await user.keyboard('Go to file');
+    await user.keyboard('{Enter}');
+    expect(screen.queryByRole('dialog')).toBeNull();
+    await vi.waitFor(() => expect(seen.goToFile).toBe(composer));
+    act(() => composer.focus()); // the control: an action outside the set runs while the palette's field holds the keyboard
+    act(() => runAction('palette.open'));
+    const field = within(dialog()).getByRole('combobox');
+    await user.keyboard('Diagnostics');
+    await user.keyboard('{Enter}');
+    expect(seen.diagnostics).toBe(field);
+  });
+
   it('a project reveals it in the sidebar: shown, its row expanded', async () => {
     useLayout.getState().setSidebar({ collapsed: true, expandedProjects: [] });
     const user = await openAndType(nine.projects[1].name.slice(0, 7));

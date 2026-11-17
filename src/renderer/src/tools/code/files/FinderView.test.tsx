@@ -5,6 +5,7 @@
 // too narrow for both, shows the tree column for the search and stores no fold. With text in it the tree stays drawn: M2
 // draws the list. Invented paths.
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { FilesEntry } from '@shared/ipc/schema/files';
 import { record } from '../../../../../../test/support/builders';
@@ -16,6 +17,7 @@ import { useSessions } from '../../../stores/sessions';
 import { fail, installFakeMain, ok as answer } from '../../../test-support/code';
 import { A, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { installResizeObserver } from '../../../test-support/resize';
+import { CommandPalette, usePalette } from '../../../palette/CommandPalette';
 import { FILES_COPY } from '../copy';
 import { openFile, resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
@@ -188,6 +190,20 @@ describe('Esc in the field', () => {
     await inField();
     goToFile(); // pressed again with the keyboard in the field
     await settle();
+    esc();
+    expect(document.activeElement).toBe(composer());
+  });
+
+  it('chosen from the palette: Esc twice gives the keyboard back to the element the palette was opened from', async () => {
+    const user = userEvent.setup();
+    usePalette.setState({ open: false });
+    render(<><Page /><CommandPalette /></>);
+    act(() => composer().focus());
+    act(() => usePalette.setState({ open: true }));
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Command palette' })).toBeTruthy());
+    await user.keyboard('Go to file');
+    await user.keyboard('{Enter}');
+    await inField();
     esc();
     expect(document.activeElement).toBe(composer());
   });
