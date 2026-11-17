@@ -65,8 +65,10 @@ describe('history navigation restores the draft and ends on edit', () => {
   });
 });
 
-const userRow = (id: string, turn: string, text: string, attachments: Row extends infer R ? (R extends { kind: 'user'; attachments: infer A } ? A : never) : never = []): Row =>
-  ({ id: `user:${id}`, turnId: turn, at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: id as MessageUuid, text, attachments, lines: 1, editable: true, steer: false, dropped: false }) as Row;
+// `placeholders`: where each chip stands in `text`, as the transcript records it (ticket 733a, the architect's ruling 4368:
+// a chip opens only at its recorded place)
+const userRow = (id: string, turn: string, text: string, attachments: Row extends infer R ? (R extends { kind: 'user'; attachments: infer A } ? A : never) : never = [], placeholders: number[] = []): Row =>
+  ({ id: `user:${id}`, turnId: turn, at: '2026-09-29T10:00:00.000Z', kind: 'user', messageUuid: id as MessageUuid, text, attachments, placeholders, lines: 1, editable: true, steer: false, dropped: false }) as Row;
 const turn = (id: string, origin: TurnActivity['origin']) => ({ turnId: id, origin }) as TurnActivity;
 const entry = (display: string, pastedContents: HistoryEntry['pastedContents'] = {}, at = '2026-09-28T10:00:00.000Z'): HistoryEntry => ({ display, at, source: 'maws', sessionId: null, pastedContents });
 const textBody = (id: number, content: string | null) => ({ id, type: 'text' as const, content, contentHash: null, mediaType: null, filename: null });
@@ -133,7 +135,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
       userRow('u2', 't2', 'from a peer'),
       userRow('u3', 't3', 'second'),
       userRow('u4', 't4', 'second'),
-      userRow('u5', 't5', 'see <\\pasted_content>\n[Pasted text #1 +2 lines]\nok', [{ kind: 'text', name: 'Pasted text #1', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'p\nq' }]),
+      userRow('u5', 't5', 'see <\\pasted_content>\n[Pasted text #1 +2 lines]\nok', [{ kind: 'text', name: 'Pasted text #1', bytes: 3, dataUrl: null, mediaType: 'text/plain', text: 'p\nq' }], ['see <\\pasted_content>\n'.length]),
     ];
     const activity = [turn('t1', 'human'), turn('t2', 'peer'), turn('t3', 'human'), turn('t4', 'human'), turn('t5', 'human')];
     const listed = [
@@ -162,7 +164,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
     const row = userTextOf(sent.text);
     expect(row.attachments.map((a) => a.text), 'the row’s body holds the joiner').not.toEqual([body]);
-    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
+    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments, row.placeholders)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
     expect(recalls).toHaveLength(1);
     expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
   });
@@ -172,7 +174,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
     const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
     const row = userTextOf(sent.text);
-    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], []);
+    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments, row.placeholders)], [turn('t1', 'human')], []);
     const again = serializeDraft(recallDoc(recalled!), ctx);
     expect(again.text).toBe(sent.text);
     expect(again.text.includes(GRANT_OPENING)).toBe(false);
@@ -235,7 +237,7 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const envelope = askSteerText('ask-9', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
     const read = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text: envelope }]);
     expect(read.text).toBe(envelope);
-    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments)], [turn('t1', 'human')], []);
+    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments, read.placeholders)], [turn('t1', 'human')], []);
     expect(recalls.length).toBe(1);
     expect(recalls[0]).toMatchObject({ source: 'session', prefill: { text: envelope, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] } });
   });
