@@ -438,11 +438,11 @@ What must exist at the end, by name. An executor who needs to change a name or a
       pasted: (lines: readonly string[]) => boolean[], // the marking of a pasted segment's lines: `pastedBodies` (revised 2026-11-16, the rule R re-merge)
       read: (slice: string) => T | null,         // a whole slice, read or refused
       maxChecks: number,                         // the cap of `read` calls a text: `MAX_ENVELOPE_CHECKS` (64); over it, { members: [], rest: text }
-    ): { members: { text: string; read: T }[]; rest: string };
+    ): { members: { text: string; read: T }[]; rest: string; over: boolean };   // over the cap: { members: [], rest: text, over: true } (the frontier fix, 2026-11-16)
 
     /** The one re-reading loop (decision 17): `slice` called until a reading takes nothing out, at most 16 times; a text whose
      *  16th reading still takes an envelope is left whole, `{ own: text, envelopes: [] }`. It uses its arguments alone. */
-    export function takeEnvelopesOut(text: string, slice: (part: string) => { members: { text: string }[]; rest: string }): { own: string; envelopes: string[] };
+    export function takeEnvelopesOut(text: string, slice: (part: string) => { members: { text: string }[]; rest: string; over: boolean }): { own: string; envelopes: string[] };   // over either bound (a pass over the cap, or 16 passes): the text whole, no envelope, what earlier passes took discarded
 
     export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string };   // unchanged
 
@@ -687,6 +687,9 @@ Found while reading the code for this document.
     - `splitPersonsMessage`, `answerEnvelopeOf`, `readPersonsContent`, `personsParts`, `personsWords`, `envelopeSlices` and `takeEnvelopesOut` decide which events a message becomes, whether a message is one answer, and which words are drawn, searched, titled, previewed or prefilled.
     - Every grant reader reads the whole joined text: `keysIn`, `personsText`'s grants, the host's `joinedMarks`, `grantOf`. `rowClaim` reads raw rows.
     - The split shapes only where an already-read grant is drawn: the consent mark goes on the message's own row only when the person's part has no other words.
+- **2026-11-16 (UTC) · The frontier review of the whole landing (base `5d78d2d23`, head `1d32ffd26`): two faults, fixed red first.** It found no grant or save decision depending on the split, and `pastedBodies` unchanged.
+  - *Frontier review, fault 1* (`c7ce0899c` red, `679f1ba1d` fix): `takeEnvelopesOut` could not tell a slicer that stopped at its 64-check cap from a pass that found nothing. When a later pass went over the cap, earlier passes' envelopes were published and the text was shortened. `envelopeSlices` now returns `{ members, rest, over: boolean }` (`over: true` with `{ members: [], rest: text }` past `maxChecks`). `takeEnvelopesOut`'s `slice` returns that shape, and on `over` the loop leaves the text whole with no envelope, as it does past 16 passes. Interfaces B is revised to that shape. The chain's bound tests are unedited; the 16-pass tests' hand-made slicers return `over: false`.
+  - *Frontier review, fault 2* (`5876bf7dc` red, `25d65e258` fix): `describe` (RenameDialog) joined a message's text blocks before reading, so an envelope spread over two blocks read as an answer, which decision 7's split does not take, and Regenerate passed over the message. It now reads `personsParts(event.content)` and flattens only the person's part. Of the other callers, summarize, rewind (and its tooltip), recent-turns and the search text read block by block or receive only a string. The composer's recall (`history.ts`, `allAnswer(row.text)`) reads `userTextOf`'s joined text and is left for a ruling.
 
 ## Outcomes & Retrospective
 
