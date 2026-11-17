@@ -682,7 +682,7 @@ describe('useFinder (S1, S4, S5; B2, B6, B7)', () => {
       } else expect(queries()).toEqual(['tide', 'tide']);
     });
 
-    it('a refresh after a failure asks again at once; with the field empty, or offline, a refresh asks nothing', async () => {
+    it('a refresh after a failure asks again at once; with the field empty a refresh asks nothing', async () => {
       const finder = mount();
       refresh(finder);
       expect(asks).toHaveLength(0);
