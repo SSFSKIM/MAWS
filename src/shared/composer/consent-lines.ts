@@ -10,7 +10,7 @@ import { GRANT_OPENING } from '../engine/grant';
 import { wrapPasted } from './pasted-framing';
 
 // Every line-break character Unicode knows but the line feed, at which the lines are already cut
-const OTHER_BREAKS = /[\r\u000b\u000c\u0085\u2028\u2029]/;
+const OTHER_BREAKS = /[\r\v\f\u0085\u2028\u2029]/;
 const reads = (text: string): boolean => text.startsWith(GRANT_OPENING) && readConsents(text).length > 0;
 
 /**
