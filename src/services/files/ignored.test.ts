@@ -3,7 +3,8 @@
 // empty home: the facts of git the check rests on. Over stand-in spawn functions: its bound, its places and its
 // disposal, on a clock the test moves, and once over a real process group held open.
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
@@ -50,6 +51,23 @@ function checkOf(options: Parameters<typeof createIgnoreCheck>[0]): IgnoreCheck 
 }
 const sorted = (answer: ReadonlySet<string> | null) => (answer === null ? null : [...answer].sort());
 
+// A spawn function over git whose first call is held until `open`, so that asks made meanwhile join the next run
+function gatedFirstRun() {
+  let open!: () => void;
+  const gate = new Promise<void>((resolve) => (open = resolve));
+  let started!: () => void;
+  const firstCall = new Promise<void>((resolve) => (started = resolve));
+  const made: { args: string[]; input: string | undefined }[] = [];
+  const execFile: ExecFileFn = (file, args, options, callback) => {
+    made.push({ args: args.slice(2), input: options.input });
+    if (made.length > 1) return execGit(file, args, options, callback);
+    started();
+    void gate.then(() => execGit(file, args, options, callback));
+    return undefined;
+  };
+  return { execFile, made, firstCall, open };
+}
+
 describe('the ignore check over a real repository', () => {
   it('rests on git naming a path as it was asked, and on exit 1 when nothing is ignored', async () => {
     const repo = await repository();
@@ -91,6 +109,45 @@ describe('the ignore check over a real repository', () => {
     const check = checkOf({ env: repo.serviceEnv() });
     expect(sorted(await check.names(repo.root, ['build', 'vendor']))).toEqual(['build']);
     expect(sorted(await check.names(repo.path('vendor'), ['fresh.js', 'kept.js']))).toEqual(['fresh.js']); // inside it, the tracked file alone is plain
+  });
+
+  it('in one run of two folders, keeps a tracked file a rule names unmarked in one while the other’s ignored file is marked, and reads * and [ in a name or a folder as text', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('g[1]/kept.log', 'kept on purpose\n');
+    await repo.git('add', '-f', 'g[1]/kept.log');
+    await repo.git('commit', '-q', '-m', 'a tracked log');
+    await repo.write('g[1]/a*.log', 'x\n');
+    await repo.write('g[1]/[x].log', 'x\n');
+    await repo.write('g[1]/notes.md', 'x\n');
+    await repo.write('g1/other.log', 'x\n'); // what `g[1]/` would match as a glob
+    await repo.write('seed/s.log', 'x\n');
+    const runs = gatedFirstRun();
+    const check = checkOf({ env: repo.serviceEnv(), execFile: runs.execFile });
+    const seed = check.names(repo.path('seed'), ['s.log']);
+    await runs.firstCall; // the seed's run holds the repository
+    const brackets = check.names(repo.path('g[1]'), ['[x].log', 'a*.log', 'kept.log', 'notes.md']);
+    const plain = check.names(repo.path('g1'), ['other.log']);
+    await settle();
+    runs.open();
+    expect(sorted(await seed)).toEqual(['s.log']);
+    expect(sorted(await brackets)).toEqual(['[x].log', 'a*.log']);
+    expect(sorted(await plain)).toEqual(['other.log']);
+    expect(runs.made).toHaveLength(4); // the seed's two runs, then one ls-files and one check-ignore for both folders
+    expect(runs.made[2]!.args.slice(4).sort()).toEqual(['g1/', 'g[1]/']);
+    expect(runs.made[3]!.input!.split('\0').filter((path) => path !== '').sort()).toEqual(['./g1/other.log', './g[1]/[x].log', './g[1]/a*.log', './g[1]/notes.md']);
+  });
+
+  it('finds a linked worktree’s repository by its .git file, and judges its folder by its own rules', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.git('add', '.gitignore');
+    await repo.git('commit', '-q', '-m', 'rules');
+    const worktree = await repo.addWorktree('wt');
+    writeFileSync(join(worktree, 'trace.log'), 'x\n');
+    writeFileSync(join(worktree, 'notes.md'), 'x\n');
+    const check = checkOf({ env: repo.serviceEnv() });
+    expect(sorted(await check.names(worktree, ['README.md', 'notes.md', 'trace.log']))).toEqual(['trace.log']);
   });
 
   // Asked bare, git 2.43 reads `:notes.txt` as a pathspec with empty magic, so it judges `notes.txt` and answers nothing
@@ -176,33 +233,80 @@ describe('the ignore check over a real repository', () => {
   });
 });
 
-// A spawn function whose runs are held by the test: each call is kept with its callback, and `live` counts those not
-// yet called back.
+// A repository as the check finds one, by its `.git` entry, for a spawn function that stands in for git
+function fakeRepo(...dirs: string[]): string {
+  const root = temp();
+  mkdirSync(join(root, '.git'));
+  for (const dir of dirs) mkdirSync(join(root, dir), { recursive: true });
+  return root;
+}
+// Lets the asks' walks to their repositories, which read the disk, finish (they cannot be awaited from outside)
+async function settle(): Promise<void> {
+  for (let i = 0; i < 10; i++) {
+    await lstat(tmpdir()).catch(() => undefined);
+    await new Promise((resolve) => setImmediate(resolve));
+  }
+}
+
+interface HeldRun {
+  args: string[]; // as git is given them after `-C <directory>`
+  directory: string;
+  input: string | undefined;
+  answer(error: Error | null, stdout: string): void;
+}
+// A spawn function whose runs are held by the test: each call is kept, with what it was asked, until the test answers
+// it; `live` counts those not yet answered, and `reached(n)` settles once `n` calls were made.
 function heldRuns() {
-  const pending: Parameters<ExecFileFn>[3][] = [];
+  const pending: HeldRun[] = [];
+  const made: HeldRun[] = [];
+  const waiters: { n: number; resolve: () => void }[] = [];
   let live = 0;
   let most = 0;
-  let calls = 0;
-  const execFile: ExecFileFn = (_file, _args, _options, callback) => {
-    calls++;
+  const execFile: ExecFileFn = (_file, args, options, callback) => {
     most = Math.max(most, ++live);
-    pending.push((error, stdout, stderr) => {
-      live--;
-      callback(error, stdout, stderr);
-    });
+    const run: HeldRun = {
+      args: args.slice(2),
+      directory: args[1]!,
+      input: options.input,
+      answer: (error, stdout) => {
+        live--;
+        callback(error as never, stdout, '');
+      },
+    };
+    pending.push(run);
+    made.push(run);
+    for (const waiter of waiters.filter((one) => made.length >= one.n)) {
+      waiters.splice(waiters.indexOf(waiter), 1);
+      waiter.resolve();
+    }
   };
-  return { execFile, pending, counts: () => ({ calls, live, most }) };
+  const reached = (n: number) => (made.length >= n ? Promise.resolve() : new Promise<void>((resolve) => waiters.push({ n, resolve })));
+  return { execFile, pending, made, reached, counts: () => ({ calls: made.length, live, most }) };
+}
+const isLsFiles = (run: HeldRun) => run.args.includes('ls-files');
+// Answers each held run as git would if nothing were tracked and every name asked were ignored
+const echo = (run: HeldRun) => run.answer(null, isLsFiles(run) ? '' : run.input!);
+// Answers held runs as they come until every one of `answers` has settled
+async function drain(pending: HeldRun[], answers: Promise<unknown>[], reply: (run: HeldRun) => void = echo): Promise<void> {
+  let settled = 0;
+  void Promise.all(answers.map((answer) => answer.then(() => void (settled += 1))));
+  while (settled < answers.length) {
+    await vi.waitFor(() => expect(pending.length > 0 || settled === answers.length).toBe(true));
+    const run = pending.shift();
+    if (run) reply(run);
+  }
 }
 
 describe('the bound and the places', () => {
   it('gives no answer when the test’s clock reaches the bound, and nothing more past the runner’s own kill delay', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const { execFile, counts } = heldRuns(); // never called back
+    const { execFile, reached } = heldRuns(); // never answered
+    const repo = fakeRepo();
     const check = checkOf({ execFile });
     let answers = 0;
     let answer: ReadonlySet<string> | null | undefined;
-    void check.names('/work/repo', ['a.log']).then((value) => ((answers += 1), (answer = value)));
-    expect(counts().calls).toBe(1);
+    void check.names(repo, ['a.log']).then((value) => ((answers += 1), (answer = value)));
+    await reached(1);
     await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 1);
     expect(answers).toBe(0);
     await vi.advanceTimersByTimeAsync(1);
@@ -214,98 +318,179 @@ describe('the bound and the places', () => {
 
   it('answers a listing whose check never answers with all its entries, none marked, once the bound has passed, beside a check that marks one', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const dir = temp();
+    const repo = fakeRepo('work');
+    const dir = join(repo, 'work');
     writeFileSync(join(dir, 'a.txt'), 'a');
     writeFileSync(join(dir, 'b.log'), 'b');
     const S = 'app-ignored' as AppSessionId;
     const records = (id: AppSessionId) => (id === S ? { directory: dir, additionalDirectories: [], worktree: null } : null);
-    let started!: () => void;
-    const asked = new Promise<void>((resolve) => (started = resolve));
-    const silent = checkOf({ execFile: () => void started() });
+    const { execFile, reached } = heldRuns(); // never answered
+    const silent = checkOf({ execFile });
     const files = createFilesService({ records, ignored: silent.names });
     const listing = files.list({ appSessionId: S, path: dir });
-    await asked;
+    await reached(1);
     await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS);
     const answer = await listing;
     expect(answer.entries.map((entry) => entry.name)).toEqual(['a.txt', 'b.log']);
     expect(answer.entries.filter((entry) => 'ignored' in entry)).toEqual([]);
     files.dispose();
     // the control: the same listing, with a check that answers, marks the entry it names
-    const answering = checkOf({ execFile: (_file, args, _options, callback) => void queueMicrotask(() => callback(null, args.includes('ls-files') ? 'a.txt\0' : './b.log\0', '')) });
+    const answering = checkOf({ execFile: (_file, args, _options, callback) => void queueMicrotask(() => callback(null, args.includes('ls-files') ? 'work/a.txt\0' : './work/b.log\0', '')) });
     const marked = createFilesService({ records, ignored: answering.names });
     expect((await marked.list({ appSessionId: S, path: dir })).entries.filter((entry) => 'ignored' in entry).map((entry) => entry.name)).toEqual(['b.log']);
     marked.dispose();
   });
 
-  it(`runs at most ${IGNORED_CHECK_CONCURRENCY} of ten checks asked at once, and answers all ten`, async () => {
-    const { execFile, pending, counts } = heldRuns();
+  it(`runs at most ${IGNORED_CHECK_CONCURRENCY} runs at once for ten checks in ten repositories, and answers all ten`, async () => {
+    const { execFile, pending, reached, counts } = heldRuns();
     const check = checkOf({ execFile, allowanceMs: 600_000 }); // the bound is not what this case reads
-    const answers = Array.from({ length: 10 }, (_, i) => check.names('/work/repo', [`f${i}.log`]));
+    const answers = Array.from({ length: 10 }, (_, i) => check.names(fakeRepo(), [`f${i}.log`]));
+    await reached(IGNORED_CHECK_CONCURRENCY);
+    await settle();
     expect(counts()).toEqual({ calls: IGNORED_CHECK_CONCURRENCY, live: IGNORED_CHECK_CONCURRENCY, most: IGNORED_CHECK_CONCURRENCY });
-    let settled = 0;
-    void Promise.all(answers.map((answer) => answer.then(() => void (settled += 1))));
-    while (settled < 10) {
-      await vi.waitFor(() => expect(pending.length > 0 || settled === 10).toBe(true));
-      pending.shift()?.(null, '', ''); // each check's two runs, ls-files then check-ignore, one after the other in its place
-    }
-    expect(await Promise.all(answers)).toHaveLength(10);
-    expect(counts()).toEqual({ calls: 20, live: 0, most: IGNORED_CHECK_CONCURRENCY });
+    await drain(pending, answers);
+    expect((await Promise.all(answers)).map(sorted)).toEqual(Array.from({ length: 10 }, (_, i) => [`f${i}.log`]));
+    expect(counts()).toEqual({ calls: 20, live: 0, most: IGNORED_CHECK_CONCURRENCY }); // each check's two runs, one after the other in its place
   });
 
-  it('asks check-ignore with --no-index about the names ls-files does not track, each as ./<name>, and no first segment of a tracked path', async () => {
-    const asked: { args: string[]; input: string | undefined }[] = [];
-    const execFile: ExecFileFn = (_file, args, options, callback) => {
-      asked.push({ args: args.slice(2), input: options.input });
-      queueMicrotask(() => callback(null, args.includes('ls-files') ? 'src/cart.ts\0src/lib/rates.ts\0README.md\0' : './debug.log\0', ''));
-    };
+  it('coalesces the asks of one repository that arrive while its run is in flight into its next run, and answers each its own names', async () => {
+    const dirs = Array.from({ length: 10 }, (_, i) => `d${i}`);
+    const repo = fakeRepo(...dirs);
+    const { execFile, pending, made, reached, counts } = heldRuns();
+    const check = checkOf({ execFile, allowanceMs: 600_000 });
+    const first = check.names(join(repo, 'd0'), ['f0.log']);
+    await reached(1); // the first run's ls-files, held
+    const rest = dirs.slice(1).map((dir, i) => check.names(join(repo, dir), [`f${i + 1}.log`, 'plain.txt']));
+    await settle();
+    expect(counts().calls).toBe(1); // the nine wait for the repository's run in flight, not for a place
+    await drain(pending, [first, ...rest], (run) => run.answer(null, isLsFiles(run) ? '' : run.input!.split('\0').filter((path) => path.endsWith('.log')).map((path) => `${path}\0`).join('')));
+    expect(sorted(await first)).toEqual(['f0.log']);
+    expect((await Promise.all(rest)).map(sorted)).toEqual(dirs.slice(1).map((_, i) => [`f${i + 1}.log`]));
+    expect(counts()).toEqual({ calls: 4, live: 0, most: 1 }); // two runs of two: the first ask's, then the nine's together
+    expect(made.map((run) => run.directory)).toEqual(Array(4).fill(repo)); // every run in the repository's root
+    expect(made[2]!.args.slice(0, 4)).toEqual(['--literal-pathspecs', 'ls-files', '-z', '--']);
+    expect(made[2]!.args.slice(4).sort()).toEqual(dirs.slice(1).map((dir) => `${dir}/`));
+    expect(made[3]!.args).toEqual(['check-ignore', '--no-index', '-z', '--stdin']);
+    expect(made[3]!.input!.split('\0').filter((path) => path !== '').sort()).toEqual(dirs.slice(1).flatMap((dir, i) => [`./${dir}/f${i + 1}.log`, `./${dir}/plain.txt`]).sort());
+  });
+
+  it('asks check-ignore with --no-index about the names ls-files does not track, each as ./<folder>/<name>, and ls-files about the folder alone', async () => {
+    const repo = fakeRepo('harbor');
+    const { execFile, pending, made } = heldRuns();
     const check = checkOf({ execFile });
-    expect(sorted(await check.names('/work/harbor', ['src', 'README.md', 'debug.log', 'node_modules']))).toEqual(['debug.log']);
-    expect(asked).toEqual([
-      { args: ['ls-files', '-z'], input: undefined },
-      { args: ['check-ignore', '--no-index', '-z', '--stdin'], input: './debug.log\0./node_modules\0' },
+    const answer = check.names(join(repo, 'harbor'), ['src', 'README.md', 'debug.log', 'node_modules']);
+    const atRoot = (async () => {
+      await answer;
+      return check.names(repo, ['harbor', 'notes.md']);
+    })();
+    await drain(pending, [answer, atRoot], (run) => run.answer(null, isLsFiles(run) ? 'harbor/src/cart.ts\0harbor/src/lib/rates.ts\0harbor/README.md\0' : run.input!.split('\0').filter((path) => path.endsWith('.log') || path.endsWith('.md')).map((path) => `${path}\0`).join('')));
+    expect(sorted(await answer)).toEqual(['debug.log']);
+    expect(sorted(await atRoot)).toEqual(['notes.md']); // `harbor` holds tracked files: never asked
+    expect(made.map((run) => [run.args, run.input])).toEqual([
+      [['--literal-pathspecs', 'ls-files', '-z', '--', 'harbor/'], undefined],
+      [['check-ignore', '--no-index', '-z', '--stdin'], './harbor/debug.log\0./harbor/node_modules\0'],
+      [['--literal-pathspecs', 'ls-files', '-z', '--', '.'], undefined],
+      [['check-ignore', '--no-index', '-z', '--stdin'], './notes.md\0'],
     ]);
   });
 
   it('gives no answer and runs no check-ignore when ls-files fails, beside a check whose ls-files answers', async () => {
+    const repo = fakeRepo();
     const subcommands: string[] = [];
     const failing: ExecFileFn = (_file, args, _options, callback) => {
-      subcommands.push(args[2]!);
+      subcommands.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
       queueMicrotask(() => callback(Object.assign(new Error('Git exited with 128'), { code: 128 }), '', 'fatal: unreadable index\n'));
     };
-    expect(await checkOf({ execFile: failing }).names('/work/harbor', ['debug.log'])).toBeNull();
+    expect(await checkOf({ execFile: failing }).names(repo, ['debug.log'])).toBeNull();
     expect(subcommands).toEqual(['ls-files']);
     const answering: ExecFileFn = (_file, args, _options, callback) => {
-      subcommands.push(args[2]!);
+      subcommands.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
       queueMicrotask(() => callback(null, args.includes('ls-files') ? '' : './debug.log\0', ''));
     };
-    expect(sorted(await checkOf({ execFile: answering }).names('/work/harbor', ['debug.log']))).toEqual(['debug.log']); // the control
+    expect(sorted(await checkOf({ execFile: answering }).names(repo, ['debug.log']))).toEqual(['debug.log']); // the control
     expect(subcommands).toEqual(['ls-files', 'ls-files', 'check-ignore']);
   });
 
-  it('bounds the two runs by one deadline: a slow ls-files leaves check-ignore the rest of the allowance, not a fresh one', async () => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const subcommands: string[] = [];
-    const execFile: ExecFileFn = (_file, args, _options, callback) => {
-      subcommands.push(args[2]!);
-      if (args.includes('ls-files')) setTimeout(() => callback(null, '', ''), IGNORED_CHECK_MS - 500); // check-ignore then never answers
-    };
+  it('starts no git for a folder in no repository or inside a .git folder, beside one in a repository that does', async () => {
+    const { execFile, pending, counts } = heldRuns();
     const check = checkOf({ execFile });
-    let answer: ReadonlySet<string> | null | undefined;
-    void check.names('/work/harbor', ['debug.log']).then((value) => void (answer = value));
-    await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 500);
-    expect(subcommands).toEqual(['ls-files', 'check-ignore']);
-    expect(answer).toBeUndefined();
-    await vi.advanceTimersByTimeAsync(500);
-    expect(answer).toBeNull();
-    await vi.advanceTimersByTimeAsync(1_000); // past the runner's kill of the check-ignore run
-    expect(subcommands).toEqual(['ls-files', 'check-ignore']);
+    const repo = fakeRepo('.git/objects', 'src');
+    const nowhere = temp();
+    expect(await check.names(nowhere, ['a.log'])).toBeNull();
+    expect(await check.names(join(repo, '.git'), ['config'])).toBeNull();
+    expect(await check.names(join(repo, '.git/objects'), ['pack'])).toBeNull();
+    expect(counts().calls).toBe(0);
+    expect(warned).not.toHaveBeenCalled();
+    const inside = check.names(join(repo, 'src'), ['a.log']); // the control
+    await drain(pending, [inside]);
+    expect(sorted(await inside)).toEqual(['a.log']);
+    expect(counts().calls).toBe(2);
+  });
+
+  it('bounds each ask by its own deadline: an ask that expires while it waits is dropped from its run, one that expires during the run gets no answer', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const repo = fakeRepo('x', 'y', 'z');
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile });
+    const got: Record<string, ReadonlySet<string> | null | undefined> = {};
+    void check.names(join(repo, 'x'), ['a.log']).then((value) => void (got.x = value));
+    await reached(1); // x's run holds the repository from t = 0
+    await vi.advanceTimersByTimeAsync(400);
+    void check.names(join(repo, 'y'), ['a.log']).then((value) => void (got.y = value)); // deadline 2,400
+    await settle();
+    await vi.advanceTimersByTimeAsync(600);
+    void check.names(join(repo, 'z'), ['a.log']).then((value) => void (got.z = value)); // deadline 3,000
+    await settle();
+    await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS - 1_000 + 500); // t = 2,500: x's and y's bounds have passed, both waiting
+    expect([got.x, got.y, got.z]).toEqual([null, null, undefined]);
+    pending.shift()!.answer(null, ''); // x's ls-files, which the runner gave up at x's deadline and its kill delay: too late
+    await reached(2);
+    expect(made[1]!.args.slice(1, 2)).toEqual(['ls-files']); // the next run: z's alone, y dropped
+    expect(made[1]!.args.slice(4)).toEqual(['z/']);
+    echo(pending.shift()!);
+    await reached(3);
+    expect(made[2]!.input).toBe('./z/a.log\0');
+    echo(pending.shift()!);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sorted(got.z ?? null)).toEqual(['a.log']);
+  });
+
+  it('gives a run the latest deadline among the asks it carries, so a late ask is still answered after an earlier one expired in it', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const repo = fakeRepo('x', 'y', 'z');
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile });
+    const got: Record<string, ReadonlySet<string> | null | undefined> = {};
+    void check.names(join(repo, 'x'), ['a.log']).then((value) => void (got.x = value));
+    await reached(1);
+    void check.names(join(repo, 'y'), ['a.log']).then((value) => void (got.y = value)); // deadline 2,000
+    await settle();
+    await vi.advanceTimersByTimeAsync(1_000);
+    void check.names(join(repo, 'z'), ['a.log']).then((value) => void (got.z = value)); // deadline 3,000
+    await settle();
+    echo(pending.shift()!); // x's ls-files, then its check-ignore
+    await reached(2);
+    echo(pending.shift()!);
+    await reached(3); // y and z's run starts at t = 1,000
+    echo(pending.shift()!); // its ls-files; its check-ignore is held
+    await reached(4);
+    await vi.advanceTimersByTimeAsync(1_000); // t = 2,000: y's bound passes inside the run
+    expect(got.y).toBeNull();
+    await vi.advanceTimersByTimeAsync(800); // t = 2,800: past y's deadline and its kill delay, short of z's
+    expect(made[3]!.input).toBe('./y/a.log\0./z/a.log\0');
+    echo(pending.shift()!);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(sorted(got.z ?? null)).toEqual(['a.log']);
+    expect(got.y).toBeNull();
   });
 
   it('never starts the run of a check that waited for a place its whole bound', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
-    const { execFile, counts } = heldRuns(); // never called back
+    const { execFile, reached, counts } = heldRuns(); // never answered
     const check = checkOf({ execFile });
-    const answers = Array.from({ length: IGNORED_CHECK_CONCURRENCY + 1 }, () => check.names('/work/repo', ['a.log']));
+    const answers = Array.from({ length: IGNORED_CHECK_CONCURRENCY + 1 }, () => check.names(fakeRepo(), ['a.log']));
+    await reached(IGNORED_CHECK_CONCURRENCY);
+    await settle();
     expect(counts().calls).toBe(IGNORED_CHECK_CONCURRENCY); // the last one waits
     await vi.advanceTimersByTimeAsync(IGNORED_CHECK_MS);
     expect(await Promise.all(answers)).toEqual(Array(IGNORED_CHECK_CONCURRENCY + 1).fill(null));
@@ -314,13 +499,17 @@ describe('the bound and the places', () => {
   });
 
   it('answers every running and waiting check with no answer at its disposal, and starts nothing after', async () => {
-    const { execFile, counts } = heldRuns(); // never called back
+    const { execFile, reached, counts } = heldRuns(); // never answered
     const check = checkOf({ execFile, allowanceMs: 600_000 });
-    const answers = Array.from({ length: IGNORED_CHECK_CONCURRENCY + 2 }, () => check.names('/work/repo', ['a.log']));
-    expect(counts().calls).toBe(IGNORED_CHECK_CONCURRENCY); // the control: four run and two wait
+    const repo = fakeRepo();
+    const answers = Array.from({ length: IGNORED_CHECK_CONCURRENCY + 2 }, () => check.names(fakeRepo(), ['a.log']));
+    answers.push(check.names(repo, ['b.log']));
+    await reached(IGNORED_CHECK_CONCURRENCY);
+    await settle();
+    expect(counts().calls).toBe(IGNORED_CHECK_CONCURRENCY); // the control: four run and three wait
     void check.dispose();
-    expect(await Promise.all(answers)).toEqual(Array(IGNORED_CHECK_CONCURRENCY + 2).fill(null));
-    expect(await check.names('/work/repo', ['a.log'])).toBeNull();
+    expect(await Promise.all(answers)).toEqual(Array(IGNORED_CHECK_CONCURRENCY + 3).fill(null));
+    expect(await check.names(repo, ['a.log'])).toBeNull();
     expect(counts().calls).toBe(IGNORED_CHECK_CONCURRENCY);
   });
 });
@@ -344,7 +533,7 @@ function alive(pid: number): boolean {
 
 describe('the daemon’s stop ends the check’s processes', () => {
   it('kills the process group a check holds open, its child included, and starts nothing for an ask after', async () => {
-    const dir = temp();
+    const dir = fakeRepo();
     const pidFile = join(dir, 'sleeper.pid');
     const children: ChildProcess[] = [];
     // A shell that starts a sleeping child and waits for it, started exactly as git is: a group of its own, input piped
