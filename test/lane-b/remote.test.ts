@@ -2919,11 +2919,4 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
     // and a plain read before each act, the second on the next channel after its own check
     expect(o.reads().filter((input) => input.path === FAR)).toHaveLength(2);
   });
-    const was = o.l.a.link.peerCapabilities();
-    expect(await o.keyed(FAR)).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'files.readOutside: the connection to mini ended before it answered; it is unknown whether it ran' } });
-    await until(() => o.l.a.link.state() === 'up' && o.l.a.link.peerCapabilities() !== null && o.l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
-    await sleep(300);
-    expect(o.acts()).toHaveLength(1);
-    expect(runs).toBe(1);
-  });
 });
