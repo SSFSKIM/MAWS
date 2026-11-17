@@ -243,6 +243,16 @@ export function commentsMessage(comments: readonly MessageComment[], destination
   return [framingLine(comments.length), ...blocks].join('\n\n');
 }
 
+/**
+ * Ticket 733a (Design 4, narrowed by the architect's ruling of 2026-11-17): whether a message `readAnchoredMessage` read
+ * is one of MAWS's own anchored forms, whose segments are drawn in place: a comment with a destination (its lead or its
+ * framing is MAWS's), or a text under the promotion's own anchor. A text under any other anchor with no destination is
+ * no writer's of MAWS, so it is drawn, given back at an edit and sent again as at the pin, its pasted blocks chips.
+ */
+export function isComposedAnchored(read: { comments: readonly MessageComment[]; destination: Destination | null }): boolean {
+  return read.destination !== null || (read.comments.length === 1 && anchorTag(read.comments[0]!.anchor) === anchorTag(PROMOTION_ANCHOR));
+}
+
 /** Every comment of a message MAWS wrote, else null. */
 export function readAnchoredMessage(text: string): { comments: MessageComment[]; destination: Destination | null } | null {
   return readFramed(text) ?? readOne(text);

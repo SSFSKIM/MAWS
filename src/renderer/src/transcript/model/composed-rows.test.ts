@@ -6,7 +6,7 @@
 // reader.
 import { describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
-import { commentsMessage, promotionMessage, quotedComment, PROMOTION_HEAD, ANCHOR_TAG_OPENING } from '@shared/anchor/message';
+import { anchorLead, anchorTag, commentsMessage, promotionMessage, quotedComment, PROMOTION_ANCHOR, PROMOTION_HEAD, ANCHOR_TAG_OPENING } from '@shared/anchor/message';
 import { wrapPasted } from '@shared/composer/pasted-framing';
 import type { SessionEvent } from '@shared/graph/events';
 import { PLAN_LEAD, planPrompt } from '@shared/engine/host-prompts';
@@ -37,6 +37,7 @@ const pinDrawn = (content: string) => {
 
 const LINE: Anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 };
 const OLD: Anchor = { ...LINE, side: 'old' };
+const TYPED: Anchor = { kind: 'file-line', locator: '/work/out/a.ts#L1', label: 'a.ts:1', path: '/work/out/a.ts', line: 1 };
 const EXCHANGES = [
   { question: 'Where are the notes?', response: 'In the notes folder.\nUnder the dated ones.' },
   { question: 'Which is newest?', response: 'The one from Tuesday.' },
@@ -88,6 +89,18 @@ describe('a form’s row is drawn as the pin drew it, its segments in place', ()
 // is built from parts: words, chips of every size (the composer's frame, the pin's), the forms' fixed words in other
 // places, tags that do not parse. A message that is a form (the plan's exact shape, a text MAWS's tag ends) is not a
 // person's message of no form and is set aside, counted.
+describe('a typed anchor with no destination is no form of MAWS’s (fix wave 3)', () => {
+  it('a paste holding a comment’s lead before it: the pin’s row, its paste a chip and no range; a promotion still drawn in place (the control)', () => {
+    const raw = `${wrapPasted('beef', `${anchorLead(TYPED, false)}\n[the notes](/work/out/notes.md)`)}\n${anchorTag(TYPED)}`;
+    const row = rowOf(raw);
+    expect(drawn(row)).toEqual(pinDrawn(raw));
+    expect([row.placeholders.length, row.composed, row.anchorFrame?.destination]).toEqual([1, undefined, null]);
+    expect(RowSchema.safeParse(row).success).toBe(true);
+    const promotion = rowOf(promotionMessage(EXCHANGES, 'Go on.', 'a1b2'));
+    expect([promotion.placeholders, promotion.text.includes('pasted_content'), (promotion.composed ?? []).length]).toEqual([[], false, 1]);
+  });
+});
+
 describe('no message of a person’s is drawn differently (the differential)', () => {
   // a seeded generator (mulberry32), so a failure names its message
   function random(seed: number): () => number {
@@ -118,14 +131,19 @@ describe('no message of a person’s is drawn differently (the differential)', (
     () => '<pasted_content id="zzzz">\nnot a tag\n</pasted_content id="zzzz">',
     () => 'Comment on "report.ts:12" (file /work/out/report.ts, line 12):',
     () => '/compact keep it short',
+    // fix wave 3: a paste holding a comment's lead, and a tag of another anchor typed with no lead
+    () => wrapPasted('beef', `${anchorLead(TYPED, false)}\n[the notes](/work/out/notes.md)`),
+    () => `\n\n${anchorTag(TYPED)}`,
   ];
   // The two recognisers' whole-form shapes, read from the raw input and not by the code under test (fix waves 1 and 2):
   // a message the pin's reader reads as anchored (its anchor reader, which this landing leaves unchanged), and a plan
   // prompt in exactly its writer's shape, one segment and nothing after it, written from the spec
   const PLAN_SHAPE = /^Implement this plan:\n\n\n\n<pasted_content id="([0-9a-f]{4})">\n(?:(?!\n<\/pasted_content id="\1">)[\s\S])*\n<\/pasted_content id="\1">\n$/;
+  // (fix wave 3) of the anchored, only MAWS's own: a comment with a destination, or a text under the promotion's anchor
   const allowedForm = (message: string) => {
     const pin = pinUserTextOf(message);
-    return pin.anchor !== null || pin.comments !== null || PLAN_SHAPE.test(message);
+    const ours = pin.anchor !== null && (pin.frame!.destination !== null || anchorTag(pin.anchor) === anchorTag(PROMOTION_ANCHOR));
+    return ours || pin.comments !== null || PLAN_SHAPE.test(message);
   };
   it(`${COUNT} seeded messages (seed ${SEED}): every row of no form is the pin’s row; a form among them is set aside, and a form is drawn otherwise (the control)`, () => {
     const next = random(SEED);

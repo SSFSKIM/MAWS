@@ -4,7 +4,8 @@ import { docOf, paragraph, pastedNode, textNode } from '../editor/doc';
 import { serializeDraft } from '../editor/serialize';
 import { entryDisplay, entryDoc } from './entry-text';
 import type { Anchor } from '@shared/anchor/anchor';
-import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
+import { anchorLead, anchorTag, commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
+import { wrapPasted } from '@shared/composer/pasted-framing';
 import { planPrompt } from '@shared/engine/host-prompts';
 import { pinPlanPrompt, pinPromotionMessage, pinQuotedComment } from '../../../../../test/support/pin-forms';
 
@@ -55,5 +56,11 @@ describe('a queued form reads in place', () => {
   ])('%s: no placeholder, the pin’s text', (_, sent, pin) => {
     expect(entryDisplay(sent)).toBe(entryDisplay(pin));
     expect(entryDisplay(sent)).not.toContain('[Pasted text');
+  });
+
+  it('a paste before a typed anchor tag with no destination is no form: its block a placeholder, as at the pin (fix wave 3)', () => {
+    const typed: Anchor = { kind: 'file-line', locator: '/work/out/a.ts#L1', label: 'a.ts:1', path: '/work/out/a.ts', line: 1 };
+    const raw = `${wrapPasted('beef', `${anchorLead(typed, false)}\nsee the notes`)}\n${anchorTag(typed)}`;
+    expect(entryDisplay(raw)).toBe(`[Pasted text #1 +2 lines]\n${anchorTag(typed)}`);
   });
 });

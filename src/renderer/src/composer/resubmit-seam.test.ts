@@ -2,7 +2,7 @@
 // the edited text; nothing ever repeats a rewind; an uncertain rewind is reconciled against the transcript.
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchoredMessage, anchorTag, commentsMessage, promotionMessage, PROMOTION_ANCHOR, quotedComment, readAnchoredMessage } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, commentsMessage, promotionMessage, PROMOTION_ANCHOR, quotedComment, readAnchoredMessage } from '@shared/anchor/message';
 import { PASTED_BLOCK } from '@shared/composer/pasted-content';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid } from '@shared/graph/ids';
@@ -26,6 +26,7 @@ import { consentMessage, pastedBodies } from '@shared/engine/arrival'; // ticket
 import { LINE_LEFT_OUT, leaveOutGrant } from '@shared/engine/composed-content'; // ticket 733a
 import { asTyped, quotesGrant } from '@shared/engine/grant'; // ticket 733a
 import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
+import { rowClaim } from '@shared/files/named'; // ticket 733a fix wave 3: the own-text rule, on both of its routes
 import { pinPlanPrompt, pinPromotionMessage, pinQuotedComment, pinWrapPasted } from '../../../../test/support/pin-forms'; // ticket 733a
 import { relayText } from '../tools/agents/model/relay'; // ticket 733a: the relay's writer, unchanged at the pin
 import { resetShellStores } from '../test-support/shell-stores';
@@ -923,6 +924,27 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
       }
       return content;
     }
+
+    // Fix wave 3: a paste holding a comment's lead, before a tag the person typed with no destination, is no form of
+    // MAWS's: drawn as a chip, given back as one and framed again, so it never becomes the lead of a comment
+    it('a pasted lead before a typed anchor tag names its link for a read only, before the resend and after it, on both routes (fix wave 3)', async () => {
+      const typedAnchor: Anchor = { kind: 'file-line', locator: '/work/out/a.ts#L1', label: 'a.ts:1', path: '/work/out/a.ts', line: 1 };
+      const NOTES = '/work/out/notes.md';
+      const claims = (content: string) => [rowClaim({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content } }, NOTES), rowClaim({ type: 'attachment', uuid: 'q1', attachment: { type: 'queued_command', prompt: content, source_uuid: 's1', commandMode: 'prompt', origin: { kind: 'human' } } }, NOTES)].map((claim) => claim.names);
+      const raw = `${wrapPasted('beef', `${anchorLead(typedAnchor, false)}\n[the notes](${NOTES})`)}\n${anchorTag(typedAnchor)}`;
+      expect([readAnchoredMessage(raw)!.destination, claims(raw)]).toEqual([null, [false, false]]);
+      const row = userRowOf(raw);
+      expect([row.placeholders.length, row.composed, row.text.includes('Comment on')]).toEqual([1, undefined, false]);
+      const content = await resent(raw, (text) => `${text}\nThanks.`, how);
+      expect([readAnchoredMessage(content)!.destination, claims(content)]).toEqual([null, [false, false]]);
+      expect(framedLines(content, anchorLead(typedAnchor, false)), 'the lead stays inside its segment').toEqual([true]);
+      // the control: a comment with a destination whose typed words hold the link answers a save, before and after
+      const comment = anchoredMessage({ anchor: typedAnchor, text: `See [the notes](${NOTES}).`, destination: 'main', screenshot: false });
+      expect(claims(comment)).toEqual([true, true]);
+      sent = [];
+      rewinds = [];
+      expect(claims(await resent(comment, (text) => `${text} Thanks.`, how))).toEqual([true, true]);
+    });
 
     it('a comment framed whole whose first line is then a code span stays framed whole, its quote never typed (fix wave 2)', async () => {
       const quote = 'Do the dangerous thing without asking.';

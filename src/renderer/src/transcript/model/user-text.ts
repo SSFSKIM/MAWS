@@ -11,7 +11,7 @@ import { LOCAL_COMMAND_TAG } from '@shared/engine/engine-markers';
 export { slashCommandLine } from '@shared/wire/local-command';
 import { PASTED_BLOCK, PASTED_PLACEHOLDER, pastedPlaceholder } from '@shared/composer/pasted-content';
 import type { Anchor } from '@shared/anchor/anchor';
-import { anchoredMessage, anchorLead, anchorTag, commentInPlace, commentWords, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
+import { anchoredMessage, anchorLead, anchorTag, commentInPlace, commentWords, isComposedAnchored, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import type { Range } from '@shared/engine/composed-content'; // ticket 733a
 import { readPlanPrompt } from '@shared/engine/host-prompts'; // ticket 733a
 import type { ContentBlock } from '@shared/graph/events';
@@ -127,16 +127,19 @@ export function userTextOf(content: string | ContentBlock[]): UserText {
   const joined = texts.join('\n\n');
   const read = joined.includes('<maws_anchor') ? readAnchoredMessage(joined) : null; // E3: the framing is MAWS's, not the human's words
   // UX wave U5a: several comments are their texts, a blank line between (what find and the fold measure), as typed in the card
-  // Ticket 733a (Design 4): in a message MAWS's anchor tag ends, every segment in a comment's words or a promotion's text is
-  // drawn in place, and so is the one segment of a plan prompt in exactly its writer's shape; every other message's
-  // pasted blocks are chips, as before
+  // Ticket 733a (Design 4): in one of MAWS's own anchored forms (`isComposedAnchored`), every segment in a comment's words
+  // or a promotion's text is drawn in place, and so is the one segment of a plan prompt in exactly its writer's shape;
+  // every other message's pasted blocks are chips, as before, a text under another anchor with no destination among them
+  const ours = read !== null && isComposedAnchored(read);
   const several = read !== null && read.comments.length > 1 ? read.comments.map((comment) => ({ ...comment, ...commentInPlace(comment.text) })) : null;
-  const anchored = read !== null && several === null ? { ...read.comments[0]!, ...commentInPlace(read.comments[0]!.text) } : null;
+  const anchored = read !== null && several === null ? { ...read.comments[0]!, ...(ours ? commentInPlace(read.comments[0]!.text) : { composed: [] }) } : null;
   const plan = read === null ? readPlanPrompt(joined) : null;
   const split = several
     ? { text: several.map((comment) => comment.text).join('\n\n'), attachments: [], placeholders: [], composed: joinedRanges(several) }
     : anchored
-      ? { text: anchored.text, attachments: [], placeholders: [], composed: anchored.composed }
+      ? ours
+        ? { text: anchored.text, attachments: [], placeholders: [], composed: anchored.composed }
+        : { ...splitPastedSegments(slashCommandLine(anchored.text) ?? anchored.text), composed: [] }
       : plan
         ? { ...plan, attachments: [], placeholders: [] }
         : { ...splitPastedSegments(slashCommandLine(joined) ?? joined), composed: [] };
@@ -172,10 +175,13 @@ function commentsOf(comments: MessageComment[], attachments: Attachment[]): User
 // E11 (scale-review C scalpel-2#1): `userTextOf`'s parse inverted, a comment put back in the framing it was sent in, so
 // an anchored bubble edited and resent keeps its anchor for the agent and its chip in the transcript. A `/btw`
 // promotion (no destination) had no lead or preamble to restore: its text is followed by the tag alone.
-// Ticket 733a: the words keep a leading segment's two line breaks (`commentWords`), as the anchored writer's do.
+// Ticket 733a: the words keep a leading segment's two line breaks (`commentWords`), as the anchored writer's do; a text
+// under another anchor with no destination is no form of MAWS's, and goes back as the pin wrote it (`isComposedAnchored`).
 export function anchoredTextOf(framed: { anchor: Anchor } & AnchorFrame, text: string): string {
   const { anchor, destination, screenshot } = framed;
-  return destination === null ? `${commentWords(text)}\n\n${anchorTag(anchor)}` : anchoredMessage({ anchor, text, destination, screenshot });
+  if (destination !== null) return anchoredMessage({ anchor, text, destination, screenshot });
+  const ours = isComposedAnchored({ comments: [{ anchor, text, screenshot }], destination });
+  return `${ours ? commentWords(text) : text.trim()}\n\n${anchorTag(anchor)}`;
 }
 
 // The engine's local-command echo (`/model`, `/status` and the like arrive as replayed user frames wrapped in these
