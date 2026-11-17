@@ -238,9 +238,10 @@ describe('the ignore check over a real repository', () => {
     expect(sorted(await check.names(repo.path('deep'), ['a.gen', 'b.out']))).toEqual(['b.out']);
   });
   // The panel's scalpel 2, second finding, with its input: the folder's `.git` is a gitdir pointer to another repository
-  // whose `core.worktree` names the folder above it. Git's own discovery would take that folder as the work tree and
-  // judge the names by its rules too; the check pins git to the folder the walk found (`GIT_WORK_TREE`).
-  it('judges a folder by its own rules when its .git points to another repository whose core.worktree names the folder above', async () => {
+  // whose `core.worktree` names the folder above it. Git's own discovery takes that folder as the work tree and would
+  // judge the names by its rules too; the check asks git where the work tree is and answers only where it is the folder
+  // the walk found (the delta's ruling: a mismatch gives no answer, as a terminal's git there names the other tree).
+  it('gives no answer for a folder whose .git points to another repository whose core.worktree names the folder above, beside the same layout without core.worktree judged by the folder’s own rules', async () => {
     const above = temp();
     writeFileSync(join(above, '.gitignore'), '*.log\n'); // a rule of the folder above, outside the tree the check is asked about
     const tree = join(above, 'inner');
@@ -248,10 +249,15 @@ describe('the ignore check over a real repository', () => {
     writeFileSync(join(tree, '.gitignore'), '*.tmp\n');
     for (const name of ['plain.txt', 'x.log', 'y.tmp']) writeFileSync(join(tree, name), 'x\n');
     const other = await repository();
-    await other.git('config', 'core.worktree', above);
     writeFileSync(join(tree, '.git'), `gitdir: ${other.path('.git')}\n`);
-    const check = checkOf({ env: other.serviceEnv() });
-    expect(sorted(await check.names(tree, ['plain.txt', 'x.log', 'y.tmp']))).toEqual(['y.tmp']); // the folder's own rule answers; the rule above does not
+    const spawns = recorded();
+    const check = checkOf({ env: other.serviceEnv(), execFile: spawns.execFile });
+    expect(sorted(await check.names(tree, ['plain.txt', 'x.log', 'y.tmp']))).toEqual(['y.tmp']); // the control: the folder's own rule answers; the rule above does not
+    await other.git('config', 'core.worktree', above);
+    const before = spawns.reads().length;
+    expect(await check.names(tree, ['plain.txt', 'x.log', 'y.tmp'])).toBeNull();
+    expect(spawns.reads().slice(before)).toEqual([]); // no read of the names is started
+    expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: git names another work tree for the folder/)]);
   });
 
   // Git checks who owns a repository it discovers, and skips the check for an explicit GIT_DIR (seen on the build VM's
@@ -331,6 +337,90 @@ describe('the ignore check over a real repository', () => {
     ownedByAnother(repo.path('.git/config')); // the common directory's config; the worktree's own git directory stays this user's
     expect(await check.names(worktree, ['trace.log'])).toBeNull();
   });
+
+  // The delta review's three findings: each a `.git` of this user's that the hand-read resolution read otherwise than
+  // git, so that the check approved one directory while git opened another, another user's. A spawn function that keeps
+  // what git was started for shows that no read is started for any of them.
+  const recorded = () => {
+    const made: string[] = [];
+    const execFile: ExecFileFn = (file, args, options, callback) => {
+      made.push(args.find((arg) => ['rev-parse', 'ls-files', 'check-ignore'].includes(arg)) ?? String(args[2]));
+      return execGit(file, args, options, callback);
+    };
+    return { execFile, reads: () => made.filter((sub) => sub !== 'rev-parse') };
+  };
+  // A folder whose `.git` is a gitdir pointer with `text` (`gitdir`), or a linked worktree whose `commondir` holds
+  // `text` (`commondir`); `mine` is this user's repository, `other` the one the stand-in gives another owner
+  const pointing = async (kind: 'gitdir' | 'commondir', text: (mine: string, other: string) => string) => {
+    const mine = await repository();
+    const other = await repository();
+    let tree: string;
+    if (kind === 'gitdir') {
+      tree = temp();
+      writeFileSync(join(tree, '.gitignore'), '*.log\n');
+      writeFileSync(join(tree, '.git'), `gitdir: ${text(mine.path('.git'), other.path('.git'))}\n`);
+    } else {
+      await mine.write('.gitignore', '*.log\n');
+      await mine.git('add', '.gitignore');
+      await mine.git('commit', '-q', '-m', 'rules');
+      tree = await mine.addWorktree('wt');
+      writeFileSync(mine.path('.git/worktrees/wt/commondir'), `${text(mine.path('.git'), other.path('.git'))}\n`);
+    }
+    writeFileSync(join(tree, 'a.log'), 'x\n');
+    const spawns = recorded();
+    return { other, tree, spawns, check: checkOf({ env: mine.serviceEnv(), execFile: spawns.execFile }) };
+  };
+  const refused = async ({ other, tree, spawns, check }: Awaited<ReturnType<typeof pointing>>) => {
+    expect(sorted(await check.names(tree, ['a.log']))).toEqual(['a.log']); // the control: every directory this user's
+    const before = spawns.reads().length;
+    ownedByAnother(other.root);
+    expect(await check.names(tree, ['a.log'])).toBeNull();
+    expect(spawns.reads().slice(before)).toEqual([]); // no read of the names is started
+    expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the repository belongs to another user/)]);
+  };
+
+  // Finding 1: git tells a gitdir pointer from a git directory by what the entry leads to (`stat`), so a link to a
+  // pointer file is read as a pointer
+  it('gives no answer, and starts no read, for a .git link to a gitdir pointer that leads into a repository another user owns, beside the same link leading into this user’s', async () => {
+    const other = await repository();
+    const tree = temp();
+    const place = temp();
+    writeFileSync(join(tree, '.gitignore'), '*.log\n');
+    writeFileSync(join(tree, 'a.log'), 'x\n');
+    writeFileSync(join(place, 'pointer'), `gitdir: ${other.path('.git')}\n`);
+    symlinkSync(join(place, 'pointer'), join(tree, '.git'));
+    const spawns = recorded();
+    await refused({ other, tree, spawns, check: checkOf({ env: other.serviceEnv(), execFile: spawns.execFile }) });
+  });
+
+  for (const kind of ['gitdir', 'commondir'] as const) {
+    // Finding 2: git strips only a line's trailing CR and LF from the path, so `x ` is not `x`
+    it(`gives no answer, and starts no read, for a ${kind} path ending in a space that leads into a repository another user owns while the same path without the space is this user’s, beside both this user’s`, async () => {
+      const base = temp();
+      await refused(
+        await pointing(kind, (mine, other) => {
+          symlinkSync(mine, join(base, 'x'));
+          symlinkSync(other, join(base, 'x '));
+          return `${base}/x `;
+        }),
+      );
+    });
+
+    // Finding 3: git resolves a link before the `..` after it, so `bridge/..` is the folder above where `bridge` leads
+    it(`gives no answer, and starts no read, for a ${kind} path whose .. follows a link into a repository another user owns while the same path read as text is this user’s, beside both this user’s`, async () => {
+      const base = temp();
+      const far = temp();
+      mkdirSync(join(far, 'child'));
+      await refused(
+        await pointing(kind, (mine, other) => {
+          symlinkSync(join(far, 'child'), join(base, 'bridge'));
+          symlinkSync(other, join(far, 'x'));
+          symlinkSync(mine, join(base, 'x'));
+          return `${base}/bridge/../x`;
+        }),
+      );
+    });
+  }
 
   // The ruling on mount points: git's discovery stops where the device changes between a folder and the one above it
   // (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so the walk stops there too. No mount can be made on the build VM without
