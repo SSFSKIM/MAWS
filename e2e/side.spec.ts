@@ -29,6 +29,7 @@ import type { AppSessionId } from '@shared/graph/ids'; // P2-E1
 import { frameAt, headerAction, importSeeded, mcpCalls, mcpResultOf, metaEvents, ofKind, pageUrlOf, resultText, seedArtifact } from './support/maws-tools'; // P2-E1; P3-L M6b; P3-F (case 12's evidence)
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar';
 import { hideSurfaces, mainTabById, mountedTabs, openArtifactInPanel, openSurface, sessionCards, sideColumn, sideTab, surface, surfaceRow } from './support/shell';
+const QUOTE_TAG = 'a1b2'; // ticket 733a M2: `quotedComment`'s tag id, passed so the project compiles; what each scene expects of the segment is M4's
 
 // E3's evidence screenshots, written only under MAWS_E3_SHOTS=1 (E11 W-E: a gate run leaves them alone); the cases'
 // both-themes token scans run either way.
@@ -1283,14 +1284,14 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
         type: 'text',
         text: commentsMessage(
           [
-            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED), screenshot: false },
-            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED), screenshot: false },
+            { anchor: removed, text: quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, QUOTE_TAG), screenshot: false },
+            { anchor: added, text: quotedComment(added, ROUNDING_LINE, COMMENT_ADDED, QUOTE_TAG), screenshot: false },
           ],
           'main',
         ),
       },
     ]);
-    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED)).toBe(`Before the change:\n\`${OLD_TOTAL_LINE}\`\n${COMMENT_REMOVED}`);
+    expect(quotedComment(removed, OLD_TOTAL_LINE, COMMENT_REMOVED, QUOTE_TAG)).toBe(`Before the change:\n\`${OLD_TOTAL_LINE}\`\n${COMMENT_REMOVED}`);
     // the transcript: one message, two chips, the two quoted lines as code, the removed one under its caption
     const main = mainRegion(page);
     await expect(main.getByText(REVIEW_REPLY)).toBeVisible({ timeout: 20_000 });
@@ -1320,7 +1321,7 @@ test.describe('side threads, Send to main and /btw (E3)', () => {
     const record = value(await invoke(page, 'session.get', { appSessionId: child as never }));
     expect(record?.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: PARENT, anchor: threaded, openedBy: 'comment' });
     expect(writtenUsers(maws, child).map((r) => r.frame.message!.content)).toEqual([
-      [{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD), screenshot: false }], 'thread') }],
+      [{ type: 'text', text: commentsMessage([{ anchor: threaded, text: quotedComment(threaded, NEW_TOTAL_LINE, COMMENT_THREAD, QUOTE_TAG), screenshot: false }], 'thread') }],
     ]);
     expect(writtenUsers(maws, parent), 'the main conversation received the one message').toHaveLength(2);
     expect(maws.consoleErrors()).toEqual([]);

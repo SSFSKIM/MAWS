@@ -188,6 +188,7 @@ import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's
 import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
 import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
 import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
+const QUOTE_TAG = 'a1b2'; // ticket 733a M2: `quotedComment`'s tag id, passed so the project compiles; what each scene expects of the segment is M4's
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -4545,7 +4546,7 @@ test('(a commit’s comment, to the peer) a comment this build wrote on a commit
   await withScratch('xb-u5b-comment', async (s) => {
     const sha = u5bRepo(s);
     const anchor = commitAnchor(U5B_APP, 3, sha);
-    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT, QUOTE_TAG), screenshot: false }], 'main');
     appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
     const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
 
@@ -4610,7 +4611,7 @@ test('(a commit’s side thread, to the peer) a side thread this build opened fr
     await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
     await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
     const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
-    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT, QUOTE_TAG), screenshot: false }], 'thread') }]]);
     const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
     expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
     // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
