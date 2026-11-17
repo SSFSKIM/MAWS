@@ -82,7 +82,7 @@ import { fileMime, isTextMime } from './mime';
 import type { Naming } from './named';
 import { sameIdentity, WatchTable, type Identity, type Installation } from './watch';
 
-export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */;
+export type BoundaryPoint = 'before-open' | 'after-walk' /* Linux: between the ancestors' walk and the open */ | 'after-open' | 'after-readdir' | 'after-watch-install' | 'before-batch' | 'before-named' /* U6c: before the transcript is asked */ | 'after-read' /* U6b-2: between a raw read's bytes and its second look at the descriptor */ | 'before-ignored' /* U6b-3a: between a listing's entries' reads and its ignore check */;
 export interface BoundaryHooks {
   // Test-only: awaited at each named point, at most once per step, with the path as given (`before-batch` with the
   // watched realpath), so a test can substitute the tree there deterministically. Undefined in the product.
@@ -110,6 +110,10 @@ export interface FilesServiceOptions {
   grants?: Pick<FileGrants, 'add' | 'has'>;
   sent?: (appSessionId: AppSessionId, real: string) => Promise<boolean>;
   own?: () => readonly string[];
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13): the names among
+  // a listed directory's entries that git ignores there (`createIgnoreCheck().names`), asked with the directory's
+  // confirmed realpath; null when git gives no answer. Absent: nothing is asked and no entry is marked.
+  ignored?: (dir: string, names: readonly string[]) => Promise<ReadonlySet<string> | null>;
 }
 
 // E2: what an operation may reach beyond the roots. Only looking at a file (`read`) and handing it to the OS

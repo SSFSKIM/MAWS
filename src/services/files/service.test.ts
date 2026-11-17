@@ -682,6 +682,75 @@ describe('files service listing and reading', () => {
   });
 });
 
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13, S1): a listing
+// carries `ignored: true` on the entries the ignore check names, asked after the entries' reads and the cut, before the
+// last confirmation; the check here is a function the test gives.
+describe('files service listing: what git ignores', () => {
+  const mixed = () => {
+    write(inRoot('mix', 'b.txt'), 'b');
+    write(inRoot('mix', 'A.txt'), 'a');
+    mkdirSync(inRoot('mix', 'zdir'));
+    mkdirSync(inRoot('mix', 'adir'));
+  };
+  const markedOf = (listing: { entries: { name: string }[] }) => listing.entries.filter((entry) => 'ignored' in entry).map((entry) => [entry.name, (entry as { ignored?: unknown }).ignored]);
+
+  it('marks exactly the names the check answers, drops a name the listing does not carry, and asks with the confirmed realpath and the names answered', async () => {
+    mixed();
+    symlinkSync(root, at('root-link'));
+    records.set(A, record(at('root-link')));
+    const ignored = vi.fn(async () => new Set(['zdir', 'b.txt', 'not-listed']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: at('root-link', 'mix') });
+    expect(listing.entries.map((entry) => entry.name)).toEqual(['adir', 'zdir', 'A.txt', 'b.txt']);
+    expect(markedOf(listing)).toEqual([['zdir', true], ['b.txt', true]]);
+    expect(ignored).toHaveBeenCalledTimes(1);
+    expect(ignored).toHaveBeenCalledWith(inRoot('mix'), ['adir', 'zdir', 'A.txt', 'b.txt']);
+  });
+
+  it('marks no entry when the check answers nothing, gives no answer or is absent, and never asks for the roots, beside a listing it marks', async () => {
+    mixed();
+    const marking = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored: marking }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]); // the control
+    const before = await service().list({ appSessionId: A, path: inRoot('mix') });
+    for (const ignored of [async () => new Set<string>(), async () => null]) {
+      const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') });
+      expect(markedOf(listing)).toEqual([]);
+      expect(JSON.stringify(listing)).toBe(JSON.stringify(before)); // byte for byte what it was
+    }
+    expect(markedOf(before)).toEqual([]);
+    marking.mockClear();
+    const roots = await service({ ignored: marking }).list({ appSessionId: A });
+    expect(marking).not.toHaveBeenCalled();
+    expect(markedOf(roots)).toEqual([]);
+  });
+
+  it('asks about at most the capped entries, in the answer’s order', async () => {
+    mkdirSync(inRoot('many'));
+    for (let i = 0; i <= FILES_LIST_MAX_ENTRIES; i++) writeFileSync(inRoot('many', `f${String(i).padStart(5, '0')}.txt`), '');
+    const ignored = vi.fn(async (_dir: string, names: readonly string[]) => new Set([names.at(-1)!, 'f05000.txt']));
+    const listing = await service({ ignored }).list({ appSessionId: A, path: inRoot('many') });
+    expect(listing.truncated).toBe(true);
+    const asked = ignored.mock.calls[0]![1];
+    expect(asked).toHaveLength(FILES_LIST_MAX_ENTRIES);
+    expect(asked).toEqual(listing.entries.map((entry) => entry.name));
+    expect(markedOf(listing)).toEqual([['f04999.txt', true]]); // the name past the cut is dropped
+  });
+
+  it('refuses the whole listing when the directory is swapped for a link at before-ignored', async () => {
+    mixed();
+    write(join(outside, 'mix', 'secret.txt'), 'outside');
+    points['before-ignored'] = () => swapToLink(inRoot('mix'), join(outside, 'mix'));
+    await expect(service({ ignored: async () => new Set(['b.txt']) }).list({ appSessionId: A, path: inRoot('mix') })).rejects.toThrow(OUT);
+  });
+
+  it('reaches before-ignored in a listing it answers, with nothing swapped (the control for the refusal)', async () => {
+    mixed();
+    points['before-ignored'] = () => undefined;
+    const ignored = vi.fn(async () => new Set(['b.txt']));
+    expect(markedOf(await service({ ignored }).list({ appSessionId: A, path: inRoot('mix') }))).toEqual([['b.txt', true]]);
+    expect(points['before-ignored']).toBeUndefined(); // the point was reached
+  });
+});
+
 describe('files openExternal', () => {
   beforeEach(() => {
     write(inRoot('doc.pdf'), '%PDF-1.4\n%%EOF\n');
