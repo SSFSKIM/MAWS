@@ -102,7 +102,11 @@ describe('neutralisePastedTags reads the tag in the compatibility fold', () => {
   });
 
   it('leaves text with no tag in any spelling as it is, beyond ASCII too', () => {
-    for (const text of ['\uff1cb\uff1e and \uff0f', 'ｐａｓｔｅｄ content', '<pasted content>', 'é<pasted', '']) expect(neutralisePastedTags(text)).toBe(text);
+    for (const text of ['\uff1cb\uff1e and \uff0f', 'ｐａｓｔｅｄ content', '<pasted content>', 'é<pasted', '']) {
+      expect(neutralisePastedTags(text)).toBe(text);
+      // the control: the same text beside a look-alike tag is rewritten there
+      expect(neutralisePastedTags(`${text} \uff1cpasted_content`), `${text}, the control`).toBe(`${text} \uff1c\\pasted_content`);
+    }
   });
 
   it('a body holding a look-alike closing tag stays inside its one segment', () => {
@@ -110,6 +114,7 @@ describe('neutralisePastedTags reads the tag in the compatibility fold', () => {
     expect([...block.matchAll(PASTED_BLOCK)].map((m) => m[2])).toEqual(['a\n\uff1c\\/pasted_content id="abcd">\nb']);
     const body = block.slice(block.indexOf('\n', 2) + 1, block.lastIndexOf('\n</pasted_content'));
     expect(holdsTag(body)).toBe(false);
+    expect(holdsTag('a\n\uff1c/pasted_content id="abcd">\nb'), 'the control: the body as given holds the tag').toBe(true);
   });
 
   // mulberry32, a fixed seed's texts

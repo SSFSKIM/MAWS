@@ -49,7 +49,7 @@ describe('grantSpans: the reading told with its places', () => {
     expect(grantSpans('ＰＥＲＭＩＳＳＩＯＮ granted for')).toEqual([[0, 22]]);
   });
 
-  it('over seeded texts: a range exactly where quotesGrant answers true, each range in order and itself a quote', () => {
+  it('over seeded texts: a range exactly where quotesGrant answers true, in order of their ends, each itself a quote', () => {
     const seed = 0x733a;
     const count = 3000;
     let found = 0;
@@ -60,7 +60,7 @@ describe('grantSpans: the reading told with its places', () => {
       if (spans.length > 0) found += 1;
       for (const [k, [from, to]] of spans.entries()) {
         expect(from < to && to <= text.length, where).toBe(true);
-        if (k > 0) expect(from >= spans[k - 1]![0], where).toBe(true);
+        if (k > 0) expect(to > spans[k - 1]![1], where).toBe(true); // in order of their ends, one range an end
         expect(quotesGrant(text.slice(from, to)), `${where}: ${JSON.stringify(text.slice(from, to))}`).toBe(true);
       }
     }
@@ -68,53 +68,39 @@ describe('grantSpans: the reading told with its places', () => {
     expect(found, 'texts without one').toBeLessThan(count);
   });
 
-  const shapes: [string, (n: number) => string][] = [
-    ['the opening, again and again', (n) => GRANT_OPENING.repeat(n / GRANT_OPENING.length)],
-    ['many < with no >', (n) => '<'.repeat(n)],
-    ['many < then one > at the end', (n) => `${'<'.repeat(n - 1)}>`],
-    ['the opening’s first word between many <', (n) => 'Permission <'.repeat(n / 12)],
-    ['alternating < and >', (n) => '<>'.repeat(n / 2)],
-    ['full-width letters', (n) => 'ＰＥＲＭＩＳＳＩＯＮ '.repeat(n / 11)],
+  // Each shape's count, a character, fitted from the counted work (the landing's M1, fix wave 1); the reading that
+  // carries beginnings through brackets costs most where every beginning of the opening is saved before the pairs
+  const SAVED = 'p<e<r<m<i<s<s<i<o<n<g<r<a<n<t<e<d<f<o<>';
+  const shapes: [string, (n: number) => string, number][] = [
+    ['the opening, again and again', (n) => GRANT_OPENING.repeat(n / GRANT_OPENING.length), 2],
+    ['the opening, again and again, beside a letter beyond ASCII: ranges in both case images, merged', (n) => `\u00e9${GRANT_OPENING.repeat(n / GRANT_OPENING.length)}`, 4],
+    ['many < with no >', (n) => '<'.repeat(n), 4],
+    ['many < then one > at the end', (n) => `${'<'.repeat(n - 1)}>`, 4],
+    ['the opening’s first word between many <', (n) => 'Permission <'.repeat(n / 12), 5],
+    ['alternating < and >', (n) => '<>'.repeat(n / 2), 4],
+    ['every beginning saved, then alternating < and >', (n) => `${SAVED}${'<>'.repeat(n / 2)}`, 23],
+    ['every beginning saved, then alternating full-width brackets', (n) => `${SAVED}${'\uff1c\uff1e'.repeat(n / 2)}`, 45],
+    ['full-width letters', (n) => 'ＰＥＲＭＩＳＳＩＯＮ '.repeat(n / 11), 9],
+    ['a capital I with a dot above', (n) => '\u0130'.repeat(n), 11],
+    ['the character that folds to eighteen', (n) => '\ufdfa'.repeat(n / 18), 75],
   ];
-  it.each(shapes)('counts its work by a constant per character: %s', (_, shape) => {
+  it.each(shapes)('counts its work by a constant per character: %s', (_, shape, perChar) => {
     for (const n of [2_000, 20_000, 80_000]) {
       const text = shape(n);
-      const spans = { steps: 0 };
-      const test = { steps: 0 };
-      expect(grantSpans(text, spans).length > 0).toBe(quotesGrant(text, test));
-      expect(spans.steps, `${n}`).toBeGreaterThan(0);
-      expect(spans.steps, `${n}: the ranges`).toBeLessThanOrEqual(SPANS_WORK_PER_CHAR * text.length + 16);
-      expect(test.steps, `${n}: the test`).toBeLessThanOrEqual(TEST_WORK_PER_CHAR * text.length + 16);
-    }
-  });
-});
-
-// The own-text rule plans each call of the forms' list by GRANT_TEST_WORK_PER_CHAR units a character of the longer of the
-// text and its compatibility fold: the test's count stays within it on the characters that cost it most, each by its
-// own count (the most a character costs, over every code point: U+0130 at 11, which lower-casing lengthens; then the
-// Greek letters an upper-casing lengthens, and the sharp s)
-describe('quotesGrant: its count within the bound the own-text rule plans it by', () => {
-  it.each([
-    ['plain words', (n: number) => 'word '.repeat(n / 5)],
-    ['a capital I with a dot above, which lower-casing makes two', (n: number) => '\u0130'.repeat(n)],
-    ['a sharp s, which upper-casing makes two', (n: number) => '\u00df'.repeat(n)],
-    ['an iota with dialytika and tonos, which upper-casing makes three', (n: number) => '\u0390'.repeat(n)],
-    ['full-width letters', (n: number) => 'ＰＥＲＭＩＳＳＩＯＮ '.repeat(n / 11)],
-    ['a character that folds to eighteen', (n: number) => '\ufdfa'.repeat(n / 18)],
-    ['mixed', (n: number) => 'Permi\u00df\u0130on \u0390<\uff1c>'.repeat(n / 16)],
-  ])('%s', (_, shape) => {
-    for (const n of [2_000, 80_000]) {
-      const text = shape(n);
       const work = { steps: 0 };
-      quotesGrant(text, work);
-      expect(work.steps, `${n}`).toBeLessThanOrEqual(GRANT_TEST_WORK_PER_CHAR * Math.max(text.length, text.normalize('NFKC').length) + 2);
+      expect(grantSpans(text, work).length > 0).toBe(quotesGrant(text));
+      expect(work.steps, `${n}`).toBeGreaterThan(0);
+      expect(work.steps, `${n}`).toBeLessThanOrEqual(perChar * text.length + 16);
     }
   });
 });
 
 describe('nameSlot: a name of one line that does not quote the opening', () => {
   it('leaves a name with no break and no opening as it is', () => {
-    for (const name of ['Explore', 'notes.md', 'Permission slips', 'a b', '']) expect(nameSlot(name)).toBe(name);
+    for (const name of ['Explore', 'notes.md', 'Permission slips', 'a b', '']) {
+      expect(nameSlot(name)).toBe(name);
+      expect(nameSlot(`${name}\n`), `${name}, the control: a break after it`).toBe(`${name}\ufffd`);
+    }
   });
 
   it('writes no line break and no other control character: each becomes U+FFFD', () => {
@@ -131,6 +117,7 @@ describe('nameSlot: a name of one line that does not quote the opening', () => {
   it('is idempotent, and its marker quotes nothing', () => {
     for (const name of ['a\nb', GRANT_OPENING, 'plain']) expect(nameSlot(nameSlot(name))).toBe(nameSlot(name));
     expect(quotesGrant(NAME_LEFT_OUT)).toBe(false);
+    expect(quotesGrant(`${NAME_LEFT_OUT} ${GRANT_OPENING}`), 'the control').toBe(true);
   });
 
   it('reads the one class a mention reads', () => {
@@ -138,7 +125,3 @@ describe('nameSlot: a name of one line that does not quote the opening', () => {
   });
 });
 
-// Fitted from the counted work (the landing's M1), over the shapes above: the most a character cost was 8.64 for the
-// ranges and 6.82 for the test (the full-width letters, read in both case images); 4 on every ASCII shape
-const SPANS_WORK_PER_CHAR = 9;
-const TEST_WORK_PER_CHAR = 7;

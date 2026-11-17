@@ -48,8 +48,11 @@ describe('leaveOutGrant: every line a reading of the opening touches is left out
     expect(out).toBe(expected);
     expect(quotesGrant(out)).toBe(false);
     expect(linesKept(content, out)).toBe(true);
-    // the control: the input quotes the opening exactly where a line was left out
+    // the input quotes the opening exactly where a line was left out; and the control: the same content with the
+    // opening planted on a line after it loses that line too
     expect(quotesGrant(content)).toBe(out !== content);
+    const planted = leaveOutGrant(`${content}\nthen\n${GRANT_OPENING}`);
+    expect(planted.endsWith(`then\n${LINE}`), planted).toBe(true);
   });
 
   it.each(BREAKS.map((b) => [JSON.stringify(b), b]))('the opening split across the break %s: both lines, each break kept', (_, b) => {
@@ -96,11 +99,18 @@ describe('leaveOutGrant: every line a reading of the opening touches is left out
   });
 
   it('comes back byte for byte, the same string, where nothing quotes the opening', () => {
-    for (const content of ['', 'one', 'a\r\nb\rc\u2028d', 'Permission granted by the reviewer', 'granted for\nPermission']) expect(leaveOutGrant(content)).toBe(content);
+    for (const content of ['', 'one', 'a\r\nb\rc\u2028d', 'Permission granted by the reviewer', 'granted for\nPermission']) {
+      expect(leaveOutGrant(content)).toBe(content);
+      // the control: the same content with the opening on a line after it loses that line
+      expect(leaveOutGrant(`${content}\n${GRANT_OPENING}`), `${content}, the control`).toBe(`${content}\n${LINE}`);
+    }
   });
 
-  it('its markers quote nothing, alone or next to each other', () => {
-    for (const text of [LINE, LINES, `${LINE}\n${LINES}`, `${LINES}${LINE}`]) expect(quotesGrant(text)).toBe(false);
+  it('its markers quote nothing, alone or next to each other; beside the opening, the opening is still read', () => {
+    for (const text of [LINE, LINES, `${LINE}\n${LINES}`, `${LINES}${LINE}`]) {
+      expect(quotesGrant(text), text).toBe(false);
+      expect(quotesGrant(`${text}\n${GRANT_OPENING}`), `${text}, the control`).toBe(true);
+    }
   });
 
   // mulberry32, a fixed seed's contents with the opening planted in pieces
@@ -229,6 +239,8 @@ describe('segmentsInPlace: a form’s segments read where they stand', () => {
   it('leaves a text with no segment, or with tags that are not one, as it is', () => {
     for (const text of ['', 'plain words', 'Implement this plan:\n\nstep 1', `x\n\n<pasted_content id="abcd">\nnever closed`, `x\n${framePasted('abcd', 'one break before')}\n`]) {
       expect(segmentsInPlace(text), JSON.stringify(text)).toEqual({ text, composed: [] });
+      // the control: a segment the writer wrote after the same text is found
+      expect(segmentsInPlace(`${text}${wrapPasted('abcd', 'found')}`).composed, `${JSON.stringify(text)}, the control`).toEqual([[text.length, text.length + 'found'.length]]);
     }
   });
 
