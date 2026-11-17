@@ -362,7 +362,11 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
   it('too narrow: ⌘P from the tab’s own file, then Esc in the empty field, shows the file again and only then puts the keyboard back in it', async () => {
     render(<Page />);
     await openBeside(NARROW);
-    const origin = await waitFor(() => document.querySelector<HTMLElement>('[data-file-viewer] .cm-content')!);
+    const origin = await waitFor(() => {
+      const text = document.querySelector<HTMLElement>('[data-file-viewer] .cm-content');
+      expect(text).not.toBeNull();
+      return text!;
+    });
     act(() => origin.focus());
     expect(document.activeElement).toBe(origin);
     const asked: boolean[] = []; // for each focus asked of the file's text: could it take the keyboard then
