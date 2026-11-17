@@ -622,7 +622,7 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
   Evidence: `c9bd7af9c-DlJ4cmuC.js:8449-8459` (the effect), `:8512` (the press), `:8477-8495` (Esc), `:8660-8663` (blur).
 
 - Observation: git lists a clean submodule among a repository's files, as its path with no trailing slash, and says what it is only with `--stage` (the delta review's finding 5).
-  Evidence: a scratch repository on a Mac, git 2.55.0, with a tracked file, an untracked file whose name holds a tab, and a submodule: `ls-files --cached --others --exclude-standard -z` answers `…|a.txt|vendor/sub|`; with `--stage` the tracked entries are `100644 <id> 0`, a tab and the path, the untracked ones the bare path, and the submodule `160000 <id> 0`, a tab and `vendor/sub`.
+  Evidence: a scratch repository on a Mac, with a tracked file, an untracked file whose name holds a tab, and a submodule: `ls-files --cached --others --exclude-standard -z` answers `…|a.txt|vendor/sub|`; with `--stage` the tracked entries are `100644 <id> 0`, a tab and the path, the untracked ones the bare path, and the submodule `160000 <id> 0`, a tab and `vendor/sub`.
 
 ## Decision Log
 
