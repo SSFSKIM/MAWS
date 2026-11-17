@@ -13,8 +13,13 @@
 // another tree's rules; and before each call every ask's folder is confirmed at the very spelling git is handed (its
 // realpath that spelling, the object the service opened) and the `.git` as the walk found it, so a substitution made
 // between the walk and the run is refused before git reads anything. An explicit GIT_DIR skips git's own check of who
-// owns a repository, so the walk makes it: the folder and its `.git` must be this user's. The threat model, and what it
-// leaves: whoever can write a `.git` the daemon's user owns already runs code as that user (a hook, in a terminal's
+// owns a repository (`safe.directory`), so the check makes one over what git will read (Decision Log 18, as ruled): the
+// folder and its `.git` entry, and, by `stat`, the git directory the entry leads to as git resolves it (a folder, a link
+// followed, a gitdir pointer read), a linked worktree's common directory, and the `config` in each, all this user's;
+// that resolution is made again before each call and must name the same directories, so a pointer rewritten in place
+// is caught too. The walk stops where the device changes above the asked folder, as git's discovery does
+// (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so a folder below a mount point is judged by nothing. The threat model, and
+// what it leaves: whoever can write a `.git` the daemon's user owns already runs code as that user (a hook, in a terminal's
 // git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that stands when the
 // listing's last confirmation runs is refused there; one made and undone while git itself runs is not seen, and can
 // answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a restore between a
@@ -43,7 +48,7 @@
 // its input to the end, answers into a pipe nobody reads and exits (decision 13's last paragraph).
 import type { ChildProcess } from 'node:child_process';
 import fs, { type BigIntStats } from 'node:fs';
-import { dirname, join, relative, sep } from 'node:path';
+import { dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
 import { createGitRunner, execGit, GitCommandError, GitTimeoutError, NotARepositoryError, type ExecFileFn, type GitRun } from '../git/runner';
 import { sameIdentity, type Identity } from './watch';
 
@@ -72,6 +77,7 @@ interface Ask {
   rel: string; // the directory from its repository's root; '' for the root itself
   opened: Identity | null; // the object `dir` must still name, once known
   marker: Identity | null; // the repository's `.git` as the walk found it
+  repo: string; // the directories the `.git` led git to at the walk, with their identities (`repositoryAt`)
   batch: Batch | null; // the run it joined, once its repository is known
   answer(value: ReadonlySet<string> | null): void; // the first call settles; later ones do nothing
 }
@@ -184,11 +190,12 @@ export function createIgnoreCheck(
     // Before each call: the asks whose folder and repository are still what was confirmed; the others get no answer
     const holding = async (): Promise<Ask[]> => {
       const marker = await fs.promises.lstat(join(root, '.git'), { bigint: true }).catch(() => null);
+      const repo = marker === null ? null : await repositoryAt(root, marker);
       const asked = live();
-      const held = await Promise.all(asked.map(async (ask) => marker !== null && sameIdentity(marker, ask.marker!) && (await stillNames(ask.dir, ask.opened!))));
+      const held = await Promise.all(asked.map(async (ask) => marker !== null && sameIdentity(marker, ask.marker!) && repo === ask.repo && (await stillNames(ask.dir, ask.opened!))));
       asked.forEach((ask, i) => {
         if (held[i] || !pending.has(ask)) return;
-        noAnswer('the folder or its repository changed before git ran');
+        noAnswer(repo === OWNED_ELSEWHERE ? 'the repository belongs to another user' : 'the folder or its repository changed before git ran');
         ask.answer(null);
       });
       return live();
@@ -243,6 +250,7 @@ export function createIgnoreCheck(
           rel: '',
           opened: opened ?? null,
           marker: null,
+          repo: '',
           batch: null,
           answer: (value) => {
             if (!pending.delete(ask)) return;
@@ -262,7 +270,8 @@ export function createIgnoreCheck(
         }, allowanceMs);
         pending.add(ask);
         const known = opened === undefined ? fs.promises.stat(dir, { bigint: true }).catch(() => null) : Promise.resolve(opened);
-        void Promise.all([repositoryOf(dir, () => pending.has(ask)), known]).then(([found, identity]) => {
+        const device = known.then((identity) => identity?.dev ?? null);
+        void Promise.all([repositoryOf(dir, device, () => pending.has(ask)), known]).then(([found, identity]) => {
           if (!pending.has(ask)) return;
           if (found === null || identity === null) return ask.answer(null); // no repository, inside a `.git` folder, or gone: no answer, and silent
           if (found === OWNED_ELSEWHERE) {
@@ -272,6 +281,7 @@ export function createIgnoreCheck(
           ask.rel = relative(found.root, dir);
           ask.opened = identity;
           ask.marker = found.marker;
+          ask.repo = found.repo;
           enter(found.root, ask);
         });
       });
@@ -299,23 +309,57 @@ export function createIgnoreCheck(
 const OWNED_ELSEWHERE = 'owned elsewhere';
 
 // The repository that holds `dir` (an absolute realpath), as git's discovery finds it from there in read mode: the
-// nearest folder at or above it with a `.git` entry, and that entry's identity. Null inside a `.git` folder, where no
-// work tree is, in no repository, and once `live` says the ask is answered (its bound passed, the check disposed: the
-// branch panel's scalpel 1); `OWNED_ELSEWHERE` when the folder or its `.git` is another user's, which git's discovery
-// refuses and an explicit GIT_DIR would not. Unlike git it does not stop at a mount point, and a folder whose `.git` is
-// no repository is judged by nothing: git, named that `.git`, fails, where its discovery would go on to the one above.
-async function repositoryOf(dir: string, live: () => boolean): Promise<{ root: string; marker: BigIntStats } | typeof OWNED_ELSEWHERE | null> {
+// nearest folder at or above it with a `.git` entry, that entry's identity, and the directories it leads git to
+// (`repositoryAt`). Null inside a `.git` folder, where no work tree is, in no repository, above a change of device (git's
+// discovery stops at a filesystem boundary: it compares each folder above with the device of the one it started in,
+// `device`), for a `.git` that leads git to no directory, and once `live` says the ask is answered (its bound passed, the
+// check disposed: the branch panel's scalpel 1); `OWNED_ELSEWHERE` when the folder, its `.git` or what that leads git
+// to is another user's. A folder whose `.git` is no repository is judged by nothing: git, named that `.git`, fails.
+async function repositoryOf(dir: string, device: Promise<bigint | null>, live: () => boolean): Promise<{ root: string; marker: BigIntStats; repo: string } | typeof OWNED_ELSEWHERE | null> {
   if (dir.split(sep).includes('.git')) return null;
   for (let at = dir; live(); at = dirname(at)) {
+    let folder: BigIntStats | null = null;
+    if (at !== dir) {
+      const [here, start] = await Promise.all([fs.promises.lstat(at, { bigint: true }).catch(() => null), device]);
+      if (here === null || start === null || here.dev !== start) return null;
+      folder = here;
+    }
     const marker = await fs.promises.lstat(join(at, '.git'), { bigint: true }).catch(() => null);
     if (marker !== null) {
-      const folder = await fs.promises.lstat(at, { bigint: true }).catch(() => null);
+      folder ??= await fs.promises.lstat(at, { bigint: true }).catch(() => null);
       if (folder === null) return null;
-      return ownedHere(marker) && ownedHere(folder) ? { root: at, marker } : OWNED_ELSEWHERE;
+      if (!ownedHere(marker) || !ownedHere(folder)) return OWNED_ELSEWHERE;
+      const repo = await repositoryAt(at, marker);
+      return repo === null || repo === OWNED_ELSEWHERE ? repo : { root: at, marker, repo };
     }
     if (dirname(at) === at) return null;
   }
   return null;
+}
+
+// The directories `<root>/.git` leads git to, as git resolves them, with their identities, as one string two
+// resolutions are compared by: the git directory (the folder, a link followed, or the path a gitdir pointer names, read
+// relative to `root` as git reads it) and, for a linked worktree, the common directory its `commondir` names. Each of
+// them, and the `config` in each where there is one, must be this user's by `stat`, which follows a link to what git
+// reads (the ruling on ownership: an explicit GIT_DIR skips git's own check; a root-owned one passes git's only for git
+// run as root, which the daemon never is). Null when the entry leads git to no directory.
+async function repositoryAt(root: string, marker: BigIntStats): Promise<string | typeof OWNED_ELSEWHERE | null> {
+  const entry = join(root, '.git');
+  let gitDir: string | null;
+  if (marker.isFile()) {
+    const text = (await fs.promises.readFile(entry, 'utf8').catch(() => null))?.trimEnd() ?? null;
+    gitDir = text?.startsWith('gitdir: ') ? await fs.promises.realpath(resolvePath(root, text.slice('gitdir: '.length))).catch(() => null) : null;
+  } else gitDir = await fs.promises.realpath(entry).catch(() => null);
+  if (gitDir === null) return null;
+  const pointed = (await fs.promises.readFile(join(gitDir, 'commondir'), 'utf8').catch(() => null))?.trimEnd() ?? null;
+  const common = pointed === null ? null : await fs.promises.realpath(resolvePath(gitDir, pointed)).catch(() => null);
+  if (pointed !== null && common === null) return null;
+  const dirs = common === null ? [gitDir] : [gitDir, common];
+  const stats = await Promise.all(dirs.map((dir) => fs.promises.stat(dir, { bigint: true }).catch(() => null)));
+  const configs = await Promise.all(dirs.map((dir) => fs.promises.stat(join(dir, 'config'), { bigint: true }).catch(() => null)));
+  if (stats.some((stat) => stat === null)) return null;
+  if (![...stats, ...configs].every((stat) => stat === null || ownedHere(stat))) return OWNED_ELSEWHERE;
+  return dirs.map((dir, i) => `${dir}\0${stats[i]!.dev}:${stats[i]!.ino}`).join('\0');
 }
 
 // Whether this process's user owns the entry, as git's own check of a discovered repository asks (`lstat`'s owner)

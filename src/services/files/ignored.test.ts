@@ -363,7 +363,7 @@ function fakeRepo(...dirs: string[]): string {
 }
 // Lets the asks' walks to their repositories, which read the disk, finish (they cannot be awaited from outside)
 async function settle(): Promise<void> {
-  for (let i = 0; i < 10; i++) {
+  for (let i = 0; i < 20; i++) {
     await lstat(tmpdir()).catch(() => undefined);
     await new Promise((resolve) => setImmediate(resolve));
   }
