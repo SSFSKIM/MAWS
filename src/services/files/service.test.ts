@@ -3024,6 +3024,52 @@ describe('files saves outside the folders', () => {
         nothingTouchedIn(seen, inHome('Documents'));
       });
 
+      // The branch review (scalpel-2#1; Decision Log 33 (1)): a walk that cannot finish refuses as protected, and nothing
+      // resolves the path unchecked after it
+      it('refuses as protected a claimed read and a hash-checked save through a folder the walk cannot list (0111) holding a link into a private folder, with open or without, touching nothing inside it', async () => {
+        mkdirSync(at('passage'));
+        symlinkSync(inHome('Documents'), at('passage', 'to-docs'));
+        write(at('passage', 'beside.txt'), 'beside as it was\n');
+        const via = at('passage', 'to-docs', 'private.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'beside.txt')))]);
+        const files = remoteService();
+        chmodSync(at('passage'), 0o111); // entered by name, never listed: the walk cannot read its entries
+        try {
+          const seen = recordTouches();
+          for (const open of [{}, { open: true }]) {
+            await expect(readThere(files, A, via, 'op-read', open), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+            await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), ...open }, claimed('op-save')), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
+          }
+          nothingTouchedIn(seen, inHome('Documents'));
+          expect(seen.filter((entry) => entry === `realpath ${via}`), 'the path is never resolved unchecked').toEqual([]);
+          // fail closed: a file of that folder itself, which the walk cannot see either, is refused the same way
+          await expect(readThere(files, A, at('passage', 'beside.txt'))).rejects.toMatchObject(protectedRefusal);
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+        expect(readFileSync(secret(), 'utf8')).toBe('private as it was\n');
+        expect(readFileSync(at('passage', 'beside.txt'), 'utf8')).toBe('beside as it was\n');
+      });
+
+      it('the control: through a folder the walk can list, a link to an ordinary folder reads and saves a named file; a named file gone from a folder it cannot list still says it is gone', async () => {
+        mkdirSync(at('passage'));
+        write(at('plain', 'notes.txt'), 'plain as it was\n');
+        symlinkSync(at('plain'), at('passage', 'to-plain'));
+        const via = at('passage', 'to-plain', 'notes.txt');
+        await transcriptOf(A, [said(link(via)), said(link(at('passage', 'gone.txt')))]);
+        const files = remoteService();
+        expect(await readThere(files, A, via)).toMatchObject({ content: 'plain as it was\n', named: true, outside: { real: at('plain', 'notes.txt'), writable: true } });
+        expect(await saveThere(files, A, via, 'saved there\n')).toEqual({ status: 'ok', hash: sha('saved there\n') });
+        expect(readFileSync(at('plain', 'notes.txt'), 'utf8')).toBe('saved there\n');
+        chmodSync(at('passage'), 0o111);
+        try {
+          await expect(readThere(files, A, at('passage', 'gone.txt'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+          await expect(files.writeOutside({ appSessionId: A, path: at('passage', 'gone.txt'), content: 'pwned\n', expectedHash: sha(''), real: at('passage', 'gone.txt') }, claimed('op-gone'))).rejects.toThrow(new Error(`not found: ${at('passage', 'gone.txt')}`));
+        } finally {
+          chmodSync(at('passage'), 0o755);
+        }
+      });
+
       it('walks no path under one of the caller’s roots: a root inside a private folder reads and saves without open', async () => {
         records.set(B, record(inHome('Documents', 'deep')));
         const files = remoteService();
