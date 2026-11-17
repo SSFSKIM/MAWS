@@ -7,27 +7,29 @@
 // inside a submodule or a nested repository is judged by that repository's own rules. A directory inside a `.git`
 // folder, and one in no repository, starts no git and has no answer.
 //
-// Git runs only in the repository the walk found, for folders that are still what the files service confirmed (the
-// branch panel's security findings): each call names that `.git` as GIT_DIR and its folder as GIT_WORK_TREE, so neither
-// git's own discovery nor a `core.worktree` in the configuration a gitdir pointer leads to can judge the names by
-// another tree's rules; and before each call every ask's folder is confirmed at the very spelling git is handed (its
-// realpath that spelling, the object the service opened) and the `.git` as the walk found it, so a substitution made
-// between the walk and the run is refused before git reads anything. An explicit GIT_DIR skips git's own check of who
-// owns a repository (`safe.directory`), so the check makes one over what git will read (as the architect ruled): the
-// folder and its `.git` entry, and, by `stat`, the git directory the entry leads to as git resolves it (a folder, a link
-// followed, a gitdir pointer read), a linked worktree's common directory, and the `config` in each, all this user's;
-// that resolution is made again before each call and must name the same directories, so a pointer rewritten in place
-// is caught too. The walk stops where the device changes above the asked folder, as git's discovery does
-// (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so a folder below a mount point is judged by nothing. The threat model, and
-// what it leaves: whoever can write a `.git` the daemon's user owns already runs code as that user (a hook, in a terminal's
-// git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that stands when the
-// listing's last confirmation runs is refused there; one made and undone while git itself runs is not seen, and can
-// answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a restore between a
-// listing's reads and its last confirmation can show outside names (service.ts).
+// Git runs only in the repository git itself names, for folders that are still what the files service confirmed (the
+// branch panel's security findings, the delta review's): before each call every ask's folder is confirmed at the very
+// spelling git is handed (its realpath that spelling, the object the service opened) and the `.git` as the walk found
+// it (the same object, and a gitdir pointer not rewritten since), and then git is asked where the repository is, from
+// the repository's root by its own discovery, with no GIT_DIR (`git rev-parse`): git reads the `.git` entry, a gitdir
+// pointer and a `commondir` itself, and makes its own check of who owns what it found (the runner resets
+// `safe.directory`). That check reads a `.git` link's own owner, not its target's, so the check makes one of its own
+// over what git will read (as the architect ruled): the git directory and the common directory git printed, and the
+// `config` in each, this user's by `stat`; and the work tree git printed must be the folder the walk found, so neither a
+// `core.worktree` nor a pointer that leads elsewhere can judge the names by another tree's rules. The call is then pinned
+// to that answer (GIT_DIR, GIT_COMMON_DIR and GIT_WORK_TREE), so git reads no pointer again; the answer is asked again
+// before the run's second call and must name the same directories, so a pointer rewritten in place is caught too. The
+// walk stops where the device changes above the asked folder, as git's discovery does (GIT_DISCOVERY_ACROSS_FILESYSTEM
+// unset), so a folder below a mount point is judged by nothing; the walk's stop comes first and starts no git. The threat
+// model, and what it leaves: whoever can write a `.git` the daemon's user owns already runs code as that user (a hook, in
+// a terminal's git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that stands
+// when the listing's last confirmation runs is refused there; one made and undone while git itself runs is not seen, and
+// can answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a restore between
+// a listing's reads and its last confirmation can show outside names (service.ts).
 //
 // The asks of one repository share its runs: while a run of the repository is in flight, or waits for a place, the asks
 // that arrive join its next run (Decision Log 10).
-// A run is two git calls in read mode in the repository's root: `git --literal-pathspecs ls-files -z -- <dir>/…` for
+// A run is two git calls in read mode in the repository's root, each after the question of where it is: `git --literal-pathspecs ls-files -z -- <dir>/…` for
 // the joined directories, whose paths name what is tracked in each, then `git check-ignore --no-index -z --stdin` on
 // every joined name that is no tracked path nor the first segment of one, each sent as `./<dir>/<name>` (the `./`
 // keeps a name that begins with `:` a name; check-ignore refuses literal pathspecs, and matches a name's `*` or `[` as
@@ -48,7 +50,7 @@
 // its input to the end, answers into a pipe nobody reads and exits (decision 13's last paragraph).
 import type { ChildProcess } from 'node:child_process';
 import fs, { type BigIntStats } from 'node:fs';
-import { dirname, join, relative, resolve as resolvePath, sep } from 'node:path';
+import { dirname, join, relative, sep } from 'node:path';
 import { createGitRunner, execGit, GitCommandError, GitTimeoutError, NotARepositoryError, type ExecFileFn, type GitRun } from '../git/runner';
 import { sameIdentity, type Identity } from './watch';
 
@@ -76,8 +78,7 @@ interface Ask {
   deadline: number; // Date.now() at which the allowance ends
   rel: string; // the directory from its repository's root; '' for the root itself
   opened: Identity | null; // the object `dir` must still name, once known
-  marker: Identity | null; // the repository's `.git` as the walk found it
-  repo: string; // the directories the `.git` led git to at the walk, with their identities (`repositoryAt`)
+  marker: BigIntStats | null; // the repository's `.git` as the walk found it
   batch: Batch | null; // the run it joined, once its repository is known
   answer(value: ReadonlySet<string> | null): void; // the first call settles; later ones do nothing
 }
@@ -103,10 +104,9 @@ export function createIgnoreCheck(
   const idle: (() => void)[] = []; // `dispose`'s waiters, called when `children` is empty
   // Each run's own runner, over a spawn function that keeps every child it starts, in the check's set and in the run's,
   // until that child's `close`: after a timeout the runner gives a run up at its SIGKILL, before the child has closed,
-  // and the run's place is freed only once its own set is empty (Decision Log 12). Every call names the repository the
-  // walk found to git, its `.git` and its folder as the work tree (the panel's security findings).
-  const runnerFor = (owned: Owned, root: string) => {
-    const pinned = { GIT_DIR: join(root, '.git'), GIT_WORK_TREE: root };
+  // and the run's place is freed only once its own set is empty (Decision Log 12). `pinned`: the repository a read is
+  // named to git by; the question of where the repository is is asked with none.
+  const runnerFor = (owned: Owned, pinned: Record<string, string> = {}) => {
     const keeping: ExecFileFn = (file, args, execOptions, callback) => {
       const child = execFile(file, args, { ...execOptions, env: { ...execOptions.env, ...pinned } }, callback);
       if (child) {
@@ -173,7 +173,7 @@ export function createIgnoreCheck(
       const now = Date.now();
       observe?.({ kind: 'run', waitedMs: batch.asks.map((ask) => now - ask.asked) });
       const owned: Owned = { children: new Set(), closed: [] };
-      void carry(batch, runnerFor(owned, batch.root))
+      void carry(batch, owned)
         .then(() => allClosed(owned))
         .finally(() => {
           running--; // the run has really ended, its every child closed: its place, and its repository, are free
@@ -183,19 +183,23 @@ export function createIgnoreCheck(
     }
   };
 
-  async function carry({ root, asks }: Batch, run: GitRun): Promise<void> {
+  async function carry({ root, asks }: Batch, owned: Owned): Promise<void> {
     const deadline = Math.max(...asks.map((ask) => ask.deadline));
-    const rest = () => Math.max(1, deadline - Date.now()); // both calls share the latest deadline the run carries
+    const rest = () => Math.max(1, deadline - Date.now()); // every call shares the latest deadline the run carries
     const live = () => asks.filter((ask) => pending.has(ask));
-    // Before each call: the asks whose folder and repository are still what was confirmed; the others get no answer
+    const asking = runnerFor(owned); // where the repository is: git's own discovery
+    let named: Repository | null = null; // the repository git named before the run's first call
+    // Before each call: the asks whose folder and `.git` are still what was confirmed, in the repository git names now,
+    // the one it named before the first call; the others get no answer
     const holding = async (): Promise<Ask[]> => {
       const marker = await fs.promises.lstat(join(root, '.git'), { bigint: true }).catch(() => null);
-      const repo = marker === null ? null : await repositoryAt(root, marker);
       const asked = live();
-      const held = await Promise.all(asked.map(async (ask) => marker !== null && sameIdentity(marker, ask.marker!) && repo === ask.repo && (await stillNames(ask.dir, ask.opened!))));
+      const held = await Promise.all(asked.map(async (ask) => marker !== null && sameMarker(marker, ask.marker!) && (await stillNames(ask.dir, ask.opened!))));
+      const found = held.includes(true) ? await repositoryAt(root, asking, rest()) : CHANGED;
+      if (typeof found !== 'string') named ??= found;
       asked.forEach((ask, i) => {
-        if (held[i] || !pending.has(ask)) return;
-        noAnswer(repo === OWNED_ELSEWHERE ? 'the repository belongs to another user' : 'the folder or its repository changed before git ran');
+        if ((held[i] && typeof found !== 'string' && found.key === named!.key) || !pending.has(ask)) return;
+        noAnswer(held[i] && typeof found === 'string' ? found : CHANGED);
         ask.answer(null);
       });
       return live();
@@ -203,6 +207,8 @@ export function createIgnoreCheck(
     try {
       const listed = await holding();
       if (listed.length === 0) return; // nothing left to ask: no git runs
+      const { gitDir, commonDir } = named!;
+      const run = runnerFor(owned, { GIT_DIR: gitDir, GIT_COMMON_DIR: commonDir, GIT_WORK_TREE: root });
       const rels = [...new Set(listed.map((ask) => ask.rel))];
       const listing = await run(root, ['--literal-pathspecs', 'ls-files', '-z', '--', ...rels.map((rel) => (rel === '' ? '.' : `${rel}/`))], { timeoutMs: rest() });
       const tracked = trackedBeneath(listing, rels);
@@ -250,7 +256,6 @@ export function createIgnoreCheck(
           rel: '',
           opened: opened ?? null,
           marker: null,
-          repo: '',
           batch: null,
           answer: (value) => {
             if (!pending.delete(ask)) return;
@@ -275,13 +280,12 @@ export function createIgnoreCheck(
           if (!pending.has(ask)) return;
           if (found === null || identity === null) return ask.answer(null); // no repository, inside a `.git` folder, or gone: no answer, and silent
           if (found === OWNED_ELSEWHERE) {
-            noAnswer('the repository belongs to another user');
+            noAnswer(OWNED_ELSEWHERE);
             return ask.answer(null);
           }
           ask.rel = relative(found.root, dir);
           ask.opened = identity;
           ask.marker = found.marker;
-          ask.repo = found.repo;
           enter(found.root, ask);
         });
       });
@@ -306,16 +310,19 @@ export function createIgnoreCheck(
   };
 }
 
-const OWNED_ELSEWHERE = 'owned elsewhere';
+// Why an ask has no answer, as the daemon's log says it
+const OWNED_ELSEWHERE = 'the repository belongs to another user';
+const CHANGED = 'the folder or its repository changed before git ran';
+const ANOTHER_TREE = 'git names another work tree for the folder';
+const UNREADABLE = 'git named a repository path the check cannot read';
 
 // The repository that holds `dir` (an absolute realpath), as git's discovery finds it from there in read mode: the
-// nearest folder at or above it with a `.git` entry, that entry's identity, and the directories it leads git to
-// (`repositoryAt`). Null inside a `.git` folder, where no work tree is, in no repository, above a change of device (git's
-// discovery stops at a filesystem boundary: it compares each folder above with the device of the one it started in,
-// `device`), for a `.git` that leads git to no directory, and once `live` says the ask is answered (its bound passed, the
-// check disposed: the branch panel's scalpel 1); `OWNED_ELSEWHERE` when the folder, its `.git` or what that leads git
-// to is another user's. A folder whose `.git` is no repository is judged by nothing: git, named that `.git`, fails.
-async function repositoryOf(dir: string, device: Promise<bigint | null>, live: () => boolean): Promise<{ root: string; marker: BigIntStats; repo: string } | typeof OWNED_ELSEWHERE | null> {
+// nearest folder at or above it with a `.git` entry, and that entry. Null inside a `.git` folder, where no work tree
+// is, in no repository, above a change of device (git's discovery stops at a filesystem boundary: it compares each
+// folder above with the device of the one it started in, `device`), and once `live` says the ask is answered (its bound
+// passed, the check disposed: the branch panel's scalpel 1); `OWNED_ELSEWHERE` when the folder or its `.git` is another
+// user's. Where the `.git` leads git is git's to say (`repositoryAt`).
+async function repositoryOf(dir: string, device: Promise<bigint | null>, live: () => boolean): Promise<{ root: string; marker: BigIntStats } | typeof OWNED_ELSEWHERE | null> {
   if (dir.split(sep).includes('.git')) return null;
   for (let at = dir; live(); at = dirname(at)) {
     let folder: BigIntStats | null = null;
@@ -329,37 +336,53 @@ async function repositoryOf(dir: string, device: Promise<bigint | null>, live: (
       folder ??= await fs.promises.lstat(at, { bigint: true }).catch(() => null);
       if (folder === null) return null;
       if (!ownedHere(marker) || !ownedHere(folder)) return OWNED_ELSEWHERE;
-      const repo = await repositoryAt(at, marker);
-      return repo === null || repo === OWNED_ELSEWHERE ? repo : { root: at, marker, repo };
+      return { root: at, marker };
     }
     if (dirname(at) === at) return null;
   }
   return null;
 }
 
-// The directories `<root>/.git` leads git to, as git resolves them, with their identities, as one string two
-// resolutions are compared by: the git directory (the folder, a link followed, or the path a gitdir pointer names, read
-// relative to `root` as git reads it) and, for a linked worktree, the common directory its `commondir` names. Each of
-// them, and the `config` in each where there is one, must be this user's by `stat`, which follows a link to what git
-// reads (the ruling on ownership: an explicit GIT_DIR skips git's own check; a root-owned one passes git's only for git
-// run as root, which the daemon never is). Null when the entry leads git to no directory.
-async function repositoryAt(root: string, marker: BigIntStats): Promise<string | typeof OWNED_ELSEWHERE | null> {
-  const entry = join(root, '.git');
-  let gitDir: string | null;
-  if (marker.isFile()) {
-    const text = (await fs.promises.readFile(entry, 'utf8').catch(() => null))?.trimEnd() ?? null;
-    gitDir = text?.startsWith('gitdir: ') ? await fs.promises.realpath(resolvePath(root, text.slice('gitdir: '.length))).catch(() => null) : null;
-  } else gitDir = await fs.promises.realpath(entry).catch(() => null);
-  if (gitDir === null) return null;
-  const pointed = (await fs.promises.readFile(join(gitDir, 'commondir'), 'utf8').catch(() => null))?.trimEnd() ?? null;
-  const common = pointed === null ? null : await fs.promises.realpath(resolvePath(gitDir, pointed)).catch(() => null);
-  if (pointed !== null && common === null) return null;
-  const dirs = common === null ? [gitDir] : [gitDir, common];
+// The repository git names for a folder: the git directory and the common directory, as absolute real paths, and
+// `key`, the two with their identities, by which two answers are compared
+interface Repository {
+  gitDir: string;
+  commonDir: string;
+  key: string;
+}
+
+// The repository git itself finds from `root`, asked with no repository named (`rev-parse`, which runs no hook and no
+// fsmonitor): git reads the `.git` entry, a gitdir pointer and a `commondir` as it does for every command, and refuses
+// one it finds another user's (`dubious ownership`: `OWNED_ELSEWHERE`). The work tree it names must be `root`
+// (`ANOTHER_TREE` otherwise: a `core.worktree` elsewhere, a `.git` that is no repository and one above it); the git
+// directory and the common directory, and the `config` in each where there is one, must be this user's by `stat`, which
+// follows a link to what git reads (git's own check reads a `.git` link's owner, not its target's; a root-owned one
+// passes git's only for git run as root, which the daemon never is). A path with a line break in it cannot be read out
+// of git's answer (`UNREADABLE`). Any other failure of git is thrown, as a call's is.
+async function repositoryAt(root: string, run: GitRun, timeoutMs: number): Promise<Repository | string> {
+  let printed: string;
+  try {
+    printed = await run(root, ['rev-parse', '--path-format=absolute', '--absolute-git-dir', '--git-common-dir', '--show-toplevel'], { timeoutMs });
+  } catch (error) {
+    if (error instanceof GitCommandError && /dubious ownership/.test(error.stderr)) return OWNED_ELSEWHERE;
+    throw error;
+  }
+  const lines = printed.split('\n');
+  if (lines.length !== 4 || lines[3] !== '') return UNREADABLE;
+  const [gitDir, commonDir, workTree] = lines as [string, string, string];
+  if (workTree !== root) return ANOTHER_TREE;
+  const dirs = [gitDir, commonDir];
   const stats = await Promise.all(dirs.map((dir) => fs.promises.stat(dir, { bigint: true }).catch(() => null)));
   const configs = await Promise.all(dirs.map((dir) => fs.promises.stat(join(dir, 'config'), { bigint: true }).catch(() => null)));
-  if (stats.some((stat) => stat === null)) return null;
+  if (stats.some((stat) => stat === null)) return CHANGED;
   if (![...stats, ...configs].every((stat) => stat === null || ownedHere(stat))) return OWNED_ELSEWHERE;
-  return dirs.map((dir, i) => `${dir}\0${stats[i]!.dev}:${stats[i]!.ino}`).join('\0');
+  return { gitDir, commonDir, key: dirs.map((dir, i) => `${dir}\0${stats[i]!.dev}:${stats[i]!.ino}`).join('\0') };
+}
+
+// The `.git` as the walk found it: the same object, and a gitdir pointer not rewritten since (one rewritten in place
+// keeps its inode)
+function sameMarker(now: BigIntStats, then: BigIntStats): boolean {
+  return sameIdentity(now, then) && (!now.isFile() || (now.mtimeNs === then.mtimeNs && now.ctimeNs === then.ctimeNs));
 }
 
 // Whether this process's user owns the entry, as git's own check of a discovered repository asks (`lstat`'s owner)

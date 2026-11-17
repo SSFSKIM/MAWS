@@ -52,7 +52,14 @@ function checkOf(options: Parameters<typeof createIgnoreCheck>[0]): IgnoreCheck 
 }
 const sorted = (answer: ReadonlySet<string> | null) => (answer === null ? null : [...answer].sort());
 
-// A spawn function over git whose first call is held until `open`, so that asks made meanwhile join the next run
+// Git's answer to where the repository is (`rev-parse`), which the stand-ins below leave to git itself: they hold, or
+// answer for git, only the reads of the names
+const isResolution = (args: readonly string[]) => args.includes('rev-parse');
+function resolving(execFile: ExecFileFn): ExecFileFn {
+  return (file, args, options, callback) => (isResolution(args) ? execGit(file, args, options, callback) : execFile(file, args, options, callback));
+}
+
+// A spawn function over git whose first read is held until `open`, so that asks made meanwhile join the next run
 function gatedFirstRun() {
   let open!: () => void;
   const gate = new Promise<void>((resolve) => (open = resolve));
@@ -60,6 +67,7 @@ function gatedFirstRun() {
   const firstCall = new Promise<void>((resolve) => (started = resolve));
   const made: { args: string[]; input: string | undefined }[] = [];
   const execFile: ExecFileFn = (file, args, options, callback) => {
+    if (isResolution(args)) return execGit(file, args, options, callback);
     made.push({ args: args.slice(2), input: options.input });
     if (made.length > 1) return execGit(file, args, options, callback);
     started();
@@ -347,7 +355,7 @@ describe('the ignore check over a real repository', () => {
       made.push(args.find((arg) => ['rev-parse', 'ls-files', 'check-ignore'].includes(arg)) ?? String(args[2]));
       return execGit(file, args, options, callback);
     };
-    return { execFile, reads: () => made.filter((sub) => sub !== 'rev-parse') };
+    return { execFile, made, reads: () => made.filter((sub) => sub !== 'rev-parse') };
   };
   // A folder whose `.git` is a gitdir pointer with `text` (`gitdir`), or a linked worktree whose `commondir` holds
   // `text` (`commondir`); `mine` is this user's repository, `other` the one the stand-in gives another owner
@@ -429,7 +437,8 @@ describe('the ignore check over a real repository', () => {
     const repo = await repository();
     await repo.write('.gitignore', '*.log\n');
     await repo.write('mount/inner/a.log', 'x\n');
-    const check = checkOf({ env: repo.serviceEnv() });
+    const spawns = recorded();
+    const check = checkOf({ env: repo.serviceEnv(), execFile: spawns.execFile });
     const asked = repo.path('mount/inner');
     expect(sorted(await check.names(asked, ['a.log']))).toEqual(['a.log']); // the control
     const lstat = fs.promises.lstat.bind(fs.promises);
@@ -439,15 +448,17 @@ describe('the ignore check over a real repository', () => {
       if (!String(path).startsWith(repo.path('mount'))) Object.assign(found, { dev: typeof found.dev === 'bigint' ? found.dev + 1n : found.dev + 1 });
       return found;
     }) as typeof fs.promises.lstat);
+    const before = spawns.made.length;
     expect(await check.names(asked, ['a.log'])).toBeNull();
+    expect(spawns.made.slice(before)).toEqual([]); // the walk's stop comes first: no git is started, its own question of where the repository is included
   });
 
 });
 
-// A repository as the check finds one, by its `.git` entry, for a spawn function that stands in for git
+// A repository, for a spawn function that stands in for git's reads of the names (git itself says where it is)
 function fakeRepo(...dirs: string[]): string {
   const root = temp();
-  mkdirSync(join(root, '.git'));
+  execFileSync('/usr/bin/git', ['init', '-q', '-b', 'main', root], { stdio: 'ignore' });
   for (const dir of dirs) mkdirSync(join(root, dir), { recursive: true });
   return root;
 }
@@ -466,15 +477,21 @@ interface HeldRun {
   env: NodeJS.ProcessEnv;
   answer(error: Error | null, stdout: string): void;
 }
-// A spawn function whose runs are held by the test: each call is kept, with what it was asked, until the test answers
-// it; `live` counts those not yet answered, and `reached(n)` settles once `n` calls were made.
+// A spawn function whose reads are held by the test: each read is kept, with what it was asked, until the test answers
+// it; `live` counts those not yet answered, and `reached(n)` settles once `n` reads were made. Each question of where
+// the repository is goes to git, kept in `resolutions` with its directory and environment.
 function heldRuns() {
   const pending: HeldRun[] = [];
   const made: HeldRun[] = [];
+  const resolutions: { directory: string; env: NodeJS.ProcessEnv }[] = [];
   const waiters: { n: number; resolve: () => void }[] = [];
   let live = 0;
   let most = 0;
-  const execFile: ExecFileFn = (_file, args, options, callback) => {
+  const execFile: ExecFileFn = (file, args, options, callback) => {
+    if (isResolution(args)) {
+      resolutions.push({ directory: args[1]!, env: options.env });
+      return execGit(file, args, options, callback);
+    }
     most = Math.max(most, ++live);
     const run: HeldRun = {
       args: args.slice(2),
@@ -494,7 +511,7 @@ function heldRuns() {
     }
   };
   const reached = (n: number) => (made.length >= n ? Promise.resolve() : new Promise<void>((resolve) => waiters.push({ n, resolve })));
-  return { execFile, pending, made, reached, counts: () => ({ calls: made.length, live, most }) };
+  return { execFile, pending, made, resolutions, reached, counts: () => ({ calls: made.length, live, most }) };
 }
 const isLsFiles = (run: HeldRun) => run.args.includes('ls-files');
 // Answers each held run as git would if nothing were tracked and every name asked were ignored
@@ -510,18 +527,25 @@ async function drain(pending: HeldRun[], answers: Promise<unknown>[], reply: (ru
   }
 }
 
-// The panel's scalpel 2: git runs only in the repository the walk found, for folders that are still the objects the
-// service confirmed at the spelling git is handed, checked before each of a run's calls
+// The panel's scalpel 2 and the delta's ruling: git runs only in the repository git names for the root the walk found,
+// for folders that are still the objects the service confirmed at the spelling git is handed, checked before each of a
+// run's calls
 describe('where git runs', () => {
-  it('names the repository the walk found to git as GIT_DIR and its folder as GIT_WORK_TREE, in every call of a run', async () => {
+  it('asks git where the repository is before each call, by its own discovery from the root, and names that repository and the folder to git in every call of a run', async () => {
     const repo = fakeRepo('harbor');
-    const { execFile, pending, made } = heldRuns();
+    const { execFile, pending, made, resolutions } = heldRuns();
     const answer = checkOf({ execFile }).names(join(repo, 'harbor'), ['debug.log']);
     await drain(pending, [answer]);
     expect(sorted(await answer)).toEqual(['debug.log']);
-    expect(made.map((run) => [run.directory, run.env.GIT_DIR, run.env.GIT_WORK_TREE])).toEqual([
-      [repo, join(repo, '.git'), repo],
-      [repo, join(repo, '.git'), repo],
+    const discovered = { GIT_DIR: undefined, GIT_COMMON_DIR: undefined, GIT_WORK_TREE: undefined };
+    expect(resolutions.map((run) => [run.directory, { GIT_DIR: run.env.GIT_DIR, GIT_COMMON_DIR: run.env.GIT_COMMON_DIR, GIT_WORK_TREE: run.env.GIT_WORK_TREE }])).toEqual([
+      [repo, discovered],
+      [repo, discovered],
+    ]);
+    expect([resolutions[0]!.env.GIT_CONFIG_KEY_3, resolutions[0]!.env.GIT_CONFIG_VALUE_3]).toEqual(['safe.directory', '']); // git's own check of who owns it, with no exception allowed
+    expect(made.map((run) => [run.directory, run.env.GIT_DIR, run.env.GIT_COMMON_DIR, run.env.GIT_WORK_TREE])).toEqual([
+      [repo, join(repo, '.git'), join(repo, '.git'), repo],
+      [repo, join(repo, '.git'), join(repo, '.git'), repo],
     ]);
   });
 
@@ -561,12 +585,11 @@ describe('where git runs', () => {
   // The gap the coordinator named: a gitdir pointer rewritten in place keeps its inode, so the git directory is resolved
   // again before each call and must be the one the walk resolved
   it('gives no answer and asks git nothing for the asks of a folder whose gitdir pointer was rewritten in place after their walk, beside a repository that answers', async () => {
-    const first = temp();
-    const second = temp();
-    for (const dir of [first, second]) mkdirSync(join(dir, 'git'));
+    const first = fakeRepo();
+    const second = fakeRepo();
     const tree = temp();
     mkdirSync(join(tree, 'kept'));
-    writeFileSync(join(tree, '.git'), `gitdir: ${join(first, 'git')}\n`);
+    writeFileSync(join(tree, '.git'), `gitdir: ${join(first, '.git')}\n`);
     const control = fakeRepo();
     const { execFile, pending, made, reached } = heldRuns();
     const check = checkOf({ execFile, allowanceMs: 600_000 });
@@ -575,12 +598,34 @@ describe('where git runs', () => {
     const late = check.names(join(tree, 'kept'), ['a.log']);
     await settle();
     const inode = statSync(join(tree, '.git')).ino;
-    writeFileSync(join(tree, '.git'), `gitdir: ${join(second, 'git')}\n`);
+    writeFileSync(join(tree, '.git'), `gitdir: ${join(second, '.git')}\n`);
     expect(statSync(join(tree, '.git')).ino).toBe(inode); // the premise: rewritten in place
     const answered = check.names(control, ['b.log']);
     await drain(pending, [seed, late, answered]);
     expect([await seed, await late, sorted(await answered)]).toEqual([null, null, ['b.log']]);
     expect(made.filter((run) => run.directory === tree).map((run) => run.args[1])).toEqual(['ls-files']); // the seed's first call, made before the rewrite
+  });
+
+  // The pointer git reads that is no `.git`: a linked worktree's `commondir`, rewritten in place between a run's calls
+  // into another repository of this user's; git, asked again, names another common directory
+  it('gives no answer and asks git nothing more for a linked worktree whose commondir was rewritten in place between its run’s calls, beside a repository that answers', async () => {
+    const repo = await repository();
+    const tree = await repo.addWorktree('wt');
+    const other = fakeRepo();
+    const control = fakeRepo();
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile, allowanceMs: 600_000 });
+    const seed = check.names(tree, ['s.log']);
+    await reached(1); // the seed's ls-files, held
+    const pointer = repo.path('.git/worktrees/wt/commondir');
+    const inode = statSync(pointer).ino;
+    writeFileSync(pointer, `${join(other, '.git')}\n`);
+    expect(statSync(pointer).ino).toBe(inode); // the premise: rewritten in place
+    const answered = check.names(control, ['b.log']);
+    await drain(pending, [seed, answered]);
+    expect([await seed, sorted(await answered)]).toEqual([null, ['b.log']]);
+    expect(made.filter((run) => run.directory === tree).map((run) => run.args[1])).toEqual(['ls-files']); // the seed's first call, made before the rewrite, and no other
+    expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the folder or its repository changed before git ran/)]);
   });
 
   it('gives no answer and asks git nothing more for the asks of a repository whose .git was replaced after their walk, beside a repository that answers', async () => {
@@ -639,7 +684,7 @@ describe('the bound and the places', () => {
     expect(answer.entries.filter((entry) => 'ignored' in entry)).toEqual([]);
     files.dispose();
     // the control: the same listing, with a check that answers, marks the entry it names
-    const answering = checkOf({ execFile: (_file, args, _options, callback) => void queueMicrotask(() => callback(null, args.includes('ls-files') ? 'work/a.txt\0' : './work/b.log\0', '')) });
+    const answering = checkOf({ execFile: resolving((_file, args, _options, callback) => void queueMicrotask(() => callback(null, args.includes('ls-files') ? 'work/a.txt\0' : './work/b.log\0', ''))) });
     const marked = createFilesService({ records, ignored: answering.names });
     expect((await marked.list({ appSessionId: S, path: dir })).entries.filter((entry) => 'ignored' in entry).map((entry) => entry.name)).toEqual(['b.log']);
     marked.dispose();
@@ -705,25 +750,25 @@ describe('the bound and the places', () => {
       subcommands.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
       queueMicrotask(() => callback(Object.assign(new Error('Git exited with 128'), { code: 128 }), '', 'fatal: unreadable index\n'));
     };
-    expect(await checkOf({ execFile: failing }).names(repo, ['debug.log'])).toBeNull();
+    expect(await checkOf({ execFile: resolving(failing) }).names(repo, ['debug.log'])).toBeNull();
     expect(subcommands).toEqual(['ls-files']);
     const answering: ExecFileFn = (_file, args, _options, callback) => {
       subcommands.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
       queueMicrotask(() => callback(null, args.includes('ls-files') ? '' : './debug.log\0', ''));
     };
-    expect(sorted(await checkOf({ execFile: answering }).names(repo, ['debug.log']))).toEqual(['debug.log']); // the control
+    expect(sorted(await checkOf({ execFile: resolving(answering) }).names(repo, ['debug.log']))).toEqual(['debug.log']); // the control
     expect(subcommands).toEqual(['ls-files', 'ls-files', 'check-ignore']);
   });
 
   it('starts no git for a folder in no repository or inside a .git folder, beside one in a repository that does', async () => {
-    const { execFile, pending, counts } = heldRuns();
+    const { execFile, pending, resolutions, counts } = heldRuns();
     const check = checkOf({ execFile });
     const repo = fakeRepo('.git/objects', 'src');
     const nowhere = temp();
     expect(await check.names(nowhere, ['a.log'])).toBeNull();
     expect(await check.names(join(repo, '.git'), ['config'])).toBeNull();
     expect(await check.names(join(repo, '.git/objects'), ['pack'])).toBeNull();
-    expect(counts().calls).toBe(0);
+    expect([counts().calls, resolutions.length]).toEqual([0, 0]);
     expect(warned).not.toHaveBeenCalled();
     const inside = check.names(join(repo, 'src'), ['a.log']); // the control
     await drain(pending, [inside]);
@@ -795,13 +840,13 @@ describe('the bound and the places', () => {
     let spawned!: () => void;
     const firstSpawn = new Promise<void>((resolve) => (spawned = resolve));
     // A child that never answers and closes only when the test says (a git blocked in the filesystem, past its SIGKILL)
-    const execFile: ExecFileFn = () => {
+    const execFile: ExecFileFn = resolving(() => {
       calls++;
       spawned();
       const child = new EventEmitter();
       children.push(child);
       return child as unknown as ChildProcess;
-    };
+    });
     // The stand-ins have no process group to kill: their close is the test's, here and, for those a failed assertion
     // left open, in the `finally`, so that a red run is its own failure and not also the teardown's wait on `dispose`
     const closed = new Set<EventEmitter>();
@@ -823,8 +868,7 @@ describe('the bound and the places', () => {
       expect(calls).toBe(1); // the runner gave the run up at 2,500, but its child has not closed: the place is still held
       close(children[0]!);
       await vi.advanceTimersByTimeAsync(0);
-      await settle(); // the next run confirms its folder on the disk before its call
-      expect(calls).toBe(2); // the place is free once the child closed
+      await vi.waitFor(() => expect(calls).toBe(2)); // the place is free once the child closed: the next run confirms its folder and asks git where it is before its call
       const disposed = check.dispose();
       expect(await second).toBeNull();
       close(children[1]!);
@@ -915,11 +959,11 @@ describe('the daemon’s stop ends the check’s processes', () => {
     const pidFile = join(dir, 'sleeper.pid');
     const children: ChildProcess[] = [];
     // A shell that starts a sleeping child and waits for it, started exactly as git is: a group of its own, input piped
-    const execFile: ExecFileFn = (_file, _args, options, callback) => {
+    const execFile: ExecFileFn = resolving((_file, _args, options, callback) => {
       const child = execGit('/bin/sh', ['-c', 'sleep 300 & echo $! > "$1"; wait', 'sh', pidFile], options, callback);
       if (child) children.push(child);
       return child;
-    };
+    });
     const check = checkOf({ env: { PATH: process.env.PATH }, execFile, allowanceMs: 600_000 });
     const answer = check.names(dir, ['a.log']);
     await vi.waitFor(() => expect(existsSync(pidFile) && readFileSync(pidFile, 'utf8').trim() !== '').toBe(true), { timeout: 10_000 });
