@@ -141,6 +141,8 @@ const firstInView = () => {
   const box = [...scroller().querySelectorAll<HTMLElement>('[role="tree"] > div')].find((element) => element.style.top === `${top}px`);
   return box?.querySelector('[role="treeitem"]')?.getAttribute('data-path') ?? null;
 };
+// The status's count as the git store holds it: the heading is not drawn while the list is scrolled past it.
+const heldCount = () => [...useGit.getState().entries.values()].find((held) => held.status !== null)?.status?.files.length ?? null;
 const scrollTo = (top: number) => {
   scroller().scrollTop = top;
   fireEvent.scroll(scroller());
@@ -226,11 +228,12 @@ describe('the Changed group (U6b-3a)', () => {
     fireEvent.click(changedRow('/r/src/old.ts')!);
     expect(reviews).toEqual([{ appSessionId: A, params: { scope: 'uncommitted', path: 'src/old.ts' } }]);
     expect(filesTab().getAttribute('data-file')).toBe(''); // no file's tab for a file that is not on disk
+    fireEvent.click(changedRow('/r/src/rates.ts')!, { metaKey: true });
+    await waitFor(() => expect(fileTabs().map((tab) => tab.kind === 'file' && tab.path)).toEqual(['/r/src/rates.ts']));
+    expect(filesTab().getAttribute('data-file')).toBe(''); // ⌘: a main tab, the tree's tab as it was
     fireEvent.click(changedRow('/r/src/cart.ts')!);
     await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe('/r/src/cart.ts'));
     expect(useLayout.getState().panelParams[panelOf(A)!.tabs[0].id]).toEqual({ file: '/r/src/cart.ts', line: null, preview: true });
-    fireEvent.click(changedRow('/r/src/rates.ts')!, { metaKey: true });
-    await waitFor(() => expect(fileTabs().map((tab) => tab.kind === 'file' && tab.path)).toEqual(['/r/src/rates.ts']));
     expect(reviews).toHaveLength(1);
   });
 
@@ -312,9 +315,11 @@ describe('the Changed group (U6b-3a)', () => {
     expect(treeRow('/r/README.md')!.textContent).not.toContain('Ignored by git');
   });
 
-  it('draws no group, no mark and no error in a folder that is no repository or that git refuses; with a status it draws them', async () => {
-    for (const refusal of ['not a git repository', 'fatal: bad config line 1 in file .git/config']) {
-      const main = changedMain(TREE, { '/r': refusal });
+  it.each(['not a git repository', 'fatal: bad config line 1 in file .git/config'])(
+    'draws no group, no mark and no error where git answers “%s”; the same tree with a status draws them',
+    async (refusal) => {
+      const statuses: Record<string, GitStatus | string> = { '/r': refusal };
+      const main = changedMain(TREE, statuses);
       connect();
       await openTree();
       await waitFor(() => expect(main.callsOf('git.watch')).toHaveLength(1));
@@ -324,17 +329,14 @@ describe('the Changed group (U6b-3a)', () => {
       expect(document.querySelectorAll('[data-letter], [data-dot], [data-mark]')).toHaveLength(0);
       expect(document.querySelectorAll('[role="alert"], [data-notice]')).toHaveLength(0);
       expect(treeRow('/r/src/cart.ts')).not.toBeNull(); // the tree lists as it does today
+      statuses['/r'] = statusOf(SEVEN); // the control: the same tree, mounted again, with a status
       cleanup();
-      offs.splice(0).forEach((off) => off());
-      resetTreeState();
-      useFiles.getState().reset();
-    }
-    changedMain(TREE, { '/r': statusOf(SEVEN) }); // the control: the same tree with a status
-    connect();
-    await openTree();
-    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('7'));
-    expect(treeRow('/r/src')!.getAttribute('data-dot')).toBe('!');
-  });
+      render(<TestHost />);
+      await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('7'));
+      expect(treeRow('/r/src')!.getAttribute('data-dot')).toBe('!');
+      expect(main.callsOf('git.watch')).toHaveLength(2);
+    },
+  );
 
   it('keeps the group drawn when a later read of the status fails (S2)', async () => {
     const statuses: Record<string, GitStatus | string> = { '/r': statusOf(SEVEN) };
@@ -362,12 +364,12 @@ describe('the Changed group (U6b-3a)', () => {
     const before = firstInView();
     expect(before).toMatch(/^\/r\/src\/f/); // a tree row
     changed(main, statusOf([entry('src/f00.ts', '.M'), entry('src/f01.ts', '.M'), entry('src/f02.ts', '.M'), entry('src/f03.ts', '.M')]));
-    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('4'));
+    await waitFor(() => expect(heldCount()).toBe(4));
     fireEvent.scroll(scroller());
     expect(scroller().scrollTop).toBe(33 * FILES_ROW_HEIGHT + 5);
     expect(firstInView()).toBe(before);
     changed(main, statusOf([entry('src/f00.ts', '.M')])); // and back: the group loses three rows
-    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+    await waitFor(() => expect(heldCount()).toBe(1));
     fireEvent.scroll(scroller());
     expect(scroller().scrollTop).toBe(30 * FILES_ROW_HEIGHT + 5);
     expect(firstInView()).toBe(before);
@@ -412,12 +414,15 @@ describe('the Changed group (U6b-3a)', () => {
   });
 
   it('selects only the tree’s row of the file in view, its letter in the row’s colour; the Changed row of the same path stays plain', async () => {
+    const observer = installResizeObserver();
     changedMain(TREE, { '/r': statusOf(SEVEN) });
     connect();
     await openTree();
     await waitFor(() => expect(heading()).not.toBeNull());
     await expand('/r/src');
     fireEvent.click(changedRow('/r/src/cart.ts')!);
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe('/r/src/cart.ts'));
+    observer.resize(filesTab(), { width: 700, height: 600 }); // room for the tree beside the file
     await waitFor(() => expect(treeRow('/r/src/cart.ts')!.getAttribute('aria-selected')).toBe('true'));
     expect(changedRow('/r/src/cart.ts')!.getAttribute('aria-selected')).toBe('false');
     expect(treeRow('/r/src/cart.ts')!.querySelector('[data-mark]')!.className).not.toContain('text-warning');
@@ -518,7 +523,8 @@ describe('the Changed group (U6b-3a)', () => {
       fireEvent.click(changedRow('/r/a/b/new')!);
       expect(treeOf(useTreeState.getState(), A).reveal).toBe('/r/a/b/new');
       releaseA();
-      await waitFor(() => expect(treeRow('/r/a/b')).not.toBeNull());
+      await waitFor(() => expect(useFiles.getState().listing(A, '/r/a')?.status).toBe('ok')); // its row out of view, below
+      await flush();
       expect(treeOf(useTreeState.getState(), A).reveal).toBe('/r/a/b/new'); // not there yet
       expect(scroller().scrollTop).toBe(0);
       releaseB();
@@ -543,9 +549,10 @@ describe('the Changed group (U6b-3a)', () => {
       fireEvent.wheel(scroller());
       expect(treeOf(useTreeState.getState(), A).reveal).toBeNull();
       releaseA();
-      await waitFor(() => expect(treeRow('/r/a/b/new')).not.toBeNull());
+      await waitFor(() => expect(useFiles.getState().listing(A, '/r/a/b/new')?.status).toBe('ok')); // its row exists, out of view
       await flush();
       expect(scroller().scrollTop).toBe(0);
+      expect(treeRow('/r/a/b/new')).toBeNull();
     });
   });
 
@@ -582,7 +589,8 @@ describe('the Changed group (U6b-3a)', () => {
     const files = Array.from({ length: 120 }, (_, i) => entry(`deep/folder-${String(i).padStart(3, '0')}/sub/file-${String(i).padStart(3, '0')}.ts`, '.M'));
     changedMain(TREE, { '/r': statusOf(files) });
     connect();
-    await openTree();
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId: A }));
     await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('120'));
     observer.resize(scroller().firstElementChild!, { width: 220, height: 600 }); // the rows' box, which the list measures
     await flush();

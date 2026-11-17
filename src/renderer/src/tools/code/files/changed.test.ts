@@ -152,9 +152,11 @@ describe('the marks in the tree (decisions 9 and 10)', () => {
 
 describe('the path a Changed row shows (decision 8)', () => {
   const rowsIn = (files: Entry[], repoRoot = '/coast') => changedRows(statusOf(files, repoRoot));
+  const rowOf = (files: Entry[], rel: string, repoRoot = '/coast') => rowsIn(files, repoRoot).find((row) => row.rel === rel)!;
 
   it('names a row under the working folder from the working folder, and one outside it from the repository’s root', () => {
-    const [inside, outside] = rowsIn([entry('harbor/src/tides/predict.ts', '.M'), entry('lighthouse/beacon.ts', 'A.')]);
+    const files = [entry('harbor/src/tides/predict.ts', '.M'), entry('lighthouse/beacon.ts', 'A.')];
+    const [inside, outside] = [rowOf(files, 'harbor/src/tides/predict.ts'), rowOf(files, 'lighthouse/beacon.ts')];
     expect(labelOf(inside, '/coast/harbor')).toEqual({ name: 'predict.ts', folder: 'src/tides/', shown: 'src/tides/predict.ts' });
     expect(labelOf(outside, '/coast/harbor')).toEqual({ name: 'beacon.ts', folder: 'lighthouse/', shown: 'lighthouse/beacon.ts' });
     expect(labelOf(inside, '/coast')).toEqual({ name: 'predict.ts', folder: 'harbor/src/tides/', shown: 'harbor/src/tides/predict.ts' });
@@ -162,13 +164,15 @@ describe('the path a Changed row shows (decision 8)', () => {
   });
 
   it('shows a folder’s row as its name with its slash, then its parent folder as a file’s row shows its folder', () => {
-    const [deep, top] = rowsIn([entry('harbor/src/charts/', '??'), entry('harbor/notes/', '??')]);
+    const files = [entry('harbor/src/charts/', '??'), entry('harbor/notes/', '??')];
+    const [deep, top] = [rowOf(files, 'harbor/src/charts'), rowOf(files, 'harbor/notes')];
     expect(labelOf(deep, '/coast/harbor')).toEqual({ name: 'charts/', folder: 'src/', shown: 'src/charts/' });
     expect(labelOf(top, '/coast/harbor')).toEqual({ name: 'notes/', folder: '', shown: 'notes/' }); // at the top of the working folder: no parent folder
   });
 
   it('matches the working folder across the /private spelling and case, and never a folder that merely begins like it', () => {
-    const [row, sibling] = rowsIn([entry('harbor/a.ts', '.M'), entry('harbor-old/b.ts', '.M')], '/private/tmp/coast');
+    const files = [entry('harbor/a.ts', '.M'), entry('harbor-old/b.ts', '.M')];
+    const [row, sibling] = [rowOf(files, 'harbor/a.ts', '/private/tmp/coast'), rowOf(files, 'harbor-old/b.ts', '/private/tmp/coast')];
     expect(labelOf(row, '/tmp/coast/Harbor')).toMatchObject({ folder: '', shown: 'a.ts' });
     expect(labelOf(sibling, '/tmp/coast/harbor')).toMatchObject({ folder: 'harbor-old/', shown: 'harbor-old/b.ts' });
   });
