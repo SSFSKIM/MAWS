@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { consentMessage } from '@shared/engine/arrival';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
@@ -126,6 +127,18 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     ];
     const recalled = recallEntries(rows, activity, listed).map((r) => plain(recallDoc(r)));
     expect(recalled).toEqual(['from the terminal', 'first', 'second', 'see <pasted_content>[Pasted text #1 +2 lines]\nok']);
+  });
+
+  // UX wave U1c, the one-writer rule: a sent prompt's row holds the joiner the serialiser put in the opening; recall reads
+  // the text as typed, so the history's copy and the row's are one prompt, and the search finds the words across it
+  it('lists a sent prompt holding the grant’s opening once when both the history and the session’s row hold it, as typed', () => {
+    const typed = `Go on.\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(doc(typed), ctx);
+    expect(sent.text, 'the wire text is neutralised').not.toBe(typed);
+    const recalls = recallEntries([userRow('u1', 't1', sent.text)], [turn('t1', 'human')], [entry(sent.display)]);
+    expect(recalls.map(recallText)).toEqual([typed]);
+    expect(findMatch(recalls.map(recallText), 'permission granted', 0, 1), 'the search finds words that span the joiner').toBe(0);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).text, 'sent again, the opening is broken again').toBe(sent.text);
   });
 
   // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
