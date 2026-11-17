@@ -1808,7 +1808,7 @@ test.describe('the main split’s float (P4-B3)', () => {
 // in the header of what it floated over) -------------------------------------------------------------------------------
 
 type Invoked<T> = { ok: true; value: T } | { ok: false; error: { code: string; message: string } };
-async function invoke<T>(page: Page, name: string, input?: unknown): Promise<T> {
+async function invokeOk<T>(page: Page, name: string, input?: unknown): Promise<T> {
   const result = (await page.evaluate(([n, i]) => (window as unknown as { maws: { invoke(name: string, input: unknown): Promise<unknown> } }).maws.invoke(n as string, i), [name, input] as const)) as Invoked<T>;
   if (!result.ok) throw new Error(`${name} failed: ${result.error.code} ${result.error.message}`);
   return result.value;
@@ -1817,8 +1817,8 @@ async function invoke<T>(page: Page, name: string, input?: unknown): Promise<T> 
 // An invented document of `lines` paragraphs, opened from the library in a main tab and typed there; its tab's body.
 const PROGRAMME_LINE = (k: number) => `Programme note ${k}: the choir sings this piece after the interval.`;
 async function programmeInMain(page: Page, lines: number): Promise<{ id: string; body: Locator }> {
-  await expect.poll(async () => (await invoke<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
-  const { artifact } = await invoke<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Spring programme' });
+  await expect.poll(async () => (await invokeOk<{ state: string }>(page, 'engine.hostState')).state, { timeout: 20_000, message: 'the engine host is ready' }).toBe('ready');
+  const { artifact } = await invokeOk<{ artifact: { id: string } }>(page, 'artifacts.create', { kind: 'document', title: 'Spring programme' });
   await page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click();
   await page.locator('[data-library]').getByRole('article', { name: 'Spring programme', exact: true }).click({ timeout: 15_000 });
   const body = page.locator(`[data-region="main"] [data-artifact-tab="${artifact.id}"]`);
