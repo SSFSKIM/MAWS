@@ -155,7 +155,11 @@ export function createTreeStateStore(
     };
     const answered = (stored: unknown) => {
       let trees: ReadonlyMap<AppSessionId, SessionTree> = storedTrees(stored);
-      for (const [id, tree] of get().trees) if (!trees.has(id)) trees = new Map(trees).set(id, tree); // drawn before the read
+      for (const [id, tree] of get().trees) {
+        const read = trees.get(id);
+        if (read === undefined) trees = new Map(trees).set(id, tree); // drawn before the read
+        else if (tree.filter !== '' || tree.finding !== null) trees = new Map(trees).set(id, { ...read, filter: tree.filter, finding: tree.finding }); // U6b-3b: a search begun before the read goes on
+      }
       for (const [id, patch] of early) trees = apply(trees, id, patch);
       const acted = early.length > 0;
       early = [];
