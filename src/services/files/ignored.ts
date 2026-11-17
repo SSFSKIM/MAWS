@@ -29,8 +29,8 @@
 //
 // The asks of one repository share its runs: while a run of the repository is in flight, or waits for a place, the asks
 // that arrive join its next run (Decision Log 10).
-// A run is two git calls in read mode in the repository's root, each after the question of where it is: `git --literal-pathspecs ls-files -z -- <dir>/…` for
-// the joined directories, whose paths name what is tracked in each, then `git check-ignore --no-index -z --stdin` on
+// A run is two git calls in read mode in the repository's root, each after the question of where it is:
+// `git --literal-pathspecs ls-files -z -- <dir>/…` for the joined directories, whose paths name what is tracked in each, then `git check-ignore --no-index -z --stdin` on
 // every joined name that is no tracked path nor the first segment of one, each sent as `./<dir>/<name>` (the `./`
 // keeps a name that begins with `:` a name; check-ignore refuses literal pathspecs, and matches a name's `*` or `[` as
 // text). A tracked file, and a folder that holds one, is never named, as `check-ignore` without `--no-index` answers,
