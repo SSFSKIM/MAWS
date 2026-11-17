@@ -21,7 +21,7 @@
 // The UX wave (U9, UC-7; docs/doperpowers/plans/2026-11-12-ux-wave-U9-other-machines.md, Interfaces §3): an act offered
 // since then leaves the set and names the capability a machine's endpoint lists once it serves it (`REMOTE_NEEDS`), and
 // one function words, for every act, why its control is disabled and why it ended without its effect (UC-7.5).
-import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
+import { OUTSIDE_ACTS, OUTSIDE_FILES_CAPABILITY, outsideOffer } from '@shared/files/outside';
 import { gradeOf } from './grades';
 import type { CommandName } from './schema';
 
@@ -117,9 +117,10 @@ export const REMOTE_NEEDS: Readonly<Partial<Record<CommandName, string>>> = {
 /**
  * How an act reads in a sentence. `act` follows "Can’t" and, capitalised, opens "… is unavailable" ("fork"); `done`
  * follows "Not" ("forked"). `closes`: the act is closed with the phase's words while its machine's link connects or
- * reconnects (the menu acts); without it the act is held under the link's hold, as Send and Stop are.
+ * reconnects (the menu acts); without it the act is held under the link's hold, as Send and Stop are. `noun` (the UX
+ * wave, U6f): what opens "… is unavailable" where the act, capitalised, does not ("Open File", not "Open a file").
  */
-export type ActWords = { act: string; done: string; closes?: true };
+export type ActWords = { act: string; done: string; closes?: true; noun?: string };
 
 /** UC-7.5's words per act. A pane's answer has none yet (U12 adds its). */
 export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>> = {
@@ -136,6 +137,11 @@ export const ACT_WORDS: Readonly<Partial<Record<CommandName, ActWords>>> = {
   // its default): a waiting message taken back (Edit, ↑ and Delete pass their own labels) and sent now
   'session.steer.cancel': { act: 'take back', done: 'taken back' },
   'session.steer.sendNow': { act: 'send now', done: 'sent now' },
+  // UX wave U6f (decision 12, §D): a file outside a session's folders opened, saved, chosen with Open File… and listed
+  'files.readOutside': { act: 'open this file', done: 'opened', noun: 'Opening this file' },
+  'files.writeOutside': { act: 'save this file', done: 'saved', noun: 'Saving this file' },
+  'files.chooseOutside': { act: 'open a file', done: 'opened', noun: 'Open File', closes: true },
+  'files.listOutside': { act: 'list a folder', done: 'listed', noun: 'Listing a folder' },
 };
 
 export type LinkPhase = 'up' | 'connecting' | 'reconnecting' | 'offline' | 'removed';
@@ -154,8 +160,9 @@ const capitalised = (text: string) => (text === '' ? text : `${text[0]!.toUpperC
  * UC-7.5's first table: the sentence a control issuing `command` is disabled with, or null. `label` stands for the act
  * where ACT_WORDS has no row or the control's own label differs. The first row that applies answers: the command is
  * declared; the machine's build does not list its capability; the machine is offline; its link connects or reconnects
- * (an act that `closes`); a fork, or an undelete (U10b), by a member known not to own the machine. The `removed` phase
- * is main's to word.
+ * (an act that `closes`); a fork, or an undelete (U10b), by a member known not to own the machine; an outside act
+ * (U6f) for a person the roster does not say owns it, unknown included, since this build offers it to owners alone. The
+ * `removed` phase is main's to word.
  */
 export function disabledWords(command: CommandName, standing: RemoteStanding, label?: string): string | null {
   const declared = REMOTE_UNAVAILABLE[command];
@@ -165,11 +172,12 @@ export function disabledWords(command: CommandName, standing: RemoteStanding, la
   const { machine, phase, capabilities } = standing;
   const needs = REMOTE_NEEDS[command];
   if (needs !== undefined && capabilities !== null && !capabilities.includes(needs)) return `Can’t ${act ?? 'do this'} on ${machine} yet. Update MAWS on ${machine} and try again.`;
-  if (phase === 'offline' && act !== undefined) return `${capitalised(act)} is unavailable while ${machine} is offline.`;
+  if (phase === 'offline' && act !== undefined) return `${label === undefined && words?.noun !== undefined ? words.noun : capitalised(act)} is unavailable while ${machine} is offline.`;
   if (words?.closes === true && phase === 'connecting') return `Connecting to ${machine}…`;
   if (words?.closes === true && phase === 'reconnecting') return `Reconnecting to ${machine}…`;
   if (command === 'session.fork' && standing.owner === false) return `Only ${machine}’s owners can fork a session there.`;
   if (command === 'artifacts.undelete' && standing.owner === false) return `Only ${machine}’s owners can restore an artifact there.`; // UX wave U10b
+  if ((OUTSIDE_ACTS as readonly string[]).includes(command) && !outsideOffer(standing.owner)) return `Only ${machine}’s owners can ${act} there.`; // UX wave U6f (decision 13)
   return null;
 }
 
@@ -190,6 +198,9 @@ function reasonOf(command: CommandName, machine: string, refusal: string, detail
       return `update MAWS on ${machine} and try again`;
     case 'owners-only':
       return `only ${machine}’s owners can`;
+    // UX wave U6f (decision 18): a read or a save of a file outside the folders would enter a folder macOS protects there
+    case 'protected':
+      return `the file is in a folder macOS protects on ${machine}`;
     case 'grade': {
       const grade = refusedAt(command);
       if (grade === 'spawn') return `you can’t start sessions on ${machine}`;

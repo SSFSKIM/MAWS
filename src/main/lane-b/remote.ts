@@ -91,6 +91,10 @@
 //   whose channel ended. Each goes only on the channel whose capabilities were just read and list `rl2.git-reads`
 //   (`oneChannel`), naming the session it is made for as the checkout's other reads do; while none are known it is
 //   refused `host_unavailable`, and a channel that ends under it fails it, never carried to the next channel's peer.
+// - The UX wave (U6f; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §D): a file outside a
+//   session's folders. A keyed read (`files.read` with `named`) and the four outside acts are handed, with their caller,
+//   to ./remote-outside-files.ts, which alone decides when a request becomes an outside act; the copy route reads a
+//   session's file through the same read.
 import type { Socket } from 'node:net';
 import type { MessageChannelMain } from 'electron';
 import type { OpenAnswer } from '@shared/client/port';
@@ -133,7 +137,8 @@ import { outcomeAsResult, pendingResult, refusalResult } from './remote-outcomes
 import { RemoteSession, type RemoteSessionTiming } from './remote-session';
 import { chooserTimings, openTiming, type ChooserRead, type OpenTiming } from './remote-timing';
 import { createSpawnAttempts } from './remote-spawn';
-import { readFileInPages } from './remote-files-read';
+import { readFileInPages, readInPages } from './remote-files-read';
+import { createRemoteOutsideFiles } from './remote-outside-files';
 import { createRemoteForwards, REMOTE_FORWARDS_TIMING, type RemoteForwards, type RemoteForwardsTiming } from './remote-forward';
 import { createRemotePty, PTY_NAMES, REMOTE_PTY_TIMING, type RemotePtyTiming } from './remote-pty';
 import { uploadInParts } from './remote-upload';
@@ -217,6 +222,10 @@ export interface RemoteLaneBDeps {
   openUrl?(url: string, machine: MachineRef): OpenAnswer;
   /** P5 O7 M5c: a consent's callback listener (./remote-port.ts's `listenCallback` by default). */
   listenCallback?(handle: CallbackHandler): Promise<CallbackServer>;
+  /** The UX wave (U6f): whether a caller is a live page of an app window (U6e's `isAppPage` bound to the app's URL); none is without it. */
+  isAppPage?(client: ClientRef): boolean;
+  /** The UX wave (U6f): whether the person owns the machine, as the roster says (`MachineState.owner`); null, the default: not known. */
+  owns?(machine: MachineRef): boolean | null;
   timing?: Partial<RemoteLaneBTiming>;
   now?(): number;
   log(line: string): void;
@@ -465,6 +474,16 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     act: (link, name, fields, options) => machineAct(link, name, fields, now() + timing.sendPendingMs, options),
     log: deps.log,
   });
+  // the UX wave (U6f): a file outside a session's folders, read, listed, chosen and saved there
+  const outside = createRemoteOutsideFiles({
+    call: (link, name, fields, label) => readInPages(link, name, fields, deps.log, label),
+    act: (link, name, fields, { oneChannel, deadline }) => machineAct(link, name, fields, deadline, oneChannel ? { oneChannel: true } : {}),
+    isAppPage: deps.isAppPage ?? (() => false),
+    owns: deps.owns ?? (() => null),
+    now,
+    pendingMs: timing.sendPendingMs,
+    log: deps.log,
+  });
   // P5 O7 M5a: artifacts
   const artifacts = createRemoteArtifacts({
     remote: deps.remote,
@@ -480,6 +499,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     openPath: deps.openPath ?? (async () => 'opening a copy is not wired in this process'),
     ...(deps.tempDir !== undefined && { tempDir: deps.tempDir }),
     env: deps.env ?? {},
+    readSessionFile: (link, fields, client, options) => outside.read(link, fields, client, { ...options, copy: true }), // the UX wave (U6f): a copy's read
     now,
     log: deps.log,
   });
@@ -924,6 +944,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
       // only on the channel checked: one that ends fails it `offline`, never carried to the next channel's peer unchecked
       if (PROJECT_CALLS.has(name)) return callOverLink(link, name, fields, { oneChannel: true });
     }
+    if (outside.handles(name)) return outside.dispatch(link, name, fields, ctx.client); // the UX wave (U6f): its own module's
     const needs = REMOTE_NEEDS[name];
     if (needs !== undefined) {
       const peers = link.peerCapabilities();
@@ -942,6 +963,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     if (name === 'session.spawn') return spawns.spawn(link, fields, ctx.session, ctx.client);
     if (name === 'attention.request') return dispatchOverLink(link, 'session.pendingRequest', { appSessionId: fields.appSessionId, requestId: fields.requestId });
     if (name === 'engine.models') return models(link, fields);
+    if (name === 'files.read' && fields.named === true) return outside.read(link, fields, ctx.client); // the UX wave (U6f): a keyed read
     if (name === 'files.read') return readFileInPages(link, fields, deps.log); // an answer past the channel, in ranged reads
     if (name === 'session.events') {
       const app = String(fields.appSessionId);
@@ -996,7 +1018,7 @@ export function createRemoteLaneB(deps: RemoteLaneBDeps): RemoteLaneB {
     chooserRead(machine, read, startedAt, answeredAt) {
       chooser(deps.remote(machine)?.name ?? machine, read, startedAt, answeredAt);
     },
-    artifacts: { openCopy: (input) => artifacts.openCopy(input), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine), copyInto: (...args) => artifacts.copyInto(...args) },
+    artifacts: { openCopy: (input, client) => artifacts.openCopy(input, client), files: (machine) => artifacts.files(machine), scheme: artifacts.scheme, assets: (machine) => artifacts.assets(machine), copyInto: (...args) => artifacts.copyInto(...args) },
     attention: { machines: () => attention.machines(), machine: (machine) => attention.machine(machine), onChange: (listener) => attention.onChange(listener), sayAgain: () => attention.sayAgain() },
     replay(machine, app) {
       const lane = machines.get(machine)?.lanes.get(app);

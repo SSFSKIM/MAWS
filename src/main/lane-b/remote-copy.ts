@@ -17,6 +17,9 @@
 //   local file: a document kind (`opensExternally`), never a program. Under MAWS_E2E=1 MAWS_E2E_OPEN_LOG takes the copy's
 //   path as a line in place of the OS, as the files' and library's open seam does. Reveal stays the renderer's greyed
 //   "on <machine>": there is nothing here to reveal.
+// - UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 15): a session's
+//   file is read through the reader its caller hands in (`readSessionFile`, the adapter's outside-aware read for the page
+//   that asked), on both copies' routes; without one, and for a library source always, as before.
 import { createHash, randomUUID } from 'node:crypto';
 import { appendFile, mkdir, open, rename, rm, type FileHandle } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
@@ -43,6 +46,9 @@ export const notByteForByte = (machine: string) => `${machine} sends this file o
 
 type Pass = 'written' | 'too-large' | 'changed' | 'unproven' | 'inexact';
 
+/** UX wave U6f: one chunk of a session's file, read for the caller that asked (`files.read`'s input; its answer's shape). */
+export type SessionFileReader = (input: Record<string, unknown>) => Promise<CommandResult<CommandName>>;
+
 /**
  * `source`'s bytes paged over `link` into `to`: written, `too-large` past `max` bytes (nothing written), or the read's
  * refusal as the command's. M5a-b fix wave 1: a copy is the file's bytes or nothing. `files.read` and `library.read`
@@ -51,7 +57,7 @@ type Pass = 'written' | 'too-large' | 'changed' | 'unproven' | 'inexact';
  * copied only when it is, its bytes' SHA-256 the file's; otherwise (not UTF-8, or past the hashed read's cap) refused
  * `invalid_input` with `notByteForByte`'s words. Nothing is renamed into place but a whole, proven file.
  */
-export async function fetchToFile(link: RemoteLink, source: RemoteCopySource, to: string, max: number, log: (line: string) => void): Promise<Result<'written' | 'too-large'>> {
+export async function fetchToFile(link: RemoteLink, source: RemoteCopySource, to: string, max: number, log: (line: string) => void, readSessionFile?: SessionFileReader): Promise<Result<'written' | 'too-large'>> {
   const name = 'appSessionId' in source ? 'files.read' : 'library.read';
   let hashed = false;
   for (let tries = 1; ; ) {
@@ -60,7 +66,7 @@ export async function fetchToFile(link: RemoteLink, source: RemoteCopySource, to
     try {
       const file = await open(part, 'w', 0o600);
       try {
-        pass = await readInto(link, name, source, file, max, hashed, log);
+        pass = await readInto(link, name, source, file, max, hashed, log, undefined, readSessionFile);
       } finally {
         await file.close();
       }
@@ -110,7 +116,9 @@ interface FrameCopy {
  * is the length verified.
  *
  * Asks the machine `files.read { appSessionId, path, offset, length, hash }` and nothing else: the keys the copy of Open
- * externally sends when it proves a text.
+ * externally sends when it proves a text. UX wave U6f: through `readSessionFile` when it is given, which adds the keys the
+ * tab's own reads there carry (`named`, the agent's mark) for a machine that reads them, and takes them off again for
+ * one that does not.
  */
 export async function fetchInto(
   link: RemoteLink,
@@ -118,7 +126,7 @@ export async function fetchInto(
   sink: FileHandle,
   max: number,
   log: (line: string) => void,
-  options: { label: string; seen(first: { mime: string; bytes: number }): void },
+  options: { label: string; seen(first: { mime: string; bytes: number }): void; readSessionFile?: SessionFileReader },
 ): Promise<Result<{ written: number } | 'too-large'>> {
   let size = 0;
   const frame: FrameCopy = {
@@ -131,7 +139,7 @@ export async function fetchInto(
   const asked: RemoteCopySource = { appSessionId: source.appSessionId, path: source.path }; // these two keys and no other
   for (let tries = 1; ; ) {
     await sink.truncate(0);
-    const pass = await readInto(link, 'files.read', asked, sink, max, true, log, frame);
+    const pass = await readInto(link, 'files.read', asked, sink, max, true, log, frame, options.readSessionFile);
     if (!pass.ok) return pass as Result<never>;
     if (pass.value === 'written') return { ok: true, value: { written: size } }; // a written pass ended at exactly this size
     if (pass.value === 'too-large') return { ok: true, value: 'too-large' };
@@ -142,8 +150,9 @@ export async function fetchInto(
 }
 
 // `frame`: a file frame's copy (`fetchInto`), which asks the hash on every page (`hashed` true) and proves a text page by
-// what its answer carries, not by the hashed pass's rule.
-async function readInto(link: RemoteLink, name: 'files.read' | 'library.read', source: RemoteCopySource, file: FileHandle, max: number, hashed: boolean, log: (line: string) => void, frame?: FrameCopy): Promise<Result<Pass>> {
+// what its answer carries, not by the hashed pass's rule. `readSessionFile` (UX wave U6f): how a session source's chunks
+// are read, when given.
+async function readInto(link: RemoteLink, name: 'files.read' | 'library.read', source: RemoteCopySource, file: FileHandle, max: number, hashed: boolean, log: (line: string) => void, frame?: FrameCopy, readSessionFile?: SessionFileReader): Promise<Result<Pass>> {
   let size: number | null = null;
   let hash: string | null = null;
   const digest = createHash('sha256');
@@ -151,7 +160,8 @@ async function readInto(link: RemoteLink, name: 'files.read' | 'library.read', s
   for (;;) {
     // the first chunk one answer the channel carries, to learn the size before reading more
     const length = size === null ? REMOTE_READ_PAGE_BYTES : Math.min(FILES_READ_MAX_LENGTH, size - offset);
-    const read = await readInPages(link, name, { ...source, offset, length, ...(hashed && { hash: true }) }, log, frame?.label);
+    const chunk = { ...source, offset, length, ...(hashed && { hash: true }) };
+    const read = readSessionFile !== undefined && 'appSessionId' in source ? await readSessionFile(chunk) : await readInPages(link, name, chunk, log, frame?.label);
     if (!read.ok) return { ok: false, error: failed(read).error };
     const page = read.value as FilesReadOutput;
     if (size === null) {
@@ -209,6 +219,8 @@ export async function nameOf(link: RemoteLink, source: ArtifactSource): Promise<
 export interface OpenCopyDeps {
   /** shell.openPath: '' when opened, else the reason. */
   openPath(path: string): Promise<string>;
+  /** UX wave U6f: how a session's file is read, for the caller that asked; absent, by the plain call. */
+  readSessionFile?: SessionFileReader;
   /** os.tmpdir(), where the copies go. */
   tempDir(): string;
   /** MAWS_E2E and MAWS_E2E_OPEN_LOG, the e2e's open seam. */
@@ -229,7 +241,7 @@ export async function openCopy(link: RemoteLink, source: RemoteCopySource, deps:
   const dir = join(deps.tempDir(), 'maws-remote-copies', link.machine, createHash('sha256').update(JSON.stringify(source)).digest('hex'));
   await mkdir(dir, { recursive: true, mode: 0o700 });
   const path = join(dir, name);
-  const fetched = await fetchToFile(link, source, path, REMOTE_COPY_MAX_BYTES, deps.log);
+  const fetched = await fetchToFile(link, source, path, REMOTE_COPY_MAX_BYTES, deps.log, deps.readSessionFile);
   if (!fetched.ok) return fetched;
   if (fetched.value === 'too-large') return { ok: true, value: { opened: false, message: `too large to copy from ${link.name}` } };
   const seam = deps.env.MAWS_E2E === '1' ? deps.env.MAWS_E2E_OPEN_LOG : undefined;

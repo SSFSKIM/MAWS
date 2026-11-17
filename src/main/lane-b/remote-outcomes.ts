@@ -14,6 +14,7 @@
 // down or reconnecting closes nothing: an act waits under the link's hold (A4), and a session with a record and no status
 // (released, or opening) is resumed by the act that needs it.
 import { isRefusalReason } from '../../../apps/org-protocol/src/index.ts';
+import { NOT_KEPT_REFUSAL } from '@shared/files/outside';
 import { ipcError, IPC_ERROR_CODES, type IpcErrorCode } from '@shared/ipc/errors';
 import { ACT_WORDS, failureWords, refusalWords } from '@shared/ipc/remote-unavailable';
 import type { CommandName, CommandResult } from '@shared/ipc/schema';
@@ -75,6 +76,9 @@ export function outcomeAsResult(name: CommandName, machine: string, outcome: Act
       // refused where the services allocate it) keeps it, and reads as that refusal does, the mode it names included
       const issues = record(error?.issues) ?? {};
       const refusal = issues.refusal;
+      // UX wave U6f (decision 4): the services' ledger kept no answer for this operation, so the adapter asks afresh;
+      // the word survives the projection, whatever words the act has
+      if (refusal === NOT_KEPT_REFUSAL) return failure('internal', said, { refusal: NOT_KEPT_REFUSAL });
       if (ACT_WORDS[name] !== undefined && isRefusalReason(refusal)) {
         const mode = typeof issues.mode === 'string' ? { mode: issues.mode } : undefined;
         return failure(isIpcCode(code) ? code : 'internal', refusalWords(name, machine, refusal, mode), { refusal });

@@ -18,3 +18,12 @@ export const OUTSIDE_FILES_CAPABILITY = 'rl2.outside-files';
  * device's projection of an act's outcome keeps (§D), so a copy of the operation is asked afresh.
  */
 export const NOT_KEPT_REFUSAL = 'not-kept';
+
+/**
+ * Whether this build asks for an outside act on a machine: only for a person the roster says owns it (decision 13; the
+ * owner's answer to Card 4, "Owners only for now"). The machine itself decides every act again; this is the device
+ * declining to ask, the one place the page and main both read and the one place that answer changes.
+ */
+export function outsideOffer(owner: boolean | null | undefined): boolean {
+  return owner === true;
+}
