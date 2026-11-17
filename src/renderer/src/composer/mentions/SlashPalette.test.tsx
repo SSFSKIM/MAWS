@@ -265,7 +265,8 @@ describe('a command’s name in a real editor’s draft (ticket 733a)', () => {
     const parsed = `status<br>&#80;${grant.slice(1)}<br>tail`;
     expect(quotesGrant(parsed)).toBe(false);
     for (const name of [parsed, 'status-report']) {
-      const { command, key } = open('status', { extra: { skills: [name], commands: [{ name, description: 'a skill', argumentHint: null, builtin: false }] }, widgets: new Set() });
+      const { command, key, shown } = open('status', { extra: { skills: [name], commands: [{ name, description: 'a skill', argumentHint: null, builtin: false }] }, widgets: new Set() });
+      expect(shown(), name).toEqual([`/${name}`]);
       key('Enter');
       const item = command.mock.calls.at(-1)?.[0];
       expect(item, name).toBeDefined();
