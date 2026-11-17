@@ -1125,8 +1125,9 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // The costliest call is the anchored message's read, bounded by ANCHOR_READ_WORK_PER_CHAR units a character (its passes
 // over the lines, then the tags it accepts, each re-written once: Decision Log 54's count), so a text counts only up
 // to the length whose read fits one stretch: OWN_TEXT_MAX_CHARS (65,536 characters, a scan step; far past what a
-// person types, and a longer message still names its paths for a read). Past the length, or past OWN_WORK_PER_CHAR
-// units a character in all (the readers' counts sum to 49), the text does not count: it fails closed. The grant's
+// person types, and a longer message still names its paths for a read; 32,768 since ticket 733a, below). Past the
+// length, or past OWN_WORK_PER_CHAR units a character in all (the readers' counts sum to 49), the text does not count:
+// it fails closed. The grant's
 // test reads the text after compatibility folding, which can make one character up to 18 (U+FDFA), so the bound holds
 // for the folded text too, decided by one fold before any reader runs; the budget follows the longer of the two, and
 // the grant's test on a counted text stays within one stretch. Ticket 733a widened the grant's test (a second reading,
@@ -1135,11 +1136,21 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // it was 3, so the readers' counts sum to 49 where they summed to 41, and each call of the forms' list is planned for at
 // the grant's bound, the costliest of them. The costliest text counted, an anchored comment at the length bound in
 // U+0130, took 51.97 units a character; the budget rose from 48 to 56, about the margin it had.
+// Ticket 733a's M3: the anchored message's writer now slots each anchor's fields (`nameSlot`, the grant's test on each)
+// and passes the whole through `neutraliseGrant`, and is charged what it counts (`commentsMessage`'s meter) where it was
+// charged a fixed 8 units a character. Its count is at most 12.025 units a character of the fields (U+0130's `nameSlot`),
+// 2 for its assembly, 12 for the last pass (11 on U+00DF's two case images, and 1 more where it puts a joiner in) and 2
+// for the compare and the search for a tag: 28.03 a character and a few units a field, the fields lying inside the text;
+// the costliest counted, sixteen comments on a page whose selector and accessible path are U+1FB7, 24.35. So the write
+// is now the costliest call, planned at ANCHOR_WRITE_WORK_PER_CHAR (32, the bound rounded up to a power of two) a
+// character of the longer of text and fold, and the length a text counts up to is the stretch over it: 32,768 characters
+// where it was 65,536 (the read's 16 a character). The costliest text counted, those comments in U+0130, takes 64.12
+// units a character in all; the budget rises from 56 to 70, about the margin it had.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
-const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
+const ANCHOR_WRITE_WORK_PER_CHAR = 32; // the read comments written back by their writer (charged what it counts), the compare and the tag search
 const CLAIM_WORK_PER_CHAR = GRANT_TEST_WORK_PER_CHAR; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
-export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
-export const OWN_WORK_PER_CHAR = 56;
+export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / Math.max(ANCHOR_READ_WORK_PER_CHAR, ANCHOR_WRITE_WORK_PER_CHAR);
+export const OWN_WORK_PER_CHAR = 70;
 const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
 const PASTE_OPENING = '<pasted_content id="'; // the head of the opener `framePasted` writes (composer/pasted-content.ts)
 

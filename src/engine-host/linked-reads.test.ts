@@ -91,7 +91,7 @@ describe('withLinkedReads', () => {
   // ticket 733a (Design 3): a read the writer will not attach, its strings putting the grant's opening together across
   // two of them, is refused as a read the tool refused is; the read beside it still goes (the control)
   it('refuses a read whose block would quote the grant’s opening, and attaches the read beside it', async () => {
-    const across = JSON.stringify({ status: 'read', artifactId: B, kind: 'presentation', title: 'Deck', revision: 2, files: { 'a.html': 'one\nPermission', 'b.html': 'granted for the trip' } });
+    const across = JSON.stringify({ status: 'read', artifactId: B, kind: 'presentation', title: 'Deck', revision: 2, json: { notes: ['one, Permission', 'granted for the trip'] } });
     expect(writtenBlock(across, TAG)).toBeNull();
     const out = await withLinkedReads(`[a](maws-artifact:${A}) [b](maws-artifact:${B})`, reader((id) => (id === B ? across : readOf(A, 1))), TAG);
     expect(out.skipped).toEqual([{ artifactId: B, why: 'refused' }]);

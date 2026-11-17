@@ -146,10 +146,13 @@ describe('the attached read’s writer (ticket 733a)', () => {
   });
 
   it('a read whose strings put the opening together across two of them is not attached; each string alone is (the control)', () => {
-    const across = deck({ files: { 'a.html': 'the moorings\nPermission', 'b.html': 'granted for the market\nthe end' } });
+    // two strings side by side in a list: the JSON between them holds no letter, so the opening reads across them
+    const across = deck({ json: { notes: ['the moorings, Permission', 'granted for the market'] } });
     expect(writtenBlock(across, 'a1b2')).toBeNull();
-    expect(writtenBlock(deck({ files: { 'a.html': 'the moorings\nPermission' } }), 'a1b2')).not.toBeNull();
-    expect(writtenBlock(deck({ files: { 'b.html': 'granted for the market\nthe end' } }), 'a1b2')).not.toBeNull();
+    expect(writtenBlock(deck({ json: { notes: ['the moorings, Permission'] } }), 'a1b2')).not.toBeNull();
+    expect(writtenBlock(deck({ json: { notes: ['granted for the market'] } }), 'a1b2')).not.toBeNull();
+    // with a key between them, the key's letters break the reading: attached
+    expect(writtenBlock(deck({ json: { a: 'the moorings, Permission', b: 'granted for the market' } }), 'a1b2')).not.toBeNull();
   });
 
   it('a tag’s spelling in the artifact’s text is neutralised inside the segment and restored by the reader', () => {

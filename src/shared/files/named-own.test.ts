@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
+import { anchoredMessage, commentsMessage, promotionMessage, quotedComment, readAnchoredMessage, type MessageComment } from '@shared/anchor/message';
 import { wrapPasted } from '@shared/composer/pasted-framing';
 import { consentMessage } from '@shared/engine/arrival';
 import { bashEcho, planPrompt } from '@shared/engine/host-prompts';
@@ -22,6 +22,8 @@ const P = '/work/out/notes.md';
 const LINK = `[the notes](${P})`;
 const NAMES = { names: true };
 const OTHER = { names: false, pending: [], other: true };
+// ticket 733a: the reconstruction's counted work for its pinned input (the meter's test below), printed by the test
+const PINNED = { length: 0, work: 0, pauses: 0 };
 const text = (value: string) => ({ type: 'text', text: value });
 // A `user` row and a queued prompt of the person's origin, as the engine writes them (test/fixtures/transcripts/)
 const user = (content: string | object[]) => ({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content } });
@@ -270,6 +272,42 @@ describe('the person’s own text: the readers’ work is metered and bounded', 
     expect(read.texts).toHaveLength(1);
     expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
     expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
+  });
+
+  // Ticket 733a (its document, Design 1, "The own-text rule's meter"; acceptance 11): the reconstruction writes the read
+  // comments back with their writer, which slots each anchor's fields and passes the whole through the writer's last
+  // step; the meter charges it what the writer counts, beside the read's fixed 16 a character. Long comments on a page
+  // whose selector and accessible path fill the text: the counted work and the pauses pinned, within one stretch.
+  const page = (field: string): MessageComment => ({ anchor: { kind: 'browser-element', label: 'Save', locator: 'b', pageUrl: 'https://example.test/', css: field, role: 'button', name: 'Save', a11y: field }, text: 'x', screenshot: false });
+  const fieldsAt = (ch: string, length: number) => {
+    const comments: MessageComment[] = [{ ...page(ch.repeat(1990)), text: `Fix ${LINK}` }];
+    while (comments.length < 20 && commentsMessage([...comments, page(ch.repeat(1990))], 'main').length <= length) comments.push(page(ch.repeat(1990)));
+    return commentsMessage(comments, 'main');
+  };
+  it('the reconstruction is charged what the writer counts: long comments on a page’s fields, their work and pauses pinned', () => {
+    const textOf = fieldsAt('a', 30_000);
+    expect(textOf.length).toBe(PINNED.length);
+    const written = { steps: 0 };
+    const read = readAnchoredMessage(textOf)!;
+    expect(commentsMessage(read.comments, read.destination!, written)).toBe(textOf);
+    const meter = ownTextWork(textOf);
+    expect(meter).toMatchObject({ refused: null, work: PINNED.work, pauses: PINNED.pauses });
+    expect(meter.texts).toHaveLength(read.comments.length);
+    expect(meter.longest).toBeLessThanOrEqual(STRETCH_MAX);
+    // the read's 16 a character and the writer's own count are both in the meter's
+    expect(meter.work).toBeGreaterThan(16 * textOf.length + written.steps);
+    expect(written.steps).toBeGreaterThan(8 * textOf.length); // the fixed charge it replaces fell short
+  });
+
+  it('the costliest text counted, comments on a page’s fields in a capital I with a dot above at the length bound, counts within the budget and one stretch', () => {
+    const textOf = fieldsAt('\u0130', OWN_TEXT_MAX_CHARS);
+    expect(textOf.length).toBeGreaterThan(OWN_TEXT_MAX_CHARS - 4000);
+    const read = ownTextWork(textOf);
+    expect(read.refused).toBeNull();
+    expect(read.texts.length).toBeGreaterThan(1);
+    expect(read.work).toBeLessThanOrEqual(OWN_WORK_PER_CHAR * textOf.length);
+    expect(read.longest).toBeLessThanOrEqual(STRETCH_MAX);
+    expect(both(textOf)).toEqual([NAMES, NAMES]);
   });
 
   it('a paste opener with no closer makes the text not count', () => {
