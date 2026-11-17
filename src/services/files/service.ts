@@ -540,7 +540,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     };
     const claim = claimOf(caller);
     if (claim === null) return (await saved()).answer;
-    const logged = (ending: string) => logOutside(`outside write: ${by(claim, appSessionId)}: ${ending}`);
+    const logged = (ending: string) => logOutside(`outside write: ${askedBy(claim, appSessionId)}: ${ending}`);
     try {
       const done = await saved();
       logged(done.answer.status === 'ok' ? `ok ${done.bytes} bytes ${done.real}` : `conflict ${done.real}`);
@@ -634,7 +634,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   async function chooseOutside({ appSessionId, path, open }: FilesChooseOutsideInput, caller: FilesCaller): Promise<FilesChooseOutsideOutput> {
     const claim = claimOf(caller);
     if (claim === null) throw new Refusal();
-    const logged = (ending: string) => logOutside(`outside choice: ${by(claim, appSessionId)}: ${ending}`);
+    const logged = (ending: string) => logOutside(`outside choice: ${askedBy(claim, appSessionId)}: ${ending}`);
     let answer: FilesChooseOutsideOutput;
     try {
       if (!records(appSessionId)) throw new Error(`unknown app session: ${appSessionId}`);
@@ -774,7 +774,7 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
 export const identityOf = (stat: BigIntStats): string => `${stat.dev}:${stat.ino}:${stat.size}:${stat.mtimeNs}:${stat.ctimeNs}`;
 
 // UX wave U6f (decision 10): who a line of the log is for, the claim's own (the member and device the endpoint proved)
-const by = (claim: FilesClaim, appSessionId: AppSessionId): string => `member ${claim.member} device ${claim.device} session ${appSessionId} op ${claim.opId}`;
+const askedBy = (claim: FilesClaim, appSessionId: AppSessionId): string => `member ${claim.member} device ${claim.device} session ${appSessionId} op ${claim.opId}`;
 
 // UX wave U6f (decision 10): the word a refused save's line gives for why: outside the rule, MAWS's own, moved since it
 // was shown, gone, not the daemon user's to write, in a protected folder not opened, or anything else
