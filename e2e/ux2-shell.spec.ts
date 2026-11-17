@@ -13,6 +13,7 @@ import { chooseCustomize, customizeHead, customizePage } from './support/customi
 import { CATALOG_FIXTURES_ENV } from '../src/main/catalog/fetch';
 import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
+import { goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { backToTabs, hideSurface, mountedTabs, moveSideTab, openAppDestination, openSurface, pageRegion, sessionCard, settingsDialog, sideColumn, sideGroup, sideTab, sideTabNames, unfoldSessionCard } from './support/shell';
 
@@ -1103,7 +1104,7 @@ test('G5: Go ▸ Go to file stands under Command palette with ⌘P; disabled wit
   expect(palette, `Command palette in Go: ${JSON.stringify(goRows)}`).toBeGreaterThanOrEqual(0);
   expect(goRows[palette + 1], 'Go to file directly under Command palette, with ⌘P, no separator between them').toEqual({ id: 'files.goToFile', type: 'normal', label: 'Go to file', accelerator: 'Cmd+P' });
 
-  const enabled = () => app.evaluate(({ Menu }) => Menu.getApplicationMenu()?.getMenuItemById('files.goToFile')?.enabled ?? null);
+  const enabled = async () => (await goToFileRow(app))?.enabled ?? null;
   await expect(main(page).getByText('No open tabs')).toBeVisible({ timeout: 15_000 });
   await expect.poll(enabled, { message: 'disabled with no session in the side column' }).toBe(false);
   await openSession(page);

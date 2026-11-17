@@ -19,6 +19,7 @@ import { invoke, value } from './support/c7-replay';
 import { closedPort, startBrowserServer } from './support/browser-server';
 import { closeScene, scratchProject, seamLines, show, type Scene } from './support/maws-tools';
 import { menu } from './support/menu';
+import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { sidebarRow } from './support/sidebar';
 import { withNativeClipboard } from './support/clipboard';
 import { latencyBudgets } from './support/latency';
@@ -1438,13 +1439,7 @@ test('G6: with the keyboard in a page of the in-app browser, Go to file puts it 
     await expect.poll(() => pageA.evaluate(() => document.hasFocus()), { message: 'the page’s own witness: its document has the keyboard' }).toBe(true);
     await expect.poll(focusedUrl, { message: 'main’s focused contents are the page’s' }).toBe(A);
 
-    const row = () =>
-      s.maws.app.evaluate(({ Menu }) => {
-        const item = Menu.getApplicationMenu()?.getMenuItemById('files.goToFile');
-        return item ? { enabled: item.enabled, accelerator: item.accelerator ?? null } : null;
-      });
-    await expect.poll(row, { message: 'Go ▸ Go to file, enabled, with ⌘P' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
-    await menu(s.maws.app, 'files.goToFile');
+    await goToFile(s.maws.app);
     await expect.poll(() => s.page.evaluate(() => document.hasFocus() && (document.activeElement?.matches('[data-files-filter]') ?? false)), { message: 'the field is the active element of the app’s page, which has the keyboard' }).toBe(true);
     await expect.poll(focusedUrl, { message: 'main’s focused contents no longer the page’s' }).not.toBe(A);
   });

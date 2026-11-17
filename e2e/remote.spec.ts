@@ -87,6 +87,7 @@ import { isAlive, tcpListeners } from './support/processes';
 import { DATASET_STATES } from '../src/artifacts/dashboard/states';
 import { applicationOf, launchMaws, REPO_ROOT, type MawsLaunch } from './support/launch';
 import { menu } from './support/menu';
+import { goToFile } from './support/go-to-file'; // UX wave U6b-3b
 import { startRemoteScene, B_NAME, type RemoteScene } from './support/remote-scene';
 import type { PlaneRow } from './support/fake-sminos'; // 2026-11-06
 import { answered, BUTTON, FIELD, startPages } from './support/headless-browser'; // P5 O17 M10
@@ -3806,13 +3807,7 @@ test('U6b-3b G7, a session on B: Go to file lists a file that exists on B alone;
     writeFileSync(tides, 'Invented tide tables, written in B’s checkout.\n');
 
     // Go to file: the field takes the keyboard, and the text lists B's file
-    const row = () =>
-      electron.evaluate(({ Menu }) => {
-        const item = Menu.getApplicationMenu()?.getMenuItemById('files.goToFile');
-        return item ? { enabled: item.enabled, accelerator: item.accelerator ?? null } : null;
-      });
-    await expect.poll(row, { message: 'Go ▸ Go to file, enabled, with ⌘P' }).toEqual({ enabled: true, accelerator: 'Cmd+P' });
-    await menu(electron, 'files.goToFile');
+    await goToFile(electron);
     await expect.poll(() => page.evaluate(() => document.activeElement?.matches('[data-files-filter]') ?? false), { message: 'the field has the keyboard' }).toBe(true);
     await page.keyboard.type('tidetables');
     const files = surface(page, 'files');

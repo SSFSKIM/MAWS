@@ -1371,7 +1371,7 @@ test.describe('sessions', () => {
         const tree = sideColumn(page).locator('[data-files-tree][data-place="beside"]');
         await expect(tree, 'the tree at the file’s left, at its own width').toBeVisible({ timeout: 20_000 });
         const treeBox = await boxOf(tree);
-        expect(treeBox.right - treeBox.left, 'the tree no narrower than its least (tools/code/files/tree-state.ts)').toBeGreaterThanOrEqual(160);
+        expect(treeBox.right - treeBox.left, `the tree no narrower than its least (tools/code/files/tree-state.ts): the column ${JSON.stringify(treeBox)}`).toBeGreaterThanOrEqual(160);
         // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, Decision Log 13): the column holds
         // Go to file's field above the tree's list, and the menu is the list's (its trigger, and its collision boundary), so
         // the presses and the bound are the list's box, under the field
