@@ -31,7 +31,7 @@ How to see it working: the unit tests named under each milestone, which write ea
 - [x] (2026-11-17) This document written against the pin: the writers, their recognisers and the readers of each form traced; the probes' rows read and the rows cited here recounted from the findings.
 - [x] (2026-11-17) The adversarial review of this document at `05dc8cacc` (two findings of the first rank, four of the second, one note on integration), the third probe's counts, and the architect's rulings on both; revised once to them ("Ruled", second table).
 - [x] (2026-11-17) Revised a second time: the ruling on older builds, and the re-read of Design 5 ("Ruled", second table, its last four rows).
-- [ ] The pass over "Statements to check again".
+- [x] (2026-11-17) The pass over "Statements to check again", at `938347bd2` (no merge of master: the architect names any further merge): rows 2, 5, 6, 10, 11, 12 and 13 hold; rows 1, 3, 4, 7, 8 and 9 hold with the nuances under Surprises & Discoveries; none stops a milestone.
 - [ ] M1 — The shared rules, and the measurements on the branch.
 - [ ] M2 — The content forms: written, read in place, edited and sent again.
 - [ ] M3 — The name forms, the host's two forms, the guard.
@@ -625,6 +625,14 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
   Evidence: `parseBash` (`src/engine-host/fs/backfill.ts`): its first branch, anchored at `<bash-input>`, returns the command.
 - Observation: a thread's title never reaches its first message's segment.
   Evidence: `cutPrompt` keeps six words; the shortest lead that can carry a quoted line, `Comment on "x" (file p, line n):`, is six.
+- Observation (M1's pass over "Statements to check again"): row 1, `DRAFT_FORMS` holds two forms at the head (file and agent mentions), M3 grows it to eight; the owner question's answer line is in `RETIRED_FORMS` with no site. Row 3: `readConsents` runs before `holdsGrantForm` in rule R, so a whole consent sentence is its own grant even where its subject quotes a form's words (the pressed consent, as accepted). Row 4: `3n + 2` bounds the forms' list readers only; the anchored read has its own bound. Row 7: `literal` is a field of `serializeDraft`'s options object. Row 8: a queued row shows an answer or an approval line before `entryDisplay` (`stack.ts`); the six words are only the fallback title, after file mentions are stripped and before a cap of 60 code points; an explicit or generated title wins. Row 9: `arrival.ts` re-exports `quotesGrant` and calls it nowhere; the other callers are tests. Row 12: `linkedReadOf` rebuilds the lead from the title and the `artifactId`.
+  Evidence: task-1 report of M1, file:line for each row.
+- Observation: `spikes/protocol-probe/fixtures.test.mjs` was edited on the probe side only; the merge took it whole (630 of 630 pass).
+  Evidence: `git diff 61050446d -- spikes/protocol-probe/fixtures.test.mjs` empty at `e8b27e4f3`.
+- Observation: the per-character reading reads everything the pin's whole-text reading reads: the whole-text NFKC fold only composes letters beyond ASCII, never an ASCII letter or bracket the per-character fold does not make.
+  Evidence: the seeded differential of `grant.test.ts` (4,000 texts) found none read by the pin and missed by the new reading.
+- Observation: rule R's work does not move: `personsLines` calls no `quotesGrant` (the grant test's entry in `COMPOSED_FORMS` is `forGrants: false`), so its pin stands unrefitted.
+  Evidence: `arrival.test.ts` passes unchanged at `c83582e1e`.
 
 ## Decision Log
 
@@ -648,6 +656,13 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
   (4) The relay row of Design 5 stands whether or not Edit is offered on a relay's row. At `bdbfe863e` it is offered: a relay goes as a `user.message` with a message id, and `derive.ts` marks such a row `editable` unless it holds several comments (`messageRows(event, rowId.user(event.messageUuid), true)`, `editable && text.comments === null`); nothing there tests for a relay.
   (5) If S3's harness can read only part of an older peer's bubble text, what it can assert comes to the architect before the scene is settled.
   Date/Author: 2026-11-17, the architect; recorded by the plan's executor.
+
+- **2026-11-17 · M1's means.** `quotesGrant` is the pin's reading kept verbatim, or a new forward reading that mirrors `neutraliseGrant`'s for the short opening; the old answers hold by construction. The upper case image is read only when the text holds a character beyond ASCII (on ASCII the images are one stream), so a false answer on ASCII text costs exactly 4 units a character and `grant.test.ts`'s pin of `4·len + 16` stands. `grantSpans` answers the whole text as one range where only the pin's reading finds the opening (fail closed; by the observation above it cannot fire, and it keeps `grantSpans` empty exactly when `quotesGrant` is false); its pins are 9 a character for the ranges and 7 for the test, on full-width letters at 2,000, 20,000 and 80,000 characters.
+  Date/Author: 2026-11-17, M1's executor; recorded by the plan's executor.
+- **2026-11-17 · M1's meters.** The own-text rule plans every reader of the forms' list at `7 × max(n, folded) + 2` (was `3n + 2`), one bound for all rather than the grant reader alone, because singling it out would edit `composed-forms.ts`; a bound above a reader's need only moves a pause earlier. `OWN_WORK_PER_CHAR` 48 → 52 (measured at the length bound: a full-width anchored comment 47.59 a character, accented 46.99, ASCII 44.99; at 48 the full-width case passed only by the 128-character floor). `OWN_TEXT_MAX_CHARS` unchanged: the anchored reading is still the costliest. `LEAVE_OUT_WORK_PER_CHAR` = 54 with a floor of 32 characters: no round of Design 2's table or its long inputs cost more than 6 a character, and 54 = 9 × 6 is eight rounds and the last pass that finds nothing; the budget is checked after each pass that finds a range, so the total may pass it by one round. A text whose characters fold to many (U+FDFA to 18) costs more a round and fails closed sooner.
+  Date/Author: 2026-11-17, M1's executor; recorded by the plan's executor.
+- **2026-11-17 · M1's readings at the edges.** Content left out whole is `(lines left out by MAWS)` with no line break; a run of left-out lines keeps the break of its last line. `takeSegment` reads only the first closing tag of the id at a line's start (null if `">\n` does not follow it) and an empty body as `''`; `segmentsInPlace` collects the closing tags in one pass, so it stays linear over openings that never close, and copies through an opening that is no segment. The tag's fold keeps the ASCII regular expression for ASCII text (so `wrapPasted`'s bytes are those of the pin) and folds per character otherwise, the backslash after the bracket character; only U+FE64 and U+FF1C fold to `<` and only U+FF0F to a bare `/` (U+2100, U+2101, U+2105, U+2106 hold `/` inside their fold and cannot form `</`). Restore also removes a full-width backslash after a bracket, the same lossy case as a typed `<\pasted_content`. A person's own text holding a look-alike tag gains that backslash when sent (Design 1's decision, kept as written: the architect, 2026-11-17) and no longer counts for a save (fail closed). `MENTION_BREAKS` stays as an alias of `LINE_OR_CONTROL`, so `paste.ts` (M3's) is not touched in M1.
+  Date/Author: 2026-11-17, M1's executor; the backslash confirmed by the architect; recorded by the plan's executor.
 
 ## Outcomes & Retrospective
 
