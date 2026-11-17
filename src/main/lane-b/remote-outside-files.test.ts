@@ -72,7 +72,7 @@ function lab(options: { owner?: boolean | null; farOwner?: boolean | null } = {}
   } as Parameters<typeof createRemoteLaneB>[0]);
   const cmd = (name: string, input: unknown, client: ClientRef = PAGE_CLIENT, machine: MachineRef = MINI): Promise<Result> => adapter.dispatch(links.get(machine)!, name as CommandName, input, { client, target: machine });
   /** The machine's `files.read` answers `answer` for every call. */
-  const reads = (answer: (input: Record<string, unknown>) => CallResult, on: FakeLink = link) => void on.answers.set('files.read', answer);
+  const reads = (answer: (input: Record<string, unknown>) => CallResult | Promise<CallResult>, on: FakeLink = link) => void on.answers.set('files.read', answer);
   /** Each `files.readOutside` page is answered done over `text`, with what the page asked, and the mark given. */
   const outsideOver = (text: string, mark: Partial<FilesReadOutput> = { named: true, outside: { real: NOTES, writable: true } }, on: FakeLink = link) => {
     on.onAct = (act) => {
