@@ -17,6 +17,7 @@ import { Shell } from '../../../app/Shell';
 import { registerSlot, resetSlots } from '../../../app/slots';
 import { connectCodeEvents } from '../../../ipc/events';
 import { queryClient } from '../../../ipc/query';
+import { isActionEnabled } from '../../../keymap/actions-runtime';
 import { connectActions } from '../../../keymap/dispatcher';
 import { toggleKeyboardShortcuts } from '../../../keymap/KeyboardShortcuts';
 import { openPalette, usePalette } from '../../../palette/CommandPalette';
@@ -202,6 +203,36 @@ describe('Go to file while any other modal is open: disabled in the menu (Decisi
     act(() => useTestSheet.setState({ open: false }));
     await waitFor(() => expect(screen.queryByRole('dialog', { name: 'Rename' })).toBeNull());
     await waitFor(() => expect(menuEnables()).toContain('files.goToFile'));
+  });
+
+  // The task review's finding: a lender holding the keyboard must not hide a modal under it
+  it.each([
+    ['the Command palette', () => openPalette(), () => usePalette.setState({ open: false }), () => palette()],
+    ['Keyboard shortcuts', () => toggleKeyboardShortcuts(), () => toggleKeyboardShortcuts(), () => shortcuts()],
+  ])('%s opened over a sheet: Go to file stays disabled while the sheet is under it; the control, the same modal alone, enables it', async (_name, open, close, modal) => {
+    renderShell(<TestSheet />);
+    await composerHoldsKeyboard();
+    // the control: the lender alone holds the keyboard, and Go to file is enabled
+    act(() => open());
+    await waitFor(() => expect(modal()?.contains(document.activeElement)).toBe(true));
+    await waitFor(() => expect(menuEnables()).toContain('files.goToFile'));
+    expect(isActionEnabled('files.goToFile')).toBe(true);
+    act(() => close());
+    await waitFor(() => expect(modal()).toBeNull());
+    // the sheet, then the same lender over it: the keyboard in the lender, the sheet still open under it
+    act(() => useTestSheet.setState({ open: true }));
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'Rename' }).contains(document.activeElement)).toBe(true));
+    await waitFor(() => expect(menuEnables()).not.toContain('files.goToFile'));
+    act(() => open());
+    await waitFor(() => expect(modal()?.contains(document.activeElement)).toBe(true));
+    expect(screen.queryByRole('dialog', { name: 'Rename', hidden: true })).not.toBeNull(); // still open, under it
+    await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(false));
+    expect(menuEnables()).not.toContain('files.goToFile');
+    act(() => close());
+    await waitFor(() => expect(modal()).toBeNull());
+    expect(isActionEnabled('files.goToFile')).toBe(false); // the sheet still open
+    act(() => useTestSheet.setState({ open: false }));
+    await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(true));
   });
 
   it('a menu Radix draws as modal (its default, as a request card’s answer menus): disabled while it is open; the control, a menu drawn with `modal={false}`, leaves it enabled', async () => {
