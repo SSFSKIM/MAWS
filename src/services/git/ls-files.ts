@@ -151,18 +151,23 @@ function inside(roots: readonly string[], resolved: string): boolean {
 const INDEX_ENTRY = /^([0-7]{6}) [0-9a-f]+ [0-3]\t/;
 const GITLINK = '160000';
 
-// The paths of git's answer: an index entry's after its head, a path the index holds at several stages (a conflict) once,
-// and apart from them the gitlinks, each as `<path>/`.
+// The paths of git's answer: an index entry's after its head, and each path once though the index holds it at several
+// stages (a conflict). A path is a gitlink, listed apart as `<path>/`, when any of its stages is one (a conflict whose
+// sides are a submodule and a file is the folder); a file otherwise.
 function listed(entries: readonly string[]): [files: string[], gitlinks: string[]] {
-  const files = new Set<string>();
-  const gitlinks = new Set<string>();
+  const gitlink = new Map<string, boolean>(); // a path, and whether one of its stages is a gitlink
   for (const entry of entries) {
     const head = INDEX_ENTRY.exec(entry);
-    if (head === null) files.add(entry);
-    else if (head[1] === GITLINK) gitlinks.add(`${entry.slice(head[0].length)}/`);
-    else files.add(entry.slice(head[0].length));
+    const path = head === null ? entry : entry.slice(head[0].length);
+    gitlink.set(path, gitlink.get(path) === true || head?.[1] === GITLINK);
   }
-  return [[...files], [...gitlinks]];
+  const files: string[] = [];
+  const gitlinks: string[] = [];
+  for (const [path, linked] of gitlink) {
+    if (linked) gitlinks.push(`${path}/`);
+    else files.push(path);
+  }
+  return [files, gitlinks];
 }
 
 // The files and every directory above one of them, a directory written with its trailing `/`; a gitlink (`<path>/`)

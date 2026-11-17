@@ -199,12 +199,22 @@ export function FileViewer({ tab, start, end, host, inView = true, agent = false
   );
 }
 
+const NO_SESSION = 'flex h-full flex-col items-center justify-center gap-1 p-6 text-center';
+
 function NoSession({ path }: { path: string }) {
   return (
-    <div data-file-viewer data-path={path} className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
+    <div data-file-viewer data-path={path} className={NO_SESSION}>
+      <NoSessionNotice path={path} />
+    </div>
+  );
+}
+
+function NoSessionNotice({ path }: { path: string }) {
+  return (
+    <>
       <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
       <p className="text-ui text-fg">{VIEWER_COPY.noSession}</p>
-    </div>
+    </>
   );
 }
 
@@ -268,15 +278,27 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
   );
   const entry = found && found.appSessionId === appSessionId && found.path === path ? found : null;
 
-  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) return <NoSession path={path} />;
+  // The keyboard's place is the same element whatever the body draws, a failed read's notice among them, so a request
+  // taken while the read is on its way stays on the view when it fails, and one made after is taken (S3; B5).
+  const place = {
+    ref: body,
+    tabIndex: takesKeyboard === undefined ? undefined : -1,
+    'data-file-keyboard': takesKeyboard === undefined ? undefined : '',
+    'data-key': takesKeyboard,
+    'data-file-viewer': true,
+    'data-path': path,
+  };
+  const outline = takesKeyboard === undefined ? '' : TAKES_KEYBOARD;
+  if (entry?.status === 'error' && entry.error?.startsWith('unknown app session')) {
+    return (
+      <div {...place} className={`${NO_SESSION} ${outline}`}>
+        <NoSessionNotice path={path} />
+      </div>
+    );
+  }
   return (
     <div
-      ref={body}
-      tabIndex={takesKeyboard === undefined ? undefined : -1}
-      data-file-keyboard={takesKeyboard === undefined ? undefined : ''}
-      data-key={takesKeyboard}
-      data-file-viewer
-      data-path={path}
+      {...place}
       data-kind={entry?.kind ?? ''}
       data-frame={entry ? frameMarker(entry) : ''}
       data-editable={String(entry !== null && entry.editable && showsCode(entry))}
@@ -284,7 +306,7 @@ export function FileBody({ tabId, appSessionId, path, line = null, readOnly = fa
       data-theirs={entry?.theirs?.view ?? ''}
       data-loads={entry?.loads ?? 0}
       data-pending={entry?.pending ?? 0}
-      className={`flex h-full min-h-0 flex-col bg-bg ${takesKeyboard === undefined ? '' : TAKES_KEYBOARD}`}
+      className={`flex h-full min-h-0 flex-col bg-bg ${outline}`}
     >
       <div className={bar}>
         {lead ? lead(entry) : <span className="flex-1" />}
