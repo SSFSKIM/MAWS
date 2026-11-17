@@ -4153,9 +4153,9 @@ function u6fPeer(peer: Build): string | null {
 // A command of B's session through this build's page, addressed to B, whatever it answers
 const onMachine = (page: Page, name: string, input: unknown, machine: MachineRef) =>
   page.evaluate(([n, i, m]) => window.maws.invoke(n as never, i as never, m as never), [name, input, machine] as const) as Promise<{ ok: boolean; value?: unknown; error?: { code: string; message: string } }>;
-// The names of the acts B's services claimed, from B's ledger (`<profile>/spine-ops.jsonl`), and B's log's lines that
+// The names of every act B's services claimed, from B's ledger (`<profile>/spine-ops.jsonl`), and B's log's lines that
 // name one of the four acts or record one (decision 10's `[files] outside write:` and `outside choice:`)
-function outsideOnPeer(b: { userData: string; log(): string }): { claims: string[]; lines: string[] } {
+function outsideOnPeer(b: { userData: string; log(): string }): { claimed: string[]; lines: string[] } {
   const ledger = join(b.userData, 'spine-ops.jsonl');
   const names = existsSync(ledger)
     ? readFileSync(ledger, 'utf8').split('\n').filter(Boolean).flatMap((line) => {
@@ -4168,7 +4168,7 @@ function outsideOnPeer(b: { userData: string; log(): string }): { claims: string
       })
     : [];
   const four = OUTSIDE_ACTS as readonly string[];
-  return { claims: names.filter((name) => four.includes(name)), lines: b.log().split('\n').filter((line) => four.some((name) => line.includes(name)) || /\[files\] outside (?:write|choice): /.test(line)) };
+  return { claimed: names, lines: b.log().split('\n').filter((line) => four.some((name) => line.includes(name)) || /\[files\] outside (?:write|choice): /.test(line)) };
 }
 
 test('(another machine’s outside file, the peer as that machine) this build’s app reaches a mawsd of the peer’s build as B: Open File… is disabled and says to update B, so does a link outside the folders, nothing of the four acts reaches B, and a save inside B’s checkout lands', async () => {
@@ -4281,8 +4281,10 @@ test('(another machine’s outside file, the peer as that machine) this build’
     const asked = await onMachine(page, 'files.writeOutside', { appSessionId: app, path: notes, real: notes, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(notes)).digest('hex') }, b.ref);
     expect(asked.ok, `files.writeOutside to B is refused: ${JSON.stringify(asked)}`).toBe(false);
     expect(readFileSync(notes, 'utf8'), 'the file outside is unchanged').toBe(NOTES_TEXT);
+    // the ledger read is B's: it holds the save's claim (so a missing or unread file fails here), and none of the four acts
     const there = outsideOnPeer(b);
-    expect(there.claims, 'B’s ledger holds no claim of the four acts').toEqual([]);
+    expect(there.claimed, 'the save is files.write, claimed by B’s services').toContain('files.write');
+    expect(there.claimed.filter((name) => (OUTSIDE_ACTS as readonly string[]).includes(name)), 'B’s ledger holds no claim of the four acts').toEqual([]);
     expect(there.lines, 'and B’s log no line of them').toEqual([]);
     expect(a.consoleErrors()).toEqual([]);
     said.push('  a save inside B’s checkout landed; B’s ledger and log hold nothing of the four acts');
