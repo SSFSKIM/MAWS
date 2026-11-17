@@ -2874,7 +2874,7 @@ describe('files saves outside the folders', () => {
           `outside choice: ${by('op-tab')}: refused (no-file) ${out('tab\\x09here')}`,
           `outside choice: ${by('op-plain')}: granted ${out('chosen.txt')}`,
         ]);
-        for (const line of logLines) expect(line, line).not.toMatch(/[\u0000-\u001f\u007f-\u009f]/);
+        for (const line of logLines) expect(line, line).not.toMatch(/\p{Cc}/u);
       });
 
       it('writes none for a save on this machine, a read or a listing, and a log that throws changes no answer', async () => {
