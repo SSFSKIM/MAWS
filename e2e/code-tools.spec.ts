@@ -2329,8 +2329,7 @@ test.describe('UX wave U6b-3b: Go to file', () => {
       await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the keyboard still in the field' }).toBe(true);
       await p.page.keyboard.press('Escape');
       await expect(sheetDismissalOf(p), 'Esc again: the sheet closed').toHaveCount(0);
-      // the side column's measured box (read in the page: Playwright's boundingBox is null for a box of no width), printed
-      // when it is not folded away
+      // the side column's box as the page measures it, printed when it is not folded away
       const panelBox = () => p.page.locator('[data-region="panel"]').evaluate((el) => {
         const { x, y, width, height } = el.getBoundingClientRect();
         return { x, y, width, height };
