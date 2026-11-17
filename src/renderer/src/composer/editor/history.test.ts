@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import { consentMessage } from '@shared/engine/arrival';
+import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
 import { userTextOf } from '../../transcript/model/user-text';
+import { expectNoGrantSent } from '../../../../../test/support/grant-readers';
 import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
@@ -149,6 +151,18 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
     expect(recalls).toHaveLength(1);
     expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
+  });
+
+  // UX wave U1c (the architect's ruling on recall): the recalled body sent again passes the one writer
+  it('the one-writer rule: a recalled row whose pasted body quotes the grant is sent again neutralised', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], []);
+    const again = serializeDraft(recallDoc(recalled!), ctx);
+    expect(again.text).toBe(sent.text);
+    expect(again.text.includes(GRANT_OPENING)).toBe(false);
+    expectNoGrantSent(again.content);
   });
 
   // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
