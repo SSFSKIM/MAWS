@@ -2078,7 +2078,6 @@ describe('a file outside the folders on another machine (U6f)', () => {
     forgetOpenedThere();
     forgetStarts();
     overRl2(T);
-    offs.push(connectCodeEvents()); // a file event reaches the store
   });
   afterEach(() => {
     document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
@@ -2100,7 +2099,9 @@ describe('a file outside the folders on another machine (U6f)', () => {
   // there for the session (a counted name, an added record).
   function disk(files: Record<string, string>, how: { names?: readonly string[]; added?: readonly string[] } = {}) {
     const names = new Set(how.names ?? []);
-    return installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === THERE && names.has(path), added: how.added });
+    const served = installDisk(files, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === THERE && names.has(path), added: how.added });
+    offs.push(connectCodeEvents()); // main's pushed events into the stores, once the bridge is installed
+    return served;
   }
   const show = (path = OUT, appSessionId: AppSessionId = T, agent = false) => {
     act(() => void openFile(appSessionId, path, null, { main: true }));
