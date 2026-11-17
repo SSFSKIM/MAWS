@@ -140,7 +140,7 @@ button.transcript-chip:hover { background: var(--bg-hover); }
 .transcript-user-line-actions { display: flex; flex: none; align-items: center; justify-content: flex-end; gap: 8px; width: 0; overflow: hidden; opacity: 0; transition: opacity 0.12s; }
 .transcript-user:hover .transcript-user-line-actions, .transcript-user:focus-within .transcript-user-line-actions { width: auto; overflow: visible; opacity: 1; }
 .transcript-user:hover .transcript-user-line-actions:not(:last-child), .transcript-user:focus-within .transcript-user-line-actions:not(:last-child) { margin-right: 8px; }
-.transcript-user-line-actions button { padding: 6px 2px 2px; margin: -6px -2px -2px; }
+.transcript-user-line-actions button { padding: 7px 2px 1px; margin: -7px -2px -1px; }
 .transcript-user-line-actions button:hover { color: var(--fg); }
 .transcript .transcript-user-line-actions button:focus-visible { outline-offset: 0; }
 /* That a message was not sent: always shown, last on the line under the bubble */
