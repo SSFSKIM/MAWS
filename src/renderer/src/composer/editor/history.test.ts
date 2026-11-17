@@ -5,7 +5,7 @@ import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
 import { userTextOf } from '../../transcript/model/user-text';
-import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
+import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
@@ -139,6 +139,16 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(recalls.map(recallText)).toEqual([typed]);
     expect(findMatch(recalls.map(recallText), 'permission granted', 0, 1), 'the search finds words that span the joiner').toBe(0);
     expect(serializeDraft(recallDoc(recalls[0]!), ctx).text, 'sent again, the opening is broken again').toBe(sent.text);
+  });
+
+  it('lists a sent prompt once when the grant’s opening is in a pasted body, the body as pasted', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    expect(row.attachments.map((a) => a.text), 'the row’s body holds the joiner').not.toEqual([body]);
+    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
+    expect(recalls).toHaveLength(1);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
   });
 
   // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
