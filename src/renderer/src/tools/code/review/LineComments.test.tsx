@@ -7,7 +7,7 @@
 // case reads them.
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, cleanup, createEvent, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { commentsMessage, MESSAGE_COMMENTS_MAX, type MessageComment } from '@shared/anchor/message';
@@ -264,6 +264,22 @@ describe('comments on lines in Review', () => {
     expect(lineRow('src/report.ts', 'old', 12)!.nextElementSibling?.contains(card())).toBe(true);
     // card 4 at its default: the label is the file and the line, the side is the anchor's, and nothing says "before"
     expect(pass()!.comments[1]).toMatchObject({ anchor: { kind: 'file-line', label: 'report.ts:12', path: '/repo/src/report.ts', line: 12, side: 'old' }, quote: 'return value;' });
+  });
+
+  // The gate's Mac run (side scene 13): once a press's handlers have run, the browser moves the keyboard to the button
+  // pressed, unless the press is prevented; the library opens the card on the press, and the card with nothing typed is
+  // discarded when the keyboard leaves it. The press on the add button leaves the keyboard in the card it opened.
+  it('keeps the card a press on the add button opened, its field holding the keyboard after the press', async () => {
+    await mountReview();
+    const button = lineRow('src/report.ts', 'new', 12)!.querySelector<HTMLButtonElement>('[data-add-widget="new"] button')!;
+    const press = createEvent.mouseDown(button);
+    fireEvent(button, press);
+    await painted(() => card() !== null && document.activeElement === field());
+    if (!press.defaultPrevented) act(() => button.focus()); // the press's default action, as a browser takes it
+    await act(() => new Promise<void>((resolve) => setTimeout(resolve, 0)));
+    expect(card(), 'the card stays open').not.toBeNull();
+    expect(document.activeElement, 'the keyboard in its field').toBe(field());
+    expect(pass()!.comments.map((comment) => comment.anchor.label)).toEqual(['report.ts:12']);
   });
 
   it('sends two comments as one message (“Send 2 comments”), each with its quoted line, the removed one under “Before the change:”', async () => {

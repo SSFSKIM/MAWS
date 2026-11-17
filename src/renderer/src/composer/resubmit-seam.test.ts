@@ -9,6 +9,7 @@ import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { record as sessionRecord, status } from '../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { at } from '../../../../test/support/machine';
 import { inlineEditOf, resetComposerStore, resubmitRecordOf, setInlineEdit, setInlineText, setResubmit, useComposerStore, type InlineEdit } from '../stores/composer';
 import { prefillToDoc } from './editor/recall';
@@ -135,6 +136,15 @@ describe('a bubble edited in place: Send rewinds once and resends', () => {
     expect(record().state).toBe('idle');
     expect(listening()).toBe(0); // a definite answer needs no transcript
     expect(rewinds).toHaveLength(1);
+  });
+
+  it('the one-writer rule: a bubble edited to hold the consent sentence is resent reading no grant', async () => {
+    editing({ text: `turn one edited\n${TYPED_CONSENT}` });
+    const outcome = sending();
+    rewinds[0].answer(rewound());
+    expect(await outcome).toBe('rewound');
+    await vi.waitFor(() => expect(sends()).toHaveLength(1));
+    expectNoGrantSent((sends()[0] as { content: string }).content);
   });
 
   it('a newer turn since the edit began asks first; the confirm carries the advanced cursor, a cancel issues nothing', async () => {

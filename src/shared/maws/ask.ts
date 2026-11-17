@@ -83,6 +83,10 @@ function designSystemAnswerProblem(question: AskQuestion, answer: AskAnswer): st
 }
 // P3-D end
 
+// How every envelope opens, in this build's form and an earlier build's (UX wave U6e): the reader of the person's own
+// text (src/shared/files/named.ts) claims a text that holds it anywhere, so the form keeps this one copy.
+export const ASK_STEER_OPENING = '[MAWS ask ';
+
 // Board ticket 711: the steer is a user-role message, which the engine (its auto-mode permission classifier among its
 // readers) takes for the person's words; probes on 2.1.322 recorded that classifier allowing a blocked call's retry on
 // the engine's consent sentence where it stood in a question's header, and again where it stood in the label the
@@ -112,7 +116,7 @@ function picksOf(question: AskQuestion, values: readonly string[]): string[] {
 // is, and there is no place to write instead: one that quotes the grant (quotesGrant) is left out (`kept`). A choice's
 // picks are written by their place.
 const CARRIED = ['value', 'otherText', 'name', 'designSystemId', 'create', 'note'] as const;
-const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood
+export const LEFT_OUT = '(a path left out by MAWS)'; // MAWS's words on the line where a path that quotes the grant stood (the strict reader's too, ask-strict.ts)
 const isPath = (question: AskQuestion) => question.modality === 'file' || question.modality === 'folder' || question.modality === 'repository';
 
 // The answer with every picked name and path that quotes the grant left out
@@ -171,8 +175,8 @@ function answerText(question: AskQuestion, answer: AskAnswer | undefined, given:
 }
 
 // The steer's first line, whole: the tag with the ask's id, then the writer's fixed sentence. A reader of envelopes the
-// engine joined with other messages opens a member only at this line (`readAnswerEnvelopes`, shared/engine/arrival.ts).
-export const askSteerOpening = (askId: string): string => `[MAWS ask ${askId}] The user answered the questions you asked:`;
+// engine joined with other messages opens a member only at this line (`envelopeSlices`, shared/engine/arrival.ts).
+export const askSteerOpening = (askId: string): string => `${ASK_STEER_OPENING}${askId}] The user answered the questions you asked:`; // the opening's one constant (UX wave U6e)
 
 // The text of the steer that delivers an async ask's answers: one line per question in the asked order,
 // `<n>. <answer>`, and under it, indented as a path is, `note: "<the note>"` when the user wrote one (P2-C3), then the

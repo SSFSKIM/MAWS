@@ -2,10 +2,9 @@ import { createHash, randomUUID } from 'node:crypto';
 import { open, type FileHandle } from 'node:fs/promises';
 import { Worker } from 'node:worker_threads';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
-import { PASTED_BLOCK } from '@shared/composer/pasted-content'; // ticket 704: the envelope's reader, run from its source
-import { envelopeSlices, takeEnvelopesOut } from '@shared/engine/arrival';
+import { envelopeSlices, MAX_ENVELOPE_CHECKS, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival'; // ticket 704: the envelope's reader, run from its source
 import { answerOutsideTranscript } from '@shared/engine/persons-message';
-import { answeredBlock, askSteerOpening } from '@shared/maws/ask';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening } from '@shared/maws/ask';
 import { parseBash } from './backfill';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 
@@ -42,7 +41,9 @@ async function fingerprint(createHash: (algorithm: string) => { update(data: Uin
 // A pass reads lines from byte `from` to the size it was started with and ends at the byte after the last line it
 // consumed: a complete line, or a last line that has no newline yet but already parses (a torn one is left for the next
 // pass, which starts at it). Lines are split on \n alone; a transcript's JSON never holds a raw line break.
-const WORKER = String.raw`
+// Exported for the guard that holds the worker's copy of the envelope's reader to the reader's own source (ticket 704,
+// the architect's ruling 6 of 2026-11-16: search-text.test.ts)
+export const WORKER = String.raw`
 const { parentPort } = require('node:worker_threads');
 const { createHash } = require('node:crypto');
 const PAGE_CHARS = ${PAGE_CHARS};
@@ -51,11 +52,13 @@ const isMadeUpFinalAnswer = ${isMadeUpFinalAnswer}; // the to-human plugin's ans
 const fingerprint = ${fingerprint};
 // Ticket 704 (ruling A): MAWS's answer envelopes inside a person's text, read as the window reads them, each function
 // from its own source (each uses its arguments alone), the block checked by the envelope's own checks.
+const ASK_STEER_OPENING = ${JSON.stringify(ASK_STEER_OPENING)}; // the opening's one constant (UX wave U6e), which askSteerOpening's source names
 const askSteerOpening = ${askSteerOpening};
-const PASTED_BLOCK = ${PASTED_BLOCK};
+const pastedBodies = ${pastedBodies}; // the one definition of a pasted segment's lines, rule R's
+const MAX_ENVELOPE_CHECKS = ${MAX_ENVELOPE_CHECKS};
 const answeredBlock = ${answeredBlock};
 const envelopeSlices = ${envelopeSlices};
-const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out
+const takeEnvelopesOut = ${takeEnvelopesOut}; // the reader's one loop, read again until a reading takes nothing out (16 at most)
 const answerOutsideTranscript = ${answerOutsideTranscript};
 const parseBash = ${parseBash}; // the backfill's own test of a shell row, which the split never reads
 // A person's text with each answer envelope read as an answer reads outside the transcript, on a line of its own after
@@ -63,7 +66,7 @@ const parseBash = ${parseBash}; // the backfill's own test of a shell row, which
 // envelope's lines can stand around another's). White space left beside an envelope is no words of the person's. Null
 // when nothing is left.
 function searchableText(text) {
-  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock));
+  const { own, envelopes } = takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS));
   const answers = envelopes.map((envelope) => answerOutsideTranscript(envelope.text));
   if (answers.length === 0) return text;
   const parts = [own.trim() === '' ? '' : own, ...answers].filter((part) => part !== '');

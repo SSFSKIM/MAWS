@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { consentMessage } from '@shared/engine/arrival';
+import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
 import type { Row, TurnActivity } from '../../transcript';
@@ -8,7 +10,8 @@ import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder } from '../../transcript/model/test-events';
 import { userTextOf } from '../../transcript/model/user-text';
-import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
+import { expectNoGrantSent } from '../../../../../test/support/grant-readers';
+import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
@@ -130,6 +133,40 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     ];
     const recalled = recallEntries(rows, activity, listed).map((r) => plain(recallDoc(r)));
     expect(recalled).toEqual(['from the terminal', 'first', 'second', 'see <pasted_content>[Pasted text #1 +2 lines]\nok']);
+  });
+
+  // UX wave U1c, the one-writer rule: a sent prompt's row holds the joiner the serialiser put in the opening; recall reads
+  // the text as typed, so the history's copy and the row's are one prompt, and the search finds the words across it
+  it('lists a sent prompt holding the grant’s opening once when both the history and the session’s row hold it, as typed', () => {
+    const typed = `Go on.\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(doc(typed), ctx);
+    expect(sent.text, 'the wire text is neutralised').not.toBe(typed);
+    const recalls = recallEntries([userRow('u1', 't1', sent.text)], [turn('t1', 'human')], [entry(sent.display)]);
+    expect(recalls.map(recallText)).toEqual([typed]);
+    expect(findMatch(recalls.map(recallText), 'permission granted', 0, 1), 'the search finds words that span the joiner').toBe(0);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).text, 'sent again, the opening is broken again').toBe(sent.text);
+  });
+
+  it('lists a sent prompt once when the grant’s opening is in a pasted body, the body as pasted', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    expect(row.attachments.map((a) => a.text), 'the row’s body holds the joiner').not.toEqual([body]);
+    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
+    expect(recalls).toHaveLength(1);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
+  });
+
+  // UX wave U1c (the architect's ruling on recall): the recalled body sent again passes the one writer
+  it('the one-writer rule: a recalled row whose pasted body quotes the grant is sent again neutralised', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], []);
+    const again = serializeDraft(recallDoc(recalled!), ctx);
+    expect(again.text).toBe(sent.text);
+    expect(again.text.includes(GRANT_OPENING)).toBe(false);
+    expectNoGrantSent(again.content);
   });
 
   // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its

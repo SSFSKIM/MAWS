@@ -15,7 +15,10 @@ export const SIDE_THREAD_PREAMBLE = 'You are in a side thread forked from the ma
 export const SIDE_THREAD_PREAMBLE_MANY = 'You are in a side thread forked from the main conversation to handle these comments. Address them here; the main conversation continues separately and is not waiting on you.';
 
 const SCREENSHOT_SENTENCE = '. A screenshot of it is attached:';
-const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
+// UX wave U6e: the reader of the person's own text (src/shared/files/named.ts) claims a text that holds the promotion's
+// head or a tag's opening anywhere, so the forms keep these one copies.
+export const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
+export const ANCHOR_TAG_OPENING = '<maws_anchor';
 const PROMOTION_CONTINUE = 'Continue from here.';
 const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' };
 
@@ -96,7 +99,7 @@ export function anchorTag(anchor: Anchor): string {
     const value = anchor[field];
     return value === undefined ? [] : [` ${field}="${escapeAttribute(tagValue(value) /* E4d: was String(value) */)}"`];
   });
-  return `<maws_anchor${attributes.join('')}/>`;
+  return `${ANCHOR_TAG_OPENING}${attributes.join('')}/>`;
 }
 
 export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }): string {

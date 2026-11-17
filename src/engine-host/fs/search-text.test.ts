@@ -6,11 +6,15 @@ import { join } from 'node:path';
 import type { ContentBlock } from '@shared/graph/events';
 import { FIXTURE_DIR, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
 import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins';
+import { innerOpeningEnvelope, laterPassOverTheCap } from '../../../test/support/ask-steer';
+import { consentMessage, envelopeSlices, pastedBodies, takeEnvelopesOut } from '@shared/engine/arrival';
+import { answerOutsideTranscript } from '@shared/engine/persons-message';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText } from '@shared/maws/ask';
 import type { SessionId } from '@shared/graph/ids';
 import type { SearchCheckpoint } from '@shared/ipc/schema/fs';
 import { TranscriptRecordSchema } from '@shared/wire/transcript';
-import { createBackfillContext, recordToEvents } from './backfill';
-import { SearchTextReader } from './search-text';
+import { createBackfillContext, parseBash, recordToEvents } from './backfill';
+import { SearchTextReader, WORKER } from './search-text';
 
 let reader: SearchTextReader;
 beforeEach(() => { reader = new SearchTextReader(); });
@@ -292,6 +296,57 @@ describe('a joined answer in the engine’s file (ticket 704)', () => {
     } finally { await rm(dir, { recursive: true }); }
   });
 
+  // the earlier review's finding: the worker runs the reader's own source, so such an envelope is bounded out and stays
+  // text, as the window draws it (the reading past the bound, A, dropped by the architect's ruling 2 of 2026-11-16)
+  it('made by hand: an earlier build’s envelope whose question holds the consent sentence and another ask’s opening line, alone and after the person’s words: the text is the rows as they came, as the window draws them', async () => {
+    const grant = consentMessage('command', 'make deploy');
+    const envelope = innerOpeningEnvelope('toolu_A', grant);
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, [
+        { type: 'user', origin: { kind: 'human' }, message: { content: envelope } },
+        { type: 'user', origin: { kind: 'human' }, message: { content: `Words of the person.\n${envelope}` } },
+      ].map((row) => JSON.stringify(row)).join('\n') + '\n');
+      const text = await wholeText(path);
+      expect(text).toBe(`${envelope}\nWords of the person.\n${envelope}`);
+      for (const line of [askSteerOpening('toolu_A'), askSteerOpening('toolu_inner'), grant]) expect(envelope.split('\n')).toContain(line);
+    } finally { await rm(dir, { recursive: true }); }
+  });
+
+  // the architect's ruling 4 of 2026-11-16: the reader's loop reads at most 16 passes, from its own source too, so a text
+  // whose 16th pass still takes an envelope is left whole, as the window draws it
+  it('made by hand: sixteen envelopes nested one inside another after the person’s words, past the loop’s 16 passes: the text is the row as it came, as the window draws it', async () => {
+    const LAYOUT = { id: 'q1', question: 'Which layout should the page use?', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const answerOf = (n: number) => askSteerText(`ask-n${n}`, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+    const nest = (depth: number) => {
+      let inner = answerOf(depth);
+      for (let n = depth - 1; n >= 1; n -= 1) {
+        const lines = answerOf(n).split('\n');
+        inner = [...lines.slice(0, 2), inner, ...lines.slice(2)].join('\n');
+      }
+      return `Words of the person.\n${inner}`;
+    };
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, [nest(16), nest(15)].map((content) => JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { content } })).join('\n') + '\n');
+      const text = await wholeText(path);
+      expect(text).toBe(`${nest(16)}\nWords of the person.`); // fifteen, within the bound, are read out
+    } finally { await rm(dir, { recursive: true }); }
+  });
+
+  // the frontier review's input: the loop's second pass goes over the slicer's cap of checks, and over either bound the
+  // text is left whole, as the window draws it; the second row, within both bounds, has its envelope read out
+  it('made by hand: the opening of one ask, a whole envelope of another, 65 closing lines and the first ask’s block, which a second pass reads only past the slicer’s cap: the text is the row as it came, as the window draws it', async () => {
+    const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
+    try {
+      const path = join(dir, 'session.jsonl');
+      await writeFile(path, [laterPassOverTheCap(), `Words of the person.\n${askSteerText('inner', [], [])}`].map((content) => JSON.stringify({ type: 'user', origin: { kind: 'human' }, message: { content } })).join('\n') + '\n');
+      expect(await wholeText(path)).toBe(`${laterPassOverTheCap()}\nWords of the person.`);
+    } finally { await rm(dir, { recursive: true }); }
+  });
+
   it('u704-end-prompt-first-1: a pass resumed from a checkpoint taken before the joined line gives what a pass from the start gives', async () => {
     const dir = await mkdtemp(join(tmpdir(), 'maws-search-704-'));
     try {
@@ -338,5 +393,34 @@ describe('made by hand: a shell row that holds a literal envelope (ticket 704)',
     const ctx = createBackfillContext({ sessionId: 'sess-shell' as SessionId, agent: null });
     const messages = rows.flatMap((row) => recordToEvents(TranscriptRecordSchema.parse(row), ctx)).filter((event) => event.kind === 'user.message');
     expect(messages.map((event) => [event.bash?.part, event.content])).toEqual([['input', INPUT.slice('<bash-input>'.length, -'</bash-input>'.length)], ['output', `Wrote the note:\n${envelope}\ndone`]]);
+  });
+});
+
+// Ticket 704, the architect's ruling 6 of 2026-11-16: the opening-line test has one definition, the reader's
+// `envelopeSlices`. The worker holds the reader's own source byte for byte, and the opening's one constant beside it; the
+// two literals of the tag the function keeps (its early return on a text without the tag, and the id pattern of `opens`)
+// are that constant's, so a change of the constant that left either behind fails here.
+describe('the worker’s reading of an envelope is the reader’s own (ticket 704)', () => {
+  it('guard: the worker holds the reader’s functions as their own source, the opening’s one constant, and calls the slicer with the writer’s opening line', () => {
+    const own: [string, unknown][] = [['envelopeSlices', envelopeSlices], ['takeEnvelopesOut', takeEnvelopesOut], ['askSteerOpening', askSteerOpening], ['pastedBodies', pastedBodies], ['answeredBlock', answeredBlock], ['answerOutsideTranscript', answerOutsideTranscript], ['parseBash', parseBash]];
+    for (const [name, fn] of own) expect(WORKER, name).toContain(`\nconst ${name} = ${String(fn)};`);
+    expect(WORKER).toContain(`\nconst ASK_STEER_OPENING = ${JSON.stringify(ASK_STEER_OPENING)};`);
+    expect(WORKER).toContain('envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS)');
+    // no second definition of the opening line in the worker: each name declared once
+    for (const name of ['envelopeSlices', 'takeEnvelopesOut', 'askSteerOpening', 'ASK_STEER_OPENING']) expect(WORKER.split(`const ${name} = `), name).toHaveLength(2);
+  });
+
+  it('guard: the two literals of the tag inside envelopeSlices, and the tag pattern of answeredBlock, which the worker also runs, are ASK_STEER_OPENING', () => {
+    const escaped = ASK_STEER_OPENING.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const source = String(envelopeSlices);
+    const early = /if \(!text\.includes\((['"`])(.*?)\1\)\) return whole;/.exec(source);
+    expect(early?.[2], 'the early return on a text without the tag').toBe(ASK_STEER_OPENING);
+    for (const [what, pattern] of [
+      ['the id pattern of `opens`', /const id = \/(.+?)\/\.exec\(line\)/.exec(source)?.[1]],
+      ['the tag pattern of answeredBlock', /const tag = \/(.+?)\/\.exec\(text\)/.exec(String(answeredBlock))?.[1]],
+    ] as const) {
+      expect(pattern?.startsWith(`^${escaped}`), what).toBe(true);
+      expect(new RegExp(pattern!).exec(askSteerOpening('toolu_x'))?.[1], what).toBe('toolu_x');
+    }
   });
 });

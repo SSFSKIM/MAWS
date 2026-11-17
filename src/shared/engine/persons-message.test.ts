@@ -4,15 +4,18 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { framePasted, PASTED_BLOCK } from '@shared/composer/pasted-content';
+import { framePasted } from '@shared/composer/pasted-content';
+import { rowClaim } from '@shared/files/named';
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
 import type { MessageUuid } from '@shared/graph/ids';
-import { answeredBlock, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
+import { answeredBlock, ASK_STEER_OPENING, askSteerOpening, askSteerText, parseAskSteer } from '@shared/maws/ask';
 import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
-import { earlierAskSteerText } from '../../../test/support/ask-steer';
+import { earlierAskSteerText, innerOpeningEnvelope, laterPassOverTheCap } from '../../../test/support/ask-steer';
 import { FIXTURE_DIR, loadUxwaveTranscript, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
+import { queuedPrompt } from '../../../test/support/queued-rows';
 import { PROBE_JOINS, recordedJoin, U4B_JOINS, type RecordedJoin } from '../../../test/support/recorded-joins';
-import { consentMessage, envelopeSlices, ownLines, ownWordsOf, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readArrivals, takeEnvelopesOut } from './arrival';
+import { consentMessage, envelopeSlices, MAX_ENVELOPE_CHECKS, ownWordsOf, pastedBodies, personsGrants, quotesGrant, readAnswerEnvelope, readAnswerEnvelopes, readAnswerEnvelopesWithCost, readArrivals, takeEnvelopesOut } from './arrival';
+import { messageText } from './peer-envelope';
 import { answerEnvelopeOf, answerOutsideTranscript, flatPersonsWords, personsParts, personsWords, splitPersonsMessage, type UserMessage } from './persons-message';
 
 const textOf = (block: ContentBlock | undefined): string => {
@@ -61,7 +64,8 @@ const MULTI = askSteerText('ask-3', [LAYOUT, FOLDER], [
   { id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'], note: 'wide screens first' },
   { id: 'q3', question: FOLDER.question, status: 'answered', value: ['/work/site/pages', '/work/site/parts'] },
 ]);
-const TAGGED_ENVELOPE = askSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
+// an earlier build's: only its writer put a question's words, and so a line beginning with the tag, on the envelope's lines
+const TAGGED_ENVELOPE = earlierAskSteerText('ask-7', [TAGGED], [{ id: 'q1', question: TAGGED.question, status: 'answered', value: ['Star'] }]);
 const BROKEN = A1.replace('"answered"', '"answred"');
 const FENCED_PROMPT = `Compare it with this:\n\`\`\`json\n${JSON.stringify(parseAskSteer(A1)!.result)}\n\`\`\``;
 const PASTED_PROMPT = `Why did the agent stop after this?\n${framePasted('a1b2', A1)}`;
@@ -78,13 +82,20 @@ const READER_CORPUS: string[] = [
   ...[...PROBE_JOINS, ...U4B_JOINS].flatMap((name) => recordedTexts(recordedJoin(name))),
 ];
 
-// A function as the search text's worker gets it: its own source evaluated with nothing of its module in scope
-const isolated = <F>(fn: F): F => new Function(`return (${String(fn)});`)() as F;
+// A function as the search text's worker gets it: its own source evaluated with nothing of its module in scope but the
+// opening's one constant (UX wave U6e), which the worker interpolates beside the functions as askSteerOpening names it
+const isolated = <F>(fn: F): F => new Function('ASK_STEER_OPENING', `return (${String(fn)});`)(ASK_STEER_OPENING) as F;
 
 describe('envelopeSlices', () => {
+  it('the corpus’s tagged envelope is an earlier build’s, its third line beginning with the tag and opening nothing', () => {
+    const third = TAGGED_ENVELOPE.split('\n')[2]!;
+    expect(third.startsWith('[MAWS ask ')).toBe(true);
+    expect(third).not.toBe(askSteerOpening('lines'));
+  });
+
   it.each(PROBE_JOINS.filter((name) => !name.startsWith('u704-end-image')))('%s: one member per envelope, its text the envelope member’s frame content byte for byte, and the rest the prompt', (name) => {
     const { joined, envelopes, prompt } = recordedJoin(name);
-    const { members, rest } = envelopeSlices(joined.content as string, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+    const { members, rest } = envelopeSlices(joined.content as string, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
     expect(members.map((member) => member.text)).toEqual(envelopes);
     expect(members.map((member) => member.read)).toEqual(envelopes.map((envelope) => parseAskSteer(envelope)));
     expect(rest).toBe(prompt ?? '');
@@ -92,24 +103,24 @@ describe('envelopeSlices', () => {
 
   it.each(['u704-end-image-1', 'u704-end-image-2'])('%s: the envelope’s text block gives the envelope byte for byte and an empty rest', (name) => {
     const { joined, envelopes } = recordedJoin(name);
-    const { members, rest } = envelopeSlices(textOf((joined.content as ContentBlock[])[0]), askSteerOpening, PASTED_BLOCK, parseAskSteer);
+    const { members, rest } = envelopeSlices(textOf((joined.content as ContentBlock[])[0]), askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
     expect(members.map((member) => member.text)).toEqual(envelopes);
     expect(rest).toBe('');
   });
 
-  it('readAnswerEnvelopes is envelopeSlices with the writer’s opening, the pasted segment and parseAskSteer, over the whole corpus', () => {
+  it('readAnswerEnvelopes is envelopeSlices with the writer’s opening, the pasted segments’ marking, parseAskSteer and the cap, over the whole corpus', () => {
     for (const text of READER_CORPUS) {
-      const { members, rest } = envelopeSlices(text, askSteerOpening, PASTED_BLOCK, parseAskSteer);
+      const { members, rest } = envelopeSlices(text, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
       expect(readAnswerEnvelopes(text)).toEqual({ envelopes: members.map((member) => member.read), rest });
     }
   });
 
-  it('envelopeSlices, answeredBlock, askSteerOpening and answerOutsideTranscript run from their own source, nothing else in scope, and read the corpus as the module does', () => {
-    const [slices, block, opening, outside] = [isolated(envelopeSlices), isolated(answeredBlock), isolated(askSteerOpening), isolated(answerOutsideTranscript)];
+  it('envelopeSlices, pastedBodies, answeredBlock, askSteerOpening and answerOutsideTranscript run from their own source, nothing else in scope, and read the corpus as the module does', () => {
+    const [slices, paste, block, opening, outside] = [isolated(envelopeSlices), isolated(pastedBodies), isolated(answeredBlock), isolated(askSteerOpening), isolated(answerOutsideTranscript)];
     let read = 0;
     for (const text of READER_CORPUS) {
-      const own = slices(text, opening, PASTED_BLOCK, block);
-      expect(own).toEqual(envelopeSlices(text, askSteerOpening, PASTED_BLOCK, answeredBlock));
+      const own = slices(text, opening, paste, block, MAX_ENVELOPE_CHECKS);
+      expect(own).toEqual(envelopeSlices(text, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS));
       own.members.forEach((member) => expect(outside(member.text)).toBe(answerOutsideTranscript(member.text)));
       read += own.members.length;
     }
@@ -117,13 +128,13 @@ describe('envelopeSlices', () => {
   });
 
   it('takeEnvelopesOut, the reader’s one loop, runs from its own source too, and reads the corpus as the module does', () => {
-    const [again, slices, block, opening] = [isolated(takeEnvelopesOut), isolated(envelopeSlices), isolated(answeredBlock), isolated(askSteerOpening)];
+    const [again, slices, paste, block, opening] = [isolated(takeEnvelopesOut), isolated(envelopeSlices), isolated(pastedBodies), isolated(answeredBlock), isolated(askSteerOpening)];
     const lines = A1.split('\n');
     const nested = `Keep these notes.\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
     for (const text of [...READER_CORPUS, nested]) {
-      expect(again(text, (part: string) => slices(part, opening, PASTED_BLOCK, block))).toEqual(takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock)));
+      expect(again(text, (part: string) => slices(part, opening, paste, block, MAX_ENVELOPE_CHECKS))).toEqual(takeEnvelopesOut(text, (part) => envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS)));
     }
-    expect(takeEnvelopesOut(nested, (part) => envelopeSlices(part, askSteerOpening, PASTED_BLOCK, answeredBlock)).envelopes.map((envelope) => envelope.text)).toEqual([A2, A1]);
+    expect(takeEnvelopesOut(nested, (part) => envelopeSlices(part, askSteerOpening, pastedBodies, answeredBlock, MAX_ENVELOPE_CHECKS)).envelopes.map((envelope) => envelope.text)).toEqual([A2, A1]);
   });
 });
 
@@ -415,7 +426,9 @@ describe('answerEnvelopeOf: a content is an answer envelope only where the split
 // read on an envelope's line, and the envelopes beside it are the answers the split splits out. Made by hand (no
 // recording holds a grant joined with an envelope): the grant is the sentence U1c sends, the envelopes MAWS's own.
 
-describe('the grant readers read a person’s message as the split does', () => {
+// The grant readers read the whole joined text by rule R (ticket 704, the architect's ruling 1 of 2026-11-16), never the
+// part the split draws as the person's; the split's parts and the answers it records stand beside them
+describe('the grant readers (rule R, the whole joined text) beside the split', () => {
   const GRANT = consentMessage('command', 'pnpm test');
   const consent = { class: 'consent', kind: 'command', subject: 'pnpm test' };
   const answerOf = (envelope: string) => {
@@ -424,13 +437,11 @@ describe('the grant readers read a person’s message as the split does', () => 
   };
   const row = (content: string | ContentBlock[]) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000708', origin: { kind: 'human' }, message: { role: 'user', content } });
   const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000708' as MessageUuid, content, isReplay: false, isSynthetic: false, origin: 'human', bash: null });
-  const ownText = (text: string) => ownLines(text).map(({ line }) => line).join('\n');
 
-  it('an answer, the grant and an answer again: three parts, the grant the person’s and an answer each for the envelopes, read alike by the split, the grant readers and the arrivals', () => {
+  it('an answer, the grant and an answer again: three parts for the split, the grant rule R reads, and an answer each for the envelopes', () => {
     const text = joinedText(A1, GRANT, A1); // the tracker's A + G + A: the same envelope again
     expect(splitPersonsMessage(message(text)).map((part) => part.content)).toEqual([GRANT, A1, A1]);
     expect(personsParts(text)).toEqual({ own: GRANT, envelopes: [A1, A1] });
-    expect(ownText(text)).toBe(GRANT);
     expect(personsGrants(text)).toEqual([consent]);
     expect(readArrivals(row(text))).toEqual([answerOf(A1), answerOf(A1), consent]);
   });
@@ -453,28 +464,28 @@ describe('the grant readers read a person’s message as the split does', () => 
     }
   });
 
-  it('made by hand: where that envelope’s lines stand around another whole envelope, the grant readers take both out as the split does, and read no grant', () => {
+  it('made by hand: where that envelope’s lines stand around another whole envelope, the split takes both out, and rule R reads no grant', () => {
     const lines = QUOTING.split('\n');
     const text = `Keep these notes.\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
     expect(personsParts(text)).toEqual({ own: 'Keep these notes.', envelopes: [A2, QUOTING] });
-    expect(ownText(text)).toBe('Keep these notes.');
     expect(personsGrants(text)).toEqual([]);
     expect(readArrivals(row(text))).toEqual([answerOf(A2), answerOf(QUOTING)]);
   });
   // The split reads each text block by itself and does not read an envelope spread over two (decision 7), so such a text
-  // is the person's own; the grant readers read it so too, block by block: the split's reading wins, since it is the one
-  // reading the landing's ruling names (the Decision Log's line of 2026-11-16)
-  it('made by hand: an envelope spread over two text-only blocks is the person’s text for the split and for the grant readers: no answer is read of it, and a grant’s sentence on its own line there is the person’s', () => {
+  // is the person's own for the split and records no answer. Rule R reads the whole joined text: where the joined
+  // blocks make this build's envelope whole, it is taken out strictly and the grant beside it is read; an earlier
+  // build's envelope fails closed (ruling 1 of 2026-11-16; the cascade reviews' A2 is gone)
+  it('made by hand: an envelope spread over two text-only blocks is the person’s text for the split, no answer read of it; rule R reads the joined text: the grant beside this build’s envelope, none in the earlier build’s quoting one', () => {
     const block = (text: string): ContentBlock => ({ type: 'text', text });
     const [head, tail] = [A1.split('\n').slice(0, 2).join('\n'), A1.split('\n').slice(2).join('\n')];
     const spread = [block(head), block(`${tail}\n${GRANT}`)];
     expect(personsParts(spread)).toEqual({ own: spread, envelopes: [] });
-    expect(readArrivals(row(spread)), 'the envelope spread over the blocks is no answer; the grant after it is the person’s').toEqual([consent]);
+    expect(readArrivals(row(spread)), 'the envelope spread over the blocks is no answer; the grant beside it, rule R’s').toEqual([consent]);
     const quoting = QUOTING.split('\n');
     const quoted = [block(`Keep these notes.\n${quoting.slice(0, 3).join('\n')}`), block(quoting.slice(3).join('\n'))];
     expect(quoting[2]).toBe(GRANT); // the grant's sentence is the head block's last line
     expect(personsParts(quoted)).toEqual({ own: quoted, envelopes: [] });
-    expect(readArrivals(row(quoted)), 'a grant’s line among the person’s own lines is theirs').toEqual([consent]);
+    expect(readArrivals(row(quoted)), 'the sentence quoted on a line of the spread envelope is no grant').toEqual([]);
   });
 });
 
@@ -544,10 +555,10 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
       }
     });
 
-    it('an answer, a grant and the answer again: the grant the person’s, then each envelope', () => {
+    it('an answer, a grant and the answer again: the split draws the grant, then each envelope; rule R reads the grant in this build’s form, none in an earlier build’s', () => {
       const text = joinedText(E, NEW_FORM_GRANT, E);
       expect(contentsOf(splitPersonsMessage(joinedMessage(text)))).toEqual([NEW_FORM_GRANT, E, E]);
-      expect(personsGrants(text)).toEqual([{ class: 'consent', kind: 'command', subject: 'pnpm test' }]);
+      expect(personsGrants(text)).toEqual(write === askSteerText ? [{ class: 'consent', kind: 'command', subject: 'pnpm test' }] : []);
     });
 
     it('two envelopes: one event each, the first keeping `joined`', () => {
@@ -567,7 +578,8 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
     });
 
     // the landing's case (c), U1c's Decision Log 56: the consent sentence the person typed as a text answer is a JSON
-    // string on the envelope's line and inside its block, never a line of their own words
+    // string on the envelope's line and inside its block, never a line of their own words. This pins the writer only:
+    // the writer quotes the sentence, so no line holds it and no reader is put to the test
     it('a typed text answer that holds the consent sentence: no grant, the envelope alone or beside the person’s words', () => {
       const typed = write('toolu_n3', [FOOTER], [{ id: 'footer', question: FOOTER.question, status: 'answered', value: NEW_FORM_GRANT }]);
       expect(typed.split('\n')).not.toContain(NEW_FORM_GRANT);
@@ -576,7 +588,7 @@ describe('the envelope’s new form (board ticket 711): the split and the exact 
       for (const text of [typed, joinedText(NEW_FORM_WORDS, typed), joinedText(typed, NEW_FORM_WORDS)]) {
         const parts = splitPersonsMessage(joinedMessage(text));
         expect(contentsOf(parts).at(-1)).toBe(typed);
-        for (const part of parts) expect(personsGrants(part.content), String(part.content).slice(0, 40)).toEqual([]);
+        for (const part of parts) expect(personsGrants(messageText(part.content)), String(part.content).slice(0, 40)).toEqual([]);
         expect(personsGrants(text)).toEqual([]);
       }
     });
@@ -591,5 +603,254 @@ describe('ownWordsOf reads a person’s words as the split does', () => {
     const text = `Keep these notes.\n${outer.slice(0, 2).join('\n')}\n${secondIn(write)}\n${outer.slice(2).join('\n')}`;
     expect(personsWords(text)).toBe('Keep these notes.');
     expect(ownWordsOf(text)).toBe(personsWords(text));
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The inputs the cascade reviews' A2 pinned (a person's part that still holds an envelope's opening line), read by
+// rule R (ticket 704, the architect's ruling 1 of 2026-11-16): the one reader of grants, on the whole joined text, never
+// on the part the split draws as the person's. A2's defence at the grant readers is gone; rule R fails closed on an
+// opening line it cannot read strictly, on an earlier build's envelope, and on an envelope's tag left anywhere.
+
+describe('rule R on the inputs A2 pinned: the grants of the whole joined text', () => {
+  const GRANT = consentMessage('command', 'make deploy');
+  const DEPLOY = { class: 'consent', kind: 'command', subject: 'make deploy' };
+  const row = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000709', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const consents = (text: string) => readArrivals(row(text)).filter((arrival) => arrival.class === 'consent');
+  // an earlier build's envelope whose question holds the sentence and another ask's opening line on lines of their own
+  const INNER = innerOpeningEnvelope('toolu_A', GRANT);
+  // decision 7's limit: an envelope cut before its block is no envelope, and its opening line stays in the text
+  const CUT = A1.slice(0, A1.indexOf('\n```json'));
+
+  it('made by hand: the brief’s envelope, its question holding the consent sentence and another ask’s opening line, alone or beside the person’s words: no grant, no consent', () => {
+    expect(INNER.split('\n')).toEqual(expect.arrayContaining([GRANT, askSteerOpening('toolu_inner')]));
+    for (const text of [INNER, joinedText('Keep these notes.', INNER), joinedText(INNER, 'Keep these notes.')]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
+      expect(consents(text), text.slice(0, 40)).toEqual([]);
+    }
+  });
+
+  it('made by hand: an envelope cut before its block, beside a grant line in either order: its opening line does not read strictly, so no grant', () => {
+    expect(personsParts(CUT)).toEqual({ own: CUT, envelopes: [] });
+    for (const text of [joinedText(GRANT, CUT), joinedText(CUT, GRANT)]) {
+      expect(personsGrants(text), text.slice(0, 40)).toEqual([]);
+      expect(consents(text), text.slice(0, 40)).toEqual([]);
+    }
+  });
+
+  it('an answer, the grant and the answer again: the grant in this build’s form, none in an earlier build’s (rule R’s accepted cost)', () => {
+    for (const [form, write] of FORMS) {
+      const answer = envelopeIn(write);
+      const expected = write === askSteerText ? [DEPLOY] : [];
+      expect(personsGrants(joinedText(answer, GRANT, answer)), form).toEqual(expected);
+      expect(consents(joinedText(answer, GRANT, answer)), form).toEqual(expected);
+    }
+  });
+
+  it('a grant beside a pasted segment that holds an envelope: the grant beside this build’s envelope, taken out strictly; none beside the brief’s envelope, its tag left over failing closed, pasted or not (rule R’s accepted cost)', () => {
+    const pastedCurrent = joinedText(GRANT, framePasted('a1b2', A1));
+    expect(personsGrants(pastedCurrent)).toEqual([DEPLOY]);
+    expect(consents(pastedCurrent)).toEqual([DEPLOY]);
+    const pastedEarlier = joinedText(framePasted('a1b2', INNER), GRANT);
+    expect(personsGrants(pastedEarlier)).toEqual([]);
+    expect(consents(pastedEarlier)).toEqual([]);
+  });
+});
+
+// Ticket 704, the architect's ruling 7 of 2026-11-16: the earlier review's finding (an earlier build's envelope whose
+// question holds the consent sentence and a whole opening line for another ask) read by the save rule and by rule R, as
+// a row the person wrote and as a prompt they queued. The sentence's command and the words beside it link a path, so a
+// text the save rule counted would name it (the control); this one is read only, its envelope's tag a form MAWS writes
+// (`rowClaim`), and yields no grant. Made by hand: no recording holds such a question.
+describe('made by hand: the earlier review’s envelope names nothing for a save outside a session’s folders and yields no grant', () => {
+  const P = '/work/out/report.md';
+  const LINK = `[r](${P})`;
+  const INNER = innerOpeningEnvelope('toolu_A', consentMessage('command', `open ${LINK}`));
+  const user = (content: string) => ({ type: 'user', uuid: 'c0c0c0c0-0000-4000-8000-000000000712', origin: { kind: 'human' }, message: { role: 'user', content } });
+  const consents = (row: unknown) => readArrivals(row).filter((arrival) => arrival.class === 'consent');
+
+  it('the person’s own words that link the path name it, at rest and queued (the control)', () => {
+    expect(rowClaim(user(`Open ${LINK}`), P)).toEqual({ names: true });
+    expect(rowClaim(queuedPrompt(`Open ${LINK}`), P)).toEqual({ names: true });
+  });
+
+  it.each([
+    ['alone', INNER],
+    ['after the person’s words that link the path', joinedText(`Open ${LINK}`, INNER)],
+    ['before them', joinedText(INNER, `Open ${LINK}`)],
+  ])('%s, at rest and queued: not the person’s naming of the path, and no grant', (_, text) => {
+    expect(INNER.split('\n')).toEqual(expect.arrayContaining([askSteerOpening('toolu_A'), askSteerOpening('toolu_inner')]));
+    for (const row of [user(text), queuedPrompt(text)]) {
+      expect(rowClaim(row, P), JSON.stringify(row).slice(0, 80)).toEqual({ names: false, pending: [], other: true });
+      expect(consents(row)).toEqual([]);
+    }
+    expect(personsGrants(text)).toEqual([]);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The reader's bound kept from U4b (a slice ends before the next opening line), with the reading past it (the cascade
+// reviews' A) dropped by the architect's ruling 2 of 2026-11-16: with rule R carrying the grants, that reading only
+// redrew forged earlier-form envelopes. An earlier build's envelope whose question holds another ask's whole opening
+// line is bounded out and stays text. Made by hand: no recording holds such a question.
+
+describe('made by hand: the reader’s bound, with no reading past it', () => {
+  const GRANT = consentMessage('command', 'make deploy');
+  const INNER = innerOpeningEnvelope('toolu_A', GRANT);
+  const WORDS = 'Keep these notes.';
+  const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000710' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+  const slicesOf = (text: string) => envelopeSlices(text, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const loop = (text: string) => takeEnvelopesOut(text, slicesOf);
+
+  it('the brief’s envelope stays text, alone or beside the person’s words: no answer, the message as it came, and no grant', () => {
+    expect(INNER.split('\n').filter((line) => line.startsWith('[MAWS ask '))).toEqual([askSteerOpening('toolu_A'), askSteerOpening('toolu_inner')]);
+    expect(answerEnvelopeOf(INNER)).toBeNull();
+    for (const text of [INNER, joinedText(WORDS, INNER), joinedText(INNER, WORDS)]) {
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+      const lone = message(text);
+      expect(splitPersonsMessage(lone)[0]).toBe(lone);
+      expect(personsGrants(text)).toEqual([]);
+    }
+  });
+
+  it('decision 17’s nested case: the inner envelope taken, then the outer; where the outer one is the brief’s envelope, the inner one alone', () => {
+    const lines = A1.split('\n');
+    const nested = `${WORDS}\n${lines.slice(0, 2).join('\n')}\n${A2}\n${lines.slice(2).join('\n')}`;
+    expect(slicesOf(nested).members.map((member) => member.text)).toEqual([A2]);
+    expect(loop(nested).envelopes.map((envelope) => envelope.text)).toEqual([A2, A1]);
+    const outer = INNER.split('\n');
+    const around = `${WORDS}\n${outer.slice(0, 2).join('\n')}\n${A2}\n${outer.slice(2).join('\n')}`;
+    expect(loop(around)).toEqual({ own: joinedText(WORDS, INNER), envelopes: [{ text: A2, read: parseAskSteer(A2) }] });
+  });
+
+  it('a later valid member is never swallowed: a malformed member, words, then a valid one, for another ask or the same', () => {
+    for (const [broken, valid] of [[BROKEN, A2], [BROKEN, A1]] as const) {
+      const text = joinedText(broken, WORDS, valid);
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: joinedText(broken, WORDS), envelopes: [{ text: valid, read: parseAskSteer(valid) }] });
+    }
+  });
+
+  it('an opening line followed by lines and a block naming another ask stays text', () => {
+    const head = `${askSteerOpening('toolu_X')}\n1. Layout — Grid\n${A1.slice(A1.indexOf('```json'))}`;
+    for (const text of [head, joinedText(WORDS, head)]) {
+      expect(parseAskSteer(text)).toBeNull();
+      expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+      expect(personsGrants(text)).toEqual([]);
+    }
+  });
+
+  it('a pasted segment never opens or ends one: an envelope pasted whole, and its opening outside a segment that holds its block', () => {
+    const lines = A1.split('\n');
+    const pastedWhole = joinedText(WORDS, framePasted('a1b2', A1));
+    const pastedTail = joinedText(lines.slice(0, 2).join('\n'), framePasted('a1b2', lines.slice(2).join('\n')));
+    for (const text of [pastedWhole, pastedTail]) expect(loop(text), text.slice(0, 40)).toEqual({ own: text, envelopes: [] });
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The reader's one loop reads at most 16 passes (ticket 704, the architect's ruling 4 of 2026-11-16), pinned by a count
+// of the slicer's calls. Made by hand: no recording nests one envelope inside another.
+
+describe('made by hand: takeEnvelopesOut reads at most 16 passes', () => {
+  const WORDS = 'Keep these notes.';
+  const slicesOf = (text: string) => envelopeSlices(text, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const answerOf = (n: number) => askSteerText(`ask-n${n}`, [LAYOUT], [{ id: 'q1', question: LAYOUT.question, status: 'answered', value: ['Grid'] }]);
+  // `depth` envelopes after the person's words, each one's first two lines and its block around the next one, so a pass
+  // takes the innermost whole envelope and leaves the one around it whole for the next pass
+  const nested = (depth: number) => {
+    let inner = answerOf(depth);
+    for (let n = depth - 1; n >= 1; n -= 1) {
+      const lines = answerOf(n).split('\n');
+      inner = [...lines.slice(0, 2), inner, ...lines.slice(2)].join('\n');
+    }
+    return joinedText(WORDS, inner);
+  };
+  const counting = <T>(slice: (text: string) => { members: { text: string; read: T }[]; rest: string; over: boolean }) => {
+    const count = { calls: 0 };
+    return { count, slice: (text: string) => {
+      count.calls += 1;
+      if (count.calls > 64) throw new Error('the loop read past 64 passes'); // a failing case fails in bounded time
+      return slice(text);
+    } };
+  };
+  const message = (content: string): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000711' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+
+  it('15 envelopes nested: each taken, the innermost first, in 16 passes, the last of which takes nothing', () => {
+    const { count, slice } = counting(slicesOf);
+    const read = takeEnvelopesOut(nested(15), slice);
+    expect(read.own).toBe(WORDS);
+    expect(read.envelopes.map((envelope) => envelope.text)).toEqual(Array.from({ length: 15 }, (_, i) => answerOf(15 - i)));
+    expect(count.calls).toBe(16);
+  });
+
+  it('16 envelopes nested: the 16th pass still takes one, so the text is over the bound and left whole, no envelope taken; the split hands the message on as it came', () => {
+    const text = nested(16);
+    const { count, slice } = counting(slicesOf);
+    expect(takeEnvelopesOut(text, slice)).toEqual({ own: text, envelopes: [] });
+    expect(count.calls).toBe(16);
+    expect(personsParts(text)).toEqual({ own: text, envelopes: [] });
+    const lone = message(text);
+    expect(splitPersonsMessage(lone)).toEqual([lone]);
+    expect(splitPersonsMessage(lone)[0]).toBe(lone);
+  });
+
+  it('a slicer that takes a member on every pass and never shortens the text: called 16 times, the text left whole', () => {
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text, over: false }));
+    expect(takeEnvelopesOut('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
+    expect(count.calls).toBe(16);
+  });
+
+  it('the bound holds from the loop’s own source too, as the search text’s worker runs it', () => {
+    const again = isolated(takeEnvelopesOut);
+    const { count, slice } = counting((text: string) => ({ members: [{ text: 'taken', read: 1 }], rest: text, over: false }));
+    expect(again('a text', slice)).toEqual({ own: 'a text', envelopes: [] });
+    expect(count.calls).toBe(16);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------------------------------
+// The frontier review's input (ticket 704): a pass after the first goes over the slicer's cap of checks. Over either
+// bound, the cap in a pass or the loop's 16 passes, the text is left whole and no envelope is taken, so what is read
+// does not depend on which pass gave up. Made by hand: no recording holds such a text.
+
+describe('made by hand: a later pass over the slicer’s cap leaves the text whole', () => {
+  const text = laterPassOverTheCap();
+  const slicesOf = (part: string) => envelopeSlices(part, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS);
+  const IMAGE: ContentBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } };
+  const message = (content: string | ContentBlock[]): UserMessage => ({ kind: 'user.message', messageUuid: 'c0c0c0c0-0000-4000-8000-000000000712' as MessageUuid, content, isReplay: true, isSynthetic: false, origin: 'human', bash: null });
+
+  it('the premise: the first pass takes the inner envelope in one check, and the second, on what it leaves, stops at the cap', () => {
+    const first = readAnswerEnvelopesWithCost(text);
+    expect(first.cost.checks).toBe(1);
+    expect(first.envelopes.map((envelope) => envelope.askId)).toEqual(['inner']);
+    const second = readAnswerEnvelopesWithCost(first.rest);
+    expect(second.cost.checks).toBe(MAX_ENVELOPE_CHECKS);
+    expect(second).toMatchObject({ envelopes: [], rest: first.rest });
+  });
+
+  it('the slicer says which reading gave up: the first is within its cap, the second over it, and a text with nothing to take is within it', () => {
+    const first = slicesOf(text);
+    expect(first).toMatchObject({ over: false, members: [{ read: { askId: 'inner' } }] });
+    expect(slicesOf(first.rest)).toEqual({ members: [], rest: first.rest, over: true });
+    expect(slicesOf('Just a prompt.')).toEqual({ members: [], rest: 'Just a prompt.', over: false });
+    expect(isolated(envelopeSlices)(first.rest, askSteerOpening, pastedBodies, parseAskSteer, MAX_ENVELOPE_CHECKS).over).toBe(true);
+  });
+
+  it('the loop takes no envelope and leaves the text whole, from the module and from its own source as the search text’s worker runs it', () => {
+    expect(takeEnvelopesOut(text, slicesOf)).toEqual({ own: text, envelopes: [] });
+    const [again, slices, paste, block, opening] = [isolated(takeEnvelopesOut), isolated(envelopeSlices), isolated(pastedBodies), isolated(answeredBlock), isolated(askSteerOpening)];
+    expect(again(text, (part: string) => slices(part, opening, paste, block, MAX_ENVELOPE_CHECKS))).toEqual({ own: text, envelopes: [] });
+  });
+
+  it('the reader and the split hand the message on as it came, as a text and as a text block beside an image', () => {
+    const blocks: ContentBlock[] = [{ type: 'text', text }, IMAGE];
+    expect(personsParts(text)).toEqual({ own: text, envelopes: [] });
+    expect(personsParts(blocks)).toEqual({ own: blocks, envelopes: [] });
+    expect(personsWords(text)).toBe(text);
+    for (const content of [text, blocks]) {
+      const lone = message(content);
+      expect(splitPersonsMessage(lone)).toEqual([lone]);
+      expect(splitPersonsMessage(lone)[0]).toBe(lone);
+    }
   });
 });

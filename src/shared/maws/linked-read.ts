@@ -44,6 +44,9 @@ export function linkedArtifacts(content: string | readonly Block[]): LinkedArtif
 const OPEN = '<system-reminder>\n';
 const CLOSE = '\n</system-reminder>';
 const LEAD = "The user's message links the MAWS artifact ";
+// How every attached read opens (UX wave U6e): the reader of the person's own text (src/shared/files/named.ts) claims a
+// text that holds it anywhere, so the form keeps this one copy.
+export const LINKED_READ_OPENING = OPEN + LEAD;
 const READ_LINE = '. Its content as mcp__maws__artifact_read returns it, read when the message was sent:\n';
 const linkText = (title: string) => title.replace(/[[\]\\]/g, (c) => `\\${c}`);
 
@@ -67,7 +70,7 @@ const headOf = (json: string): ReadHead | null => {
 export function linkedReadBlock(read: string): string {
   const head = headOf(read);
   if (!head) throw new Error('a linked read is an artifact_read answer of status read');
-  return `${OPEN}${LEAD}[${linkText(head.title)}](maws-artifact:${head.artifactId})${READ_LINE}${read}${CLOSE}`;
+  return `${LINKED_READ_OPENING}[${linkText(head.title)}](maws-artifact:${head.artifactId})${READ_LINE}${read}${CLOSE}`;
 }
 
 export interface LinkedReadSummary {
@@ -79,11 +82,11 @@ export interface LinkedReadSummary {
 
 // What an attached read names, or null for any other text (a near miss, words typed in its shape around it).
 export function linkedReadOf(text: string): LinkedReadSummary | null {
-  if (!text.startsWith(OPEN + LEAD) || !text.endsWith(CLOSE)) return null;
+  if (!text.startsWith(LINKED_READ_OPENING) || !text.endsWith(CLOSE)) return null;
   const at = text.indexOf(READ_LINE);
   if (at < 0) return null;
   const head = headOf(text.slice(at + READ_LINE.length, text.length - CLOSE.length));
-  if (!head || !text.startsWith(`${OPEN}${LEAD}[${linkText(head.title)}](maws-artifact:${head.artifactId})${READ_LINE}`)) return null;
+  if (!head || !text.startsWith(`${LINKED_READ_OPENING}[${linkText(head.title)}](maws-artifact:${head.artifactId})${READ_LINE}`)) return null;
   return { artifactId: head.artifactId, title: head.title, kind: head.kind, revision: head.revision };
 }
 
