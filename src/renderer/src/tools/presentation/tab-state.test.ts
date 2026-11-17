@@ -88,6 +88,15 @@ describe('a deck tab’s state (X32’s lifetime rule)', () => {
     expect(confirmDiscard).toHaveBeenCalledWith('Q3 review');
   });
 
+  // UX wave U10b fix wave 5 (the panel's P1): an edit the deletion's fence refused lives only in the parked, read-only replica
+  it('its close guard asks at once for a read-only replica holding an edit the host never acknowledged, and keeps the tab when declined', async () => {
+    const { handle, state, confirmDiscard } = await opened();
+    state.setTitle('Q3 review');
+    handle.set({ phase: 'off', synced: false, readOnly: true, unsaved: 1 });
+    await expect(state.closeGuard()).resolves.toBe(false);
+    expect(confirmDiscard).toHaveBeenCalledExactlyOnceWith('Q3 review');
+  });
+
   it('disposed with edits in flight, it closes the replica only once the host acknowledges them', async () => {
     const { handle, state } = await opened();
     handle.set({ unsaved: 3 });

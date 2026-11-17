@@ -7,6 +7,7 @@
 import { useLayoutEffect, useRef } from 'react';
 import type { ArtifactHost, DocumentHandle } from '../../host';
 import type { HtmlParser } from '../canon';
+import type { SystemOrigin } from '../model';
 import { Canon } from './Canon';
 import { Check } from './Check';
 import { Law, type AskAdopt } from './Law';
@@ -33,6 +34,9 @@ export interface DesignSystemPageProps {
   /** The page's title: the artifact's (Decision Log 29); the system's name when absent. The law keeps its own title. */
   title?: string;
 }
+
+// The bundled system a seeded default (or a duplicate of one, which keeps its route and key) holds; null for any other.
+const bundledKeyOf = (origin: SystemOrigin): string | null => (origin.route === 'default' && origin.key !== undefined ? origin.key : null);
 
 export function DesignSystemPage(props: DesignSystemPageProps) {
   const { artifactId, handle, host, readOnly = false, revealCheck = 0 } = props;
@@ -71,7 +75,7 @@ export function DesignSystemPage(props: DesignSystemPageProps) {
       <Palette {...sections} />
       <TypeScale {...sections} />
       <Measures {...sections} />
-      <Canon tokens={system.tokens} files={system.files} toUrl={toUrl} />
+      <Canon tokens={system.tokens} files={system.files} toUrl={toUrl} bundledKey={bundledKeyOf(system.meta.origin)} />
       <Law law={system.law} askAdopt={props.askAdopt} />
       <Check law={system.law} tokens={system.tokens} files={system.files} parser={parser} sectionRef={check} />
     </div>

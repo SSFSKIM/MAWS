@@ -32,8 +32,9 @@ export type Arrival =
       summary: string;         // the answer as it was delivered to the model
       answers: AskAnswer[] | null;  // parsed, when the carrier holds them (MAWS's own envelope); else null
       dismissed: boolean }     // the person dismissed the question without answering: `summary` is then the bridge's dismissal sentence, whole
-  // a slash command's output, its tags cut and a terminal's ANSI escapes removed
-  | { class: 'command'; run: { command: string; args: string } | null; stdout: string; stderr: string }
+  // a slash command's output, its tags cut and a terminal's ANSI escapes removed; `plain` where the carrier's text held
+  // such escapes (a terminal's text, not markdown: UX wave U3b, decision 2)
+  | { class: 'command'; run: { command: string; args: string } | null; stdout: string; stderr: string; plain: boolean }
   // the person's own words that sminos delivered (a send or a steer, through the inbox or by the bridge): theirs, never a peer's
   | { class: 'own'; via: 'chat' | 'steer'; words: string; frame: string }
   // the sminos bridge's own prompt, which wakes a session to read what it has not read
@@ -63,8 +64,9 @@ const CARRIED_CLASSES: ReadonlySet<string> = new Set(['task', 'schedule', 'answe
 /** One entry of the field as it travels: a carried arrival, or an entry of a class this build does not know (decision 20). */
 export type ArrivalEntry = CarriedArrival | { class: string; [key: string]: unknown };
 
-// A later build adds classes (U3b's `command`). An entry whose class this build knows is held to its schema, field for
-// field; any other passes as it was sent, for no consumer reads it, so one unknown class does not fail the whole event.
+// A later build adds classes. An entry whose class this build knows is held to its schema, field for field; any other
+// passes as it was sent, so one class a build does not know does not fail the whole event. `command` (U3b) is such a
+// class on purpose, read by `commandOf` below, never by `carriedOf`.
 const UnknownEntrySchema = z.looseObject({ class: z.string().refine((name) => !CARRIED_CLASSES.has(name), 'a class this build knows is read by its own schema') });
 
 export const ArrivalEntrySchema: z.ZodType<ArrivalEntry> = z.union([CarriedArrivalSchema, UnknownEntrySchema]);
@@ -72,4 +74,32 @@ export const ArrivalEntrySchema: z.ZodType<ArrivalEntry> = z.union([CarriedArriv
 /** The entries of the classes this build knows; none for an absent field. */
 export function carriedOf(arrival: readonly ArrivalEntry[] | undefined): CarriedArrival[] {
   return (arrival ?? []).filter((entry): entry is CarriedArrival => CARRIED_CLASSES.has(entry.class));
+}
+
+// UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, decision 2 and Interfaces A): what
+// travels with a command's output on its own `user.message`. Not a member of the carried union, which the wire's rule
+// would count a breaking change: it passes the event's schema through the member above and is held here to a strict
+// schema of its own, so a build that knows no such entry keeps the event and an entry that does not fit is ignored.
+
+/** What travels with a command's output: the command the engine ran, and that its text was a terminal's. */
+export interface CommandFacts { run: { command: string; args: string } | null; plain: boolean }
+
+const CommandEntrySchema = z.strictObject({
+  class: z.literal('command'),
+  run: z.strictObject({ command: z.string(), args: z.string() }).optional(),
+  plain: z.literal(true).optional(),
+});
+
+/** The entry of `arrival` that carries them; none when there is nothing to say (no run, not plain). */
+export function commandEntry(facts: CommandFacts): ArrivalEntry[] {
+  if (facts.run === null && !facts.plain) return [];
+  return [{ class: 'command', ...(facts.run !== null && { run: { command: facts.run.command, args: facts.run.args } }), ...(facts.plain && { plain: true }) }];
+}
+
+/** What a `user.message` of origin `local-command` carries: its first entry of class `command`, held to
+ *  `{ class: 'command', run?: { command: string; args: string }, plain?: true }` strictly. An entry that does not fit,
+ *  or none, reads as `{ run: null, plain: false }`; never an error. */
+export function commandOf(arrival: readonly ArrivalEntry[] | undefined): CommandFacts {
+  const read = CommandEntrySchema.safeParse(arrival?.find((entry) => entry.class === 'command'));
+  return read.success ? { run: read.data.run ?? null, plain: read.data.plain === true } : { run: null, plain: false };
 }

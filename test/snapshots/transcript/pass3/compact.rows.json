@@ -61,6 +61,7 @@
     "at": "2026-10-01T09:24:11.618Z",
     "id": "local:7f84c993-b61d-4bb6-a46d-ae221df0af36",
     "kind": "local_command",
+    "lone": true,
     "messageUuid": "7f84c993-b61d-4bb6-a46d-ae221df0af36",
     "text": "Compacted Tip: You have access to Sonnet 1M with 5x more context",
     "turnId": "turn:062ad4d0-6e0b-4398-8031-ed1fe2164099"

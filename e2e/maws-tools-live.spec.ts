@@ -3,7 +3,8 @@
 // (`settings.json` `{}`, a `.claude.json` that trusts the scratch repository), through ClaudeUsage's relay, on Haiku in
 // default permission mode. M2's four prompts run in four sessions, the async one asking for a foreground command so its
 // answer folds into the running turn. The human's part is done through the real surfaces: every permission through the
-// request card docked in the composer, every ask through the Question sheet (the folder through main's pick seam),
+// request card (since UX wave U1b at the transcript's end), every ask through its form in the capsule's row (the Question
+// sheet's own sections; the folder through main's pick seam),
 // the delivery row's two buttons through the open seam (nothing opens on this Mac). The owner's ~/.claude.json is read
 // only, for the A-15 delta before the first launch and after every session. Writes the plain-text evidence
 // (`live-sitting.txt`) and the screenshots in both themes (`e1-<surface>-<theme>.png`) into the directory
@@ -173,7 +174,7 @@ async function begin(s: Sitting, label: string, id: string, prompt: string): Pro
   return session;
 }
 
-// Waits for `until`, allowing every permission the session asks meanwhile through the card docked in the composer
+// Waits for `until`, allowing every permission the session asks meanwhile through its card at the transcript's end
 // (once). Only a request not yet resolved is answered, so a card still showing its answered state is left alone.
 async function drive(s: Sitting, session: Session, what: string, until: () => Promise<boolean>, timeout = TURN_MS): Promise<void> {
   const deadline = Date.now() + timeout;
@@ -228,6 +229,8 @@ const shoot = (s: Sitting, surface: string) => shootThemes(s.page, (theme) => jo
 
 const sheetOf = (s: Sitting) => s.panel.locator('[data-ask-sheet]');
 const capsuleOf = (s: Sitting) => s.pane.locator('section.transcript-ask').last();
+// UX wave U1b (O-17): a waiting ask's form stands in its capsule's row; the sheet opens only when the person opens it
+const formOf = (s: Sitting) => capsuleOf(s).locator('.transcript-ask-form [data-hover-ask]');
 const sectionFor = (sheet: Locator, question: AskQuestion) => sheet.locator(`section[data-question-id="${question.id}"]`);
 
 // ---- the sitting -----------------------------------------------------------------------------------------------------
@@ -298,7 +301,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await end(s, session, before);
     });
 
-    await test.step('2 a blocking ask: the capsule, the sheet with five modalities, the attention item, Submit, the reply', async () => {
+    await test.step('2 a blocking ask: the capsule with its form in its row, five modalities, no sheet opened, the attention item, Submit, the reply', async () => {
       const session = await begin(s, 'blocking ask', blockingId, PROMPTS.blocking);
       await drive(s, session, 'the ask', async () => ofKind(await s.events(session.id), 'maws.ask.opened').length > 0);
       const [opened] = ofKind(await s.events(session.id), 'maws.ask.opened');
@@ -306,10 +309,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const capsule = capsuleOf(s);
       await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
       await expect(capsule.locator('[data-ask-chip]')).toHaveText('Waiting for you');
-      const sheet = sheetOf(s);
-      await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-      await expect(sheet.locator('section[data-question-id]')).toHaveCount(opened!.questions.length);
-      note(`G3: maws.ask.opened ${opened!.questions.length} questions ${JSON.stringify(opened!.questions.map((q) => [q.id, q.modality, q.multi ?? false]))}; the capsule reads "Waiting for you"; the sheet opened by itself on the shown session`);
+      const form = formOf(s);
+      await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+      await expect(form.locator('section[data-question-id]')).toHaveCount(opened!.questions.length);
+      await expect(sheetOf(s), 'no sheet opened by itself').toHaveCount(0);
+      note(`G3: maws.ask.opened ${opened!.questions.length} questions ${JSON.stringify(opened!.questions.map((q) => [q.id, q.modality, q.multi ?? false]))}; the capsule reads "Waiting for you"; its form stands in its row, and no sheet opened`);
       await capsule.scrollIntoViewIfNeeded();
       await expect(capsule).toBeVisible();
       await shoot(s, 'capsule-pending');
@@ -326,31 +330,31 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       await page.keyboard.press('Escape');
       await expect(overview).toHaveCount(0);
 
-      // M2's answers, given in the sheet: Blue; Mon and Wed with Other "Fri"; the text skipped; the assets folder through
+      // M2's answers, given in the row's form: Blue; Mon and Wed with Other "Fri"; the text skipped; the assets folder through
       // the native pick; the repository delegated
       const byModality = (modality: AskQuestion['modality'], multi?: boolean) => opened!.questions.find((q) => q.modality === modality && (multi === undefined || (q.multi ?? false) === multi))!;
       const single = byModality('choice', false);
       const multi = byModality('choice', true);
-      await sectionFor(sheet, single).getByRole('radio', { name: 'Blue' }).click();
-      await sectionFor(sheet, multi).getByRole('checkbox', { name: 'Mon' }).click();
-      await sectionFor(sheet, multi).getByRole('checkbox', { name: 'Wed' }).click();
-      await sectionFor(sheet, multi).getByRole('checkbox', { name: 'Other…' }).click();
-      await sectionFor(sheet, multi).getByRole('textbox').fill('Fri');
-      await sectionFor(sheet, byModality('text')).getByRole('button', { name: 'Skip' }).click();
+      await sectionFor(form, single).getByRole('radio', { name: 'Blue' }).click();
+      await sectionFor(form, multi).getByRole('checkbox', { name: 'Mon' }).click();
+      await sectionFor(form, multi).getByRole('checkbox', { name: 'Wed' }).click();
+      await sectionFor(form, multi).getByRole('checkbox', { name: 'Other…' }).click();
+      await sectionFor(form, multi).getByRole('textbox').fill('Fri');
+      await sectionFor(form, byModality('text')).getByRole('button', { name: 'Skip' }).click();
       const assets = join(sc.repo, 'assets');
       await maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), assets);
-      await sectionFor(sheet, byModality('folder')).getByRole('button', { name: 'Choose folder…' }).click();
-      await expect(sectionFor(sheet, byModality('folder')).getByRole('list')).toHaveText(assets);
-      await expect(sectionFor(sheet, byModality('repository')).getByRole('radio', { name: 'repo' })).toBeVisible();
-      await sectionFor(sheet, byModality('repository')).getByRole('button', { name: 'Decide for me' }).click();
-      await shoot(s, 'sheet');
+      await sectionFor(form, byModality('folder')).getByRole('button', { name: 'Choose folder…' }).click();
+      await expect(sectionFor(form, byModality('folder')).getByRole('list')).toHaveText(assets);
+      await expect(sectionFor(form, byModality('repository')).getByRole('radio', { name: 'repo' })).toBeVisible();
+      await sectionFor(form, byModality('repository')).getByRole('button', { name: 'Decide for me' }).click();
+      await shoot(s, 'ask-form');
       await clearToasts(page);
-      await sheet.getByRole('button', { name: /^Submit/ }).click();
+      await form.getByRole('button', { name: /^Submit/ }).click();
 
       await drive(s, session, 'the answer and the reply', async () => ofKind(await s.events(session.id), 'maws.ask.answered').length > 0 && (await idleNow(s, session.id)));
       const [answered] = ofKind(await s.events(session.id), 'maws.ask.answered');
       expect(answered).toMatchObject({ askId: opened!.askId, delivery: 'result' });
-      // what the sheet was given, written as the result's answers, one per question in the ask's order
+      // what the form was given, written as the result's answers, one per question in the ask's order
       const given = (q: AskQuestion) =>
         q === single ? { status: 'answered', value: ['Blue'] }
         : q === multi ? { status: 'answered', value: ['Mon', 'Wed'], otherText: 'Fri' }
@@ -364,7 +368,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
       await shoot(s, 'capsule-answered');
       await capsule.getByRole('button', { name: 'View answers' }).click();
-      await expect(sheet.locator('[data-ask-readonly]')).toBeVisible();
+      await expect(sheetOf(s).locator('[data-ask-readonly]')).toBeVisible();
       note(`G3: Submit wrote ${JSON.stringify(answered!.answers.map((a) => [a.id, a.status, a.value ?? null, a.otherText ?? null]).map((a) => JSON.stringify(a).replace(sc.root, '<scratch>')))}; the attention item left Needs you; the capsule reads "Answered"; View answers reopened it read-only; reply ${JSON.stringify(reply.replace(sc.root, '<scratch>'))}`);
       expect(reply).toMatch(/Blue/);
       expect(reply).toMatch(/SKIPPED/i);
@@ -379,14 +383,14 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const capsule = capsuleOf(s);
       await expect(capsule).toHaveAttribute('data-ask-state', 'asked');
       await expect(capsule.locator('[data-ask-chip]')).toHaveText('Asked, answer when ready');
-      // the model keeps working: its Bash call starts, then the answer goes from the sheet while it runs
+      // the model keeps working: its Bash call starts, then the answer goes from the row's form while it runs
       await drive(s, session, 'the Bash call', async () => ofKind(await s.events(session.id), 'tool.use').some((e) => e.toolName === 'Bash'));
       await page.waitForTimeout(2_000);
-      const sheet = sheetOf(s);
-      await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-      await sheet.getByRole('radio', { name: 'Yes' }).click();
+      const form = formOf(s);
+      await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+      await form.getByRole('radio', { name: 'Yes' }).click();
       await clearToasts(page);
-      await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+      await form.getByRole('button', { name: 'Submit', exact: true }).click();
       await drive(s, session, 'the reply', async () => ofKind(await s.events(session.id), 'maws.ask.answered').length > 0 && (await idleNow(s, session.id)));
       await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
       const rows = journal(session.journalPath);
@@ -408,7 +412,7 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       const bashResult = rows.find((r) => r.direction === 'in' && (r.frame as Frame).type === 'user' && Array.isArray(blocks(r)) && blocks(r).some((b) => b.type === 'tool_result' && b.tool_use_id === bashId));
       const duringBash = bashUse !== undefined && bashResult !== undefined && bashUse.seq < steer!.seq && steer!.seq < bashResult.seq;
       note(`G4: maws.ask.opened blocking false; the acknowledgement {status: "asked", askId} written at seq ${ack.seq}, before the answer's steer; the capsule read "Asked, answer when ready"; the steer (priority next, seq ${steer!.seq}) ${duringBash ? `went while Bash ran (its tool_use at seq ${bashUse!.seq}, its result at seq ${bashResult!.seq})` : `did not land inside Bash's span (tool_use seq ${bashUse?.seq ?? 'none'}, result seq ${bashResult?.seq ?? 'none'})`}, and ${folded ? `folded into the running turn (one main result, seq ${firstResult.seq})` : `did not fold: ${results.length} main results at seqs ${JSON.stringify(results.map((r) => r.seq))}`}; replies ${JSON.stringify(replies)}`);
-      expect.soft(duringBash, 'the answer went from the sheet while Bash ran').toBe(true);
+      expect.soft(duringBash, 'the answer went from the row’s form while Bash ran').toBe(true);
       expect(replies.some((r) => /ANSWER:\s*Yes/i.test(r))).toBe(true);
       expect.soft(folded, 'the answer folded into the running turn').toBe(true);
       await end(s, session, before);
@@ -416,14 +420,16 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
 
     // E2 landed the Deliverables tool after E1's sitting, so the pane exists and target "none" names nothing (the replay
     // spec's expectation, maws-tools.spec.ts); E1's build answered "not available in this build". P3-L M6b: the
-    // `artifact` pane and the Artifacts tool
-    await test.step('4 show_pane: the Terminal opens, an artifact that does not exist and an unknown pane are error cells', async () => {
+    // `artifact` pane and the Artifacts tool. UX wave U6d (O-44): the pane is retired; the engine still sends the call (a
+    // pane outside the listed enum reaches the server, pass3/p1-maws-show-pane's `nope`), the host refuses it with the
+    // sentence that teaches the link and asks no window
+    await test.step('4 show_pane: the Terminal opens, the retired artifact pane and an unknown pane are error cells', async () => {
       const session = await begin(s, 'show_pane', showPaneId, PROMPTS.showPane);
       await drive(s, session, 'the turn end', async () => ofKind(await s.events(session.id), 'turn.ended').some((e) => e.parentToolUseId === null) && (await idleNow(s, session.id)));
       const shown = ofKind(await s.events(session.id), 'maws.pane.shown');
       expect(shown.map((e) => [e.pane, e.opened?.kind ?? null, e.error])).toEqual([
         ['terminal', 'panel-tool', null],
-        ['artifact', null, TOOL_ERRORS.artifactNotFound('none')],
+        ['artifact', null, TOOL_ERRORS.artifactPaneRetired],
       ]);
       await expect(surface(s.page, 'terminal')).toBeVisible();
       const divider = s.pane.locator('[data-kind="divider"]').last().locator('button[aria-expanded]').first();
@@ -431,11 +437,11 @@ test('the live sitting: send_file, a blocking ask, an async ask folded into its 
       // the cells' own labels, since the model's reply may quote the same words (a live run's read "opened Terminal panel")
       const cell = (text: string | RegExp) => s.pane.locator('.transcript-cell-label').filter({ hasText: text });
       await expect(cell(/^Opened Terminal$/)).toBeVisible();
-      await expect(cell(/^Could not open pane: no artifact "none" in this session$/)).toBeVisible();
+      await expect(cell(/^Could not open pane: MAWS no longer opens an artifact for the user\./)).toBeVisible();
       await expect(cell(/^Could not open pane: unknown pane "nope"/)).toBeVisible();
       await shoot(s, 'pane');
       const reply = mainTurnsEnded(await s.events(session.id)).at(-1)?.resultText ?? '';
-      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: no artifact "none" in this session", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
+      note(`G5: maws.pane.shown ${JSON.stringify(shown.map((e) => ({ pane: e.pane, opened: e.opened, error: e.error })))}; the Terminal tab opened in the panel; the cells read "Opened Terminal", "Could not open pane: MAWS no longer opens an artifact for the user. …", "Could not open pane: unknown pane "nope"…"; reply ${JSON.stringify(reply)}`);
       await end(s, session, before);
     });
   } finally {

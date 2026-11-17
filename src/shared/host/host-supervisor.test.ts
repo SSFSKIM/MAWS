@@ -887,3 +887,60 @@ describe('a handover mark across two owners', () => {
     expect([supervisor.snapshot('engine-host').restarts, supervisor.facts('engine-host').lastExit]).toEqual([0, null]);
   });
 });
+
+// #473: main's verdict on the daemon shape. `mawsd`'s drain dropped main's relayed link before the old host said it handed
+// over, so main's own look finds the process gone with no handover mark heard; while `mawsd` reported a drain, the
+// relay's end report on that incarnation decides (relayedVerdict), and without one the exit is a crash, as before
+describe('a relayed engine host gone while its relay drained it', () => {
+  async function relayedScene() {
+    const engine = await startFake();
+    const asked: string[] = [];
+    let answer: (handedOver: boolean | null) => void = () => {};
+    const supervisor = makeSupervisor(
+      { 'engine-host': { detached: detachedOptions({ relayed: true }) } },
+      { relayedVerdict: (owner, incarnation) => (asked.push(`${owner} ${incarnation}`), new Promise((resolve) => (answer = resolve))) },
+    );
+    await supervisor.start();
+    await until(() => supervisor.snapshot('engine-host').state === 'ready');
+    const said = vi.spyOn(console, 'log').mockImplementation(() => {});
+    await engine.die({ keepLock: true }); // the old host leaves; main heard nothing of its handover
+    await until(() => asked.length === 1);
+    expect(asked).toEqual([`engine-host ${engine.pid}@${engine.startedAt}`]);
+    await sleep(BACKOFF[2] * 2);
+    expect(supervisor.snapshot('engine-host').state, 'not judged while the relay’s verdict is out').toBe('restarting');
+    expect(supervisor.facts('engine-host').lastExit).toBeNull();
+    expect(spawn).not.toHaveBeenCalled();
+    return { supervisor, said, answer: (handedOver: boolean | null) => answer(handedOver) };
+  }
+
+  it('the relay says it handed over: its successor at once, no crash count', async () => {
+    const { supervisor, said, answer } = await relayedScene();
+    answer(true);
+    await until(() => supervisor.snapshot('engine-host').state === 'ready' && fakes.length === 2);
+    expect(said.mock.calls.flat().join('\n')).toContain('left after handing its sessions over');
+    expect([supervisor.snapshot('engine-host').restarts, supervisor.facts('engine-host').lastExit]).toEqual([0, null]);
+  });
+
+  it('the relay says it crashed mid-drain, or tells nothing in time: a crash, counted', async () => {
+    for (const verdict of [false, null]) {
+      const { supervisor, answer } = await relayedScene();
+      answer(verdict);
+      await until(() => supervisor.facts('engine-host').lastExit !== null);
+      await until(() => supervisor.snapshot('engine-host').state === 'ready');
+      expect(supervisor.snapshot('engine-host').restarts).toBe(1);
+      supervisor.stop();
+      for (const fake of fakes.splice(0)) await fake.die();
+      spawn.mockClear();
+    }
+  });
+
+  it('no drain reported: judged at once, as before', async () => {
+    await startFake().then(async (engine) => {
+      const supervisor = makeSupervisor({ 'engine-host': { detached: detachedOptions({ relayed: true }) } }, { relayedVerdict: () => null });
+      await supervisor.start();
+      await until(() => supervisor.snapshot('engine-host').state === 'ready');
+      await engine.die({ keepLock: true });
+      await until(() => supervisor.facts('engine-host').lastExit !== null);
+    });
+  });
+});

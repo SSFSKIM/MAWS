@@ -48,8 +48,8 @@ const FORM = SIDE_COPY.composer;
 // half-column cap): it casts the strip's shadow, whose every layer reaches at most 8 px, where the floating shadow's wide
 // blurs (and the composer's 80 px light layer) were trimmed at the sides and bottom. Over a frame it floats.
 const shadowOf = (style: CardStyle) => (style.mode === 'strip' ? 'shadow-strip' : 'shadow-float');
-// P4-B1: the margin's card is in flow in its entry, as the strip's is
-const flowOf = (style: CardStyle) => (style.mode === 'strip' || style.mode === 'margin' ? 'relative' : 'absolute');
+// P4-B1: the margin's card is in flow in its entry, as the strip's is; UX wave U5b: so is the card in a surface's row
+const flowOf = (style: CardStyle) => (style.mode === 'strip' || style.mode === 'margin' || style.mode === 'inline' ? 'relative' : 'absolute');
 const cornerOf = (style: CardStyle, pinned: boolean) => (!pinned ? '' : style.mode === 'below' ? 'rounded-tl-none' : style.mode === 'above' ? 'rounded-bl-none' : '');
 
 interface Props {
@@ -164,7 +164,7 @@ export function CommentCard({ card, style, pinned, frame, visible, onDismiss, re
         </button>
       </header>
       {!thread && shown !== card.parent && <ParentName parent={card.parent} /> /* P3-F1; UX wave U5a: the one rule */}
-      {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : phase.kind === 'composing' && <CardComposer card={card} passKey={phase.pass} commentId={phase.comment} {...(restoreFocus && { restoreFocus })} />}
+      {thread ? <CardThread card={card} child={thread.child} echo={thread.echo} frame={frame} visible={visible} /> : phase.kind === 'composing' && <CardComposer card={card} passKey={phase.pass} commentId={phase.comment} listsPass={style.mode !== 'inline' /* UX wave U5b */} {...(restoreFocus && { restoreFocus })} />}
     </div>
   );
 }
@@ -190,8 +190,10 @@ function ParentName({ parent }: { parent: AppSessionId }) {
 
 // The composer half, over one comment of its pass (UX wave U5a). Send sends the pass; what becomes of the card then is
 // the send's (§D): it closes and its host's place says where the comments went, or it becomes the side thread. A send
-// that took the card away gives the keyboard back to the host's control.
-function CardComposer({ card, passKey, commentId, restoreFocus }: { card: OpenCard; passKey: string; commentId: string; restoreFocus?(): void }) {
+// that took the card away gives the keyboard back to the host's control. UX wave U5b (§B; the drawn example's D5): in a
+// surface's row the card leaves out the list of the pass's other comments, which the surface draws as rows under their
+// lines; "Send N comments" stays.
+function CardComposer({ card, passKey, commentId, listsPass, restoreFocus }: { card: OpenCard; passKey: string; commentId: string; listsPass: boolean; restoreFocus?(): void }) {
   const { parent, serial } = card;
   const form = usePassForm(passKey, commentId);
   // P4-B1 (C6): the field takes the keyboard when the card first shows, and on a remount (its host moved) only if the
@@ -220,7 +222,7 @@ function CardComposer({ card, passKey, commentId, restoreFocus }: { card: OpenCa
       }}
     >
       <div data-card-scroll="" className="flex min-h-0 shrink flex-col gap-2 overflow-y-auto">
-        {form.others.length > 0 && <OtherComments passKey={passKey} hostId={card.hostId} comments={form.others} />}
+        {listsPass && form.others.length > 0 && <OtherComments passKey={passKey} hostId={card.hostId} comments={form.others} />}
         {form.screenshot !== null && form.showScreenshot && <ScreenshotThumbnail parent={parent} screenshot={form.screenshot} disabled={form.sending} onRemove={form.removeScreenshot} />}
         <textarea
           aria-label={FORM.field}

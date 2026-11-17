@@ -13,11 +13,12 @@ import { afterAll, afterEach, beforeAll, describe, expect, it } from 'vitest';
 import type { Action } from 'org-protocol';
 import type { CommandName } from '@shared/ipc/schema';
 import { validateCommandInput } from '@shared/ipc/validate';
+import { gradeOf } from '@shared/ipc/grades';
 import { KEPT_WITHOUT_ACTION } from '../../src/endpoint/actions';
-import { OFFERS } from '../../src/endpoint/offers';
+import { OFFERS, type Offers } from '../../src/endpoint/offers';
 import { registerFilesHandlers } from '../../src/services/files/register';
 import { FILES_REFUSAL } from '../../src/services/files/service';
-import { act, CHECKOUT, makeOrg, openRemote, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote } from './sub-harness';
+import { act, CHECKOUT, makeOrg, openRemote, sminos, startEndpoint, stopAll, waitFor, type Fixture, type Msg, type Org, type Remote, type StartOptions } from './sub-harness';
 
 let org: Org;
 const started: Fixture[] = [];
@@ -65,6 +66,10 @@ const gitCalls = (dir: string): Record<string, Record<string, unknown>> => ({
   'git.worktree.list': { repoRoot: dir },
   'git.worktree.status': { repoRoot: dir, path: dir },
   'git.worktree.branch': { repoRoot: dir, branch: 'main' },
+  // UX wave U5b-2 (M8): the branch read, the commit read and the working-tree read
+  'git.branchCommits': { directory: dir, limit: 50 },
+  'git.commitDiff': { directory: dir, commit: 'a'.repeat(40) },
+  'git.changesSince': { directory: dir, against: 'HEAD' },
 });
 
 /** The checkout's writes, `machine` acts placed by their session. */
@@ -93,11 +98,11 @@ const code = (m: Msg) => (m.ok === true ? 'ok' : (m.error as { code: string }).c
 const AUTHORIZATION = ['grade', 'not-offered', 'act-required', 'ungraded', 'no-target', 'no-rule', 'malformed', 'class'];
 
 /** A live lane B session the machine's owners own, its record rooted at a real directory, git answering for it there. */
-async function setup(): Promise<{ f: Fixture; dir: string; a: Remote; b: Remote }> {
+async function setup(options: StartOptions = {}): Promise<{ f: Fixture; dir: string; a: Remote; b: Remote }> {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-rows-')));
   dirs.push(dir);
   mkdirSync(join(dir, 'src'));
-  const f = await startEndpoint(org, started);
+  const f = await startEndpoint(org, started, options);
   const s = f.host.add(APP);
   f.spine.set(APP, s.engineSessionId, { appId: APP, directory: dir, additionalDirectories: [], worktree: null });
   f.records.set({ lane: 'B', session: s.engineSessionId!, owners: ['@machine'] }, APP);
@@ -134,7 +139,8 @@ describe('the checkout’s offer rows (M4)', () => {
   });
 
   it('leave unoffered what the spec keeps local or for later', () => {
-    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'session.create', 'session.launch']) {
+    // UX wave U6e: the outside save and the grant stay on the session's own machine (until U6f)
+    for (const name of ['git.worktree.add', 'git.worktree.remove', 'git.worktree.deleteBranch', 'fs.holders', 'fs.readSpill', 'files.reveal', 'files.openExternal', 'files.readResolved', 'files.writeOutside', 'files.grant', 'session.create', 'session.launch']) {
       expect([name, Object.hasOwn(OFFERS.commands, name)]).toEqual([name, false]);
     }
   });
@@ -216,6 +222,53 @@ describe('the checkout’s offer rows (M4)', () => {
       from = f.host.calls.length;
       expect(code(await call(r, 'session.projects.list', null))).toBe('ok');
       expect(reached(f, from, 'machine', 'session.projects.list')).toHaveLength(1);
+    }
+  });
+});
+
+// The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, "Routes"): the three
+// reads Review and Source control's page make cross under the `checkout` rule at `view`, as git's other reads do. A
+// commit is any commit of the repository the reader may already diff; the input is held to its schema strictly; and an
+// endpoint of an older build, whose table has no row for them, refuses each before its services see it.
+describe('the git reads’ offer rows (U5b-2)', () => {
+  const READS = ['git.branchCommits', 'git.commitDiff', 'git.changesSince'];
+
+  it('are `view` reads under the checkout rule', () => {
+    for (const name of READS) expect([name, OFFERS.commands[name], gradeOf(name)]).toEqual([name, { kind: 'call', executor: 'machine', target: 'checkout' }, 'view']);
+  });
+
+  it('refuse each, unread, `no-target` for a directory outside the session’s checkout and for a call that names no session', async () => {
+    const { f, dir, a } = await setup();
+    const outside = realpathSync(mkdtempSync(join(tmpdir(), 'checkout-rows-outside-')));
+    dirs.push(outside);
+    for (const name of READS) {
+      const from = f.host.calls.length;
+      expect([name, code(await call(a, name, gitCalls(outside)[name], { session: SESSION }))]).toEqual([name, 'no-target']);
+      expect([name, code(await call(a, name, gitCalls(dir)[name]))]).toEqual([name, 'no-target']);
+      expect([name, reached(f, from, 'machine', name)]).toEqual([name, []]);
+    }
+  });
+
+  it('refuse, unread, `malformed` a commit or a base that is not a full hash', async () => {
+    const { f, dir, a } = await setup();
+    const from = f.host.calls.length;
+    for (const [name, input] of [
+      ['git.commitDiff', { directory: dir, commit: 'abc1234' }],
+      ['git.commitDiff', { directory: dir, commit: `-${'a'.repeat(39)}` }],
+      ['git.changesSince', { directory: dir, against: 'main' }],
+    ] as const) {
+      expect([name, input, code(await call(a, name, input, { session: SESSION }))]).toEqual([name, input, 'malformed']);
+    }
+    expect([...reached(f, from, 'machine', 'git.commitDiff'), ...reached(f, from, 'machine', 'git.changesSince')]).toEqual([]);
+  });
+
+  it('are refused `not-offered`, unread, by an endpoint whose table has no row for them (an older build’s)', async () => {
+    const older: Offers = { ...OFFERS, commands: Object.fromEntries(Object.entries(OFFERS.commands).filter(([name]) => !READS.includes(name))) };
+    const { f, dir, a } = await setup({ offers: older });
+    for (const name of READS) {
+      const from = f.host.calls.length;
+      expect([name, code(await call(a, name, gitCalls(dir)[name], { session: SESSION }))]).toEqual([name, 'not-offered']);
+      expect([name, reached(f, from, 'machine', 'git.worktree.list'), reached(f, from, 'machine', name)]).toEqual([name, [], []]);
     }
   });
 });

@@ -5,5 +5,5 @@
 export const PANEL_CHILD_TAIL = {
   first: 333,
   batches: [80, 80, 83],
-  rows: [46, 86, 128],
+  rows: [46, 86, 127], // UX wave U1b: the Bash call's permission request makes no row (§B, rule 3)
 } as const;

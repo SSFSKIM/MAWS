@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AgentId, AppSessionId } from '../../graph/ids';
 import type { MachineRef } from '../../machine/ref';
-import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
+import { commands, EMPTY_STRIP, events, ExportFolderSchema, LAYOUT_DEFAULTS, type LayoutMain, type LayoutMainV1, LayoutKeySchema, LayoutMainSchema, PanelActiveNoSessionSchema, PanelParamsSchema, PanelSurfacesSchema, LayoutRegionsSchema, PanelPinnedSchema, PanelSessionStateSchema, storedMain, storedMainSchema, storedPanelSurfacesSchema, storedRegionsSchema, type Strip, stripOf, type TabRef, TabRefSchema, type TabTarget, tabId, UsageBannersSchema, retiredFront, pageAtStart, type Destination, QuitWaitSchema, FILES_TREE_EXPANDED_MAX, FilesTreeSchema } from './layout'; // C7: UsageBannersSchema; C12: QuitWaitSchema; UX wave U13a: the strip
 
 // P5 O6 M2 (OX2): a layout holds addresses; one written before O6 held bare ids, every one the local machine's, and reads
 // lifted with it.
@@ -532,7 +532,53 @@ describe('layout value shapes', () => {
       'layout.saveAllDone': 'main', // E5: a window's answer to the quit question's Save all
       'layout.captureRegion': 'main', // P3-G: Mark-up's still of a region the window draws
       'layout.nativeEdit': 'main', // P4-B2 K6: the Edit menu's Undo or Redo no editor in the page claimed, run natively
+      'layout.openFile': 'main', // UX wave U6e: Open File…, the system's chooser, then main's grant
+      'layout.frameFile': 'main', // UX wave U6b-2: a file frame's token, issued to the asking page
+      'layout.releaseFrame': 'main', // UX wave U6b-2: its release by that page
     });
+  });
+
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §D): a file frame's issue,
+  // its release, and the event that a read for its token failed; a token is 32 lower-case hexadecimal characters
+  it('carries a file frame’s issue, its release and the failure of a read for it as Interfaces §D shows them, and no token of another shape', () => {
+    const TOKEN = '3f9c2b7e4d1a8c6f0e5b9a2d7c4f1e8b';
+    const frameFile = commands['layout.frameFile'];
+    expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf' }).success).toBe(true);
+    for (const input of [{ appSessionId: 'app-1', path: '' }, { appSessionId: 'app-1' }, { path: '/w/a.pdf' }, { appSessionId: 'app-1', path: '/w/a.pdf', named: true }, { appSessionId: 'app-1', path: '/w/a.pdf', raw: true }]) {
+      expect(frameFile.input.safeParse(input).success, JSON.stringify(input)).toBe(false);
+    }
+    const url = `maws-artifact://${TOKEN}/ledger.pdf`;
+    for (const framed of ['pdf', 'video', 'audio'] as const) expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed }).success, framed).toBe(true);
+    expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed: 'html', neighbours: true }).success).toBe(true);
+    expect(frameFile.output.safeParse({ status: 'ready', token: TOKEN, url, framed: 'html' }).success).toBe(true);
+    for (const why of ['too-large', 'unserved', 'unframed'] as const) expect(frameFile.output.safeParse({ status: 'row', why }).success, why).toBe(true);
+    for (const output of [
+      { status: 'ready', token: TOKEN, url, framed: 'image' },
+      { status: 'ready', token: TOKEN, url, framed: 'pdf', path: '/w/a.pdf' },
+      { status: 'row', why: 'unplayable' },
+      { status: 'row', why: 'too-large', token: TOKEN },
+      { status: 'ready', url, framed: 'pdf' },
+    ]) expect(frameFile.output.safeParse(output).success, JSON.stringify(output)).toBe(false);
+    expect(commands['layout.releaseFrame'].input.safeParse({ token: TOKEN }).success).toBe(true);
+    expect(commands['layout.releaseFrame'].output.safeParse(undefined).success).toBe(true);
+    expect(events['layout.frameFailed'].safeParse({ token: TOKEN }).success).toBe(true);
+    for (const token of [TOKEN.toUpperCase(), TOKEN.slice(1), `${TOKEN}0`, '0a1b2c3d-4e5f-4a6b-8c7d-8e9f0a1b2c3d', `${TOKEN.slice(0, 31)}g`, '']) {
+      expect(frameFile.output.safeParse({ status: 'ready', token, url, framed: 'pdf' }).success, token).toBe(false);
+      expect(commands['layout.releaseFrame'].input.safeParse({ token }).success, token).toBe(false);
+      expect(events['layout.frameFailed'].safeParse({ token }).success, token).toBe(false);
+    }
+    expect(commands['layout.releaseFrame'].input.safeParse({ token: TOKEN, path: '/w/a.pdf' }).success).toBe(false);
+    expect(events['layout.frameFailed'].safeParse({ token: TOKEN, path: '/w/a.pdf' }).success).toBe(false);
+  });
+
+  // UX wave U6e arrived with the chain (the U6b-2 document, "What this document assumes of landings in flight"): a frame
+  // asked for a tab that holds the agent's mark carries `agent`, as that tab's reads do; nothing else is admitted
+  it('takes agent on a file frame’s issue only as true', () => {
+    const frameFile = commands['layout.frameFile'];
+    expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf', agent: true }).success).toBe(true);
+    for (const agent of [false, 'true', 1, null]) {
+      expect(frameFile.input.safeParse({ appSessionId: 'app-1', path: '/w/invented/ledger.pdf', agent }).success, JSON.stringify(agent)).toBe(false);
+    }
   });
 
   // Edit ▸ Select All (sitting finding, 2026-09-30): the application menu's own item tells the page, with nothing to add
@@ -676,5 +722,27 @@ describe('the one strip, read from and stored as main.tabs', () => {
     const noneElsewhere = { version: 3, current: BETA, sets: { none: set }, closedTabs: [] } as unknown as LayoutMain;
     expect(stripOf(noneElsewhere).canonical).toBe(false);
     expect(stripOf({ version: 3, current: 'none', sets: {}, closedTabs: [] }).canonical).toBe(false);
+  });
+});
+
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, M3, Interfaces §A and §C): Files'
+// tree, one state per session under a key of its own
+describe('files.tree', () => {
+  const tree = { width: 260, folded: false, expanded: ['/r', '/r/src'] };
+  it('is a layout key outside the panel namespace', () => {
+    expect(LayoutKeySchema.safeParse('files.tree').success).toBe(true);
+    expect(commands['layout.set'].input.safeParse({ key: 'files.tree', value: { version: 1, sessions: {} } }).success).toBe(true);
+  });
+
+  it('holds each session’s width (or null), fold and open folders, at most two hundred of them, and nothing else', () => {
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { [at('app-a')]: tree, [at('app-b')]: { width: null, folded: true, expanded: [] } } }).success).toBe(true);
+    const many = Array.from({ length: FILES_TREE_EXPANDED_MAX }, (_, i) => `/r/d${i}`);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, expanded: many } } }).success).toBe(true);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, expanded: [...many, '/r/one-more'] } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 2, sessions: {} }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: {}, extra: true }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, scrollTop: 0 } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { ...tree, width: 12.5 } } }).success).toBe(false);
+    expect(FilesTreeSchema.safeParse({ version: 1, sessions: { a: { width: 260, expanded: [] } } }).success).toBe(false);
   });
 });

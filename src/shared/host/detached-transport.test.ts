@@ -1569,6 +1569,28 @@ describe('the detached transport: the handover', () => {
     expect(stops).toEqual([]);
   });
 
+  // #473: the drain's end is told with the verdict on the old host's exit, naming its incarnation, so a client whose
+  // own link the drain dropped (main, through `mawsd`'s relay) can take that verdict instead of guessing at a gone pid
+  it('the drain’s end is told with its verdict: handed over after the detached word, crashed mid-drain without it', async () => {
+    const { fake: old } = await handingOverFake();
+    onSpawn = (candidate) => void handingOverFake({ pid: candidate.pid! });
+    const ends: unknown[] = [];
+    supervisor.onHandover('engine-host', (current, ended) => void (current === null && ends.push(ended ?? null)));
+    await supervisor.start();
+    await until(() => state().state === 'ready');
+    expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'detaching' } });
+    await handsOver(old);
+    await until(() => state().state === 'ready' && state().pid !== old.pid);
+    expect(ends).toEqual([{ pid: old.pid, startedAt: old.startedAt, handedOver: true }]);
+
+    const next = fakes.at(-1)!;
+    expect(await supervisor.handover('engine-host', 0)).toEqual({ ok: true, value: { state: 'detaching' } });
+    await next.die(); // gone with no word that its rows detached, on a link that carries its events: a crash mid-drain
+    await until(() => ends.length === 2);
+    expect(ends[1]).toEqual({ pid: next.pid, startedAt: next.startedAt, handedOver: false });
+    await until(() => supervisor.facts('engine-host').lastExit !== null);
+  });
+
   it('a host that said its rows detached, then exited, handed over as planned: no crash count, no backoff, no toast', async () => {
     const { fake: old, inFlight } = await handingOverFake({}, { count: 1 });
     await supervisor.start();

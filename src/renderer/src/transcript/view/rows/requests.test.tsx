@@ -159,14 +159,15 @@ describe('question row', () => {
   });
 
   // Debt wave 4: Esc on the card answers a question with a plain permission deny, which C3 reports as
-  // `question.answered` with no answers (recorded: pass3/question-deny). The row reads the question as skipped.
-  it('a question declined through a plain deny reads Skipped, in the row and its export (pass3/question-deny)', async () => {
+  // `question.answered` with no answers (recorded: pass3/question-deny). UX wave U1b (decision 10): the row reads the
+  // question as dismissed, as the card's Dismiss names that decline.
+  it('a question declined through a plain deny reads Dismissed, in the row and its export (pass3/question-deny)', async () => {
     const store = await expanded(journalToEvents(loadJournal('pass3', 'question-deny')));
     const row = rowOf(store.rows(), 'question');
     expect(row.answers).toEqual({});
     const view = renderRow(row, { storeKey: store.key });
-    expect(lines(view.container)).toEqual(['Color→Skipped']);
-    expect(serializeRows([row])).toBe('**Color** Red or Blue?: Skipped');
+    expect(lines(view.container)).toEqual(['Color→Dismissed']);
+    expect(serializeRows([row])).toBe('**Color** Red or Blue?: Dismissed');
   });
 
   it('a partially answered row (the stepper skipped one) says Not answered for each question without an answer, and only for those', async () => {
@@ -206,6 +207,9 @@ describe('question row', () => {
   });
 });
 
+// UX wave U1b (§B, rule 3; §C): no row is made for a request; a pending question's own row is derived while it waits
+// (its form drawn there by the host's renderer while the session's list names its call), and the slot kind passes only
+// the rows a host makes itself (desk web's tail) and the transcript's end row.
 describe('request slot', () => {
   function pendingQuestion() {
     const b = builder();
@@ -214,36 +218,34 @@ describe('request slot', () => {
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [{ question: 'Which colour?', header: 'Colour', multiSelect: false, options: [{ label: 'Red', description: null, preview: null }] }] });
     return b;
   }
+  const hostSlot = { id: 'desk-tail:request:k' as never, turnId: null, at: '', kind: 'request_slot' as const, requestId: request('desk-tail:request:k'), toolUseId: null, requestKind: 'permission' as const, toolName: 'Bash', requestedAt: '' };
 
-  it('without renderRequest: a status line saying what waits and where to answer', async () => {
-    const store = await storeWith(pendingQuestion().events);
-    renderRow(rowOf(store.rows(), 'request_slot'), { storeKey: store.key });
-    expect(screen.getByRole('status').textContent).toBe('Waiting for you · AskUserQuestion · answer in the composer');
+  it('without renderRequest: a host’s slot is a status line saying what waits', () => {
+    renderRow(hostSlot);
+    expect(screen.getByRole('status').textContent).toBe('Waiting for you · Bash · answer in the composer');
   });
 
-  it('with renderRequest: the supplied node and no placeholder', async () => {
-    const store = await storeWith(pendingQuestion().events);
-    const slot = rowOf(store.rows(), 'request_slot');
+  it('with renderRequest: the supplied node and no placeholder', () => {
     const renderRequest = vi.fn((row: Extract<Row, { kind: 'request_slot' }>) => <div data-card="">Card for {row.requestId}</div>);
-    const view = renderRow(slot, { storeKey: store.key, renderRequest });
-    expect(renderRequest).toHaveBeenCalledWith(slot);
-    expect(view.container.querySelector('[data-card]')?.textContent).toBe('Card for r1');
+    const view = renderRow(hostSlot, { renderRequest });
+    expect(renderRequest).toHaveBeenCalledWith(hostSlot);
+    expect(view.container.querySelector('[data-card]')?.textContent).toBe('Card for desk-tail:request:k');
     expect(view.container.textContent).not.toContain('Waiting for you');
   });
 
-  it('a question.answered for the pending slot puts the question row at the slot’s position in its turn', async () => {
+  it('a pending question has its own row and no slot; question.answered fills that row in place', async () => {
     const b = pendingQuestion();
     const store = await storeWith(b.events);
     const before = store.rows();
-    const at = before.findIndex((row) => row.kind === 'request_slot');
-    expect(before[at]).toMatchObject({ id: rowId.slot(request('r1')), requestKind: 'question' });
+    expect(ofKind(before, 'request_slot')).toEqual([]);
+    const at = before.findIndex((row) => row.kind === 'question');
+    expect(before[at]).toMatchObject({ id: rowId.question(tool('q1')), answers: null });
     const answered = builder('2026-09-28T10:00:05.000Z');
     answered.emit('question.answered', { requestId: request('r1'), toolUseId: tool('q1'), answers: { 'Which colour?': 'Red' } }, { id: 'answer' });
     act(() => store.push(answered.events));
     const after = store.rows();
     expect(after[at]).toMatchObject({ kind: 'question', id: rowId.question(tool('q1')), turnId: before[at].turnId, answers: { 'Which colour?': 'Red' } });
-    expect(ofKind(after, 'request_slot')).toEqual([]);
-    expect(after.map((row) => row.id).filter((id) => id !== after[at].id)).toEqual(before.map((row) => row.id).filter((id) => id !== before[at].id));
+    expect(after.map((row) => row.id)).toEqual(before.map((row) => row.id));
   });
 });
 

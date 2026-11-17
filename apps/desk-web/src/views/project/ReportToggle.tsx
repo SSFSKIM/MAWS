@@ -3,10 +3,12 @@
 // MAWS's words and styles, calling the transcript store's `setView` as `ReportBar` does. MAWS keeps the choice per tab
 // in the store's state, which the desk starts afresh whenever the transcript resets or the reader comes back to the
 // session (its key dropped when the view went), so the desk keeps the choice per session itself and applies it again.
+// UX wave U2b: MAWS's bar is gone (its switch stands above the composer); the words and styles kept for this toggle
+// are in `owner/view/`.
 import { useEffect } from 'react';
 import { create } from 'zustand';
-import { REPORT } from '../../../../../src/renderer/src/owner/report/copy';
-import '../../../../../src/renderer/src/owner/report/report.css';
+import { REPORT } from '../../../../../src/renderer/src/owner/view/copy';
+import '../../../../../src/renderer/src/owner/view/view.css';
 import { useTranscriptStore } from '../../../../../src/renderer/src/stores/transcript';
 
 type View = 'report' | 'transcript';

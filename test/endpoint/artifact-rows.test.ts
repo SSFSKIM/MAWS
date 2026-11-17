@@ -186,6 +186,24 @@ describe('M5a’s rows', () => {
     const c = await openRemote(f, org.c1, org.C, { passkey: org.passkey });
     expect(codeOf(await call(c, 'library.spaces', null))).toBe('class');
   });
+
+  // UX wave U10b (M9; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, Routes, "A Space's instructions, said
+  // as it is"): no command over the link reads or changes a Space's instructions. Neither name has a row, so the endpoint
+  // refuses each from another machine, as a call and as an act, for a member and for the machine's owner alike, before
+  // anything reaches the machine's engine host
+  it('refuse a Space’s instructions, read or written, from another machine: neither name is offered, and nothing reaches the engine host', async () => {
+    for (const name of ['spaces.instructions', 'spaces.setInstructions']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    const { f, a, b } = await setup();
+    const from = f.host.calls.length;
+    const spaceId = randomUUID();
+    for (const r of [a, b]) {
+      expect(codeOf(await call(r, 'spaces.instructions', {}))).toBe('not-offered');
+      expect(codeOf(await call(r, 'spaces.setInstructions', { spaceId, text: 'Use metres.' }))).toBe('not-offered');
+      expect(await act(r, actOf(f, r, 'spaces.instructions', {}))).toBe('not-offered');
+      expect(await act(r, actOf(f, r, 'spaces.setInstructions', { spaceId, text: 'Use metres.' }))).toBe('not-offered');
+    }
+    expect(JSON.stringify(f.host.calls.slice(from))).not.toContain('spaces.');
+  });
 });
 
 describe('an artifact write, an engine-host act with no session', () => {
@@ -388,10 +406,21 @@ describe('M5c’s rows', () => {
     expect(OFFERS.commands['delivery.receipts']).toEqual({ kind: 'call', executor: 'machine', target: 'machine', grade: 'list' });
     expect(OFFERS.commands['connectors.callback']).toEqual({ kind: 'call', executor: 'machine', target: 'machine' });
     expect(OFFERS.commands['client.windowShown']).toMatchObject({ kind: 'call', executor: 'endpoint', target: 'machine', grade: 'list' });
-    for (const name of ['catalog.engine', 'catalog.engineRefresh', 'delivery.connect', 'delivery.deliver', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.add', 'connectors.remove']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    for (const name of ['catalog.engine', 'catalog.engineRefresh', 'delivery.connect', 'delivery.deliver', 'connectors.windowShown', 'connectors.adoptGrant', 'connectors.add', 'connectors.remove', 'connectors.addJson' /* UX wave U11g */]) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
     const { a } = await scene();
     expect(codeOf(await call(a, 'catalog.engine', { cwd: null }))).toBe('not-offered');
     expect(codeOf(await call(a, 'catalog.engineRefresh', {}))).toBe('not-offered');
+    // UX wave U11g (G6): a custom connector's add reaches no other machine's engine host
+    expect(codeOf(await call(a, 'connectors.addJson', { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', folder: '/tmp/files-probe', entry: { type: 'stdio', command: 'files-probe', args: [], env: [] } }))).toBe('not-offered');
+  });
+
+  // UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, H9): Customize's two reads, a
+  // plugin's connectors among them, are this Mac's alone: no offer row, and a caller on another machine is refused
+  it('Customize’s inventory and its endpoints, a plugin’s connectors among them, are not offered to a caller on another machine', async () => {
+    for (const name of ['customization.inventory', 'customization.serverEndpoints']) expect([name, OFFERS.commands[name]]).toEqual([name, undefined]);
+    const { a } = await scene();
+    expect(codeOf(await call(a, 'customization.inventory', { cwd: null }))).toBe('not-offered');
+    expect(codeOf(await call(a, 'customization.serverEndpoints', { cwd: null }))).toBe('not-offered');
   });
 
   it('take each lease command at its floor: a `view` holder opens and uses a lease, and is refused its tool calls (`converse` by effect)', async () => {

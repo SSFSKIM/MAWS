@@ -9,15 +9,16 @@ import { REGISTRY } from '@shared/ipc/registry';
 import { addressingOf, addressOf, bareOf } from '@shared/machine/address';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
-import { createWidgetBackend, type WidgetBackend } from '../../../../test/support/widget-backend';
+import { createWidgetBackend, WidgetBackendError, type WidgetBackend } from '../../../../test/support/widget-backend';
 import { project, record, status } from '../../../../test/support/builders';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { useLibraryStore } from '../widgets/plugins/library-store';
-import { CustomizeView } from './CustomizeView';
 import { useCustomizeProject } from './open';
+import { useCustomizePage } from './page';
+import { mountCustomize } from '../test-support/customize-page';
 import { PlusMenu } from '../composer/plus-menu/PlusMenu';
 import userEvent from '@testing-library/user-event';
 import { SkillsWidget } from '../widgets/SkillsWidget';
@@ -59,9 +60,13 @@ afterEach(() => {
   useMachines.setState({ loaded: new Set() });
   useLibraryStore.setState(useLibraryStore.getInitialState());
   useCustomizeProject.setState({ projectId: undefined });
+  useCustomizePage.setState({ search: '' });
   delete (window as { maws?: PreloadBridge }).maws;
 });
-const mount = (section: 'plugins' | 'skills' | 'mcp') => render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><CustomizeView section={section} /></QueryClientProvider>);
+// UX wave U11c: a kind is the page's Show value, in My items
+const SHOW = { plugins: 'plugins', skills: 'skills', mcp: 'connectors' } as const;
+const mount = (section: 'plugins' | 'skills' | 'mcp') => mountCustomize({ view: 'mine', show: SHOW[section] });
+const pageHead = () => document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
 
 it('keeps the plugin session picker with its library controls and reloads the selected session without resetting disk choices', async () => {
   const first = { ...pageStatus('live-a'), cwd: '/one', pluginsObservedAt: '2026-10-24T12:00:00.000Z' };
@@ -77,16 +82,16 @@ it('keeps the plugin session picker with its library controls and reloads the se
   backend.script('session.reloadSkills', () => ({ opId: 'chrome-skills' }));
   mount('plugins');
 
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).getByRole('tablist', { name: 'Customize sections' })).toBeTruthy();
-  expect(within(pageHead).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  // UX wave U11c: the head holds the view switch, Showing and, in My items, the live session; Show and the tools under them
+  const head = pageHead();
+  expect(within(head).getByRole('radiogroup', { name: 'Show' })).toBeTruthy();
+  expect(within(head).getByRole('combobox', { name: 'Project' })).toHaveProperty('value', P);
   expect(screen.queryByRole('heading', { name: 'Plugins' })).toBeNull();
-  const picker = screen.getByRole('combobox', { name: 'Live session' });
-  const libraryHead = picker.closest('header')!;
+  const picker = within(head).getByRole('combobox', { name: 'Live session' });
+  const libraryHead = head;
   expect(within(libraryHead).getByRole('radio', { name: 'My items' })).toBeTruthy();
   expect(within(libraryHead).getByRole('searchbox', { name: 'Search plugins' })).toBeTruthy();
-  for (const name of ['Show', 'Sort by', 'Add']) expect(within(libraryHead).getByRole('button', { name })).toBeTruthy();
+  for (const name of ['Filter', 'Sort by', 'Add']) expect(within(libraryHead).getByRole('button', { name })).toBeTruthy();
   expect(screen.getByText('Loaded now')).toBeTruthy();
 
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search plugins' }), { target: { value: 'notes' } });
@@ -107,7 +112,7 @@ it('keeps the plugin session picker with its library controls and reloads the se
   fireEvent.click(within(libraryHead).getByRole('radio', { name: 'Discover' }));
   await waitFor(() => expect(backend.calls.filter((call) => call.command === 'catalog.home').map((call) => call.input)).toEqual([{ tab: 'plugins', cwd: '/one' }]));
   expect(backend.calls.filter((call) => call.command === 'plugins.available')).toEqual([]);
-  expect(within(libraryHead).getByRole('combobox', { name: 'Live session' })).toBe(picker);
+  expect(within(libraryHead).queryByRole('combobox', { name: 'Live session' })).toBeNull(); // in My items only (ruled point 7)
   expect(within(libraryHead).getByRole('searchbox', { name: 'Search all sources' })).toBeTruthy();
   expect(within(libraryHead).getByRole('button', { name: 'Sources' })).toBeTruthy();
   expect(backend.calls.filter((call) => call.command === 'session.acquire')).toEqual([]);
@@ -118,11 +123,8 @@ it('keeps the Skills scopes visible through search and detail without treating t
   useSessions.setState({ engine: new Map([[live.appSessionId, live]]) });
   mount('skills');
   await screen.findByRole('button', { name: 'View review' });
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
-  const picker = screen.getByRole('combobox', { name: 'Live session' });
-  const toolbar = picker.closest('[data-customize-toolbar]') as HTMLElement;
-  expect(within(toolbar).getByRole('searchbox', { name: 'Search skills' })).toBeTruthy();
+  const picker = within(pageHead()).getByRole('combobox', { name: 'Live session' }); // UX wave U11c: the head's, in My items
+  expect(within(pageHead()).getByRole('searchbox', { name: 'Search skills' })).toBeTruthy();
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: 'absent' } });
   expect(screen.queryByRole('button', { name: 'View review' })).toBeNull();
   fireEvent.change(screen.getByRole('searchbox', { name: 'Search skills' }), { target: { value: '' } });
@@ -144,9 +146,8 @@ it('keeps the MCP session picker beside live connectors and switches only the li
   mount('mcp');
   const live = await screen.findByRole('region', { name: 'Live connectors' });
   await within(live).findByText(bareOf(first.appSessionId));
-  const picker = within(live).getByRole('combobox', { name: 'Live session' });
-  const pageHead = document.querySelector<HTMLElement>('[data-customize-header]')!; // UX wave U7b: the page's name is the title bar's
-  expect(within(pageHead).queryByRole('combobox', { name: 'Live session' })).toBeNull();
+  const picker = within(pageHead()).getByRole('combobox', { name: 'Live session' }); // UX wave U11c: the head's, in My items
+  expect(within(live).queryByRole('combobox', { name: 'Live session' })).toBeNull();
   const inventoryReads = backend.calls.filter((call) => call.command === 'customization.inventory').length;
   picker.focus();
   fireEvent.change(picker, { target: { value: second.appSessionId } });
@@ -169,22 +170,24 @@ it('reads the focused project without a session and switches the disk inventory 
   expect(backend.calls.filter((call) => call.command.startsWith('session.'))).toEqual([]);
 });
 
-it('keeps the visited plugin library mounted when another Customize section is selected', async () => {
+// UX wave U11c: the view is the page's, so Discover chosen with one kind is Discover with every kind
+it('keeps Discover when another kind is chosen, and My items when it is chosen again', async () => {
   backend.script('plugins.list', () => ({ plugins: [] }));
   backend.script('marketplaces.list', () => ({ marketplaces: [] }));
-  backend.script('plugins.available', () => ({ plugins: [] }));
   backend.script('mods.list', () => []);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const view = (section: 'plugins' | 'skills') => <QueryClientProvider client={client}><CustomizeView section={section} /></QueryClientProvider>;
-  const mounted = render(view('plugins'));
-  const browse = await screen.findByRole('radio', { name: 'Discover' });
+  backend.script('catalog.home', () => ({ featured: null, shelves: [], categories: [], total: 0 }));
+  backend.script('catalog.query', () => ({ items: [], nextCursor: null, total: 0, restarted: false }));
+  backend.script('catalog.sources', () => []);
+  mount('plugins');
+  const browse = within(pageHead()).getByRole('radio', { name: 'Discover' });
   fireEvent.click(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
-  mounted.rerender(view('skills'));
-  await screen.findByRole('button', { name: 'View review' });
-  mounted.rerender(view('plugins'));
-  expect(within(screen.getByRole('tabpanel', { name: 'Plugins' })).getByRole('radio', { name: 'Discover' })).toBe(browse); // P4-AGG M3: Skills, once visited, stays mounted too
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Skills' }));
+  await waitFor(() => expect(document.querySelector('[data-discover="skills"]')).not.toBeNull());
+  expect(within(pageHead()).getByRole('radio', { name: 'Discover' })).toBe(browse);
   expect(browse.getAttribute('aria-checked')).toBe('true');
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'My items' }));
+  await screen.findByRole('button', { name: 'View review' });
 });
 
 it('keeps disk skill names as display metadata without inventing user or plugin invocations', async () => {
@@ -198,15 +201,14 @@ it('keeps disk skill names as display metadata without inventing user or plugin 
     const label = open.closest('li')!.querySelector('[data-skill-name]')!;
     expect(label.textContent).toBe(name);
     expect(label.getAttribute('title')).toBeNull();
-    const tile = open.closest('li')!.querySelector('span[aria-hidden]')!;
-    expect(tile.textContent?.trim()).not.toBe('/');
-    expect(tile.querySelector('svg')).not.toBeNull();
+    // UX wave U11c M1: a skill's image is its letter tile, whether or not it is invocable (the "/" tile went)
+    const tile = open.closest('li')!.querySelector('[data-item-image]')!;
+    expect([tile.getAttribute('data-item-image'), tile.getAttribute('data-item-kind'), tile.textContent]).toEqual(['tile', 'skill', name.startsWith('Plugin') ? 'P' : 'Q']);
     fireEvent.click(open);
     const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
     expect(within(detail).getByRole('heading', { name })).toBeTruthy();
-    const detailTile = detail.querySelector('span[aria-hidden]')!;
-    expect(detailTile.textContent?.trim()).not.toBe('/');
-    expect(detailTile.querySelector('svg')).not.toBeNull();
+    const detailTile = detail.querySelector('[data-item-image]')!;
+    expect([detailTile.textContent, detailTile.getAttribute('data-tile-colour')]).toEqual([tile.textContent, tile.getAttribute('data-tile-colour')]); // the same tile in its detail
     expect(within(detail).queryByText('Type')).toBeNull();
     expect(within(detail).queryByText(`/${name}`)).toBeNull();
     expect(within(detail).queryByRole('button', { name: 'Use in chat' })).toBeNull();
@@ -226,10 +228,10 @@ it('retains the engine-qualified invocation and Use in chat for the live Skills 
   render(<QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}><SkillsWidget appSessionId={page.appSessionId} args="" close={() => {}} /></QueryClientProvider>);
   const open = await screen.findByRole('button', { name: 'View review' });
   expect(open.closest('li')!.querySelector('[data-skill-name]')!.getAttribute('title')).toBe('/reports:review');
-  expect(open.closest('li')!.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(open.closest('li')!.querySelector('[data-item-image]')!.textContent).toBe('R'); // UX wave U11c: the tile, "Use in chat" saying it is invocable
   fireEvent.click(open);
   const detail = document.querySelector<HTMLElement>('[data-skill-detail]')!;
-  expect(detail.querySelector('span[aria-hidden]')!.textContent?.trim()).toBe('/');
+  expect(detail.querySelector('[data-item-image]')!.textContent).toBe('R');
   expect(within(detail).getByText('Type')).toBeTruthy();
   expect(within(detail).getByText('/reports:review')).toBeTruthy();
   expect(within(detail).getByRole('button', { name: 'Use in chat' })).toBeTruthy();
@@ -256,18 +258,18 @@ it('shows a session directory no project has as its directory as itself, its pat
   expect([...select.options].map((option) => option.textContent)).not.toContain(worktree);
 });
 
-// UX wave U7b (O-40; Interfaces §J, "Every way in"): a section tab is the page's `show`, the page's view kept, and the
-// strip is not touched.
-it('switches its section as the page’s show, keeping its view', async () => {
+// UX wave U7b (O-40; Interfaces §J, "Every way in"); UX wave U11c: a Show value is the page's `show`, the page's view kept,
+// and the strip is not touched.
+it('switches its kind as the page’s show, keeping its view', async () => {
   useLayout.getState().openDestination({ kind: 'customize', view: 'discover', show: 'skills' });
   const strip = useLayout.getState().main;
-  mount('skills');
-  await screen.findByRole('button', { name: 'View review' });
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Connectors' }));
+  mountCustomize({ view: 'discover', show: 'skills' });
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Connectors' }));
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'connectors' });
-  fireEvent.mouseDown(screen.getByRole('tab', { name: 'Plugins' }));
+  fireEvent.click(within(pageHead()).getByRole('radio', { name: 'Plugins' }));
   expect(useLayout.getState().destination).toEqual({ kind: 'customize', view: 'discover', show: 'plugins' });
   expect(useLayout.getState().main).toBe(strip);
+  expect(screen.queryByRole('tab', { name: 'Connectors' })).toBeNull();
 });
 
 it('opens the connector Manage footer for the composer project even when no session exists', async () => {
@@ -334,15 +336,32 @@ describe('Connectors', () => {
   // main's posture for each configured server, by the record its endpoint matches; unscripted, it is unknown
   // with its configuration's fingerprint (`print`, read at each answer: an endpoint replaced under the same name changes it)
   let print = 'print-1';
-  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null }] }));
-  const mountWith = (client: QueryClient) => render(<QueryClientProvider client={client}><CustomizeView section="mcp" /></QueryClientProvider>);
+  const posture = (_client: QueryClient, name: string, authPosture: 'auth_required' | 'no_auth', scope = 'user', path = '/config/.claude.json') => backend.script('catalog.postures', () => ({ servers: [{ name, scope, path, authPosture, fingerprint: print, revision: null, iconUrl: null }], plugins: [] }));
+  const mountWith = (client: QueryClient) => mountCustomize({ view: 'mine', show: 'connectors' }, client);
   const fresh = () => new QueryClient({ defaultOptions: { queries: { retry: false } } });
   afterEach(() => {
     resetSignIns();
     print = 'print-1';
   });
 
-  it('is the tab named Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
+  // UX wave U11c M1 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §C): a configured row's image is the
+  // icon of the one directory record its address matches (main's posture names it), else the connector's letter tile
+  it('draws a configured connector’s directory icon where its posture names one and its tile where none, the rows in place', async () => {
+    const ICON = 'https://storage.googleapis.com/media-assets-299d7136-cb52-d546-ee02-34bc1307c35f/mcp-directory/icons/tides.svg';
+    const at = (name: string, iconUrl: string | null) => ({ name, scope: 'user', path: '/config/.claude.json', authPosture: null, fingerprint: null, revision: null, iconUrl });
+    backend.script('customization.inventory', () => ({ skills: [], servers: ['tides', 'buoy'].map((name) => ({ name, scope: 'user', path: '/config/.claude.json', transport: 'http' })), warnings: [], serversRead: true }));
+    backend.script('catalog.postures', () => ({ servers: [at('tides', ICON), at('buoy', null)], plugins: [] }));
+    backend.script('catalog.icon', () => ({ dataUrl: 'data:image/svg+xml;base64,PHN2Zy8+' }));
+    mountWith(fresh());
+    const imageOf = (name: string) => document.querySelector<HTMLElement>(`[data-connector="${name}"] [data-item-image]`)!;
+    await screen.findByText('buoy');
+    await waitFor(() => expect(imageOf('tides').getAttribute('data-item-image')).toBe('icon'));
+    expect([imageOf('buoy').getAttribute('data-item-image'), imageOf('buoy').getAttribute('data-item-kind'), imageOf('buoy').textContent]).toEqual(['tile', 'connector', 'B']);
+    expect(backend.calls.filter((call) => call.command === 'catalog.icon').map((call) => call.input)).toEqual([{ url: ICON }]);
+    expect([...document.querySelectorAll('[data-connector]')].map((row) => row.getAttribute('data-connector'))).toEqual(['tides', 'buoy']);
+  });
+
+  it('is Show’s Connectors; a user-scope server signs in from any ready session and shows each step and the result', async () => {
     const elsewhere = { ...pageStatus('signer'), cwd: '/two' };
     useSessions.setState({ engine: new Map([[elsewhere.appSessionId, elsewhere]]) });
     backend.script('connectors.signIn', () => ({ opId: 'op-1' }));
@@ -350,7 +369,7 @@ describe('Connectors', () => {
     const client = fresh();
     posture(client, 'notion', 'auth_required');
     mountWith(client);
-    expect(screen.getByRole('tab', { name: 'Connectors' })).toBeTruthy();
+    expect(within(pageHead()).getByRole('radio', { name: 'Connectors' }).getAttribute('aria-checked')).toBe('true');
     const row = (await screen.findByText('notion')).closest('li')!;
     expect(await within(row).findByText('Sign in needed')).toBeTruthy(); // main's posture, read after the list
     fireEvent.click(within(row).getByRole('button', { name: 'Sign in to notion' }));
@@ -409,7 +428,7 @@ describe('Connectors', () => {
 
   it('a name configured in two scopes: the entry the engine uses offers Sign in, the other says it is shadowed and offers none', async () => {
     const client = fresh();
-    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null }] }));
+    backend.script('catalog.postures', () => ({ servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-user', revision: null, iconUrl: null }, { name: 'notion', scope: 'local', path: '/config/.claude.json', authPosture: 'auth_required', fingerprint: 'print-local', revision: null, iconUrl: null }], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' }, { name: 'notion', scope: 'local', path: '/config/.claude.json', transport: 'http' }], warnings: [], serversRead: true }));
     const here = { ...pageStatus('here'), cwd: '/one' };
     useSessions.setState({ engine: new Map([[here.appSessionId, here]]) });
@@ -439,9 +458,9 @@ describe('Connectors', () => {
     const innerFile = '/one/.mcp.json';
     let innerPrint = 'print-inner';
     backend.script('catalog.postures', () => ({ servers: [
-      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null },
-      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null },
-    ] }));
+      { name: 'notion', scope: 'project', path: outerFile, authPosture: 'no_auth', fingerprint: 'print-outer', revision: null, iconUrl: null },
+      { name: 'notion', scope: 'project', path: innerFile, authPosture: 'auth_required', fingerprint: innerPrint, revision: null, iconUrl: null },
+    ], plugins: [] }));
     backend.script('customization.inventory', () => ({ skills: [], servers: [{ name: 'notion', scope: 'project', path: outerFile, transport: 'http' }, { name: 'notion', scope: 'project', path: innerFile, transport: 'http' }], warnings: [], serversRead: true }));
     backend.script('connectors.signIn', () => ({ opId: 'op-inner' }));
     const here = { ...pageStatus('here'), cwd: '/one' };
@@ -469,7 +488,7 @@ describe('Connectors', () => {
   // host of an earlier build) it offers nothing, and with no such session it says to open one.
   describe('a row of MAWS’s own list', () => {
     const OWN = { name: 'fx-own', scope: 'app', path: '/maws/machine-settings.json', transport: 'http' } as const;
-    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision }] }));
+    const ownPosture = (revision: string | null) => backend.script('catalog.postures', () => ({ servers: [{ name: 'fx-own', scope: 'app', path: OWN.path, authPosture: 'auth_required', fingerprint: 'print-own', revision, iconUrl: null }], plugins: [] }));
     const holding = (bare: string, cwd: string, names: string[]) => ({ ...pageStatus(bare), cwd, mcpServers: names.map((name) => ({ name, status: 'needs-auth', source: null })) });
     // the disk row, not the live list's line of the same name below it
     const ownRow = () => waitFor(() => {
@@ -509,6 +528,23 @@ describe('Connectors', () => {
       fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
       await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'idle', entry: { revision: 'rev-1' } }]));
       expect(row.querySelector('[data-sign-in-needs-session]')).toBeNull();
+    });
+
+    // UX wave U11h, the branch panel's ruling (2026-11-16, UTC): the attached session's answer, once it exists, is its list
+    // whole; the init's list counts only before it
+    it('a server the attached session’s mcp_status no longer lists is not read from its init’s list: the session that holds it signs it in', async () => {
+      const bare = holding('bare', '/one', ['fx-own']); // the page's attached session, whose init listed it
+      const holder = holding('holder', '/two', ['fx-own']);
+      useSessions.setState({ engine: new Map([[bare.appSessionId, bare], [holder.appSessionId, holder]]) });
+      backend.script('session.mcpStatus', () => ({ mcpServers: [] })); // its answer does not
+      ownPosture('rev-1');
+      const client = fresh();
+      mountWith(client);
+      const row = await ownRow();
+      await waitFor(() => expect(client.getQueryCache().getAll().some((query) => query.queryKey[1] === 'session.mcpStatus' && query.state.data !== undefined)).toBe(true));
+      await act(async () => {});
+      fireEvent.click(await within(row).findByRole('button', { name: 'Sign in to fx-own' }));
+      await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.signInDynamicServer').map((call) => call.input)).toEqual([{ name: 'fx-own', appSessionId: 'holder', entry: { revision: 'rev-1' } }]));
     });
 
     it('offers no Sign in while the row has no revision', async () => {
@@ -600,5 +636,216 @@ describe('Connectors', () => {
     expect(alert.textContent).toContain('Anthropic’s directory is unavailable.');
     fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
     await waitFor(() => expect(backend.calls.some((call) => call.command === 'catalog.refresh')).toBe(true));
+  });
+});
+
+// UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, "Where", "After Add", §D, §G): the
+// action at the head of My items, the read of what is configured here at each opening, the add's line at the head of
+// the list, and the engine host's refusal there.
+describe('Connectors › Add custom connector', () => {
+  const READY_ENV = { binary: '/engine/claude', binaryError: null, configHome: '/config', globalConfig: '/config/.claude.json' };
+  const NOTION = { name: 'notion', scope: 'user', path: '/config/.claude.json', transport: 'http' } as const;
+  const listed = (servers: readonly object[]) => ({ skills: [], servers, warnings: [], serversRead: true });
+  const deferred = () => {
+    let resolve!: (value: unknown) => void;
+    let reject!: (error: unknown) => void;
+    const promise = new Promise((done, failed) => ((resolve = done), (reject = failed)));
+    return { promise, resolve, reject };
+  };
+  let emit: (name: string, payload: unknown) => void;
+  beforeEach(() => {
+    backend.script('plugins.env', () => READY_ENV);
+    backend.script('customization.inventory', () => listed([NOTION]));
+    // the plugin events, sent by the test as the engine host would
+    const base = window.maws!;
+    const listeners = new Map<string, Set<(payload: unknown) => void>>();
+    window.maws = {
+      ...base,
+      on(name, listener) {
+        if (!name.startsWith('plugins.')) return base.on(name, listener);
+        const set = listeners.get(name) ?? new Set();
+        listeners.set(name, set);
+        const entry = listener as (payload: unknown) => void;
+        set.add(entry);
+        return () => void set.delete(entry);
+      },
+    };
+    emit = (name, payload) => act(() => listeners.get(name)?.forEach((listener) => listener(payload)));
+  });
+  const mountFresh = () => mountCustomize({ view: 'mine', show: 'connectors' });
+  const inventoryReads = () => backend.calls.filter((call) => call.command === 'customization.inventory').length;
+  const openSheet = async () => {
+    fireEvent.click(await screen.findByRole('button', { name: 'Add custom connector…' }));
+    const sheet = await screen.findByRole('dialog', { name: 'Add custom connector' });
+    await within(sheet).findByRole('button', { name: 'Details' }); // plugins.env answered
+    return sheet;
+  };
+  const type = (sheet: HTMLElement, selector: string, value: string) => fireEvent.change(sheet.querySelector(selector)!, { target: { value } });
+  const remote = (sheet: HTMLElement, name: string, value = 'value-one') => {
+    type(sheet, '[data-connector-name]', name);
+    type(sheet, '[data-connector-url-field]', 'https://files.example.test/mcp');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add header' }));
+    type(sheet, '[data-connector-row-name]', 'X-Probe-Key');
+    type(sheet, '[data-connector-value]', value);
+  };
+  const addButton = (sheet: HTMLElement) => within(sheet).getByRole('button', { name: 'Add' }) as HTMLButtonElement;
+  const line = (key: string) => document.querySelector(`[data-connector-adding="${key}"]`) as HTMLElement | null;
+  const done = (opId: string, outcome: unknown) => emit('plugins.operation', { opId, action: 'mcp-add', target: 'files-probe', phase: 'done', outcome });
+
+  it('stands at the head of My items before Refresh, on a project’s page and on the user configuration’s, not in Discover; it opens with Remote (HTTP), all projects and Details closed', async () => {
+    mountFresh();
+    const action = await screen.findByRole('button', { name: 'Add custom connector…' });
+    expect(action.closest('[data-customize-header]')).not.toBeNull(); // UX wave U11c: the page's head
+    expect(action.nextElementSibling!.textContent).toBe('Refresh');
+    let sheet = await openSheet();
+    expect((within(sheet).getByRole('radio', { name: 'Remote (HTTP)' }) as HTMLInputElement).checked).toBe(true);
+    expect((within(sheet).getByRole('radio', { name: 'All projects' }) as HTMLInputElement).checked).toBe(true);
+    expect(within(sheet).getByRole('radio', { name: 'One only' })).toBeTruthy();
+    expect(within(sheet).getByRole('radio', { name: 'One, shared in its .mcp.json' })).toBeTruthy();
+    expect(within(sheet).getByRole('button', { name: 'Details' }).getAttribute('aria-expanded')).toBe('false');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    fireEvent.click(screen.getByRole('radio', { name: 'Discover' }));
+    expect(screen.queryByRole('button', { name: 'Add custom connector…' })).toBeNull();
+    fireEvent.click(screen.getByRole('radio', { name: 'My items' }));
+    fireEvent.change(screen.getByRole('combobox', { name: 'Project' }), { target: { value: '' } });
+    sheet = await openSheet();
+    expect(within(sheet).queryByRole('radio', { name: 'All projects' })).toBeNull();
+    expect(sheet.querySelector('[data-connector-add-to]')!.textContent).toBe('All projects');
+  });
+
+  it('held open: with an older answer in hand Add waits for the opening’s read; a name it holds is refused with that entry; without it Add is enabled; a failure offers Retry', async () => {
+    const reads: ReturnType<typeof deferred>[] = [];
+    let first = true;
+    backend.script('customization.inventory', () => {
+      if (first) return ((first = false), listed([NOTION]));
+      reads.push(deferred());
+      return reads.at(-1)!.promise;
+    });
+    mountFresh();
+    await waitFor(() => expect(document.querySelector('[data-connector="notion"]')).not.toBeNull());
+    const before = inventoryReads();
+    let sheet = await openSheet();
+    expect(inventoryReads()).toBe(before + 1); // the opening reads again
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true);
+    expect(within(sheet).getByRole('status').textContent).toBe('Reading what is configured here…');
+    await act(async () => reads[0].resolve(listed([NOTION, { name: 'files-probe', scope: 'project', path: '/one/.mcp.json', transport: 'http' }])));
+    await waitFor(() => expect(sheet.querySelector('[data-connector-problem]')?.textContent).toBe('This name is already configured here (project scope, /one/.mcp.json).'));
+    expect(addButton(sheet).disabled).toBe(true);
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+
+    sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true); // the answer in hand holds the name, and vouches for nothing now
+    expect(sheet.querySelector('[data-connector-problem]')).toBeNull();
+    await act(async () => reads[1].resolve(listed([NOTION])));
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Cancel' }));
+
+    sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    await act(async () => reads[2].reject(new WidgetBackendError({ code: 'internal', message: 'the engine host is not running' })));
+    const alert = await within(sheet).findByRole('alert');
+    expect(alert.textContent).toContain('What is configured here couldn’t be read: the engine host is not running');
+    expect(addButton(sheet).disabled).toBe(true);
+    fireEvent.click(within(alert).getByRole('button', { name: 'Retry' }));
+    await waitFor(() => expect(reads).toHaveLength(4));
+    expect(addButton(sheet).disabled).toBe(true);
+  });
+
+  it('held open: opened during the page’s first read, that read’s answer alone does not enable Add; the read begun after it does', async () => {
+    const reads: ReturnType<typeof deferred>[] = [];
+    backend.script('customization.inventory', () => {
+      reads.push(deferred());
+      return reads.at(-1)!.promise;
+    });
+    mountFresh();
+    await waitFor(() => expect(reads).toHaveLength(1)); // the page's first read, out
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    expect(addButton(sheet).disabled).toBe(true);
+    await act(async () => reads[0].resolve(listed([NOTION])));
+    await waitFor(() => expect(reads).toHaveLength(2)); // a read begun after the first ended
+    expect(addButton(sheet).disabled).toBe(true);
+    expect(within(sheet).getByRole('status').textContent).toBe('Reading what is configured here…');
+    await act(async () => reads[1].resolve(listed([NOTION, { name: 'files-probe', scope: 'user', path: '/config/.claude.json', transport: 'http' }])));
+    await waitFor(() => expect(sheet.querySelector('[data-connector-problem]')?.textContent).toBe('This name is already configured here (user scope, /config/.claude.json).'));
+    expect(addButton(sheet).disabled).toBe(true);
+    type(sheet, '[data-connector-name]', 'files-probe-2');
+    expect(addButton(sheet).disabled).toBe(false);
+    expect(reads).toHaveLength(2);
+  });
+
+  it('held open: the name is added elsewhere after the sheet’s read; Add sends connectors.addJson, and the engine host’s refusal reads on the add’s line with its scope', async () => {
+    backend.script('connectors.addJson', () => ({ opId: 'add-1' }));
+    mountFresh();
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'One only' }));
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+    await waitFor(() => expect(backend.calls.filter((call) => call.command === 'connectors.addJson').map((call) => call.input)).toEqual([{ cwd: '/one', binary: '/engine/claude', name: 'files-probe', scope: 'local', entry: { type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Probe-Key', value: 'value-one' }] }, folder: '/one' }]));
+    expect(backend.calls.filter((call) => call.command === 'connectors.add')).toEqual([]);
+    await waitFor(() => expect(line('connector:add:local:files-probe')?.textContent).toContain('Working…'));
+    done('add-1', { ok: false, error: { code: 'spawn_failed', message: 'files-probe is already configured here (user scope). Nothing was added.', failureCode: 'name_configured', shownCommand: null } });
+    const failed = line('connector:add:local:files-probe')!;
+    expect(failed.firstElementChild!.textContent).toBe('files-probe');
+    expect(within(failed).getByRole('status').textContent).toBe('files-probe is already configured here (user scope). Nothing was added. · name_configured');
+    expect(within(failed).getByRole('status').className).toContain('text-danger');
+  });
+
+  it('held open: two adds; the first fails in its words and code while the second works; the second ends well, its line leaves and its row comes with the list; nothing drawn holds a value', async () => {
+    let receipts = 0;
+    backend.script('connectors.addJson', () => ({ opId: `add-${++receipts}` }));
+    let servers: object[] = [NOTION];
+    backend.script('customization.inventory', () => listed(servers));
+    mountFresh();
+    let sheet = await openSheet();
+    remote(sheet, 'files-probe', 'value-one');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe')?.textContent).toContain('Working…'));
+    await waitFor(() => expect(within(line('connector:add:user:files-probe')!).queryByRole('button', { name: 'Stop' })).not.toBeNull()); // today's line: Stop while the CLI runs
+    emit('plugins.operation', { opId: 'add-1', action: 'mcp-add', target: 'files-probe', phase: 'output', line: 'Checking the configuration' });
+    expect(within(line('connector:add:user:files-probe')!).getByRole('status').textContent).toBe('Checking the configuration');
+
+    sheet = await openSheet();
+    type(sheet, '[data-connector-name]', 'files-probe-2');
+    fireEvent.click(within(sheet).getByRole('radio', { name: 'Local command' }));
+    type(sheet, '[data-connector-command-field]', '/opt/probe/bin/files-probe');
+    fireEvent.click(within(sheet).getByRole('button', { name: 'Add variable' }));
+    type(sheet, '[data-connector-row-name]', 'MODE');
+    type(sheet, '[data-connector-value]', 'value-two');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe-2')?.textContent).toContain('Working…'));
+
+    done('add-1', { ok: false, error: { code: 'cli_failed', message: 'MCP server files-probe already exists in user config', failureCode: null, shownCommand: null } });
+    expect(within(line('connector:add:user:files-probe')!).getByRole('status').textContent).toBe('MCP server files-probe already exists in user config · cli_failed');
+    expect(line('connector:add:user:files-probe-2')!.textContent).toContain('Working…');
+
+    servers = [NOTION, { name: 'files-probe-2', scope: 'user', path: '/config/.claude.json', transport: 'stdio' }];
+    emit('plugins.operation', { opId: 'add-2', action: 'mcp-add', target: 'files-probe-2', phase: 'done', outcome: { ok: true, result: { command: 'mcp add-json', outcome: 'ok', message: 'Added stdio MCP server files-probe-2 to user config', name: 'files-probe-2', scope: 'user' } } });
+    emit('plugins.changed', {});
+    expect(line('connector:add:user:files-probe-2')).toBeNull();
+    await waitFor(() => expect(document.querySelector('[data-connector="files-probe-2"]')?.textContent).toContain('user scope · stdio'));
+    expect(within(document.querySelector<HTMLElement>('[data-connector="files-probe-2"]')!).getByRole('button', { name: 'Remove files-probe-2' })).toBeTruthy();
+    expect(line('connector:add:user:files-probe')).not.toBeNull(); // a failed line stays
+    expect(document.body.textContent).not.toMatch(/value-one|value-two/);
+  });
+
+  it('a refused send (an engine host of an older build) reads the transport’s words on the line, and nothing else changes', async () => {
+    backend.script('connectors.addJson', () => {
+      throw new WidgetBackendError({ code: 'unknown_command', message: 'connectors.addJson is not a command here' });
+    });
+    mountFresh();
+    const sheet = await openSheet();
+    remote(sheet, 'files-probe');
+    await waitFor(() => expect(addButton(sheet).disabled).toBe(false));
+    fireEvent.click(addButton(sheet));
+    await waitFor(() => expect(line('connector:add:user:files-probe')?.textContent).toContain('connectors.addJson is not a command here · showing the last value it reported'));
+    expect([...document.querySelectorAll('[data-connector]')].map((row) => row.getAttribute('data-connector'))).toEqual(['notion']);
   });
 });

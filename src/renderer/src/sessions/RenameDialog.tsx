@@ -7,9 +7,11 @@
 // did shows in the sidebar at once (the sessions store's `noteRenamed`). While the act can't work there (the window's
 // helper) the sheet says why and its Rename is disabled, whenever that begins.
 import { useEffect, useState } from 'react';
+import type { ContentBlock } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { withoutLinkedReads } from '@shared/maws/linked-read'; // P4-A3: a linked read is not the prompt's words
+import { answerOutsideTranscript, personsParts } from '@shared/engine/persons-message'; // the UX wave, ticket 704
 import { ipc } from '../ipc/client';
 import { useRemoteUnavailable } from '../lane-b/remote-unavailable';
 import { useSessions } from '../stores/sessions';
@@ -31,17 +33,25 @@ export function provenanceOf(source: SessionRecord['title']['source']): string {
   }
 }
 
-// What the title summarises: the conversation's first prompt from the host's events, else the current title.
+// What the title summarises: the conversation's first prompt with words from the host's events, else the current title.
+// The UX wave, ticket 704: the person's words of a message, MAWS's answer envelopes read out (an older host's message
+// can hold them joined to the prompt); a message of answers alone reads as an answer reads outside the transcript
+// (ruling A: nothing), and the walk goes on. The content is read as the split reads it, each text block by itself
+// (decision 7), and only what is left is flattened, so the title's source is the transcript's.
 async function describe(appSessionId: AppSessionId, fallback: string): Promise<string> {
   const events = await ipc.invoke('session.events', { appSessionId, afterSeq: null, limit: 200 });
   if (!events.ok) return fallback;
   for (const event of events.value.events) {
     if (event.kind !== 'user.message' || event.isSynthetic || event.bash !== null) continue;
-    const text = typeof event.content === 'string' ? event.content : withoutLinkedReads(event.content).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n');
-    if (text.trim()) return text;
+    const { own, envelopes } = personsParts(event.content);
+    const words = own !== null ? textOf(own) : envelopes.map(answerOutsideTranscript).filter(Boolean).join('\n');
+    if (words.trim()) return words.trim();
   }
   return fallback;
 }
+
+const textOf = (content: string | ContentBlock[]): string =>
+  typeof content === 'string' ? content : withoutLinkedReads(content).flatMap((b) => (b.type === 'text' && typeof b.text === 'string' ? [b.text] : [])).join('\n');
 
 export function RenameDialog({ appSessionId }: { appSessionId: AppSessionId }) {
   const record = useSessions((s) => s.records.get(appSessionId) ?? null);

@@ -108,8 +108,8 @@ export const cost=p=>Math.max(0,...p.frames.filter(r=>r.frame.type==='result').m
 export function keepTranscript(file,name){mkdirSync(FIXTURES,{recursive:true});const out=FIXTURES+name+'.transcript.jsonl';writeFileSync(out,existsSync(file)?redact(readFileSync(file,'utf8')):'');return out;}
 
 // One launch as MAWS launches. `body(p, ctx)` runs after MAWS's post-initialize requests.
-export async function mawsLaunch(name,{cwd=process.env.PROBE_WORK,model='haiku',mode='auto',bare=false,flags=[],env={},sessionId=randomUUID(),resume=null,spendCap='1.00',lane=true,provenance={}}={},body){
- const args=[...(bare?[]:PRODUCT_FLAGS),'--await-initialize',...(resume?['--resume',resume]:['--session-id',sessionId]),'--disallowedTools','AskUserQuestion','--allowedTools','mcp__maws__ask','--settings',JSON.stringify({dialogExpiry:'never'}),'--max-budget-usd',spendCap,...flags];
+export async function mawsLaunch(name,{cwd=process.env.PROBE_WORK,model='haiku',mode='auto',bare=false,flags=[],env={},sessionId=randomUUID(),resume=null,spendCap='1.00',lane=true,engineAsk=false,provenance={}}={},body){
+ const args=[...(bare?[]:PRODUCT_FLAGS),'--await-initialize',...(resume?['--resume',resume]:['--session-id',sessionId]),...(engineAsk?[]:['--disallowedTools','AskUserQuestion']),'--allowedTools','mcp__maws__ask','--settings',JSON.stringify({dialogExpiry:'never'}),'--max-budget-usd',spendCap,...flags];
  const id=resume??sessionId;
  let failure=null;
  const p=await harnessRun(name,async p=>{

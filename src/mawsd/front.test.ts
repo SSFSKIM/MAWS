@@ -461,6 +461,28 @@ describe('the services front', () => {
     served.close();
     expect(changed).toBe(2); // the app's connection ended (the other sent none)
   });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8, §B Wiring): the bundle
+  // each attached app told in its machine.client, kept per connection, which the files service never writes
+  it('keeps the bundle each connection’s machine.client told, and answers those of the connections that live', async () => {
+    const { served, client } = front({ isApp: () => true });
+    const app = connection();
+    const appRuntime = served.runtimeFor({ appPid: 1, capabilities: [MACHINE_SPINE_CAPABILITY] });
+    appRuntime.serve(app.port);
+    const dev = client();
+    const older = client();
+    expect(served.appBundles()).toEqual([]);
+    expect(await app.request('machine.client', { browserSocket: null, bundle: '/Applications/MAWS.app' })).toMatchObject({ ok: true });
+    expect(await dev.request('machine.client', { browserSocket: null, bundle: '/work/build/MAWS Dev.app' })).toMatchObject({ ok: true });
+    expect(await older.request('machine.client', { browserSocket: null })).toMatchObject({ ok: true }); // an app of an earlier build tells none
+    expect([...served.appBundles()].sort()).toEqual(['/Applications/MAWS.app', '/work/build/MAWS Dev.app']);
+    expect(await dev.request('machine.client', { browserSocket: null, bundle: null })).toMatchObject({ ok: true });
+    expect(served.appBundles()).toEqual(['/Applications/MAWS.app']);
+    app.close();
+    appRuntime.detach(); // the socket server's end of the connection
+    expect(served.appBundles()).toEqual([]);
+    served.close();
+  });
 });
 
 // P5 O17 M3 (docs/doperpowers/plans/2026-11-01-p5-o17-browser.md, Interfaces §E, §F): a tab engine's browser work, bound to
@@ -654,5 +676,28 @@ describe('the front’s requests as work', () => {
     expect(open).toBe(1);
     answer(undefined);
     await vi.waitFor(() => expect(open).toBe(0));
+  });
+});
+
+describe('the front’s refusal of a custom connector’s entry', () => {
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, R2): a custom connector's entry
+  // refused for a value too long, and for a control character in a value, is answered with an error that, like every
+  // line logged meanwhile, holds no part of the value
+  it('refuses connectors.addJson for a value too long or holding a control character without echoing the value', async () => {
+    const logged = (['log', 'info', 'warn', 'error'] as const).map((level) => vi.spyOn(console, level).mockImplementation(() => {}));
+    const { client, forwarded, logs } = front();
+    const c = client();
+    const values = [`value-one-${'x'.repeat(8_200)}`, 'value-one\u0007more'];
+    for (const value of values) {
+      for (const entry of [{ type: 'http', url: 'https://files.example.test/mcp', headers: [{ name: 'X-Files-Key', value }] }, { type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value }] }]) {
+        const input = { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', entry, folder: '/tmp/files-probe' };
+        const answer = await c.request('connectors.addJson', input);
+        expect(answer).toMatchObject({ ok: false, error: { code: 'invalid_input' } });
+        const said = [JSON.stringify(answer), ...logs, ...logged.flatMap((spy) => spy.mock.calls.map((call) => JSON.stringify(call, (_key, v: unknown) => (v instanceof Error ? v.message : v))))].join('\n');
+        for (const form of [value, JSON.stringify(value).slice(1, -1)]) expect(said.includes(form)).toBe(false);
+      }
+    }
+    expect(forwarded).toEqual([]);
+    for (const spy of logged) spy.mockRestore();
   });
 });

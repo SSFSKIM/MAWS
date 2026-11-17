@@ -275,6 +275,12 @@ export const OFFERS: Offers = {
     'git.worktree.list': checkout,
     'git.worktree.status': checkout,
     'git.worktree.branch': checkout,
+    // The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D): the branch read,
+    // the commit read and the working-tree read, by the same rule. A commit is any commit of that repository, which a
+    // reader at `view` may already diff; a device sends them only to an endpoint that lists `rl2.git-reads`.
+    'git.branchCommits': checkout,
+    'git.commitDiff': checkout,
+    'git.changesSince': checkout,
     // A child agent's events, the engine host's read. P5 O7 M8: the follow it starts is held by the channel's client, and
     // ends with the channel or that client's unfollow of the agent it names (the engine host lets go of its own hold
     // alone); the session-wide unfollow (`agentId: null`) would stop every client's follow of the session and is refused.
@@ -394,6 +400,9 @@ export const OFFERS: Offers = {
     'artifacts.copyAsset': artifact('act'),
     'artifacts.rereadDatasetFile': artifact('act'),
     'artifacts.create': artifact('act'),
+    // The UX wave (U10b, M4; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.3): the undo of an agent's
+    // delete, the machine's owners' alone (nobody else can be placed on a deleted artifact), behind `rl2.artifact-undelete`
+    'artifacts.undelete': { ...artifact('act'), owners: true },
     // The library's listing, each row kept for a caller who views its artifact (calls.ts, the `each-session` shape over
     // each row's own sessions; whole for a machine owner), and its Spaces (names and counts), at `list`.
     'library.list': eachSession,
@@ -491,6 +500,11 @@ export const OFFERS: Offers = {
     'attention.acknowledge': laneBMachine('act'),
     'session.steer.cancel': laneB('act'),
     'maws.pane.answer': laneB('act'),
+    // The UX wave (U4b; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C), behind
+    // `rl2.send-now` (capabilities.ts): a message waiting at the next step sent now (`converse`: it carries no content and
+    // adds only what an interrupt allows, ending the running turn), on the session's live launch; the engine host's queue
+    // answers `nothing_waiting` for any uuid that is not a pending steer of that session.
+    'session.steer.sendNow': laneB('act'),
     // M2: a fork in place (graded `spawn`, a right on the machine), the machine's owners' alone, who must also view the
     // source (authorize.ts): a fork names no starter, so it is the owners'. Composed by the services under the operation,
     // answered at its setup's `launching` and held there to the machine's ceiling on the record it copies its mode from.

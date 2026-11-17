@@ -6,6 +6,7 @@
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import { pastedPlaceholder } from '@shared/composer/pasted-content';
 import { parsePlaceholders, restorePastedTags, type Placeholder } from '@shared/composer/pasted-framing';
+import { asTyped } from '@shared/engine/grant';
 import type { JSONContent } from '@tiptap/core';
 import type { Prefill } from '../../stores/composer';
 import { atomId, docOf, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc, type PastedAttrs } from './doc';
@@ -55,18 +56,20 @@ const unavailable = (placeholder: Placeholder): PastedAttrs =>
     ? { id: atomId('pasted'), kind: 'text', name: `Pasted text #${placeholder.n}`, lines: placeholder.lines, text: null }
     : { id: atomId('pasted'), kind: placeholder.kind, name: `${placeholder.kind === 'image' ? 'Image' : 'PDF'} #${placeholder.n}`, lines: 0, text: null };
 
-const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string): PastedAttrs => ({
+// UX wave U10b (M9, §E.3): a prefill's pasted entry names its chip when it gives a name (a Space's instructions do)
+const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string, name?: string): PastedAttrs => ({
   id: atomId('pasted'),
   kind: 'text',
-  name: `Pasted text #${placeholder.n}`,
+  name: name ?? `Pasted text #${placeholder.n}`,
   lines: body.split('\n').length,
   text: body,
 });
 
+// UX wave U1c: as typed (`asTyped`), as every prefill path is: no U+2060 comes back, one the person typed included
 export function historyEntryToDoc(entry: HistoryEntry): ComposerDoc {
-  return textToDoc(entry.display, (placeholder) => {
+  return textToDoc(asTyped(entry.display), (placeholder) => {
     const body = placeholder.kind === 'pasted' ? entry.pastedContents[String(placeholder.n)] : undefined;
-    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, body.content) : unavailable(placeholder);
+    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, asTyped(body.content)) : unavailable(placeholder);
   });
 }
 
@@ -104,17 +107,20 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
     prefill.text,
     (placeholder) => {
       if (placeholder.kind !== 'pasted') return unavailable(placeholder);
-      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : prefill.pasted?.[k]?.text;
+      const entry = bodies ? undefined : prefill.pasted?.[k];
+      const body = bodies ? bodies[pastedPlaceholder(placeholder.n, placeholder.lines)] : entry?.text;
       if (!bodies) k++;
-      return body !== undefined ? available(placeholder, body) : unavailable(placeholder);
+      return body !== undefined ? available(placeholder, body, entry?.name) : unavailable(placeholder);
     },
     images,
   );
 }
 
-// A user row's text as the human typed it: the neutralised `<\pasted_content` restored, and the one newline C6 keeps
-// before each pasted placeholder removed (the composer's framing opens every block after a blank line, which C6's
-// extraction reduces to that newline; the newline after it is the paragraph join and stays).
+// A user row's text as the human typed it: the neutralised `<\pasted_content` restored, the joiner the one-writer rule put
+// in each opening of the grant removed (UX wave U1c, shared/engine/grant.ts `asTyped`, every U+2060; sent again, the
+// serialiser puts the joiner back; a U+2060 the person typed or pasted does not come back), and the one newline C6 keeps before each
+// pasted placeholder removed (the composer's framing opens every block after a blank line, which C6's extraction
+// reduces to that newline; the newline after it is the paragraph join and stays).
 export function typedFromRowText(text: string): string {
-  return restorePastedTags(text).replace(/\n(?=\[Pasted text #\d+ \+\d+ lines\])/g, '');
+  return asTyped(restorePastedTags(text)).replace(/\n(?=\[Pasted text #\d+ \+\d+ lines\])/g, '');
 }

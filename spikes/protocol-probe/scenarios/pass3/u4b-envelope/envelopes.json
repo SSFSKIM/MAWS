@@ -1,0 +1,6 @@
+{
+ "single": "[MAWS ask uxw-ask-single-1] The user answered the questions you asked:\n1. Fruit — Mango\n```json\n{\n  \"status\": \"answered\",\n  \"askId\": \"uxw-ask-single-1\",\n  \"answers\": [\n    {\n      \"id\": \"q1\",\n      \"question\": \"Which fruit should the demo use?\",\n      \"status\": \"answered\",\n      \"value\": [\n        \"Mango\"\n      ]\n    }\n  ]\n}\n```",
+ "multi": "[MAWS ask uxw-ask-multi-1] The user answered the questions you asked:\n1. Banner — \"Line one of the banner\\nLine two of the banner\"\n   note: \"Keep both lines short.\"\n```json\n{\n  \"status\": \"answered\",\n  \"askId\": \"uxw-ask-multi-1\",\n  \"answers\": [\n    {\n      \"id\": \"q1\",\n      \"question\": \"What should the banner say?\",\n      \"status\": \"answered\",\n      \"value\": \"Line one of the banner\\nLine two of the banner\",\n      \"note\": \"Keep both lines short.\"\n    }\n  ]\n}\n```",
+ "parsesSingle": true,
+ "parsesMulti": true
+}

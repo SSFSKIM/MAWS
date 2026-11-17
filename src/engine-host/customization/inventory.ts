@@ -11,8 +11,10 @@ import { lstat, open, opendir, realpath } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import type { HostOn } from '@shared/host/runtime';
-import type { CustomizationEndpoint, CustomizationInventory, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
+import type { CustomizationEndpoint, CustomizationInventory, CustomizationPluginEndpoint, CustomizationPluginServer, CustomizationServer, CustomizationSkill } from '@shared/ipc/schema';
 import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
+import { usedEntry } from '@shared/plugins/connector-precedence';
+import { addressFormOf } from '@shared/plugins/plugin-connector';
 import { isUnifiedSettings, migrateMachineSettings, migrateSettings } from '@shared/settings/defaults';
 import { captureLocalKey } from '../connectors/local-key';
 import { configFileOf, legacyConfigFileOf, nodeSourceFiles } from '../connectors/source-entry';
@@ -33,17 +35,54 @@ type Revision = (configuration: Pick<CustomizationEndpoint, 'name' | 'transport'
 export function configurationRevision(key: Buffer): Revision {
   return ({ name, transport, url }) => (url === null ? null : createHmac('sha256', key).update(`${name}\u0000${transport}\u0000${url}`).digest('hex').slice(0, 32));
 }
+/** The installation a plugin's connector is declared by, and what the engine names it by. */
+export interface PluginConfiguration {
+  plugin: string; // the key, `<name>@<marketplace>`
+  installScope: CustomizationPluginServer['installScope'];
+  installPath: string; // the installation's folder
+  projectPath: string | null; // the folder it is installed for; null at user scope
+  version: string | null;
+  name: string | null; // the engine's name
+  transport: CustomizationPluginServer['transport'];
+  url: string | null;
+}
+type PluginRevision = (configuration: PluginConfiguration) => string | null;
+/** UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §A, rule (d)): a plugin connector's
+ * revision, `configurationRevision`'s form over the plugin's key, its installation (scope, folder, version), the engine
+ * name, the transport and the address, so a removal, a replacement or an update between a row's display and its press
+ * shows. Null without an engine name or an address. */
+export function pluginConfigurationRevision(key: Buffer): PluginRevision {
+  return ({ plugin, installScope, installPath, projectPath, version, name, transport, url }) => (name === null || url === null ? null
+    : createHmac('sha256', key).update(JSON.stringify(['plugin', plugin, installScope, installPath, projectPath, version, name, transport, url])).digest('hex').slice(0, 32));
+}
 // The host's key: made at its start, kept in memory, never written or sent; a revision lives for one run of the host.
-const revisionOf = configurationRevision(randomBytes(32));
+const hostKey = randomBytes(32);
+const revisionOf = configurationRevision(hostKey);
+const pluginRevisionOf = pluginConfigurationRevision(hostKey);
 const record = (value: unknown): Record<string, unknown> | null => typeof value === 'object' && value !== null && !Array.isArray(value) ? value as Record<string, unknown> : null;
 const absent = (error: unknown) => ['ENOENT', 'ENOTDIR'].includes((error as NodeJS.ErrnoException).code ?? '');
 const LIMIT = 'Customization inventory reached its read limit; some configured items are not inventoried.';
 class Stop extends Error {}
+const FILE_RANK: Record<CustomizationServer['scope'], number> = { app: 0, project: 1, user: 2, local: 3 };
+const URL_BOUND = 4096; // an endpoint's `url`
+type FileEntry = CustomizationServer & { url: string | null };
+const transportOf = (entry: Record<string, unknown>): CustomizationServer['transport'] => {
+  const type = entry.type === 'streamable-http' ? 'http' : entry.type === undefined && typeof entry.command === 'string' ? 'stdio' : entry.type;
+  return (['stdio', 'http', 'sse', 'ws'].includes(type as string) ? type : 'unknown') as CustomizationServer['transport'];
+};
 
 class Reading {
   readonly skills: CustomizationSkill[] = [];
   readonly servers: CustomizationServer[] = [];
   readonly endpoints: CustomizationEndpoint[] = []; // P4-AGG M4: `servers`, row for row, with each one's URL (main only)
+  // UX wave U11h (§A): the plugins' connectors, the plugins kept for the folder, and the connectors row for row with
+  // their addresses and revisions (main only)
+  readonly pluginServers: CustomizationPluginServer[] = [];
+  readonly plugins: NonNullable<CustomizationInventory['plugins']> = [];
+  readonly pluginEndpoints: CustomizationPluginEndpoint[] = [];
+  // the file-configured servers (`user`, `project`, `local`) with their addresses whole, for `sameAddressAs`
+  private readonly fileEntries: FileEntry[] = [];
+  private usedFileEntries: FileEntry[] | null = null; // of them, the one the engine uses for each name; made at the first plugin server
   readonly warnings = new Set<string>();
   stopped = false;
   serversRead = false; // P4-AGG M4: every MCP configuration that applies was read without a warning
@@ -54,7 +93,9 @@ class Reading {
   check(): void { if (this.stopped) throw new Stop(); }
   tick(): void { this.check(); if (++this.entries > INVENTORY_BOUNDS.entries) throw new Stop(); }
   warn(message: string): void { this.check(); if (this.warnings.size < 64) this.warnings.add(message); }
-  snapshot(): CustomizationInventory { return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings], serversRead: this.serversRead }; }
+  snapshot(): CustomizationInventory {
+    return { skills: [...this.skills], servers: [...this.servers], warnings: [...this.warnings], serversRead: this.serversRead, pluginServers: [...this.pluginServers], plugins: [...this.plugins] };
+  }
   // An MCP read section: no warning added inside it (and the warning cap not reached), or the servers are not the whole set.
   mcpStart(): void { this.mcpMark = this.warnings.size; }
   mcpEnd(): boolean { return this.mcpMark >= 0 && this.warnings.size === this.mcpMark && this.warnings.size < 64; }
@@ -63,8 +104,35 @@ class Reading {
   }
   addServer(row: CustomizationServer, url: string | null): void {
     this.check(); if (this.servers.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.servers.push(row);
-    const address = url === null ? null : url.slice(0, 4096);
+    if (row.scope !== 'app') this.fileEntries.push({ ...row, url });
+    const address = url === null ? null : url.slice(0, URL_BOUND);
     this.endpoints.push({ name: row.name, scope: row.scope, path: row.path, transport: row.transport, url: address, revision: revisionOf({ name: row.name, transport: row.transport, url: address }) });
+  }
+  addPlugin(row: NonNullable<CustomizationInventory['plugins']>[number]): void {
+    this.check(); if (this.plugins.length >= INVENTORY_BOUNDS.rows) throw new Stop(); this.plugins.push(row);
+  }
+  addPluginServer(configuration: PluginConfiguration, row: Pick<CustomizationPluginServer, 'pluginName' | 'server' | 'path'>): void {
+    this.check(); if (this.pluginServers.length >= INVENTORY_BOUNDS.rows) throw new Stop();
+    const { plugin, installScope, version, name, transport, url } = configuration;
+    this.pluginServers.push({ plugin, pluginName: row.pluginName, server: row.server, name, installScope, version, path: row.path, transport, address: url === null ? null : addressFormOf(url), sameAddressAs: this.sameAddressAs(transport, url) });
+    // the address is classified, compared and revised whole; `pluginServers` lists none past the endpoint's bound
+    this.pluginEndpoints.push({ plugin, pluginName: row.pluginName, server: row.server, name, version, path: row.path, transport, url, revision: pluginRevisionOf(configuration) });
+  }
+  // The engine drops a plugin's server whose address a file-configured server names
+  // (spikes/protocol-probe/findings-uxwave-u11-plugin-server-dedup.txt), after it has merged the files' servers by name
+  // (2.1.322 cli.pretty.js about 477063, then 476051): so only the `user`, `project` or `local` entry the engine uses for
+  // its name (`usedEntry`) is compared, by its address as written, and of several such the highest (local, then user,
+  // then the nearest project file). Only a remote address with no template is compared; MAWS's own list is not (the
+  // engine does not compare servers given at launch). Read after every configured server, which `collect` reads first.
+  private sameAddressAs(transport: CustomizationPluginServer['transport'], url: string | null): string | null {
+    if (url === null || url.includes('${') || !['http', 'sse', 'ws'].includes(transport)) return null;
+    this.usedFileEntries ??= this.fileEntries.filter((entry) => usedEntry(entry.name, this.fileEntries) === entry);
+    let found: FileEntry | null = null;
+    for (const entry of this.usedFileEntries) {
+      if (entry.url !== url) continue;
+      if (found === null || FILE_RANK[entry.scope] >= FILE_RANK[found.scope]) found = entry;
+    }
+    return found?.name ?? null;
   }
 
   async exists(path: string): Promise<boolean> {
@@ -180,9 +248,7 @@ class Reading {
       this.tick();
       const entry = record(map[name]);
       if (!entry) { this.warn(`${path}: unknown MCP configuration shape`); continue; }
-      const type = entry.type === 'streamable-http' ? 'http' : entry.type === undefined && typeof entry.command === 'string' ? 'stdio' : entry.type;
-      const transport = (['stdio', 'http', 'sse', 'ws'].includes(type as string) ? type : 'unknown') as CustomizationServer['transport'];
-      this.addServer({ name: name.slice(0, 256), scope, path, transport }, typeof entry.url === 'string' ? entry.url : null);
+      this.addServer({ name: name.slice(0, 256), scope, path, transport: transportOf(entry) }, typeof entry.url === 'string' ? entry.url : null);
     }
   }
 }
@@ -193,13 +259,70 @@ class Reading {
 // no plugin under any name, and a longer one than the row holds would be cut wrong: both answer null.
 const pluginNameOf = (name: unknown): string | null => (typeof name === 'string' && name.length > 0 && name.length <= 256 && !/[\s\p{Cc}\p{Cf}]/u.test(name) ? name : null);
 
-async function installedSkills(r: Reading, configHome: string, cwd: string | null): Promise<void> {
+// A URL where a path belongs (the manifest reader's test): never fetched.
+const isUrl = (value: string) => /^[a-z][a-z\d+.-]*:/i.test(value);
+
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M1): the servers one installation's
+// files declare, by the rule its "What's inside" follows (`Inventory.mcpServers` in ../plugins/manifest.ts): its .mcp.json
+// (`{mcpServers}` or the map itself), then each path and inline map its manifest names under `mcpServers` and
+// `experimental.mcpServers`, the first declaration of a name winning. A bundle (.mcpb, .dxt) is never read and a URL where
+// a path belongs never fetched; neither is listed nor warned of, since a warning reads as configuration that could not be
+// read. Every file is confined to the plugin's folder, as its skills' are. A name is listed as written; one its field
+// cannot hold is not listed, since a cut name is another name, and so for an address past the endpoints' bound.
+async function pluginServers(r: Reading, installation: Omit<PluginConfiguration, 'name' | 'transport' | 'url'>, pluginName: string | null, anchor: string, manifest: Record<string, unknown> | null, manifestPath: string): Promise<void> {
+  const { plugin, installPath } = installation;
+  const seen = new Set<string>();
+  const declared = (value: unknown, path: string): void => {
+    const map = record(value);
+    if (!map) { r.warn(`${path}: unknown MCP configuration shape`); return; }
+    for (const [server, config] of Object.entries(map)) {
+      r.tick();
+      const entry = record(config);
+      if (!entry) { r.warn(`${path}: unknown MCP configuration shape`); continue; }
+      if (seen.has(server)) continue;
+      seen.add(server);
+      if (server.length === 0 || server.length > 256) continue;
+      // the engine's name (spikes/protocol-probe/findings-uxwave-u11-plugin-connectors.txt, 1): the manifest's name, never the
+      // key's; a built-in plugin's carries an alias the inventory cannot know (2.1.322 cli.pretty.js:954009-954011)
+      const name = pluginName === null || plugin.endsWith('@builtin') ? null : `plugin:${pluginName}:${server}`;
+      const url = typeof entry.url === 'string' ? entry.url : null;
+      // an address past the endpoints' bound is not listed, as a name past its field's is: a cut address is another one,
+      // which a session's live address at that prefix would match (the architect's ruling of 2026-11-15)
+      if (url !== null && url.length > URL_BOUND) continue;
+      r.addPluginServer({ ...installation, name, transport: transportOf(entry), url }, { pluginName, server, path });
+    }
+  };
+  const file = async (path: string): Promise<void> => {
+    const raw = await r.json(path, anchor);
+    if (raw === undefined) return;
+    declared(record(record(raw)?.mcpServers) ? record(raw)!.mcpServers : raw, path);
+  };
+  await file(join(installPath, '.mcp.json'));
+  for (const declaration of [manifest?.mcpServers, record(manifest?.experimental)?.mcpServers]) {
+    if (declaration === undefined) continue;
+    for (const spec of Array.isArray(declaration) ? declaration : [declaration]) {
+      r.tick();
+      if (typeof spec === 'string') {
+        if (/\.(mcpb|dxt)$/i.test(spec) || isUrl(spec)) continue;
+        const path = resolve(installPath, spec);
+        if (spec.includes('\0') || !under(resolve(installPath), path)) { r.warn(`${manifestPath}: outside the plugin`); continue; }
+        await file(path);
+      } else if (record(spec)) declared(spec, manifestPath);
+      else r.warn(`${manifestPath}: unknown MCP configuration shape`);
+    }
+  }
+}
+
+// The installations that apply to the folder (user scope, or a project path the folder is under): each one's skills, and
+// (UX wave U11h) for the first installation of each key, its entry in `plugins` and the servers its files declare.
+async function installedPlugins(r: Reading, configHome: string, cwd: string | null): Promise<void> {
   const path = join(configHome, 'plugins', 'installed_plugins.json');
   const raw = await r.json(path);
   if (raw === undefined) return;
   const inventory = record(raw);
   const plugins = record(inventory?.plugins);
   if (inventory?.version !== 2 || !plugins) { r.warn(`${path}: unsupported installed plugin inventory`); return; }
+  const kept = new Set<string>();
   for (const plugin of Object.keys(plugins).sort()) {
     const rows = plugins[plugin];
     if (!Array.isArray(rows)) { r.warn(`${path}: unknown installation shape`); continue; }
@@ -237,6 +360,16 @@ async function installedSkills(r: Reading, configHome: string, cwd: string | nul
           if (!under(resolve(row.installPath), directory)) { r.warn(`${manifestPath}: outside the plugin`); continue; }
           if (!(await addDirectory(directory))) for (const child of await r.directories(directory, anchor)) await addDirectory(child);
         }
+      }
+      // one entry per key, its first installation for the folder in the file's order; a key its field cannot hold whole is
+      // not listed (a cut key would name another plugin)
+      if (!kept.has(plugin) && plugin.length > 0 && plugin.length <= 256) {
+        kept.add(plugin);
+        const installScope = row.scope as CustomizationPluginServer['installScope'];
+        r.addPlugin({ plugin, pluginName, installScope });
+        const version = typeof row.version === 'string' && row.version.length <= 256 ? row.version : null;
+        const projectPath = row.scope === 'user' ? null : resolve(row.projectPath as string);
+        await pluginServers(r, { plugin, installScope, installPath: row.installPath, projectPath, version }, pluginName, anchor, manifest, manifestPath);
       }
       r.warn(CUSTOMIZATION_INVENTORY_COVERAGE);
     }
@@ -305,16 +438,18 @@ async function collect(r: Reading, cwd: string | null, deps: InventoryDeps): Pro
     }
   }
   r.serversRead = appRead && r.mcpEnd();
-  if (isAbsolute(configHome)) await installedSkills(r, configHome, cwd);
+  if (isAbsolute(configHome)) await installedPlugins(r, configHome, cwd);
 }
 
 export async function readCustomizationInventory(cwd: string | null, deps: InventoryDeps): Promise<CustomizationInventory> {
   return (await readInventory(cwd, deps)).snapshot();
 }
 
-/** P4-AGG M4: the configured servers with their URLs, for main's catalog alone (`customization.serverEndpoints`). */
-export async function readServerEndpoints(cwd: string | null, deps: InventoryDeps): Promise<{ servers: CustomizationEndpoint[] }> {
-  return { servers: [...(await readInventory(cwd, deps)).endpoints] };
+/** P4-AGG M4: the configured servers with their URLs, for main's catalog alone (`customization.serverEndpoints`); UX wave
+ * U11h: and the plugins' connectors with theirs. */
+export async function readServerEndpoints(cwd: string | null, deps: InventoryDeps): Promise<{ servers: CustomizationEndpoint[]; pluginServers: CustomizationPluginEndpoint[] }> {
+  const read = await readInventory(cwd, deps);
+  return { servers: [...read.endpoints], pluginServers: [...read.pluginEndpoints] };
 }
 
 async function readInventory(cwd: string | null, deps: InventoryDeps): Promise<Reading> {

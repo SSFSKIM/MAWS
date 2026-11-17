@@ -36,6 +36,19 @@ describe('the kinds’ guides and format references', () => {
     expect(KIND_GUIDES.file.guide).toMatch(/send_file/);
   });
 
+  // UX wave U10b (l6-artifacts-18, §A.4): when a reader filters, an html page; a rebuilt page publishes from its file
+  it('tells the agent when a dashboard is the wrong kind, and how to publish a rebuilt page by path', () => {
+    const when = KIND_GUIDES.dashboard.guide.split('\n## ').find((section) => section.startsWith('When to use this kind'))!;
+    expect(when.trimEnd().endsWith("A dashboard's views have no controls for the reader: a filter is fixed in each view's spec. When the user should filter or explore the data themselves, make an `html` page.")).toBe(true);
+    const editing = KIND_GUIDES.html.guide.split('\n## ').find((section) => section.startsWith('Reading and editing'))!;
+    expect(editing).toContain('and `files: {"index.html": "<the whole new page>"}`. When you rebuilt the page as a file, pass `path` (that .html file) in place of `files`: its bytes become the new version.');
+  });
+
+  // UX wave U10b (l6-artifacts-07 (b), §B.4): how to fit a page, right after the system's page size
+  it('tells the agent how to fit a document to a page', () => {
+    expect(KIND_GUIDES.document.guide).toContain('its fonts, colours, spacing and page size come from the system, in the editor and in every export. To fit a page, set the document\'s page with `set_page` and check the PDF\'s `pages`. Do not style through the content');
+  });
+
   // P3-B (M7): the document kind's guide and format reference (their examples are checked against the dialect in
   // document/format.test.ts)
   it('writes the document kind in full: the guide names its tools, the format reference its dialect', () => {
@@ -53,6 +66,15 @@ describe('the kinds’ guides and format references', () => {
       const last = KIND_GUIDES[kind].guide.split('\n## ').at(-1)!;
       expect(last.split('\n')[0], kind).toBe('Before you finish');
       expect(last, kind).toContain('[its title](maws-artifact:<artifactId>)');
+    }
+  });
+
+  // UX wave U6d (O-44): the paragraph that closes every guide, exact, and no guide invites the agent to open a pane
+  it('closes every kind’s guide with the link paragraph, word for word, and no guide names show_pane', () => {
+    for (const kind of ARTIFACT_KINDS) {
+      const { guide } = KIND_GUIDES[kind];
+      expect(guide.endsWith('\n\nWhen a message to the user names this artifact, write it as a Markdown link, [its title](maws-artifact:<artifactId>): the user opens it in MAWS with a click.\n'), kind).toBe(true);
+      expect(guide, kind).not.toContain('show_pane');
     }
   });
 });

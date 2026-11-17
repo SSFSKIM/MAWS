@@ -4,7 +4,8 @@
 // It crosses between builds, so it is in the wire manifest (src/shared/ipc/wire.ts).
 //
 // P5 O3-D (docs/doperpowers/plans/2026-10-29-p5-o3-d-cutover.md, Interfaces §H, §I): the services front's own commands, all
-// main-only (`internal`): `machine.client`, the attached app telling `mawsd` its browser's socket; `machine.op` and
+// main-only (`internal`): `machine.client`, the attached app telling `mawsd` its browser's socket (UX wave U6e: and its
+// bundle); `machine.op` and
 // `machine.opQuery`, the services' operation ledger (O3X7), which the endpoint reaches as `host.op` reaches lane B's.
 import * as z from 'zod';
 import { MachineRefSchema } from '../../machine/ref';
@@ -42,7 +43,10 @@ export const FoldersListInputSchema = z.strictObject({ path: z.string().min(1).m
 
 export const commands = {
   'machine.identity': { input: z.void(), output: MachineIdentitySchema, owner: 'machine' },
-  'machine.client': { input: z.strictObject({ browserSocket: z.string().nullable() }), output: z.void(), owner: 'machine' }, // the attached app's browser socket directory (E13; each session's `<dir>/<appSessionId>.sock`, @shared/browser/cua-socket): null, none
+  // the attached app's browser socket directory (E13; each session's `<dir>/<appSessionId>.sock`, @shared/browser/cua-socket):
+  // null, none. UX wave U6e (decision 8): `bundle`, the folder named `*.app` the app runs from (`bundleOf`), which the files
+  // service then never writes; null, none; absent from an app of an earlier build. Believed only as a folder to protect.
+  'machine.client': { input: z.strictObject({ browserSocket: z.string().nullable(), bundle: z.string().nullable().optional() }), output: z.void(), owner: 'machine' },
   'machine.op': { input: MachineOpInputSchema, output: HostOpOutputSchema, owner: 'machine' },
   'machine.opQuery': { input: z.strictObject({ opId: OpIdSchema, opCreated: z.string(), tombstoneIfAbsent: z.boolean() }), output: HostOpQueryOutputSchema, owner: 'machine' },
   'machine.folders.list': { input: FoldersListInputSchema, output: z.strictObject({ entries: z.array(FolderEntrySchema), cursor: z.string().nullable() }), owner: 'machine' }, // P5 O7 M9

@@ -7,6 +7,8 @@ import { commands, type CommandOutput } from '@shared/ipc/schema';
 import { isBridgedCommandName } from '@shared/ipc/names';
 import { validateCommandInput, validateCommandOutput } from '@shared/ipc/validate';
 import { clientSettingsDefaults, machineSettingsDefaults, SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
+import { CUSTOMIZATION_INVENTORY_COVERAGE } from '@shared/ipc/schema/customization';
+import { readManifestView } from '../plugins/manifest';
 import { configurationRevision, INVENTORY_BOUNDS, readCustomizationInventory, readServerEndpoints, registerCustomizationInventory } from './inventory';
 
 // P5 O3-A: a machine-settings.json holding these app MCP servers
@@ -56,7 +58,7 @@ describe('cold customization inventory', () => {
         { name: 'shared', scope: 'app', path: appFile, transport: 'http' },
         { name: 'process', scope: 'user', path: global, transport: 'stdio' },
         { name: 'shared', scope: 'user', path: global, transport: 'http' },
-      ], warnings: [], serversRead: true,
+      ], warnings: [], serversRead: true, pluginServers: [], plugins: [],
     });
     expect(JSON.stringify(answer)).not.toMatch(/SECRET|Do not return|Authorization|mcpServers|command|args|env|url/);
     expect(await Promise.all([readFile(global, 'utf8'), readFile(appFile, 'utf8'), readFile(path, 'utf8')])).toEqual(before);
@@ -266,12 +268,12 @@ describe('cold customization inventory', () => {
   it('retains app configuration when the user environment is unavailable', async () => {
     const path = await json(join(userData, 'machine-settings.json'), appServers([{ name: 'app', type: 'http', url: 'https://app.test/' }]));
     const answer = await readCustomizationInventory(null, { userData, captureEnv: async () => { throw new Error('CAPTURE_SECRET'); } });
-    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false });
+    expect(answer).toEqual({ skills: [], servers: [{ name: 'app', scope: 'app', path, transport: 'http' }], warnings: ['User configuration environment could not be read.'], serversRead: false, pluginServers: [], plugins: [] });
   });
 
   it('returns a warning within its deadline even when environment capture never settles', async () => {
     const answer = await readCustomizationInventory(null, { userData, captureEnv: () => new Promise(() => {}), timeoutMs: 5 });
-    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'], serversRead: false });
+    expect(answer).toEqual({ skills: [], servers: [], warnings: ['Customization inventory reached its read limit; some configured items are not inventoried.'], serversRead: false, pluginServers: [], plugins: [] });
   });
 
   it('a project .mcp.json it cannot read leaves the servers not wholly read; one that reads clean leaves them read', async () => {
@@ -291,7 +293,7 @@ describe('cold customization inventory', () => {
       { name: 'app', scope: 'app', path: appFile, transport: 'http', url: 'https://app.test/', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
       { name: 'linear', scope: 'user', path: global, transport: 'http', url: 'https://mcp.linear.app/mcp?token=QUERY_SECRET', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
       { name: 'process', scope: 'user', path: global, transport: 'stdio', url: null, revision: null },
-    ] });
+    ], pluginServers: [] });
     expect(JSON.stringify(await read())).not.toMatch(/SECRET|linear\.app/);
     expect(isBridgedCommandName('customization.serverEndpoints')).toBe(false);
     expect(commands['customization.serverEndpoints'].owner).toBe('engine-host');
@@ -343,5 +345,286 @@ describe('cold customization inventory', () => {
     expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
     const leaked = { ...answer, servers: [{ name: 'x', scope: 'user', path: '/config', transport: 'http', env: { TOKEN: 'SECRET' } }] };
     expect(validateCommandOutput('customization.inventory', leaked).ok).toBe(false);
+  });
+});
+
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, M1 and §A): the connectors an
+// installed plugin's files declare are listed beside the configured ones, by the rule "What's inside" follows, with the
+// three names kept apart (the key, the manifest name, the engine name) and with no address in the window's answer.
+describe('a plugin’s connectors (UX wave U11h)', () => {
+  const KEY = 'key-tides@harbour-market';
+  const installed = (plugins: Record<string, unknown[]>) => json(join(configHome, 'plugins', 'installed_plugins.json'), { version: 2, plugins });
+  const endpoints = (cwd: string | null = null) => readServerEndpoints(cwd, { userData, captureEnv: environment });
+
+  // An invented plugin that declares servers in all three ways: its .mcp.json, a file its manifest names, and an inline
+  // map (under `experimental`, which repeats a name the .mcp.json gave first); and a bundle, a URL where a path belongs
+  // and two files outside it, none of them listed.
+  async function tides(at = join(root, 'tides'), manifest: Record<string, unknown> = {}) {
+    await json(join(at, '.mcp.json'), { mcpServers: {
+      'tides-http': { type: 'http', url: 'https://tides.example.com/mcp', headers: { Authorization: 'HEADER_SECRET' } },
+      'tide clock': { command: '${CLAUDE_PLUGIN_ROOT}/bin/COMMAND_SECRET', args: ['ARG_SECRET'] },
+    } });
+    await json(join(at, 'servers', 'more.json'), { 'ferry:times': { type: 'sse', url: 'https://ferry.example.com/${REGION}/sse' } });
+    await json(join(dirname(at), 'outside.json'), { escaped: { type: 'http', url: 'https://outside.example.com/mcp' } });
+    await symlink(join(dirname(at), 'outside.json'), join(at, 'linked.json'));
+    await json(join(at, '.claude-plugin', 'plugin.json'), {
+      name: 'mani-tides',
+      mcpServers: ['./servers/more.json', './bundle.mcpb', 'https://example.com/servers.json', '../outside.json', './linked.json'],
+      experimental: { mcpServers: { buoys: { type: 'streamable-http', url: 'https://buoys.example.com/mcp' }, 'tides-http': { type: 'sse', url: 'https://other.example.com/sse' } } },
+      ...manifest,
+    });
+    return at;
+  }
+  const row = (at: string, server: string, transport: string, file: string, address: string | null, over: Record<string, unknown> = {}) => ({
+    plugin: KEY, pluginName: 'mani-tides', server, name: `plugin:mani-tides:${server}`, installScope: 'user', version: '1.2.0', path: join(at, file), transport, address, sameAddressAs: null, ...over,
+  });
+
+  it('lists each server a plugin declares in its .mcp.json, a file its manifest names and an inline map, first declaration of a name winning, with its installation and its engine name', async () => {
+    const at = await tides();
+    await installed({ [KEY]: [{ scope: 'user', installPath: at, version: '1.2.0' }] });
+    const answer = await read();
+    expect(answer.pluginServers).toEqual([
+      row(at, 'tides-http', 'http', '.mcp.json', 'literal'),
+      row(at, 'tide clock', 'stdio', '.mcp.json', null), // a name with a space, as written; a local command has no address
+      row(at, 'ferry:times', 'sse', 'servers/more.json', 'templated'), // a name with a colon, as written
+      row(at, 'buoys', 'http', '.claude-plugin/plugin.json', 'literal'),
+    ]);
+    expect(answer.plugins).toEqual([{ plugin: KEY, pluginName: 'mani-tides', installScope: 'user' }]);
+    // the bundle and the URL add no warning; a file outside the plugin is refused, as a skill's is
+    expect(answer.warnings).toEqual([`${join(at, '.claude-plugin', 'plugin.json')}: outside the plugin`, `${join(at, 'linked.json')}: outside the plugin`, CUSTOMIZATION_INVENTORY_COVERAGE]);
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
+    expect(JSON.stringify(answer)).not.toMatch(/SECRET|example\.com|REGION|CLAUDE_PLUGIN_ROOT|Authorization|escaped/);
+  });
+
+  it('names the same servers as the plugin’s “What’s inside”', async () => {
+    const at = await tides();
+    await installed({ [KEY]: [{ scope: 'user', installPath: at, version: '1.2.0' }] });
+    const view = await readManifestView({ kind: 'installation', id: KEY, scope: 'user', projectPath: null }, { root: at, marketplaceRoot: null, entryName: 'key-tides' });
+    expect(view.components.mcpServers.map((server) => server.name)).toEqual(['tides-http', 'tide clock', 'ferry:times', 'buoys']);
+    expect(view.components.mcpBundles).toBe(1);
+    expect((await read()).pluginServers!.map((server) => server.server)).toEqual(view.components.mcpServers.map((server) => server.name));
+  });
+
+  it('builds the engine name from the manifest name, whole at 147 characters, and lists no server whose name its field cannot hold', async () => {
+    const at = join(root, 'long');
+    const manifestName = `long-${'p'.repeat(95)}`;
+    const server = `long-${'s'.repeat(34)}`;
+    await json(join(at, '.mcp.json'), { mcpServers: { [server]: { type: 'http', url: 'https://long.example.com/mcp' }, ['x'.repeat(257)]: { type: 'http', url: 'https://cut.example.com/mcp' }, '': { type: 'http', url: 'https://empty.example.com/mcp' } } });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: manifestName });
+    await installed({ 'long@harbour-market': [{ scope: 'user', installPath: at, version: '0.0.1' }] });
+    const answer = await read();
+    expect(answer.pluginServers!.map((row) => [row.server, row.name])).toEqual([[server, `plugin:${manifestName}:${server}`]]);
+    expect(answer.pluginServers![0]!.name).toHaveLength(147);
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
+  });
+
+  it('gives a null manifest name and engine name where the manifest’s name cannot be read, and a null engine name to a built-in plugin', async () => {
+    const plugin = async (folder: string, manifest: unknown) => {
+      const at = join(root, folder);
+      await json(join(at, '.mcp.json'), { mcpServers: { harbour: { type: 'http', url: 'https://harbour.example.com/mcp' } } });
+      if (manifest !== undefined) await json(join(at, '.claude-plugin', 'plugin.json'), manifest);
+      return at;
+    };
+    await installed({
+      'absent@harbour-market': [{ scope: 'user', installPath: await plugin('absent', undefined) }],
+      'fx-built@builtin': [{ scope: 'user', installPath: await plugin('built', { name: 'fx-built' }) }],
+      'spaced@harbour-market': [{ scope: 'user', installPath: await plugin('spaced', { name: 'two words' }) }],
+    });
+    const answer = await read();
+    expect(answer.pluginServers!.map((row) => [row.plugin, row.pluginName, row.name, row.version])).toEqual([
+      ['absent@harbour-market', null, null, null],
+      ['fx-built@builtin', 'fx-built', null, null],
+      ['spaced@harbour-market', null, null, null],
+    ]);
+    expect(validateCommandOutput('customization.inventory', answer).ok).toBe(true);
+  });
+
+  it('lists no connector of an installation for another project, and one row per server of a plugin installed twice for the folder: the first installation’s', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const first = await tides(join(root, 'first', 'tides'));
+    const second = join(root, 'second');
+    await json(join(second, '.mcp.json'), { mcpServers: { 'tides-http': { type: 'http', url: 'https://second.example.com/mcp' }, extra: { type: 'http', url: 'https://extra.example.com/mcp' } } });
+    await json(join(second, '.claude-plugin', 'plugin.json'), { name: 'mani-tides' });
+    await installed({
+      'elsewhere@harbour-market': [{ scope: 'project', projectPath: join(home, 'other'), installPath: second, version: '9.9.9' }],
+      [KEY]: [{ scope: 'project', projectPath: join(home, 'other'), installPath: second }, { scope: 'user', installPath: first, version: '1.2.0' }, { scope: 'project', projectPath: cwd, installPath: second, version: '2.0.0' }],
+    });
+    const answer = await read(cwd);
+    expect(answer.pluginServers!.map((row) => [row.plugin, row.server, row.installScope, row.version, row.path])).toEqual([
+      [KEY, 'tides-http', 'user', '1.2.0', join(first, '.mcp.json')],
+      [KEY, 'tide clock', 'user', '1.2.0', join(first, '.mcp.json')],
+      [KEY, 'ferry:times', 'user', '1.2.0', join(first, 'servers', 'more.json')],
+      [KEY, 'buoys', 'user', '1.2.0', join(first, '.claude-plugin', 'plugin.json')],
+    ]);
+    expect(answer.plugins).toEqual([{ plugin: KEY, pluginName: 'mani-tides', installScope: 'user' }]);
+  });
+
+  it('names every plugin kept for the folder, one that declares no connector among them, a manifest name with a colon as written', async () => {
+    const quiet = join(root, 'quiet');
+    await json(join(quiet, '.claude-plugin', 'plugin.json'), { name: 'alpha:beta' });
+    const at = await tides();
+    await installed({ [KEY]: [{ scope: 'user', installPath: at, version: '1.2.0' }], 'quiet@harbour-market': [{ scope: 'user', installPath: quiet }] });
+    const answer = await read();
+    expect(answer.plugins).toEqual([
+      { plugin: KEY, pluginName: 'mani-tides', installScope: 'user' },
+      { plugin: 'quiet@harbour-market', pluginName: 'alpha:beta', installScope: 'user' },
+    ]);
+    expect(answer.pluginServers!.every((row) => row.plugin === KEY)).toBe(true);
+  });
+
+  it('words each address by its shape alone: literal, templated after a literal origin, templated-origin otherwise, none for a local command', async () => {
+    const at = join(root, 'shapes');
+    await json(join(at, '.mcp.json'), { mcpServers: {
+      plain: { type: 'http', url: 'https://plain.example.com/mcp' },
+      tenant: { type: 'http', url: 'https://tenant.example.com/${TENANT}/mcp' },
+      host: { type: 'http', url: 'https://${HOST}/mcp' },
+      port: { type: 'sse', url: 'https://port.example.com:${PORT}/sse' },
+      slash: { type: 'http', url: 'https:///${HOST}/mcp' },
+      user: { type: 'http', url: 'https://me@user.example.com/${TENANT}' },
+      upper: { type: 'http', url: 'HTTPS://upper.example.com/${TENANT}' },
+      local: { command: 'run-local' },
+    } });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'shapes' });
+    await installed({ 'shapes@harbour-market': [{ scope: 'user', installPath: at }] });
+    expect(Object.fromEntries((await read()).pluginServers!.map((row) => [row.server, row.address]))).toEqual({
+      plain: 'literal', tenant: 'templated', host: 'templated-origin', port: 'templated-origin', slash: 'templated-origin', user: 'templated-origin', upper: 'templated-origin', local: null,
+    });
+  });
+
+  it('names the configured entry of the same address as written, the highest in the engine’s precedence, only for a remote transport and two addresses with no template', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const SAME = 'https://same.example.com/mcp';
+    await json(join(configHome, '.claude.json'), {
+      mcpServers: { 'user-same': { type: 'http', url: SAME }, 'user-only': { type: 'http', url: 'https://user.example.com/mcp' }, 'user-template': { type: 'http', url: 'https://tpl.example.com/${T}' } },
+      projects: { [cwd]: { mcpServers: { 'local-same': { type: 'sse', url: SAME } } } },
+    });
+    await json(join(home, '.mcp.json'), { mcpServers: { 'outer-project': { type: 'http', url: 'https://project.example.com/mcp' } } });
+    await json(join(cwd, '.mcp.json'), { mcpServers: { 'inner-project': { type: 'http', url: 'https://project.example.com/mcp' } } });
+    await json(join(userData, 'machine-settings.json'), appServers([{ name: 'own', type: 'http', url: 'https://own.example.com/mcp' }]));
+    const at = join(root, 'dups');
+    await json(join(at, '.mcp.json'), { mcpServers: {
+      same: { type: 'http', url: SAME }, // user and local both: local is higher
+      'user-only': { type: 'ws', url: 'https://user.example.com/mcp' },
+      project: { type: 'sse', url: 'https://project.example.com/mcp' }, // two project files: the nearest
+      'as-written': { type: 'http', url: 'https://same.example.com/mcp/' }, // another text: not compared further
+      own: { type: 'http', url: 'https://own.example.com/mcp' }, // MAWS's own list is not compared
+      template: { type: 'http', url: 'https://tpl.example.com/${T}' }, // neither address may hold a template
+      odd: { type: 'carrier-pigeon', url: SAME }, // not a remote transport
+      local: { command: 'run' },
+    } });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'dups' });
+    await installed({ 'dups@harbour-market': [{ scope: 'user', installPath: at }] });
+    expect(Object.fromEntries((await read(cwd)).pluginServers!.map((row) => [row.server, row.sameAddressAs]))).toEqual({
+      same: 'local-same', 'user-only': 'user-only', project: 'inner-project', 'as-written': null, own: null, template: null, odd: null, local: null,
+    });
+  });
+
+  it('carries each plugin server’s address and revision to main alone; the revision moves with the key, the installation’s scope, folder or version, the engine name, the transport or the address', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const at = await tides();
+    const copy = await tides(join(root, 'copy', 'tides'));
+    const install = (over: Record<string, unknown> = {}, key = KEY) => installed({ [key]: [{ scope: 'user', installPath: at, version: '1.2.0', ...over }] });
+    const tidesHttp = async () => (await endpoints(cwd)).pluginServers!.find((row) => row.server === 'tides-http')!;
+    await install();
+    const answer = await endpoints(cwd);
+    expect(answer.pluginServers).toEqual([
+      { plugin: KEY, pluginName: 'mani-tides', server: 'tides-http', name: 'plugin:mani-tides:tides-http', version: '1.2.0', path: join(at, '.mcp.json'), transport: 'http', url: 'https://tides.example.com/mcp', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { plugin: KEY, pluginName: 'mani-tides', server: 'tide clock', name: 'plugin:mani-tides:tide clock', version: '1.2.0', path: join(at, '.mcp.json'), transport: 'stdio', url: null, revision: null },
+      { plugin: KEY, pluginName: 'mani-tides', server: 'ferry:times', name: 'plugin:mani-tides:ferry:times', version: '1.2.0', path: join(at, 'servers', 'more.json'), transport: 'sse', url: 'https://ferry.example.com/${REGION}/sse', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+      { plugin: KEY, pluginName: 'mani-tides', server: 'buoys', name: 'plugin:mani-tides:buoys', version: '1.2.0', path: join(at, '.claude-plugin', 'plugin.json'), transport: 'http', url: 'https://buoys.example.com/mcp', revision: expect.stringMatching(/^[0-9a-f]{32}$/) },
+    ]);
+    expect(validateCommandOutput('customization.serverEndpoints', answer).ok).toBe(true);
+    const first = (await tidesHttp()).revision;
+    expect((await tidesHttp()).revision).toBe(first); // within one run of the host
+    const moved: [string, () => Promise<unknown>][] = [
+      ['the key', () => install({}, 'key-tides@other-market')],
+      ['the scope', () => install({ scope: 'project', projectPath: cwd })],
+      ['the folder', () => install({ installPath: copy })],
+      ['the version', () => install({ version: '1.3.0' })],
+      ['the engine name', async () => { await install(); await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'mani-tides-2' }); }],
+      ['the transport', async () => { await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'mani-tides' }); await json(join(at, '.mcp.json'), { mcpServers: { 'tides-http': { type: 'sse', url: 'https://tides.example.com/mcp' } } }); }],
+      ['the address', () => json(join(at, '.mcp.json'), { mcpServers: { 'tides-http': { type: 'http', url: 'https://tides.example.com/mcp2' } } })],
+    ];
+    for (const [what, move] of moved) {
+      await move();
+      expect([what, (await tidesHttp()).revision]).not.toEqual([what, first]);
+    }
+    await json(join(at, '.mcp.json'), { mcpServers: { 'tides-http': { type: 'http', url: 'https://tides.example.com/mcp' } } });
+    expect((await tidesHttp()).revision).toBe(first); // all of it as it was: the same revision
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'two words' });
+    expect((await tidesHttp()).revision).toBeNull(); // no engine name, no revision
+    expect(JSON.stringify(await read(cwd))).not.toMatch(/example\.com|COMMAND_SECRET|ARG_SECRET|HEADER_SECRET|REGION/);
+  });
+
+  // The engine merges the file-configured servers by name before it drops a plugin's server of the same address (2.1.322
+  // cli.pretty.js about 477063, then 476051): an entry another scope overrides by name is not loaded and drops nothing.
+  it('compares a plugin server’s address only with the entry the engine uses for each name', async () => {
+    const cwd = join(home, 'repo');
+    await mkdir(join(cwd, '.git'), { recursive: true });
+    const [A, B, C, D, E, F] = ['a', 'b', 'c', 'd', 'e', 'f'].map((x) => `https://${x}.example.com/mcp`);
+    await json(join(configHome, '.claude.json'), {
+      mcpServers: { shared: { type: 'http', url: A }, ranked: { type: 'http', url: E } },
+      projects: { [cwd]: { mcpServers: { shared: { type: 'http', url: B } } } },
+    });
+    await json(join(home, '.mcp.json'), { mcpServers: { nested: { type: 'http', url: C }, ranked: { type: 'http', url: F } } });
+    await json(join(cwd, '.mcp.json'), { mcpServers: { nested: { type: 'http', url: D } } });
+    await json(join(userData, 'machine-settings.json'), appServers([{ name: 'shared', type: 'http', url: 'https://own.example.com/mcp' }]));
+    const at = join(root, 'merged');
+    await json(join(at, '.mcp.json'), { mcpServers: {
+      'at-overridden-user': { type: 'http', url: A }, // user `shared`, which local `shared` overrides: not loaded
+      'at-used-local': { type: 'http', url: B }, // local `shared`, the entry used, though MAWS's own list names `shared` too
+      'at-outer-project': { type: 'http', url: C }, // the outer project file's `nested`, which the nearer file overrides
+      'at-nearest-project': { type: 'http', url: D },
+      'at-overridden-project': { type: 'http', url: F }, // project `ranked`, which user `ranked` overrides
+      'at-used-user': { type: 'http', url: E },
+    } });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'merged' });
+    await installed({ 'merged@harbour-market': [{ scope: 'user', installPath: at }] });
+    expect(Object.fromEntries((await read(cwd)).pluginServers!.map((row) => [row.server, row.sameAddressAs]))).toEqual({
+      'at-overridden-user': null, 'at-used-local': 'shared', 'at-outer-project': null, 'at-nearest-project': 'nested', 'at-overridden-project': null, 'at-used-user': 'ranked',
+    });
+  });
+
+  it('lists no connector whose declared address is past the endpoints’ bound, in either answer, and compares, classifies and revises a listed one’s address whole', async () => {
+    const LONG = `https://long.example.com/${'p'.repeat(4096 - 'https://long.example.com/'.length)}`;
+    expect(LONG).toHaveLength(4096);
+    await json(join(configHome, '.claude.json'), { mcpServers: { bound: { type: 'http', url: LONG }, past: { type: 'http', url: `${LONG}x` } } });
+    const at = join(root, 'long-address');
+    const declare = (exact: { type: string; url: string }) => json(join(at, '.mcp.json'), { mcpServers: {
+      longer: { type: 'http', url: `${LONG}b` }, // past the bound: a cut text would be another address, so no row at all
+      template: { type: 'http', url: `${LONG}\${T}` }, // past the bound with a template: no row either
+      exact, // at the bound: listed; `past` is cut to this text in its own endpoint, and is still another address
+      short: { type: 'http', url: 'https://short.example.com/mcp' },
+    } });
+    await declare({ type: 'http', url: LONG });
+    await json(join(at, '.claude-plugin', 'plugin.json'), { name: 'long-address' });
+    await installed({ 'long@harbour-market': [{ scope: 'user', installPath: at }] });
+    const answer = await read();
+    expect(answer.pluginServers!.map((row) => row.server)).toEqual(['exact', 'short']);
+    expect(answer.plugins).toEqual([{ plugin: 'long@harbour-market', pluginName: 'long-address', installScope: 'user' }]);
+    expect(answer.pluginServers!.find((row) => row.server === 'exact')).toMatchObject({ address: 'literal', sameAddressAs: 'bound' });
+    const listed = (await endpoints()).pluginServers!;
+    expect(listed.map((row) => row.server)).toEqual(['exact', 'short']);
+    const exact = listed.find((row) => row.server === 'exact')!;
+    expect(exact.url).toBe(LONG);
+    expect(exact.revision).toMatch(/^[0-9a-f]{32}$/);
+    await declare({ type: 'http', url: `${LONG.slice(0, -1)}q` });
+    const moved = (await endpoints()).pluginServers!.find((row) => row.server === 'exact')!;
+    expect(moved.revision).not.toBe(exact.revision); // the revision is of the whole text, its last character included
+  });
+
+  it('caps the plugins’ connectors at the inventory’s row bound and labels the result partial', async () => {
+    const at = join(root, 'many');
+    const servers: Record<string, { type: string; url: string }> = {};
+    for (let i = 0; i <= INVENTORY_BOUNDS.rows; i++) servers[`server-${String(i).padStart(4, '0')}`] = { type: 'http', url: `https://many.example.com/${i}` };
+    await json(join(at, '.mcp.json'), { mcpServers: servers });
+    await installed({ 'many@harbour-market': [{ scope: 'user', installPath: at }] });
+    const answer = await read();
+    expect(answer.pluginServers).toHaveLength(INVENTORY_BOUNDS.rows);
+    expect(answer.pluginServers!.at(-1)!.server).toBe('server-1023');
+    expect(answer.warnings).toContain('Customization inventory reached its read limit; some configured items are not inventoried.');
   });
 });

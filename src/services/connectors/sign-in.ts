@@ -54,6 +54,19 @@
 // redirect, per kind, is DYNAMIC_REDIRECT's (P1, spikes/p4-aggregator/findings-m4.txt, part "UX wave U11a, M1": MAWS's
 // listener for both).
 //
+// UX wave U11h (docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md, §B, "The guarantee, and the sign-in
+// rule"): a press from a plugin's row in Customize, a `plugin:` name with the revision of its entry (`heldToRule`), is held
+// to the rule's four parts (./sign-in-entry.ts) at three points, since each of the operation's waits is long enough for
+// the engine to change a session's plugins by itself and it signs in whichever server stands under the name at its call:
+// (1) at the press, and its baseline judged by (b) and (c), so "already connected" is never said of a server outside the
+// entry's address; (2) inside the queued call, immediately before `mcp_authenticate`; (3) after the engine's answer, before
+// it is acted on in any way (the browser, the end with none, the engine's own listener). Points 2 and 3 read the status
+// afresh, judge the entry kept at point 1, and also require that nothing moved since: the session's `pluginsObservedAt`
+// is point 1's, no operation of MAWS's plugin runner is under way, no `plugins.changed` was heard. A failure at point 3
+// ends MAWS's operation as a cancel does and sends the engine nothing: its flow ends by its own timer or the next call for
+// the name. What two passing checks cannot see (a swap and a swap back between them, or to a server at the entry's
+// address while the reported list still shows this plugin alone) is the landing's named residue, G2.
+//
 // The engine's own pending flow is left to lapse; a new `mcp_authenticate` starts a new flow and the engine refuses the
 // old flow's callback (findings-m4 3, 4). No event carries the authorization URL, a code or a state. MAWS's own OAuth
 // store (./oauth-store.ts) is not involved. `mcp_set_servers` is never used (it drops the session's SDK server).
@@ -64,7 +77,8 @@ import type { CommandInput, CommandName, CommandOutput, CommandResult } from '@s
 import { CONNECTOR_ALREADY_CONNECTED, type ConnectorSignInChanged } from '@shared/ipc/schema/connectors';
 import type { ServicesBus } from '@shared/spine/bus';
 import { Work, type Settling } from '../work';
-import { dynamicRefusal, entryRefusal } from './sign-in-entry';
+import type { SessionPlugin } from '@shared/plugins/plugin-connector';
+import { dynamicRefusal, entryRefusal, pluginEntryChanged, pluginEntryOf, pluginOwnerRefusal, pluginServerRefusal, PLUGINS_CHANGED, type LiveServer, type PluginEntry } from './sign-in-entry';
 import { OAUTH_CALLBACK_HOST, type ListenLoopback, type LoopbackListener, type LoopbackReply, type LoopbackRequest } from './oauth-callback';
 import { createRelayedCallbacks, type RelayedCallbacks, type RelayedReceiver } from './relayed-callback'; // P5 O7 M5c
 
@@ -98,7 +112,10 @@ export interface SignInDeps {
   emit(event: ConnectorSignInChanged): void;
   ready(appSessionId: string): boolean; // the session's process is ready now
   onSessionGone(listener: (appSessionId: string) => void): () => void; // its process left ready
-  check(entry: SignInRequest & { appSessionId: string }): Promise<string | null>; // why the session's engine does not use this entry, or null (P5 O7 M8: no path, the entry of the name and scope it uses; U11a M8: a dynamic one, the session's server)
+  // why the session's engine does not use this entry, or null (P5 O7 M8: no path, the entry of the name and scope it uses;
+  // U11a M8: a dynamic one, the session's server). U11h: asked at each of the three points of a press held to the rule,
+  // with what the operation keeps from point 1 (`kept`); any other press is asked at point 1 alone, as before.
+  check(entry: SignInRequest & { appSessionId: string; kept?: Kept }, point: CheckPoint): Promise<string | null>;
   // P5 O7 M5c: a remote asker's relayed receivers (the spine's one registry, shared with the connectors' Connect), and
   // this machine's name, for a sign-in that must be made here. Absent: a registry of its own, and "this machine".
   relayed?: Pick<RelayedCallbacks, 'arm'>;
@@ -120,6 +137,15 @@ export const connectorKey = ({ name, scope, cwd }: ConnectorConfiguration): stri
 /** What a press asks to sign in: a configured connector, by its file (`connectors.signIn`) or not; for a dynamic one
  * pressed from a row of MAWS's own list, the revision of the configuration that row was drawn with. */
 export type SignInRequest = ConnectorConfiguration & { path?: string; entry?: { revision: string } };
+
+/** UX wave U11h (§B): a press held to the sign-in rule at three points, one from a plugin's row in Customize: a dynamic
+ * `plugin:` name with the revision of its entry. The session's Connectors dialog names no entry and MAWS's own list no
+ * `plugin:` name; both keep U11a's check, at the press alone. */
+export const heldToRule = ({ name, scope, entry }: Pick<SignInRequest, 'name' | 'scope' | 'entry'>): boolean => scope === 'dynamic' && entry !== undefined && name.startsWith('plugin:');
+export type CheckPoint = 1 | 2 | 3;
+/** What point 1 found, which the operation keeps for its later points: the entry, the session's `pluginsObservedAt`, and how many `plugins.changed` had been heard. */
+export interface PointOne { entry: PluginEntry & { name: string }; observedAt: string | null; changes: number }
+export interface Kept { pointOne?: PointOne }
 
 export interface SignIn extends Settling {
   // P5 O7 M5c: `callback`, a remote asker's loopback port (./relayed-callback.ts)
@@ -148,6 +174,7 @@ interface Operation {
   client: ClientRef | null; // who asked: the browser the authorization URL opens in
   state: State;
   receiver: RelayedReceiver | null; // P5 O7 M5c: a remote asker's, armed at the start; null: this machine's loopback
+  kept: Kept | null; // UX wave U11h: what point 1 found, for a press held to the rule; null for any other press
   listener: LoopbackListener | null;
   timers: Set<NodeJS.Timeout>;
   ended(): void; // P5 O4 D17: its end, for the part's settling
@@ -171,9 +198,13 @@ export function createSignIn(deps: SignInDeps): SignIn {
   // in flight could replace a later call's flow. Each flow's calls go one after another: a replacement's waits for the
   // cancelled operation's to answer (its answer is then dropped), and a call whose operation ended first is not sent.
   const authTail = new Map<string, Promise<unknown>>(); // flowKey → the last mcp_authenticate sent or queued for it
+  // UX wave U11h: a press held to the rule is checked inside the queued call, after the wait behind an earlier one and
+  // immediately before its own is sent (point 2)
   const authenticateInOrder = (op: Operation, input: CommandInput<'session.mcpAuthenticate'>) => {
     const key = flowKey(op);
-    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (live(op) ? ask(op, 'session.mcpAuthenticate', input) : null));
+    const send = () => ask(op, 'session.mcpAuthenticate', input);
+    // a cancel that lands between the passing check and the send is honoured: the operation is confirmed live again
+    const call = (authTail.get(key) ?? Promise.resolve()).then(() => (!live(op) ? null : op.kept === null ? send() : passes(op, 2).then((passed) => (passed && live(op) ? send() : null))));
     const tail = call.catch(() => {});
     authTail.set(key, tail);
     void tail.then(() => authTail.get(key) === tail && authTail.delete(key));
@@ -181,6 +212,17 @@ export function createSignIn(deps: SignInDeps): SignIn {
   };
 
   const live = (op: Operation) => !TERMINAL.has(op.state);
+  // UX wave U11h: the request the check is asked with; a press held to the rule carries what the operation keeps
+  const checkRequest = (op: Operation) => ({ ...op.configuration, appSessionId: op.appSessionId, ...(op.kept !== null && { kept: op.kept }) });
+  // A later point of a press held to the rule: true when it passes; false once its failure ended the operation, or the
+  // operation ended meanwhile
+  const passes = async (op: Operation, point: 2 | 3): Promise<boolean> => {
+    const refusal = await deps.check(checkRequest(op), point);
+    if (!live(op)) return false;
+    if (refusal === null) return true;
+    fail(op, 'other_entry', refusal);
+    return false;
+  };
   const move = (op: Operation, state: State, extra: { reason?: Reason; message?: string | null; where?: 'here' | 'new_sessions' } = {}) => {
     if (!live(op)) return;
     op.state = state;
@@ -226,7 +268,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
     return null;
   }
 
-  type Server = { name: string; status: string; error?: unknown };
+  type Server = LiveServer & { status: string; error?: unknown };
   const serverOf = async (op: Operation): Promise<Server | null | undefined> => {
     const status = await ask(op, 'session.mcpStatus', { appSessionId: op.appSessionId });
     if (status === null) return undefined; // the operation failed
@@ -261,11 +303,21 @@ export function createSignIn(deps: SignInDeps): SignIn {
 
   async function run(op: Operation): Promise<void> {
     if (!deps.ready(op.appSessionId)) return fail(op, 'no_session');
-    const refusal = await deps.check({ ...op.configuration, appSessionId: op.appSessionId });
+    const refusal = await deps.check(checkRequest(op), 1);
     if (!live(op)) return;
     if (refusal !== null) return fail(op, 'other_entry', refusal);
     const before = await serverOf(op); // the baseline: a connection already there is not this flow's
     if (before === undefined || !live(op)) return;
+    // UX wave U11h: point 1's baseline is a status read like any other, judged by (b) and (c) against the entry point 1 kept;
+    // and "already connected" is a report of a sign-in, so before it is said the session is judged as point 3 judges one:
+    // (a) on the list it reports now, and nothing moved since point 1
+    if (op.kept !== null) {
+      if (op.kept.pointOne === undefined) throw new Error(`the check of ${op.name} kept no entry at its first point`);
+      const different = pluginServerRefusal(op.kept.pointOne.entry, before === null ? [] : [before]);
+      if (different !== null) return fail(op, 'other_entry', different);
+      if (before?.status === 'connected' && !(await passes(op, 3))) return;
+      if (!live(op)) return;
+    }
     if (before?.status === 'connected') return move(op, 'done', { where: 'here', message: ALREADY_CONNECTED });
     let expected: string | null = null; // the engine's state, once it answered
     let port = 0;
@@ -301,6 +353,9 @@ export function createSignIn(deps: SignInDeps): SignIn {
     }
     if (auth === null) return;
     if (!auth.ok) return fail(op, 'engine', auth.message);
+    // UX wave U11h: point 3, before the answer is acted on in any way; a failure ends the operation as a cancel does
+    // (listener closed, later answers dropped) and sends the engine nothing
+    if (op.kept !== null && (!(await passes(op, 3)) || !live(op))) return; // a cancel meanwhile is honoured
     const { authUrl, requiresUserAction, redirectScheme, state } = auth.answer;
     if (authUrl === undefined || requiresUserAction === false) return move(op, 'done', { where: 'here' });
     move(op, 'waiting_browser');
@@ -358,7 +413,7 @@ export function createSignIn(deps: SignInDeps): SignIn {
       }
       let ended!: () => void;
       void flows.track(new Promise<void>((resolve) => (ended = resolve)));
-      const op: Operation = { opId, name, connector, configuration: { name, scope, cwd, path, entry }, appSessionId, client, state: 'starting', receiver, listener: null, timers: new Set(), ended };
+      const op: Operation = { opId, name, connector, configuration: { name, scope, cwd, path, entry }, appSessionId, client, state: 'starting', receiver, kept: heldToRule({ name, scope, entry }) ? {} : null, listener: null, timers: new Set(), ended };
       operations.set(op.opId, op);
       if (!refused) {
         byConnector.set(connector, op.opId);
@@ -392,18 +447,26 @@ export function createSignIn(deps: SignInDeps): SignIn {
 
 // ---- the spine's wiring --------------------------------------------------------------------------------------------
 
+/** What the service reads of a session's status: its process and folder, and (UX wave U11h) the plugins the engine last
+ * reported and when (`EngineSessionStatus.plugins`, `pluginsObservedAt`); absent, the session counts as having reported none. */
+export interface SessionReport { process: string; cwd: string; plugins?: readonly SessionPlugin[]; pluginsObservedAt?: string | null }
+
 export interface SignInServiceDeps {
   bus: Pick<ServicesBus, 'register' | 'emit'>;
   host: SignInHost;
-  onSessionStatus(listener: (payload: { appSessionId: string; status: { process: string; cwd: string } }) => void): () => void;
+  onSessionStatus(listener: (payload: { appSessionId: string; status: SessionReport }) => void): () => void;
   onHostLost(listener: () => void): () => void; // the engine host left ready: every session with it
   // P5 O4 M2 (D30): the engine host's sessions as it lists them now, read at the start and each time it streams again,
   // since the spine may load long after a session became ready (its status then announced to no one here). Read at the
   // start only while the host streams: on the daemon shape a dispatch to a parked host starts it, ahead of the
   // discovery wake that waits only for a host it woke (src/mawsd/discovery-wake.ts)
-  sessions(): Promise<readonly { appSessionId: string; process: string; cwd: string }[]>;
+  sessions(): Promise<readonly ({ appSessionId: string } & SessionReport)[]>;
   hostStreaming(): boolean;
   onHostStreaming(listener: () => void): () => void;
+  // UX wave U11h (§B, "Nothing moved since point 1"): the engine host's plugin runner's operations and its plugin and
+  // marketplace changes. The spine's root gives both; a press held to the rule hears nothing move where one is absent.
+  onPluginsOperation?(listener: (event: { opId: string; phase: string }) => void): () => void;
+  onPluginsChanged?(listener: () => void): () => void;
   port: Pick<ClientPort, 'openExternal'>;
   listen: ListenLoopback;
   relayed: Pick<RelayedCallbacks, 'arm'>; // P5 O7 M5c: the spine's registry, shared with the connectors
@@ -412,7 +475,9 @@ export interface SignInServiceDeps {
 
 // `connectors.signIn` and `connectors.signInCancel`, over the sessions the spine hears ready from the engine host.
 export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void } {
-  const ready = new Map<string, string>(); // a ready session → its directory
+  // a ready session → its directory and (UX wave U11h) the plugins it last reported, kept from its status until it leaves
+  const ready = new Map<string, { cwd: string; plugins: readonly SessionPlugin[]; observedAt: string | null }>();
+  const keptOf = ({ cwd, plugins, pluginsObservedAt }: SessionReport) => ({ cwd, plugins: plugins ?? [], observedAt: plugins === undefined ? null : (pluginsObservedAt ?? null) });
   const goneListeners = new Set<(appSessionId: string) => void>();
   const gone = (appSessionId: string) => {
     ready.delete(appSessionId);
@@ -421,10 +486,18 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
   const listings = new Set<Set<string>>(); // per listing in flight, the sessions a status was heard for since it began
   const offStatus = deps.onSessionStatus(({ appSessionId, status }) => {
     for (const heard of listings) heard.add(appSessionId);
-    if (status.process === 'ready') ready.set(appSessionId, status.cwd);
+    if (status.process === 'ready') ready.set(appSessionId, keptOf(status));
     else if (ready.has(appSessionId)) gone(appSessionId);
   });
-  const offHost = deps.onHostLost(() => [...ready.keys()].forEach(gone));
+  // UX wave U11h: what tells a later point that plugins moved since point 1, beside the session's pluginsObservedAt
+  const running = new Set<string>(); // the plugin runner's operations begun and not done
+  let pluginChanges = 0; // the plugins.changed heard
+  const offOperation = deps.onPluginsOperation?.(({ opId, phase }) => void (phase === 'done' ? running.delete(opId) : running.add(opId))) ?? (() => {});
+  const offChanged = deps.onPluginsChanged?.(() => void (pluginChanges += 1)) ?? (() => {});
+  const offHost = deps.onHostLost(() => {
+    running.clear(); // the runner is the host's, and left with it
+    [...ready.keys()].forEach(gone);
+  });
   // a session the listing names ready is ready, unless a status heard meanwhile said otherwise (it is the newer word)
   let stopped = false;
   const learn = async () => {
@@ -433,7 +506,7 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
     try {
       const sessions = await deps.sessions();
       if (stopped) return;
-      for (const { appSessionId, process, cwd } of sessions) if (process === 'ready' && !heard.has(appSessionId) && !ready.has(appSessionId)) ready.set(appSessionId, cwd);
+      for (const listed of sessions) if (listed.process === 'ready' && !heard.has(listed.appSessionId) && !ready.has(listed.appSessionId)) ready.set(listed.appSessionId, keptOf(listed));
     } catch {
       // the host is not answering: its next streaming notice reads again
     } finally {
@@ -446,15 +519,44 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
   // server it holds, as its mcp_status reports it (fix-D#4). U11a M8: a dynamic connector is the session's server, and
   // for a press that names an entry, MAWS's own entries as the host answers them now, read once: that one read gives the
   // entry's revision and its address, and both comparisons use it.
-  const check: SignInDeps['check'] = async ({ appSessionId, entry, ...requested }) => {
-    const cwd = ready.get(appSessionId);
+  const check: SignInDeps['check'] = async ({ appSessionId, entry, kept, ...requested }, point) => {
+    const cwd = ready.get(appSessionId)?.cwd;
     if (cwd === undefined) return 'that session is not ready';
+    if (kept !== undefined && entry !== undefined) return pluginCheck(appSessionId, cwd, { name: requested.name, revision: entry.revision }, kept, point);
     const [read, status] = await Promise.all([requested.scope === 'dynamic' && entry === undefined ? null : deps.host.call('customization.serverEndpoints', { cwd: requested.scope === 'dynamic' ? null : cwd }), deps.host.call('session.mcpStatus', { appSessionId })]);
     if (read !== null && !read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
     if (!status.ok) return `that session’s servers could not be read: ${status.error.message}`;
     if (requested.scope === 'dynamic') return dynamicRefusal({ name: requested.name, entry }, status.value.mcpServers, read?.value.servers ?? []);
     return entryRefusal({ ...requested, scope: requested.scope }, cwd, read!.value.servers, status.value.mcpServers);
   };
+  // UX wave U11h (§B, "The check"): a press from a plugin's row. Point 1 reads the endpoints at the session's own folder and
+  // its status together, finds the entry by name and revision (d), then judges (a) on the plugins the session last
+  // reported, (b) and (c) on its server of the name, and keeps what it found; points 2 and 3 read the status afresh and
+  // judge the kept entry again, and that nothing moved since, in one sentence.
+  async function pluginCheck(appSessionId: string, cwd: string, press: { name: string; revision: string }, kept: Kept, point: CheckPoint): Promise<string | null> {
+    if (point === 1) {
+      const [read, status] = await Promise.all([deps.host.call('customization.serverEndpoints', { cwd }), deps.host.call('session.mcpStatus', { appSessionId })]);
+      if (!read.ok) return `that session’s configuration could not be read: ${read.error.message}`;
+      if (!status.ok) return `that session’s servers could not be read: ${status.error.message}`;
+      const entry = pluginEntryOf(press, read.value.pluginServers ?? []);
+      if (entry === null) return pluginEntryChanged(press.name);
+      const session = ready.get(appSessionId); // the list it last reported, once both reads have answered
+      if (session === undefined) return 'that session is not ready';
+      const refusal = pluginOwnerRefusal(entry, session.plugins, session.observedAt) ?? pluginServerRefusal(entry, status.value.mcpServers);
+      if (refusal !== null) return refusal;
+      kept.pointOne = { entry, observedAt: session.observedAt, changes: pluginChanges };
+      return null;
+    }
+    const pointOne = kept.pointOne;
+    if (pointOne === undefined) return PLUGINS_CHANGED; // no point 1 passed: nothing to hold the session to
+    const status = await deps.host.call('session.mcpStatus', { appSessionId });
+    if (!status.ok) return `that session’s servers could not be read: ${status.error.message}`;
+    const session = ready.get(appSessionId);
+    if (session === undefined) return 'that session is not ready';
+    const moved = session.observedAt !== pointOne.observedAt || running.size > 0 || pluginChanges !== pointOne.changes;
+    if (moved || pluginOwnerRefusal(pointOne.entry, session.plugins, session.observedAt) !== null || pluginServerRefusal(pointOne.entry, status.value.mcpServers) !== null) return PLUGINS_CHANGED;
+    return null;
+  }
   const signIn = createSignIn({
     host: deps.host,
     listen: deps.listen,
@@ -480,6 +582,8 @@ export function startSignIn(deps: SignInServiceDeps): Settling & { stop(): void 
       offStatus();
       offHost();
       offStreaming();
+      offOperation();
+      offChanged();
       signIn.stop();
     },
   };

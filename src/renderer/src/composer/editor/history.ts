@@ -4,8 +4,14 @@
 // sources, newest first: this session's own human prompts from the transcript (a `peer` turn's opening message is not
 // the owner's), consecutive duplicates collapsed, then `session.history.list` entries not already among them (the same
 // display and the same bodies). UX wave U4a M6 (l3-input-12): the line under the text while recalling or searching, and
-// the search's matching and keys. Pure.
+// the search's matching and keys. UX wave U4b (Acceptance 3; the first Mac run; the medium review's form (b), step 1):
+// MAWS's answer envelope is never a prompt to recall. An answer waiting at the next step is a row of the running turn:
+// ↑ and the search walk past it. A message the engine joined from an envelope and the person's own waiting messages
+// reaches the transcript read apart (ticket 704: the person's message, then the envelope as a message of its own), so a
+// row's text is the person's words and the recall takes it as drawn. Pure.
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { asTyped } from '@shared/engine/grant';
+import { answerEnvelopeOf } from '@shared/engine/persons-message';
 import type { Prefill } from '../../stores/composer';
 import type { Row, TurnActivity } from '../../transcript';
 import type { ComposerDoc } from './doc';
@@ -39,13 +45,15 @@ type UserRow = Extract<Row, { kind: 'user' }>;
 // around pasted placeholders (the transcript's rows put newlines there), with the bodies in placeholder order.
 const PLACEHOLDER_SPACE = /\s*(\[Pasted text #\d+ \+\d+ lines\])\s*/g;
 const ATTACHMENT_PLACEHOLDER = /\s*\[(?:Image|PDF) #\d+\]/g;
-const keyOf = (display: string, bodies: (string | null)[]) => `${display.replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies)}`;
+// UX wave U1c (the review round's R3): both sides as typed (`asTyped`), so one prompt is one entry whichever path it came back by
+const keyOf = (display: string, bodies: (string | null)[]) => `${asTyped(display).replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies.map((body) => (body === null ? null : asTyped(body))))}`;
 
 function rowPrefill(row: UserRow): Prefill {
   const dataUrl = (url: string) => /^data:([^;,]+);base64,(.*)$/s.exec(url);
   return {
     text: typedFromRowText(row.text),
-    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text! })),
+    // UX wave U1c: a body as pasted (shared/engine/grant.ts `asTyped`)
+    pasted: row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: asTyped(a.text!) })),
     images: row.attachments.flatMap((a) => {
       const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrl(a.dataUrl) : null;
       return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts[1], data: parts[2] }] : [];
@@ -63,6 +71,14 @@ const entryKey = (e: HistoryEntry) =>
       .map(([, c]) => c.content),
   );
 
+// A row that is one of MAWS's answer envelopes, whole, with no attachment (a row of an orphan envelope, whose ask the
+// window does not hold, or one the person typed); a row with attachments recalls as it draws (the task review of U4b's
+// fix wave). The recall is the row's text as drawn, never the rest of a reading of it. Read as the split reads a
+// person's message (`answerEnvelopeOf`; ticket 704), so a text that only opens with the tag is a prompt.
+function allAnswer(row: UserRow): boolean {
+  return row.attachments.length === 0 && answerEnvelopeOf(row.text) !== null;
+}
+
 // The recallable entries, oldest first (navigation starts from the end): earlier history, then this session's prompts.
 export function recallEntries(rows: readonly Row[], activity: readonly TurnActivity[], listed: readonly HistoryEntry[]): Recall[] {
   const human = new Set(activity.filter((turn) => turn.origin === 'human').map((turn) => turn.turnId));
@@ -71,6 +87,7 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
   let last: string | null = null;
   for (const row of rows) {
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
+    if (allAnswer(row)) continue; // an answer is not a prompt (U4b)
     const prefill = rowPrefill(row);
     const key = prefillKey(prefill);
     if (key === last) continue;
@@ -90,7 +107,7 @@ export const recallDoc = (recall: Recall): ComposerDoc => (recall.source === 'se
 export const recallLine = (index: number, count: number): string => `History ${count - index}/${count} · ↓ to restore your draft`;
 
 // The text a search reads in a recall: what the box shows for it, its placeholders included.
-export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : recall.entry.display);
+export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : asTyped(recall.entry.display)); // UX wave U1c: as typed
 
 const holds = (text: string, query: string) => text.toLowerCase().includes(query.toLowerCase());
 

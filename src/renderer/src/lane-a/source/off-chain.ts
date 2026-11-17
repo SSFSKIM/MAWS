@@ -29,6 +29,8 @@
 // The held rows stay verbatim; only the drawing's mapping changes. An older producer marks nothing, and the drawing is
 // every held row, as before.
 import type { ContentBlock, SessionEvent } from '@shared/graph/events';
+import type { MessageUuid } from '@shared/graph/ids';
+import { splitPersonsMessage, type UserMessage } from '@shared/engine/persons-message';
 import { isMadeUpFinalAnswer } from '@shared/owner/message-call';
 import type { TranscriptRecord } from '@shared/wire/transcript';
 import type { JsonObject } from 'desk-hub/protocol';
@@ -200,13 +202,16 @@ export function drawingsDiffer(a: Drawing, b: Drawing, except: string | null): b
 /**
  * An undone owner input's events, under the row's own uuid: its prompt, and the engine's discarding of it before it
  * ran, so MAWS's reducer draws it where it lies as a prompt the engine dropped (a turn of its own that never started and
- * receives nothing), and the desk's mount says why (`UNDONE`).
+ * receives nothing), and the desk's mount says why (`UNDONE`). The prompt passes the one split every maker of a person's
+ * message applies (UX wave, ticket 704; its null origin is a person's): words beside MAWS's answer envelope are the
+ * person's message, under the row's uuid, and each envelope a message after it, under the uuid with `#part<n>`.
  */
 export function undoneEvents(row: JsonObject, owner: OwnerInput, ctx: BackfillContext): SessionEvent[] {
   const uuid = row.uuid as string;
   if (typeof row.timestamp === 'string') ctx.lastAt = row.timestamp;
+  const message: UserMessage = { kind: 'user.message', messageUuid: uuid as MessageUuid, content: owner.content, isReplay: false, isSynthetic: false, origin: null, bash: null };
   return [
-    { ...eventBase(ctx, uuid), kind: 'user.message', messageUuid: uuid, content: owner.content, isReplay: false, isSynthetic: false, origin: null, bash: null },
+    ...splitPersonsMessage(message).map((part, i) => ({ ...eventBase(ctx, i === 0 ? uuid : `${uuid}#part${i}`), ...part })),
     { ...eventBase(ctx, `${uuid}#undone`), kind: 'command.lifecycle', commandUuid: uuid, state: 'discarded' },
   ] as SessionEvent[];
 }

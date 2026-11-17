@@ -119,10 +119,31 @@
 // (sidebar, both ways), and its rows are in the same table.
 // UX wave U4a: (stage, its message waiting) and (stage, its message taken), a take-back's stage, the one stored value of
 // U4a build F can meet; their block is at the end of this file, and their row is in U13a's UC-14 coverage table.
+// Board ticket 711: (envelope, to the peer) and (envelope, from the peer), an async ask's answer envelope one build's host
+// writes and the other build's window reads; their block is at the end of this file, and their row is in the same table.
+// UX wave U10b-4: (space instructions, both ways), a key of the artifact store's `meta` the older builds never read, and
+// a draft's chip named for them, read across the two builds in both directions; its block is at the end of this file,
+// and its rows are in U13a's UC-14 coverage table (the table's first rows for the artifact store).
+// UX wave U6e: (an outside file, both ways) and (outside file, on the peer's daemon), a chosen file outside the session's
+// folders across build F and master at U6e's parent pin; their block is at the end of this file, and their row is in
+// U13a's UC-14 coverage table.
+// UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
+// other build's window as the row the build that reads the frames makes; its block is at the end of this file.
+// UX wave U6b-2: (file frame, both ways), `files.read`'s `raw` and its answer's `identity` across a daemon of each build;
+// its block is at the end of this file, and its row is in U13a's UC-14 coverage table.
+// UX wave U5b: (reads, on the peer's daemon), (source control, from the peer), (a commit's comment, to the peer) and (a
+// commit's side thread, to the peer), no new stored form: the git reads an older daemon lacks, its acting pane over this
+// build's daemon, and a commit's comment in a message's words and a side thread's lineage; their block is at the end of
+// this file, and their row is in U13a's UC-14 coverage table.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
+// An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
+// machines run reads it, so scripts/ci-gate-peer.mjs admits a peer of this build's own wire when it is named with
+// --peer-exact beside this group in --gates. No minor is crossed then: the assertions that hold a crossing of one (OX1's
+// additive rule, the hello and welcome at each end's minor, the gap's `unknown_command`) are skipped, each said in the
+// report as a skipped check naming the wire (skipWireSkew), and everything else runs, the stored forms read both ways first.
 import { execFileSync } from 'node:child_process'; // UX wave U8c-2: git and the index, read as a person would
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto'; // UX wave U6e: createHash, the files service's content hash
 import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -143,7 +164,8 @@ import { reachMachine } from '../src/mawsd/machine-client';
 import { answered, ENGINE_HOST_BROWSER_WORK, SCREENCAST, startPages as startHeadlessPages } from './support/headless-browser'; // P5 O17 M8; M7: the pre-O17 app's cell
 import { connectorControl, writeCuaEngine, type ConnectorControl } from '../test/support/cua-engine'; // P5 O17 M7
 import { invoke, replaySpec, turnsJournal, value } from './support/c7-replay';
-import { AgentSeam } from './support/dashboards';
+import { AgentSeam, refusalOf } from './support/dashboards'; // UX wave U10b: refusalOf
+import { TOOL_ERRORS } from '../src/shared/maws/tools'; // UX wave U10b
 import { DATASET, readDataset, SOURCE, writeBoard } from './support/live-data';
 import { readSealedText } from './support/connector-direct-checks';
 import { expectMockCustody } from './support/connector-direct-oauth';
@@ -151,15 +173,21 @@ import { placeholderGrantText, sealWithAppSafeStorage, writeLegacySealed } from 
 import { ciRefusal, e2eLabel, runIdOf } from './support/daemon-unit-guard.mjs';
 import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
-import { addressed } from './support/address'; // U13a
+import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, mainTabById, mainTabs, moveSideTab, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
-import { sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
+import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf; UX wave U5b: a new chat, the parent of a side thread
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
 import { spineFiles, spineFilesOpen } from '../test/support/spine-files';
-import { adoptedOf, attentionOf, eventsOf, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
+import { adoptedOf, attentionOf, eventsOf, firstPrompt /* board ticket 711 */, isRequestRow, isTailItemRow, pendingPermissions, PERMISSION, PROMPT, statusOf, suffix, TAIL_ITEM, tailFixture, untilRequested, withScratch, type JournalRow, type Run, type Scratch } from './support/supervisor-scratch';
 import { stubSpec } from './support/stub-engine'; // P5 O16 M3c
+import { askFixture } from './support/maws-tools'; // board ticket 711: the recorded ask with ids the model chose
+import { markPixels, minimalPdf } from './support/media-fixtures'; // UX wave U6b-2: the PDF of (file frame, both ways)
+import type { Anchor } from '@shared/anchor/anchor'; // UX wave U5b: a comment's anchor on a commit's line
+import { commentsMessage, quotedComment } from '../src/shared/anchor/message'; // UX wave U5b: the text this build writes for a comment
+import { seedTranscript, SideJournal, transcript as transcriptRecords } from './support/side-replay'; // UX wave U5b: a side thread on the replay
+import { clickRevealed } from './support/hover'; // UX wave U5b: a line's add control in Review
 
 const PEER = process.env.MAWS_E2E_PEER_ROOT || null;
 test.skip(process.env.MAWS_CROSS_BUILD_E2E !== '1', 'the two-build check runs under pnpm e2e:cross-build (MAWS_CROSS_BUILD_E2E=1)');
@@ -187,6 +215,11 @@ interface Build {
   mainOnly: Set<string>; // the commands its windows cannot send: its preload bridges only the others
 }
 const wireOf = (build: Build) => `${build.manifest.major}.${build.manifest.minor}`;
+// Whether two builds speak one wire (builds() holds their majors equal), and the report's word for a wire-skew assertion
+// skipped for such a pair: skipped, not passed, since it would hold nothing
+const sameWire = (a: Build, b: Build) => a.manifest.minor === b.manifest.minor;
+const skipWireSkew = (build: Build, check: string) =>
+  test.info().annotations.push({ type: 'skipped check', description: `${check}: both builds speak wire ${wireOf(build)} (equal wire: stored forms only), so no minor is crossed` });
 type CommandEntry = { owner: string; input: unknown };
 const commandOf = (build: Build, name: string) => build.manifest.entries[`commands.${name}`] as CommandEntry | undefined;
 
@@ -216,7 +249,8 @@ function builds(): { older: Build; newer: Build; here: Build; peer: Build } {
   const [older, newer] = here.manifest.minor < peer.manifest.minor ? [here, peer] : [peer, here];
   // OX1's rule between the two, as between two minors: within a major nothing may change but additively (a JSON Schema
   // rendering rebased after a zod upgrade reads as breaking here too; such a pair is not one this check can vouch for)
-  expect(classifyWireChange(older.manifest, newer.manifest).breaking, `${older.label} (wire ${wireOf(older)}) to ${newer.label} (wire ${wireOf(newer)})`).toEqual([]);
+  if (sameWire(older, newer)) skipWireSkew(here, "OX1's additive rule from the older minor to the newer (classifyWireChange)");
+  else expect(classifyWireChange(older.manifest, newer.manifest).breaking, `${older.label} (wire ${wireOf(older)}) to ${newer.label} (wire ${wireOf(newer)})`).toEqual([]);
   return { older, newer, here, peer };
 }
 
@@ -323,10 +357,26 @@ interface CrossingSteps {
   attacherMoved?(run: Run): Promise<string[]>;
 }
 
+// A crossing needs the attacher's engine host to be another build's. Two builds a minor apart always differ there; two
+// of one wire may not (a change outside every bundle the engine host takes, a stored form of the renderer's), and the
+// attacher's main then meets a host of its own build: matched `same`, served, never handed over or moved. So the scene
+// is skipped, saying so, as soon as the attacher names the bundle it would start (host.status's appBuildId).
+async function skipOneEngineHost(attaching: Run, keptBuild: string, keeper: Build, attacher: Build): Promise<void> {
+  const { appBuildId } = value(await invoke(attaching.page, 'host.status', undefined));
+  test.skip(appBuildId === keptBuild, `${keeper.label} (wire ${wireOf(keeper)}) and ${attacher.label} (wire ${wireOf(attacher)}) bundle one engine host, build ${keptBuild}: there is no other build's engine host to attach to`);
+}
+
 async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer: Build; older: Build } | null, shapes: Shapes, steps: CrossingSteps = {}): Promise<string[]> {
   if (holds(keeper) && holds(attacher)) return handedOverCrossing(s, keeper, attacher, shapes, steps); // P5 O16 M3c
   const shapeOf = (shape: Shape) => (shape === 'daemon' ? ' on the daemon shape' : '');
   const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)})${shapeOf(shapes.keeper)} keeps a session; ${attacher.label} (wire ${wireOf(attacher)})${shapeOf(shapes.attacher)} attaches`];
+  // an equal wire has no gap to probe: neither build lacks a command of the other's
+  const crossesMinor = !sameWire(keeper, attacher);
+  if (!crossesMinor && gap) {
+    skipWireSkew(keeper, "the gap: the newer build's added commands, unknown_command from the older supervisor");
+    said.push('  gap: not probed: the two builds speak one wire');
+    gap = null;
+  }
 
   // the keeper: a paced replay kept across a quit, its auto-mode denial and its request still ahead
   const first = await s.launch({ MAWS_HOST_MODE: shapes.keeper, MAWS_E2E_QUIT_ANSWER: 'keep', MAWS_E2E_REPLAY_ROW_MS: ROW_MS, ...steps.env }, keeper.root);
@@ -357,6 +407,7 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   const legacyRoute = routesMachine(attacher) && !routesMachine(keeper) ? turnsJournal(s.root, 'machine-legacy', 1) : null;
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(idleMs), ...(legacyRoute !== null && { MAWS_E2E_REPLAY_FIXTURES: legacyRoute }), ...steps.env }, attacher.root);
   let second = await attach();
+  await skipOneEngineHost(second, kept.buildId, keeper, attacher);
   const attacherRuns: Run[] = [second]; // P5 O3-D M6: the attacher's launches (acceptance 9 quits and reattaches it)
   const served = await s.ready(second.page, (st) => st.supervisor!.exitWhenIdle && onOwnShape(shapes.attacher, keeperDaemon)(st));
   expect(served, `${attacher.label} served by ${keeper.label}'s supervisor`).toMatchObject({ matches: 'build', supervisor: { pid: kept.pid, buildId: kept.buildId, liveSessions: 1, exitWhenIdle: true } });
@@ -373,11 +424,16 @@ async function crossing(s: Scratch, keeper: Build, attacher: Build, gap: { newer
   // says this build's engine-host build and wire, and the app's main reads the welcome `mawsd` reflects from upstream
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
   const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
-  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello, at its own minor`).toContain(hello);
   const welcome = `connected to supervisor pid ${kept.pid} build ${kept.buildId} wire ${wireOf(keeper)} capabilities [`;
-  expect(second.output(), "the attaching app's main: the welcome, at the supervisor's minor").toContain(welcome);
-  if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
-  said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
+  if (crossesMinor) {
+    expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello, at its own minor`).toContain(hello);
+    expect(second.output(), "the attaching app's main: the welcome, at the supervisor's minor").toContain(welcome);
+    if (attacherDaemon !== null) expect(s.daemonLog(), "mawsd's log: the upstream's welcome, at the supervisor's minor").toContain(welcome);
+    said.push(`  hello: ${hello}…`, `  welcome: ${welcome}…`);
+  } else {
+    skipWireSkew(keeper, "the hello and the welcome across the minor, each at its end's wire (host.log, the attaching app's main, mawsd's log)");
+    said.push('  hello, welcome: not checked across a minor: the two builds speak one wire');
+  }
   if (keeperDaemon !== null) {
     // How the keeper's `mawsd` goes depends on the attacher's build and shape. On the daemon shape (P5 O15 M1) its build
     // check asks that `mawsd`, of another build, to restart, and its own serves the kept engine host. One that knows the
@@ -547,6 +603,7 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   // the other build's app attaches: its client asks the kept host to hand over, and a host of its own build adopts
   const attach = () => s.launch({ MAWS_HOST_MODE: shapes.attacher, MAWS_E2E_SUPERVISOR_IDLE_MS: String(shapes.attacher === 'daemon' ? REATTACH_IDLE_MS : IDLE_MS), ...steps.env }, attacher.root);
   let second = await attach();
+  await skipOneEngineHost(second, kept.buildId, keeper, attacher);
   const attacherRuns: Run[] = [second];
   const served = await s.ready(second.page, (st) => st.supervisor!.pid !== kept.pid && onOwnShape(shapes.attacher, keeperDaemon)(st), 90_000);
   const build = served.appBuildId;
@@ -555,7 +612,8 @@ async function handedOverCrossing(s: Scratch, keeper: Build, attacher: Build, sh
   await expect.poll(() => isAlive(kept.pid), { timeout: 15_000, message: 'the kept supervisor is gone' }).toBe(false);
   const attacherDaemon = shapes.attacher === 'daemon' ? served.daemon!.pid : null;
   const hello = `client connected: appPid ${attacherDaemon ?? second.child.pid} build ${build} wire ${wireOf(attacher)} capabilities [`;
-  expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
+  if (sameWire(keeper, attacher)) skipWireSkew(keeper, "the hello to the kept host across the minor, at the attacher's wire (host.log)");
+  else expect(s.log(), `host.log: the attaching ${attacherDaemon === null ? 'app' : 'app’s mawsd'}'s hello to the kept host, at its own minor`).toContain(hello);
   expect(s.log(), 'host.log: the kept host handed over').toContain('exiting (handover)');
   await expect(banner(second.page, 'MAWS was updated.'), 'no banner: the kept host hands over, never waits for idle (P5 O16 M3c fix wave 2: served at most until its first quiet status)').toHaveCount(0);
   if (keeperDaemon !== null) {
@@ -1749,10 +1807,47 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   | the index: `sessions.launch_folder`,          | (moved, from this build): F shows the session where   | (moved, from this build): this build shows what F  |
 //   | `sessions.agent_folder` (UX wave U8c-2)       | its directory says, finds its transcript there (its   | shows for a session F filed last, and the facts    |
 //   |                                               | resume's recorded state) and files on                 | again after the session's next row                 |
+//   | U6b-1: files beside the chat                  | (files beside the chat, both ways): F draws its one   | the return: the files beside the chat, the preview |
+//   | (`panel.<session>` with several Files tabs,   | Files surface with its tree, refuses no value, opens  | still the preview, the file F opened a main tab    |
+//   | their `panelTools.params`; `files.tree`)      | a file as a main tab and keeps every tab and          | only; F's pin the tree-only tab, holding no file;  |
+//   |                                               | `files.tree` whole; F's pin of a file's tab           | the tree's width and open folder as stored         |
 //   | a take-back's stage (U4a): the session's      | (stage, its message waiting), (stage, its message     | the return of each: the stage carried forward      |
 //   | stored draft, its document's `takeBack`,      | taken): F's box shows it as an ordinary draft; what   | (withdrawn and in the box; with the message taken, |
 //   | kept for the seconds a take-back lasts        | F leaves at its unmount is read and is what this      | cleared, saying the agent has it), or F's draft    |
 //   |                                               | build finds                                           | standing beside the message, each said             |
+//   | an async ask's answer envelope (board ticket  | (envelope, to the peer): F draws the answer on its    | (envelope, from the peer): this build draws the    |
+//   | 711): the user message the host writes, kept  | question's row, whole, and never the envelope as raw  | answer of the form F writes the same way           |
+//   | in the session's journal and transcript       | text                                                  |                                                    |
+//   | a document's `page`, on its settings node     | (document page, both ways): F reads the document,     | the return: the page still in force in a read of   |
+//   | (UX wave U10b-1)                              | exports it on its own size, accepts a suggestion on   | the document and of F's version, and in its PDF;   |
+//   |                                               | it and saves a version; `artifacts.status` ok         | F's own document reads the system's page           |
+//   | the artifact store's `meta` key               | (space instructions, both ways): F opens the store    | the return: each Space that still exists has its   |
+//   | `spaceInstructions` (U10b-4), with no         | `ok`, not `readOnly` (`user_version` 4), never reads  | text (a renamed one keeps it, marked); the entry of|
+//   | migration                                     | the key, and keeps it through its rename and delete   | one F deleted is answered for nothing and dropped  |
+//   |                                               | of Spaces                                             | at the next write; a Space F made has none         |
+//   | a stored draft whose pasted chip carries a    | (space instructions, both ways): F's box draws the    | the return: the chip by the same name, in the box  |
+//   | name (U10b-4)                                 | chip by the name stored, and its draft keeps it       | and in the draft F left                            |
+//   | the artifact store (UX wave U10b-2): the key  | (deleted draft, both ways): F's `artifacts.status` is | the return of (deleted draft, both ways): the     |
+//   | `agentDraft:<id>` in `meta` (the mark), an    | `ok`; the draft this build's agent deleted is not in  | delete of the draft F's person typed in is refused |
+//   | agent's delete recorded in it, and a cleared  | F's library; F's person types in the agent's other    | (`why: 'unknown'`); the agent's delete made before |
+//   | `deletedAt`                                   | draft and F's store holds the text                    | the stay is still undone, and the store is `ok`    |
+//   | U6e: `sessions/file-grants.json`, a profile   | (an outside file, both ways), for F and for master at | the return: both files read and savable again, the |
+//   | file the peer does not know; the mark `agent` | U6e's parent pin: the peer draws its Files tree and   | one beside the chat saving once more; the grants   |
+//   | in a Files tab's params; the tab of a chosen  | the main tab's refusal, refuses no value, writes its  | file as this build left it. The mark is written    |
+//   | file (a Files tab, a main `file` tab)         | pin, and leaves the grants file's bytes as they were  | only by an agent's open, which no scene here       |
+//   |                                               |                                                       | replays; both peers keep a tab's params whole      |
+//   |                                               |                                                       | (U6b-1's row)                                      |
+//   | U6b-2: nothing stored. On the wire,           | (file frame, both ways): on the peer's mawsd this     | the second half: the peer's app on this build's    |
+//   | `files.read`'s `raw` and its answer's         | build's window draws the PDF's row, with the          | unit mawsd draws its row as it always did, Open    |
+//   | `identity` (`src/shared/ipc/schema/files.ts`) | sentence for a service that cannot serve it, and      | externally reaching the seam, nothing refused. A   |
+//   |                                               | no frame; the peer's daemon drops `raw`, refuses      | peer from before O4 is refused by this build's     |
+//   |                                               | nothing, and its Open externally reaches the seam;    | mawsd: "not run: <reason>", held by                |
+//   |                                               | on this build's own mawsd the tab draws the PDF       | service.test.ts "a plain read's answer is what it  |
+//   |                                               |                                                       | was" and files.test.ts "an answer with identity is |
+//   |                                               |                                                       | read by a reader that does not know it as the      |
+//   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
+//   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
+//   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -2223,6 +2318,89 @@ test('(sidebar, both ways) this build hides a session and quits; the peer, which
     expect(again.maws.consoleErrors()).toEqual([]);
     await s.quit(again);
     said.push(`  ${here.label} again: the sidebar folded, the row under Hidden · 1`);
+    record(said);
+  });
+});
+
+// ---- UX wave U10b-2: an agent's draft, its delete and its undo, across a stay under the peer ------------------------------
+
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M4 and M5, §C.1, §G; the wave's root,
+// UC-14): an agent's draft carries a mark in the store's `meta` table (`agentDraft:<id>`), which this build keeps with
+// every content row its own sessions write, and which a build from before U10b never reads (its `meta` is read by key
+// only) and never keeps: a content row it appends leaves the mark behind the artifact's newest row. No migration is
+// added, so the peer's store stays `ok`. Its row is in UC-14's coverage table above (U13a's block).
+//   (deleted draft, both ways) this build's agent, a session of the host's agent seam, makes two drafts and deletes the
+//                              second, and quits. The peer opens the profile: its `artifacts.status` is `ok`, its library
+//                              lists the first draft and not the deleted one, and a person types in the first, which
+//                              the peer's store holds. This build opens the profile again: the agent's delete of the
+//                              draft the person typed in is refused with §C.1's sentence (`why: 'unknown'`, the mark
+//                              behind the newest row), the delete made before the stay is still undone, and the store
+//                              is `ok`. Skipped for a peer whose store keeps the mark (its storage.ts names agentDraft).
+const keepsAgentDrafts = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/engine-host/documents/storage.ts'), 'utf8').includes('agentDraft');
+const DRAFTER = 'xb-drafter'; // the agent's session, as the host's seam names it
+const PERSON_TYPED = ' A person added this under the older build.';
+
+test('(deleted draft, both ways) this build’s agent makes two drafts and deletes one; the peer’s store is ok, lists the kept draft alone, and takes a person’s edit there; this build refuses the agent’s delete of the edited draft and still undoes the earlier delete', async () => {
+  const { here, peer } = builds();
+  test.skip(keepsAgentDrafts(peer), `the peer (wire ${wireOf(peer)}) keeps the agent-draft mark (its storage.ts names agentDraft): a build from U10b on, not one that has never heard of it`);
+  await withScratch('xb-deleted-draft', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) drafts and deletes; ${peer.label} (wire ${wireOf(peer)}) opens the profile and a person types; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam, on every launch of the scene
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const statusOf = async (page: Page) => value(await invoke(page, 'artifacts.status', undefined));
+    const listed = async (page: Page) => value(await invoke(page, 'library.list', {})).rows.map((row) => row.id);
+
+    // this build: the agent's two drafts, the second deleted by the agent
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const plan = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft plan', handle: 'draft-plan', content: '# Draft plan\n\nAn agent wrote this.' })).artifactId;
+    const notes = (await agent.ok<{ artifactId: string }>(DRAFTER, 'artifact_create', { kind: 'document', title: 'Draft notes', handle: 'draft-notes', content: '# Draft notes\n\nAn agent wrote these.' })).artifactId;
+    expect(await agent.ok(DRAFTER, 'artifact_delete', { artifact: notes })).toEqual({ status: 'deleted', artifactId: notes, kind: 'document', title: 'Draft notes' });
+    expect(value(await invoke(ours.page, 'artifacts.get', { artifactId: notes })).deleted, 'an agent’s delete, which Undo can take back').toEqual({ title: 'Draft notes', kind: 'document', undoable: true });
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd of its own build
+    said.push(`  drafted: ${plan} (kept), ${notes} (deleted by the agent)`);
+
+    // the peer: its store ok, the deleted draft not listed, a person's edit in the kept one
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    expect(await statusOf(theirs.page), `${peer.label}'s store after this build wrote: ok, not readOnly (no migration added)`).toMatchObject({ status: 'ok' });
+    await expect.poll(() => listed(theirs.page), { timeout: 20_000, message: `${peer.label}'s library lists the kept draft` }).toContain(plan);
+    expect(await listed(theirs.page), `${peer.label}'s library leaves out the draft the agent deleted`).not.toContain(notes);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: 'Draft plan', exact: true }).click({ timeout: 20_000 });
+    const editor = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${plan}"] .ProseMirror[data-editor="live"]`);
+    await expect(editor, `${peer.label} draws the draft`).toContainText('An agent wrote this.', { timeout: 20_000 });
+    // the store's revision, read through the window and no session's tool, so the only content write under the peer is
+    // the person's
+    const revisionOf = async (page: Page) => value(await invoke(page, 'artifacts.get', { artifactId: plan })).artifact?.revision ?? -1;
+    const before = await revisionOf(theirs.page);
+    await editor.click();
+    await theirs.page.keyboard.press('End');
+    await theirs.page.keyboard.type(PERSON_TYPED);
+    await expect.poll(() => revisionOf(theirs.page), { timeout: 20_000, message: `${peer.label}'s store took the person's edit` }).toBeGreaterThan(before);
+    expect(await statusOf(theirs.page), `${peer.label}'s store after its own write`).toMatchObject({ status: 'ok' });
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: status ok, ${notes} not listed, a person's edit in ${plan}`);
+
+    // this build again: the edited draft refused, the earlier delete undone
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    const refused = await agent.call(DRAFTER, 'artifact_delete', { artifact: plan });
+    expect(refused.text, 'the delete of a draft a person wrote to under the peer').toContain(TOOL_ERRORS.deleteUnknown('Draft plan'));
+    expect(refusalOf(refused)).toMatchObject({ reason: 'invalid', why: 'unknown' });
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: plan })).artifact?.title, 'the edited draft stays').toBe('Draft plan');
+    expect(JSON.stringify(await agent.ok('xb-reader', 'artifact_read', { artifact: plan })), `the person's edit under ${peer.label}, read here`).toContain(PERSON_TYPED.trim());
+    value(await invoke(again.page, 'artifacts.undelete', { artifactId: notes }));
+    expect(value(await invoke(again.page, 'artifacts.get', { artifactId: notes })).artifact?.title, 'the agent’s delete made before the stay, undone after it').toBe('Draft notes');
+    await expect.poll(() => listed(again.page), { timeout: 20_000, message: 'the library lists the restored draft' }).toContain(notes);
+    expect(await statusOf(again.page)).toMatchObject({ status: 'ok' });
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: the delete of ${plan} refused (${refusalOf(refused).why as string}), ${notes} undeleted`);
     record(said);
   });
 });
@@ -2986,6 +3164,14 @@ const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names D
 // what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
 const STAGE_ROW_MS = 6_000;
 const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+// UX wave U1b: whether a build's request takes its composer's place (its `swapOf`, the docked swap). Both peers, build F
+// and the master build, dock a session's oldest request over the box; from U1b a request is drawn in the transcript and
+// the box is shown beside it, so on such a build a request ahead holds no box and the premise above stands.
+const docksRequests = (build: Build) => {
+  const swap = join(build.root ?? REPO_ROOT, 'src/renderer/src/composer/docked/swap.ts');
+  return existsSync(swap) && readFileSync(swap, 'utf8').includes('export function swapOf');
+};
+const boxHeld = async (build: Build, page: Page, id: AppSessionId) => docksRequests(build) && (await hasRequest(page, id));
 const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
 const STAGE_TAKEN = 'Rename the second fixture once the review is done';
 const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
@@ -3074,7 +3260,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
 
     // the peer: the stage in its box as an ordinary draft, the message still listed
     const old = await launchServed(s, id, peer.root);
-    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(peer, old.page, id), STAGE_PREMISE);
     expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
     const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
     said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
@@ -3085,7 +3271,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
     expect(found, 'this build finds what the peer left').toEqual(left);
     const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
     expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
-    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(here, back.page, id), STAGE_PREMISE);
     await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
     if (stageOf(found) !== null) {
       await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
@@ -3129,7 +3315,8 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
     // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
     // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
-    // the next prompt and no request's card holds either build's box
+    // the next prompt and no request's card holds the box of a build that docks one (`docksRequests`: both peers; this
+    // build, from UX wave U1b, never covers it)
     type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
     let next: Requested | undefined;
     await expect
@@ -3170,5 +3357,1293 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     await s.quit(back);
     said.push(`  ${here.label} again: ${outcome}`);
     record(said);
+  });
+});
+
+// ---- Board ticket 711: an async ask's answer envelope, read across the two builds -----------------------------------
+// The answer to an asynchronous `mcp__maws__ask` reaches the engine as a user-role message, its envelope
+// (src/shared/maws/ask.ts, askSteerText), which the session's journal and the engine's transcript keep and every build
+// that opens the session reads (parseAskSteer: the transcript's capsule and bubbles, the queue's row, the arrivals
+// reader). From this landing it holds no text the model wrote: each question by its number (in the block, `q<n>`), a
+// picked option by its place (`option <k>`), the other answers as JSON strings, the block's `question` empty and each
+// answer's question named by its place, which this build's reader joins back to the question's own id. The builds
+// before it write the question's words and the label on its line and in its block. Both scenes play the recorded async
+// ask (pass3/p1-maws-ask-async) on the stub engine under a session host, answer it through `maws.ask.answer` as the
+// Question sheet does, and quit with the session kept; the other build opens the session.
+//   (envelope, to the peer)   this build's host writes the new form for the recorded ask with its question's id chosen
+//                             by the model (askFixture); the peer draws the capsule on the question's row, whole, with
+//                             no console error and no "[MAWS ask" text in the session's transcript. Its row reads the
+//                             label ("Yes") where it holds the host's `maws.ask.answered` event, which wins over the
+//                             steer; on the steer alone, `option 1`, or "Not answered" where its reader joins the
+//                             block's place `q1` to no question (the stated residue of the ids by place, measured
+//                             here). The scene records which it met and fails on any other.
+//   (envelope, from the peer) the peer's host writes its form; this build draws the label ("Yes") the same. Run only
+//                             with a peer that writes the earlier form (its ask.ts keeps the question's words in the
+//                             block); skipped otherwise, saying so.
+// This build's window draws "Yes" either way: from the event, or from the steer read back with the call
+// (askAnswersFromSteer). The envelope is read all the same, since only a reader that parsed it draws it as no bubble.
+// The steer as the answers' only source (a session read from the engine's transcript alone) is held by the unit tests
+// (src/renderer/src/transcript/model/maws.test.ts and disk.test.ts). Its row is in UC-14's coverage table (U13a's
+// block).
+const ASK_ASYNC_FIXTURE = 'spikes/protocol-probe/fixtures/pass3/p1-maws-ask-async.jsonl';
+const ENVELOPE_ANSWERS = [{ id: 'q1', question: 'Proceed?', status: 'answered' as const, value: ['Yes'] }]; // as the sheet sends them
+// (envelope, to the peer): the recorded ask with its question named by the model (askFixture rewrites the call's
+// arguments in each frame that carries them), so the block's place `q1` is not the question's id
+const CHOSEN_ID = 'proceed-or-stop';
+const CHOSEN_ASK = { blocking: false, questions: [{ id: CHOSEN_ID, question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }] };
+const CHOSEN_ANSWERS = [{ ...ENVELOPE_ANSWERS[0]!, id: CHOSEN_ID }];
+const NOT_ANSWERED = 'Not answered'; // transcript/model/copy.ts ASK.notAnswered, in this build and in build F
+// a peer whose writer is this landing's or later: its ask.ts reads the new form back (askAnswersFromSteer, which no
+// build before this landing has: 0 at f1852de3a and at 2c7044231)
+const writesNewEnvelope = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/shared/maws/ask.ts'), 'utf8').includes('export function askAnswersFromSteer');
+const writesNewEnvelopeWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) writes the envelope this build writes (its src/shared/maws/ask.ts has askAnswersFromSteer): no earlier form to read; the run of record is the merge-base peer's or build F's, --peer-exact f1852de3a`;
+
+// The envelope the session's host wrote for the ask: the `user` frame it sent opening with the ask's tag
+function envelopeIn(s: Scratch, id: AppSessionId, askId: string): string | null {
+  for (const row of s.journal(id)) {
+    const content = row.direction === 'out' && row.frame.type === 'user' ? (row.frame.message as { content?: unknown } | undefined)?.content : undefined;
+    if (typeof content === 'string' && content.startsWith(`[MAWS ask ${askId}] `)) return content;
+  }
+  return null;
+}
+
+// The recorded async ask played and answered on `page`'s build: the prompt, the ask's call allowed, the ask answered as
+// the Question sheet answers it, the envelope that build's host wrote, and both main turns ended (the reply the
+// second's)
+async function answerAsyncAsk(page: Page, s: Scratch, id: AppSessionId, answers: readonly { id: string }[] = ENVELOPE_ANSWERS): Promise<{ askId: string; envelope: string }> {
+  value(await invoke(page, 'session.send', { appSessionId: id, content: firstPrompt(ASK_ASYNC_FIXTURE) }));
+  const requested = await untilRequested(page, id);
+  value(await invoke(page, 'session.answer', { appSessionId: id, requestId: requested.requestId, answer: { kind: 'permission', decision: 'allow', scope: 'once' } }));
+  type Opened = Extract<SessionEvent, { kind: 'maws.ask.opened' }>;
+  let opened: Opened | undefined;
+  await expect.poll(async () => (opened = (await eventsOf(page, id)).find((e): e is Opened => e.kind === 'maws.ask.opened')), { timeout: 60_000, message: 'the ask opened' }).toBeDefined();
+  expect(opened!.blocking, 'the recorded ask does not wait').toBe(false);
+  value(await invoke(page, 'maws.ask.answer', { appSessionId: id, askId: opened!.askId, answers: answers as typeof ENVELOPE_ANSWERS }));
+  let envelope: string | null = null;
+  await expect.poll(() => (envelope = envelopeIn(s, id, opened!.askId)), { timeout: 60_000, message: 'the host wrote the answer’s envelope' }).not.toBeNull();
+  type Ended = Extract<SessionEvent, { kind: 'turn.ended' }>;
+  await expect
+    .poll(async () => (await statusOf(page, id)).turn === null && (await eventsOf(page, id)).filter((e): e is Ended => e.kind === 'turn.ended' && e.parentToolUseId === null && !e.isEchoReceipt).length >= 2, { timeout: 90_000, message: 'both main turns ended, the reply the second’s' })
+    .toBe(true);
+  return { askId: opened!.askId, envelope: envelope! };
+}
+
+// The session as `run`'s window draws it: its tab shown, the ask's capsule answered on its one question's row,
+// "Proceed?" → one of `answers` (the label, the pick by its place, or "Not answered" where an older window joins no
+// answer to a question whose id the model chose), and no "[MAWS ask" text in its transcript (an envelope no reader
+// parsed would be a bubble of it), with no console error. Returns what the row read.
+async function drawsAnswered(run: Run, id: AppSessionId, askId: string, answers: readonly string[] = ['Yes']): Promise<string> {
+  await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+  const main = run.page.locator('[data-region="main"]');
+  const capsule = main.locator(`section.transcript-ask[data-ask-id="${askId}"]`);
+  await expect(capsule, 'the ask’s capsule reads answered').toHaveAttribute('data-ask-state', 'answered', { timeout: 30_000 });
+  const line = capsule.locator('[data-ask-answer]');
+  await expect(line, 'one row, the question’s').toHaveCount(1);
+  await expect(line.locator('.transcript-question-label'), 'the question’s words, from the call').toHaveText('Proceed?');
+  const answer = line.locator('.transcript-question-answer');
+  await expect.poll(async () => answers.includes((await answer.textContent()) ?? ''), { message: `the answer on its question’s row, whole: one of ${answers.join(', ')}` }).toBe(true);
+  await expect(main.locator('[data-transcript-scroller]').getByText('[MAWS ask', { exact: false }), 'the envelope is drawn as no text').toHaveCount(0);
+  expect(run.maws.consoleErrors()).toEqual([]);
+  return (await answer.textContent()) ?? '';
+}
+
+test('(envelope, to the peer) this build’s host delivers an async ask’s answer by the question’s number alone; the peer draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  await withScratch('xb-envelope-to', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) answers an async ask; ${peer.label} (wire ${wireOf(peer)}) opens the session`];
+    s.useStub();
+    const run = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' });
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    await s.launchSession(run.page, id, askFixture(s.root, ASK_ASYNC_FIXTURE, CHOSEN_ASK), { cwd: s.repo });
+    const { askId, envelope } = await answerAsyncAsk(run.page, s, id, CHOSEN_ANSWERS);
+    expect(envelope.split('\n').slice(0, 3), 'this build’s host wrote the new form').toEqual([`[MAWS ask ${askId}] The user answered the questions you asked:`, '1. option 1', '```json']);
+    for (const words of ['Proceed?', 'Yes', CHOSEN_ID]) expect(envelope, 'with no words of the model’s').not.toContain(words);
+    expect(envelope, 'the block names the question by its place').toContain('"id": "q1"');
+    await drawsAnswered(run, id, askId);
+    await s.quit(run);
+    said.push(`  ${here.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn here answered`);
+
+    const old = await launchServed(s, id, peer.root);
+    const read = await drawsAnswered(old, id, askId, ['Yes', 'option 1', NOT_ANSWERED]);
+    await s.quit(old);
+    const how = read === 'Yes' ? 'the label, from the host’s event' : read === 'option 1' ? 'the pick by its place, from the steer' : 'no answer joined: the block’s q1 is not the id the model chose (the stated residue)';
+    said.push(`  ${peer.label}: the capsule answered, "Proceed?" → ${JSON.stringify(read)} on its row (${how}), no envelope drawn, no console error`);
+    record(said);
+  });
+});
+
+test('(envelope, from the peer) the peer’s host delivers an async ask’s answer in the form the earlier builds write; this build draws it on the question’s row, whole, and never the envelope as raw text', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(writesNewEnvelope(peer), writesNewEnvelopeWhy(peer));
+  await withScratch('xb-envelope-from', async (s) => {
+    const said: string[] = [`${peer.label} (wire ${wireOf(peer)}) answers an async ask; ${here.label} (wire ${wireOf(here)}) opens the session`];
+    s.useStub();
+    const old = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, peer.root);
+    await s.ready(old.page);
+    const id = await s.record(old.page);
+    const input = fitTo(commandOf(peer, 'session.launch')!.input, { spec: stubSpec(s.stub!, id, ASK_ASYNC_FIXTURE, { cwd: s.repo }) });
+    expect(value(await invoke(old.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+    await expect.poll(async () => value(await invoke(old.page, 'session.status', { appSessionId: id })).process, { timeout: 30_000 }).toBe('ready');
+    const { askId, envelope } = await answerAsyncAsk(old.page, s, id);
+    expect(envelope.split('\n')[1], 'the peer’s host wrote the earlier form, the question’s words and the label on its line').toBe('1. Proceed? — Yes');
+    await drawsAnswered(old, id, askId);
+    await s.quit(old);
+    said.push(`  ${peer.label}: the envelope's line ${JSON.stringify(envelope.split('\n')[1])}; drawn there answered`);
+
+    const back = await launchServed(s, id);
+    await drawsAnswered(back, id, askId);
+    await s.quit(back);
+    said.push(`  ${here.label}: the capsule answered, "Proceed?" → "Yes" on its row, no envelope drawn`);
+    record(said);
+  });
+});
+
+// ---- UX wave U10b-1: a document's page, read across the two builds -------------------------------------------------------
+
+// UX wave U10b-1 (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, §G and M3; the wave's root, UC-14): a
+// document's page setting is an attribute `page` on its settings node, beside `dsOverrides`, which build F and build 2c
+// read and keep without knowing it (every reader there asks for `dsOverrides` alone, and an accepted suggestion pairs
+// every root's attributes). Its row is in UC-14's coverage table above (U13a's block).
+//   (document page, both ways) this build's agent makes a document with a suggestion pending and sets its page to A4 at
+//                        compact density. The peer opens the profile: its store is `ok`, its agent's read has no page,
+//                        its PDF of the document prints on its own size (Letter, the system's), the person accepts the
+//                        suggestion in its editor, a version is saved there, and its agent makes a document of its own.
+//                        This build opens the profile again: the document reads the accepted text and its page, A4 and
+//                        compact, live and in the peer's version, and prints on A4; the peer's document reads the
+//                        system's page and prints on Letter. Skipped only for a peer whose settings node already holds
+//                        the page (its src/artifacts/document/meta.ts reads `docPage`), never for an equal wire.
+const knowsDocumentPage = (build: Build) => readFileSync(join(build.root ?? REPO_ROOT, 'src/artifacts/document/meta.ts'), 'utf8').includes('docPage');
+// A PDF's first page's size in points, rounded (Chromium writes its page objects uncompressed).
+const pdfPageSize = (path: string): { width: number; height: number } => {
+  const box = /\/MediaBox\s*\[\s*0\s+0\s+([\d.]+)\s+([\d.]+)\s*\]/.exec(readFileSync(path).toString('latin1'));
+  return { width: Math.round(Number(box?.[1])), height: Math.round(Number(box?.[2])) };
+};
+const LETTER = { width: 612, height: 792 };
+const A4 = { width: 595, height: 842 };
+const PAGE_DOC = 'Cross-build page memo';
+const PEER_DOC = 'Cross-build peer memo';
+const PROPOSED = 'Proposed by the agent before the page was set.';
+type PageRead = { artifactId: string; markdown: string; page?: { size: string; density: string }; version?: { id: number } };
+
+test('(document page, both ways) this build sets a document’s page and leaves a suggestion; the peer, which knows no page, reads it, prints on its own size, accepts the suggestion and saves a version; this build reads the page back in force, live and in that version', async () => {
+  test.setTimeout(300_000);
+  const { here, peer } = builds();
+  test.skip(knowsDocumentPage(peer), `the peer (wire ${wireOf(peer)}) reads a document's page (its meta.ts names docPage): a build from U10b-1 on, not one that has never heard of the setting`);
+  await withScratch('xb-document-page', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) sets a document's page; ${peer.label} (wire ${wireOf(peer)}) opens the profile; ${here.label} opens it again`];
+    const env = { MAWS_DASHBOARD_E2E: '1' }; // the host's agent seam (e2e/support/dashboards.ts), at both builds
+    const agent = new AgentSeam(join(s.userData, 'dashboard-e2e'));
+    const AGENT = 'xb-page-agent';
+    const read = (artifact: string, more: Record<string, unknown> = {}) => agent.ok<PageRead>(AGENT, 'artifact_read', { artifact, ...more });
+    const pdfOf = async (page: Page, artifactId: string) => pdfPageSize(value(await invoke(page, 'artifacts.export', { artifactId, format: 'pdf' })).path);
+    const storeOk = async (page: Page, build: Build) => expect(value(await invoke(page, 'artifacts.status', undefined)), `${build.label}'s store opens the profile writable`).toMatchObject({ status: 'ok' });
+
+    // this build: the agent's document, a suggestion pending on it, then its page
+    const ours = await s.launch(env);
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const created = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PAGE_DOC, content: '# Page memo\n\nThe first paragraph of the memo.\n' });
+    const id = created.artifactId;
+    const first = /\^([A-Za-z0-9_-]+)\s*$/m.exec((await read(id)).markdown)![1]!;
+    await agent.ok(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', mode: 'suggest', ops: [{ op: 'insert', after: first, markdown: PROPOSED }] });
+    const set = await agent.ok<{ results: unknown[] }>(AGENT, 'artifact_edit', { artifact: id, baseRevision: 'last', ops: [{ op: 'set_page', size: 'a4', density: 'compact' }] });
+    expect(set.results).toEqual([{ op: 'set_page', size: 'a4', density: 'compact' }]);
+    expect((await read(id)).page, 'this build reads the page it wrote').toEqual({ size: 'a4', density: 'compact' });
+    expect(await pdfOf(ours.page, id), 'and prints on it').toEqual(A4);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts its own mawsd and engine host
+    said.push(`  ${here.label}: ${id} set to A4, compact, a suggestion pending`);
+
+    // the peer: its store writable, the page unknown to its read and its export, the suggestion accepted, a version saved
+    const theirs = await s.launch(env, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await storeOk(theirs.page, peer);
+    const peerRead = await read(id);
+    expect(peerRead.page, `${peer.label}'s agent reads no page`).toBeUndefined();
+    expect(peerRead.markdown).toContain('The first paragraph of the memo.');
+    expect(await pdfOf(theirs.page, id), `${peer.label} prints on its own size, the system's Letter`).toEqual(LETTER);
+    await theirs.page.locator('[data-region="sidebar"]').getByRole('button', { name: 'Artifacts', exact: true }).click({ timeout: 15_000 });
+    await theirs.page.locator('[data-library]').getByRole('article', { name: PAGE_DOC, exact: true }).click({ timeout: 20_000 });
+    const tab = theirs.page.locator(`[data-region="main"] [data-artifact-tab="${id}"]`);
+    await expect(tab.getByLabel('Suggested document'), `${peer.label} shows the suggestion`).toContainText(PROPOSED, { timeout: 20_000 });
+    await tab.getByRole('button', { name: 'Accept suggestion 1', exact: true }).click();
+    await expect.poll(async () => (await read(id)).markdown, { timeout: 20_000, message: `the suggestion accepted in ${peer.label}'s editor` }).toContain(PROPOSED);
+    const { versionId } = value(await invoke(theirs.page, 'artifacts.saveVersion', { artifactId: id, label: 'Accepted on the peer' }));
+    const own = await agent.ok<{ artifactId: string }>(AGENT, 'artifact_create', { kind: 'document', title: PEER_DOC, content: '# Peer memo\n\nWritten by the older build.\n' });
+    await storeOk(theirs.page, peer);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: store ok, no page read, a Letter PDF, the suggestion accepted, version ${versionId}, its own ${own.artifactId}`);
+
+    // this build again: the page in force, live and in the peer's version, and the peer's document on the system's page
+    const again = await s.launch(env);
+    await s.ready(again.page, (st) => st.daemon !== null, 60_000);
+    await storeOk(again.page, here);
+    const live = await read(id);
+    expect([live.page, live.markdown.includes(PROPOSED)], 'the page kept through the peer’s accept, with the accepted text').toEqual([{ size: 'a4', density: 'compact' }, true]);
+    const version = await read(id, { version: versionId });
+    expect([version.version?.id, version.page], 'the peer’s version pins the page as any content').toEqual([versionId, { size: 'a4', density: 'compact' }]);
+    expect(await pdfOf(again.page, id), 'the document prints on its page again').toEqual(A4);
+    expect((await read(own.artifactId)).page, 'the peer’s document: the system’s page at standard density').toEqual({ size: 'system', density: 'standard' });
+    expect(await pdfOf(again.page, own.artifactId)).toEqual(LETTER);
+    expect(again.maws.consoleErrors()).toEqual([]);
+    await s.quit(again);
+    said.push(`  ${here.label} again: A4 and compact live and in version ${versionId}, an A4 PDF; ${peer.label}'s document on Letter`);
+    record(said);
+  });
+});
+
+// ---- UX wave U6b-1: the files beside the chat, build F reads (UC-14) ---------------------------------------------------
+// U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §A, R1 and R9) opens a file as a
+// tab of the Files tool in the session's side column: `panel.<session>` holds several Files refs, of F's own shape, the
+// tree-only one before those that hold a file, and `panelTools.params[<tab>]` holds `{ file, line, preview? }`, a key F's
+// Files tool does not read (it reads `path`). F shows one surface per tool, the first Files ref, as its tree; its "Keep
+// open for every session" pins the first Files ref of the session, which can hold a file. One scene, both ways, runs
+// only with a peer from before this landing (no src/renderer/src/tools/code/files/tabs.ts); a skipped scene is not
+// evidence, and the run of record is the one whose peer is F (`--peer-exact f1852de3a`), on M1's head before M2 starts.
+// M3 adds Files' tree at the left of every Files tab, its state the session's, stored under a key of its own,
+// `files.tree`, which F's renderer never names and its main keeps through its own writes.
+//   (files beside the chat, both ways)  this build opens three files beside the first session's chat from Files' tree
+//                                       (the first two kept by a double-click on their tab, the third the preview),
+//                                       opens a folder in the tree at the third's left and widens that tree, and opens
+//                                       one file beside the second session's chat, the only Files tab there; the peer
+//                                       draws its Files surface with its tree, refuses no layout value, pins Files from
+//                                       its icon's menu under the second session, and then opens the first file from
+//                                       its tree as a main tab, `files.tree` kept whole in what it wrote; this build
+//                                       shows the two files left beside the first chat, the third still the preview,
+//                                       the first as a main tab only, the tree at the file's left with the width and the
+//                                       open folder as stored, and one pinned Files tab, the tree alone, under both
+//                                       sessions, holding no file in what it wrote back; `files.tree` read back whole.
+const opensFilesBeside = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/code/files/tabs.ts'));
+const opensFilesBesideWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has src/renderer/src/tools/code/files/tabs.ts: it opens files beside the chat as this build does; UC-14's round trip is with build F, --peer-exact f1852de3a`;
+const FILE_TEXT = (name: string) => `An invented file, ${name}, for the cross-build scene.\n`;
+const TREE_WIDTH_DEFAULT = 220; // this build's width of Files' tree at a file's left, while none is stored (tools/code/files/tree-state.ts)
+type StoredTree = { version: number; sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> };
+// Files' tree beside the file in view, and its divider (this build's words, tools/code/copy.ts)
+const treeBeside = (page: Page) => sideColumn(page).locator('[data-files-tree][data-place="beside"]');
+const treeDivider = (page: Page) => sideColumn(page).getByRole('separator', { name: 'Resize files', exact: true });
+// layout.json as main last wrote it, whole
+function layoutJson(s: Scratch): Record<string, unknown> {
+  const path = join(s.userData, 'layout.json');
+  return existsSync(path) ? (JSON.parse(readFileSync(path, 'utf8')) as Record<string, unknown>) : {};
+}
+// The files the session's side tabs hold, by name (the tree's root may be the scratch folder's real path), in strip order,
+// as layout.json holds them
+function filesBeside(s: Scratch, address: string): { id: string; file: string | null; preview: boolean }[] {
+  const side = sideOf(s, address);
+  const own = ((layoutJson(s)[`panel.${address}`] as { tabs?: PanelRef[] } | undefined)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  return own.map((tab) => {
+    const params = side.params[tab.id] as { file?: unknown; preview?: unknown } | undefined;
+    return { id: tab.id, file: typeof params?.file === 'string' ? basename(params.file) : null, preview: params?.preview === true };
+  });
+}
+// Files' tree in this build's side column, a row of it clicked as a person clicks it
+const treeRow = (page: Page, name: string) => sideColumn(page).getByRole('treeitem', { name, exact: true });
+async function addFilesTab(page: Page): Promise<void> {
+  await sideGroup(page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
+  await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
+  await expect(sideColumn(page).locator('[data-files-tab][data-file=""]'), 'the tree-only tab in view').toBeVisible({ timeout: 20_000 });
+}
+async function openBeside(page: Page, name: string, keep: boolean): Promise<void> {
+  await treeRow(page, name).click({ timeout: 20_000 });
+  await expect(sideColumn(page).locator('[data-files-tab]'), `${name} beside the chat`).toHaveAttribute('data-file', new RegExp(`/${name.replace('.', '\\.')}$`), { timeout: 20_000 });
+  if (!keep) return;
+  await sideTab(sideColumn(page), name).dblclick();
+  await expect(sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), `${name} kept`).toHaveCount(0);
+}
+
+test('(files beside the chat, both ways) three files beside one chat and one beside another, as this build stores them, are drawn by the peer as its Files tree; its main tab of one and its pin of the other\u2019s are read back here as the main tab alone and the pinned tree', async () => {
+  const { here, peer } = builds();
+  test.skip(opensFilesBeside(peer), opensFilesBesideWhy(peer));
+  test.setTimeout(300_000);
+  await withScratch('xb-files-beside', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) opens files beside the chat; ${peer.label} (wire ${wireOf(peer)}) reads them, opens one in its main area and pins Files`];
+    for (const name of ['first.txt', 'second.txt', 'third.txt', 'other.txt']) writeFileSync(join(s.repo, name), FILE_TEXT(name));
+    const folder = 'folder'; // M3: a folder opened in the tree, as the tree's state stores it
+    mkdirSync(join(s.repo, folder));
+    writeFileSync(join(s.repo, folder, 'inside.txt'), FILE_TEXT('inside.txt'));
+    const second = randomUUID();
+    appendTurn(transcriptIn(s, s.repo, second), second, s.repo, 'main', 'A second invented session for the cross-build scene');
+    const [first, other, third, alone] = ['first.txt', 'second.txt', 'third.txt', 'other.txt'];
+
+    // this build: three files beside the first session's chat, the first two kept, the third the preview; one beside the
+    // second session's, the only Files tab there
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const id2 = await recordFor(run.page, second);
+    const [address, address2] = [await addressed(run.page, id), await addressed(run.page, id2)];
+    await showSession(run.page, id, `session:${address}`);
+    await openSurface(run.page, 'Files');
+    await openBeside(run.page, 'first.txt', true);
+    await addFilesTab(run.page);
+    await openBeside(run.page, 'second.txt', true);
+    await addFilesTab(run.page);
+    await openBeside(run.page, 'third.txt', false);
+    await expect
+      .poll(() => filesBeside(s, address).map((tab) => [tab.file, tab.preview]), { timeout: 20_000, message: `${here.label} wrote three Files tabs beside the first chat` })
+      .toEqual([[third, true], [other, false], [first, false]]);
+    // M3: the tree at the third file's left; a folder opened in it, and the tree widened from its divider
+    await expect(treeBeside(run.page), 'the tree at the file\u2019s left (a column wide enough for both)').toBeVisible({ timeout: 20_000 });
+    await treeRow(run.page, folder).click();
+    await expect(treeRow(run.page, folder), 'the folder open').toHaveAttribute('aria-expanded', 'true');
+    await treeDivider(run.page).focus();
+    await treeDivider(run.page).press('Shift+ArrowRight');
+    const width = TREE_WIDTH_DEFAULT + 32; // the divider's large step (app/Resizer.tsx)
+    await expect(treeDivider(run.page), 'the tree widened').toHaveAttribute('aria-valuenow', String(width));
+    const treeAt = () => (layoutJson(s)['files.tree'] as StoredTree | undefined)?.sessions[address] ?? null;
+    await expect
+      .poll(() => { const tree = treeAt(); return tree && [tree.width, tree.folded, tree.expanded.some((path) => basename(path) === folder)]; }, { timeout: 20_000, message: `${here.label} stored the first session's tree` })
+      .toEqual([width, false, true]);
+    await showSession(run.page, id2, `session:${address2}`);
+    await openSurface(run.page, 'Files');
+    await openBeside(run.page, 'other.txt', false);
+    await expect.poll(() => filesBeside(s, address2).map((tab) => tab.file), { timeout: 20_000, message: `${here.label} wrote the second session's one Files tab` }).toEqual([alone]);
+    expect(mainFileIds(await stripIds(run.page)), 'the main strip holds no file').toEqual([]);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const storedTree = layoutJson(s)['files.tree'];
+    said.push(`  ${here.label}: beside the first chat ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')}; beside the second, ${alone}; the first's tree ${width} px wide, ${folder} open`);
+
+    // the peer: Files kept for every session from its icon's menu under the second session, which pins that session's
+    // first Files ref; then, under the first, its one Files surface (the pin, which follows the session shown: both work in
+    // s.repo), the tree, and the first file from it as a main tab, which it writes. The open is F's last act: F, as this
+    // build, opens a session from the sidebar in the place of what the pane shows when its tab is not open and that tab is
+    // not pinned (`replaceActive`, f1852de3a's stores/layout-model.ts, "I2"), so the file's clean main tab, opened before
+    // the second session was shown, would give its place to that session's tab and F's last write would hold no file.
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await showSession(old.page, id2, `session:${address2}`);
+    await openToolMenu(old.page, 'Files', 'Keep open for every session');
+    await old.page.getByRole('menuitem', { name: 'Keep open for every session', exact: true }).click();
+    await closeMenus(old.page);
+    await expect.poll(() => sideOf(s, address2).pinned, { timeout: 20_000, message: `${peer.label} pins the second session's Files tab` }).toEqual(['files']);
+    const pinned = sideOf(s, address2).pinnedIds[0];
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'first.txt', exact: true }).click({ timeout: 20_000 });
+    await expect.poll(async () => mainFileIds(await stripIds(old.page)).some((tabId) => tabId.endsWith(`/${first}`)), { timeout: 20_000, message: `${peer.label} opens the first file as a main tab` }).toBe(true);
+    await expect.poll(() => JSON.stringify(layoutJson(s)['main.tabs'] ?? null).includes(`/${first}`), { timeout: 20_000, message: `${peer.label} writes its main tab` }).toBe(true);
+    expect(filesBeside(s, address).map((tab) => tab.file), `${peer.label} kept the first session's three tabs`).toEqual([third, other, first]);
+    expect(layoutJson(s)['files.tree'], `${peer.label} kept files.tree whole through its write`).toEqual(storedTree);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${peer.label}: its Files tree, ${first} as a main tab, Files pinned under the second session (${pinned}, which held ${alone})`);
+
+    // this build: the two files left beside the first chat, the third still the preview, the first a main tab alone; one
+    // pinned Files tab, the tree, under both sessions, holding no file in what hydration wrote back
+    const back = await s.launch();
+    await s.ready(back.page);
+    await showSession(back.page, id, `session:${address}`);
+    await expect.poll(async () => mainFileIds(await stripIds(back.page)).filter((tabId) => tabId.endsWith(`/${first}`)).length, { timeout: 20_000, message: 'the file the peer opened is a main tab' }).toBe(1);
+    await expect.poll(() => filesBeside(s, address).map((tab) => [tab.file, tab.preview]), { timeout: 20_000, message: 'and no longer beside the chat; the preview still the preview' }).toEqual([[third, true], [other, false]]);
+    await expect.poll(() => [sideOf(s, address2).pinnedIds, (sideOf(s, address2).params[pinned] as { file?: unknown } | undefined)?.file ?? null], { timeout: 20_000, message: 'the pin kept, its params holding no file' }).toEqual([[pinned], null]);
+    await openSurface(back.page, 'Files');
+    await expect.poll(() => titlesIn(back.page, 'upper'), { message: 'the pinned tree and the two files' }).toEqual(['Files', 'third.txt', 'second.txt']);
+    await expect(sideColumn(back.page).locator('[data-side-strip] [data-tab-id][data-preview="true"]'), 'the third the preview').toHaveText(/^third\.txt/);
+    await sideTab(sideColumn(back.page), 'second.txt').click();
+    await expect(treeBeside(back.page), 'the tree at the file\u2019s left').toBeVisible({ timeout: 20_000 });
+    await expect(treeDivider(back.page), 'the tree\u2019s width as stored').toHaveAttribute('aria-valuenow', String(width));
+    await expect(treeRow(back.page, folder), 'the folder open as stored').toHaveAttribute('aria-expanded', 'true', { timeout: 20_000 });
+    for (const [session, sessionAddress] of [[id, address], [id2, address2]] as const) {
+      await showSession(back.page, session, `session:${sessionAddress}`);
+      await openSurface(back.page, 'Files');
+      await sideTab(sideColumn(back.page), 'Files').click();
+      await expect(sideColumn(back.page).locator('[data-files-tab]'), 'the pinned Files tab is the tree alone').toHaveAttribute('data-file', '', { timeout: 20_000 });
+      expect(await titlesIn(back.page, 'upper'), 'no tab with the pinned file\u2019s name').not.toContain(alone);
+    }
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    expect(layoutJson(s)['files.tree'], 'files.tree read back whole').toEqual(storedTree);
+    said.push(`  ${here.label} again: ${filesBeside(s, address).map((tab) => `${tab.file}${tab.preview ? ' (preview)' : ''}`).join(', ')} beside the first chat, ${first} a main tab, the tree ${width} px wide with ${folder} open; the pinned Files tab the tree under both sessions`);
+    record(said);
+  });
+});
+// The main strip's file tabs among its tab ids (`file:<machine>:<path>`)
+const mainFileIds = (ids: string[]) => ids.filter((tabId) => tabId.startsWith('file:'));
+
+// ---- UX wave U10b-4: a Space's instructions, a key of the artifact store's meta (UC-14) -------------------------------
+// UX wave U10b (docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, M9, §E.1 and §G; the wave's root, UC-14):
+// a Space's instructions are held in the artifact store's `meta` table under one key, `spaceInstructions`
+// (`{ [spaceId]: { text, at } }`), with no migration and no change to the `spaces` table, so a build from before them
+// opens the store writable (its STORE_MIGRATIONS are the same four, `user_version` 4) and never reads the key, which its
+// `meta` reads by key only (`storage.ts`, the same at both older builds). A chat a card starts from such a Space keeps
+// them in its draft as a pasted chip named `Instructions for “<name>”`; a pasted atom's `name` is any string in both
+// older builds (a dropped text file already stores one), and their chip shows a name that is not a numbered one as it is
+// stored (`chipName`). The draft is written as the composer writes it (`prefillToDoc`'s atom, `pastedNode`'s attributes)
+// through the page's own `session.drafts.set`, onto the seeded session both builds file, as the take-back scenes write
+// their stage. Its rows are in UC-14's coverage table above (U13a's block).
+//   (space instructions, both ways) this build makes two Spaces and gives each instructions, keeps the chip's draft on
+//                        the seeded session and draws it, and quits; the stored form is read: the key holds both texts,
+//                        `user_version` is 4. The peer opens the profile: its store is `ok`, not `readOnly`; it renames
+//                        the first Space, deletes the second, makes a third, and draws the chip by the name stored, and
+//                        the key is as this build left it. This build opens the profile again: its store is `ok`, the
+//                        renamed Space's text is answered and marked, the deleted Space's entry is answered for nothing
+//                        and the third Space has none; its next write drops the deleted Space's entry; the chip is
+//                        still named as stored, in the box and in the draft the peer left. Skipped only for a peer whose
+//                        store holds Space instructions itself (its src/engine-host/documents/space-instructions.ts).
+const knowsSpaceInstructions = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/engine-host/documents/space-instructions.ts'));
+const knowsSpaceInstructionsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) holds Space instructions itself (its src/engine-host/documents/space-instructions.ts): a build from U10b-4 on, not one that never reads the key`;
+// One value of the profile's artifact store as the build that wrote it left it, read as `indexed` reads the index
+function storedValue(s: Scratch, sql: string): unknown {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'artifacts', 'store.sqlite'), sql], { encoding: 'utf8' }).trim();
+  const rows = (out === '' ? [] : JSON.parse(out)) as Record<string, unknown>[];
+  return rows.length === 0 ? null : Object.values(rows[0]!)[0] ?? null;
+}
+type StoredInstructions = Record<string, { text: string; at: number }>;
+const storedInstructions = (s: Scratch): StoredInstructions | null => {
+  const raw = storedValue(s, "SELECT value FROM meta WHERE key = 'spaceInstructions'");
+  return raw === null ? null : (JSON.parse(String(raw)) as StoredInstructions);
+};
+const storeVersion = (s: Scratch) => storedValue(s, 'PRAGMA user_version');
+const storedSpaces = (s: Scratch): Record<string, string> => {
+  const out = execFileSync('/usr/bin/sqlite3', ['-readonly', '-json', join(s.userData, 'artifacts', 'store.sqlite'), 'SELECT id, name FROM spaces ORDER BY name'], { encoding: 'utf8' }).trim();
+  return Object.fromEntries(((out === '' ? [] : JSON.parse(out)) as { id: string; name: string }[]).map((row) => [row.id, row.name]));
+};
+// The store's status as the window's engine host reports it; null while the host does not answer
+const storeStatus = async (page: Page) => {
+  const answer = await invoke(page, 'artifacts.status', undefined);
+  return answer.ok ? answer.value.status : null;
+};
+const XB_FIRST = 'Field notes';
+const XB_RENAMED = 'Field notes, autumn';
+const XB_SECOND = 'Old trips';
+const XB_THIRD = 'Made there';
+const XB_TEXT = 'Write for ninth graders in plain English.\nName each source by its title.';
+const XB_CHIP = `Instructions for “${XB_FIRST}”`;
+// The draft a card from the first Space leaves: the opening words, then the chip (MakeSomethingNew.tsx's prefill read by
+// recall.ts's `prefillToDoc`: one paragraph, the atom with the prefill's name and its body's lines)
+function chipDraft(): Draft {
+  const body = `Instructions of the Space “${XB_FIRST}”, set by the user in MAWS:\n${XB_TEXT}`;
+  const chip = { type: 'pasted', attrs: { id: 'pasted-xb-instructions', kind: 'text', name: XB_CHIP, lines: body.split('\n').length, text: body } };
+  const doc = { type: 'doc', attrs: { attachments: [] }, content: [{ type: 'paragraph', content: [{ type: 'text', text: `Make a document in the Space “${XB_FIRST}”: ` }, chip] }] };
+  return { doc, attachments: [], updatedAt: new Date().toISOString() };
+}
+// The names of the pasted chips a stored draft holds
+const chipNames = (draft: Draft | null): string[] => {
+  const names: string[] = [];
+  const walk = (node: unknown) => {
+    if (node === null || typeof node !== 'object') return;
+    const { type, attrs, content } = node as { type?: string; attrs?: { name?: unknown }; content?: unknown[] };
+    if (type === 'pasted' && typeof attrs?.name === 'string') names.push(attrs.name);
+    for (const child of content ?? []) walk(child);
+  };
+  walk(draft?.doc);
+  return names;
+};
+const chipIn = (page: Page) => composerBox(page).locator('[data-pasted="text"]');
+// A Space's heading line on the library's By Space list (Rows.tsx's GroupHeading, the same markup at both older builds)
+const spaceLine = (page: Page, name: string) => page.locator('[data-library]').getByRole('heading', { level: 2, name, exact: true }).locator('xpath=..');
+
+test('(space instructions, both ways) the instructions this build keeps in the artifact store’s meta are kept by the peer, whose store stays writable, through its rename and delete; back here every Space that still exists has its text, and a chip named for them is drawn by its name on both builds', async () => {
+  test.setTimeout(360_000);
+  const { here, peer } = builds();
+  test.skip(knowsSpaceInstructions(peer), knowsSpaceInstructionsWhy(peer));
+  await withScratch('xb-space-instructions', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) gives two Spaces instructions; ${peer.label} (wire ${wireOf(peer)}) renames one, deletes the other and makes a third; ${here.label} opens the profile again`];
+
+    // this build: two Spaces with instructions, the chip's draft on the seeded session, drawn
+    const ours = await s.launch();
+    await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    const id = await s.record(ours.page);
+    const session = `session:${await addressed(ours.page, id)}`;
+    expect(await storeStatus(ours.page), `${here.label}'s store is writable`).toBe('ok');
+    const first = value(await invoke(ours.page, 'spaces.create', { name: XB_FIRST })).space.id;
+    const second = value(await invoke(ours.page, 'spaces.create', { name: XB_SECOND })).space.id;
+    value(await invoke(ours.page, 'spaces.setInstructions', { spaceId: first, text: XB_TEXT }));
+    value(await invoke(ours.page, 'spaces.setInstructions', { spaceId: second, text: 'Keep each trip note to one page.' }));
+    const given = value(await invoke(ours.page, 'spaces.instructions', {})).instructions;
+    expect(given.map((entry) => entry.spaceId).sort(), 'both Spaces have instructions here').toEqual([first, second].sort());
+    value(await invoke(ours.page, 'session.drafts.set', { appSessionId: id, draft: chipDraft() }));
+    await showSession(ours.page, id, session);
+    await expect(chipIn(ours.page), `${here.label} draws the chip by its name`).toHaveText(`${XB_CHIP} +3 lines`, { timeout: 20_000, useInnerText: true });
+    const wrote = storedInstructions(s);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's app starts a mawsd and an engine host of its own build
+
+    // the stored form as this build left it: the key holds both texts, the store's version is still 4
+    expect(storedInstructions(s), 'the key as this build quit').toEqual(wrote);
+    expect(Object.keys(wrote ?? {}).sort(), 'the key holds both Spaces’ instructions').toEqual([first, second].sort());
+    expect(wrote![first]!.text).toBe(XB_TEXT);
+    expect(storeVersion(s), 'no migration: the store’s user_version is 4').toBe(4);
+    said.push(`  ${here.label}: spaceInstructions holds ${JSON.stringify(Object.keys(wrote!))}; user_version 4; the chip drawn as “${XB_CHIP}”`);
+
+    // the peer: its store writable, the Spaces renamed, deleted and made there, the key kept, the chip drawn by its name
+    const theirs = await s.launch({}, peer.root);
+    await s.ready(theirs.page, () => true, 60_000);
+    await expect.poll(() => storeStatus(theirs.page), { timeout: 30_000, message: `${peer.label} opens the store this build wrote as ok, not readOnly: no migration was added` }).toBe('ok');
+    value(await invoke(theirs.page, 'spaces.update', { spaceId: first, name: XB_RENAMED }));
+    value(await invoke(theirs.page, 'spaces.delete', { spaceId: second }));
+    const third = value(await invoke(theirs.page, 'spaces.create', { name: XB_THIRD })).space.id;
+    await expect.poll(() => storedSpaces(s), { message: `${peer.label} wrote its acts on the Spaces` }).toEqual({ [first]: XB_RENAMED, [third]: XB_THIRD });
+    expect(storedInstructions(s), `${peer.label} neither read nor changed the key`).toEqual(wrote);
+    await showSession(theirs.page, id, session);
+    await expect(chipIn(theirs.page), `${peer.label} draws the chip by the name stored`).toContainText(XB_CHIP, { timeout: 20_000 });
+    await mainTabById(theirs.page, session).getByRole('button', { name: /^Close / }).click();
+    await expect(mainTabById(theirs.page, session), 'the session’s tab closed').toHaveCount(0);
+    await theirs.page.waitForTimeout(1_000); // past the draft writer's 750 ms: whatever the unmount writes is written
+    const left = await storedDraft(theirs.page, id);
+    expect(chipNames(left), `the draft ${peer.label} left names the chip as stored`).toEqual([XB_CHIP]);
+    expect(theirs.maws.consoleErrors()).toEqual([]);
+    await s.quit(theirs);
+    await endProfileProcesses(s.userData);
+    expect(storedInstructions(s), `the key as ${peer.label} quit`).toEqual(wrote);
+    expect(storeVersion(s), `user_version after ${peer.label}'s writes`).toBe(4);
+    said.push(`  ${peer.label}: the store ok; ${XB_FIRST} renamed, ${XB_SECOND} deleted, ${XB_THIRD} made; the key kept; the chip drawn as stored`);
+
+    // this build again: the text of every Space that still exists, marked; the deleted Space's entry dropped at the next
+    // write; the chip still named as stored
+    const back = await s.launch();
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    expect(await storeStatus(back.page), `${here.label}'s store is writable after ${peer.label}'s stay`).toBe('ok');
+    expect(value(await invoke(back.page, 'spaces.instructions', {})).instructions, 'the renamed Space’s text, with its stamp; nothing for the deleted Space or the one made there').toEqual([
+      { spaceId: first, text: XB_TEXT, at: wrote![first]!.at },
+    ]);
+    await openAppDestination(back.page, 'Artifacts');
+    await back.page.locator('[data-library]').getByRole('radio', { name: 'By Space' }).click();
+    await expect(spaceLine(back.page, XB_RENAMED).getByRole('button', { name: 'Instructions', exact: true }), 'the renamed Space is marked').toBeVisible({ timeout: 20_000 });
+    await expect(spaceLine(back.page, XB_THIRD), 'the Space the peer made is listed').toBeVisible();
+    await expect(spaceLine(back.page, XB_THIRD).getByRole('button', { name: 'Instructions', exact: true }), 'and has no instructions').toHaveCount(0);
+    value(await invoke(back.page, 'spaces.setInstructions', { spaceId: first, text: `${XB_TEXT}\nEnd with one question.` }));
+    await expect.poll(() => Object.keys(storedInstructions(s) ?? {}), { message: 'this build’s write dropped the deleted Space’s entry' }).toEqual([first]);
+    expect(storeVersion(s)).toBe(4);
+    await showSession(back.page, id, session);
+    await expect(chipIn(back.page), `${here.label} draws the chip by the name stored, in the draft the peer left`).toHaveText(`${XB_CHIP} +3 lines`, { timeout: 20_000, useInnerText: true });
+    expect(chipNames(await storedDraft(back.page, id))).toEqual([XB_CHIP]);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: the store ok; ${XB_RENAMED}'s text answered and marked, nothing for ${XB_SECOND} or ${XB_THIRD}; the next write kept ${XB_RENAMED}'s entry alone; the chip drawn as stored`);
+    record(said);
+  });
+});
+
+// ---- UX wave U6e: a file from outside the session's folders, the two older builds (UC-14) ------------------------------
+// U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
+// build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
+// Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
+// `file` tab of U6b-1's shape. Its peers are the builds from before it, read from marks in the peer's source as the file's
+// other scenes read theirs (`u6ePeer`): a peer whose source names `files.grant` has U6e, and each scene skips, saying so;
+// any other is told by whether its files service answers `named`. One that does not is build F's behaviour (`f1852de3a`);
+// one that does, with no `outside`, is a master from before U6e (its parent pin `2c7044231`, or a later one such as
+// `b89d6d1d7`).
+//   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
+//                                         File… (the pick seam), saves one beside the chat and moves the other to the
+//                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
+//                                         could not show before (its Files surface with its tree; the main tab its
+//                                         refusal, since neither older daemon knows a grant), refuses no layout value,
+//                                         pins that tab so that it writes, and quits; the grants file's bytes are what
+//                                         they were; this build reads both files again, and the one beside the chat
+//                                         saves once more.
+//   (outside file, on the peer's daemon)  the peer's `mawsd` runs as the profile's unit, so this build's app is held on
+//                                         it (a private daemon of another build is restarted at the first status read);
+//                                         a file outside the folders the transcript links shows the peer's answer: F's
+//                                         daemon drops `named` and refuses it, master's answers `named` with no `outside`
+//                                         and the page holds it read-only; Open File… says it could not open the file and
+//                                         opens nothing, since neither knows `files.grant`; `files.writeOutside` through
+//                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
+// The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
+// (test/cross-build/files-schema.test.ts), as §A says.
+const U6E_PEERS = { dropsNamed: 'build F’s files service, which drops `named`', answersNamed: 'a master from before U6e, whose files service answers `named` with no `outside`' } as const;
+type U6ePeer = keyof typeof U6E_PEERS;
+const peerSource = (build: Build, path: string) => readFileSync(join(build.root ?? REPO_ROOT, path), 'utf8');
+function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
+  if (peerSource(peer, 'src/shared/ipc/names/files.ts').includes("'files.grant'")) {
+    return { which: null, why: `the peer (wire ${wireOf(peer)}) names files.grant (its src/shared/ipc/names/files.ts): a build from U6e on, which knows a grant` };
+  }
+  // the files service's answer to a read asked with `named` (`{ ...answer, named: true }` in a master before U6e; F's has none)
+  const which = peerSource(peer, 'src/services/files/service.ts').includes('named: true') ? 'answersNamed' : 'dropsNamed';
+  return { which, why: '' };
+}
+const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
+const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
+// An agent's row that links `text`'s paths, appended to the session's transcript (U6c's form: the agent's own text)
+function appendReply(path: string, sid: string, cwd: string, text: string): void {
+  const rows = readFileSync(path, 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as { uuid?: unknown });
+  const parentUuid = rows.filter((row) => typeof row.uuid === 'string').at(-1)?.uuid ?? null;
+  const message = { id: `msg_${randomUUID().slice(0, 8)}`, type: 'message', role: 'assistant', model: 'claude-opus-4-5', content: [{ type: 'text', text }], stop_reason: 'end_turn', stop_sequence: null, usage: { input_tokens: 10, output_tokens: 20 } };
+  appendFileSync(path, `${JSON.stringify({ parentUuid, isSidechain: false, type: 'assistant', message, uuid: randomUUID(), timestamp: new Date().toISOString(), cwd, sessionId: sid, version: '2.1.283' })}\n`);
+}
+// File › Open File… with the pick seam set to `path` (read at each pick); answers the file's viewer beside the chat
+async function chooseFile(run: Run, path: string): Promise<Locator> {
+  await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), path);
+  await menu(run.maws.app, 'file.open');
+  const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${path}"]`);
+  await expect(viewer, `${basename(path)} chosen and beside the chat`).toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+  return viewer;
+}
+// The person types `text` at the document's end and saves with File › Save file; the file on disk then holds it
+async function typeAndSave(run: Run, viewer: Locator, path: string, text: string): Promise<void> {
+  const before = readFileSync(path, 'utf8');
+  await viewer.locator('.cm-content').click();
+  await run.page.keyboard.press('Meta+End');
+  await run.page.keyboard.type(text);
+  await expect(viewer).toHaveAttribute('data-dirty', 'true');
+  expect(readFileSync(path, 'utf8'), 'nothing written before Save').toBe(before);
+  await menu(run.maws.app, 'file.save');
+  await expect.poll(() => readFileSync(path, 'utf8'), { timeout: 20_000, message: `${basename(path)} saved` }).toBe(`${before}${text}`);
+  await expect(viewer).toHaveAttribute('data-dirty', 'false');
+}
+const grantsOf = (s: Scratch) => join(s.userData, 'sessions', 'file-grants.json');
+
+test('(an outside file, both ways) two files this build chose with Open File…, one saved beside the chat and one a main tab, are shown by the peer only as it could before, its layout write keeping the grants file as it was; this build reads both again and saves', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.setTimeout(300_000);
+  await withScratch('xb-u6e-both', async (s) => {
+    const said: string[] = [`${here.label} (wire ${wireOf(here)}) chooses two files outside the session's folders; ${peer.label} (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}) reads the profile`];
+    const outside = join(s.root, 'outside'); // beside the repository and the profile, under neither
+    mkdirSync(outside);
+    const [beside, inMain] = [join(outside, 'beside.txt'), join(outside, 'in-main.txt')];
+    for (const path of [beside, inMain]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+
+    // this build: both chosen; the first edited and saved beside the chat, the second moved to the main area
+    const run = await s.launch();
+    await s.ready(run.page);
+    const id = await s.record(run.page);
+    const address = await addressed(run.page, id);
+    const machine = await localRef(run.page);
+    const mainTabId = `file:${machine}:${inMain}`;
+    await showSession(run.page, id, `session:${address}`);
+    const besideViewer = await chooseFile(run, beside);
+    await typeAndSave(run, besideViewer, beside, 'Saved by this build.');
+    const movedViewer = await chooseFile(run, inMain);
+    await movedViewer.locator('[data-move-to-main]').click();
+    await expect(mainTabById(run.page, mainTabId), 'the second chosen file a main tab, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+    await expect.poll(() => (existsSync(grantsOf(s)) ? Object.values((JSON.parse(readFileSync(grantsOf(s), 'utf8')) as { sessions: Record<string, { real: string }[]> }).sessions).flat().map((grant) => grant.real).sort() : []), { timeout: 20_000, message: 'the two choices recorded in the profile' }).toEqual([beside, inMain].sort());
+    expect(run.maws.consoleErrors()).toEqual([]);
+    await s.quit(run);
+    await endProfileProcesses(s.userData);
+    const grants = readFileSync(grantsOf(s));
+    const saved = readFileSync(beside, 'utf8');
+    said.push(`  ${here.label}: ${basename(beside)} saved beside the chat, ${basename(inMain)} a main tab; ${grants.length} bytes of grants`);
+
+    // the peer: the main tab its refusal (no older daemon knows a grant, and no transcript links the file), pinned so that
+    // it writes; under the session, its Files surface with its tree and no viewer of the file beside the chat
+    const old = await s.launch({}, peer.root);
+    await s.ready(old.page);
+    await mainTabById(old.page, mainTabId).click({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"] [data-refusal]`), `${peer.label} refuses the chosen file it cannot know`).toContainText(FILES_REFUSED, { timeout: 20_000 });
+    await pinTab(old.page, mainTabId);
+    await expect.poll(() => pinnedIn((layoutJson(s)['main.tabs'] ?? null) as StoredSets | null), { timeout: 20_000, message: `${peer.label} writes main.tabs with its pin` }).toContain(mainTabId);
+    await showSession(old.page, id, `session:${address}`);
+    await showTool(old.page, 'Files');
+    await expect(toolBody(old.page, 'Files').getByRole('treeitem').first(), `${peer.label}'s Files surface draws its tree`).toBeVisible({ timeout: 20_000 });
+    await expect(old.page.locator(`[data-file-viewer][data-path="${beside}"]`), `${peer.label} draws no file beside the chat`).toHaveCount(0);
+    expect((await consoleSaid(old.page)).filter((line) => INVALID_LAYOUT.test(line)), `${peer.label} took every layout value as valid`).toEqual([]);
+    expect(old.maws.consoleErrors()).toEqual([]);
+    await s.quit(old);
+    await endProfileProcesses(s.userData);
+    expect(readFileSync(grantsOf(s)), `${peer.label} left the grants file as it was`).toEqual(grants);
+    expect([readFileSync(beside, 'utf8'), readFileSync(inMain, 'utf8')], `${peer.label} wrote neither file`).toEqual([saved, OUTSIDE_TEXT(basename(inMain))]);
+    said.push(`  ${peer.label}: ${basename(inMain)} refused in its main tab and pinned, its Files tree under the session, nothing refused; the grants file untouched`);
+
+    // this build again: the main tab reads the file, savable; the one beside the chat shows the saved text and saves again
+    const back = await s.launch();
+    await s.ready(back.page);
+    await mainTabById(back.page, mainTabId).click({ timeout: 20_000 });
+    const backMain = back.page.locator(`[data-region="main"] [data-file-viewer][data-path="${inMain}"]`);
+    await expect(backMain, 'the main tab of the chosen file savable again').toHaveAttribute('data-editable', 'true', { timeout: 20_000 });
+    await expect(backMain.locator('[data-path-lead]')).toHaveAttribute('title', `Save writes to ${inMain}`);
+    await showSession(back.page, id, `session:${address}`);
+    await sideTab(sideColumn(back.page), basename(beside)).click({ timeout: 20_000 });
+    const backBeside = sideColumn(back.page).locator(`[data-file-viewer][data-path="${beside}"]`);
+    await expect(backBeside.locator('.cm-content'), 'the saved text, beside the chat').toContainText('Saved by this build.', { timeout: 20_000 });
+    await typeAndSave(back, backBeside, beside, ' And once more after the peer.');
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    said.push(`  ${here.label} again: ${basename(inMain)} savable in its main tab; ${basename(beside)} saved once more`);
+    record(said);
+  });
+});
+
+test('(outside file, on the peer’s daemon) this build’s app on the peer’s unit mawsd: a linked file outside the folders shows that daemon’s answer, Open File… says it could not open the file and opens nothing, and files.writeOutside answers unknown_command with the bytes unchanged', async () => {
+  const { here, peer } = builds();
+  const known = u6ePeer(peer);
+  test.skip(known.which === null, known.why);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u6e-unit', async (s) => {
+    const outside = join(s.root, 'outside');
+    mkdirSync(outside);
+    const [linked, chosen] = [join(outside, 'linked.txt'), join(outside, 'chosen.txt')];
+    for (const path of [linked, chosen]) writeFileSync(path, OUTSIDE_TEXT(basename(path)));
+    appendReply(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, `Here are [the linked notes](${linked}).`);
+    await withUnit(s, peer, 'xb-u6e-unit', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (${U6E_PEERS[known.which!]}, wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      const id = await s.record(run.page);
+      await showSession(run.page, id, `session:${await addressed(run.page, id)}`);
+
+      // the link, clicked: the peer's daemon decides what the page may show
+      const chip = run.page.locator(`[data-region="main"] [data-chip="path"][title="${linked}"]`);
+      await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
+      await chip.click();
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
+      if (known.which === 'dropsNamed') {
+        await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
+      } else {
+        await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
+        await expect(viewer.locator('[data-read-only="outside"]'), 'with no `outside`, held read-only (W6)').toBeVisible();
+        await expect(viewer).toHaveAttribute('data-editable', 'false');
+        await expect(viewer.locator('.cm-content')).toHaveAttribute('title', 'Read-only: the file is outside the folders this session works in');
+      }
+
+      // Open File…: the grant is a command neither older daemon knows, so main answers refused and the page says so
+      await run.maws.app.evaluate((_electron, p) => void (process.env.MAWS_E2E_PICK_PATHS = p), chosen);
+      await menu(run.maws.app, 'file.open');
+      await expect(run.page.locator('[data-toast-viewport]').getByText('MAWS could not open the file just now. Try Open File again in a moment.'), 'Open File… says it could not open the file').toBeVisible({ timeout: 20_000 });
+      await expect(run.page.locator(`[data-file-viewer][data-path="${chosen}"]`), 'and opens nothing').toHaveCount(0);
+      expect(existsSync(grantsOf(s)), 'nothing granted').toBe(false);
+
+      // the outside save through the page's bridge: a command the peer's daemon does not know, so nothing is written
+      const answer = await invoke(run.page, 'files.writeOutside', { appSessionId: id, path: linked, real: linked, content: 'overwritten', expectedHash: createHash('sha256').update(readFileSync(linked)).digest('hex') });
+      expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
+      expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+// ---- UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6): a command's output -----
+// The engine writes a slash command's output as an assistant frame with `local_command_source` and, from 2.1.322, the
+// run it made (`local_command_run`); a build from U3 on maps it to the person's line of class `command` (its
+// normalizer's `commandOutput`), and U3b's event carries the run in a `command` entry. A build before U3 (build F) draws
+// it as the model's answer. Whichever build's engine host reads the frames makes the window's events: at a handover (both
+// builds list `host.holder`) the attacher's host adopts the session and folds the whole journal itself, so the entry is
+// never sent across the builds on one profile; without one the keeper's host serves the other build's app. The scene
+// keeps a session whose journal holds a `/rename` and its output (u3-commands-r1, seq 198 to 208, inside C3's permission
+// round trip), crosses each way and reads the row the attacher's window draws: one row of the output, of the kind that
+// host's build makes, drawn by the attacher's build (U3b's light line, or the earlier "Command output" card), nothing
+// refused and no gap. Where both builds hand over (this tree, build G and build F all list `host.holder`), the window's
+// build is the reading build, so this build's entry never reaches an older window here: what an older reader does with it
+// is held by acceptance 14's unit cases (src/shared/graph/arrival-builds.test.ts). The recorded rows are the probe's own,
+// with the scene's name for the session in place of the recorded one.
+const COMMAND_ROWS = { fixture: 'spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.jsonl', from: 198, to: 208, named: 'uxw renamed' };
+const COMMAND = '/rename crossing check';
+const COMMAND_OUTPUT = 'Session renamed to: crossing check';
+const sourceHas = (build: Build, file: string, text: string) => {
+  const path = join(build.root ?? REPO_ROOT, file);
+  return existsSync(path) && readFileSync(path, 'utf8').includes(text);
+};
+// What the peer knows, read from its source; this build's side is pinned, not read: its host reads the frame as a
+// command's output and its window draws U3b's light line, so losing either fails the scene rather than changing it
+const readsCommandOutput = (build: Build) => build.root === undefined || sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
+const drawsLightLine = (build: Build) => build.root === undefined || sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
+const takesStubEngine = (build: Build) => sourceHas(build, 'src/engine-host/binary-info.ts', 'MAWS_E2E_ENGINE_BIN');
+
+// C3's permission round trip with the recorded `/rename` turn ahead of its prompt, written into the scratch: the rows
+// carry the round trip's session id and its init (the recorded turn's own init names the probe's folder), the name is
+// the scene's, and the seqs run on. The stub holds at the command's `out` row until the app sends a user frame, plays the
+// command's rows, then holds at the prompt.
+function commandJournal(dir: string): string {
+  const read = (fixture: string) => readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow);
+  const rows = read(PERMISSION);
+  const init = rows.find((r) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init')!;
+  const sessionId = init.frame.session_id as string;
+  const recorded = read(COMMAND_ROWS.fixture).filter((r) => r.seq >= COMMAND_ROWS.from && r.seq <= COMMAND_ROWS.to && r.direction !== 'meta');
+  const recordedId = recorded.find((r) => typeof r.frame.session_id === 'string')!.frame.session_id as string;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const command = recorded.map((r) =>
+    r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init'
+      ? { ...init, at: rows[prompt]!.at }
+      : ({ ...JSON.parse(JSON.stringify(r).replaceAll(recordedId, sessionId).replaceAll(COMMAND_ROWS.named, COMMAND.slice('/rename '.length))), at: rows[prompt]!.at } as JournalRow),
+  );
+  const path = join(dir, 'command-output.jsonl');
+  writeFileSync(path, [...rows.slice(0, prompt), ...command, ...rows.slice(prompt)].map((r, i) => JSON.stringify({ ...r, seq: i + 1 })).join('\n') + '\n');
+  return path;
+}
+
+test('(a command’s output, both ways) a session kept with a slash command’s output in its journal shows the output once in the other build’s window, as the row the reading build makes', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  for (const [keeper, attacher] of [[here, peer], [peer, here]] as const) {
+    await withScratch(`xb-command-${keeper === here ? 'here' : 'peer'}`, async (s) => {
+      const handover = holds(keeper) && holds(attacher);
+      const reader = handover ? attacher : keeper; // the build whose engine host reads the frames
+      const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)}) keeps a session whose turn ran ${COMMAND}; ${attacher.label} (wire ${wireOf(attacher)}) shows it; ${reader.label}'s engine host reads the frames${handover ? ' (the handover)' : ''}`];
+      const stub = s.useStub({ rowMs: Number(ROW_MS) });
+
+      // the keeper: the command's turn played to its end, then the app quits and the session is kept
+      const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, keeper.root);
+      await s.ready(first.page);
+      const id = await s.record(first.page);
+      const input = fitTo(commandOf(keeper, 'session.launch')!.input, { spec: stubSpec(stub, id, commandJournal(s.root), { cwd: s.repo }) });
+      expect(value(await invoke(first.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+      await expect.poll(async () => (await statusOf(first.page, id)).process, { timeout: 30_000 }).toBe('ready');
+      value(await invoke(first.page, 'session.send', { appSessionId: id, content: COMMAND }));
+      await expect.poll(async () => JSON.stringify(await eventsOf(first.page, id)).includes(COMMAND_OUTPUT), { timeout: 60_000, message: 'the output reached the keeper’s events' }).toBe(true);
+      await turnEnded(first.page, id);
+      expect(first.maws.consoleErrors()).toEqual([]);
+      await s.quit(first);
+
+      // the attacher: served the kept session, its window shows the output once
+      const second = await launchServed(s, id, attacher.root);
+      await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+      const transcript = second.page.locator('[data-region="main"] [data-transcript-scroller]');
+      const row = transcript.locator('.transcript-row[data-kind]').filter({ hasText: COMMAND_OUTPUT });
+      await expect(row, 'one row of the output').toHaveCount(1, { timeout: 20_000 });
+      const kind = await row.getAttribute('data-kind');
+      if (readsCommandOutput(reader)) {
+        expect(kind, `${reader.label} reads the frame as a command’s output`).toBe('local_command');
+        if (drawsLightLine(attacher)) await expect(row.locator('.transcript-command-output'), `${attacher.label} draws the light line`).toHaveText(COMMAND_OUTPUT);
+        else await expect(row, `${attacher.label} draws its card`).toContainText('Command output');
+      } else expect(kind, `${reader.label} reads the frame as the model’s answer`).toBe('assistant_text');
+      await expect(transcript.locator('.transcript-row[data-kind="gap"]'), 'no gap').toHaveCount(0);
+      expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing`).toEqual([]);
+      expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+      const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+      said.push(`  ${attacher.label}'s window: one ${kind} row${kind === 'local_command' ? (drawsLightLine(attacher) ? ', the light line' : ', the "Command output" card') : ''}`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+      expect(second.maws.consoleErrors()).toEqual([]);
+      await s.quit(second);
+      record(said);
+    });
+  }
+});
+
+// ---- UX wave U6b-2: a file frame across builds (UC-14; B13) -----------------------------------------------------------
+// U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Interfaces §B, M6 decision 3) stores nothing and
+// adds `raw` to `files.read`'s input and `identity` to its answer. This build's main draws a PDF, an HTML page, a video or
+// a sound in its frame from raw reads of this Mac's daemon; a daemon of an older build drops the key it does not know and
+// answers the plain read, with no identity, so main serves nothing and the tab shows the row with the sentence for a
+// service that cannot serve it. Each build's mawsd runs as the profile's unit (a LaunchAgent, which the other build's app
+// leaves as it is), as in (update, render). One scene, both ways, with a peer from before this landing (its `files.read`
+// knows no `raw`); a direction that cannot run against a peer is not counted (C2), and a run in which the first half was
+// skipped is not a run of record:
+//   (file frame, both ways)  this build's app on the peer's unit mawsd opens a PDF of the session's folder from Files'
+//                            tree: its row, the sentence for a service that cannot serve it and Open externally, no
+//                            frame; Open externally reaches the open seam through the peer's mawsd; neither main's log nor
+//                            the peer's mawsd's holds a refusal of the read. This build again, on its own mawsd: the tab
+//                            shown again draws the PDF. Then the peer's app on this build's unit mawsd opens the same PDF:
+//                            its row, as it always drew it, Open externally reaching the seam, and no refusal. Where this
+//                            build's mawsd refuses the peer's app (one from before O4), that half says it is not run.
+const knowsRaw = (build: Build) => (commandOf(build, 'files.read')?.input as { properties?: Record<string, unknown> } | undefined)?.properties?.raw !== undefined;
+const knowsRawWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.read's raw: a daemon of this landing or later serves a frame; the runs of record have build F and build M as the peer, --peer-exact f1852de3a and 2c7044231`;
+const OLDER_SERVICE = 'MAWS’s service on this Mac is an older version, so this file can’t be shown here yet.'; // this build's row (tools/code/copy.ts)
+const PEER_ROW = 'PDF files open outside MAWS'; // the row of both peers (tools/code/copy.ts at f1852de3a and at 2c7044231)
+// What either end would log had it refused the other's read: the validation's own words (src/shared/ipc/validate.ts)
+const READ_REFUSED = /invalid (?:input for|output of) files\.read/;
+
+test('(file frame, both ways) this build’s window on the peer’s unit mawsd draws a PDF’s row with the sentence for a service that cannot serve it, no frame, and nothing refused; on its own mawsd the PDF is drawn; the peer’s app on this build’s unit mawsd draws its row as it always did', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsRaw(peer), knowsRawWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-file-frame', async (s) => {
+    const said = [`${here.label} (wire ${wireOf(here)}) asks files.read with raw to draw a framed file; ${peer.label} (wire ${wireOf(peer)}) knows no raw`];
+    const pdf = join(s.repo, 'report.pdf');
+    writeFileSync(pdf, minimalPdf());
+    const openLog = join(s.root, 'open.log');
+    // the open seam's lines, less the file frames' own (`frame-decision`, `frame-entry`), which share its log
+    const opened = () => (existsSync(openLog) ? readFileSync(openLog, 'utf8').split('\n') : []).filter((line) => line !== '' && !line.startsWith('frame-'));
+    const refusals = (text: string) => text.split('\n').filter((line) => READ_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-file-frame-peer', async (unit) => {
+      said.push(`  ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+      await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      await treeRow(run.page, 'report.pdf').click({ timeout: 20_000 });
+      const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+      await expect(viewer, 'a framed file, beside the chat').toHaveAttribute('data-kind', 'frame', { timeout: 20_000 });
+      await expect(viewer, 'its row, no frame').toHaveAttribute('data-frame', 'row', { timeout: 20_000 });
+      const row = viewer.locator('[data-external-row]');
+      await expect(row.getByText(OLDER_SERVICE, { exact: true })).toBeVisible();
+      await expect(viewer.locator('iframe, video, audio'), 'nothing drawn in a frame').toHaveCount(0);
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(opened, { timeout: 20_000, message: `${peer.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${peer.label}'s mawsd refuses no read ${here.label} sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the row: "${OLDER_SERVICE}" with Open externally, which reached the seam; no refusal in either log; ${s.daemonLog().split('\n').filter((line) => DROPPED.test(line)).length} dropped-field lines in the mawsd log`);
+      await s.quit(run);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    await endProfileProcesses(s.userData);
+
+    // this build again, on its own mawsd: the tab, shown again, draws the PDF
+    const back = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog });
+    await s.ready(back.page, (st) => st.daemon !== null, 60_000);
+    await showSession(back.page, id, `session:${address}`);
+    await openSurface(back.page, 'Files');
+    await sideTab(sideColumn(back.page), 'report.pdf').click({ timeout: 20_000 });
+    const drawn = sideColumn(back.page).locator(`[data-file-viewer][data-path="${pdf}"]`);
+    await expect(drawn, 'drawn once a daemon of this build serves').toHaveAttribute('data-frame', 'pdf', { timeout: 30_000 });
+    await expect(drawn.locator('[data-artifact-frame="pdf"]')).toHaveAttribute('src', /^maws-artifact:\/\/[0-9a-f]{32}\/report\.pdf#toolbar=0&navpanes=0$/);
+    await expect.poll(() => markPixels(back.maws.app, back.page, drawn.locator('[data-artifact-frame="pdf"]')), { timeout: 15_000, message: 'the page drawn: its black square' }).toBeGreaterThan(2_000);
+    expect(back.maws.consoleErrors()).toEqual([]);
+    await s.quit(back);
+    await endProfileProcesses(s.userData);
+    said.push(`  ${here.label} again, on its own mawsd: the tab shown again draws the PDF`);
+
+    // the second half: the peer's app on this build's unit mawsd
+    if (!appObeysConnectors(peer)) {
+      const why = `not run: ${here.label}'s mawsd refuses an app from before O4 (${peer.label}, wire ${wireOf(peer)}); held by service.test.ts "a plain read's answer is what it was" and files.test.ts "an answer with identity is read by a reader that does not know it as the answer without it"`;
+      test.info().annotations.push({ type: 'skipped check', description: `the second half, ${why}` });
+      said.push(`  the second half ${why}`);
+      record(said);
+      return;
+    }
+    await withUnit(s, here, 'xb-file-frame-here', async (unit) => {
+      said.push(`  ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon', MAWS_E2E_OPEN_LOG: openLog }, peer.root);
+      await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'report.pdf', exact: true }).click({ timeout: 20_000 });
+      const row = old.page.locator(`[data-file-viewer][data-path="${pdf}"] [data-external-row]`);
+      await expect(row, `${peer.label}'s row, as it always drew it`).toContainText(PEER_ROW, { timeout: 20_000 });
+      await expect(old.page.locator('iframe[src^="maws-artifact:"]'), `${peer.label} frames no file`).toHaveCount(0);
+      const before = opened().length;
+      await row.getByRole('button', { name: 'Open externally', exact: true }).click();
+      await expect.poll(() => opened().slice(before), { timeout: 20_000, message: `${here.label}'s mawsd hands the PDF to the open seam` }).toEqual([pdf]);
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd answered`).toEqual([]);
+      expect(s.daemonLog().split('\n').filter((line) => READ_REFUSED.test(line)), `${here.label}'s mawsd refuses no read ${peer.label} sent`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s row: "${PEER_ROW}" with Open externally, which reached the seam; no refusal in either log`);
+      await s.quit(old);
+    }, { MAWS_E2E_OPEN_LOG: openLog });
+    record(said);
+  });
+});
+
+// ---- UX wave U5b: the git reads, the acting pane and a commit's comment, the two older builds (UC-14) -----------------
+// U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §K and M11) stores no new form: Review's
+// and Source control's view state stays in the window's memory. What crosses is what it sends: the three git reads
+// (`git.branchCommits`, `git.commitDiff`, `git.changesSince`), which a daemon before them does not serve; the ten
+// `scm.*` commands, which this build's window no longer sends and its daemon still serves; and a comment on a commit's
+// line, whose anchor carries `commit`, a key the older builds' strict anchor schema refuses: whole in a message's words
+// and tag, which every build reads as text, and without `commit` and `path` in a side thread's lineage (`lineageAnchor`),
+// which their daemons hold to that schema. Its peers are build F (`f1852de3a`) and master at its parent pin
+// (`2c7044231`), the runs of record `--peer-exact f1852de3a` and `--peer-exact 2c7044231`; every scene holds against
+// both. Each is guarded by a probe of the peer's source alone, never by its wire, so it runs in the equal-wire mode as
+// well. A scene that puts one build's app on the other's daemon runs that daemon as the profile's unit (`withUnit`: a
+// private daemon of another build is restarted at the app's first status read) and asserts which build serves, by
+// `daemon.status`'s `build.buildId` against that build's out/main/mawsd.js, before anything else.
+//   (reads, on the peer's daemon)          run while the peer's src/shared/ipc/names/git.ts names no
+//                                          `git.branchCommits`. This build's app on the peer's unit: Source control draws
+//                                          Where, Uncommitted and the Pull request part (the folder is not trusted, so the
+//                                          part's sentence stands whatever GitHub CLI the Mac has), and Commits reads
+//                                          "Commits unavailable: this Mac’s MAWS service is older than this window" with
+//                                          no refresh control and no row; Review's Uncommitted lists the repository's two
+//                                          files, the new one "Untracked" with no count, and "This branch" is disabled
+//                                          with its title.
+//   (source control, from the peer)        run while the peer has src/renderer/src/tools/scm/CommitForm.tsx. The peer's
+//                                          app on this build's unit: its acting pane, by its own locators (a group's
+//                                          `data-scm-row`, the row's Stage, the commit form), stages one file and commits
+//                                          it, and the repository's HEAD moved: the commands stay served. The scene that
+//                                          drives build F's pane against this build's daemon, (build F's app, unit
+//                                          mawsd), stays as it is.
+//   (a commit's comment, to the peer)      run while the peer's src/shared/anchor/anchor.ts names no `commit` in its
+//                                          anchor schema: the key its tag reader and its lineage refuse. A session's
+//                                          transcript holds a comment on a commit's line, its text written by this build's
+//                                          `commentsMessage`; the peer, on its own daemon, draws the message's words with
+//                                          the full hash and the quoted line as code, and no chip.
+//   (a commit's side thread, to the peer)  the same probe. This build, on its own daemon, opens a commit from Source
+//                                          control in Review, comments on a line with "Send to main" unticked, and the
+//                                          side thread starts on the replay, its first message the tag with the hash.
+//                                          Then the peer's daemon, the profile's unit, answers `session.list` (the list
+//                                          loads and holds the child) and `session.get` for the child (its lineage as this
+//                                          build stored it, with no `commit` and no `path`), and the peer's app over it
+//                                          opens the parent and draws its side-thread row: the case a transcript alone
+//                                          does not prove.
+const sourceOf = (build: Build, path: string) => {
+  const file = join(build.root ?? REPO_ROOT, path);
+  return existsSync(file) ? readFileSync(file, 'utf8') : null;
+};
+const servesGitReads = (build: Build) => sourceOf(build, 'src/shared/ipc/names/git.ts')?.includes("'git.branchCommits'") ?? false;
+const servesGitReadsWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names git.branchCommits in its src/shared/ipc/names/git.ts: its daemon serves the reads; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const hasActingPane = (build: Build) => existsSync(join(build.root ?? REPO_ROOT, 'src/renderer/src/tools/scm/CommitForm.tsx'));
+const hasActingPaneWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) has no src/renderer/src/tools/scm/CommitForm.tsx: its window sends no scm.* command; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+const knowsCommitAnchor = (build: Build) => /^\s*commit:/m.test(sourceOf(build, 'src/shared/anchor/anchor.ts') ?? '');
+const knowsCommitAnchorWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names commit in its src/shared/anchor/anchor.ts: it reads a commit's anchor as this build does; U5b-2's runs of record are --peer-exact f1852de3a and 2c7044231`;
+// A build's `mawsd` as `daemon.status` names it: 16 hex of the SHA-1 of its out/main/mawsd.js (src/shared/ipc/schema/daemon.ts)
+const mawsdBuildOf = (build: Build) => createHash('sha1').update(readFileSync(join(build.root ?? REPO_ROOT, 'out', 'main', 'mawsd.js'))).digest('hex').slice(0, 16);
+const U5B_APP = 'src/app.ts';
+const U5B_LINES = Array.from({ length: 8 }, (_, i) => `export const v${i + 1} = ${i + 1};`);
+const U5B_CHANGED = 'export const v3 = sumOf([1, 2]);'; // line 3 as the second commit has it
+const U5B_SUBJECT = 'An invented change to v3';
+const U5B_COMMENT = 'Why does v3 call sumOf here?';
+const U5B_PEER_COMMIT = 'An invented commit made by the peer’s pane';
+const U5B_PARENT = 'e5b20000-0000-4000-8000-000000000001'; // the engine ids the replay pins: the parent, its side thread
+const U5B_CHILD = 'e5b20000-0000-4000-8000-000000000002';
+const U5B_FIRST_PROMPT = 'Read src/app.ts and say what v3 holds.';
+const U5B_FIRST_REPLY = 'v3 holds the sum of a short list.';
+const U5B_THREAD_REPLY = 'sumOf keeps v3 in step with the list it names.';
+const COMMITS_OLDER = 'Commits unavailable: this Mac’s MAWS service is older than this window'; // tools/scm/copy.ts, commitsOlder(null)
+const BRANCH_NEEDS_READS = 'This branch needs this Mac’s MAWS service to be updated'; // tools/code/copy.ts, branchNeedsReads(null)
+const PR_UNTRUSTED = 'Trust this folder to see PR state'; // panel/copy.ts, SUMMARY_COPY.prUntrusted
+
+// The scratch's repository made a git repository on `main` with its own identity, no signing and no hooks: src/app.ts
+// and notes.txt in a first commit, line 3 of src/app.ts changed in a second; answers the second's full hash
+function u5bRepo(s: Scratch): string {
+  mkdirSync(join(s.repo, 'src'), { recursive: true });
+  mkdirSync(join(s.root, 'no-hooks'));
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.join('\n')}\n`);
+  writeFileSync(join(s.repo, 'notes.txt'), 'notes\n');
+  gitAt(s.repo, 'init', '-q');
+  const config: [string, string][] = [['user.name', 'MAWS Fixture'], ['user.email', 'fixture@maws.invalid'], ['commit.gpgsign', 'false'], ['core.hooksPath', join(s.root, 'no-hooks')]];
+  for (const [key, value] of config) gitAt(s.repo, 'config', key, value);
+  gitAt(s.repo, 'add', '-A');
+  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  writeFileSync(join(s.repo, U5B_APP), `${U5B_LINES.map((line, i) => (i === 2 ? U5B_CHANGED : line)).join('\n')}\n`);
+  gitAt(s.repo, 'commit', '-q', '-am', U5B_SUBJECT);
+  return gitAt(s.repo, 'rev-parse', 'HEAD').trim();
+}
+// The anchor Review makes for a new line of a commit's diff (`commitLineAnchor`, src/renderer/src/tools/code/anchor/anchor.ts)
+const commitAnchor = (path: string, line: number, commit: string): Anchor => ({ kind: 'file-line', locator: `${path}#L${line}@${commit}`, label: `${basename(path)}:${line} · ${commit.slice(0, 7)}`, path, line, side: 'new', commit });
+// The add control the diff library draws on a new line of Review while the line is hovered, pressed; answers the card
+async function commentOnCommitLine(review: Locator, path: string, line: number, label: string): Promise<Locator> {
+  const body = review.locator(`[data-review-file="${path}"] [data-review-body]`);
+  const numbered = `[data-line-new-num="${line}"]`;
+  const row = body.locator('tr').filter({ has: review.page().locator(numbered) }).first();
+  await clickRevealed(body.locator(numbered).first(), row.locator('[data-add-widget="new"] button'));
+  const card = review.getByRole('dialog', { name: `Comment on ${label}` });
+  await expect(card).toBeVisible();
+  return card;
+}
+// A new chat in the repository's project, its route direct (the replay's `get_status` answers a direct session, so its
+// side thread is direct too), started with its first prompt; answers once its first turn has ended (e2e/side.spec.ts)
+async function startCommentParent(page: Page, repo: string): Promise<AppSessionId> {
+  const project = value(await invoke(page, 'session.projects.add', { directory: repo }));
+  await openProject(page, project.name);
+  await newChatIn(page, project.name);
+  await expect(page.getByRole('heading', { name: `New chat in ${project.name}` })).toBeVisible({ timeout: 20_000 });
+  const id = value(await invoke(page, 'session.intent.list', undefined)).intents.at(-1)!.appSessionId;
+  value(await invoke(page, 'session.intent.patch', { appSessionId: id, patch: { gateway: 'direct' } }));
+  value(await invoke(page, 'session.start', { appSessionId: id, message: { content: U5B_FIRST_PROMPT, display: U5B_FIRST_PROMPT }, options: {} }));
+  await expect(page.locator('[data-region="main"]').getByText(U5B_FIRST_REPLY)).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => (await statusOf(page, id)).turn, { timeout: 20_000 }).toBeNull();
+  return id;
+}
+// The side thread of `parent`, once its record exists (its setup creates it before the engine runs)
+async function sideThreadOf(page: Page, parent: AppSessionId): Promise<AppSessionId> {
+  let child = '';
+  await expect
+    .poll(async () => (child = value(await invoke(page, 'session.list', {})).sessions.find((r) => r.lineage?.kind === 'side-thread' && r.lineage.parentAppSessionId === parent)?.appId ?? ''), { timeout: 20_000, message: 'the side thread has a record' })
+    .not.toBe('');
+  return child as AppSessionId;
+}
+
+test('(reads, on the peer’s daemon) this build’s app on the peer’s unit mawsd: Source control draws Where, Uncommitted and the Pull request part, and Commits says this Mac’s service is older; Review lists Uncommitted with the new file uncounted, and This branch is disabled with its title', async () => {
+  const { here, peer } = builds();
+  test.skip(servesGitReads(peer), servesGitReadsWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-reads', async (s) => {
+    u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    writeFileSync(join(s.repo, 'added.txt'), 'a new file\nof two lines\n');
+    await withUnit(s, peer, 'xb-u5b-reads', async (unit) => {
+      const said = [`${here.label} (wire ${wireOf(here)}) on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      const page = run.page;
+      const id = await s.record(page);
+      await showSession(page, id, `session:${await addressed(page, id)}`);
+
+      // Source control: three parts drawn; Commits the older service's sentence, with nothing asked and nothing to ask again
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-where]'), 'Where').toContainText('⎇ main', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="uncommitted"] [data-scm-count]'), 'Uncommitted, its two files').toHaveText('2', { timeout: 20_000 });
+      await expect(scm.locator('[data-scm-part="pr"]'), 'the Pull request part, its sentence for a folder not trusted').toContainText(PR_UNTRUSTED, { timeout: 20_000 });
+      const commits = scm.locator('[data-scm-part="commits"]');
+      await expect(commits.locator('[data-scm-failure]'), 'Commits: the older service').toHaveText(COMMITS_OLDER, { timeout: 20_000 });
+      await expect(commits.locator('[data-scm-refresh]'), 'no refresh control').toHaveCount(0);
+      await expect(commits.locator('[data-scm-commit]'), 'no row').toHaveCount(0);
+      said.push(`  Source control: Where, Uncommitted 2 and the Pull request part drawn; Commits "${COMMITS_OLDER}"`);
+
+      // Review: Uncommitted read as before the reads, the new file uncounted; This branch disabled with its reason
+      await showTool(page, 'Review');
+      const review = toolBody(page, 'Review');
+      await expect(review.locator('[data-chip="uncommitted"]'), 'Review on Uncommitted').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+      const listed = () => review.locator('[data-review-file]').evaluateAll((nodes) => nodes.map((node) => node.getAttribute('data-review-file') ?? '').sort());
+      await expect.poll(listed, { timeout: 20_000, message: 'the repository’s two changed files' }).toEqual(['added.txt', 'notes.txt']);
+      const added = review.locator('[data-review-file="added.txt"]');
+      await expect(added.locator('[data-review-badge]'), 'the new file’s badge').toHaveText('Untracked');
+      await expect(added.locator('[data-review-counts]'), 'and no count').toHaveCount(0);
+      const branch = review.locator('[data-chip="branch"]');
+      await expect(branch, 'This branch disabled').toBeDisabled();
+      await expect(branch, 'with its title').toHaveAttribute('title', BRANCH_NEEDS_READS);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  Review: added.txt Untracked with no count beside notes.txt; This branch disabled, "${BRANCH_NEEDS_READS}"`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(source control, from the peer) the peer’s app on this build’s unit mawsd: its acting pane stages one file and commits it by its own locators, and the repository’s HEAD moved', async () => {
+  const { here, peer } = builds();
+  test.skip(!hasActingPane(peer), hasActingPaneWhy(peer));
+  test.skip(!appObeysConnectors(peer), `the peer (wire ${wireOf(peer)}) is an app from before O4, which this build's mawsd refuses`);
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(240_000);
+  await withScratch('xb-u5b-acts', async (s) => {
+    const before = u5bRepo(s);
+    writeFileSync(join(s.repo, 'notes.txt'), 'notes\nchanged in the working tree\n');
+    trustIn(s, [s.repo]); // the pane commits only in a trusted folder
+    await withUnit(s, here, 'xb-u5b-acts', async (unit) => {
+      const said = [`${peer.label}'s app (wire ${wireOf(peer)}) on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`];
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      const page = run.page;
+      const id = await s.record(page);
+      await (await sidebarRow(page, { appSessionId: id })).click();
+      await showTool(page, 'Source control');
+      const scm = toolBody(page, 'Source control');
+      await expect(scm.locator('[data-scm-header]'), 'the peer’s pane on main').toContainText('⎇ main', { timeout: 20_000 });
+      const row = (group: string) => scm.locator(`section[data-scm-group="${group}"] li[data-scm-row][data-path="notes.txt"]`);
+      await expect(row('unstaged'), 'notes.txt unstaged').toBeVisible({ timeout: 20_000 });
+      await row('unstaged').hover();
+      await row('unstaged').getByRole('button', { name: 'Stage notes.txt', exact: true }).click();
+      await expect(row('staged'), 'notes.txt staged').toBeVisible({ timeout: 20_000 });
+      await expect.poll(() => gitAt(s.repo, 'diff', '--cached', '--name-only').trim(), { timeout: 20_000, message: 'the index holds notes.txt' }).toBe('notes.txt');
+      const form = scm.locator('[data-scm-commit]');
+      await form.getByRole('textbox', { name: 'Commit message', exact: true }).fill(U5B_PEER_COMMIT);
+      await form.getByRole('button', { name: 'Commit', exact: true }).click();
+      await expect.poll(() => gitAt(s.repo, 'rev-parse', 'HEAD').trim(), { timeout: 20_000, message: 'HEAD moved' }).not.toBe(before);
+      expect(gitAt(s.repo, 'log', '-1', '--format=%s%n%P').trim().split('\n'), 'the peer’s commit, on the last').toEqual([U5B_PEER_COMMIT, before]);
+      expect(gitAt(s.repo, 'show', '--name-only', '--format=', 'HEAD').trim(), 'holding the staged file').toBe('notes.txt');
+      expect(gitAt(s.repo, 'status', '--porcelain'), 'nothing left uncommitted').toBe('');
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the peer's pane staged notes.txt and committed it: HEAD ${before.slice(0, 7)} → ${gitAt(s.repo, 'rev-parse', '--short', 'HEAD').trim()}`);
+      await s.quit(run);
+      record(said);
+    });
+  });
+});
+
+test('(a commit’s comment, to the peer) a comment this build wrote on a commit’s line, in a session’s transcript, is drawn by the peer as the message’s words and the quoted line, with no chip', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.setTimeout(180_000);
+  await withScratch('xb-u5b-comment', async (s) => {
+    const sha = u5bRepo(s);
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const text = commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'main');
+    appendTurn(transcriptIn(s, s.repo, s.engineId), s.engineId, s.repo, 'main', text);
+    const said = [`${here.label} (wire ${wireOf(here)}) wrote a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) draws the session`];
+
+    const run = await s.launch({}, peer.root);
+    await s.ready(run.page, () => true, 60_000);
+    const id = await s.record(run.page);
+    await (await sidebarRow(run.page, { appSessionId: id })).click();
+    const bubble = run.page.locator('[data-region="main"] [data-bubble]').filter({ hasText: U5B_COMMENT });
+    await expect(bubble, 'the message drawn once').toHaveCount(1, { timeout: 20_000 });
+    await expect(bubble, 'its words name the commit by its full hash').toContainText(`commit ${sha}`);
+    await expect(bubble.locator('code'), 'the quoted line, as code').toHaveText([U5B_CHANGED]);
+    await expect(bubble.locator('[data-chip="anchor"]'), 'no chip').toHaveCount(0);
+    expect(run.maws.consoleErrors()).toEqual([]);
+    said.push(`  ${peer.label}: the words with commit ${sha.slice(0, 7)}…, the quoted line as code, no chip`);
+    await s.quit(run);
+    record(said);
+  });
+});
+
+test('(a commit’s side thread, to the peer) a side thread this build opened from a comment on a commit’s line is listed and read by the peer’s unit mawsd, its lineage with no commit, and the peer draws the parent’s side-thread row', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsCommitAnchor(peer), knowsCommitAnchorWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(360_000);
+  await withScratch('xb-u5b-thread', async (s) => {
+    const sha = u5bRepo(s);
+    trustIn(s, [s.repo]);
+    writeFileSync(join(s.userData, 'claude-config', 'settings.json'), `${JSON.stringify({ permissions: { defaultMode: 'default' } })}\n`); // the journals' mode, so the host corrects none
+    const anchor = commitAnchor(U5B_APP, 3, sha);
+    const journals = join(s.root, 'journals');
+    mkdirSync(journals);
+    const parentJournal = new SideJournal(U5B_PARENT, s.repo);
+    parentJournal.turn(U5B_FIRST_REPLY);
+    const threadJournal = new SideJournal(U5B_CHILD, s.repo);
+    const first = threadJournal.prompt();
+    threadJournal.rename(anchor.label); // `finishBinding`'s title: the lineage's label, which keeps the short hash
+    threadJournal.reply(first, U5B_THREAD_REPLY);
+    threadJournal.completed(first);
+    const fixtures = [parentJournal.write(journals, 'parent'), threadJournal.write(journals, 'thread')].join(',');
+    const said = [`${here.label} (wire ${wireOf(here)}) opens a side thread from a comment on ${anchor.label}; ${peer.label} (wire ${wireOf(peer)}) reads the profile`];
+
+    // this build, on its own daemon: the commit opened from Source control, a comment on its line 3 sent to a side thread
+    const ours = await s.launch({ MAWS_E2E_REPLAY_FIXTURES: fixtures });
+    const own = await s.ready(ours.page, (st) => st.daemon !== null, 60_000);
+    expect(own.daemon!.build.buildId, `${here.label} on its own mawsd`).toBe(mawsdBuildOf(here));
+    const page = ours.page;
+    const parent = await startCommentParent(page, s.repo);
+    await showTool(page, 'Source control');
+    await toolBody(page, 'Source control').getByRole('button', { name: `Open commit ${sha.slice(0, 7)} in Review`, exact: true }).click({ timeout: 20_000 });
+    const review = toolBody(page, 'Review');
+    await expect(review.locator('[data-chip="commit"]'), 'Review on the commit').toHaveAttribute('aria-pressed', 'true', { timeout: 20_000 });
+    await expect(review.locator('[data-chip="commit"]')).toHaveText(`Commit ${sha.slice(0, 7)}`);
+    await expect(review.locator(`[data-review-file="${U5B_APP}"] [data-review-body] table`).first(), 'the commit’s diff').toBeVisible({ timeout: 20_000 });
+    const card = await commentOnCommitLine(review, U5B_APP, 3, anchor.label);
+    const toMain = card.getByRole('checkbox', { name: 'Send to main' });
+    await expect(toMain, 'Review asks for main').toBeChecked();
+    await toMain.uncheck();
+    await card.getByRole('textbox', { name: 'Comment' }).fill(U5B_COMMENT);
+    await card.getByRole('button', { name: 'Send', exact: true }).click();
+    const child = await sideThreadOf(page, parent);
+    const pane = page.locator('[data-region="panel"]').locator(`[data-side-thread-view="${await addressed(page, child)}"]`);
+    await expect(pane.getByText(U5B_THREAD_REPLY), 'the side thread answered on the replay').toBeVisible({ timeout: 30_000 });
+    await expect.poll(async () => (await statusOf(page, child)).turn, { timeout: 20_000, message: 'its turn ended' }).toBeNull();
+    const written = s.journal(child).filter((r) => r.direction === 'out' && r.frame.type === 'user').map((r) => (r.frame.message as { content: unknown }).content);
+    expect(written, 'its first message: the quoted line, the words and the tag with the full hash').toEqual([[{ type: 'text', text: commentsMessage([{ anchor, text: quotedComment(anchor, U5B_CHANGED, U5B_COMMENT), screenshot: false }], 'thread') }]]);
+    const lineage = value(await invoke(page, 'session.get', { appSessionId: child }))?.lineage;
+    expect(lineage, 'stored without commit and path').toEqual({ kind: 'side-thread', parentAppSessionId: parent, parentEngineSessionId: U5B_PARENT, anchor: { kind: 'file-line', locator: anchor.locator, label: anchor.label, line: 3, side: 'new' }, openedBy: 'comment' });
+    // what the engine left in its store for the parent's first turn (the replay writes none), for the peer to open
+    const parentTranscript = transcriptRecords({ sessionId: U5B_PARENT, cwd: s.repo, start: Date.UTC(2026, 10, 15, 12, 0, 0) });
+    parentTranscript.user('e5b2e000-0000-4000-8000-000000000001', U5B_FIRST_PROMPT);
+    parentTranscript.text('e5b2e000-0000-4000-8000-000000000002', U5B_FIRST_REPLY);
+    parentTranscript.turnEnd('e5b2e000-0000-4000-8000-000000000003');
+    seedTranscript(join(s.userData, 'claude-config'), s.repo, U5B_PARENT, parentTranscript.records);
+    expect(ours.maws.consoleErrors()).toEqual([]);
+    await s.quit(ours);
+    await endProfileProcesses(s.userData); // the peer's daemon runs next, as the profile's unit
+    said.push(`  ${here.label}: thread ${child} from ${anchor.label}, its first message's tag with the full hash, its lineage with no commit and no path`);
+
+    // the peer's daemon as the profile's unit: the list and the record load; the peer's app draws the parent's row
+    await withUnit(s, peer, 'xb-u5b-thread', async (unit) => {
+      expect((await unit.status()).build.buildId, `${peer.label}'s mawsd serves`).toBe(mawsdBuildOf(peer));
+      type Listed = { sessions: { appId: string; lineage: unknown }[] };
+      const listed = await unit.request<Listed>('session.list', {});
+      expect(listed.sessions.map((r) => r.appId), 'session.list loads and holds the parent and the child').toEqual(expect.arrayContaining([parent, child]));
+      expect(listed.sessions.find((r) => r.appId === child)?.lineage, 'the child listed with its lineage').toEqual(lineage);
+      const got = await unit.request<{ lineage: unknown } | null>('session.get', { appSessionId: child });
+      expect(got?.lineage, 'session.get: the lineage parses, with no commit').toEqual(lineage);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `${peer.label}'s app on its unit`).toBe(mawsdBuildOf(peer));
+      await (await sidebarRow(run.page, { appSessionId: parent })).click();
+      const row = run.page.locator(`[data-region="main"] [data-side-thread$=${JSON.stringify(child)}]`);
+      await expect(row, 'the parent’s side-thread row').toBeVisible({ timeout: 20_000 });
+      await expect(row.locator('.transcript-side-thread-label'), 'named by the lineage’s label').toHaveText(anchor.label);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  ${peer.label}'s unit mawsd (pid ${unit.pid}): session.list holds ${listed.sessions.length} records with the child, session.get its lineage; its app draws the parent's row`);
+      await s.quit(run);
+      record(said);
+    });
   });
 });

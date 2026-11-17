@@ -11,6 +11,7 @@ import { presentationOf, tableRowOf } from './classify';
 import { artifactHeading } from './copy';
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
+import { serializeRows } from './serialize'; // UX wave U10b
 import { applyEvents, createState } from './reduce';
 import type { Row } from './rows';
 import { builder, request, tool, type Builder } from './test-events';
@@ -259,5 +260,92 @@ describe('p1-maws-artifacts, recorded', () => {
   it('the list cell and the screenshot cell with the recording’s title and size', () => {
     const labels = ofKind(rows(), 'cell').filter((cell) => cell.toolName === LIST || cell.toolName === SCREENSHOT).map((cell) => cell.label);
     expect(labels).toEqual(['Screenshot of Dashboard v1 (64 × 64)', 'Listed 1 artifact']);
+  });
+});
+
+// UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md §C.4): an agent's `artifact_delete` is the
+// artifact row's third action. It names the artifact by the call's reference until the answer, then by the answer's id
+// and title; a refusal reads in the person's words by the `why` of its JSON, never with the tool's name or "the user".
+describe('the artifact row of an agent’s delete', () => {
+  const DELETE = 'mcp__maws__artifact_delete';
+  const DRAFT = '6b0f6b2e-1d7a-4c35-9a59-2f1c0c4f7a11';
+  const deleteRows = (configure: (b: Builder) => void, fold = false) => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_d', DELETE, { artifact: 'draft-plan' });
+    configure(b);
+    return ofKind((fold ? foldedRows : expandedRows)(b.events), 'artifact');
+  };
+  const refused = (sentence: string, json: Record<string, unknown>) => (b: Builder) => b.result('toolu_d', `${sentence} ${JSON.stringify(json)}`, { isError: true });
+
+  it('is an artifact row, "Deleting <reference>…" until the answer, then "Deleted <title>" by the answer’s id and title', () => {
+    expect(presentationOf(DELETE)).toBe('artifact');
+    const [pending] = deleteRows(() => {});
+    expect(pending).toMatchObject({ kind: 'artifact', action: 'delete', artifactId: 'draft-plan', title: null, error: null, answered: false });
+    expect(artifactHeading(pending)).toBe('Deleting draft-plan…');
+    const [deleted] = deleteRows((b) => b.result('toolu_d', json({ status: 'deleted', artifactId: DRAFT, kind: 'document', title: 'Draft plan' })));
+    expect(deleted).toMatchObject({ action: 'delete', artifactId: DRAFT, title: 'Draft plan', error: null, answered: true, deliverableId: null, version: null });
+    expect(deleted).not.toHaveProperty('why');
+    expect(artifactHeading(deleted)).toBe('Deleted Draft plan');
+  });
+
+  it('reads each refusal by its `why` in the person’s words, with neither the tool’s name nor "the user"', () => {
+    const cases: [string, Record<string, unknown>, string][] = [
+      ['artifact_delete: "Budget" was created by the user; ask them to delete it in the Library', { reason: 'invalid', why: 'byUser' }, 'Could not delete draft-plan: you made it. Delete it from the Library if you no longer need it.'],
+      ['artifact_delete: the user has edited "Budget"; ask them to delete it in the Library', { reason: 'invalid', why: 'edited' }, 'Could not delete draft-plan: you have edited it. Delete it from the Library if you no longer need it.'],
+      ['artifact_delete: "Budget" was created by another session; ask the user to delete it in the Library', { reason: 'invalid', why: 'otherSession' }, 'Could not delete draft-plan: another session made it. Delete it from the Library if you no longer need it.'],
+      ['artifact_delete: MAWS cannot tell that only agents have written to "Budget"; ask the user to delete it in the Library', { reason: 'invalid', why: 'unknown' }, 'Could not delete draft-plan: MAWS cannot tell that only agents have written to it. Delete it from the Library if you no longer need it.'],
+      ['artifact_delete: the design system governs 2 artifact(s)', { reason: 'designSystemInUse', artifactIds: ['a', 'b'], why: 'designSystemInUse' }, 'Could not delete draft-plan: it still styles other artifacts. Move them to another design system first.'],
+    ];
+    for (const [sentence, refusal, heading] of cases) {
+      const [row] = deleteRows(refused(sentence, refusal));
+      expect(row).toMatchObject({ action: 'delete', why: refusal.why, answered: true });
+      expect(artifactHeading(row)).toBe(heading);
+      expect(artifactHeading(row)).not.toMatch(/artifact_delete|the user/);
+    }
+  });
+
+  it('a refusal it has no words for (a newer machine’s) is drawn as the refusal reader leaves the agent’s sentence', () => {
+    const [newer] = deleteRows(refused('artifact_delete: "Budget" is pinned by a newer rule', { reason: 'invalid', why: 'pinnedElsewhere' }));
+    expect(newer.why).toBe('pinnedElsewhere');
+    expect(artifactHeading(newer)).toBe('Could not delete draft-plan: "Budget" is pinned by a newer rule');
+    const [plain] = deleteRows((b) => b.result('toolu_d', 'artifact_delete: invalid arguments: artifact: Required', { isError: true }));
+    expect(plain).not.toHaveProperty('why');
+    expect(artifactHeading(plain)).toBe('Could not delete draft-plan: invalid arguments: artifact: Required');
+  });
+
+  // Fix wave 1 (review item 1): the artifact family's E11 form, a delete whose turn closed before its answer
+  it('a delete whose turn closed with no answer reads "Deleting <title> was never answered"', () => {
+    const [closed] = deleteRows((b) => b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null }));
+    expect(closed).toMatchObject({ action: 'delete', error: null, answered: false, neverAnswered: true });
+    expect(artifactHeading(closed)).toBe('Deleting draft-plan was never answered');
+  });
+
+  const REJECTED = "The user doesn't want to proceed with this tool use. The tool use was rejected (eg. if it was a file edit, the new_string was NOT written to the file).";
+  it('a delete stopped or denied comes back with an error result and reads "Could not delete <title>: …", never answered or not', () => {
+    const [stopped] = deleteRows((b) => {
+      b.result('toolu_d', REJECTED, { isError: true });
+      b.emit('process.exited', { code: null, signal: 'SIGKILL', reason: 'crash', lostAttentionCount: 0, budget: null });
+    });
+    expect(stopped).toMatchObject({ action: 'delete', error: REJECTED, answered: true });
+    expect(stopped).not.toHaveProperty('neverAnswered');
+    expect(artifactHeading(stopped)).toMatch(/^Could not delete draft-plan: /);
+  });
+
+  it('a denied delete with no `why` reads the engine’s sentence as the refusal reader leaves it', () => {
+    const [denied] = deleteRows((b) => b.result('toolu_d', REJECTED, { isError: true }));
+    expect(denied).not.toHaveProperty('why');
+    expect(artifactHeading(denied)).toBe(`Could not delete draft-plan: ${REJECTED}`);
+  });
+
+  it('stays in view when its turn folds, and its copied text is the heading alone', () => {
+    const rows = deleteRows((b) => {
+      b.result('toolu_d', json({ status: 'deleted', artifactId: DRAFT, kind: 'document', title: 'Draft plan' }));
+      b.text('m1', 0, 'Done.');
+      b.end(['u1']);
+    }, true);
+    expect(rows).toHaveLength(1);
+    expect(isPersistentRow(rows[0])).toBe(true);
+    expect(serializeRows(rows)).toBe('**Deleted Draft plan**');
   });
 });

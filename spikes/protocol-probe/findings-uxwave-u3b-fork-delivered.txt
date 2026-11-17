@@ -1,0 +1,74 @@
+UX wave, landing U3b, probe 5: a fork that rewinds to a prompt that was delivered, not typed, engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, "Probes", the premise named after item 4:
+"Fork from here" passes the id of the prompt that follows the answer; 2026-11-15, VM dc-uxwave5-26dc, branch
+ux-wave/U3b-probes)
+
+Question. When the prompt that follows an answer was delivered into the session and not typed (a message the sminos
+bridge delivered into an interactive session; or, on the stream-json wire, a prompt that waited in the queue and was
+read as a `queued_command`), does the engine's rewind accept that id, so that the fork starts with the conversation
+cut before that prompt, or refuse it, and in which words?
+
+Verdict. It accepts every one (5 of 5 rewinds, each in a fork of its own): the typed control, the queued prompt by
+its sent uuid, the queued prompt by its file row's uuid, the bridge-delivered prompt, and a typed control in the
+same terminal session. Each answer is {rewound: true, targetMessageUuid, prefillText: the prompt's text,
+precedingAssistantUuid}. The fork's next prompt hangs below the point before the target, and the target and
+everything after it are gone. No refusal arose, so there are no refusal words to report. The refusal recorded
+elsewhere is {rewound: false, error: "target not found", reason: "target_not_found"}, for a target already rewound
+(findings-p4-w2a-rewind.txt). The premise holds: no code is needed for a delivered prompt.
+Two details the document's reading may want:
+  - A queued prompt has no `user` row in the file. Its only row is an `attachment` of type `queued_command` (its own
+    uuid, `source_uuid` = the uuid the prompt was sent with). On the wire the engine replays it as a `user` frame
+    with the SENT uuid (isReplay true). The rewind takes either id. Given the attachment's uuid, it answers with
+    targetMessageUuid = the source_uuid, so the id it reports can differ from the id it was given.
+  - A queued prompt arrives mid-turn, so the cut keeps the turn's earlier tool call and result (the fork's chain
+    ends at the tool_result row, before the queued_command attachment), and the answer that followed is gone.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md). Scenario
+scenarios/pass3/uxwave-u3b-fork-delivered.mjs. The fork is launched as MAWS launches one (src/engine-host/launch.ts:
+`--resume <source> --fork-session --session-id <new>`, with the rest of the launch of uxwave-common-arrivals.mjs) and
+rewound as rewindFork (src/services/sessions/setup.ts) asks through src/engine-host/rewind.ts:
+`rewind_conversation` {target_message_uuid, last_seen_user_message_uuid: the source's newest non-meta user row,
+interrupt_if_running: false}. After an accepted rewind, the fork is sent "Without using any tool, reply with only the
+word FORKED.", so that it writes its file; the chain from that prompt's row back to the root is noted
+(`uxw_fork_chain`). Each fork runs in the source's scratch HOME (vm-run.sh -e HOME, PROBE_WORK, PROBE_ROOT).
+  Source A, headless (u3b-fork-source .jsonl and .transcript.jsonl): a session launched as MAWS launches it. ONE
+  typed; TWO typed, with a 12 s foreground sleep; THREE sent 3 s into that tool call (MAWS's send while busy); FOUR
+  typed. THREE was sent with uuid be360905…: wire seq 59 out, 60 command_lifecycle queued, 64 the replay `user` frame
+  with uuid be360905… (isReplay true), 65 started. In the file, its only row is line 40, an `attachment`
+  {type: "queued_command", source_uuid: "be360905…", commandMode: "prompt", prompt: "Also reply with the word
+  THREE."} with uuid 73cf822f…; line 41 is a queue-operation "remove". It has no `user` row.
+  Source B, the terminal session of probe 2's first run (u3b-bridge-command-r1.transcript.jsonl): READY typed (line
+  4); the renames; then `sminos send <session> "UXW delivered: …"` while idle, delivered by the bridge as line 65, a
+  `user` row with uuid e0820294…, origin {kind: "plugin", name: "sminos", asUser: true}, promptSource "system",
+  content "[sminos message from human id=…]\nUXW delivered: reply with only the word DELIVERED.".
+
+Observed (fixtures/uxwave/u3b-fork-<case>.jsonl seq; the fork's own file u3b-fork-<case>.transcript.jsonl lines).
+  typed (A, target FOUR 9961ed28…): seq 25 {rewound: true, targetMessageUuid: 9961ed28…, prefillText: "Without using
+    any tool, reply with only the word FOUR.", precedingAssistantUuid: 581cf944… (TWO's answer)}. Chain from FORKED
+    (line 32): 31 assistant "TWO\nTHREE", 29 the queued_command attachment, 28 tool_result, 27 tool_use, 25 TWO, 23
+    "ONE", 12 ONE. FOUR is gone.
+  queued-sent (A, target be360905…, the uuid the prompt was sent with and the replay frame's): seq 24 {rewound: true,
+    targetMessageUuid: be360905…, prefillText: "Also reply with the word THREE.", precedingAssistantUuid: 3f05058b…
+    (TWO's tool_use)}. Chain from FORKED (line 29): 28 the tool_result, 27 the tool_use, 25 TWO, 23, 12. THREE, TWO's
+    answer and FOUR are gone.
+  queued-row (A, target 73cf822f…, the attachment row's own uuid): seq 24 the same answer as queued-sent, with
+    targetMessageUuid be360905… (not the uuid given); the same chain.
+  delivered (B, target e0820294…): seq 26 {rewound: true, targetMessageUuid: e0820294…, prefillText: "[sminos message
+    from human id=…]\nUXW delivered: reply with only the word DELIVERED.", precedingAssistantUuid: 6cc5d7d1… (READY's
+    answer)}. Chain from FORKED (line 40): 39, 36, 33, 30 the renames' meta reminder rows, 24 "READY", 13 READY. The
+    delivered prompt and its answer are gone. The FORKED row hangs off the last row before the target (the last
+    rename's reminder), not off precedingAssistantUuid.
+  terminal-typed (B, target READY 34c4987a…, the session's first prompt): seq 25 {rewound: true, prefillText: READY's
+    text, precedingAssistantUuid: null}; the fork's FORKED row (line 12) is the root of its chain.
+  Each case ran once: a rewind reads the transcript as written and does not depend on timing.
+  Spend: under US$0.03 in all (the source session, and one short prompt per fork).
+  The VM's host name, which the harness's redaction misses (it appears in the terminal session's sminos attribution
+  line), is replaced by <host> in u3b-fork-delivered.transcript.jsonl.
+
+Inference, in the document's terms.
+  - The unprobed premise holds for both delivered forms. "If it refuses, the fork's own tab says so in the engine's
+    words" does not arise for them.
+  - For a queued prompt, the id MAWS holds is the one it sent (the replay frame's uuid), and that id is accepted. A
+    reader of the file that takes the queued_command attachment's uuid gets the same result. Neither needs mapping.
+  - prefillText is the delivered prompt's full text, the bridge's "[sminos message from … id=…]" header included. A
+    fork that puts prefillText in the composer would show that header.

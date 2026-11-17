@@ -22,6 +22,19 @@ export function withoutScreenshot(anchor: Anchor): Anchor {
   return rest;
 }
 
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §A and §K; decision 25): the anchor
+// a side thread's lineage keeps, which is stored (the setup intent, the index's record) and read by every build. Both
+// builds that bind hold it to a strict schema without `commit`, so a commit's anchor goes without it, and without its
+// `path`, which means nothing without the commit and which a reader of lineage would open as a file. Every other anchor
+// is `withoutScreenshot`'s. The first message keeps the commit (its words and its tag are made with `withoutScreenshot`).
+export function lineageAnchor(anchor: Anchor): Anchor {
+  const rest = withoutScreenshot(anchor);
+  if (rest.commit === undefined) return rest;
+  delete rest.commit;
+  delete rest.path;
+  return rest;
+}
+
 // `at(i)` is where the i-th comment sits in the command's input (`[]` for the one comment of `side.sendToMain` and for
 // `side.thread.open`'s first, `['more', i - 1]` for its others, `['comments', i]` for `side.comment.content`), which a
 // refused screenshot names. The roots are asked for once, and only when a comment has a screenshot.

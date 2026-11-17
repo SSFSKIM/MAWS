@@ -43,7 +43,7 @@ import type { WirePeer } from '../ipc/wire'; // P5 O1 M6
 import { clientGoneRelay, type ClientGoneRelay } from './client-refs'; // P5 O1 M5
 import { createDetachedTransport, HANDOVER_GRACE_MS, refusedOn, type DetachedEvents, type DetachedTransport, type DetachedTransportOptions, type ExitInfo, type HandoverAnswer, type HostLink, type Welcomed } from './detached-transport'; // E10
 import { MainDocRelay, type RelayPort } from './doc-relay'; // P3-A M5
-import { CompletionRoutes, pidOfStartedAtKey, startedAtKey, type CompletionRoute, type StartedAtKey } from './completion-routes'; // P5 O16 M3b fix wave 3
+import { CompletionRoutes, pidOfStartedAtKey, startedAtKey, startedAtOfKey, type CompletionRoute, type StartedAtKey } from './completion-routes'; // P5 O16 M3b fix wave 3
 import { DocumentsClosedSchema, HOLDER_CAPABILITY, MACHINE_SPINE_CAPABILITY, PEER_CAPABILITIES, SOCKET_PROTOCOL_V2, type ServerRefuse } from './socket-protocol'; // P3-A M5
 
 // The hosts a client reaches, and how a command is sent to one (main's router re-exports both).
@@ -103,6 +103,12 @@ export interface HostSupervisorOptions {
   // P5 O2 M3 end
   onReplaced?(owner: HostOwner): void; // P5 O2 M5: another client took a detached host (it is crashed for good)
   onParked?(owner: HostOwner, parked: boolean): void; // P5 O2 M5: an on-demand host parked, or left its park
+  // #473: on the daemon shape, the relay's verdict on a relayed host's exit. Main's own look at a gone process it heard no
+  // handover mark for comes ahead of `mawsd`'s, whose drain dropped main's link before the host could say it handed over;
+  // so while `mawsd` reported a drain, the verdict waits for its end report on that incarnation (true: handed over;
+  // false: it crashed mid-drain). Null: nothing to wait for (no drain reported), the verdict now; a promise that
+  // answers null (no report within its bound) is today's verdict, a crash.
+  relayedVerdict?(owner: HostOwner, incarnation: StartedAtKey): Promise<boolean | null> | null;
 }
 
 // E10: what main pulls from a host between its connect and its `ready` line (X13: the host emits nothing before it).
@@ -132,6 +138,15 @@ export interface EngineHandoverState {
   state: 'waiting' | 'draining';
   inFlight: number;
   tool?: string;
+}
+
+// #473: a drain's end as the supervisor that asked it read the old host's exit (`lost`'s replace verdict, on the
+// evidence): its incarnation, and whether it handed its sessions over or crashed mid-drain. `mawsd` tells it to main with
+// the `none` that ends `daemon.engineHandover`.
+export interface HandoverEnded {
+  pid: number;
+  startedAt: string;
+  handedOver: boolean;
 }
 
 export interface HostSupervisor {
@@ -222,7 +237,7 @@ export interface HostSupervisor {
   // P5 O16 M3c fix wave 2 (D63): the host's update under way (above), null when none; told at each change. Cleared at the
   // old host's exit (its link's loss), at a successor's welcome, and at a failed ask's recycle.
   handoverState(owner: HostOwner): EngineHandoverState | null;
-  onHandover(owner: HostOwner, listener: (state: EngineHandoverState | null) => void): () => void;
+  onHandover(owner: HostOwner, listener: (state: EngineHandoverState | null, ended?: HandoverEnded) => void): () => void; // #473: `ended` with a drain's end
 }
 
 export const REQUEST_TIMEOUT_MS = 10_000;
@@ -327,8 +342,9 @@ interface Host {
   drainStopped: MainPort | null; // P5 O16 M3c fix wave 3: the draining link a stop-all was written to (its close is planned)
   drainHears: boolean; // fix wave 3: the draining link carried the host's events (a ready line was said on it)
   relayed: boolean; // fix wave 3: reached through a relay (main's daemon shape), whose handovers are the relay's to ask
+  verdictWait: object | null; // #473: a gone relayed host's verdict, waiting for the relay's end report (relayedVerdict)
   drainMet: StartedAtKey | null; // fix wave 3b: the last process met with its drain armed already (its lines logged once); its incarnation, not its pid (the panel fix's merge)
-  handoverListeners: Set<(state: EngineHandoverState | null) => void>;
+  handoverListeners: Set<(state: EngineHandoverState | null, ended?: HandoverEnded) => void>;
 }
 
 export function createHostSupervisor(options: HostSupervisorOptions): HostSupervisor {
@@ -405,6 +421,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       drainStopped: null, // P5 O16 M3c fix wave 3
       drainHears: false,
       relayed: false,
+      verdictWait: null,
       drainMet: null,
     };
     // E10: a detached host's transport, reporting into the same state, ladder and requests as a utility host's
@@ -742,6 +759,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
       connected(link: HostLink, welcome, facts) {
         if (stopped) return link.close();
         park(host, false); // P5 O2 M3: an adoption, or a launch, reached it
+        host.verdictWait = null; // #473: a welcome supersedes a verdict still waited for
         host.updatePending = facts?.updatePending === true; // P5 O16 M3c fix wave 2
         setHandover(host, null); // a successor's welcome, or the same host's again (its wait re-read from its next status)
         host.port = link;
@@ -793,9 +811,10 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         disconnected();
       },
       lost(loss) {
-        // P5 O16 M3c fix wave 2: the old host's exit (or its link's loss) ends the update it waited in
+        // P5 O16 M3c fix wave 2: the old host's exit (or its link's loss) ends the update it waited in; #473: a drain's
+        // close ends it below, with the verdict on its exit
         host.updatePending = false;
-        setHandover(host, null);
+        if (!(typeof loss === 'object' && 'replace' in loss) || stopped) setHandover(host, null);
         // P5 O16 M3b fix wave 1: the old link closed: its host's completions have no one to settle (fix wave 3: refused)
         const drainLink = host.draining;
         const drained = host.draining ? host.routes.closed(host.draining) : null;
@@ -828,6 +847,7 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
           const planned = detached || (drainLink !== null && drainLink === host.drainStopped) || (!abnormal && (!host.drainHears || loss.idleAsked));
           host.drainStopped = null;
           host.drainHears = false;
+          setHandover(host, null, closed === null ? undefined : { pid: pidOfStartedAtKey(closed), startedAt: startedAtOfKey(closed), handedOver: planned }); // #473
           failSent(host, planned ? 'handed its sessions over' : 'exited');
           if (!planned) return unexpected(loss.replace);
           if (host.state.state !== 'restarting') transition(host, { state: 'restarting', pid: null, restarts: host.state.restarts });
@@ -840,12 +860,25 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
         if (loss === 'deliberate') return deliberate();
         // P5 O16 M3c fix wave 1: a host whose last status said it was handing over (another client asked it, as `mawsd
         // restart --engine-host` does) left as planned: its successor at once, with no crash count and no backoff
-        if (closed !== null && saidHandedOver) {
-          console.log(`[hosts] ${host.owner} pid ${pidOfStartedAtKey(closed)} left after handing its sessions over; starting its successor`);
+        const handedOverLeft = (gone: StartedAtKey) => {
+          console.log(`[hosts] ${host.owner} pid ${pidOfStartedAtKey(gone)} left after handing its sessions over; starting its successor`);
           failSent(host, 'handed its sessions over');
-          return launch(host);
-        }
-        unexpected(loss.crash);
+          launch(host);
+        };
+        if (closed !== null && saidHandedOver) return handedOverLeft(closed);
+        // #473: a relayed host gone with no mark heard, while the relay reported a drain: the relay's verdict decides
+        const gone = closed;
+        const verdict = gone !== null && host.relayed ? (options.relayedVerdict?.(host.owner, gone) ?? null) : null;
+        if (gone === null || verdict === null) return unexpected(loss.crash);
+        const waitedFor = {};
+        host.verdictWait = waitedFor;
+        void verdict.then((handedOver) => {
+          if (host.verdictWait !== waitedFor) return;
+          host.verdictWait = null;
+          if (stopped) return;
+          if (handedOver === true) return handedOverLeft(gone);
+          unexpected(loss.crash);
+        });
       },
       exited(exit) {
         setHandover(host, null); // P5 O16 M3c fix wave 2
@@ -880,12 +913,12 @@ export function createHostSupervisor(options: HostSupervisorOptions): HostSuperv
   // E10 end
 
   // P5 O16 M3c fix wave 2 (D63): the update under way, told at each change
-  function setHandover(host: Host, next: EngineHandoverState | null): void {
-    if (JSON.stringify(next) === JSON.stringify(host.handover)) return;
+  function setHandover(host: Host, next: EngineHandoverState | null, ended?: HandoverEnded): void {
+    if (ended === undefined && JSON.stringify(next) === JSON.stringify(host.handover)) return;
     host.handover = next;
     for (const listener of [...host.handoverListeners]) {
       try {
-        listener(next);
+        listener(next, ended);
       } catch (error) {
         console.error(`[hosts] a handover listener of ${host.owner} failed`, error);
       }

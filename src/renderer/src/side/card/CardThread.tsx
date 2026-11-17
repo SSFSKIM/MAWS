@@ -10,6 +10,7 @@
 // screen, so the unread rule and attention navigation count it as the Side pane's. P3-F (L154): a reply sets out through
 // the host's `onSending` as the comment's send does, so a document's card records it as its thread's next message.
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type KeyboardEvent } from 'react';
+import { neutraliseGrant } from '@shared/engine/grant';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import { tabId } from '@shared/ipc/schema/layout';
 import { editRowOf } from '../../composer/resubmit-seam'; // P2-F F-C1
@@ -179,9 +180,10 @@ function Echo({ text }: { text: string }) {
 
 // The thread's artifact row opening the artifact whose page the card is on (P3-L M5b; E2's record before the cutover)
 // shows that version in the card's viewer (the latest followed when it is the last); any other artifact goes the
-// registered way (the panel's tool). P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on
-// its row. P2-F F-C1: a bubble's Edit edits the thread's message (the registered default reads the main pane's active
-// tab, which is never this thread).
+// registered way (the panel's tool). UX wave U6d: a mention's look for an open main tab passes over the card's own
+// artifact. P2-F L121: a reply of this card's the engine took is marked "Sent to Claude" on its row. P2-F F-C1: a
+// bubble's Edit edits the thread's message (the registered default reads the main pane's active tab, which is never
+// this thread).
 function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, delivered: ReadonlySet<MessageUuid>): Partial<TranscriptActions> {
   const showVersion = useRef(frame.showVersion);
   useLayoutEffect(() => {
@@ -201,6 +203,15 @@ function useCardActions(card: OpenCard, child: AppSessionId, frame: CardFrame, d
         }
         if (location) registeredActions().openArtifact(appSessionId, id, at, location); // P4-B4: a link's place
         else registeredActions().openArtifact(appSessionId, id, at);
+      },
+      // UX wave U6d (decision 7): a mention of the card's own artifact opens in the card's viewer above, also while a
+      // main tab shows it, so a click in the thread never takes the person off the page they comment on; any other
+      // artifact follows the registered rule (the main tab that already shows it comes forward)
+      showOpenArtifactTab(appSessionId, id, location) {
+        if (target?.kind === 'artifact-page' && showVersion.current !== undefined && id === target.artifactId) return false;
+        const registered = registeredActions().showOpenArtifactTab;
+        if (!registered) return false;
+        return location ? registered(appSessionId, id, location) : registered(appSessionId, id);
       },
       userRowMark: (row) => (row.messageUuid !== null && delivered.has(row.messageUuid) ? COPY.sentToClaude : null),
       editAndResubmit: (row) => editRowOf(child, row, 'edit'),
@@ -229,7 +240,8 @@ function useReply(serial: number, child: AppSessionId, delivered: (result: Human
     const settled = onSending?.(content); // P3-F (L154): told as it sets out, then whether it went, the card gone or not
     let result: HumanPromptResult;
     try {
-      result = await sendToSession(child, content, { origin: 'comment' });
+      // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+      result = await sendToSession(child, neutraliseGrant(content), { origin: 'comment' });
     } catch (error) {
       result = { disposition: 'refused', started: false, reason: error instanceof Error ? error.message : String(error) };
     }

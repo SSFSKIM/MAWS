@@ -1,81 +1,105 @@
 // The Files tool (C8c execution document, Interfaces *Tools, slots and the open-file seam*; M2's decisions): the
 // session's roots as a tree, one root per directory the session may read, listed lazily as directories expand and kept
 // current by `files.changed` for the expanded ones; `.git` hidden as a root's child, dotfiles shown, symlinks named and
-// not followed. A click on a directory toggles it, on a file opens the viewer in the main area. X5: `id: 'files'`,
-// pinnable, single-instance, `params { path?, line? }`, no summary. Its state is a store handle (C8a's React Compiler
-// rule): the expansion, selection and scroll per session, and a reveal `open` asked for.
+// not followed. A click on a directory toggles it, on a file opens it (`openFile`). X5: `id: 'files'`, pinnable, no
+// summary. Its state is a store handle (C8a's React Compiler rule): the expansion, selection and scroll per session.
+//
+// UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Decisions 1, 8 and 21): a file opens
+// beside the chat as a tab of this tool, so Files is multi-instance and a tab of it either holds a file (its params,
+// `files/tabs.ts`) and draws the file viewer, or holds none and draws the tree. What a tab holds is read from the layout
+// store, for a tab restored and for one opened now alike; an add of a tab with a file writes its params before the tab
+// is listed, so no reader meets a file's tab without its file. An add with no file shows the tree-only tab the scope has
+// (`reuse`), and adds one only when it has none. The reveal of `params.path`, which nothing in the window asked for,
+// is gone with its two waiting states. M2: a tab that holds a file closes as a main file tab closes, asking about unsaved
+// edits (`beforeClose`), and its viewer is where ⌘S and Comment on this line act while it holds the keyboard.
+// M3 (Interfaces §C): every Files tab draws the tree in a column at the left of its file, where `treePlace` says (the
+// owner's answer on card R8: in a tab too narrow for both, the button shows the tree in the file's place), and the tree's
+// state is the session's (`tree-state.ts`), so the tool's instance keeps nothing. A row's click opens the file in the
+// preview tab, a double-click keeps it, ⌘-click opens a main tab; the row of the file in view is marked.
+// UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §D; "Reported" 1, K6, K7, K9): the
+// tree's context menu (a right-click in it, or ⇧F10 with the keyboard in it) holds the one row "Open File…", the menus'
+// component as the Files icon's menu draws it, with no chord; for a session on another machine the row is disabled and
+// names the machine (until U6f). A tab's agent's mark is handed to its file's viewer (decision 19).
 import { useVirtualizer } from '@tanstack/react-virtual';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef } from 'react';
-import { useStore } from 'zustand';
-import { createStore, type StoreApi } from 'zustand/vanilla';
+import { ContextMenu } from 'radix-ui';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
 import { workingFolder } from '@shared/sessions/working-folder';
+import { Resizer } from '../../../app/Resizer';
+import { panelHost } from '../../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
-import { FILES_COPY, REFUSAL } from '../copy';
-import { normalizeLexically, openFile } from '../open-file';
+import { ipc } from '../../../ipc/client';
+import { machineFor } from '../../../ipc/machine';
+import { useMachines } from '../../../stores/machines';
+import { machineName } from '../../../stores/org-projects';
+import { useLayout } from '../../../stores/layout';
+import { paramsHoldFile } from '../../../stores/layout-model';
+import { FILES_COPY, OPEN_FILE_COPY, REFUSAL } from '../copy';
+import { closeGuardOf, registerSideFile } from '../editor/register';
+import { openFile, type Opened } from '../open-file';
+import { FileViewer } from '../viewer/FileViewer';
+import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
+import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
+import { openChosen } from './open-chosen';
 import { listingKey, useFiles } from './store';
-import { dirname, expandTo, firstRoot, roleOf, rootsFor, rowsOf, workingRoot, type RootRole, type TreeRow } from './tree';
+import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
+import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
+import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
-export const FILES_TOOL_ID = 'files';
+export { FILES_TOOL_ID };
 export const FILES_ROW_HEIGHT = 24;
 
-export interface FilesParams {
-  path?: string;
-  line?: number;
-}
+// What an add of Files is given: a file to show (`openFile`'s), or nothing for the tree. A restored tab's params are
+// whatever the layout holds for it (X5), read through `fileOfTab`.
+export type FilesParams = FilesTabParams | undefined;
 
-export interface FilesView {
-  expanded: ReadonlySet<string>;
-  selected: string | null;
-  scrollTop: number;
-  defaultRoot: string | null;
-}
-
-export interface FilesUi {
-  views: Readonly<Record<string, FilesView>>; // by session: a pinned tool keeps each session's tree as it left it
-  reveal: { path: string; line: number | null } | null; // asked by `open`, resolved against the shown session's roots
-  pendingOpen: { path: string; line: number | null } | null; // revealed; opened once its directory's listing says it is a file
-}
-
+// M3: the tree's state is the session's (`tree-state.ts`), the same in each of its Files tabs: the instance keeps only
+// its id.
 export interface FilesState {
-  readonly ui: StoreApi<FilesUi>;
+  readonly tabId: string;
 }
 
-const EMPTY_VIEW: FilesView = { expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null };
-const viewOf = (ui: FilesUi, appSessionId: AppSessionId): FilesView => ui.views[appSessionId] ?? EMPTY_VIEW;
-
-function patchView(ui: StoreApi<FilesUi>, appSessionId: AppSessionId, next: (view: FilesView) => Partial<FilesView>): void {
-  ui.setState((s) => {
-    const view = viewOf(s, appSessionId);
-    return { views: { ...s.views, [appSessionId]: { ...view, ...next(view) } } };
-  });
+// A tab opened now with a file stores it first, before the host lists the tab; a restored tab's are in the layout already.
+function createState({ instanceId, params, restored }: PanelToolInit<FilesParams>): FilesState {
+  if (!restored && paramsHoldFile(params)) useLayout.getState().setPanelParams(instanceId, params);
+  return { tabId: instanceId };
 }
 
-const toggled = (set: ReadonlySet<string>, path: string): ReadonlySet<string> => {
-  const next = new Set(set);
-  if (!next.delete(path)) next.add(path);
-  return next;
-};
-
-// `params` is undefined for a tab restored from layout.json (X5).
-function createState({ params }: PanelToolInit<FilesParams>): FilesState {
-  const ui = createStore<FilesUi>()(() => ({ views: {}, reveal: null, pendingOpen: null }));
-  if (params?.path) ui.setState({ reveal: { path: normalizeLexically(params.path), line: params.line ?? null } });
-  return { ui };
+// Decision 21: an add with no file re-targets the scope's first tab that holds no file (the pinned tree, else the
+// session's own); an add with a file always makes its own tab.
+function reuse(refs: readonly { id: string }[], params: FilesParams): string | null {
+  if (paramsHoldFile(params)) return null;
+  const held = useLayout.getState().panelParams;
+  return refs.find((ref) => !paramsHoldFile(held[ref.id]))?.id ?? null;
 }
 
-// Re-targeting (X5): reveal the path in the shown session's tree and, for a file, open the viewer at the line.
-function open(state: FilesState, params: FilesParams): void {
-  if (params?.path) state.ui.setState({ reveal: { path: normalizeLexically(params.path), line: params.line ?? null } });
+// M2 (sequence 2): a tab that holds a file asks what a main file tab's close asks, of the file's key, and its answer acts
+// only while this tab still holds that file; a merge view's veto brings the tab into view. A close let through is
+// marked as answered, so the side tabs' subscriber does not keep the file as a main tab when the tab leaves.
+async function beforeClose(state: FilesState): Promise<boolean> {
+  const at = sideFileOf(state.tabId);
+  if (!at) return true;
+  const allowed = await closeGuardOf(at.key, { reveal: () => panelHost.selectTab(state.tabId), holds: () => sideFileOf(state.tabId)?.key === at.key });
+  if (allowed) closeAnswered(state.tabId);
+  return allowed;
 }
 
 export function FilesIcon({ className }: { className?: string }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinejoin="round">
       <path d="M1.5 4a1.5 1.5 0 0 1 1.5-1.5h3l1.5 1.5h5.5A1.5 1.5 0 0 1 14.5 5.5V12a1.5 1.5 0 0 1-1.5 1.5H3A1.5 1.5 0 0 1 1.5 12z" />
+    </svg>
+  );
+}
+
+function TreeIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinejoin="round">
+      <rect x="1.5" y="2.5" width="13" height="11" rx="1.5" />
+      <path d="M6 2.5v11" />
     </svg>
   );
 }
@@ -94,14 +118,169 @@ const unstartedRootsKey = (intent: SetupIntent | undefined): string =>
   intent ? JSON.stringify([intent.location, intent.additionalDirectories, intent.progress.worktree?.path ?? null]) : '';
 
 function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext }) {
+  const held = fileOfTab(useLayout((s) => s.panelParams[state.tabId]));
   if (ctx.appSessionId === null) return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{FILES_COPY.noSession}</p>;
-  return <SessionTree key={ctx.appSessionId} ui={state.ui} appSessionId={ctx.appSessionId} session={ctx.session} />;
+  return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} />;
 }
 
-function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; appSessionId: AppSessionId; session: SessionRecord | null }) {
-  const view = useStore(ui, (s) => viewOf(s, appSessionId));
-  const reveal = useStore(ui, (s) => s.reveal);
-  const pendingOpen = useStore(ui, (s) => s.pendingOpen);
+// The tab's own width, measured as it draws and followed as it changes (happy-dom measures 0: a tab too narrow for both).
+function useWidth(): [number, (element: HTMLDivElement | null) => (() => void) | undefined] {
+  const [width, setWidth] = useState(0);
+  const measure = useCallback((element: HTMLDivElement | null) => {
+    if (element === null) return;
+    setWidth(element.getBoundingClientRect().width);
+    if (typeof ResizeObserver === 'undefined') return;
+    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, []);
+  return [width, measure];
+}
+
+const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-border bg-bg px-3 py-1 text-ui-sm';
+
+// A Files tab: the tree alone when it holds no file; with a file, the tree in a column at the file's left, folded away,
+// or in the file's place (`treePlace`). The file is drawn as a main file tab draws it (law 3): the same viewer and its bar,
+// under the key the file's main tab would have, with the tree's button at the bar's start. While the tab is visible the
+// file's own column is where the keyboard can hold the file (R4); the tree beside it is not. While the tree stands in the
+// file's place the viewer stays mounted, hidden and inert, so the file keeps its editor's state and its viewer entry
+// stays mounted (the cap never takes it), and it is not where the keyboard is.
+// UX wave U6b-2 (Decision Log 29): while the tree stands in the file's place or the panel is not on screen, the file is
+// not in view, and a framed file's element is not in the document.
+function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: string; appSessionId: AppSessionId; session: SessionRecord | null; held: FilesTabParams | null; visible: boolean }) {
+  const machine = machineFor(appSessionId);
+  const key = held ? fileKey(machine, held.file) : null;
+  const [tabWidth, measure] = useWidth();
+  const [fileColumn, setFileColumn] = useState<HTMLDivElement | null>(null);
+  useEffect(() => void useTreeState.getState().load(), []);
+  const loaded = useTreeState((s) => s.loaded);
+  const tree = useTreeState((s) => treeOf(s, appSessionId));
+  // The button pressed in this tab while it is too narrow for both (not stored), for the file it was pressed over: any
+  // change of the file the tab holds ends it (a file chosen, a reuse of the tab from a link), so a file that comes back
+  // later is shown, not the tree.
+  const file = held?.file ?? null;
+  const [shown, setShown] = useState<{ file: string | null; on: boolean }>({ file, on: false });
+  if (shown.file !== file) setShown({ file, on: false });
+  const treeWidth = Math.max(TREE_WIDTH_MIN, tree.width ?? TREE_WIDTH_DEFAULT);
+  const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
+  const place = treePlace({ holdsFile: held !== null, tabWidth, treeWidth, folded: tree.folded, shown: shown.file === file && shown.on });
+  useEffect(() => (visible && key !== null && fileColumn && place !== 'instead' ? registerSideFile(fileColumn, key) : undefined), [visible, key, fileColumn, place]);
+  const inView = visible && place !== 'instead'; // UX wave U6b-2 (Decision Log 29)
+  // The button: with room for both it folds the tree for the session (stored); too narrow, it shows the tree in the file's
+  // place in this tab, until a file is chosen or it is pressed again.
+  const toggleTree = () => {
+    if (held === null) return;
+    if (roomy) useTreeState.getState().setFolded(appSessionId, !tree.folded);
+    else setShown({ file, on: place !== 'instead' });
+  };
+  const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} />;
+  const treeId = `files-tree-${tabId}`;
+  const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
+  return (
+    <div ref={measure} data-files-tab data-file={file ?? ''} onDoubleClick={(event) => keepChosen(tabId, event.target)} className="flex h-full min-h-0 min-w-0">
+      {place === 'alone' ? (
+        <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 min-w-0 flex-1">
+          {sessionTree}
+        </div>
+      ) : null}
+      {place === 'beside' ? (
+        <>
+          <div id={treeId} data-files-tree data-place={place} className="h-full min-h-0 shrink-0 border-r border-border" style={{ width: treeWidth }}>
+            {sessionTree}
+          </div>
+          <Resizer
+            label={FILES_COPY.resizeTree}
+            controls={treeId}
+            value={treeWidth}
+            min={TREE_WIDTH_MIN}
+            max={Math.floor(tabWidth) - FILE_WIDTH_MIN}
+            defaultValue={TREE_WIDTH_DEFAULT}
+            onChange={(width) => useTreeState.getState().setWidth(appSessionId, width)}
+            onReset={() => useTreeState.getState().setWidth(appSessionId, null)}
+            className="-ml-1.5 shrink-0"
+          />
+        </>
+      ) : null}
+      {place === 'instead' ? (
+        <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
+          <div className={treeBar}>
+            {button}
+            <span className="truncate text-fg-muted">{FILES_COPY.title}</span>
+          </div>
+          <div className="min-h-0 flex-1">{sessionTree}</div>
+        </div>
+      ) : null}
+      {held ? (
+        <div ref={setFileColumn} hidden={place === 'instead'} inert={place === 'instead'} className="h-full min-h-0 min-w-0 flex-1">
+          <FileViewer tab={{ id: fileKey(machine, held.file), kind: 'file', path: held.file, line: held.line, appSessionId, machine, pinned: false }} start={button} end={<MoveToMain tabId={tabId} />} host="side" inView={inView} agent={held.agent === true} />
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+// A double-click on a tree row keeps the tab its first click opened (L1). Where the tree stood in the file's place, the
+// first click ends it and the second lands on the file now drawn there, so the row's own double-click never fires. So a
+// row's click that opened its file beside the chat records the file and the tab it is in, and the record holds for the
+// very next click in the window only: when that click is the pair's second (`detail`, the system's click count, two or
+// more), the double-click that follows it keeps the file, if it lands in that same tab, on no control of its own (a
+// button, the divider, a row), and the tab still holds the file. Any other click, any key, and that double-click end the
+// record. A single click is not delayed. One record for the window: the second click is heard wherever it lands.
+let chosenByClick: { tabId: string; path: string; second: boolean } | null = null;
+let listening = false;
+function listenForThePair(): void {
+  if (listening || typeof window === 'undefined') return;
+  listening = true;
+  // Capture, so the record is judged before any handler of the click (the row's own sets the next record after it).
+  window.addEventListener('click', (event) => void (chosenByClick = chosenByClick && !chosenByClick.second && event.detail >= 2 ? { ...chosenByClick, second: true } : null), true);
+  window.addEventListener('keydown', () => void (chosenByClick = null), true);
+  window.addEventListener('dblclick', () => void (chosenByClick = null)); // after the page's handlers
+}
+function chosenFile(path: string, opened: Opened | null): void {
+  listenForThePair();
+  chosenByClick = opened?.surface === 'side' ? { tabId: opened.tabId, path, second: false } : null;
+}
+const OWN_DOUBLE_CLICK = 'button, a, input, textarea, select, [role="button"], [role="separator"], [role="treeitem"]';
+function keepChosen(tabId: string, target: EventTarget): void {
+  const chosen = chosenByClick;
+  chosenByClick = null;
+  if (chosen === null || !chosen.second || chosen.tabId !== tabId || sideFileOf(tabId)?.held.file !== chosen.path) return;
+  if (target instanceof Element && target.closest(OWN_DOUBLE_CLICK)) return; // a control's own double-click
+  keep(tabId);
+}
+
+// M4: the file into the main area from its bar, as from its tab's menu; disabled with the reason while it cannot move.
+function MoveToMain({ tabId }: { tabId: string }) {
+  const refusal = useTransferRefusal({ to: 'tab', panelTabId: tabId });
+  return (
+    <button type="button" data-move-to-main aria-label={TRANSFER_COPY.moveToMain} title={refusal ?? TRANSFER_COPY.moveToMain} disabled={refusal !== null} onClick={() => void moveFileToMain(tabId)} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2 disabled:text-fg-faint">
+      <MoveToMainIcon className="size-3.5" />
+    </button>
+  );
+}
+
+// A box with an arrow leaving it towards the main area, at the left.
+function MoveToMainIcon({ className }: { className?: string }) {
+  return (
+    <svg viewBox="0 0 16 16" aria-hidden="true" className={className} fill="none" stroke="currentColor" strokeWidth={1.4} strokeLinecap="round" strokeLinejoin="round">
+      <path d="M7 2.5h5A1.5 1.5 0 0 1 13.5 4v8a1.5 1.5 0 0 1-1.5 1.5H7M2.5 8h7M5 5.5 2.5 8 5 10.5" />
+    </svg>
+  );
+}
+
+function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {
+  const label = drawn ? FILES_COPY.hideTree : FILES_COPY.showTree;
+  return (
+    <button type="button" data-files-tree-toggle aria-label={label} title={label} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+      <TreeIcon className="size-3.5" />
+    </button>
+  );
+}
+
+// The session's tree. `marked`: the file the tab holds, whose row is marked when it is listed (Decision 8: the tree marks
+// and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it.
+function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void }) {
+  const view = useTreeState((s) => treeOf(s, appSessionId));
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
 
@@ -131,10 +310,10 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   // a newly created worktree gets its own first expansion when it replaces the original directory, and so does the
   // working folder an agent moved into (UX wave U8c-2), nothing else being collapsed.
   const defaultRoot = firstRoot(rootEntries.map((root) => root.path), roles, folder);
+  // UX wave U6b-1 (M3): the session's tree, so after a relaunch the stored folders stand (`firstRoot`).
   useEffect(() => {
-    if (defaultRoot === null || view.defaultRoot === defaultRoot) return;
-    patchView(ui, appSessionId, (current) => ({ defaultRoot, expanded: new Set([...current.expanded, defaultRoot]) }));
-  }, [defaultRoot, view.defaultRoot, ui, appSessionId]);
+    if (defaultRoot !== null) useTreeState.getState().firstRoot(appSessionId, defaultRoot);
+  }, [defaultRoot, appSessionId]);
 
   // The roots, again whenever the record changes the directories the session may read; before the session starts, its
   // setup intent's location, which main lists until the record exists (E11), so a project chosen after the pane opened
@@ -155,37 +334,22 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
     for (const path of shown.split('\0')) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
   }, [appSessionId, shown]);
 
-  // A reveal: expand the path's ancestors under its root and select it; a path under no root opens its tab anyway,
-  // where the viewer says why it cannot be read.
-  useEffect(() => {
-    if (!reveal || !roots || roots.status === 'loading') return;
-    const target = roots.status === 'ok' ? expandTo(rootEntries.map((root) => root.path), reveal.path) : null;
-    if (!target) {
-      ui.setState({ reveal: null });
-      openFile(appSessionId, reveal.path, reveal.line);
-      return;
-    }
-    const opens = target.ancestors.length === 0 ? [target.path] : target.ancestors;
-    ui.setState({ reveal: null, pendingOpen: target.ancestors.length === 0 ? null : { path: target.path, line: reveal.line } });
-    patchView(ui, appSessionId, (v) => ({ expanded: new Set([...v.expanded, ...opens]), selected: target.path }));
-  }, [reveal, roots, rootEntries, ui, appSessionId]);
-  useEffect(() => {
-    if (!pendingOpen) return;
-    const parent = listings.get(listingKey(appSessionId, dirname(pendingOpen.path)));
-    if (!parent || parent.status === 'loading') return;
-    const entry = parent.status === 'ok' ? parent.value.entries.find((e) => e.path === pendingOpen.path) : undefined;
-    ui.setState({ pendingOpen: null });
-    if (entry?.kind === 'dir') patchView(ui, appSessionId, (v) => ({ expanded: new Set([...v.expanded, entry.path]) }));
-    else if (!entry || entry.kind === 'file') openFile(appSessionId, pendingOpen.path, pendingOpen.line);
-  }, [pendingOpen, listings, ui, appSessionId]);
-
-  const activate = (row: TreeRow) => {
+  // A click: a folder opens or closes; a file opens in the preview tab, or with ⌘ as a main tab (L3).
+  const activate = (row: TreeRow, main: boolean) => {
     if (row.kind === 'notice') return;
     const directory = row.kind === 'root' || row.entry.kind === 'dir';
     // Expanding a directory whose listing failed asks again (a refused root stays expandable for a retry).
     if (directory && !row.expanded && useFiles.getState().listing(appSessionId, row.path)?.status === 'error') useFiles.getState().list(appSessionId, row.path);
-    patchView(ui, appSessionId, (v) => ({ selected: row.path, ...(directory ? { expanded: toggled(v.expanded, row.path) } : {}) }));
-    if (row.kind === 'entry' && row.entry.kind === 'file') openFile(appSessionId, row.path, null);
+    useTreeState.getState().select(appSessionId, row.path);
+    if (directory) useTreeState.getState().toggle(appSessionId, row.path);
+    if (row.kind !== 'entry' || row.entry.kind !== 'file') return;
+    chosen();
+    if (main) return void openFile(appSessionId, row.path, null, { main: true });
+    chosenFile(row.path, openFile(appSessionId, row.path, null));
+  };
+  // A double-click on a file keeps the tab its first click opened (L1).
+  const keepRow = (row: TreeRow) => {
+    if (row.kind === 'entry' && row.entry.kind === 'file') openFile(appSessionId, row.path, null, { keep: true });
   };
   const refresh = () => {
     useFiles.getState().list(appSessionId, null);
@@ -193,10 +357,93 @@ function SessionTree({ ui, appSessionId, session }: { ui: StoreApi<FilesUi>; app
   };
 
   return (
-    <div data-tool="files" className="flex h-full min-h-0 flex-col">
-      {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-      <TreeList rows={rows} selected={view.selected} activate={activate} ui={ui} appSessionId={appSessionId} refresh={refresh} />
-    </div>
+    <FilesMenu appSessionId={appSessionId}>
+      <div data-tool="files" className="flex h-full min-h-0 flex-col">
+        {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
+        <TreeList rows={rows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} />
+      </div>
+    </FilesMenu>
+  );
+}
+
+// UX wave U6e: the Files list's menu, in the classes of the Files icon's (`panel/SurfaceRow.tsx`, K9), at most 24rem wide
+// (K6), its least and its most width never wider than its column less 1rem (the tree can be 160 px), the column (the
+// list's own box) measured as the menu opens and its edges the menu's collision boundary (K12). ⇧F10 opens it at the
+// element that holds the keyboard, as it opens an icon's. Its one row draws no chord: no in-page menu of the app draws
+// one, and the File menu shows ⌘O (K7).
+const MENU = 'z-50 min-w-[min(12rem,calc(var(--files-menu-column,25rem)_-_1rem))] max-w-[min(24rem,calc(var(--files-menu-column,25rem)_-_1rem))] rounded-md border border-border-strong bg-bg-overlay p-1 text-fg shadow-float';
+const MENU_ROW = 'block h-8 cursor-default truncate rounded-sm px-2 text-ui leading-8 outline-none data-highlighted:bg-bg-hover data-disabled:text-fg-faint';
+
+function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; children: ReactNode }) {
+  const list = useRef<HTMLElement>(null);
+  const [column, setColumn] = useState<{ box: Element; width: number } | null>(null);
+  // A menu that closes hands the keyboard back to where it was a task later (Radix's focus scope, in a timer). Opened
+  // again before that task runs, the menu holds the keyboard, and the late hand-back would land outside it and close it
+  // (a menu that is not modal closes when the keyboard leaves it): so while the menu is open again, nothing is handed back.
+  // The menu opened again so (a second right-click while it is open closes and opens it in one gesture) has recorded the
+  // page as where the keyboard was: so the element that held the keyboard when the menu first opened is kept, and a
+  // close with no reopen hands the keyboard back to it while it is in the page. A close by a press elsewhere leaves the
+  // keyboard where that press put it, as Radix does.
+  const open = useRef(false);
+  const owed = useRef(false); // a close whose hand-back has not run yet
+  const opener = useRef<HTMLElement | null>(null);
+  const outside = useRef(false);
+  const opened = (now: boolean) => {
+    if (now && !owed.current) opener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    if (!now) owed.current = true;
+    open.current = now;
+    const box = list.current;
+    if (now && box) setColumn({ box, width: box.getBoundingClientRect().width });
+  };
+  const handBack = (event: Event) => {
+    const pressedElsewhere = outside.current;
+    owed.current = false;
+    outside.current = false;
+    if (open.current) event.preventDefault();
+    else if (!pressedElsewhere && opener.current?.isConnected) {
+      event.preventDefault();
+      opener.current.focus({ preventScroll: true });
+    }
+  };
+  const machine = machineFor(appSessionId);
+  const elsewhere = useMachines((s) => (machine === ipc.localMachine ? null : machineName(s.machines, machine, ipc.localMachine)));
+  const atKeyboard = (event: KeyboardEvent<HTMLElement>) => {
+    if (!event.shiftKey || event.key !== 'F10') return;
+    event.preventDefault();
+    const box = (event.target as Element).getBoundingClientRect();
+    event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
+  };
+  // Another machine (Decision Log 6: until U6f): the row disabled, its parenthesis in the muted colour, a long name cut
+  // with the whole row as its title.
+  const whole = elsewhere === null ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
+  return (
+    <ContextMenu.Root modal={false} onOpenChange={opened}>
+      <ContextMenu.Trigger ref={list} asChild onKeyDown={atKeyboard}>
+        {children}
+      </ContextMenu.Trigger>
+      <ContextMenu.Portal>
+        <ContextMenu.Content
+          data-files-menu=""
+          className={MENU}
+          collisionBoundary={column?.box}
+          collisionPadding={8}
+          onCloseAutoFocus={handBack}
+          onInteractOutside={() => void (outside.current = true)}
+          style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
+        >
+          {whole === null ? (
+            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosen(appSessionId)}>
+              {OPEN_FILE_COPY.row}
+            </ContextMenu.Item>
+          ) : (
+            <ContextMenu.Item data-open-file="" disabled title={whole} className={MENU_ROW}>
+              {OPEN_FILE_COPY.row}
+              <span className="text-fg-muted">{whole.slice(OPEN_FILE_COPY.row.length)}</span>
+            </ContextMenu.Item>
+          )}
+        </ContextMenu.Content>
+      </ContextMenu.Portal>
+    </ContextMenu.Root>
   );
 }
 
@@ -206,14 +453,14 @@ function TreeList({
   rows,
   selected,
   activate,
-  ui,
+  keepRow,
   appSessionId,
   refresh,
 }: {
   rows: TreeRow[];
   selected: string | null;
-  activate: (row: TreeRow) => void;
-  ui: StoreApi<FilesUi>;
+  activate: (row: TreeRow, main: boolean) => void;
+  keepRow: (row: TreeRow) => void;
   appSessionId: AppSessionId;
   refresh(): void;
 }) {
@@ -227,21 +474,21 @@ function TreeList({
     getItemKey,
     overscan: 12,
   });
-  // The scroll offset lives in the tool's state across unmounts (the host mounts only the selected tab): restored once
+  // The scroll offset lives in the session's tree state across unmounts (the host mounts only the selected tab): restored once
   // per mount, written back on unmount. A tab hidden past the watch grace comes back with its directories unlisted, so
   // the scroller clamps the offset to the rows there are; the offset is then pending, re-applied as the rows arrive
   // until the content reaches it once, and dropped if the owner scrolls first. Unmounted while pending, it keeps it.
   const pending = useRef<number | null>(null);
   useLayoutEffect(() => {
     const el = scroller.current!;
-    const saved = viewOf(ui.getState(), appSessionId).scrollTop;
+    const saved = treeOf(useTreeState.getState(), appSessionId).scrollTop;
     el.scrollTop = saved;
     pending.current = el.scrollTop < saved ? saved : null;
     return () => {
       const kept = pending.current ?? el.scrollTop;
-      patchView(ui, appSessionId, () => ({ scrollTop: kept }));
+      useTreeState.getState().scrolled(appSessionId, kept);
     };
-  }, [ui, appSessionId]);
+  }, [appSessionId]);
   const total = virtualizer.getTotalSize();
   useLayoutEffect(() => {
     const want = pending.current;
@@ -259,7 +506,7 @@ function TreeList({
             const row = rows[item.index];
             return (
               <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === 0 && row.kind === 'root' ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
-                <Row row={row} selected={selected === row.path && row.kind !== 'notice'} activate={activate} />
+                <Row row={row} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} />
               </div>
             );
           })}
@@ -297,7 +544,7 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function Row({ row, selected, activate }: { row: TreeRow; selected: boolean; activate: (row: TreeRow) => void }) {
+function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void }) {
   if (row.kind === 'notice') {
     const text =
       row.notice === 'empty'
@@ -329,7 +576,8 @@ function Row({ row, selected, activate }: { row: TreeRow; selected: boolean; act
       data-path={row.path}
       data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
       title={row.path}
-      onClick={() => activate(row)}
+      onClick={(event) => activate(row, event.metaKey)}
+      onDoubleClick={() => keepRow(row)}
       className={`flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui hover:bg-bg-hover ${selected ? 'bg-bg-active text-fg' : inert ? 'text-fg-muted' : 'text-fg'}`}
       style={indent(row.depth)}
     >
@@ -344,11 +592,11 @@ export const filesTool: PanelTool<FilesState, FilesParams> = {
   id: FILES_TOOL_ID,
   title: 'Files',
   icon: FilesIcon,
-  pinnable: true,
-  multiInstance: false,
+  pinnable: true, // the tree-only tab; a tab that holds a file never (the layout store's gate)
+  multiInstance: true,
   createState,
-  open,
-  beforeClose: async () => true, // read-only: nothing to lose
+  reuse,
+  beforeClose, // the tree alone: nothing to lose; a file: the question a main file tab asks
   dispose: () => {}, // the watches are the mounted tree's, released when it unmounts (after the grace)
   render: FilesBody,
 };

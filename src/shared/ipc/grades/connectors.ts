@@ -22,6 +22,7 @@ export const grades = {
   'connectors.disconnect': 'machine-admin',
   'connectors.add': 'machine-admin',
   'connectors.remove': 'machine-admin',
+  'connectors.addJson': 'machine-admin', // UX wave U11g: connectors.add's
   'connectors.signIn': 'machine-admin',
   'connectors.signInCancel': 'machine-admin',
   'connectors.signInServer': 'machine-admin', // P5 O7 M8: connectors.signIn's, for the session's MCP widget

@@ -12,7 +12,12 @@
 // DX4 messages cross IPC as JSON values; they are read here as `desk-hub/protocol`'s `SessionMessage`. A page hears every
 // window's `laneA.plane` and reads only its own watch ids.
 //
-// The jobs a snapshot or a `subagents` message carries are kept in the lane A store (`useLaneAJobs`).
+// The jobs a snapshot or a `subagents` message carries are kept in the lane A store (`useLaneAJobs`). UX wave U8d: so are
+// its subagents, when the body carries a list of them (`useLaneAAgents`; an older driver's carries none, or an empty one),
+// for every session's watch, another machine's too; a watch's end, or its last consumer letting it go, keeps them only
+// when none still runs and their body named an origin. They are noted with the origin their body names beside the list
+// (`origin`: the holder whose bridge child the facts came from, the fence review's ruling), or none when it names none
+// (an older driver; another machine's sminos today), and the lane A store fences them on it.
 //
 // The session-wide `op` and `compact` messages are kept by their op's id (the last 100 ops per session), so a caller that
 // learns an id from a control's answer after its op already ended still finds the op's messages.
@@ -36,9 +41,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandResult, EventPayload, MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
 import type { Job } from 'desk-hub/protocol';
-import { laneAJobsWatchEnded, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
+import type { LaneAAgent } from '@shared/lane-a/agents';
+import { laneAAgentsWatchEnded, laneAJobsWatchEnded, noteLaneAAgents, noteLaneAJobs, noteLaneAUsage, useLaneA, type LaneAUsage } from '../stores/lane-a';
 import { learnReaderGrade, readerGradeOf, useReader } from '../sessions/share/reader';
 import { isRemoteLaneA } from './remote-session';
+import { clearCompacting, noteCompacting } from '../stores/compacting'; // UX wave U3b (M4)
 
 // `resumed` (P5 O9 M9): a remote link's transport is back after a pause, the watch going on as it was (never a reset).
 export type PlaneEvent =
@@ -89,9 +96,10 @@ const tell = (entry: Entry, event: PlaneEvent) => {
 function keepOps(appSessionId: AppSessionId, messages: readonly SessionMessage[]): void {
   for (const message of messages) {
     if (message.kind !== 'op' && message.kind !== 'compact') continue;
-    const body = message.body as { id?: unknown; rpc?: unknown };
+    const body = message.body as { id?: unknown; rpc?: unknown; phase?: unknown };
     const id = message.kind === 'op' ? body.id : body.rpc;
     if (typeof id !== 'string') continue;
+    if (message.kind === 'compact') noteCompacting(appSessionId, { kind: 'bridge', rpc: id }, body.phase === 'start'); // UX wave U3b (M4)
     let kept = ops.get(appSessionId);
     if (!kept) ops.set(appSessionId, (kept = new Map()));
     kept.set(id, [...(kept.get(id) ?? []), message]);
@@ -111,8 +119,10 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
       for (const message of messages) {
         const usage = message.kind === 'usage' ? message.body : message.kind === 'snapshot' ? (message.body as { usage?: unknown }).usage : null;
         if (usage && typeof usage === 'object' && 'context' in usage) noteLaneAUsage(appSessionId, usage as LaneAUsage);
-        const jobs = message.kind === 'snapshot' || message.kind === 'subagents' ? (message.body as { jobs?: unknown }).jobs : undefined;
+        if (message.kind !== 'snapshot' && message.kind !== 'subagents') continue;
+        const { jobs, subagents, origin } = message.body as { jobs?: unknown; subagents?: unknown; origin?: unknown };
         if (Array.isArray(jobs)) noteLaneAJobs(appSessionId, jobs as Job[]);
+        if (Array.isArray(subagents)) noteLaneAAgents(appSessionId, subagents as LaneAAgent[], typeof origin === 'string' ? origin : null);
       }
     }
     if (messages[0]?.kind === 'snapshot') {
@@ -126,6 +136,7 @@ function receive(appSessionId: AppSessionId, entry: Entry, payload: Payload): vo
   } else if ('reset' in payload) {
     entry.log = null;
     entry.overflowed = false; // the fresh snapshot follows
+    if (session) clearCompacting(appSessionId); // UX wave U3b (M4): a compaction's end may be among what was lost
     tell(entry, { kind: 'reset' });
   } else if ('ended' in payload) {
     end(appSessionId, entry, payload.ended);
@@ -146,7 +157,11 @@ function end(appSessionId: AppSessionId, entry: Entry, reason: string): void {
   entry.watch = null;
   entry.log = null;
   entry.overflowed = false;
-  if (entry.agentId === null) laneAJobsWatchEnded(appSessionId);
+  if (entry.agentId === null) {
+    laneAJobsWatchEnded(appSessionId);
+    laneAAgentsWatchEnded(appSessionId);
+    clearCompacting(appSessionId); // UX wave U3b (M4)
+  }
   tell(entry, { kind: 'ended', reason });
 }
 
@@ -212,6 +227,10 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
     entry.overflowed = false;
+    if (agentId === null) {
+      laneAAgentsWatchEnded(appSessionId); // UX wave U8d: the watch has ended, as at its other two ends
+      clearCompacting(appSessionId); // UX wave U3b (M4): this window's own reset, as the link's
+    }
     tell(entry, { kind: 'reset' });
   }
   entry.watchers.add(watcher);
@@ -220,8 +239,10 @@ export function watchLaneA(appSessionId: AppSessionId, listener: (event: PlaneEv
     if (!entry.watchers.delete(watcher) || entry.watchers.size > 0) return;
     entry.off();
     entries.delete(key);
+    if (agentId === null) clearCompacting(appSessionId); // UX wave U3b (M4): nothing would hear its end now
     if (entry.watch !== null) void entry.client.invoke('laneA.unwatch', { appSessionId, watch: entry.watch });
     entry.watch = null;
+    if (agentId === null) laneAAgentsWatchEnded(appSessionId); // UX wave U8d: no longer heard, a running agent is no longer known to run
   };
 }
 

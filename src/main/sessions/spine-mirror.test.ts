@@ -13,6 +13,7 @@ import { digest as digestOf, humanTurn, item as itemOf, project as projectOf, re
 import { intentFor as intentOf } from '../../../test/support/session-host';
 import { SETTINGS_DEFAULTS_V21 } from '@shared/settings/defaults';
 import { startNotifier } from '../attention/notifier';
+import { bundleOf } from '@shared/files/bundle'; // UX wave U6e
 import { createMirrorSpineView, type MirrorHosts } from './spine-mirror';
 
 // The builders' shapes, keyed as the mirror keys them
@@ -105,13 +106,14 @@ class FakeMachine implements MirrorHosts {
   }
 }
 
-function mirrorOver(host: FakeMachine, options: { refused?: () => string | null; browserSocket?: () => string | null } = {}) {
+function mirrorOver(host: FakeMachine, options: { refused?: () => string | null; browserSocket?: () => string | null; execPath?: string } = {}) {
   let daemon: () => void = () => {};
   const mirror = createMirrorSpineView({
     hosts: host,
     spineRefused: options.refused ?? (() => null),
     onDaemonStatus: (listener) => ((daemon = listener), () => {}),
     browserSocket: options.browserSocket ?? (() => null),
+    ...(options.execPath !== undefined && { execPath: options.execPath }), // UX wave U6e
     retryMs: 10,
     log: () => {},
   });
@@ -429,7 +431,7 @@ describe('the spine mirror (Interfaces §F)', () => {
     host.stream();
     await loaded(view);
     const follows = () => host.asked.filter((a) => a.name === 'session.follow').map((a) => a.input);
-    expect(host.asked.find((a) => a.name === 'machine.client')?.input).toEqual({ browserSocket: '/profile/browser/cua' });
+    expect(host.asked.find((a) => a.name === 'machine.client')?.input).toEqual({ browserSocket: '/profile/browser/cua', bundle: bundleOf(process.execPath) });
     expect(follows()).toEqual([{ sessions: [], live: true }]);
     // A: a status, then events of its launch (the cursor is the last one delivered); B: a status alone (its stream's
     // opening row); C: exited, so it is not followed again
@@ -448,6 +450,26 @@ describe('the spine mirror (Interfaces §F)', () => {
       ],
       live: true,
     });
+  });
+
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 8): the app's bundle, one
+  // of MAWS's own folders the files service never writes, told with the browser socket at each streaming
+  it('tells mawsd the bundle the app runs from at each streaming, and null where its executable is in none', async () => {
+    const packaged = new FakeMachine({ records: [] });
+    const { view } = mirrorOver(packaged, { execPath: '/Applications/MAWS.app/Contents/MacOS/MAWS' });
+    packaged.stream();
+    await loaded(view);
+    packaged.lose();
+    packaged.stream();
+    await vi.waitFor(() => expect(packaged.asked.filter((a) => a.name === 'machine.client')).toHaveLength(2));
+    expect(packaged.asked.filter((a) => a.name === 'machine.client').map((a) => a.input)).toEqual([
+      { browserSocket: null, bundle: '/Applications/MAWS.app' },
+      { browserSocket: null, bundle: '/Applications/MAWS.app' },
+    ]);
+    const development = new FakeMachine({ records: [] });
+    mirrorOver(development, { execPath: '/opt/node/bin/node' });
+    development.stream();
+    await vi.waitFor(() => expect(development.asked.find((a) => a.name === 'machine.client')?.input).toEqual({ browserSocket: null, bundle: null }));
   });
 
   // A launch the front replays from its first event (one launched after the follow) opens on a status that already names

@@ -612,6 +612,8 @@ So what is authenticated is the session's server; the session's server is the en
 
 so the control reads "Not on another machine yet: signing in to a connector from a plugin or from MAWS’s own list", disabled, through `useRemoteUnavailable(appSessionId, 'connectors.signInDynamicServer')`; nothing is sent, and `test/lane-b/offer-coverage.test.ts` passes. A file-scope row beside it keeps its Sign in, and the words a machine's own listener gives ("sign in on <machine>") are today's. A machine reached over a socket link (development and `e2e/machines.spec.ts`) is not greyed by that helper and takes the command or answers `unknown_command`. U11f removes the entry and makes the insertions U9's document lists (its Interfaces 2), with UC-7.5's update sentence for a machine that does not list the capability.
 
+2026-11-14, UX wave U11h (X-184): a plugin's connector listed in Customize signs in through `connectors.signInDynamicServer` with the revision of its own entry, only through a session whose own plugin list holds exactly one plugin of its manifest name, with its key, and whose server of that name has its transport and address (`docs/doperpowers/plans/2026-11-14-ux-wave-U11h-plugin-connectors.md`, the sign-in rule).
+
 ### §B. Org copy (M2)
 
 `ORG` in `settings-tab/copy.ts`, exact, with the file's typographic apostrophes:
@@ -668,6 +670,8 @@ Every refusal still opens with `ORG.notSigned` or stands alone as today; that pr
 | the palette's description of `/mcp` (U4's `composer/mentions/widgets.ts`; `items.ts` lets this one name's declared description win over the engine's) | Connectors in this chat (MCP servers) |
 | the head's sentence, once | Off here is off for every session in <place>. |
 | its tooltip | The engine records it in ~/.claude.json. |
+
+2026-11-14, UX wave U11g: the head's sentence is now “A switch here is for this chat, and every session started in <place> afterwards.” (`docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md`); today's sentence claimed sessions that are open, which the engine does not tell.
 
 `MCP_ACTIONS.persisted` goes. The `/mcp` beside the title stays.
 

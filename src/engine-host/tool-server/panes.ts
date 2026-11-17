@@ -5,7 +5,8 @@
 // once with an error nobody reads (the server answers an aborted call with nothing). E2: a thin instance of the host
 // bridge (`./bridge.ts`), which `artifact_screenshot`'s capture shares. U12a: a browser answer carries what main did with
 // the page (`page`) and, for a session launched with a browser backend, the note written here; the window never sends one.
-import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
+// UX wave U6d: the host never asks for the retired `artifact` pane nor sends P4-B4's `at`; `pane` stays the full list,
+// the window's request schema (`MawsPaneShowSchema`) keeps both for an older engine host.
 import type { RequestId } from '@shared/graph/ids';
 import type { MawsPaneAnswerResult } from '@shared/ipc/schema/maws';
 import { PANE_ANSWER_MS, type Pane } from '@shared/maws/panes';
@@ -17,7 +18,6 @@ export interface PaneShowRequest {
   pane: Pane;
   target: string | null;
   line: number | null;
-  at?: ArtifactLocation; // P4-B4: the place an `artifact` pane opens its artifact at; absent when none
 }
 
 export type PaneBridgeAnswer = ShowPaneResult | { error: string };

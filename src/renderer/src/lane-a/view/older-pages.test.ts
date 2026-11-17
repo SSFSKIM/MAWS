@@ -7,6 +7,7 @@ import type { JsonObject } from 'desk-hub/protocol';
 import { afterEach, describe, expect, it } from 'vitest';
 import { useStore } from 'zustand';
 import { useTranscriptStore } from '../../stores/transcript';
+import type { Row } from '../../transcript/model/rows';
 import type { TranscriptListHandle } from '../../transcript/view/Transcript';
 import { FakePlane, mount, settle } from '../test-support/fake-plane';
 import { readRecording, rowsBefore, scriptOf } from '../test-support/session-stream';
@@ -19,7 +20,7 @@ const recorded = readRecording().session;
 const prompt = recorded[0];
 const attachments = Array.from({ length: 9 }, (_, i) => ({ ...recorded.filter((row) => row.type === 'attachment')[i % 3], uuid: `attachment-${i}` }));
 const second = { ...prompt, uuid: 'second-prompt', message: { role: 'user', content: 'And one more thing.' } };
-// One turn as the report folds it: its prompt, nine responses of unmarked text (its working record's, hidden while the
+// One turn as the to-human view folds it: its prompt, nine responses of unmarked text (one stretch, hidden while its
 // record is closed), and a marked answer.
 const textRow = recorded.find((row) => row.type === 'assistant' && JSON.stringify(row.message).includes('"type":"text"'))!;
 const said = (uuid: string, parent: string, text: string) => ({ ...textRow, uuid, parentUuid: parent, message: { ...(textRow.message as JsonObject), id: `msg_${uuid}`, content: [{ type: 'text', text }] } });
@@ -51,7 +52,7 @@ describe('paging older rows in', () => {
     controller.open();
     const unmount = mount(controller, useTranscriptStore);
     // The session view's owner lane, told to the store again whenever its key's state starts over, as MAWS's view does.
-    const lane = options.report ? useTranscriptStore.subscribe((s) => s.entries[controller.key] && s.entries[controller.key].state.ui.ownerLane !== true && s.setOwnerLane(controller.key, true)) : () => {};
+    const lane = options.report ? useTranscriptStore.subscribe((s) => s.entries[controller.key] && s.entries[controller.key].state.ui.ownerLane !== true && s.setToHumanView(controller.key, { lane: true, tailMessage: false })) : () => {};
     const list = scroller(geometry);
     renderHook(() => useOlderPages(controller, list, useStore(controller.state)));
     opened.push(() => (lane(), unmount(), controller.close(), useTranscriptStore.getState().drop(controller.key)));
@@ -154,7 +155,44 @@ describe('paging older rows in', () => {
     expect(plane.current.asked).toHaveLength(4);
   });
 
-  it('in the report, a page whose rows all fold into a closed working record draws nothing new, and the next is asked for', async () => {
+  // UX wave U2b (the architect's ruling of 2026-11-15): the property the fold puts at risk. In the to-human view a page
+  // of rows folds to fewer rows than the pane holds, so one answer does not fill it, though the list grew: the pager asks
+  // again, and again, until the pane is filled, and then no more while older rows remain.
+  it('in the to-human view, a page that folds to fewer rows than the pane holds is followed by the next until the pane is filled', async () => {
+    // Four marked turns, each its prompt, three unmarked responses and a marked answer: folded, three rows a turn.
+    const turns = Array.from({ length: 4 }, (_, t) => {
+      const asked = { ...prompt, uuid: `prompt-${t}`, message: { role: 'user', content: `Question ${t}.` } };
+      const work = Array.from({ length: 3 }, (_, i) => said(`turn-${t}-work-${i}`, i === 0 ? `prompt-${t}` : `turn-${t}-work-${i - 1}`, `Turn ${t}, step ${i}.`));
+      return [asked, ...work, said(`turn-${t}-answer`, `turn-${t}-work-2`, `<message>Turn ${t} is done.</message>`)];
+    }).flat();
+    let key = '';
+    const drawnCount = () => drawnRows(key, []).length;
+    // A pane of 100 px whose rows are 40 px each: filled (past `TOP`, 160 px) from seven drawn rows on.
+    const geometry = { get scrollHeight() { return drawnCount() * 40; }, clientHeight: 100, scrollTop: 0 };
+    const { plane, controller, script, answer } = open(turns, 3, geometry, { report: true });
+    key = controller.key;
+    await act(async () => {
+      plane.snapshot(script, script.length, 3); // the last turn's last two responses and its answer: a record line and the answer
+      await settle();
+      await settle();
+    });
+    expect(drawnCount()).toBeLessThan(7);
+    expect(plane.current.asked).toHaveLength(1); // not filled: asked at once
+    const drawnBefore = drawnCount();
+    await answer(); // the turn's first response and its prompt, and the turn before's answer: the list grows, not filled
+    expect(drawnCount()).toBeGreaterThan(drawnBefore);
+    expect(drawnCount()).toBeLessThan(7);
+    expect(plane.current.asked).toHaveLength(2); // one answer did not fill the pane: the next is asked for
+    for (let pages = 0; pages < 10 && drawnCount() < 7; pages += 1) await answer();
+    expect(drawnCount()).toBeGreaterThanOrEqual(7); // filled before the first row
+    expect(drawnRows(key, []).some((row) => row.id.includes('prompt-0'))).toBe(false);
+    const asked = plane.current.asked.length;
+    await act(async () => { await settle(); await settle(); });
+    expect(plane.current.asked).toHaveLength(asked); // filled: no more, though older rows remain
+    expect(controller.state.getState().more).toBe(true);
+  });
+
+  it('in the to-human view, a page whose rows all fold into a closed record draws nothing new, and the next is asked for', async () => {
     const geometry = { scrollHeight: 1000, clientHeight: 300, scrollTop: 700 };
     const { plane, controller, list, script, answer } = open(markedTurn, 3, geometry, { report: true });
     await act(async () => {
@@ -164,7 +202,7 @@ describe('paging older rows in', () => {
     });
     const drawn = () => drawnRows(controller.key, []).map((row) => row.id);
     const before = drawn();
-    expect(before.some((id) => id.startsWith('owner-record:'))).toBe(true);
+    expect(before.some((id) => id.startsWith('record-fold:'))).toBe(true);
     expect(plane.current.asked).toHaveLength(0);
     geometry.scrollTop = 0; // the reader scrolls to the top
     await act(async () => void list.current!.scrollElement!.dispatchEvent(new Event('scroll')));
@@ -183,12 +221,12 @@ describe('paging older rows in', () => {
 });
 
 describe('the drawn row count, which a page is measured against', () => {
-  it('in the report, follows a working record opened and closed again', async () => {
+  it('in the to-human view, follows a record opened and closed again', async () => {
     const plane = new FakePlane('proj');
     const controller = openOn(plane);
     controller.open();
     const unmount = mount(controller, useTranscriptStore);
-    const lane = useTranscriptStore.subscribe((s) => s.entries[controller.key] && s.entries[controller.key].state.ui.ownerLane !== true && s.setOwnerLane(controller.key, true));
+    const lane = useTranscriptStore.subscribe((s) => s.entries[controller.key] && s.entries[controller.key].state.ui.ownerLane !== true && s.setToHumanView(controller.key, { lane: true, tailMessage: false }));
     try {
       const script = scriptOf(markedTurn, null);
       await act(async () => {
@@ -198,13 +236,13 @@ describe('the drawn row count, which a page is measured against', () => {
       });
       const count = renderHook(() => useDrawnRowCount(controller.key));
       const drawn = () => drawnRows(controller.key, []);
-      const record = drawn().find((row) => row.id.startsWith('owner-record:'))!;
+      const record = drawn().find((row): row is Extract<Row, { kind: 'record_fold' }> => row.kind === 'record_fold')!;
       const folded = count.result.current;
       expect(folded).toBe(drawn().length);
-      act(() => useTranscriptStore.getState().toggleReportRecord(controller.key, record.turnId!));
+      act(() => useTranscriptStore.getState().toggleStretch(controller.key, record.stretch));
       expect(drawn().length).toBeGreaterThan(folded); // the record's work drawn
       expect(count.result.current).toBe(drawn().length);
-      act(() => useTranscriptStore.getState().toggleReportRecord(controller.key, record.turnId!));
+      act(() => useTranscriptStore.getState().toggleStretch(controller.key, record.stretch));
       expect(count.result.current).toBe(folded);
     } finally {
       lane();

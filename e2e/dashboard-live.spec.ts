@@ -4,7 +4,7 @@
 // CLAUDE_CONFIG_DIR under /tmp (`settings.json` `{}`, a `.claude.json` trusting the scratch project), through
 // ClaudeUsage's relay (GET /api/hello, one retry two minutes later, else the run is `blocked: relay`), on Haiku in default
 // permission mode with the session's `--max-budget-usd`, every permission allowed for the session through the request card
-// docked in the composer. The window is never shown (`launchMaws`'s quiet window).
+// at the transcript’s end (UX wave U1b). The window is never shown (`launchMaws`'s quiet window).
 // One session, three prompts through the real composer:
 //   1. the agent reads the dashboard guide, writes sales.csv under its working directory, creates a dashboard from markdown
 //      whose chart and table blocks name `sales`, binds the file with one artifact_dataset call (answered its columns and

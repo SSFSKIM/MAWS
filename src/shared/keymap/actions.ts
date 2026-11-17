@@ -144,6 +144,10 @@ export const ACTIONS = {
   // switches input sources on a multi-language Mac)
   'composer.dictate':        { title: 'Hold to dictate',          chord: null,           sink: 'renderer', menu: null, scope: 'app', hold: true },
   // E9 end
+  // UX wave U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, decision 13): Open File…, the
+  // system's chooser for one file, opened beside the chat; registered while a session's chat of this Mac is in front. The
+  // row before Save file; no rebinding while build F may run (`isRebindable`)
+  'file.open':               { title: 'Open File…',               chord: 'Cmd+O',        sink: 'menu', menu: 'file', scope: 'app' },
   // E5 start: the editor's save (E5 execution document, Interfaces *The close guard and the action*). A menu action
   // because macOS registers ⌘S in the menu and the page never sees it (as ⌘W); it saves the focused pane's file tab.
   'file.save':               { title: 'Save file',                chord: 'Cmd+S',        sink: 'menu', menu: 'file', scope: 'app' },
@@ -155,9 +159,14 @@ export const ACTIONS = {
   'file.commentLine':        { title: 'Comment on this line',     chord: null,           sink: 'menu', menu: 'file', scope: 'app' },
   // E11 end
   // P2-C start (2026-10-09; the parent's Decision Log 19): the focused pane's session tab between its report and its
-  // full transcript while the owner channel's lane is on, as the pane header's toggle does; unbound by default
+  // full transcript while the owner channel's lane is on, as the view's switch above the composer does (UX wave U2b; it
+  // was the pane header's toggle); unbound by default
   'transcript.toggleReport': { title: 'Toggle report and transcript', chord: null,         sink: 'renderer', menu: null, scope: 'app' },
   // P2-C end
+  // UX wave U2b (ruling R9; the U2b execution document, §K): with the bar above the transcript gone, the focused pane's
+  // session's unread legacy items marked read, as the bar's Mark all read did; a command of the palette, unbound, and
+  // build F knows it not, so it takes no rebinding (`isRebindable`)
+  'transcript.markAllRead':  { title: 'Mark all read',            chord: null,           sink: 'renderer', menu: null, scope: 'app' },
   // P3-G (§D4.4): Mark up over the selected panel tab's surface, as the panel header's button does; unbound by default
   'markup.start':            { title: 'Mark up',                  chord: null,           sink: 'renderer', menu: null, scope: 'app' },
 } as const satisfies Record<string, ActionSpec>;

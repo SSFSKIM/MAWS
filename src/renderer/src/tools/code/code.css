@@ -32,9 +32,10 @@
 
 /* Review's diff body (M3): @git-diff-view/react's colour variables (its diff-view.css names them `--diff-*--` on
    `.diff-style-root`, one set per `data-theme`) from X7 tokens, so both themes follow the app's; one selector serves
-   both, since the tokens change with the theme. Scoped under ReviewView's scroller (`.review-diff`), one step more
-   specific than the library's own rules. Syntax colours are shiki's github-light and github-dark, as the transcript's
-   code blocks (C6), applied inline by the library. */
+   both, since the tokens change with the theme. Scoped under the diff's scroller (`.review-diff`: Review's stack, UX
+   wave U5b, and the desk web app's one-file viewer, which imports this file), one step more specific than the
+   library's own rules. Syntax colours are shiki's github-light and github-dark, as the transcript's code blocks (C6),
+   applied inline by the library. */
 .review-diff .diff-tailwindcss-wrapper[data-theme] .diff-style-root {
   --diff-border--: var(--border);
   --diff-plain-content--: var(--bg);
@@ -65,4 +66,24 @@
 /* The library sets its font inline; the app's mono face wins. */
 .review-diff .diff-table-scroll-container {
   font-family: var(--font-mono) !important;
+}
+/* Review's add-comment button (UX wave U5b, M5; §G, D6): the library draws a glyph of 1.4 times the diff's font (16.8 px);
+   its pressed area is a 24 px square around it. */
+.review-diff .diff-add-widget {
+  position: relative;
+}
+.review-diff .diff-add-widget::after {
+  content: '';
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  width: 24px;
+  height: 24px;
+  transform: translate(-50%, -50%);
+}
+/* The comment card host's place in Review (M5, §B): while it draws neither the unsent-comments chip nor the place line, it
+   takes no room (no gap in the toolbar, no line where the toolbar stands). */
+[data-review-card-bar]:has([data-card-inline]:empty),
+[data-review-toolbar-chip]:has([data-card-inline]:empty) {
+  display: none;
 }

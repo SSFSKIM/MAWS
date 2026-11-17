@@ -1,7 +1,7 @@
 import { create } from 'zustand';
 import type { AppSessionId } from '@shared/graph/ids';
 import { pageOpen, useLayout, type LayoutState } from '../stores/layout';
-import { activeTab, sessionOfTab } from '../stores/layout-model';
+import { sessionsInView } from '../stores/layout-model';
 import { useSessions, type SessionsState } from '../stores/sessions';
 import { surfaceSession, surfaceTabs } from '../panel/surface-model';
 import { cardColumnShown, isWideColumn, shellGeometry } from './shell-geometry';
@@ -14,6 +14,19 @@ export function shellGeometryOf(state: LayoutState, width: number) {
   const tabs = surfaceTabs(state, surfaceSession(state));
   return shellGeometry(state.regions, width, tabs.length > 0, isWideColumn(tabs), state.panelWidths);
 }
+
+// UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, Decision Log 35): whether the main area is
+// on screen. Three things take it off screen and keep it mounted (the shell's main section inert, or its wrapper behind a
+// page invisible and inert): the side column maximized or floating over it, the side column as a sheet over a narrow
+// window, and a page covering it. A main-area file tab's framed file reads it, and draws no element while it is false.
+export const mainAreaOnScreen = (state: LayoutState, width: number): boolean => {
+  const geometry = shellGeometryOf(state, width);
+  return !pageOpen(state) && !geometry.mainHidden && !geometry.sheet;
+};
+export function useMainAreaOnScreen(): boolean {
+  const width = useWindowWidth();
+  return useLayout((state) => mainAreaOnScreen(state, width));
+}
 export function useShellGeometry() {
   const width = useWindowWidth();
   const state = useLayout();
@@ -22,7 +35,7 @@ export function useShellGeometry() {
 
 // UX wave U8b (UC-9, §C.2): the card column now, from the one place its predicate's inputs are gathered. The shell's
 // column, the Session cards icon, `toggleSessionCards` and `useCardColumnShown` read this and nothing else, so none of
-// them can say the column is drawn while another says it is not. `session`: the session of the tab in front. UX wave U7b
+// them can say the column is drawn while another says it is not. `session`: the session in view (`cardColumnSession`). UX wave U7b
 // (M5, decision 4): `placed`, whether the column keeps its place (the shell mounts it and pads the main area by it), is
 // the predicate's answer as if no page were open; `shown`, whether it is drawn and counts as shown, is `placed` while no
 // page is open. A page hides a placed column without taking its place (decision 2).
@@ -31,13 +44,17 @@ export interface CardColumn { session: AppSessionId | null; sessionTab: boolean;
 // only listed (it has the column's slots and its running work, and none of the cards a record feeds).
 export const cardsSpeakOf = (sessions: Pick<SessionsState, 'records' | 'listed'>, session: AppSessionId | null): boolean =>
   session !== null && (sessions.records.has(session) || sessions.listed.get(session)?.lane === 'A');
+// The session the column speaks of: the focused pane's, else the other pane's of a split, so a focus move between a
+// session's pane and another pane neither places nor removes the column (ticket 692: the press that moved focus also moved the
+// pane's header, and its release landed elsewhere). The focused pane's session wins while both show one.
+export const cardColumnSession = (state: Pick<LayoutState, 'main'>): AppSessionId | null => sessionsInView(state.main)[0] ?? null;
 type CardFacts = { known: boolean; opened: boolean; pageOpen: boolean };
 function cardFactsNow(state: LayoutState): CardFacts {
   const view = useShellView.getState();
-  return { known: cardsSpeakOf(useSessions.getState(), sessionOfTab(activeTab(state.main))), opened: view.cardsOverlay, pageOpen: pageOpen(state) };
+  return { known: cardsSpeakOf(useSessions.getState(), cardColumnSession(state)), opened: view.cardsOverlay, pageOpen: pageOpen(state) };
 }
 export function cardColumnNow(state: LayoutState, width: number, facts: CardFacts = cardFactsNow(state)): CardColumn {
-  const session = sessionOfTab(activeTab(state.main));
+  const session = cardColumnSession(state);
   const sessionTab = session !== null && facts.known;
   const room = width - shellGeometryOf(state, width).sidebar;
   const tabsInView = surfaceTabs(state, surfaceSession(state)).length;
@@ -50,7 +67,7 @@ export function cardColumnNow(state: LayoutState, width: number, facts: CardFact
 export function useCardColumn(): CardColumn {
   const width = useWindowWidth();
   const state = useLayout();
-  const session = sessionOfTab(activeTab(state.main));
+  const session = cardColumnSession(state);
   const known = useSessions((s) => cardsSpeakOf(s, session));
   const opened = useShellView((s) => s.cardsOverlay);
   return cardColumnNow(state, width, { known, opened, pageOpen: pageOpen(state) });

@@ -5,6 +5,7 @@
 // blocks, images first. Pure.
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { countLines, parsePlaceholders, restorePastedTags } from '@shared/composer/pasted-framing';
+import { asTyped } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
 import type { FirstMessage } from '@shared/sessions/intent';
 import type { Prefill } from '../stores/composer';
@@ -20,7 +21,7 @@ const base64Blocks = (content: FirstMessage['content']): Base64Block[] =>
     : content.filter((b): b is ContentBlock & Base64Block => (b.type === 'image' || b.type === 'document') && (b as Base64Block).source?.type === 'base64');
 
 // The pasted bodies of a sent text, in order, as they were typed (the send neutralised a typed tag inside a body).
-const pastedBodies = (wire: string): string[] => [...wire.matchAll(PASTED_BLOCK)].map((m) => restorePastedTags(m[2]!));
+const pastedBodies = (wire: string): string[] => [...wire.matchAll(PASTED_BLOCK)].map((m) => asTyped(restorePastedTags(m[2]!))); // UX wave U1c: as pasted
 
 // What returns a retained first message to the editor (`prefillComposer`): its text as typed with the pasted bodies
 // behind their placeholders, and its images re-attached (their `[Image #n]` placeholders dropped, since the attachment
@@ -29,8 +30,9 @@ const pastedBodies = (wire: string): string[] => [...wire.matchAll(PASTED_BLOCK)
 export function messagePrefill(message: FirstMessage): Prefill {
   const blocks = base64Blocks(message.content).filter((b) => b.type === 'image');
   const images: NonNullable<Prefill['images']> = [];
-  let text = message.display;
-  const placeholders = parsePlaceholders(message.display).filter((p) => p.kind === 'image');
+  let text = asTyped(message.display); // UX wave U1c: as typed
+  // found in the text they are cut from: a joiner the person typed before one would shift the display's offsets
+  const placeholders = parsePlaceholders(text).filter((p) => p.kind === 'image');
   // drop from the end so earlier offsets stay valid; each placeholder was joined to what precedes it with one space
   for (let i = Math.min(placeholders.length, blocks.length) - 1; i >= 0; i--) {
     const p = placeholders[i]!;
@@ -47,12 +49,12 @@ export function messagePrefill(message: FirstMessage): Prefill {
 // first, then the images and the documents.
 export function firstMessageOf(content: FirstMessage['content']): FirstMessage {
   let n = 0;
-  const typed = restorePastedTags(
+  const typed = asTyped(restorePastedTags( // UX wave U1c: as typed
     wireOf(content).replace(PASTED_BLOCK, (_block, _id: string, body: string) => {
       n += 1;
       return pastedPlaceholder(n, countLines(restorePastedTags(body)));
     }),
-  );
+  ));
   const attachments = base64Blocks(content);
   const placeholders = [...attachments.filter((b) => b.type === 'image'), ...attachments.filter((b) => b.type === 'document')].map((b) => {
     n += 1;

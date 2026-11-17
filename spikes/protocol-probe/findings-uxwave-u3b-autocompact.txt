@@ -1,0 +1,102 @@
+UX wave, landing U3b, probe 3: an automatic compaction on engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, "Probes" 3; it serves acceptance 10 and "Engine
+facts" 9; 2026-11-15, VM dc-uxwave5-26dc, branch ux-wave/U3b-probes)
+
+Question. In a session launched as MAWS launches it, when the context fills and the engine compacts by itself, does the
+wire carry `system/status` `compacting` before the boundary and a status that is not `compacting` after it? What does
+each status carry, does `compacting` repeat, what does the boundary hold, and how does this differ from a typed
+`/compact` (fixtures/uxwave/u3-commands-r1.jsonl)?
+
+Verdict. Yes, as the document's default reads it, in 3 of 3 automatic compactions, and none of them failed. The order
+is always the same: `status: "requesting"` for the prompt's request, then `status: "compacting"` (which also carries
+`compact_output_chars: 0`), then `{status: null, compact_result: "success"}` 5.7 to 8.0 s later, then the replay of
+the prompt that set it off, then `compact_boundary` with `compact_metadata.trigger: "auto"`, then the summary, then the
+model's answer to that same prompt, all in one turn. "The next status that is not `compacting`" ends it, as with a
+typed /compact. So acceptance 10 stands as written, covering typed and automatic compactions, and no tracker row is
+needed. Each compaction sent `compacting` once: none lasted the 30 s after which the engine repeats it, so a repeat
+during an automatic compaction was not seen either way. "Engine facts" 9 says "the end sometimes with no
+`compact_result`"; that did not occur, since every end carried `compact_result: "success"`. The bundle's ends without
+a result belong to a compaction that is skipped or aborted (cli.pretty.js:433215, 439512), and none was provoked here.
+
+The recordings (fixtures/uxwave/). Engine 2.1.322 (/opt/maws-probe/engines/2.1.322, system/init claude_code_version
+"2.1.322"), model haiku (claude-haiku-5-5), route: the gateway through vm-run.sh's loopback forward
+(spikes/protocol-probe/VM.md). Scenario: scenarios/pass3/uxwave-u3b-autocompact.mjs, the launch of
+uxwave-common-arrivals.mjs (MAWS's flags, environment, initialize, ui_attach and thinking display, as
+findings-uxwave-u3-commands.txt lists them) with the probe's guard --max-budget-usd. Under that launch the engine
+gives haiku a 1,000,000-token window and an auto-compact threshold of 967,000 (get_context_usage `maxTokens`,
+`autoCompactThreshold`, `isAutoCompactEnabled: true`). The context is filled with invented filler sent as plain
+prompts, a repeated block of space-separated digits at one token per character, each prompt ending "Reply with only
+the word NOTED.". get_context_usage is read after each turn; then come "Reply with only the word AFTER." and "Reply
+with only the word LATER.".
+  - u3b-autocompact-r2: THE LAUNCH MAWS USES, NOTHING CHANGED: a new session (`--session-id`). Three fills took the
+    context to 99,660, then 947,075, then 975,073 tokens; the compaction came before the AFTER prompt's request.
+  - u3b-autocompact-r1-resumed: THE SAME LAUNCH WITH `--resume <id>`, as MAWS resumes a session. The session was one a
+    first run had filled to 966,623 tokens, 377 short of the threshold (u3b-autocompact-r1, whose journal is not
+    committed: it holds only fills). It was resumed 75 s after that run's process ended. The resumed session's first
+    prompt, a 16,761-character block, was compacted before its own request. Its journal's first `uxw_case` note
+    (fill-1) lists the whole resumed history among its file rows: a fault in the scenario's note, since fixed. The
+    engine's frames and rows are unaffected.
+  - u3b-autocompact-window100k: A SMALLER WINDOW, SET BY THE ENGINE'S OWN VARIABLE CLAUDE_CODE_AUTO_COMPACT_WINDOW=100000
+    (passed with vm-run.sh -e; the engine's minimum). get_context_usage then reads maxTokens 100,000 and threshold
+    67,000. Otherwise the launch is r2's: fills to 39,701, 47,147 and 75,071, then the compaction before AFTER.
+  Spend: US$0.675 (r2), US$0.710 (r1's fills) + US$0.054 (the resumed run), US$0.014 (window100k). A run my own budget
+  cap stopped before any compaction (US$0.525) and two token-count trials (US$0.004) were not kept. In all, US$1.98.
+
+Observed: the wire (seq, time).
+  r2:  96 status requesting, user_message_uuids [AFTER's uuid 29be308a…]
+       97 status {status: "compacting", compact_output_chars: 0}              12:57:43.531
+       98 status {status: null, compact_result: "success"}                   12:57:51.546 (8.0 s)
+       99 user, the AFTER prompt again, isReplay true (the same uuid)
+      100 system/compact_boundary {trigger: "auto", pre_tokens 975111, post_tokens 3341, cumulative_dropped_tokens
+          971770, duration_ms 8008, preserved_segment {head: the last NOTED assistant 2f88ff3e…, anchor: the summary
+          30101e99…, tail: the prompt's budget attachment 16eae716…}, preserved_messages {anchor, uuids: [that
+          assistant, the AFTER prompt, that attachment]}}; no logical_parent_uuid
+      101 user, the summary ("This session is being continued from a previous conversation that ran out of
+          context. …"), isSynthetic true
+      106 assistant "AFTER"; 110 result success. LATER (117 to 131): no compaction.
+  r1-resumed: 30 requesting [the filler prompt]; 31 compacting, compact_output_chars 0 (12:54:25.074); 32 null,
+       compact_result success (12:54:32.103, 7.0 s); 33 the filler prompt replayed; 34 compact_boundary trigger auto,
+       pre_tokens 970887, post_tokens 7351, duration_ms 7026, with preserved_segment and preserved_messages as in r2;
+       35 the summary, isSynthetic; 39 assistant "NOTED"; 43 result. AFTER and LATER: no compaction.
+  window100k: 121 requesting; 122 compacting, compact_output_chars 0; 123 null, success (5.7 s); 124 the AFTER
+       prompt replayed; 125 compact_boundary trigger auto, pre_tokens 75110, post_tokens 3190, duration_ms 5652;
+       126 the summary; 131 assistant "AFTER".
+  No status frame in any run carries a time or a compact_error. Between the end status and the answer there is no
+  other status frame.
+
+Observed: the file (line numbers of the .transcript.jsonl).
+  r2: 50 to 52 the AFTER prompt (queue enqueue, dequeue, the `user` row), 53 its budget attachment, all before the
+      boundary; 58 `system` compact_boundary (parentUuid null, compactMetadata {trigger: "auto", preTokens, postTokens,
+      cumulativeDroppedTokens, durationMs, preservedSegment, preservedMessages}); 59 and 60 context attachments; 61 the
+      summary, `user` with isCompactSummary and isVisibleInTranscriptOnly; 62 to 68 context attachments; 79 assistant
+      "AFTER".
+  r1-resumed: 70 the filler prompt and 71 its attachment, before the boundary; 81 compact_boundary (trigger auto);
+      84 the summary; 103 assistant "NOTED".
+  window100k: 58 compact_boundary (trigger auto); 61 the summary.
+  No caveat row, no <command-name> row, no "Compacted" row: the file holds nothing that names a command.
+
+Compared with a typed /compact (u3-commands-r1.jsonl seq 150 to 157; its file lines 141 to 145).
+  - A typed compaction's `compacting` (seq 150) has no compact_output_chars, and no `requesting` comes before it.
+    An automatic one comes after the prompt's `requesting` and carries compact_output_chars: 0.
+  - Typed: end status, system/init, then compact_boundary with trigger "manual" and no preserved segment, the summary,
+    the user frame "<local-command-stdout>Compacted </local-command-stdout>", the replay of <command-name>/compact,
+    and then the result. Automatic: the replay of the person's own prompt comes BETWEEN the end status and the
+    boundary, the boundary preserves a segment holding that prompt, and the turn goes on to the model's answer to
+    it. There is no command output and no command row, on the wire or in the file.
+  - Both end with {status: null, compact_result: "success"}.
+
+Inference, in the document's terms.
+  - Default held: "yes, as the bundle reads", for typed and automatic alike. Nothing in the reader has to tell them
+    apart. If a line is wanted that names the automatic case, compact_metadata.trigger "auto" (wire) or
+    compactMetadata.trigger (file) is the mark, and so is compact_output_chars on the compacting status.
+  - The prompt that set off the compaction is replayed after the end status and before the boundary, and the
+    boundary's preserved segment keeps it. A view that drops everything above a boundary would lose that prompt.
+    It is preserved, and the summary sits before it in the engine's own order (preserved_segment anchor = the
+    summary).
+  - When the compaction comes: in r2 the turn that took the context from 947,075 to 975,073 did not compact before
+    its own request; the next prompt did. In the resumed session the first prompt compacted before its own request
+    (pre_tokens 970,887 counts that prompt). So the check reads the last response's usage when the process has one,
+    and after a resume it counts the whole history with the new prompt. One run of each, so this is read from
+    timing and not confirmed.
+  - Not answered here: whether `compacting` repeats every 30 s during an automatic compaction ("Engine facts" 2 is
+    recorded for typed ones only), and what a failed or skipped automatic compaction sends.

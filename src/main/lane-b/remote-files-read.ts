@@ -39,10 +39,13 @@ export function readFileInPages(link: RemoteLink, input: Record<string, unknown>
   return readInPages(link, 'files.read', input, log);
 }
 
-export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void): Promise<Result> {
+// UX wave U6b-2 (M3, decision 9; A7): `label`, when given, names the read in the two log lines in place of the path or the
+// artifact's id, so a file frame's copy logs no path. The sentence a file that kept changing answers is unchanged: it goes
+// to the window that asked, which named the path.
+export async function readInPages(link: RemoteLink, name: PagedRead, input: Record<string, unknown>, log: (line: string) => void, label?: string): Promise<Result> {
   const whole = await dispatchOverLink(link, name, input);
   if (!tooLarge(whole)) return whole;
-  const said = `lane B: ${name} of ${link.name} ${String(input.path ?? input.artifactId)}`;
+  const said = `lane B: ${name} of ${link.name} ${label ?? String(input.path ?? input.artifactId)}`;
   log(`${said}: too large for the channel in one answer; read in pages`);
   for (let tries = 1; ; tries++) {
     const read = await readOnce(link, name, input);

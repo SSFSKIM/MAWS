@@ -50,6 +50,7 @@ import { invalidateScmQueries, refreshPublishedPrState /* P5 E312 */, resetScmQu
 // C8a end
 // C8c start
 import { useFiles } from '../tools/code/files/store';
+import { useBranchReads } from '../tools/code/review/branch-read'; // UX wave U5b-2
 import { useViewer } from '../tools/code/viewer/viewer-store';
 // C8c end
 // E5 start
@@ -499,6 +500,7 @@ export function connectPanelEvents(client: MawsBridge = ipc): () => void {
       useGit.getState().applyChanged(event, machine);
       // P5 O6 M4: a repository is a machine's, so only that machine's sessions in it are read again.
       if (event.reason === 'head' || event.reason === 'refs') invalidateScmQueries((appSessionId) => machineOf(appSessionId) === machine && repoRootOf(appSessionId) === event.repoRoot);
+      if (event.reason === 'head' || event.reason === 'refs') useBranchReads.getState().changed(machine, event.repoRoot); // UX wave U5b-2 (§E): the branch read, if held
     }),
     // P5 O3-E: a machine's host heard again (main's host.status, emitted after it re-reads the daemon at each ready of
     // the machine host): the git watches it could not answer are asked again (stores/git.ts)
@@ -535,6 +537,9 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
     useFiles.getState().applyChanged(event);
     useViewer.getState().applyChanged(event);
   });
+  // UX wave U6b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U6b-2-file-frames.md, M5): main tells this page alone that a
+  // read for one of its file frames' tokens failed
+  const offFrames = client.on('layout.frameFailed', ({ token }) => useViewer.getState().frameFailed(token));
   // E5 start (M5): the quit guard's unsaved files. The window's dirty file tabs go to main on every change of the set,
   // and main's Save all saves them and is answered with those left unsaved (after the saves' own pushes).
   const offUnsaved = pushUnsavedFiles(client);
@@ -556,6 +561,7 @@ export function connectCodeEvents(client: MawsBridge = ipc): () => void {
   );
   return () => {
     offFiles();
+    offFrames();
     offUnsaved();
     offSaveAll();
   };

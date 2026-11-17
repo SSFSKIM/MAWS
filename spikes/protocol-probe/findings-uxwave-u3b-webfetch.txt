@@ -1,0 +1,58 @@
+UX wave, landing U3b, probe 4: the web plugin's fetch on the wire and in the file, engine 2.1.322
+(docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, "Probes" 4; it serves M5's `isWebFetch` and
+`webFetchUrl` in src/shared/engine/web-fetch.ts and "Engine facts" 11; 2026-11-15, VM dc-uxwave5-26dc, branch
+ux-wave/U3b-probes)
+
+Question. With the web plugin loaded, what are the `tool_use` name and input and the `tool_result` content of one
+fetch with a prompt and one without, on the live wire and in the transcript file, and how does the session's init
+frame announce the tool?
+
+Verdict. The document's default held in 4 of 4 fetches (2 runs, each with both forms, in opposite orders). The name is
+`mcp__web__fetch`; the input is `{url}` without a prompt and `{url, prompt}` with one, and no other key was sent. The
+result is text: the `tool_result` block's `content` is a plain STRING, not an array of text blocks, and it has no
+`is_error`. The same string is the wire frame's `tool_use_result` and the file row's `toolUseResult`. So `isWebFetch`
+(name) and `webFetchUrl` (input.url) can be written as the document builds them. The one shape to add to M5's tests
+is that the content is a string, which is what the file and the wire both carry. The tool is deferred: in each run the
+model loaded it first with `ToolSearch` {query: "select:mcp__web__fetch", max_results: 1}, whose result content is
+[{type: "tool_reference", tool_name: "mcp__web__fetch"}]. That ToolSearch call is an ordinary tool row of its own and
+is not part of the fetch.
+
+Method. Engine 2.1.322, model haiku (claude-haiku-5-5), the gateway route (spikes/protocol-probe/VM.md). Scenario
+scenarios/pass3/uxwave-u3b-webfetch.mjs: the launch of uxwave-common-arrivals.mjs (MAWS's flags, environment and
+initialize), with `--plugin-dir /var/lib/devcloud/marketplaces/doperpowers/web` (the VM's own marketplace copy, web
+0.5.1; nothing installed, no key or sign-in: the plugin's prompt answer goes through the engine's own model call) and
+CLAUDE_CODE_ENABLE_FUNCTION_HOOKS=1 (the plugin's tool is a mod's; the owner's user settings set it). The plugin's
+cache is its default, under the scratch HOME, so the first fetch of each run is a real fetch of https://example.com.
+The prompts ask for one call with the url and the prompt "What is the page's main heading?", or with no prompt.
+u3b-webfetch-r1 (prompt first, then bare) and u3b-webfetch-r2 (bare first, then prompt), each with .transcript.jsonl.
+The VM has no Chromium, so every result has the plugin's line "rendering unavailable on this machine: no Chromium
+found (set WEB_CHROME)". On a Mac with Chromium, that line is the one part of the text expected to differ.
+
+Observed.
+  Init (both runs, seq 26): `tools` lists "mcp__web__fetch" beside the engine's own "WebFetch" and "ToolSearch";
+    `mcp_servers` has {name: "web", status: "connected", source: "plugin"} (and the `maws` SDK server); `plugins` has
+    {name: "web", path: <the marketplace copy>, source: "web@inline", version: "0.5.1"}.
+  r1, prompt: wire 59 ToolSearch tool_use, 61 its result; 72 assistant tool_use {name: "mcp__web__fetch", input:
+    {url: "https://example.com", prompt: "What is the page's main heading?"}}; 76 user tool_result, content a string
+    (444 chars): the answer citing [L2], then "— Answered by haiku from <cache>/example.com/…/page.md (lines 1–11
+    of 11). Read cited lines to check them.", then a line '"Example Domain" · example.com · 11 lines · 0 images ·
+    fetched now', then the rendering line. File lines 26, 27, 39 (tool_use), 40 (tool_result and toolUseResult, the
+    same string; sourceToolAssistantUUID names line 39's assistant).
+  r1, bare: wire 156 tool_use {name: "mcp__web__fetch", input: {url: "https://example.com"}}; 158 tool_result, a
+    string (805 chars): "Saved <cache>/…/page.md", a line '"Example Domain" · example.com · 25 words · 11 lines ·
+    ~82 tokens · 0 images', "Cached, fetched 13 s ago (refresh: true fetches again)", the rendering line, the plugin's
+    untrusted-content notice, then "---" and the page as markdown with its front matter (title, site, source
+    "https://example.com/", …). File 54, 55. No ToolSearch this time: it was loaded already.
+  r2, bare first: wire 55/58 ToolSearch, 66 tool_use {url}, 70 tool_result (762 chars, "Fetched now"); file 26, 27,
+    39, 40. r2, prompt: wire 97 tool_use {url, prompt}, 101 tool_result (538 chars, "fetched 12 s ago"); file 52, 53.
+  Request headers or keys: none in the four results or anywhere in the four files. The fetched page is example.com's
+  public text. Each result names the cache file under the scratch HOME (/tmp/u3bp-*/home/.cache/claude-web/…); on the
+  owner's machine that path is under their home, so a view that shows the result's text shows a home path.
+
+Inference, in the document's terms.
+  - "The name is mcp__web__fetch, the input holds url, and the result is text": held, so `isWebFetch` and
+    `webFetchUrl` stay as built. The fixtures now hold the two shapes the tests write by hand: replace them with
+    r1 seq 72/76 (prompt) and 156/158 (bare), or file lines 39/40 and 54/55.
+  - The url is the one the model wrote ("https://example.com"). The page's canonical source ("https://example.com/")
+    appears only inside the bare result's text, so a row that shows the url shows the input's.
+  - "Engine facts" 11 is confirmed as written; `refresh` was never sent, and its absence needs no handling.

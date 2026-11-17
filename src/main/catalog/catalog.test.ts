@@ -4,7 +4,7 @@
 // coverage, deterministic pagination across a tie, a failed source leaving the others, an added marketplace no other
 // source knows, and the test-source seam before the add.
 import { describe, expect, it } from 'vitest';
-import { CatalogItemSchema, type CatalogItem } from '@shared/ipc/schema/catalog';
+import { CatalogItemSchema, type CatalogItem, type CatalogShelf } from '@shared/ipc/schema/catalog';
 import { PROJECT_A, PROJECT_B, recordedEngine, recordedNetwork, recordedSources, testSourceData } from '../../../test/support/catalog-inputs';
 import { buildCatalog } from './join';
 import { connectorName, knownFromEntry, type EngineView } from './normalize';
@@ -318,6 +318,97 @@ describe('the home', () => {
     expect(fs.total).toBe(19);
     expect(queryOf(items, { tab: 'plugins', cwd: null, category: 'finances', limit: 200 }, 'r').items.every((i) => i.categories.includes('finances'))).toBe(true);
     expect(queryOf(items, { tab: 'plugins', cwd: null, chips: ['community'], limit: 200 }, 'r').items.every((i) => (i.reviewTier ?? i.ownership) === 'community')).toBe(true);
+  });
+});
+
+// UX wave U11c M4 (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §F): Discover's All, over both kinds.
+describe('All', () => {
+  const ids = (items: readonly CatalogItem[]) => items.map((i) => i.id);
+  const isCommunity = (i: CatalogItem) => (i.reviewTier ?? i.ownership) === 'community';
+  // a kind's items in its own shelf order (installs, rank for connectors), as its own home orders a shelf
+  const inShelfOrder = (items: CatalogItem[], tab: 'plugins' | 'skills' | 'connectors') => queryOf(items, { tab, cwd: null, limit: 200 }, 'r').items;
+  const byName = (a: CatalogItem, b: CatalogItem) => (a.name.toLowerCase() < b.name.toLowerCase() ? -1 : a.name.toLowerCase() > b.name.toLowerCase() ? 1 : a.id < b.id ? -1 : a.id > b.id ? 1 : 0);
+
+  it('its home is the Plugins home’s Featured and a shelf per kind, each of that kind’s first non-community items, Skills repeating no card of Plugins', async () => {
+    const items = await catalog();
+    const home = homeOf(items, 'all');
+    expect(home.featured?.id).toBe(homeOf(items, 'plugins').featured?.id);
+    expect(home.categories).toEqual([]);
+    expect(home.shelves.map((s) => [s.key, s.kind, s.title])).toEqual([
+      ['kind:plugins', 'kind', 'Plugins'],
+      ['kind:skills', 'kind', 'Skills'],
+      ['kind:connectors', 'kind', 'Connectors'],
+    ]);
+    const [plugins, skills, connectors] = home.shelves as [CatalogShelf, CatalogShelf, CatalogShelf];
+    const firstPlugins = inShelfOrder(items, 'plugins').filter((i) => !isCommunity(i));
+    expect(ids(plugins.items)).toEqual(ids(firstPlugins.slice(0, 12)));
+    // without the rule the Skills shelf would repeat Plugins' cards: Plugins' twelve hold items with skills
+    expect(plugins.items.some((i) => (i.components?.skills.length ?? 0) > 0)).toBe(true);
+    const onPlugins = new Set(ids(plugins.items));
+    expect(ids(skills.items)).toEqual(ids(inShelfOrder(items, 'skills').filter((i) => !isCommunity(i) && !onPlugins.has(i.id)).slice(0, 12)));
+    expect(skills.items).toHaveLength(12);
+    expect(ids(connectors.items)).toEqual(ids(inShelfOrder(items, 'connectors').filter((i) => !isCommunity(i)).slice(0, 12)));
+    expect(connectors.items.length).toBeGreaterThan(0);
+    for (const s of home.shelves) expect(s.items.some(isCommunity), s.key).toBe(false);
+    // each total is the kind's whole count, community items included: what See all leads to
+    expect(plugins.total).toBe(77);
+    expect(items.filter((i) => i.kind === 'plugin').some(isCommunity)).toBe(true);
+    expect(skills.total).toBe(homeOf(items, 'skills').total);
+    expect(connectors.total).toBe(10);
+    expect(home.total).toBe(87);
+  });
+
+  it('on a small catalog keeps a kind’s shelf whose cards are all on Plugins’, by its total, and gives a kind with nothing a total of 0', async () => {
+    const items = await catalog();
+    const withSkills = items.find((i) => i.kind === 'plugin' && !isCommunity(i) && (i.components?.skills.length ?? 0) > 0)!;
+    const home = homeOf([withSkills], 'all');
+    expect(home.shelves.map((s) => [s.key, s.items.map((i) => i.id), s.total])).toEqual([
+      ['kind:plugins', [withSkills.id], 1],
+      ['kind:skills', [], 1],
+      ['kind:connectors', [], 0],
+    ]);
+  });
+
+  it('its query holds both kinds in one order whatever the sort sent: a name match first, then by name, ties by id, across a page boundary', async () => {
+    const items = await catalog();
+    const all = queryOf(items, { tab: 'all', cwd: null, limit: 200 }, 'r');
+    expect(all.total).toBe(87);
+    expect(new Set(all.items.map((i) => i.kind))).toEqual(new Set(['plugin', 'connector']));
+    expect(ids(all.items)).toEqual(ids([...items].sort(byName)));
+    for (const sort of ['installs', 'updated', 'name'] as const) expect(ids(queryOf(items, { tab: 'all', cwd: null, sort, limit: 200 }, 'r').items), sort).toEqual(ids(all.items));
+    // the category is ignored; the chips are as on a kind's tab
+    expect(queryOf(items, { tab: 'all', cwd: null, category: 'finances', limit: 200 }, 'r').total).toBe(87);
+    expect(queryOf(items, { tab: 'all', cwd: null, chips: ['community'], limit: 200 }, 'r').items.every(isCommunity)).toBe(true);
+    // a search: the name matches by name, then the description-only matches by name
+    const text = 'e';
+    const found = queryOf(items, { tab: 'all', cwd: null, text, limit: 200 }, 'r').items;
+    const nameMatch = (i: CatalogItem) => `${i.name} ${i.installName ?? ''}`.toLowerCase().includes(text);
+    const named = found.filter(nameMatch);
+    const described = found.filter((i) => !nameMatch(i));
+    expect(named.length).toBeGreaterThan(0);
+    expect(described.length).toBeGreaterThan(0);
+    expect(new Set(named.map((i) => i.kind))).toEqual(new Set(['plugin', 'connector']));
+    expect(ids(found)).toEqual(ids([...[...named].sort(byName), ...[...described].sort(byName)]));
+    // paged, with a different sort sent for each page and in both directions: the same walk, never restarted
+    for (const reverse of [false, true]) {
+      const seen: string[] = [];
+      const cursors = new Set<string>();
+      let cursor: string | null = null;
+      let page = 0;
+      // bounded: a cursor that repeats, or more pages than the results could fill, ends the walk and fails below
+      do {
+        const sort = (['installs', 'updated', 'name'] as const)[page % 3];
+        const answer = queryOf(items, { tab: 'all', cwd: null, text, sort, reverse, cursor, limit: 7 }, 'r1');
+        expect(answer.restarted).toBe(false);
+        seen.push(...ids(answer.items));
+        cursor = answer.nextCursor;
+        page += 1;
+        if (cursor !== null && cursors.has(cursor)) break;
+        if (cursor !== null) cursors.add(cursor);
+      } while (cursor !== null && page <= Math.ceil(found.length / 7));
+      expect(cursor).toBeNull();
+      expect(seen).toEqual(reverse ? ids(found).reverse() : ids(found));
+    }
   });
 });
 

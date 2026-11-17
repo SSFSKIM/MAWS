@@ -1223,6 +1223,62 @@ describe('remote lane B over a real link', { timeout: 30_000 }, () => {
     expect(filesChanges(l.a, 'app-1')).toEqual([]);
   });
 
+  // ---- The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, Decision Log
+  // 33 and 35): the branch read, the commit read and the working-tree read, the device half and the endpoint half joined
+  // by the capability's name and the rows' names alone, proven together through the real link and the real offer table.
+
+  it('asks the three git reads of a session there: each arrives at the machine’s endpoint naming the session, and answers what its git reads in the checkout', async () => {
+    const l = await lab();
+    const repo = await gitRepo();
+    await repo.git('checkout', '-q', '-b', 'feature');
+    await repo.write('parser.ts', 'export const parse = 1;\n');
+    await repo.git('add', 'parser.ts');
+    await repo.git('commit', '-q', '-m', 'Add the parser');
+    await repo.write('notes.md', 'one\ntwo\nthree\n'); // a new file, three lines
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    const mergeBase = (await repo.git('rev-parse', 'main')).trim();
+    l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    expect(l.a.link.peerCapabilities()).toContain('rl2.git-reads');
+    const from = { session: 'app-1' as AppSessionId };
+    const arrived = (name: string) => l.host.calls.filter((c) => c.owner === 'machine' && c.name === name);
+
+    const branch = await l.a.route('git.branchCommits', { directory: repo.root, limit: 50 }, from);
+    expect(branch).toMatchObject({ ok: true, value: { base: { ref: 'main', mergeBase }, upstream: null, commits: [{ sha: head, subject: 'Add the parser', pushed: false }], counts: { all: 1 }, behind: 0 } });
+    const diff = await l.a.route('git.commitDiff', { directory: repo.root, commit: head }, from);
+    expect(diff).toMatchObject({ ok: true, value: { commit: { sha: head }, onHead: true, files: [{ path: 'parser.ts', insertions: 1 }] } });
+    const since = await l.a.route('git.changesSince', { directory: repo.root, against: mergeBase }, from);
+    expect(since).toMatchObject({ ok: true, value: { files: [{ path: 'parser.ts', insertions: 1 }], untracked: [{ path: 'notes.md', insertions: 3, binary: false }] } });
+    for (const name of ['git.branchCommits', 'git.commitDiff', 'git.changesSince']) expect([name, arrived(name)]).toMatchObject([name, [{ name }]]);
+
+    // the session is what admits them there: the same read naming none is the checkout rule's `no-target`, unread
+    const before = arrived('git.commitDiff').length;
+    expect(await l.a.route('git.commitDiff', { directory: repo.root, commit: head }, {})).toMatchObject({ ok: false, error: { code: 'internal', issues: { refusal: 'no-target' } } });
+    expect(arrived('git.commitDiff')).toHaveLength(before);
+  });
+
+  it('sends none of the three git reads to an endpoint that does not list `rl2.git-reads`, answering each `not-offered` (the older kind)', async () => {
+    endpointWithout('rl2.git-reads');
+    const l = await lab();
+    const repo = await gitRepo();
+    const head = (await repo.git('rev-parse', 'HEAD')).trim();
+    l.host.add('app-1');
+    l.place('app-1', undefined, { directory: repo.root });
+    checkoutServices(l, repo);
+    expect(l.a.link.peerCapabilities()).not.toContain('rl2.git-reads');
+    const from = { session: 'app-1' as AppSessionId };
+    for (const [name, input] of [
+      ['git.branchCommits', { directory: repo.root, limit: 50 }],
+      ['git.commitDiff', { directory: repo.root, commit: head }],
+      ['git.changesSince', { directory: repo.root, against: 'HEAD' }],
+    ] as const) {
+      expect([name, await l.a.route(name, input, from)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    }
+    // nothing reached the machine: not the reads, nor the bounds read the checkout rule would make for one
+    expect(l.host.calls.filter((c) => c.name.startsWith('git.'))).toEqual([]);
+  });
+
   // ---- P5 O7 M3: terminals and forwarded ports ----------------------------------------------------------------------
 
   it('spawns a shell as a member with a `shell` grant, types into it and reads it back across a forced drop: nothing repeated, nothing lost, no second prompt', async () => {

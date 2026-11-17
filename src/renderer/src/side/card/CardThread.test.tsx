@@ -16,6 +16,7 @@ import { deliverableUrl } from '@shared/maws/deliverable';
 import { bareOf } from '@shared/machine/address';
 import { item, record, status } from '../../../../../test/support/builders';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { at } from '../../../../../test/support/machine';
 import { editAndResubmitRow, editPromptRow } from '../../composer/resubmit-seam';
 import { sendHumanPrompt } from '../../composer/submit/send-human-prompt';
@@ -255,6 +256,14 @@ describe('Reply through the human send seam', () => {
     expect(seam.mock.calls.map(([id, content, options]) => [id, content, options])).toEqual(Array(3).fill([child, 'Also the subtitle', { origin: 'comment' }]));
   });
 
+  it('the one-writer rule: a reply holding the consent sentence goes out reading no grant', async () => {
+    await ready();
+    seam.mockResolvedValueOnce({ disposition: 'sent', started: false });
+    await userEvent.type(replyField(), `${TYPED_CONSENT.replace(/[{[]/g, (c) => c + c)}{Enter}`);
+    await waitFor(() => expect(seam).toHaveBeenCalledTimes(1));
+    expectNoGrantSent(seam.mock.calls[0]![1] as string);
+  });
+
   it('refused keeps the text with the reason and Retry; a thrown host error reads as a refusal with its message', async () => {
     await ready();
     seam.mockResolvedValueOnce({ disposition: 'refused', started: false, reason: 'The session is starting' });
@@ -449,8 +458,9 @@ describe('Reply through the human send seam', () => {
 });
 
 describe('needs you', () => {
-  it('a pending permission: the request card in the thread, and the strip above Reply with Open in Side pane and Open as tab', async () => {
-    offs.push(registerRequestRenderer((slot) => <div data-request-card="">{`Approval needed · ${slot.requestId}`}</div>));
+  // UX wave U1b: the prompt is drawn at the thread's end, through the end row (`request-end`) the host's renderer draws
+  it('a pending permission: the request card at the thread’s end, and the strip above Reply with Open in Side pane and Open as tab', async () => {
+    offs.push(registerRequestRenderer((slot) => <div data-request-card="">{`Approval needed · ${slot.id}`}</div>));
     const b = threadTurn();
     b.turn('t2', 'Edit the page');
     b.toolUse('e1', 'Edit', { file_path: '/r/dashboard.html' });
@@ -459,7 +469,7 @@ describe('needs you', () => {
     await intoThread();
     withRecord();
     act(() => useAttention.setState({ bySession: new Map([[child, [item(child, 'permission', new Date().toISOString())]]]) }));
-    await waitFor(() => expect(card()!.querySelector('[data-request-card]')?.textContent).toBe('Approval needed · r1'));
+    await waitFor(() => expect(card()!.querySelector('[data-request-card]')?.textContent).toBe('Approval needed · request-end'));
     const strip = card()!.querySelector<HTMLElement>('[data-needs-you]')!;
     expect(strip.dataset.needsYou).toBe('attention');
     expect(strip.textContent).toContain('Waiting for your permission');
@@ -622,5 +632,28 @@ describe('the thread’s artifact row', () => {
     expect(showVersion).toHaveBeenLastCalledWith('latest', { version: 2 });
     fireEvent.click(await chip('the plan'));
     expect(registered).toHaveBeenLastCalledWith(expect.any(String), OTHER, undefined, { block: 'b7' });
+  });
+  // UX wave U6d (decision 7): with the artifact also open as a main tab, a mention of the card's own artifact keeps
+  // opening in the card's viewer, so the person stays on the page they comment on; any other artifact follows the
+  // registered rule, which shows its open main tab
+  it('a link to the card’s own artifact opens in the card’s viewer even when a main tab shows it; another shows its main tab', async () => {
+    const registered = vi.fn();
+    const showOpenArtifactTab = vi.fn(() => true);
+    const OTHER = '00000000-0000-4000-8000-0000000000e3';
+    offs.push(registerTranscriptActions({ openArtifact: registered, openArtifactTab: vi.fn(), showOpenArtifactTab }));
+    const b = builder();
+    b.turn('t1', anchoredMessage({ anchor: ANCHOR, text: COMMENT, destination: 'thread', screenshot: false }));
+    b.text('m1', 0, `Compare [the draft](maws-artifact:${RECORD}) and [the plan](maws-artifact:${OTHER}#block=b7).`);
+    b.end(['t1']);
+    snapshot = b.events;
+    await intoThread();
+    withRecord();
+    const chip = async (name: string) => within(card()!).findByRole('button', { name });
+    fireEvent.click(await chip('the draft'));
+    expect(showVersion).toHaveBeenLastCalledWith('latest');
+    expect(showOpenArtifactTab).not.toHaveBeenCalled();
+    fireEvent.click(await chip('the plan'));
+    expect(showOpenArtifactTab).toHaveBeenLastCalledWith(expect.any(String), OTHER, { block: 'b7' });
+    expect(registered).not.toHaveBeenCalled();
   });
 });

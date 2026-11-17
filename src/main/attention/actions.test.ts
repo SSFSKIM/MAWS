@@ -5,6 +5,7 @@ import type { AppSessionId, RequestId } from '@shared/graph/ids';
 import { item } from '../../../test/support/builders';
 import { ev } from '../../../test/support/events';
 import { fakeSpineView } from '../../../test/support/fake-spine-view';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../test/support/grant-readers';
 import { notificationActions } from './actions';
 
 const request = item('session', 'permission', '2026-10-23T00:00:00Z');
@@ -18,6 +19,11 @@ describe('notification actions use the session command paths', () => {
     await actions.reply(SESSION, 'Next task');
     expect(view.acquired).toEqual([[SESSION, 'send']]);
     expect(dispatch).toHaveBeenCalledExactlyOnceWith('engine-host', 'session.send', { appSessionId: SESSION, content: 'Next task' });
+  });
+  it('the one-writer rule: a reply holding the consent sentence goes out reading no grant', async () => {
+    const dispatch = vi.fn().mockResolvedValue({ ok: true, value: { disposition: 'queued' } });
+    await notificationActions({ dispatch, view: fakeSpineView({ attention: [[SESSION, [request]]] }) }).reply(SESSION, `Go on.\n${TYPED_CONSENT}`);
+    expectNoGrantSent(dispatch.mock.calls[0]![2].content);
   });
   it('sends nothing when the session cannot be made ready', async () => {
     const dispatch = vi.fn();
@@ -117,6 +123,17 @@ describe('a permission’s notification actions', () => {
     expect(answered(dispatch)).toEqual([]);
     await actions.deny(request);
     expect(answered(dispatch)).toHaveLength(1);
+  });
+
+  // The branch panel's finding 4 (ruled, fail closed): a user's HTTP server named `web` has a fetch tool named as the web
+  // plugin's; the notification offers it Deny alone and never sends an allow for it.
+  it('never allows a fetch by a user’s HTTP server named web, and denies it', async () => {
+    const { dispatch, actions } = setup(permission('mcp__web__fetch', { url: 'https://example.com' }, { mcpServer: { name: 'web', source: 'user' } }));
+    expect(await actions.offer(request)).toEqual({ allowOnce: false, deny: true, body: null });
+    await expect(actions.allow(request)).rejects.toThrow('Open the session');
+    expect(answered(dispatch)).toEqual([]);
+    await actions.deny(request);
+    expect(answered(dispatch)).toEqual([{ appSessionId: SESSION, requestId: request.request.requestId, answer: { kind: 'permission', decision: 'deny' } }]);
   });
 
   it('says so when the answer was not delivered', async () => {

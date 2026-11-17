@@ -5,14 +5,19 @@
 // failure is not the store's (a timeout, an unavailable host).
 import type { ArtifactKind } from '@shared/artifacts/entity';
 import type { ArtifactLocation } from '@shared/artifacts/link'; // P4-B4
+import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandInput, CommandName, CommandOutput, InvokeRest, IpcError, MawsBridge } from '@shared/ipc/schema';
 import { artifactRefusalOf, type ArtifactRefusal, type ArtifactRow } from '@shared/ipc/schema/artifacts';
+import { tabId } from '@shared/ipc/schema/layout';
 import type { Space } from '@shared/artifacts/entity';
 import type { MachineRef } from '@shared/machine/ref';
-import { artifactMachineOf, recordArtifactMachine } from '../artifacts/machines';
+import { artifactMachineOf, recordArtifactMachine, sessionArtifactMachine } from '../artifacts/machines';
 import { ipc } from '../ipc/client';
 import { useLayout } from '../stores/layout';
+import { isOpen } from '../stores/layout-model';
 import { requestArtifactOpen } from '../tools/artifacts/viewers/requests'; // P4-B4
+import { refreshSpaceInstructions } from './store'; // UX wave U10b (M9)
+import { ARTIFACT } from '../transcript/model/copy'; // UX wave U10b: the row's words, shared with the editor's notice
 
 export type LibraryActionResult<T> = { ok: true; value: T } | { ok: false; error: IpcError; refusal: ArtifactRefusal | null };
 
@@ -36,6 +41,20 @@ export const setArtifactPinned = (artifactId: string, pinned: boolean, client: M
 export const moveArtifactToSpace = (artifactId: string, spaceId: string | null, client: MawsBridge = ipc) => run(client, 'artifacts.update', { artifactId, spaceId }, artifactOf);
 export const duplicateArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.duplicate', { artifactId }, artifactOf);
 export const deleteArtifact = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.delete', { artifactId }, nothing);
+// UX wave U10b (M5, §C.4): undo an agent's delete on the artifact's machine. Resolves null once the artifact is live
+// again, else the sentence an act that ended without its effect leaves: this Mac's store's sentence after "Not restored:";
+// another machine's as main words it (`refusalWords`, `failureWords`: "Not restored: <machine> is offline", …).
+export async function undeleteArtifact(artifactId: string, machine: MachineRef, client: MawsBridge = ipc): Promise<string | null> {
+  const result = await client.invoke('artifacts.undelete', { artifactId }, { machine });
+  if (result.ok) return null;
+  return machine === client.localMachine ? ARTIFACT.notRestored(result.error.message) : result.error.message;
+}
+// The transcript's row: on the session's machine, the artifact's machine recorded as `openArtifactInPanel` records it.
+export function undeleteSessionArtifact(appSessionId: AppSessionId, artifactId: string, client: MawsBridge = ipc): Promise<string | null> {
+  const machine = sessionArtifactMachine(appSessionId, artifactId, client.localMachine);
+  recordArtifactMachine(artifactId, machine, client.localMachine);
+  return undeleteArtifact(artifactId, machine, client);
+}
 // Decision Log 15: once per open, by the surface that showed the artifact's content to the owner, never by the list.
 export const markArtifactViewed = (artifactId: string, client: MawsBridge = ipc) => run(client, 'artifacts.markViewed', { artifactId }, nothing);
 
@@ -48,6 +67,13 @@ export const renameSpace = (spaceId: string, name: string, client: MawsBridge = 
 export const linkSpaceDirectory = (spaceId: string, linkedDir: string | null, client: MawsBridge = ipc) => run(client, 'spaces.update', { spaceId, linkedDir }, spaceOf, local(client));
 // Its artifacts are left in no Space (A's rule).
 export const deleteSpace = (spaceId: string, client: MawsBridge = ipc) => run(client, 'spaces.delete', { spaceId }, nothing);
+// UX wave U10b (M9, §E.2): a Space's instructions on this Mac ('' removes them), read again once written, so this window
+// shows them whether or not the host's announcement reaches it first.
+export async function setSpaceInstructions(spaceId: string, text: string, client: MawsBridge = ipc): Promise<LibraryActionResult<void>> {
+  const result = await run(client, 'spaces.setInstructions', { spaceId, text }, nothing);
+  if (result.ok) refreshSpaceInstructions(client);
+  return result;
+}
 
 // ---- opening -----------------------------------------------------------------------------------------------------------
 
@@ -64,4 +90,16 @@ export function openArtifactTab(artifactId: string, location?: ArtifactLocation,
   const layout = useLayout.getState();
   layout.revealMain();
   layout.openTab({ kind: 'artifact', artifactId, machine: artifactMachineOf(artifactId) ?? ipc.localMachine });
+}
+
+// UX wave U6d (card C5, "Show that tab"; the execution document's decisions 1 to 3): the main tab that already shows the
+// artifact, brought forward at the place `location` names, as a mention's click asks before it opens beside the chat.
+// The tab is looked for in this window's one strip on the machine the side column would read the artifact on
+// (`sessionArtifactMachine`, `openArtifactInPanel`'s rule), so a tab of the same id on another machine is not taken.
+// False, and nothing done, when the strip holds none; it awaits nothing.
+export function showOpenArtifactTab(appSessionId: AppSessionId, artifactId: string, location?: ArtifactLocation): boolean {
+  const machine = sessionArtifactMachine(appSessionId, artifactId, ipc.localMachine);
+  if (!isOpen(useLayout.getState().main, tabId({ kind: 'artifact', artifactId, machine }))) return false;
+  openArtifactTab(artifactId, location, machine);
+  return true;
 }

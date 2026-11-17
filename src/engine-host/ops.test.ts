@@ -4,7 +4,7 @@
 // nothing. `host.opQuery` answers RL4's states with the stored binding and tombstones an absent id when asked.
 // The first block drives the commands over a stand-in handler table; the second through registerEngineIpc's own handlers
 // and a replayed engine session, so a reseal shows one effect in a real session.
-import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,6 +65,7 @@ function ops(edit: Partial<OpsDeps> = {}) {
     ['session.launch', async (input) => (ran.push({ name: 'session.launch', input }), { status: 'refused', reason: 'already_live', message: 'stand-in' })],
     ['fs.sessionText', async (input) => (ran.push({ name: 'fs.sessionText', input }), { text: 'a transcript', cursor: null, size: 12, mtimeMs: 0 })],
     ['artifacts.versionState', async (input) => (ran.push({ name: 'artifacts.versionState', input }), { bytes: new Uint8Array([0, 1, 255]) })],
+    ['connectors.addJson', async (input) => (ran.push({ name: 'connectors.addJson', input }), { opId: 'op-add' })], // UX wave U11g: an act on no session
   ]);
   const statusReads: string[] = [];
   const deps: OpsDeps = {
@@ -286,10 +287,45 @@ describe('host.artifactOp (an act on no session)', () => {
     expect(await h.op(op({ name: 'artifacts.saveVersion', input: { artifactId: ARTIFACT_ID, label: 'Draft' } }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
   });
 
-  it('names the thirteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
+  // UX wave U11g (docs/doperpowers/plans/2026-11-14-ux-wave-U11g-custom-connector.md, G6): a custom connector's add names
+  // no session, so a remote action naming it is refused before anything is claimed, and neither command runs it
+  it('refuses connectors.addJson `unavailable`, through host.op and host.artifactOp alike, running nothing and claiming nothing', async () => {
+    const h = ops();
+    const input = { cwd: '/tmp/files-probe', binary: '/opt/claude/bin/claude', name: 'files-probe', scope: 'local', folder: '/tmp/files-probe', entry: { type: 'stdio', command: 'files-probe', args: [], env: [{ name: 'FILES_PROBE_KEY', value: 'value-one' }] } };
+    expect(validateCommandInput('connectors.addJson', input).ok).toBe(true);
+    expect(await h.op(op({ name: 'connectors.addJson', input }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(await h.op(op({ name: 'connectors.addJson', input: { ...input, appSessionId: 'app-1' } }), CTX)).toEqual({ state: 'refused', reason: 'malformed' }); // no session can be named into it
+    expect(await h.artifactOp(save({ name: 'connectors.addJson', input }), CTX)).toEqual({ state: 'refused', reason: 'unavailable' });
+    expect(h.ran).toEqual([]);
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+    expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('connectors.addJson');
+  });
+
+  // UX wave U10b (M9; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, Routes): a Space's instructions name
+  // no session and are no artifact write, so a remote action naming either command is refused where it would run, though
+  // this host serves both to its own windows; nothing is run and nothing is claimed
+  it('refuses a Space’s instructions `unavailable`, through host.op and host.artifactOp alike, running nothing and claiming nothing', async () => {
+    const served: string[] = [];
+    const serve = (name: string) => (name === 'spaces.instructions' || name === 'spaces.setInstructions' ? async () => void served.push(name) : undefined);
+    const h = ops({ handler: serve, artifactWrite: serve });
+    const set = { spaceId: '22222222-2222-4222-8222-222222222222', text: 'Use metres.' };
+    expect(validateCommandInput('spaces.setInstructions', set).ok).toBe(true);
+    expect(validateCommandInput('spaces.instructions', {}).ok).toBe(true);
+    for (const [name, input] of [['spaces.setInstructions', set], ['spaces.instructions', {}]] as const) {
+      expect(await h.op(op({ name, input }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
+      expect(await h.op(op({ name, input: { ...input, appSessionId: 'app-1' } }), CTX), name).toEqual({ state: 'refused', reason: 'malformed' }); // no session can be named into it
+      expect(await h.artifactOp(save({ name, input }), CTX), name).toEqual({ state: 'refused', reason: 'unavailable' });
+    }
+    expect(served).toEqual([]);
+    expect(h.opQuery({ opId: 'op-000000000000001', opCreated: iso(Date.now()), tombstoneIfAbsent: false })).toEqual({ state: 'not-received' });
+    expect(existsSync(join(dir, 'ops.jsonl')) ? readFileSync(join(dir, 'ops.jsonl'), 'utf8') : '').not.toContain('spaces.');
+  });
+
+  // UX wave U10b (M4): and the fourteenth, the undelete of an agent's delete
+  it('names the fourteen artifact writes of §L, each an engine-host command graded manage that names no session', () => {
     expect([...ARTIFACT_OP_COMMANDS].sort()).toEqual([
       'artifacts.acceptSuggestion', 'artifacts.copyAsset', 'artifacts.create', 'artifacts.delete', 'artifacts.duplicate', 'artifacts.nameVersion', 'artifacts.pruneVersions',
-      'artifacts.rejectSuggestion', 'artifacts.rereadDatasetFile', 'artifacts.restore', 'artifacts.saveVersion', 'artifacts.update', 'artifacts.uploadAsset',
+      'artifacts.rejectSuggestion', 'artifacts.rereadDatasetFile', 'artifacts.restore', 'artifacts.saveVersion', 'artifacts.undelete', 'artifacts.update', 'artifacts.uploadAsset',
     ]);
     for (const name of ARTIFACT_OP_COMMANDS) {
       expect(commands[name].owner, name).toBe('engine-host');
@@ -490,6 +526,17 @@ describe('host.artifactOp over the host’s own registration', () => {
       expect(await call('host.artifactOp', update)).toEqual(done); // the reseal is the ledger's, run nowhere
       expect(await call('artifacts.get', { artifactId: artifact.id })).toMatchObject({ artifact: { title: 'Changed here' } });
       expect(await call('host.opQuery', { opId: update.opId, opCreated: update.opCreated, tombstoneIfAbsent: false })).toMatchObject({ state: 'done', target: `artifact:${artifact.id}`, name: 'artifacts.update' });
+      // UX wave U10b (M4): the undelete runs under the same ledger, and the store's refusal of an artifact no agent's
+      // delete removed (here, the Library's) comes back as the command's own answer
+      await call('artifacts.delete', { artifactId: artifact.id });
+      const undelete = { ...update, opId: 'op-real-undelete-01', target: `artifact:${artifact.id}`, name: 'artifacts.undelete', input: { artifactId: artifact.id } };
+      expect(await call('host.artifactOp', undelete)).toMatchObject({ state: 'done', result: { ok: false, error: { code: 'invalid_input', message: 'this artifact was deleted in the Library, not by an agent', issues: { reason: 'invalid' } } } });
+      const agent = { kind: 'session', appSessionId: 'app-1' as AppSessionId } as const;
+      const draft = await documents!.store.create({ kind: 'document', title: 'Draft plan' }, agent);
+      await documents!.store.writeCommitted(() => documents!.store.deleteOwnDraft(draft.id, ['app-1' as AppSessionId]));
+      const restore = { ...update, opId: 'op-real-undelete-02', target: `artifact:${draft.id}`, name: 'artifacts.undelete', input: { artifactId: draft.id } };
+      expect(await call('host.artifactOp', restore)).toMatchObject({ state: 'done', result: { ok: true } });
+      expect(await call('artifacts.get', { artifactId: draft.id })).toMatchObject({ artifact: { id: draft.id } });
     } finally {
       surface.close();
       documents?.close();

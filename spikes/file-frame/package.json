@@ -1,0 +1,10 @@
+{
+  "name": "maws-spike-file-frame",
+  "private": true,
+  "type": "module",
+  "description": "Spike (UX wave U6b-2, M1): both ends of a request for a token host of maws-artifact:, and Chromium's PDF viewer on one. Findings only, never product code. Runs on the repository's own Electron (the root's node_modules); no dependencies of its own.",
+  "main": "main.mjs",
+  "scripts": {
+    "spike": "node run.mjs"
+  }
+}

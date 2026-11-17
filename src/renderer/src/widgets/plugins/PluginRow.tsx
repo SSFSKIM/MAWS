@@ -1,5 +1,6 @@
 // A row of My items (P2-B execution document §5.4; Claude Desktop's row,
-// readable/app-2.16120.0/web/app/v1/c27f32a39-QZ0BG6_X.js:130-293, :325-395, :536-678): the icon tile, the display
+// readable/app-2.16120.0/web/app/v1/c27f32a39-QZ0BG6_X.js:130-293, :325-395, :536-678): the image (UX wave U11c: the
+// directory's icon, which the list reads for its rows, else the plugin's letter tile), the display
 // name with "New" and "Disabled", "by <author> · <description>", at the trailing edge the version and the date, and the
 // overflow (Turn on or off, Update, Uninstall…), each change through E8's confirm sheet at the representative
 // installation's scope. The row is one plugin, whatever its number of installations; a change acts on one installation,
@@ -8,13 +9,20 @@
 // where it is managed. The whole row is one target, "View <name>", opening the detail (M4): a button under the row's
 // content, which sits above it so its tooltips show, a click on it still opening the detail; the row's own controls (the
 // overflow, an operation's Stop or Reload again, the menu's items) keep their clicks.
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, C2): on Customize's page, whose one book
+// holds what Discover started too, a row with no line of its own draws the line of a Discover install of its plugin.
 import { DropdownMenu } from 'radix-ui';
 import type { InstalledPlugin } from '@shared/ipc/schema/plugins';
 import { PLUGINS_SCOPES, type PluginsAction, type PluginsScope } from '@shared/plugins/cli';
+import { ItemImage } from '../../customize/image/ItemImage';
+import { KindWord } from '../../customize/KindWord';
+import { pluginSeedOf } from '../../customize/image/tile';
 import { LIBRARY as L } from '../copy';
-import { MoreIcon, PluginGlyph } from './icons';
+import { MoreIcon } from './icons';
 import { basename, dateWords, displayNameOf, isNew, updatedOf, versionWords, type PluginIdentity } from './library';
+import { CATALOG_KEY } from '../../customize/discover/add';
 import { OperationLine, useManage } from './manage';
+import { factsOf } from './operation';
 import { requestFor } from './present';
 
 type Installation = Pick<InstalledPlugin, 'id' | 'scope' | 'projectPath'>;
@@ -28,14 +36,6 @@ export const installationOf = (key: string): Installation => {
 };
 // The installation's own scope where the CLI takes it; a pseudo-scope falls back to user (E8).
 const scopeOfRow = (scope: string): PluginsScope => ((PLUGINS_SCOPES as readonly string[]).includes(scope) ? (scope as PluginsScope) : 'user');
-
-export function PluginTile() {
-  return (
-    <span aria-hidden className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border bg-bg-active text-fg-muted">
-      <PluginGlyph className="size-4" />
-    </span>
-  );
-}
 
 // A group's heading in the scrolling list, held at the top while its rows pass under it.
 export function GroupHeading({ label, count }: { label: string; count?: number }) {
@@ -96,11 +96,14 @@ function managedWords(identity: PluginIdentity): { text: string; title?: string 
 // item's click through the row too).
 const ownControl = (target: EventTarget): boolean => target instanceof Element && target.closest('button:not([data-row-open]), a, [role="menuitem"]') !== null;
 
-export function PluginRow({ identity, now, onOpen }: { identity: PluginIdentity; now: number; onOpen(id: string): void }) {
+// `iconUrl`: the directory's icon of this plugin, from the list's one read (`usePluginIcons`); null for its tile.
+// `kindWord`: under Customize's All (UX wave U11c, §E), "Plugin" before the menu.
+export function PluginRow({ identity, now, iconUrl, onOpen, kindWord = false }: { identity: PluginIdentity; now: number; iconUrl: string | null; onOpen(id: string): void; kindWord?: boolean }) {
   const { ops } = useManage();
   const target = identity.representative;
   const key = installedKey(target);
   const busy = ops.entries.get(key)?.state.phase === 'working';
+  const discovered = ops.entries.has(key) ? undefined : [...ops.entries.entries()].find(([opKey, entry]) => opKey.startsWith(CATALOG_KEY) && factsOf(entry).action === 'install' && factsOf(entry).target === identity.id)?.[0];
   const name = displayNameOf(identity.name, identity.manifest);
   const manifest = identity.manifest;
   const skills = manifest?.state === 'read' ? manifest.components.skills.length : 0;
@@ -120,7 +123,7 @@ export function PluginRow({ identity, now, onOpen }: { identity: PluginIdentity;
       }}
     >
       <button type="button" data-row-open aria-label={L.view(name)} className="absolute inset-0 rounded-sm outline-accent -outline-offset-2 focus-visible:outline-2" />
-      <PluginTile />
+      <ItemImage kind="plugin" seed={pluginSeedOf(identity.id)} iconUrl={iconUrl} size="row" />
       <div className="relative flex min-w-0 flex-1 flex-col gap-0.5">
         <span className="flex min-w-0 items-center gap-2">
           <span className="truncate font-medium text-fg" title={identity.id}>
@@ -145,11 +148,12 @@ export function PluginRow({ identity, now, onOpen }: { identity: PluginIdentity;
           </span>
         ))}
         <div className="text-ui-sm empty:hidden">
-          <OperationLine opKey={key} />
+          <OperationLine opKey={discovered ?? key} />
         </div>
       </div>
       {(version !== null || date !== null) && (
-        <span className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums">
+        // Customize's narrow page (under its container's 24rem) gives them up; /plugins' dialog has no such container
+        <span data-plugin-version className="relative shrink-0 text-ui-sm text-fg-muted tabular-nums @max-sm/customize:hidden">
           {version}
           {version !== null && date !== null && ' · '}
           {date && (
@@ -159,6 +163,7 @@ export function PluginRow({ identity, now, onOpen }: { identity: PluginIdentity;
           )}
         </span>
       )}
+      {kindWord && <KindWord kind="plugin" />}
       <span className="relative inline-flex shrink-0">{actionable ? <RowMenu identity={identity} name={name} busy={busy} /> : <span aria-hidden className="size-7" />}</span>
     </li>
   );

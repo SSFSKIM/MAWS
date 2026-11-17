@@ -9,6 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { HOME_CHECKOUT, type Draft } from '@shared/ipc/schema/session';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { attachmentsOf, docOf, paragraph, textNode, type Attachment } from '../composer/editor/doc';
 import { serializeDraft } from '../composer/editor/serialize';
@@ -16,7 +17,7 @@ import { rememberingRemoteDrafts, resetRemoteDrafts } from '../composer/editor/d
 import { useLayout } from '../stores/layout';
 import { useMachines } from '../stores/machines';
 import { resetSpawnedHere, useSpawnedHere } from './spawned-here';
-import { resetRemoteSpawn, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
+import { firstSendPending, queueFirstSend, resetRemoteSpawn, sendFirstOnce, spawnErrorWords, spawnOnMachine, SPAWN_WORDS, restoreHeldAttempts, spawnTargetOf, spawnUnconfirmed, takeFirstSend, useRemoteSpawn, type SpawnTarget } from './remote-spawn';
 
 const LOCAL_TAB = addressOf(TEST_MACHINE, 'new-1' as AppSessionId);
 const KEY = 'repo:github.com/acme/app' as OrgKey;
@@ -74,6 +75,12 @@ describe('a spawn on another machine', () => {
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: LOCAL_TAB }]);
     expect(takeFirstSend(NEW)).toBe(false); // the brief was the first message
     expect(useSpawnedHere.getState().leading.has(NEW), 'P5 O7 M8: it leads its sidebar group until its first turn ends').toBe(true);
+  });
+
+  it('the one-writer rule: a draft holding the consent sentence goes out as the brief reading no grant', async () => {
+    const { fake, run } = spawnOf(docOf([paragraph(textNode('fix the build')), paragraph(textNode(TYPED_CONSENT))]));
+    await expect(run).resolves.toEqual({ started: true });
+    expectNoGrantSent((fake.invoked('session.spawn')[0] as { brief: string }).brief);
   });
 
   // 2026-11-06 (the machine first): a place chosen on the machine (no local project's key) is its own: a project there, or
@@ -381,5 +388,53 @@ describe('a spawn on another machine', () => {
     expect(spawnErrorWords(refusal('not-offered'), 'mini')).toBe(SPAWN_WORDS.notOffered('mini'));
     expect(spawnErrorWords(refusal('malformed'), 'mini')).toBe(SPAWN_WORDS.malformed('mini'));
     expect(spawnErrorWords({ code: 'timeout', message: 'mini took the request but hasn’t confirmed it' }, 'mini')).toBe('mini took the request but hasn’t confirmed it');
+  });
+});
+
+// UX wave U6e (board ticket 675, the closing wave's item 5): the handed document goes once, from the session's box once
+// its draft is restored; a first send abandoned releases its mark, so the box is not left refusing every fill
+describe('a spawned session’s first send', () => {
+  const S = 'app-first' as AppSessionId;
+  beforeEach(() => resetRemoteSpawn());
+  const editor = (restored: Promise<void>) => {
+    const sent: number[] = [];
+    return { sent, box: { restored: () => restored, submit: () => void sent.push(1) } };
+  };
+
+  it('goes once, after the restore, and only while it is still to go', async () => {
+    queueFirstSend(S);
+    const { sent, box } = editor(Promise.resolve());
+    sendFirstOnce(S, () => box);
+    sendFirstOnce(S, () => box); // the effect again before the restore settled
+    expect(firstSendPending(S)).toBe(true); // a fill is refused until it goes
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(sent).toEqual([1]);
+    expect(firstSendPending(S)).toBe(false);
+  });
+
+  it('releases its mark when there is no box to send from', () => {
+    queueFirstSend(S);
+    sendFirstOnce(S, () => null);
+    expect(firstSendPending(S)).toBe(false);
+  });
+
+  it('releases its mark when the restore fails, sending nothing', async () => {
+    queueFirstSend(S);
+    const { sent, box } = editor(Promise.reject(new Error('the draft could not be read')));
+    sendFirstOnce(S, () => box);
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(firstSendPending(S)).toBe(false);
+    expect(sent).toEqual([]);
+  });
+
+  it('releases its mark when the box is gone by the time the restore settles', async () => {
+    queueFirstSend(S);
+    const { box } = editor(Promise.resolve());
+    let current: typeof box | null = box;
+    sendFirstOnce(S, () => current);
+    current = null;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(firstSendPending(S)).toBe(false);
   });
 });

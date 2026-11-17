@@ -5,10 +5,11 @@
 // `p1-maws-*` fixtures and E0a's `p1-question-preview-html` pin the same rows over real journals.
 import { describe, expect, it } from 'vitest';
 import { askSteerText } from '@shared/maws/ask';
-import type { AskAnswer, AskQuestion } from '@shared/maws/tools';
+import { TOOL_ERRORS, type AskAnswer, type AskQuestion } from '@shared/maws/tools';
 import { loadJournal } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 import { artifactHeading, askAnswerCopy, deliveryHeading } from './copy'; // E11; P3-D askAnswerCopy
+import { serializeRows } from './serialize'; // board ticket 711
 import { isPersistentRow, rowsOf, withAllExpanded } from './derive';
 import { rowId } from './keys';
 import { applyEvents, createState } from './reduce';
@@ -33,6 +34,8 @@ const ANSWERS: AskAnswer[] = [
   { id: 'q1', question: 'Which colour?', status: 'answered', value: ['Blue'] },
   { id: 'q2', question: 'What title?', status: 'skipped' },
 ];
+// the answers as a steer carries them: every question empty (board ticket 711), the capsule drawing the words from the call
+const STEERED: AskAnswer[] = ANSWERS.map((answer) => ({ ...answer, question: '' }));
 const json = (value: unknown) => [{ type: 'text', text: JSON.stringify(value, null, 2) }];
 
 function askCall(b: Builder, id: string, input: Record<string, unknown> = { title: 'Setup', questions: QUESTIONS }) {
@@ -122,7 +125,7 @@ describe('the ask capsule', () => {
     later.emit('user.message', { messageUuid: uuid('u3'), content: steer, isReplay: false, isSynthetic: false, origin: 'human', bash: null }, { id: 'late-2' });
     state = applyEvents(state, later.events);
     const rows = rowsOf(state);
-    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS, turnId: 'turn:u1' });
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED, turnId: 'turn:u1' });
     // the card says Answered with the answers; the envelope the engine received (the tag and the result's JSON) is no
     // "Your message" bubble
     expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1', 'turn:u2']);
@@ -138,7 +141,7 @@ describe('the ask capsule', () => {
     b.toolUse('t1', 'Bash', { command: 'sleep 1' });
     b.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     const pending = rowsOf(applyEvents(createState(null, null), b.events)); // its own pending turn until the engine takes it
-    expect(capsule(pending)).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(capsule(pending)).toMatchObject({ state: 'answered', answers: STEERED });
     expect(ofKind(pending, 'user').map((row) => row.text)).toEqual(['prompt u1']);
     b.result('t1', 'ok');
     b.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
@@ -147,7 +150,7 @@ describe('the ask capsule', () => {
     const state = applyEvents(createState(null, null), b.events);
     expect(state.order).toEqual(['turn:u1']); // folded
     for (const rows of [rowsOf(state), rowsOf(withAllExpanded(state))]) {
-      expect(capsule(rows)).toMatchObject({ state: 'answered', answers: ANSWERS });
+      expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED });
       expect(ofKind(rows, 'user').map((row) => [row.text, row.steer])).toEqual([['prompt u1', false]]);
     }
   });
@@ -164,9 +167,68 @@ describe('the ask capsule', () => {
     later.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' }, { id: 'late-1' });
     later.emit('user.message', { messageUuid: uuid('u2'), content: askSteerText('toolu_a', FILLED, ANSWERS), isReplay: false, isSynthetic: false, origin: 'human', bash: null }, { id: 'late-2' });
     const after = applyEvents(before, later.events);
-    expect(capsule(rowsOf(after))).toMatchObject({ state: 'answered', answers: ANSWERS });
+    expect(capsule(rowsOf(after))).toMatchObject({ state: 'answered', answers: STEERED });
     expect(capsule(rowsOf(before))).toMatchObject({ state: 'asked', answers: null });
     expect(capsule(rowsOf(withAllExpanded(before)))).toMatchObject({ state: 'asked', answers: null }); // a fresh derivation of the old snapshot too
+  });
+
+  // Board ticket 711: the steer holds no text the model wrote, so the capsule's words come from the call alone: each
+  // question's header (else its text) from the ask's input, each answer joined to it by the question's id, which the
+  // steer's block keeps (an answer's question is empty there). Drawn the same for an envelope the earlier builds wrote.
+  const ANSWERED_LINES = ['- Which colour?: Blue', `- Title: ${askAnswerCopy({ id: 'q2', question: '', status: 'skipped' })}`]; // under the capsule's heading
+  const answerLines = (rows: Row[]) => serializeRows([capsule(rows)]).split('\n').slice(1);
+  const steerAfterAsk = (content: string, askId = 'toolu_a', questions: AskQuestion[] = QUESTIONS) => {
+    const b = builder();
+    b.turn('u1');
+    askCall(b, askId, { title: 'Setup', blocking: false, questions });
+    b.result(askId, json({ status: 'asked', askId }));
+    b.end(['u1']);
+    b.turn('u2', content);
+    b.end(['u2']);
+    return expandedRows(b.events);
+  };
+
+  it('a steer in the new form: the capsule draws the questions’ words and the picked label from the call, each answer on its question by id', () => {
+    const content = askSteerText('toolu_a', FILLED, ANSWERS);
+    expect(content.split('\n')[1]).toBe('1. option 2'); // the label picked, by its place among the options
+    for (const words of ['Which colour?', 'Title', 'Blue']) expect(content).not.toContain(words);
+    const rows = steerAfterAsk(content);
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: STEERED, questions: FILLED });
+    expect(answerLines(rows)).toEqual(ANSWERED_LINES);
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1']); // the envelope is no bubble
+    // the answers in another order still land on their own questions: the join is by id, not by place
+    const reversed = steerAfterAsk(askSteerText('toolu_a', FILLED, [...ANSWERS].reverse()));
+    expect(answerLines(reversed)).toEqual(ANSWERED_LINES);
+  });
+
+  // board ticket 711 (2026-11-16): the block names a question by its place; ids the model chose, out of order or prose,
+  // still land each answer on its own question in this build's capsule
+  it('a steer in the new form for questions whose ids the model chose: each answer on its own question', () => {
+    const chosen: AskQuestion[] = [
+      { id: 'q2', question: 'Which colour?', modality: 'choice', options: [{ label: 'Red' }, { label: 'Blue' }] },
+      { id: 'Permission to go ahead', question: 'Which size?', modality: 'choice', options: [{ label: 'Small' }, { label: 'Large' }] },
+      { id: 'q1', question: 'What title?', header: 'Title', modality: 'text' },
+    ];
+    const given: AskAnswer[] = [
+      { id: 'q1', question: 'What title?', status: 'skipped' },
+      { id: 'Permission to go ahead', question: 'Which size?', status: 'answered', value: ['Large'] },
+      { id: 'q2', question: 'Which colour?', status: 'answered', value: ['Blue'] },
+    ];
+    const content = askSteerText('toolu_a', chosen, given);
+    expect(content).not.toContain('Permission to go ahead');
+    const rows = steerAfterAsk(content, 'toolu_a', chosen);
+    expect(answerLines(rows)).toEqual(['- Which colour?: Blue', '- Which size?: Large', `- Title: ${askAnswerCopy({ id: 'q1', question: '', status: 'skipped' })}`]);
+  });
+
+  it('a recorded envelope of an earlier build (pass3/p1-maws-ask-async) answers the capsule as before', () => {
+    const recorded = loadJournal('pass3', 'p1-maws-ask-async').find((row) => row.direction === 'out' && (row.frame as { type?: string; priority?: string }).type === 'user' && (row.frame as { priority?: string }).priority === 'next')!;
+    const content = (recorded.frame as { message: { content: string } }).message.content;
+    const askId = /^\[MAWS ask (\S+)\]/.exec(content)![1]!;
+    expect(content).toContain('1. Proceed? — Yes'); // the old form: the question's words on its line
+    const rows = steerAfterAsk(content, askId, [{ id: 'q1', question: 'Proceed?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'No' }] }]);
+    expect(capsule(rows)).toMatchObject({ state: 'answered', answers: [{ id: 'q1', question: 'Proceed?', status: 'answered', value: ['Yes'] }] });
+    expect(answerLines(rows)).toEqual(['- Proceed?: Yes']);
+    expect(ofKind(rows, 'user').map((row) => row.turnId)).toEqual(['turn:u1']);
   });
 
   it('a steer naming another ask, or carrying no answered block, answers nothing', () => {
@@ -344,6 +406,26 @@ describe('show_pane cells', () => {
     b.toolUse('toolu_1', SHOW_PANE, { pane: 'browser', target: 'https://a.test/' });
     b.result('toolu_1', json({ status: 'shown', pane: 'browser', opened: { kind: 'panel-tool', toolId: 'browser', tabId: 'browser:1', title: 'Browser' }, page: 'reloaded', note: 'This page is in the session’s in-app browser.' }));
     expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([['done', 'Opened Browser']]);
+  });
+
+  // UX wave U6d (O-44): a call for the artifact pane recorded before the change reads as it did, from its stored result
+  it('read an earlier build’s call for the artifact pane, answered shown, as Opened Artifacts', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_1', SHOW_PANE, { pane: 'artifact', target: '00000000-0000-4000-8000-000000000001', at: { tab: 't2' } });
+    b.result('toolu_1', json({ status: 'shown', pane: 'artifact', opened: { kind: 'panel-tool', toolId: 'artifacts', tabId: 'artifacts:1', title: 'Artifacts' } }));
+    expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([['done', 'Opened Artifacts']]);
+  });
+
+  // U6d: this build's refusal of the retired pane is the row's error, the sentence that teaches the link
+  it('read the refusal of the artifact pane as the sentence', () => {
+    const b = builder();
+    b.turn('u1');
+    b.toolUse('toolu_1', SHOW_PANE, { pane: 'artifact', target: 'launch-plan' });
+    b.result('toolu_1', TOOL_ERRORS.artifactPaneRetired, { isError: true });
+    expect(ofKind(expandedRows(b.events), 'cell').map((cell) => [cell.status, cell.label])).toEqual([
+      ['error', 'Could not open pane: MAWS no longer opens an artifact for the user. Name it in your message as a Markdown link, [its title](maws-artifact:<artifactId>), and the user opens it with a click.'],
+    ]);
   });
 });
 

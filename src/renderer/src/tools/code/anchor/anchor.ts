@@ -22,7 +22,7 @@ export interface CardRect {
   height: number;
 }
 export type CommentPlacement =
-  | { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */; hostId?: string; rect?: CardRect }
+  | { kind: 'card'; host: 'browser' | 'artifact-page' /* P3-L (M5b; M6b: E2's 'deliverable' gone) */ | 'artifact' /* P3-B */ | 'review' /* UX wave U5b */; hostId?: string; rect?: CardRect }
   | { kind: 'sheet' }
   // P4-B1 (X21) start: a document's card in its margin's stack (`anchorY` the passage's first line in the page frame,
   // `stackIndex` its place in the stack's document order). The card store reads only `card` placements today; the
@@ -40,6 +40,9 @@ export interface CommentContext {
   // P3-F1 (the P3 interface ledger's X23 row of fix 2): the destination the form starts on (E3's `CommentDestination`),
   // Side thread when absent; Send to main for a session started blank for the comment, which has no conversation to fork
   destination?: 'thread' | 'main';
+  // UX wave U5b (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, §B): the commented line's text,
+  // when the anchor cannot carry it (Review: the diff line without its prefix); the send quotes it (`quotedComment`)
+  quote?: string;
 }
 // P2-E1 end
 
@@ -48,6 +51,15 @@ export type CommentComposerOpener = (anchor: Anchor, context: CommentContext) =>
 const basename = (path: string) => path.split('/').filter(Boolean).at(-1) ?? path;
 
 export const fileLineAnchor = (path: string, line: number): FileLineAnchor => ({ kind: 'file-line', locator: `${path}#L${line}`, label: `${basename(path)}:${line}`, path, line });
+
+// UX wave U5b-2 (docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md, Interfaces §A): a line of one
+// commit's diff. `path` is the path as that commit's diff names the file, relative to the repository; `side` is always
+// given (the old side is the commit's first parent's); `commit` the whole object id. The label is `<file name>:<line> ·
+// <sha7>`, the file name fitted to X10's label rule as a PR line's path is; the locator `<path>#L<line>@<hash>`.
+export const commitLineAnchor = (path: string, line: number, side: 'old' | 'new', commit: string): FileLineAnchor => {
+  const suffix = `:${line} · ${commit.slice(0, 7)}`;
+  return { kind: 'file-line', locator: `${path}#L${line}@${commit}`, label: `${anchorField(basename(path), LABEL_MAX - suffix.length, { control: 'mark', keep: 'tail' })}${suffix}`, path, line, side, commit };
+};
 
 // X10's pr-line anchor, as E6 produces it (E6 execution document, Design §9): a line of a pull request's diff.
 export interface PrLineAnchor {

@@ -184,7 +184,7 @@ describe('ipc schema validates both directions', () => {
 
     // C4 (M6): the read-only git service, owned by main.
     it('carries the C4 git.* entries, every command owned by machine (P5 O3-E), with the diff and log bounds', () => {
-      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branches', 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
+      expect(Object.keys(git.commands).filter((name) => !name.startsWith('git.worktree.')) /* C10: its block is pinned below */.sort()).toEqual(['git.branchCommits' /* UX wave U5b-2 */, 'git.branches', 'git.changesSince' /* U5b-2 */, 'git.commitDiff' /* U5b-2 */, 'git.diff', 'git.log', 'git.lsFiles' /* C7 */, 'git.status', 'git.unwatch', 'git.watch']);
       for (const [name, spec] of Object.entries(git.commands)) if (!name.startsWith('git.worktree.')) expect(spec.owner, name).toBe('machine'); // P5 O3-E: mawsd's with the spine
       expect(Object.keys(git.events)).toEqual(['git.changed']);
       expect(validateCommandInput('git.diff', { directory: '/r', scope: 'all', base: 'main', path: 'a.ts', context: 20 }).ok).toBe(true);
@@ -194,6 +194,38 @@ describe('ipc schema validates both directions', () => {
       expect(validateCommandInput('git.log', { directory: '/r', limit: 500 }).ok).toBe(true);
     });
     // end C4
+
+    // UX wave U5b-2 (Interfaces §C): the three reads take a commit as a whole object id and nothing else, so nothing a
+    // caller sends reaches git as an option, a ref name or an abbreviation
+    it('holds the three reads to their bounds: a commit or an against that is not a whole hash is refused', () => {
+      const sha1 = 'a'.repeat(40);
+      const sha256 = 'b'.repeat(64);
+      expect(validateCommandInput('git.branchCommits', { directory: '/r', limit: 50 }).ok).toBe(true);
+      for (const limit of [0, 201, 1.5]) expect(validateCommandInput('git.branchCommits', { directory: '/r', limit }).ok, String(limit)).toBe(false);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, path: 'a.ts', context: 20, patch: false }).ok).toBe(true);
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha256 }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: 'HEAD' }).ok).toBe(true);
+      expect(validateCommandInput('git.changesSince', { directory: '/r', against: sha256, path: 'a.ts', context: 0 }).ok).toBe(true);
+      for (const bad of ['-' + 'a'.repeat(39), '--output=/tmp/x', 'a'.repeat(39), 'A'.repeat(40), 'main', 'HEAD~1', `${sha1}\n`, 'a'.repeat(41)]) {
+        expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: bad }).ok, bad).toBe(false);
+        expect(validateCommandInput('git.changesSince', { directory: '/r', against: bad }).ok, bad).toBe(false);
+      }
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: 'HEAD' }).ok).toBe(false); // only the working-tree read takes HEAD
+      expect(validateCommandInput('git.commitDiff', { directory: '/r', commit: sha1, context: 21 }).ok).toBe(false);
+    });
+
+    // UX wave U5b-2 (the branch read's one snapshot, Decision Log 52): a count is of commits, so none is below 0; an answer
+    // with a negative one is refused at the schema, whichever count it is
+    it('refuses a branch read whose count of commits is negative', () => {
+      const answer = (counts: { all: number; notPushed: number | null; pushed: number | null } | null, behind: number | null) => validateCommandOutput('git.branchCommits', { base: null, upstream: null, commits: [], counts, behind }).ok;
+      expect(answer({ all: 3, notPushed: 1, pushed: 2 }, 0)).toBe(true);
+      expect(answer({ all: 0, notPushed: 0, pushed: 0 }, null)).toBe(true);
+      expect(answer({ all: 3, notPushed: null, pushed: null }, null)).toBe(true);
+      expect(answer({ all: -1, notPushed: 0, pushed: 0 }, 0), 'all').toBe(false);
+      expect(answer({ all: 1, notPushed: 2, pushed: -1 }, 0), 'pushed').toBe(false);
+      expect(answer({ all: 1, notPushed: -1, pushed: 2 }, 0), 'notPushed').toBe(false);
+      expect(answer({ all: 1, notPushed: 1, pushed: 0 }, -1), 'behind').toBe(false);
+    });
 
     // E6 start: git.diff's untracked scope (the service requires its path and refuses a base)
     it('accepts the E6 untracked scope on git.diff', () => {
@@ -236,7 +268,18 @@ describe('ipc schema validates both directions', () => {
     // C8c start: the read-only files.* service over a session's own directories (P5 O3-E: owned by machine, mawsd's with
     // the spine, with library.read's reach and the upload).
     it('carries the C8c files.* entries, every command owned by machine, with the read bounds', () => {
-      expect(Object.keys(files.commands).sort()).toEqual(['files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write']);
+      expect(Object.keys(files.commands).sort()).toEqual(['files.grant' /* UX wave U6e */, 'files.list', 'files.openExternal', 'files.read', 'files.readResolved' /* P5 O3-E */, 'files.readUploads' /* P5 O7 M8 */, 'files.reveal' /* E1 */, 'files.unwatch', 'files.upload' /* P5 O3-E */, 'files.watch', 'files.write', 'files.writeOutside' /* UX wave U6e */]);
+      // UX wave U6e: the grant is main's alone; the outside save is bridged, and takes files.write's input and the real path
+      expect(MAIN_ONLY_COMMANDS).toContain('files.grant');
+      expect(MAIN_ONLY_COMMANDS).not.toContain('files.writeOutside');
+      const save = { appSessionId: 'a', path: '/w/notes.md', content: 'x', expectedHash: 'a'.repeat(64) };
+      expect(validateCommandInput('files.writeOutside', { ...save, real: '/w/notes.md' }).ok).toBe(true);
+      expect(validateCommandInput('files.writeOutside', save).ok).toBe(false);
+      expect(validateCommandInput('files.write', { ...save, real: '/w/notes.md' }).ok).toBe(false);
+      expect(validateCommandOutput('files.grant', { status: 'granted', path: '/w/notes.md' }).ok).toBe(true);
+      expect(validateCommandOutput('files.grant', { status: 'refused', reason: 'not-a-file' }).ok).toBe(true);
+      expect(validateCommandInput('files.read', { appSessionId: 'a', path: '/w/notes.md', named: true, agent: true }).ok).toBe(true);
+      expect(validateCommandInput('files.readResolved', { path: '/w/notes.md', agent: true }).ok).toBe(false);
       for (const spec of Object.values(files.commands)) expect(spec.owner).toBe('machine');
       expect(Object.keys(files.events)).toEqual(['files.changed']);
       const read = (extra: object) => validateCommandInput('files.read', { appSessionId: 'a', path: '/r/a.ts', ...extra }).ok;
@@ -1916,7 +1959,19 @@ describe('ipc schema validates both directions', () => {
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.setDefaults');
       expect([...NAMES.artifacts.commands]).not.toContain('artifacts.content');
       expect(HOST_EVENTS).toEqual(expect.arrayContaining(['artifacts.changed', 'spaces.changed']));
-      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete']);
+      expect(Object.keys(spaces.commands)).toEqual(['spaces.list', 'spaces.create', 'spaces.update', 'spaces.delete', 'spaces.instructions', 'spaces.setInstructions']);
+    });
+
+    // UX wave U10b (M9, §E.1): a Space's instructions, two engine-host commands beside the Space and not in it, the text
+    // at most 8,000 characters; '' removes it
+    it('reads and writes a Space’s instructions by two engine-host commands, the text at most 8,000 characters', () => {
+      expect([spaces.commands['spaces.instructions'].owner, spaces.commands['spaces.setInstructions'].owner]).toEqual(['engine-host', 'engine-host']);
+      expect(validateCommandInput('spaces.instructions', {}).ok).toBe(true);
+      expect(validateCommandInput('spaces.instructions', { spaceId: id }).ok).toBe(false);
+      expect(validateCommandOutput('spaces.instructions', { instructions: [{ spaceId: id, text: 'Use metres.', at: 1 }] }).ok).toBe(true);
+      for (const text of ['', 'Use metres.', 'x'.repeat(8000)]) expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text }).ok).toBe(true);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'x'.repeat(8001) }).ok).toBe(false);
+      expect(validateCommandInput('spaces.setInstructions', { spaceId: id, text: 'Use metres.', name: 'Work' }).ok).toBe(false);
     });
 
     // P3-A M7: the export service (main's `artifacts.export`, the host's bridge `maws.artifact.export`/`exported`) and an
@@ -2169,7 +2224,7 @@ describe('ipc schema validates both directions', () => {
       const owners = Object.fromEntries(Object.entries(connectors.commands).map(([name, spec]) => [name, spec.owner]));
       // P4-AGG M4: Customize's add and remove are the engine host's plugin runner, which a window reaches as it reaches
       // `plugins.install`; every other bridged connectors command is the machine's
-      const runner = ['connectors.add', 'connectors.remove'];
+      const runner = ['connectors.add', 'connectors.remove', 'connectors.addJson']; // UX wave U11g: a custom connector's add-json
       for (const name of NAMES.connectors.commands) expect(owners[name], name).toBe(runner.includes(name) ? 'engine-host' : 'machine');
       // the app's window report and adoption hand-off: the machine's, asked by main alone
       for (const name of ['connectors.windowShown', 'connectors.adoptGrant'] as const) {

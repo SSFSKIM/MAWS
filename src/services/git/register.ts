@@ -23,6 +23,9 @@ export function registerGitHandlers(git: GitService, { register }: Pick<Services
   register('git.branches', ({ directory }) => relay(() => git.branches(directory)));
   register('git.diff', (input) => relay(() => git.diff(input)));
   register('git.log', (input) => relay(() => git.log(input)));
+  register('git.branchCommits', (input) => relay(() => git.branchCommits(input))); // UX wave U5b-2: the three reads
+  register('git.commitDiff', (input) => relay(() => git.commitDiff(input)));
+  register('git.changesSince', (input) => relay(() => git.changesSince(input)));
   register('git.watch', ({ directory }, { client }) => relay(() => {
     const watching = git.watch(directory, client.id); // takes the owner's release fence at once, so a release from here on drops it
     follow(client);

@@ -1,15 +1,16 @@
 // The Review tool (C8c execution document, Interfaces *Tools, slots and the open-file seam*; M3's decisions): what
 // changed under the scope that fits, in the right panel. X5: `id: 'review'`, pinnable, single-instance,
 // `params { scope?, path?, turnId? }`, `open` re-targeting, and a `summary` for Environment's diff stats. Its state is a
-// store handle (C8a's React Compiler rule): the scope, the turn, the selected file, the hunk, the scroll, the mode and
-// the viewed marks. The git watch and the scope's diff are the mounted body's (the host unmounts an unselected tool),
-// so `dispose` has nothing left to release.
+// store handle (C8a's React Compiler rule): the scope, the turn, the hunk, the mode, the viewed marks and (UX wave U5b)
+// the stack's folds and places. The git watch and the scope's diff are the mounted body's (the host unmounts an
+// unselected tool); a listed commit's read is the tab's (Decision Log 49), released by `dispose`.
 import { useEffect } from 'react';
 import { useStore } from 'zustand';
 import type { StoreApi } from 'zustand/vanilla';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { REVIEW_COPY } from '../copy';
 import type { ReviewParams } from './review-model';
+import { useReview } from './review-store';
 import { ReviewShell } from './ReviewShell';
 import { ReviewSummary } from './ReviewSummary';
 import { applyRequest, createReviewUi, forSession, type ReviewUi } from './view-state';
@@ -62,7 +63,7 @@ function ReviewBody({ state, ctx }: { state: ReviewState; ctx: PanelToolContext 
     return <p className="flex h-full items-center justify-center p-4 text-center text-ui text-fg-muted">{REVIEW_COPY.noSession}</p>;
   }
   if (!synced) return null;
-  return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
+  return <ReviewShell key={`${shown}\0${directory}`} appSessionId={shown} directory={directory} ui={ui} hostId={ctx.editorHost.tabId} hostMode="panel" chips focusRequest={ctx.focusRequest} visible={ctx.visible} />;
 }
 
 export const reviewTool: PanelTool<ReviewState, ReviewParams> = {
@@ -74,7 +75,7 @@ export const reviewTool: PanelTool<ReviewState, ReviewParams> = {
   createState,
   open,
   beforeClose: async () => true, // read-only: nothing to lose
-  dispose: () => {}, // the watch and the diff are the mounted body's, released when it unmounts
+  dispose: (state) => useReview.getState().releaseTab(state.ui), // the listed commit's read; the watch and the scopes' diffs go with the mounted body
   render: ReviewBody,
   summary: ReviewSummary,
 };

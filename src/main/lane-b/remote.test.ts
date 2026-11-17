@@ -17,6 +17,7 @@ import { BUILTIN_MODELS } from '@shared/sessions/models';
 import { project, record, status } from '../../../test/support/builders';
 import { FakeLink, MINI, type FakeAct } from '../../../test/lane-b/fake-link';
 import type { MainContext } from '../ipc/router';
+import { dispatchOverLink } from '../machines/remote/dispatch';
 import type { CallResult } from '../machines/remote/link';
 import { AGENT_TOO_LARGE, createRemoteLaneB, routeLaneB, standInForMachines, type RemoteLaneB } from './remote';
 import { UNRESOLVED_MAX } from './remote-spawn';
@@ -1436,6 +1437,201 @@ describe('the session acts (`rl2.session-acts`)', () => {
     const archiving = l.cmd('session.archive', { appSessionId: APP });
     await vi.advanceTimersByTimeAsync(60_000);
     expect(await archiving).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+});
+
+// The UX wave (U4b, M3; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C, D and G):
+// Send now on a waiting message is an engine-host act on the open session behind `rl2.send-now`, never behind a send. It
+// and taking a message back act on a live launch alone: with none, nothing is acquired and nothing is sent. An earlier
+// engine host that lacks the handler refuses `unavailable` after the endpoint accepted the act, told apart from the
+// endpoint's own `unavailable`, which comes in place of the acceptance. The older lists are the two builds' own
+// (`git show f1852de3a:src/endpoint/capabilities.ts`, `git show 2c7044231:src/endpoint/capabilities.ts`).
+describe('Send now (`rl2.send-now`), and the acts on a live launch alone', () => {
+  const THIS_BUILD = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.send-now'];
+  const BUILD_G = ['rl2.executor.machine', 'rl2.session-acts'];
+  const BUILD_F = ['rl2.executor.machine'];
+  const SEND_NOW = { appSessionId: APP, messageUuid: 'm2' };
+  const DELIVERING = { state: 'done' as const, result: { outcome: 'delivering' } };
+  /** The session placed by its record with no live launch (released). */
+  async function released(l: ReturnType<typeof lab>) {
+    await vi.advanceTimersByTimeAsync(0);
+    l.link.open()[0].sink.ended('unavailable');
+  }
+
+  it('is taken by the adapter and built as an engine-host act on the open session, sealed for its live launch, carrying its capability', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await live(l);
+    expect(l.adapter.handles('session.steer.sendNow')).toBe(true);
+    l.link.onAct = settleWith(DELIVERING);
+    expect(await l.cmd('session.steer.sendNow', SEND_NOW)).toEqual({ ok: true, value: { outcome: 'delivering' } });
+    expect(l.link.acts.map((a) => a.request)).toEqual([
+      { action: 'session.steer.sendNow', session: APP, context: { lane: 'B', launchId: 'L1', engineSessionId: `eng-${APP}` }, args: SEND_NOW, executor: 'engine-host', sendBy: expect.any(Number), requires: 'rl2.send-now' },
+    ]);
+    expect(l.base).toEqual([]);
+  });
+
+  it('goes at once while a send of the same session is still out', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await live(l);
+    l.link.onAct = (act) => void (act.request.action === 'session.steer.sendNow' && act.settle(DELIVERING));
+    const sending = l.cmd('session.send', { appSessionId: APP, content: 'over there' });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(await l.cmd('session.steer.sendNow', SEND_NOW)).toEqual({ ok: true, value: { outcome: 'delivering' } });
+    expect(l.link.acts.map((a) => [a.request.action, a.settled === null ? 'out' : 'answered'])).toEqual([['session.send', 'out'], ['session.steer.sendNow', 'answered']]);
+    l.link.acts[0].settle({ state: 'done', result: { messageUuid: null, disposition: 'sent', queueId: 'q-1' } });
+    await sending;
+  });
+
+  it('is sent nothing of to a peer whose handshake lists no `rl2.send-now`, build G’s list and build F’s, answered in UC-7.5’s words', async () => {
+    for (const peers of [BUILD_G, BUILD_F]) {
+      const l = lab();
+      l.link.relink(peers);
+      await live(l);
+      expect(await l.cmd('session.steer.sendNow', SEND_NOW), peers.join(' ')).toEqual({ ok: false, error: { code: 'internal', message: 'Not sent now: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+      expect(l.link.acts).toEqual([]);
+    }
+  });
+
+  it('acquires nothing and sends nothing for a session with no live launch, Send now and a take-back alike', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await released(l);
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ready', appSessionId: APP, launched: true, joined: false } });
+    expect(await l.cmd('session.steer.sendNow', SEND_NOW)).toEqual({ ok: false, error: { code: 'internal', message: 'Not sent now: the session isn’t running on mini', issues: { refusal: 'not-live' } } });
+    expect(await l.cmd('session.steer.cancel', SEND_NOW)).toEqual({ ok: false, error: { code: 'internal', message: 'Not taken back: the session isn’t running on mini', issues: { refusal: 'not-live' } } });
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts).toEqual([]); // no `session.acquire`
+  });
+
+  it('tells an earlier engine host’s `unavailable` after the acceptance from the endpoint’s own in its place', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await live(l);
+    l.link.onAct = (act) => {
+      act.move('accepted'); // the endpoint's `ack`
+      act.settle({ state: 'refused', reason: 'unavailable' }); // then the host's outcome
+    };
+    expect(await l.cmd('session.steer.sendNow', SEND_NOW)).toEqual({
+      ok: false,
+      error: { code: 'internal', message: 'Not sent now: the engine host on mini is finishing an update; this works once it has handed the session over', issues: { refusal: 'host-older' } },
+    });
+    l.link.onAct = settleWith({ state: 'refused', reason: 'unavailable' }); // the endpoint's own refusal, never accepted
+    expect(await l.cmd('session.steer.sendNow', SEND_NOW)).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent now: mini is busy; try again in a moment', issues: { refusal: 'unavailable' } } });
+    l.link.onAct = (act) => {
+      act.move('accepted');
+      act.settle({ state: 'refused', reason: 'unavailable' });
+    };
+    expect(await l.cmd('session.steer.cancel', SEND_NOW), 'another act keeps the busy words').toMatchObject({ ok: false, error: { message: 'Not taken back: mini is busy; try again in a moment' } });
+  });
+
+  it('words the machine’s refusals of Send now by UC-7.5, and keeps the pending sentence for one whose answer has not come by the bound', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await live(l);
+    const outcomes: Array<[Parameters<FakeAct['settle']>[0], unknown]> = [
+      [{ state: 'refused', reason: 'grade' }, { code: 'internal', message: 'Not sent now: you can read this session but not act on it', issues: { refusal: 'grade' } }],
+      [{ state: 'refused', reason: 'read-only' }, { code: 'internal', message: 'Not sent now: mini is in read-only mode', issues: { refusal: 'read-only' } }],
+      [{ state: 'refused', reason: 'offline' }, { code: 'host_unavailable', message: 'Not sent now: mini is offline', issues: { refusal: 'offline' } }],
+    ];
+    for (const [outcome, error] of outcomes) {
+      l.link.onAct = settleWith(outcome);
+      expect(await l.cmd('session.steer.sendNow', SEND_NOW), JSON.stringify(outcome)).toEqual({ ok: false, error });
+    }
+    l.link.onAct = (act) => act.move('sent');
+    const sending = l.cmd('session.steer.sendNow', SEND_NOW);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(await sending).toEqual({ ok: false, error: { code: 'timeout', message: 'mini took the request but hasn’t confirmed it' } });
+  });
+
+  it('waits under the link’s hold with no channel current, carrying its capability for the channel it goes on to judge', async () => {
+    const l = lab();
+    l.link.relink(THIS_BUILD);
+    await live(l);
+    l.link.lose();
+    l.link.onAct = (act) => act.move('waiting');
+    const sending = l.cmd('session.steer.sendNow', SEND_NOW);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(l.link.acts.map((a) => a.request.requires)).toEqual(['rl2.send-now']);
+    l.link.acts[0].settle({ state: 'refused', reason: 'offline' });
+    expect(await sending).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'Not sent now: mini is offline', issues: { refusal: 'offline' } } });
+  });
+});
+
+// The UX wave U5b-2 (M8; docs/doperpowers/plans/2026-11-15-ux-wave-U5b-review-source-control.md §D, decision 14): the
+// branch read, the commit read and the working-tree read go only on a channel whose capabilities were read and list
+// `rl2.git-reads`, each naming the session it is made for, which the endpoint's checkout rule bounds it by. While no
+// channel's capabilities are known a read is refused at once, never held for the next channel; a channel that ends under
+// a read fails it, never resent to the next channel's peer. The router here is the composition root's: what the adapter
+// doesn't take goes by the manager's path, `dispatchOverLink` on the same link, where nothing reads REMOTE_NEEDS.
+describe('the git reads (`rl2.git-reads`)', () => {
+  const SERVES = ['rl2.executor.machine', 'rl2.call-session', 'rl2.git-reads'];
+  const OLDER = ['rl2.executor.machine', 'rl2.call-session']; // an endpoint of a build before the reads
+  const HASH = 'a'.repeat(40);
+  const commit = { sha: HASH, shortSha: 'aaaaaaa', author: 'Ada', authoredAt: '2026-11-15T00:00:00.000Z', subject: 'Add the parser', parents: [] };
+  const READS: Array<[CommandName, Record<string, unknown>, unknown]> = [
+    ['git.branchCommits', { directory: `/work/${APP}`, limit: 50 }, { base: null, upstream: null, commits: [], counts: null, behind: null }],
+    ['git.commitDiff', { directory: `/work/${APP}`, commit: HASH }, { commit, onHead: true, patch: '', files: [] }],
+    ['git.changesSince', { directory: `/work/${APP}`, against: HASH }, { patch: '', files: [], untracked: [] }],
+  ];
+  const readCalls = (l: ReturnType<typeof lab>) => l.link.calls.filter((c) => c.name.startsWith('git.'));
+  /** The router over the manager's path, each read made from the session's tab (the envelope's session). */
+  function routed(l: ReturnType<typeof lab>) {
+    const route = routeLaneB((_machine, name, input, ctx) => dispatchOverLink(l.link, name, input, ctx.session), (m) => (m === MINI ? l.link : null), l.adapter);
+    return (name: CommandName, input: unknown) => route(MINI, name, input, { client: endableClientRef('page-1'), target: MINI, session: APP as AppSessionId });
+  }
+
+  it('are taken by the adapter', () => {
+    const l = lab({ tabs: [] });
+    for (const [name] of READS) expect([name, l.adapter.handles(name)]).toEqual([name, true]);
+  });
+
+  it('go as calls to a peer that lists the capability, each naming the session it is made for', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SERVES);
+    for (const [name, input, output] of READS) {
+      l.link.answers.set(name, () => ({ ok: true, output }));
+      expect([name, await l.cmdFrom(name, input, APP)]).toEqual([name, { ok: true, value: output }]);
+    }
+    expect(readCalls(l)).toEqual(READS.map(([name, input]) => ({ name, input, session: { lane: 'B', id: APP } })));
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `host_unavailable` while the link’s capabilities are unknown, and an older peer connecting next is sent nothing', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    for (const [name, , output] of READS) l.link.answers.set(name, () => ({ ok: true, output }));
+    l.link.lose(); // still `up` for the grace: no channel current, no peer known
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toEqual([name, { ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } }]);
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toEqual([]);
+  });
+
+  it('fail when the channel they went on ends before the answer, and are not resent to the older peer on the next channel', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(SERVES);
+    for (const [name] of READS) l.link.answers.set(name, () => new Promise<never>(() => {}));
+    const answers: Array<CommandResult<CommandName> | undefined> = READS.map(() => undefined);
+    READS.forEach(([name, input], i) => void read(name, input).then((answer) => (answers[i] = answer)));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(readCalls(l)).toHaveLength(READS.length);
+    l.link.lose();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(answers).toEqual(READS.map(([name]) => ({ ok: false, error: { code: 'host_unavailable', message: `${name}: machine mini is not reachable` } })));
+    l.link.relink(OLDER);
+    await vi.advanceTimersByTimeAsync(60_000);
+    expect(readCalls(l)).toHaveLength(READS.length);
+  });
+
+  it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {
+    const l = lab({ tabs: [] });
+    const read = routed(l);
+    l.link.relink(OLDER);
+    for (const [name, input] of READS) expect([name, await read(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(readCalls(l)).toEqual([]);
   });
 });
 

@@ -40,9 +40,10 @@ import { connectStatusLine } from './statusline';
 import { DEFAULT_ACTIONS, registerTranscriptActions } from './transcript';
 import { setHostActions } from './transcript/view/context'; // P3-F wave S (F14 review 2)
 // C7 end
+import { registerBlockedCalls } from './blocked-call'; // UX wave U1c
 // C8c start
 import { connectCodeEvents } from './ipc/events';
-import { codeTranscriptActions, registerCodeTools } from './tools/code';
+import { codeTranscriptActions, registerCodeTools, reviewTranscriptActions } from './tools/code';
 import { registerTranscriptActions as registerCodeTranscriptActions } from './transcript';
 // C8c end
 // C10 start
@@ -89,7 +90,7 @@ import { connectPaneShows } from './tools/maws/panes/connect';
 import { registerTranscriptActions as registerMawsTranscriptActions } from './transcript';
 // E1 end
 // E6 start
-import { connectScmRunEnds, registerScmTool } from './tools/scm';
+import { registerScmTool } from './tools/scm';
 // E6 end
 // E3 start
 import { CommentComposerHost } from './side/CommentComposer';
@@ -131,7 +132,7 @@ import { registerTranscriptActions as registerBrowserAgentTranscriptActions } fr
 // E4c end
 // P3-L start
 import { registerArtifactTabs } from './library/ArtifactTab';
-import { openArtifactTab } from './library/actions'; // P3-F wave S (F14)
+import { openArtifactTab, showOpenArtifactTab, undeleteSessionArtifact } from './library/actions'; // P3-F wave S (F14); UX wave U6d: showOpenArtifactTab; UX wave U10b: undeleteSessionArtifact
 import { artifactsTool, openArtifactInPanel } from './tools/artifacts/ArtifactsTool';
 import { registerByteViewers } from './tools/artifacts/viewers/register';
 import { Library } from './library/Library';
@@ -227,6 +228,7 @@ export function App() {
   useEffect(() => connectComposer(), []); // the composer in C5's composer slot
   useEffect(() => connectInlineEdit(), []); // W3 (B6): a bubble's Edit, and a blocked prompt's Edit prompt (W1), edit the bubble in place
   // C7 end
+  useEffect(() => registerBlockedCalls(), []); // UX wave U1c: "Approve and retry" under a call auto mode blocked
   // C8c start: Review, Files, the file viewer and the diff tab, registered once and never unregistered, as C8a's block
   // does (a registration's disposer closes the tool's tabs); main's files.changed; and the transcript's two callbacks
   // (K3), registered after C6's `connectTranscript` so they win over its file-tab default.
@@ -235,6 +237,7 @@ export function App() {
   }, []);
   useEffect(() => connectCodeEvents(), []);
   useEffect(() => registerCodeTranscriptActions(codeTranscriptActions), []);
+  useEffect(() => registerCodeTranscriptActions(reviewTranscriptActions), []); // UX wave U5b-2: the chip of a commit's comment opens Review
   // C8c end
   // C10 start: the setup store and C5's tab retention at once (before hydration's snapshots answer); in launch mode
   // `index`, the newSession slot, the session creator, the close guard, the unstarted title and the session actions
@@ -282,7 +285,8 @@ export function App() {
   // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
   useEffect(() => connectPaneShows(), []);
   useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
-  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that open it
+  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that feed its
+  // store (UX wave U1b: an ask opens no sheet; the person opens it)
   useEffect(() => {
     registerPanelTool(askSheetTool);
   }, []);
@@ -293,8 +297,6 @@ export function App() {
   useEffect(() => {
     registerScmTool();
   }, []);
-  // and a run's end reads every PR state again, whether or not a Source control body is mounted
-  useEffect(() => connectScmRunEnds(), []);
   // E6 end
   // E3 start: side threads (E3 execution document, M3): the Side pane, registered once and never unregistered (C8a's
   // rule above); the comment composer in E5's seam and the transcript's summary-row Open
@@ -308,7 +310,7 @@ export function App() {
   useEffect(() => {
     registerPanelTool(artifactsTool);
   }, []);
-  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel, openArtifactTab }), []); // P3-F wave S (F14): openArtifactTab, an artifact link's ⌘-click
+  useEffect(() => registerArtifactTranscriptActions({ openArtifact: openArtifactInPanel, openArtifactTab, showOpenArtifactTab, undeleteArtifact: undeleteSessionArtifact }), []); // P3-F wave S (F14): openArtifactTab, an artifact link's ⌘-click; UX wave U6d: showOpenArtifactTab, the main tab a mention's click shows when one holds the artifact; UX wave U10b: undeleteArtifact, the delete row's Undo
   // E2 end
   // E10 start: the supervisor's update and incompatibility banners and its crash toast, from main's host.status; this
   // connects the hosts store app-wide (Diagnostics and Settings read it too)

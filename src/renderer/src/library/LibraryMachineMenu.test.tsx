@@ -28,7 +28,7 @@ const SPACES: Record<string, LibrarySpace[]> = {
 };
 
 let main: ReturnType<typeof installFakeMain>;
-const sentTo = (name: 'library.list' | 'library.spaces') => main.calls.flatMap((call, i) => (call.name === name ? [machines[i]] : []));
+const sentTo = (name: 'library.list' | 'library.spaces' | 'spaces.instructions') => main.calls.flatMap((call, i) => (call.name === name ? [machines[i]] : []));
 let machines: (MachineRef | undefined)[];
 let studioDown = false;
 const offs: (() => void)[] = [];
@@ -62,6 +62,8 @@ beforeEach(() => {
     }
     if (name === 'library.spaces') return ok({ spaces: SPACES[machine] ?? [] });
     if (name === 'library.exportFormats') return ok({ formats: [] });
+    // UX wave U10b (M9): this Mac's instructions, held for an id the studio's Space also has
+    if (name === 'spaces.instructions') return ok({ instructions: [{ spaceId: artifactId(80), text: 'Use metres.', at: 1 }] });
     if (name === 'artifacts.update') {
       const { sessions: _s, lastEditor: _e, lastEditedAt: _t, space: _p, ...artifact } = STUDIO[0]!;
       void [_s, _e, _t, _p];
@@ -140,6 +142,21 @@ describe('the library’s machine menu', () => {
     await waitFor(() => expect(main.callsOf('artifacts.update')).toEqual([{ artifactId: STUDIO[0]!.id, spaceId: null }]));
     const update = main.calls.findIndex((call) => call.name === 'artifacts.update');
     expect(machines[update]).toBe(OTHER_MACHINE);
+  });
+
+  // UX wave U10b (M9; Routes, A8): a Space's instructions are this Mac's alone, written and marked only for its Spaces
+  it('marks no Space of the studio’s library as having instructions, and its Space’s menu offers no “Instructions…”', async () => {
+    const user = userEvent.setup();
+    roster({ ref: OTHER_MACHINE, name: 'studio', state: 'up', carrier: 'direct' });
+    render(<Library />);
+    await user.click(await waitFor(() => menu()!));
+    await user.click(screen.getByRole('menuitemradio', { name: 'studio' }));
+    await user.click(screen.getByRole('radio', { name: 'By Space' }));
+    const heading = (await screen.findByRole('heading', { name: 'Studio work', level: 2 })).parentElement as HTMLElement;
+    expect(within(heading).queryByRole('button', { name: 'Instructions' })).toBeNull();
+    await user.click(within(heading).getByRole('button', { name: 'Actions for the Space Studio work' }));
+    expect(within(await screen.findByRole('menu')).queryByRole('menuitem', { name: 'Instructions…' })).toBeNull();
+    expect(sentTo('spaces.instructions').filter((machine) => machine !== TEST_MACHINE)).toEqual([]);
   });
 
   // fix wave 1 (the task review): the list kept while the next is read is the same machine's, never another's

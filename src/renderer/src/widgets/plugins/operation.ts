@@ -5,13 +5,19 @@
 // uninstall or a marketplace removal takes its row out of the list at `plugins.changed`, before `done`, and its words
 // must outlive the row. It listens before it asks so no event that outruns its receipt is lost, follows only the opIds
 // it started, and only while mounted. A rejected invoke is the transport branch: nothing ran.
+// UX wave U11c (docs/doperpowers/plans/2026-11-14-ux-wave-U11c-customize.md, §D "What the book keeps of an ended
+// operation"): a Customize page's book is kept for the run of the app, so once an operation has ended (its `done`, or a
+// refused send) the book holds its outcome and the five fields a line and the line's controls read (`EndedRequest`),
+// and no longer the request: a URL, a command or an argument typed for a custom connector is held only while it runs.
+// The rule is every book's, the session dialogs' own too.
 import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { CommandName } from '@shared/ipc/schema';
 import type { PluginsOperationEvent } from '@shared/ipc/schema/plugins';
-import type { RunnerAction } from '@shared/plugins/cli';
+import { isMcpEntryAdd, type RunnerAction } from '@shared/plugins/cli';
 import { ipc } from '../../ipc/client';
 import { transportWords } from '../read';
-import type { PluginOpState, PluginsRequest } from './present';
+import type { PluginsScope } from '@shared/plugins/cli';
+import { scopeOf, shownRequestOf, targetOf, type PluginOpState, type PluginsRequest } from './present';
 
 const COMMAND_OF = {
   install: 'plugins.install',
@@ -26,11 +32,38 @@ const COMMAND_OF = {
   'mcp-remove': 'connectors.remove',
 } as const satisfies Record<RunnerAction, CommandName>;
 
-export interface PluginOperationEntry {
-  request: PluginsRequest;
-  opId: string | null; // null until the receipt
-  state: PluginOpState;
+// UX wave U11g (§B, §D): a request whose input holds an entry is a custom connector's add, sent as `connectors.addJson`
+// with the page's folder its name is checked against; every other request sends what COMMAND_OF says.
+function commandOf(request: PluginsRequest, cwd: string, binary: string): { command: CommandName; input: object } {
+  if (request.action === 'mcp-add' && isMcpEntryAdd(request.input)) return { command: 'connectors.addJson', input: { cwd, binary, ...request.input, folder: request.folder ?? null } };
+  return { command: COMMAND_OF[request.action], input: { cwd, binary, ...request.input } };
 }
+
+/** What the book keeps of an operation's request once it has ended: every field a line or a control on it reads. */
+export interface EndedRequest {
+  action: RunnerAction;
+  scope: PluginsScope; // `scopeOf(request)`: the reload report's scope word
+  target: string; // `targetOf(request)`: a plugin's id, a connector's or a marketplace's name; the name a result with no row is drawn under
+  afterAdd?: { marketplace: string; scope: PluginsScope }; // the marketplace an install added first: its sentence and "Remove marketplace"
+  catalogName?: string; // the catalog item's display name, for a result whose card has gone
+}
+
+export const endedOf = (request: PluginsRequest): EndedRequest => ({
+  action: request.action,
+  scope: scopeOf(request),
+  target: targetOf(request),
+  ...(request.afterAdd && { afterAdd: request.afterAdd }),
+  ...(request.catalog && { catalogName: request.catalog.name }),
+});
+
+type Working = Extract<PluginOpState, { phase: 'working' }>;
+type Ended = Extract<PluginOpState, { phase: 'done' | 'unsent' }>;
+
+// `request` is the whole request while the operation works, and its ended form from the `done` event or a refused send on.
+export type PluginOperationEntry = { request: PluginsRequest; opId: string | null; state: Working } | { request: EndedRequest; opId: string | null; state: Ended }; // opId: null until the receipt
+
+/** The fields of an entry's request that its line and controls read, whether it still works or has ended. */
+export const factsOf = (entry: PluginOperationEntry): EndedRequest => (entry.state.phase === 'working' ? endedOf(entry.request as PluginsRequest) : (entry.request as EndedRequest));
 
 export interface PluginOperations {
   entries: ReadonlyMap<string, PluginOperationEntry>; // by key (the row that started it)
@@ -40,7 +73,7 @@ export interface PluginOperations {
   cancel(key: string): void; // asks the host to stop the CLI or drop the queued operation; `done` follows as `cancelled`
 }
 
-function next(state: PluginOpState, event: PluginsOperationEvent): PluginOpState {
+function next(state: PluginOpState, event: PluginsOperationEvent): Working | Extract<PluginOpState, { phase: 'done' }> {
   if (event.phase === 'done') return { phase: 'done', event };
   const line = state.phase === 'working' ? state.line : null;
   if (event.phase === 'output') return { phase: 'working', opId: event.opId, line: event.line ?? line, reloading: false };
@@ -119,8 +152,9 @@ class OperationBook {
     if (key === undefined) return;
     this.set((prior) => {
       const entry = prior.get(key);
-      if (!entry || entry.opId !== event.opId) return prior; // a newer operation took the key
-      return new Map(prior).set(key, { ...entry, state: next(entry.state, event) });
+      if (!entry || entry.opId !== event.opId || entry.state.phase !== 'working') return prior; // a newer operation took the key
+      const state = next(entry.state, event);
+      return new Map(prior).set(key, state.phase === 'working' ? { request: entry.request as PluginsRequest, opId: entry.opId, state } : { request: factsOf(entry), opId: entry.opId, state });
     });
     if (event.phase === 'done') {
       this.waiting.get(event.opId)?.(event);
@@ -130,17 +164,21 @@ class OperationBook {
     }
   }
 
-  readonly run = async (key: string, request: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null> => {
+  // UX wave U11g (§D): the book keeps the request as shown, so nothing it holds while it runs holds the content of a value
+  // slot; the request itself goes only into the send. UX wave U11c: once it has ended, the book keeps its ended form.
+  readonly run = async (key: string, asked: PluginsRequest, cwd: string, binary: string): Promise<PluginsOperationEvent | null> => {
+    const request = shownRequestOf(asked);
+    const sent = commandOf(asked, cwd, binary);
     this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'working', opId: null, line: null, reloading: false } }));
     if (this.kept) this.listen(); // a kept book listens before it asks, shown or not
     this.asking += 1;
-    const result = await ipc.invoke(COMMAND_OF[request.action], { cwd, binary, ...request.input } as never, { machine: ipc.localMachine }); // P5 O6 M4: this machine's plugins (read.ts)
+    const result = await ipc.invoke(sent.command, sent.input as never, { machine: ipc.localMachine }); // P5 O6 M4: this machine's plugins (read.ts)
     this.asking -= 1;
     const held = this.early;
     if (this.asking === 0) this.early = [];
     if (!this.alive) return null;
     if (!result.ok) {
-      this.set((prior) => new Map(prior).set(key, { request, opId: null, state: { phase: 'unsent', error: transportWords(result.error) } }));
+      this.set((prior) => new Map(prior).set(key, { request: endedOf(request), opId: null, state: { phase: 'unsent', error: transportWords(result.error) } }));
       this.quiet();
       return null;
     }

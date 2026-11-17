@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { PANEL_CHILD_TAIL } from '../../../../../test/support/panel-child-fixture';
+import { selectWaitingRequests, useAttention } from '../../stores/attention';
 import { useTranscriptStore } from '../../stores/transcript';
 import { childTranscriptTool } from './childTranscriptTool';
 import { fakeId } from './fakeSessions';
@@ -42,10 +43,29 @@ describe('panel harness child transcript', () => {
       expect(rows(), `after batch ${i + 1}`).toHaveLength(PANEL_CHILD_TAIL.rows[i]);
     });
     expect(session.player.done).toBe(true);
-    expect(rows().filter((row) => row.kind === 'request_slot')).toHaveLength(1);
+    expect(rows().filter((row) => row.kind === 'request_slot')).toHaveLength(0); // UX wave U1b: a request makes no row
 
     childTranscriptTool.dispose(state);
     expect(useTranscriptStore.getState().entries[key], 'dispose forgets the child’s entry').toBeUndefined();
+  });
+
+  // UX wave U1b: the child's key names its session, as ipcSource's does, so the child's transcript lists that session's
+  // waiting requests; the fixture's pending request reaches the list as the broker lists it, and goes with the tab.
+  it('keys the child under its session and lists its pending request in that session’s attention list until the tab closes', async () => {
+    await summaryProbes.loadTranscript('A', 'events/panel-child', { releaseTo: PANEL_CHILD_TAIL.first });
+    const session = loadedSession(A)!;
+    const state = childTranscriptTool.createState(init);
+    const source = state.snapshot().source!;
+    expect(source.key).toBe(`${A}:ad286defbc77bc090`);
+    await useTranscriptStore.getState().attach(source.key!, source, { agentId: source.agentId });
+    expect(state.raisePending(), 'nothing pending before the request is released').toBe(0);
+    while (!session.player.done) session.player.step();
+    expect(state.raisePending()).toBe(1);
+    expect(selectWaitingRequests(useAttention.getState(), A).map((item) => [item.kind, item.request.toolUseId, item.request.agentId, item.summary])).toEqual([
+      ['permission', 'toolu_panel_child_bash', 'ad286defbc77bc090', 'Bash: pnpm test'],
+    ]);
+    childTranscriptTool.dispose(state);
+    expect(selectWaitingRequests(useAttention.getState(), A), 'closing the tab takes it back').toEqual([]);
   });
 
   it('shows a line instead of a transcript when the session has no loaded transcript', () => {

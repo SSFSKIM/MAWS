@@ -57,7 +57,7 @@ import { startArtifactSession } from '../../../artifacts/session-context';
 import { ipc } from '../../../ipc/client';
 import { openArtifactCopy } from '../../../lane-b/open-copy';
 import { toastFailure } from '../../../library/dialogs';
-import { exportArtifact, saveArtifactCopy, useExportFormats } from '../../../library/export';
+import { exportArtifact, saveArtifactCopy, savesCopy, useExportFormats } from '../../../library/export';
 import { useLibraryRow } from '../../../library/store';
 import { useRegionMarkupSurface } from '../../../markup/surface';
 import { focusEditorHostAction, useEditorHost, type EditorHostAction, type EditorHostExport } from '../../../panel/editor-host';
@@ -69,6 +69,7 @@ import { machineName } from '../../../stores/org-projects';
 import { useSessions } from '../../../stores/sessions';
 import { openCommentComposer } from '../../code/anchor/anchor';
 import { openFile } from '../../code/open-file';
+import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
 import { FileBody } from '../../code/viewer/FileViewer';
 import { useViewer, type ArtifactRead } from '../../code/viewer/viewer-store';
 import { ArtifactConnectorsSheet } from './connectors/ConnectorsSheet';
@@ -166,6 +167,10 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
   // P3-H H4: the page's connectors: shown only while the body and the window's document are, read grants kept current
   const { connectors } = state;
   const pageShown = useDocumentVisible() && visible;
+  // UX wave U6b-2 (Decision Log 35): the file viewer's body is on screen, in the main area while the main area is (the shell's
+  // reading, which a sheet over it is in and the main tab's `visible` is not), beside the chat while the panel says so
+  const mainOnScreen = useMainAreaOnScreen();
+  const fileInView = scope.surface === 'main' ? mainOnScreen : visible;
   useEffect(() => connectors?.setVisible(pageShown), [connectors, pageShown]);
   useEffect(() => () => connectors?.setVisible(false), [connectors]);
   useEffect(() => {
@@ -277,6 +282,7 @@ function ByteViewer({ kind, artifactId, state, scope, visible, onShown }: Artifa
             onFrame={setFrameHandle}
             onReady={ready}
             connectors={connectors}
+            inView={fileInView}
           />
         )}
         {picking && (
@@ -350,9 +356,10 @@ interface BodyProps {
   onFrame(handle: FrameHandle | null): void;
   onReady(): void; // the content is loaded (whether or not it is on screen)
   connectors: ConnectorsTab | null; // P3-H H4: what each load's connector port is relayed through
+  inView: boolean; // UX wave U6b-2: the file viewer's body is on screen (Decision Log 35)
 }
 
-function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors }: BodyProps) {
+function Body({ artifactId, content, body, title, session, reloads, picking, onPick, onFrame, onReady, connectors, inView }: BodyProps) {
   const url = artifactUrl(artifactId, content.revision, content.name);
   const frameTitle = VIEWERS_COPY.frameTitle(title);
   switch (body) {
@@ -375,7 +382,7 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
     case 'audio':
       return <Media kind={body} url={url} onLoad={onReady} />;
     case 'file':
-      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} artifact={{ artifactId, revision: content.revision }} path={content.path} onReady={onReady} />;
+      return <DrawnFile tabId={fileTabId(artifactId, content.revision, reloads)} session={session} artifact={{ artifactId, revision: content.revision }} path={content.path} onReady={onReady} inView={inView} />;
   }
 }
 
@@ -384,12 +391,12 @@ function Body({ artifactId, content, body, title, session, reloads, picking, onP
 const fileTabId = (artifactId: string, revision: number, reloads: number) => `artifact:${artifactId}:${revision}${reloads > 0 ? `:r${reloads}` : ''}`;
 
 // Under its session while the window knows it (the file followed as it changes), else by its artifact alone (fix wave 2).
-function DrawnFile({ tabId, session, artifact, path, onReady }: { tabId: string; session: AppSessionId | null; artifact: ArtifactRead; path: string; onReady(): void }) {
+function DrawnFile({ tabId, session, artifact, path, onReady, inView }: { tabId: string; session: AppSessionId | null; artifact: ArtifactRead; path: string; onReady(): void; inView: boolean }) {
   const read = useViewer((s) => s.entries.get(tabId)?.status === 'ready');
   useEffect(() => {
     if (read) onReady();
   }, [read, onReady]);
-  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly {...(session === null && { artifact })} />;
+  return <FileBody tabId={tabId} appSessionId={session} path={path} readOnly inView={inView} {...(session === null && { artifact })} />;
 }
 
 // ---- the header (X32) --------------------------------------------------------------------------------------------------
@@ -460,7 +467,8 @@ function useViewerHeader({ kind, artifactId, title, state, scope, content, body,
       if (selection) void exportArtifact(artifactId, format, selection.versionId);
     },
   }));
-  if (kind === 'file') {
+  if (savesCopy(kind)) {
+    // U10b (l6-artifacts-18): an html page's copy is its stored page, as a File artifact's is its file
     exports.push({
       id: 'copy',
       label: VIEWERS_COPY.saveCopy,
