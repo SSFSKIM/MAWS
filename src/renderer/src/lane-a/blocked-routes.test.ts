@@ -223,10 +223,10 @@ describe('an approval the bridge appended waits for the engine to read it, by bo
     ['u1c-t-idle-1', 'submitted as the user'],
     ['u1c-t-busy-1', 'appended into the running turn, its mirror line recovered'],
     ['u1c-t-esc-1', 'appended after an Esc, and the bridge’s wake'],
-  ] as const)('%s (%s): the neutralised sentence keeps its joiner and reads no approval by either route; the pressed one is read', async (name) => {
+  ] as const)('%s (%s): the neutralised sentence keeps its joiner and reads no approval by either route; the pressed one is read', async (name, form) => {
     const recorded = textOf(`${name}.transcript.jsonl`);
     const sentence = JSON.stringify(consentMessage('command', commandOf(1))).slice(1, -1);
-    expect(recorded.includes(sentence), 'the recorded run holds the sentence').toBe(true);
+    expect(recorded.includes(sentence), `${form}: the recorded run holds the sentence`).toBe(true);
     const neutralised = recorded.replaceAll(sentence, JSON.stringify(neutraliseGrant(consentMessage('command', commandOf(1)))).slice(1, -1));
     for (const [route, events] of [['from the file', await fromFile(neutralised)], ['through its rows', await fromRows(neutralised)]] as const) {
       expect(approvalAt(events, commandOf(1)), route).toBe('none');

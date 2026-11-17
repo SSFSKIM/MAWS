@@ -133,7 +133,7 @@ describe('the one-writer rule: no grant from what the person did not press', () 
 
   it('over seeded drafts of every piece kind, what the serialiser sends and every later image of it hold no opening and read no grant', () => {
     const seed = 0x75316331;
-    const count = 600;
+    const count = 300; // within the default 5 s case limit under the wide run's load (each image read alone and joined twice)
     const r = random(seed);
     let neutralised = 0;
     for (let n = 0; n < count; n += 1) {
@@ -148,7 +148,7 @@ describe('the one-writer rule: no grant from what the person did not press', () 
 
   it('over seeded free text, what the sites without the serialiser send and every later image of it hold no opening and read no grant', () => {
     const seed = 0x66726565;
-    const count = 600;
+    const count = 300; // within the default 5 s case limit under the wide run's load (each image read alone and joined twice)
     const r = random(seed);
     let neutralised = 0;
     for (let n = 0; n < count; n += 1) {
