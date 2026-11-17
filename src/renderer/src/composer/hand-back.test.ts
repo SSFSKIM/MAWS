@@ -7,10 +7,9 @@
 // see.
 import { readdirSync, readFileSync } from 'node:fs';
 import { join, relative, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 
-const REPOSITORY = fileURLToPath(new URL('../../../../', import.meta.url));
+const REPOSITORY = join(__dirname, '../../../..');
 const RENDERER = join(REPOSITORY, 'src/renderer/src');
 
 // Every product file of the renderer that names the raw setter, and what it hands the composer
