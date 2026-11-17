@@ -4702,23 +4702,29 @@ const DROPPED_SUBMODULE_EVENT = /dropped \S*\bsubmodule from event git\.changed,
 // committed; then build/out.txt written under the ignored folder and lib's tracked file modified, so that the outer status
 // lists `lib` alone, as a submodule whose working tree changed (porcelain v2's `sub` S.M.)
 function whatChangedRepo(s: Scratch): void {
+  // every git command of the fixture under a home of its own, empty, so no ignore file or configuration of the runner's
+  // home decides what it tracks or ignores (gitAt's flags, this environment)
+  const home = join(s.root, 'git-home');
+  mkdirSync(home);
+  const env = { ...isolatedGitEnv(), HOME: home, XDG_CONFIG_HOME: join(home, '.config') };
+  const git = (cwd: string, ...args: string[]) => execFileSync('/usr/bin/git', ['-c', 'commit.gpgsign=false', '-c', 'init.defaultBranch=main', ...args], { cwd, env, encoding: 'utf8' });
   const origin = join(s.root, 'lib-origin');
   mkdirSync(origin);
   writeFileSync(join(origin, 'lib.txt'), 'An invented library line.\n');
-  gitAt(origin, 'init', '-q');
-  gitAt(origin, 'add', '-A');
-  gitAt(origin, 'commit', '-q', '-m', 'An invented library');
+  git(origin, 'init', '-q');
+  git(origin, 'add', '-A');
+  git(origin, 'commit', '-q', '-m', 'An invented library');
   writeFileSync(join(s.repo, 'README.md'), '# An invented project\n');
   writeFileSync(join(s.repo, '.gitignore'), 'build/\n');
   for (const name of Object.values(XB_WITNESS)) writeFileSync(join(s.repo, name), 'An invented witness, as committed.\n');
-  gitAt(s.repo, 'init', '-q');
-  gitAt(s.repo, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', origin, 'lib');
-  gitAt(s.repo, 'add', '-A');
-  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  git(s.repo, 'init', '-q');
+  git(s.repo, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', origin, 'lib');
+  git(s.repo, 'add', '-A');
+  git(s.repo, 'commit', '-q', '-m', 'An invented first commit');
   mkdirSync(join(s.repo, 'build'));
   writeFileSync(join(s.repo, 'build', 'out.txt'), 'An invented build output.\n');
   writeFileSync(join(s.repo, 'lib', 'lib.txt'), 'An invented library line, changed in the working tree.\n');
-  expect(gitAt(s.repo, 'status', '--porcelain=v2').trim(), 'the outer status lists the dirty submodule alone').toMatch(/^1 \.M S\.M\. 160000 160000 160000 [0-9a-f]+ [0-9a-f]+ lib$/);
+  expect(git(s.repo, 'status', '--porcelain=v2').trim(), 'the outer status lists the dirty submodule alone').toMatch(/^1 \.M S\.M\. 160000 160000 160000 [0-9a-f]+ [0-9a-f]+ lib$/);
 }
 
 test('(what changed, both ways) after a same-build control, this build’s window on the peer’s unit mawsd lists the folder with nothing dimmed, draws the dirty submodule as a file’s row, and a second change reaches the Changed group; the peer’s app on this build’s unit mawsd lists the folder, shows the submodule and then a second change in its Review, refuses nothing, and its log names both keys dropped', async () => {

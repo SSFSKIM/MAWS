@@ -3720,17 +3720,21 @@ test('U6b-3a G3, a session on B: A’s Files shows B’s changed files and marks
     journal.turn(CHANGED_REPLY);
     const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Make two changes.', firstReply: CHANGED_REPLY, title: 'B’s changed session', open: false }, held);
     // B's checkout made a repository, whatever the session left there committed with notes.txt and a .gitignore naming
-    // logs/; then notes.txt modified, draft.md new, and logs/run.log written under the ignored folder
-    git(checkout, 'init', '--quiet', '-b', 'main');
+    // logs/; then notes.txt modified, draft.md new, and logs/run.log written under the ignored folder. Every git command
+    // here runs under a home of its own, empty, so no ignore file or configuration of the runner's home decides the fixture
+    const gitHome = join(root, 'git-home');
+    mkdirSync(gitHome);
+    const gitHere = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: { ...isolatedGitEnv(), HOME: gitHome, XDG_CONFIG_HOME: join(gitHome, '.config') }, encoding: 'utf8' }).trim();
+    gitHere(checkout, 'init', '--quiet', '-b', 'main');
     writeFileSync(join(checkout, NOTES), NOTES_TEXT);
     writeFileSync(join(checkout, '.gitignore'), 'logs/\n');
-    git(checkout, 'add', '-A');
-    git(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
+    gitHere(checkout, 'add', '-A');
+    gitHere(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
     writeFileSync(join(checkout, NOTES), `${NOTES_TEXT}A line B’s agent added.\n`);
     writeFileSync(join(checkout, 'draft.md'), '# An invented draft on B\n');
     mkdirSync(join(checkout, 'logs'));
     writeFileSync(join(checkout, 'logs', 'run.log'), 'An invented log line on B.\n');
-    expect([git(checkout, 'diff', '--name-only'), git(checkout, 'ls-files', '--others', '--exclude-standard')], 'B’s checkout holds the two changes and nothing else').toEqual([NOTES, 'draft.md']);
+    expect([gitHere(checkout, 'diff', '--name-only'), gitHere(checkout, 'ls-files', '--others', '--exclude-standard')], 'B’s checkout holds the two changes and nothing else').toEqual([NOTES, 'draft.md']);
 
     // A opens B's session, then Files
     await sessionRow(page, addressOf(b.ref, app)).click();

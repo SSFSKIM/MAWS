@@ -60,15 +60,22 @@ export interface CodeScratch {
   siblingFile: string; // a file in a sibling directory whose name starts with the repository's
   path(relative: string): string; // a path in the repository
   git(...args: string[]): string;
+  gitEnv: NodeJS.ProcessEnv; // UX wave U6b-3a: the environment every git command of the scratch runs with
   env: Record<string, string>; // the product launch's environment
   cleanup(): void;
 }
 
-export function buildCodeScratch(): CodeScratch {
+// UX wave U6b-3a: `gitHome`, every git command of the scratch run with a home of its own, empty (HOME and
+// XDG_CONFIG_HOME under the scratch's root), so that no ignore file or configuration of the runner's own home decides
+// what the fixture tracks or ignores. Without it the scratch is built as before.
+export function buildCodeScratch(options: { gitHome?: boolean } = {}): CodeScratch {
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-code-')));
   const dir = join(root, 'repo');
   const origin = join(root, 'origin.git');
-  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: isolatedGitEnv(), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
+  const home = join(root, 'git-home');
+  if (options.gitHome) mkdirSync(home);
+  const gitEnv: NodeJS.ProcessEnv = options.gitHome ? { ...isolatedGitEnv(), HOME: home, XDG_CONFIG_HOME: join(home, '.config') } : isolatedGitEnv();
+  const git = (cwd: string, ...args: string[]) => execFileSync('git', args, { cwd, env: gitEnv, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }).trim();
   const write = (relative: string, content: string | Buffer) => {
     const path = join(dir, relative);
     mkdirSync(join(path, '..'), { recursive: true });
@@ -127,6 +134,7 @@ export function buildCodeScratch(): CodeScratch {
     siblingFile,
     path: (relative) => join(dir, relative),
     git: (...args) => git(dir, ...args),
+    gitEnv,
     env: { MAWS_SESSION_SOURCE: `stub:${scenario}`, MAWS_E2E_OPEN_LOG: openLog, MAWS_SCENARIO_CLOCK: 'manual', MAWS_HARNESS: '0' },
     cleanup: () => {
       execFileSync('chmod', ['-R', 'u+rwx', root]); // a case may leave a directory it locked

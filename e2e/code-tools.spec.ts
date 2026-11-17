@@ -13,7 +13,6 @@ import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { slugOf } from '../src/engine-host/fs/paths';
-import { isolatedGitEnv } from '../test/support/git-env'; // UX wave U6b-3a: a conflict's stages written into the index
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import type { AppSessionId } from '../src/shared/graph/ids';
@@ -1356,7 +1355,7 @@ test.describe('the product in stub mode over a scratch repository', () => {
         writeFileSync(scratch.path('gone.pdf'), minimalPdf());
       },
       // UX wave U6b-2: the removed PDF's frame asking its URL again, answered 404 before a byte (the responder's one answer)
-      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/gone\.pdf(#\S*)? Failed to load resource: the server responded with a status of 404 \(Not Found\)$/] },
+      { frames: [/^maws-artifact:\/\/[0-9a-f]{32}\/gone\.pdf(#\S*)? Failed to load resource: the server responded with a status of 404 \(Not Found\)$/], gitHome: true }, // UX wave U6b-3a: gitHome
     );
   });
 });
@@ -1753,7 +1752,7 @@ const boxText = (name: string, box: { x: number; y: number; width: number; heigh
 // `git update-index --index-info`, the working tree's file left as it is: `git status` then lists the path as unmerged
 // (UU), with its file on disk.
 function unmerged(scratch: CodeScratch, relative: string): void {
-  const git = (args: string[], input: string) => execFileSync('git', args, { cwd: scratch.dir, env: isolatedGitEnv(), input, encoding: 'utf8' }).trim();
+  const git = (args: string[], input: string) => execFileSync('git', args, { cwd: scratch.dir, env: scratch.gitEnv, input, encoding: 'utf8' }).trim();
   const [base, ours, theirs] = [CONFLICT_BLOCK.base, CONFLICT_BLOCK.mine, CONFLICT_BLOCK.theirs].map((line) => git(['hash-object', '-w', '--stdin'], `${line}\n`));
   git(['update-index', '--index-info'], [`0 ${'0'.repeat(40)}\t${relative}`, `100644 ${base} 1\t${relative}`, `100644 ${ours} 2\t${relative}`, `100644 ${theirs} 3\t${relative}`, ''].join('\n'));
 }
@@ -1787,16 +1786,17 @@ function g1Repository(scratch: CodeScratch): void {
   writeFileSync(scratch.path('cache.bin'), Buffer.from([0x00, 0x01, 0x02]));
 }
 
-// G2's repository: a committed .gitignore naming *.log, two files it ignores side by side (debug.log, trace.log), and the
-// scratch's big.log removed; the rest as the scratch leaves it (src/app.ts modified, src/staged.ts staged, scratch.txt and
+// G2's repository: a committed .gitignore naming *.keep-out (an invented extension no common global ignore file names, so
+// the runner's own rules cannot decide these entries), two files it ignores side by side (debug.keep-out, trace.keep-out),
+// and the scratch's big.log removed; the rest as the scratch leaves it (src/app.ts modified, src/staged.ts staged, scratch.txt and
 // link-out untracked).
 function g2Repository(scratch: CodeScratch): void {
   rmSync(scratch.path('big.log'));
-  writeFileSync(scratch.path('.gitignore'), '*.log\n');
+  writeFileSync(scratch.path('.gitignore'), '*.keep-out\n');
   scratch.git('add', '.gitignore');
   scratch.git('commit', '--quiet', '-m', 'An invented ignore file', '--', '.gitignore'); // that path alone: src/staged.ts stays staged
-  writeFileSync(scratch.path('debug.log'), 'An invented debug line.\n');
-  writeFileSync(scratch.path('trace.log'), 'An invented trace line.\n');
+  writeFileSync(scratch.path('debug.keep-out'), 'An invented debug line.\n');
+  writeFileSync(scratch.path('trace.keep-out'), 'An invented trace line.\n');
 }
 
 test.describe('UX wave U6b-3a: Files shows what changed', () => {
@@ -1886,20 +1886,20 @@ test.describe('UX wave U6b-3a: Files shows what changed', () => {
       await expect(sideFileTab(p.page, 'app.ts'), 'in the preview tab').toHaveAttribute('data-preview', 'true');
       await expect(treeRow(p, app), 'the tree’s row of the file in view selected').toHaveAttribute('aria-selected', 'true');
       await expect(changedRow(p, 'src/app.ts'), 'its Changed row stays plain').toHaveAttribute('aria-selected', 'false');
-    }, g1Repository);
+    }, g1Repository, { gitHome: true });
   });
 
   // G2 (B3). Waits on the first status's rows and the two ignored files' marks before it writes anything; after each act
   // on the disk, on the row or attribute that act should bring or take away: notes/guide.md's row after its write, its
   // absence after the restore with src/app.ts's row still there (the control); `data-ignored` on scratch.txt's tree row
-  // after the line added to .gitignore; debug.log's `data-letter="A"` and its `data-ignored` gone after `git add -f`,
-  // trace.log still muted beside it (the control). No act is made in the window between.
+  // after the line added to .gitignore; debug.keep-out's `data-letter="A"` and its `data-ignored` gone after `git add -f`,
+  // trace.keep-out still muted beside it (the control). No act is made in the window between.
   test('G2: the group and the dimming follow the disk: a write and its restore, a line added to .gitignore, an ignored file added to the index by force', async () => {
     await withProduct(async (p) => {
       await addTool(p, 'Files');
       const control = changedRow(p, 'src/app.ts');
       await expect(control, 'the group drawn from the first status').toHaveAttribute('data-letter', 'M');
-      for (const name of ['debug.log', 'trace.log']) await expect(treeRow(p, p.scratch.path(name)), `${name}: ignored at first`).toHaveAttribute('data-ignored', '');
+      for (const name of ['debug.keep-out', 'trace.keep-out']) await expect(treeRow(p, p.scratch.path(name)), `${name}: ignored at first`).toHaveAttribute('data-ignored', '');
 
       // a file another process writes appears in the group, and goes once it is restored
       const guide = p.scratch.path('notes/guide.md');
@@ -1921,12 +1921,12 @@ test.describe('UX wave U6b-3a: Files shows what changed', () => {
       await expect(scratchTxt, 'with no letter').not.toHaveAttribute('data-letter');
 
       // an ignored file added to the index by force: A, and muted no longer; the ignored file beside it stays muted
-      p.scratch.git('add', '-f', 'debug.log');
-      const debug = treeRow(p, p.scratch.path('debug.log'));
+      p.scratch.git('add', '-f', 'debug.keep-out');
+      const debug = treeRow(p, p.scratch.path('debug.keep-out'));
       await expect(debug, 'added by force: A').toHaveAttribute('data-letter', 'A');
       await expect(debug, 'and no longer ignored').not.toHaveAttribute('data-ignored');
-      await expect(changedRow(p, 'debug.log')).toHaveAttribute('data-letter', 'A');
-      await expect(treeRow(p, p.scratch.path('trace.log')), 'trace.log still muted').toHaveAttribute('data-ignored', '');
-    }, g2Repository);
+      await expect(changedRow(p, 'debug.keep-out')).toHaveAttribute('data-letter', 'A');
+      await expect(treeRow(p, p.scratch.path('trace.keep-out')), 'trace.keep-out still muted').toHaveAttribute('data-ignored', '');
+    }, g2Repository, { gitHome: true });
   });
 });
