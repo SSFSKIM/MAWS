@@ -11,11 +11,11 @@ import { join } from 'node:path';
 import { expect, type Locator, type Page } from '@playwright/test';
 import { menu, openInViewer, otherThemeColours, sideFileTab, withProduct, type Product } from './support/code-product';
 import { CONFLICT_BLOCK, MERGE_LINES } from './support/code-scratch';
+import { expectDrawnWhole, expectDrawnWholeAtBothWidths } from './support/editor-notice';
 import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
 import { hideSurface, openSurface } from './support/shell';
-import { resizePanel } from './support/toolbar-controls';
 
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
@@ -58,23 +58,6 @@ async function expectDirtyTab(page: Page, name: string, dirty: boolean): Promise
   }
 }
 
-// The editor's notice drawn whole (the architect's hands-on check: the bar can shrink its span to nothing): visible, and
-// its text not cut, the notice's needed and given widths and its bar's width in the failure message
-async function expectDrawnWhole(notice: Locator, where: string): Promise<void> {
-  await expect(notice, where).toBeVisible();
-  const widths = await notice.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, bar: el.closest('[data-editor-controls]')?.parentElement?.clientWidth ?? null }));
-  expect(widths.scrollWidth, `${where}: the notice needs ${widths.scrollWidth} px, has ${widths.clientWidth}, in a bar of ${widths.bar}`).toBeLessThanOrEqual(widths.clientWidth);
-}
-// The same at the width the scene has, then with the right panel holding the file at its narrowest (its divider's
-// minimum, through `resizePanel`), the panel's width restored after
-async function expectDrawnWholeAtBothWidths(page: Page, notice: Locator): Promise<void> {
-  await expectDrawnWhole(notice, 'at the width the scene has');
-  const divider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
-  const [before, narrowest] = [Number(await divider.getAttribute('aria-valuenow')), Number(await divider.getAttribute('aria-valuemin'))];
-  await resizePanel(page, narrowest);
-  await expectDrawnWhole(notice, `with the panel at its narrowest, ${narrowest} px`);
-  await resizePanel(page, before);
-}
 
 async function awaitNotice(viewer: Locator): Promise<void> {
   const notice = viewer.locator('[data-theirs-notice="notice"]');
