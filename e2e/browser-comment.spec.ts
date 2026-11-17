@@ -29,7 +29,7 @@ import { anchoredMessage, commentsMessage, readAnchoredMessage } from '../src/sh
 import { COMMENT_COPY } from '../src/renderer/src/tools/browser/comment/copy';
 import { addressed } from './support/address';
 import { startBrowserServer, type BrowserServer } from './support/browser-server';
-import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, resizeWindow, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
+import { address, browserIn, expectOnPane, launchBrowserScene, noticesIn, openBrowser, overflow, pageAt, paneIn, paneRect, placedOn, resizeWindow, tabAt, tabState, tabsOf, viewOf, type BrowserScene } from './support/browser-scene';
 import { invoke, launchReady, value } from './support/c7-replay';
 import { otherThemeColours } from './support/code-product';
 import { clearToasts, closeScene, scratchProject, show, type Scratch } from './support/maws-tools';
@@ -1584,7 +1584,7 @@ test('zoom probe: the pin', async () => {
     let picks = 0;
     for (const f of PROBE_FACTORS) {
       await setAppZoom(s.maws.app, s.page, f);
-      const fullPane = await paneRect(paneIn(t.panel));
+      const fullPane = await placedOn(s, t.tabId, paneIn(t.panel)); // main has the rect the pane now measures
       const view = (await viewOf(s, t.tabId))!;
       await arm(s, t);
       const button = await rectOf(t.page.locator('#increment'));
@@ -1592,11 +1592,14 @@ test('zoom probe: the pin', async () => {
       await expect(t.page.locator('maws-comment-overlay')).toBeVisible();
       await t.page.mouse.down();
       await t.page.mouse.up();
-      const card = cardOf(s, INCREMENT_LABEL);
-      await expect(card).toBeVisible(); // the card for this pick is drawn
+      // the card for this pick: the pick reached the window, and the card (the previous one was closed) is drawn with
+      // its caret, whose place is recorded, not required
       const picked = await lastPicked(s, ++picks);
+      const card = cardOf(s, INCREMENT_LABEL);
+      await expect(card).toBeVisible();
       const caret = t.panel.locator('[data-card-dock] [data-card-caret]');
-      await expect(caret).toHaveAttribute('data-card-caret', String(picked.position?.x));
+      await expect(caret).toBeVisible();
+      const caretAttr = await caret.getAttribute('data-card-caret');
       const caretBox = (await caret.boundingBox())!;
       const caretX = caretBox.x + caretBox.width / 2;
       const bounds = view.bounds!;
@@ -1605,7 +1608,7 @@ test('zoom probe: the pin', async () => {
       record([
         {
           probe: 'pin', placement: 4, factor: f, pane: fullPane, viewBounds: bounds, button, position: picked.position ?? null,
-          caretCentreX: caretX, caretTopY: caretBox.y, drawnAt, undivided,
+          caretCentreX: caretX, caretTopY: caretBox.y, caretAttr, drawnAt, undivided,
           off: undivided !== null && Math.abs(caretX - undivided.x) <= 1.5 && Math.abs(caretX - drawnAt.x) > 1.5,
         },
       ]);

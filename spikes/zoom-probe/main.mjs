@@ -111,9 +111,12 @@ const jobs = {
     void win.loadFile(PAGE);
     await ready;
     win.webContents.setZoomFactor(factor);
-    const reflected = await untilPageAt(win, factor);
-    result('zoomed', { mode: argv.mode, asked: factor, factor: win.webContents.getZoomFactor(), zoomMode: mode(win.webContents), pageReflects: reflected, page: await pageZoom(win), url: win.webContents.getURL() });
+    // what the call left, read at once, and the kill's mark right after it: a forced exit "at once" is timed from the
+    // call, not from the renderer's layout at the factor, which is observed only after the mark
+    result('set', { mode: argv.mode, asked: factor, factor: win.webContents.getZoomFactor(), zoomMode: mode(win.webContents) });
     console.log('ZOOMED');
+    const reflected = await untilPageAt(win, factor);
+    result('zoomed', { factor: win.webContents.getZoomFactor(), pageReflects: reflected, page: await pageZoom(win), url: win.webContents.getURL() });
     if (argv.end === 'quit') app.quit();
   },
 

@@ -17,7 +17,7 @@ import { spawn, spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const argv = Object.fromEntries(process.argv.slice(2).filter((a) => a.startsWith('--')).map((a) => { const [k, ...v] = a.slice(2).split('='); return [k, v.join('=') || true]; }));
@@ -35,17 +35,20 @@ if (process.platform === 'linux') {
   const s = statSync(helper);
   if (!(s.mode & 0o4000) || s.uid !== 0) {
     if (!argv['setuid-sandbox']) {
-      console.error(`chrome-sandbox at ${helper} is not setuid root; pass --setuid-sandbox to set it with sudo -n`);
+      console.error("the repository's Electron chrome-sandbox is not setuid root; pass --setuid-sandbox to set it with sudo -n");
       process.exit(2);
     }
     for (const args of [['chown', 'root:root', helper], ['chmod', '4755', helper]]) {
       const r = spawnSync('sudo', ['-n', ...args], { stdio: 'inherit' });
       if (r.status !== 0) process.exit(2);
     }
-    console.error(`set chrome-sandbox setuid root (${helper})`);
+    console.error("set the repository's Electron chrome-sandbox setuid root");
   }
 }
 
+// What the run prints and stores names this folder as `<harness>`, never by its absolute path (a Preferences key holds
+// the page's whole file URL), so a line can be copied into FINDINGS.md as it is.
+const scrub = (text) => text.split(pathToFileURL(here).href).join('<harness>').split(here).join('<harness>');
 const stamp = new Date().toISOString().replace(/[:.]/g, '-');
 const runs = join(here, 'runs', stamp);
 const profiles = join(runs, 'profiles');
@@ -73,7 +76,7 @@ function launch(label, args, { kill = null } = {}) {
     child.on('exit', (code, signal) => {
       clearTimeout(guard);
       const results = out.split('\n').filter((l) => l.startsWith('RESULT ')).map((l) => JSON.parse(l.slice(7)));
-      writeFileSync(join(runs, `${label}.log`), `${out}\n--- stderr ---\n${err}`);
+      writeFileSync(join(runs, `${label}.log`), scrub(`${out}\n--- stderr ---\n${err}`));
       resolve({ label, code, signal, killedAfterMs: killedAt, results, stderrTail: err.split('\n').slice(-6).join(' ').slice(0, 600) });
     });
   });
@@ -83,7 +86,13 @@ const profile = (label) => {
   mkdirSync(dir, { recursive: true });
   return dir;
 };
-const part = (got, name) => got.results.find((r) => r.part === name) ?? null;
+// A launch's result of that part, without main.mjs's own `job` and `part` fields (the row's parts carry labels of their own).
+const part = (got, name) => {
+  const found = got.results.find((r) => r.part === name);
+  if (!found) return null;
+  const { job: _job, part: _part, ...rest } = found;
+  return rest;
+};
 
 // Every key path holding "zoom" in each Preferences file under the profile (the default session's is the profile's own),
 // with its value: where Chromium keeps a zoom, by host or by the whole URL.
@@ -131,8 +140,15 @@ async function kept(row, mode, end, kill = null) {
   const prefsAfterZoom = zoomPrefs(dir);
   const standin = await launch(`${label}-standin`, ['--job=standin', `--profile=${dir}`]);
   const opened = part(standin, 'opened');
+  const set = part(zoomed, 'set');
+  // the experiment stands only when the zooming launch set 1.5 in the mode asked and ended the way asked: a launch that
+  // failed early leaves a clean profile, which would read as "nothing kept"
+  const ended = kill === null ? zoomed.code === 0 && zoomed.signal === null : zoomed.signal === 'SIGKILL' && zoomed.killedAfterMs === (kill === 'now' ? 0 : kill);
+  const valid = set !== null && set.factor === 1.5 && (mode !== 'isolated' || set.zoomMode === 'isolated') && ended && opened !== null;
   return {
     part: end,
+    valid,
+    set,
     zoomed: part(zoomed, 'zoomed'),
     exit: { code: zoomed.code, signal: zoomed.signal, killedAfterMs: zoomed.killedAfterMs },
     prefsAfterZoom,
@@ -143,16 +159,25 @@ async function kept(row, mode, end, kill = null) {
   };
 }
 const keptAtOne = (parts) => parts.every((p) => p.standinFactor === 1 && p.standinPage?.zoom === 1);
+// PASS or FAIL only over valid experiments; a part that did not stand makes the row FAIL as an experiment, said so
+const keptVerdict = (parts) => (parts.some((p) => !p.valid) ? 'FAIL (an experiment did not stand)' : keptAtOne(parts) ? 'PASS' : 'FAIL');
+const recordVerdict = (parts) => (parts.some((p) => !p.valid) ? 'FAIL (an experiment did not stand)' : 'RECORD');
 
-if (want('a')) rows.a = { verdict: 'RECORD', parts: [await kept('a', 'default', 'quit')] };
-if (want('b')) rows.b = { verdict: 'RECORD', parts: [await kept('b', 'default', 'kill-now', 'now'), await kept('b', 'default', 'kill-15s', 15_000)] };
+if (want('a')) {
+  const parts = [await kept('a', 'default', 'quit')];
+  rows.a = { verdict: recordVerdict(parts), parts };
+}
+if (want('b')) {
+  const parts = [await kept('b', 'default', 'kill-now', 'now'), await kept('b', 'default', 'kill-15s', 15_000)];
+  rows.b = { verdict: recordVerdict(parts), parts };
+}
 if (want('c')) {
   const parts = [await kept('c', 'isolated', 'quit')];
-  rows.c = { verdict: keptAtOne(parts) ? 'PASS' : 'FAIL', parts };
+  rows.c = { verdict: keptVerdict(parts), parts };
 }
 if (want('d')) {
   const parts = [await kept('d', 'isolated', 'kill-now', 'now'), await kept('d', 'isolated', 'kill-15s', 15_000)];
-  rows.d = { verdict: keptAtOne(parts) ? 'PASS' : 'FAIL', parts };
+  rows.d = { verdict: keptVerdict(parts), parts };
 }
 
 // Row e: the factor after a reload and after another load.
@@ -211,28 +236,34 @@ if (want('h')) {
 // Row i: the call exists and the preference took.
 if (want('i')) {
   const api = part(await launch('i', ['--job=api', `--profile=${profile('i')}`]), 'api');
-  const ok = api?.setZoomMode === 'function' && (api.getZoomMode !== 'function' || api.mode === 'isolated');
-  rows.i = { verdict: ok ? 'PASS' : 'FAIL', parts: [{ part: 'api', ...(api ?? { failed: 'no result' }), ...(api?.getZoomMode !== 'function' && { note: 'no getZoomMode: the mode the preference set is not readable' }) }] };
+  // both are needed: the call exists, and the mode the preference set reads back as isolated (no getter: not shown, a stop)
+  const ok = api?.setZoomMode === 'function' && api.getZoomMode === 'function' && api.mode === 'isolated';
+  rows.i = { verdict: ok ? 'PASS' : 'FAIL', parts: [{ part: 'api', ...(api ?? { failed: 'no result' }) }] };
 }
 
 // Row j: on a Mac with two displays of different scale only. A changed devicePixelRatio is recorded, not judged.
 if (want('j')) {
   const got = await launch('j', ['--job=view', `--profile=${profile('j')}`, '--factor=1.25', '--move']);
   const moved = part(got, 'moved');
-  if (!moved || moved.notRun) rows.j = { verdict: 'NOT RUN', parts: [{ part: 'move', ...(moved ?? { failed: got.stderrTail }) }] };
+  // NOT RUN only for the launch's own word that no display of another scale is at hand; a launch that gave no answer
+  // failed. A move counts only once the window reached the display asked and the page settled at the factor there.
+  if (!moved) rows.j = { verdict: 'FAIL (the experiment gave no result)', parts: [{ part: 'move', failed: got.stderrTail }] };
+  else if (moved.notRun) rows.j = { verdict: 'NOT RUN', parts: [{ part: 'move', ...moved }] };
   else {
+    const reached = (at, display) => at.display === display && at.settled;
     const holds = (at) => at.appFactor === 1.25 && sameRect(at.againstBox.want, at.againstBox.bounds);
-    rows.j = { verdict: holds(moved.there) && holds(moved.back) ? 'PASS' : 'FAIL', parts: [{ part: 'move', ...moved }] };
+    const verdict = !reached(moved.there, moved.to.id) || !reached(moved.back, moved.from.id) ? 'FAIL (the move did not complete)' : holds(moved.there) && holds(moved.back) ? 'PASS' : 'FAIL';
+    rows.j = { verdict, parts: [{ part: 'move', ...moved }] };
   }
 }
 
-writeFileSync(join(runs, 'results.json'), JSON.stringify({ electron: version, platform: `${process.platform} ${process.arch}`, stamp, rows }, null, 1));
+writeFileSync(join(runs, 'results.json'), scrub(JSON.stringify({ electron: version, platform: `${process.platform} ${process.arch}`, stamp, rows }, null, 1)));
 // One line per row, its decisive values in brief (the parts in full are in results.json).
 const brief = {
-  a: (r) => r.parts.map((p) => ({ end: p.part, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
-  b: (r) => r.parts.map((p) => ({ end: p.part, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
-  c: (r) => r.parts.map((p) => ({ end: p.part, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
-  d: (r) => r.parts.map((p) => ({ end: p.part, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
+  a: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
+  b: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
+  c: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
+  d: (r) => r.parts.map((p) => ({ end: p.part, valid: p.valid, standin: p.standinFactor, prefs: p.prefsAfterZoom })),
   e: (r) => r.parts.map((p) => ({ at: p.part, afterReload: p.afterReload?.factor, afterLoad: p.afterLoad?.factor })),
   f: (r) => ({ openAt: r.openAt, ways: r.parts.map((p) => ({ way: p.part, atDomReady: p.atDomReady, atShow: p.atShow, inkRatio: p.inkRatioAtShow, ok: p.atFactorWhenShown })) }),
   g: (r) => r.parts.map((p) => ({ mode: p.part, first: p.first, openBefore: p.openBefore, openedAfter: p.openedAfter })),
@@ -240,5 +271,5 @@ const brief = {
   i: (r) => r.parts[0],
   j: (r) => (r.verdict === 'NOT RUN' ? r.parts[0] : { there: r.parts[0].there?.againstBox, back: r.parts[0].back?.againstBox, dpr: [r.parts[0].before?.page?.dpr, r.parts[0].there?.page?.dpr, r.parts[0].back?.page?.dpr] }),
 };
-for (const [row, r] of Object.entries(rows)) console.log(`RECORD ${row} ${r.verdict} ${JSON.stringify(brief[row](r))}`);
-console.log(`\nelectron ${version}, ${process.platform} ${process.arch}; evidence: ${runs}`);
+for (const [row, r] of Object.entries(rows)) console.log(scrub(`RECORD ${row} ${r.verdict} ${JSON.stringify(brief[row](r))}`));
+console.log(`\nelectron ${version}, ${process.platform} ${process.arch}; evidence: runs/${stamp}`);

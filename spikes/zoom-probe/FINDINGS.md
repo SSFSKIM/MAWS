@@ -28,10 +28,10 @@ It prints one line per row:
 | f | isolated, at 0.5 and at 2: f1 `webPreferences.zoomFactor`; f2 a call at `dom-ready`; f3 a call at `ready-to-show` and the window shown at the next painted frame; f0, the control at 1 | PASS when a way has the factor in force at the show and the capture taken at the show has the red line's ink at the factor times f0's height, within 10 %, at both factors; `openAt` is the first such way. FAIL (a stop) when no way passes |
 | g | the page at 1.5, once in default mode and once isolated, beside the same file with another query (the presenter's shape) and another file (the repair page's shape), each opened before the zoom and again after it | RECORD: the other windows' factors |
 | h | isolated, at 0.5 and at 2: a `WebContentsView` of another partition placed over the page's box by decision 27's rule | PASS when the view's factor is 1, its bounds are the box times the factor edge by edge, and its page is that many CSS pixels wide |
-| i | isolated | PASS when `setZoomMode` is a function and, where `getZoomMode` exists, it answers `isolated` |
-| j | row h's window at 1.25, moved to a display of another scale and back | NOT RUN without such a display; otherwise PASS when the app's factor stays 1.25 and the view stays on the box times the factor. `devicePixelRatio` is recorded but not judged |
+| i | isolated | PASS when `setZoomMode` is a function and `getZoomMode()` answers `isolated`; without the getter the preference is not shown to have taken: FAIL |
+| j | row h's window at 1.25, moved to a display of another scale and back | NOT RUN only when the launch reports no such display (a launch with no answer is a FAIL); otherwise, once the window has reached each display and the page has settled at 1.25 there, PASS when the app's factor stays 1.25 and the view stays on the box times the factor. `devicePixelRatio` is recorded but not judged |
 
-The 15 s before a forced exit is a wait the run makes. It is not a bound the run asserts.
+Rows a to d stand only when the zooming launch set 1.5 in the mode asked (`set`, read right after the call) and ended the way asked: a quit with exit 0, or a SIGKILL timed from the `ZOOMED` mark, which is printed right after the call and before the renderer's layout is observed. A part that does not stand makes its row `FAIL (an experiment did not stand)`, never a PASS. The 15 s before a forced exit is a wait the run makes. It is not a bound the run asserts.
 
 ## The probe scenes (placements 1 to 6, and the peers)
 

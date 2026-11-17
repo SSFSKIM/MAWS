@@ -1472,15 +1472,34 @@ test('zoom probe: the view, the lights, the device box', async () => {
     }
 
     // placement 6: Mobile chosen at 100 %, then at each factor the five numbers with the room ample, and the menu's
-    // offer with the room just under and just over 375 CSS pixels
+    // offer with the room just under and just over 375 CSS pixels. The window is first made as wide as its display's
+    // work area, since the panel can be at most the window's CSS width less 360 (shell-geometry.ts) and a narrow
+    // window at 200 % shows the panel as a sheet, with no separator: a sample the window cannot give is said so, not read
     await setAppZoom(s.maws.app, s.page, 1);
+    const workArea = await s.maws.app.evaluate(({ BrowserWindow, screen }) => {
+      const win = BrowserWindow.getAllWindows().find((w) => w.isVisible())!;
+      const area = screen.getDisplayMatching(win.getBounds()).workArea;
+      win.setBounds({ x: area.x, y: area.y, width: area.width, height: area.height });
+      return area;
+    });
     await (await viewportItem(s, panel, 'mobile')).click();
     await expect.poll(async () => (await tabState(s, t)).tab?.viewport).toEqual({ width: 375, height: 812 });
     const resizer = s.page.getByRole('separator', { name: 'Resize right panel' });
-    // the room dragged towards `width` CSS pixels by the panel's separator (the panel's own bounds may stop it short):
-    // the room's width it reached
-    const roomTo = async (width: number): Promise<number> => {
-      const before = (await rectOf(box)).width;
+    // the room's width once two reads in a row agree (a drag's layout lands after the pointer's last event)
+    const settledRoom = async (): Promise<number> => {
+      let last = Number.NaN;
+      await expect.poll(async () => {
+        const previous = last;
+        last = (await rectOf(box)).width;
+        return last === previous;
+      }, { message: 'the room settled' }).toBe(true);
+      return last;
+    };
+    // the room dragged towards `width` CSS pixels by the panel's separator, and the width it settled at (the panel's
+    // own bounds may stop it short); null when the panel has no separator (a sheet)
+    const roomTo = async (width: number): Promise<number | null> => {
+      if ((await resizer.count()) === 0) return null;
+      const before = await settledRoom();
       if (Math.abs(before - width) < 1) return before;
       const handle = await rectOf(resizer);
       const [hx, hy] = [handle.x + handle.width / 2, handle.y + handle.height / 2];
@@ -1488,9 +1507,7 @@ test('zoom probe: the view, the lights, the device box', async () => {
       await s.page.mouse.down();
       await s.page.mouse.move(hx + before - width, hy, { steps: 4 });
       await s.page.mouse.up();
-      let after = before;
-      await expect.poll(async () => (after = (await rectOf(box)).width), { message: `the room moved from ${before} towards ${width}` }).not.toBe(before);
-      return after;
+      return settledRoom();
     };
     const offered = async (): Promise<boolean> => {
       const item = await viewportItem(s, panel, 'mobile');
@@ -1501,6 +1518,10 @@ test('zoom probe: the view, the lights, the device box', async () => {
     for (const f of PROBE_FACTORS) {
       await setAppZoom(s.maws.app, s.page, f);
       const room = await roomTo(440);
+      if (room === null) {
+        record([{ probe: 'device box', placement: 6, factor: f, workArea, established: false, why: 'the panel is a sheet at this factor: no separator, no room to set' }]);
+        continue;
+      }
       await expect.poll(async () => (await tabState(s, t)).tab?.covered).toBe(false);
       const rect = await placedOn(s, t, pane);
       const view = (await viewOf(s, t))!;
@@ -1508,19 +1529,22 @@ test('zoom probe: the view, the lights, the device box', async () => {
       const ample = room >= 375;
       const offers: { room: number; offered: boolean; predicted: boolean }[] = [];
       for (const target of [370, 380]) {
-        const at = await roomTo(target);
+        const at = (await roomTo(target))!;
         offers.push({ room: at, offered: await offered(), predicted: at >= 375 });
       }
+      // the offer's verdict needs one sample on each side of 375 CSS pixels; without them it is not established
+      const straddles = offers.some((o) => o.room < 375) && offers.some((o) => o.room >= 375);
       record([
         {
-          probe: 'device box', placement: 6, factor: f, room, ample, placed: rect,
+          probe: 'device box', placement: 6, factor: f, workArea, room, ample, straddles, placed: rect,
           element: { read: element, predicted: Math.min(375, room) },
           frameDrawnPt: { read: element * f, predicted: Math.min(375, room) * f },
           view: { read: view.bounds?.width ?? null, predicted: Math.min(375, room) },
           innerWidth: { read: inner, predicted: Math.min(375, room) },
           chip: { read: text, predicted: `${Math.min(375, Math.round(room))} × …` },
           offers,
-          off: { viewNotItsFrame: view.bounds !== null && Math.abs(view.bounds.width - element * f) > 1, offerIgnoresFactor: offers.every((o) => o.offered === o.predicted) },
+          // the five numbers are read against the pin's predictions only with the room ample; the offer only when straddled
+          off: { viewNotItsFrame: ample ? view.bounds !== null && Math.abs(view.bounds.width - element * f) > 1 : null, offerIgnoresFactor: straddles ? offers.every((o) => o.offered === o.predicted) : null },
         },
       ]);
     }
