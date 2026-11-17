@@ -23,7 +23,7 @@ const LINK = `[the notes](${P})`;
 const NAMES = { names: true };
 const OTHER = { names: false, pending: [], other: true };
 // ticket 733a: the reconstruction's counted work for its pinned input (the meter's test below), printed by the test
-const PINNED = { length: 0, work: 0, pauses: 0 };
+const PINNED = { length: 29_296, work: 0, pauses: 0 };
 const text = (value: string) => ({ type: 'text', text: value });
 // A `user` row and a queued prompt of the person's origin, as the engine writes them (test/fixtures/transcripts/)
 const user = (content: string | object[]) => ({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, message: { role: 'user', content } });
