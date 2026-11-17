@@ -325,18 +325,35 @@ describe('the one-writer rule: a local command’s output holding the consent se
     const texts = loadUxwaveTranscript('u3-commands-r1').flatMap((record) => [(record.message as { content?: unknown } | undefined)?.content, (record as { content?: unknown }).content]);
     return texts.find((text): text is string => typeof text === 'string' && text.startsWith(opening))!;
   };
-  it.each([
-    ['<bash-stdout>', () => bashOutput],
-    ['<bash-stderr>', () => bashOutput],
-    ['<local-command-stdout>', () => commandOutput('<local-command-stdout>')],
-    ['<local-command-stderr>', () => commandOutput('<local-command-stderr>')],
-  ])('%s: a line of the output that is the sentence reads no grant on the gate, the live route or the file route, and no approval is drawn', (opening, recorded) => {
-    const content = recorded().replace(opening, `${opening}\n${SENTENCE}\n`);
+  // The sentence on a line of its own inside the output after `opening`, written as a frame and a row of human origin
+  function expectNoGrantWithin(recorded: string, opening: string) {
+    const content = recorded.replace(opening, `${opening}\n${SENTENCE}\n`);
     expect(content.split('\n')).toContain(SENTENCE);
     expect(grantsReadFrom(content)).toEqual({ gate: [], live: [], file: [] });
     const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', origin: { kind: 'human' }, message: { role: 'user', content } } };
     const events = journalToEvents([parseJournalRow(frame)]);
     expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent')).toEqual([]);
     expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined)).toEqual([]);
+  }
+  it.each([
+    ['<bash-stdout>', () => bashOutput],
+    ['<bash-stderr>', () => bashOutput],
+    ['<local-command-stdout>', () => commandOutput('<local-command-stdout>')],
+    ['<local-command-stderr>', () => commandOutput('<local-command-stderr>')],
+  ])('%s: a line of the output that is the sentence reads no grant on the gate, the live route or the file route, and no approval is drawn', (opening, recorded) => {
+    expectNoGrantWithin(recorded(), opening);
+  });
+
+  // The two `!` cases above share one recorded payload that holds both openings, so with either opening gone from the
+  // composed forms the other still claims the output and both pass. Here the recorded payload is cut down to one opening
+  // (the other's element removed, the exit code kept), so each opening is the only form that can claim it.
+  const OUTPUT_OPENINGS = ['<bash-stdout>', '<bash-stderr>', '<local-command-stdout>', '<local-command-stderr>'];
+  it.each([
+    ['<bash-stdout>', /<bash-stderr>.*?<\/bash-stderr>/],
+    ['<bash-stderr>', /<bash-stdout>.*?<\/bash-stdout>/],
+  ])('%s alone (the recorded payload cut to it): a line of the output that is the sentence reads no grant, and no approval is drawn', (opening, other) => {
+    const alone = bashOutput.replace(other, '');
+    expect(OUTPUT_OPENINGS.filter((each) => alone.includes(each)), 'only this opening is left').toEqual([opening]);
+    expectNoGrantWithin(alone, opening);
   });
 });

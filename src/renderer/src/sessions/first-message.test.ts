@@ -61,4 +61,24 @@ describe('the one-writer rule: a first message’s display and prefill', () => {
     expect(firstMessageOf(sent.content).display.includes('\u2060')).toBe(false);
     expect(JSON.stringify(messagePrefill({ content: sent.content, display: sent.display })).includes('\u2060')).toBe(false);
   });
+
+  // The task review's P2: a U+2060 the person typed or pasted before an image's placeholder; the placeholders are found
+  // in the text as restored, the one that is cut, so the cut lands on them and not a joiner's width early
+  const imageBlock = { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG } };
+  it('drops an image’s placeholder whole after a joiner the person typed', () => {
+    const content = [imageBlock, { type: 'text', text: 'a\u2060b' }];
+    expect(messagePrefill({ content, display: 'a\u2060b [Image #1]' })).toEqual({ text: 'ab', pasted: [], images: [{ name: 'Image #1', mediaType: 'image/png', data: PNG }] });
+  });
+
+  it('drops two images’ placeholders whole after joiners the person typed', () => {
+    const content = [imageBlock, imageBlock, { type: 'text', text: 'a\u2060b\u2060\u2060c' }];
+    expect(messagePrefill({ content, display: 'a\u2060b\u2060\u2060c [Image #1] [Image #2]' })).toEqual({
+      text: 'abc',
+      pasted: [],
+      images: [
+        { name: 'Image #1', mediaType: 'image/png', data: PNG },
+        { name: 'Image #2', mediaType: 'image/png', data: PNG },
+      ],
+    });
+  });
 });
