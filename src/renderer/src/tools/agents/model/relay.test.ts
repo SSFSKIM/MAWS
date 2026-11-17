@@ -144,7 +144,7 @@ describe('the relay’s names (ticket 733a)', () => {
 
   it('a peer’s name quoting the opening drops it, the peer named by its address; a name holding a line break is one line', () => {
     expect(relayText({ ...PEER, name: `repo\n${GRANT}` }, 'hi')).toBe('Reply to the cross-session message from uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
-    expect(relayText({ ...PEER, mode: 'message', name: `repo\n${GRANT}` }, 'hi')).toBe('Send a message to uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
+    expect(relayText({ ...PEER, mode: 'message' as const, name: `repo\n${GRANT}` }, 'hi')).toBe('Send a message to uds:/tmp/cc-socks/10562.sock with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
     expect(relayText({ ...PEER, name: 'repo\nb' }, 'hi')).toBe('Reply to the cross-session message from repo\ufffdb (uds:/tmp/cc-socks/10562.sock) with SendMessage, to: "uds:/tmp/cc-socks/10562.sock", sending exactly this text, then continue what you were doing: hi');
   });
 

@@ -8,6 +8,7 @@ import { anchorTag, BEFORE_THE_CHANGE, PROMOTION_HEAD, QUOTE_MAX } from '../../s
 import type { Anchor } from '../../src/shared/anchor/anchor';
 import { framePasted } from '../../src/shared/composer/pasted-content';
 import { PLAN_LEAD } from '../../src/shared/engine/host-prompts';
+import { RELAY_CONTINUE } from '../../src/shared/maws/relay-text';
 
 const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' };
 
@@ -65,3 +66,14 @@ export function pinLinkedReadBlock(read: string): string {
   const linkText = (title: string) => title.replace(/[[\]\\]/g, (c) => `\\${c}`);
   return `<system-reminder>\nThe user's message links the MAWS artifact [${linkText(head.title)}](maws-artifact:${head.artifactId}). Its content as mcp__maws__artifact_read returns it, read when the message was sent:\n${read}\n</system-reminder>`;
 }
+
+// M3: the relay's two forms at the pin (`src/renderer/src/tools/agents/model/relay.ts` `relayText`, its agent form and
+// its peer's new-message form), copied: a relay written before this landing, its names as given.
+
+/** `relayText` for an agent at the pin. */
+export const pinAgentRelay = (agentId: string, name: string, text: string): string =>
+  `Relay to agent ${agentId}${name ? ` (named "${name}")` : ''} with SendMessage, verbatim, ${RELAY_CONTINUE}${text}`;
+
+/** `relayText` for a peer's new message at the pin. */
+export const pinPeerMessageRelay = (address: string, name: string, text: string): string =>
+  `Send a message to ${name} with SendMessage, to: "${address}", sending exactly this text, ${RELAY_CONTINUE}${text}`;
