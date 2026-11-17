@@ -24,6 +24,7 @@ const DEV_URL = 'http://localhost:5173/';
 const APP = 'app-elsewhere';
 const NOTES = '/srv/elsewhere/notes.txt';
 const PDF = '/srv/elsewhere/ledger draft.pdf';
+const PRIVATE_PDF = '/Users/someone/Documents/minutes.pdf'; // in a folder macOS protects there, which nobody opened yet
 const REFUSAL = "path outside the session's directories"; // the files service's, as it crosses a call's answer
 const SERVES = ['rl2.executor.machine', OUTSIDE_FILES_CAPABILITY];
 const TEXT = 'an invented line outside the session’s folders\n';
@@ -101,14 +102,18 @@ function pageOf(bytes: Buffer, args: Record<string, unknown>, mime: string, mark
   };
 }
 
-/** The machine refuses every plain read of the two files, and answers every page of `files.readOutside` from them. */
+/**
+ * The machine refuses every plain read of the files, and answers every page of `files.readOutside` from them; the one in
+ * a protected folder only for a read that carries `open` (decision 18), refused `protected` otherwise.
+ */
 function machineServes(): void {
   link.answers.set('files.read', (): CallResult => ({ ok: false, error: { code: 'internal', message: REFUSAL } }));
   link.onAct = (act: FakeAct) => {
     const args = act.request.args as Record<string, unknown>;
     if (act.request.action !== 'files.readOutside') return;
+    if (args.path === PRIVATE_PDF && args.open !== true) return act.settle({ state: 'failed', error: { code: 'internal', message: 'the file is in a folder macOS protects', issues: { refusal: 'protected' } } });
     const mark = { named: true, outside: { real: args.path, writable: true } };
-    act.settle({ state: 'done', result: args.path === PDF ? pageOf(PDF_BYTES, args, 'application/pdf', mark) : pageOf(Buffer.from(TEXT, 'utf8'), args, 'text/plain', mark) });
+    act.settle({ state: 'done', result: args.path === NOTES ? pageOf(Buffer.from(TEXT, 'utf8'), args, 'text/plain', mark) : pageOf(PDF_BYTES, args, 'application/pdf', mark) });
   };
 }
 const outsideActs = () => link.acts.filter((act) => act.request.action === 'files.readOutside');
@@ -161,6 +166,7 @@ beforeEach(async () => {
   const base = async () => ({ ok: false, error: { code: 'host_unavailable', message: 'not on the manager’s path in this suite' } }) as CommandResult<CommandName>;
   router.installRouter({ appUrl: DEV_URL, local: LOCAL, dispatchToHost: vi.fn(), remote: laneB.routeLaneB(base, remote, adapter), machine: { kind: 'host' } });
   router.guardCommand(openFile.APP_PAGE_ONLY, openFile.appPageOnly(DEV_URL));
+  router.guardCommand(openFile.OPENS_FROM_APP_PAGE_ONLY, openFile.openFromAppPageOnly(DEV_URL)); // M3's fix wave (Decision Log 26)
   // as src/main/app.ts registers it: the asking caller passed on
   router.registerMainHandler('remote.openCopy', async (input, { target, client }) => {
     if (target !== LOCAL && target !== input.machine) throw new Error('remote.openCopy: its source is on another machine');
@@ -254,6 +260,15 @@ describe('“Open externally” on an outside file (remote.openCopy; P1, P2; dec
     expect(outsideActs().length).toBeGreaterThan(0);
     expect(opened).toHaveLength(1);
     expect(readFileSync(opened[0]!, 'utf8')).toBe(TEXT);
+    // the copy's plain read is today's to the byte (Decision Log 27): it may be carried to any peer
+    expect(plainReads().filter((call) => ['named', 'agent', 'open', 'raw'].some((key) => key in (call.input as object)))).toEqual([]);
+  });
+
+  it('with the channel gone between the plain read’s refusal and the act: answers at once, and no act is sent (Decision Log 27)', async () => {
+    link.answers.set('files.read', (): CallResult => (link.lose(), { ok: false, error: { code: 'internal', message: REFUSAL } }));
+    expect(await invoke(appWindow().event, 'remote.openCopy', copyOf(NOTES))).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(link.acts).toEqual([]);
+    expect(opened).toEqual([]);
   });
 });
 
@@ -261,14 +276,16 @@ describe('a file’s frame of an outside file (layout.frameFile; P1 to P3; decis
   const frame = { appSessionId: APP, path: PDF, agent: true };
   const copiesListed = () => readdirSync(join(profile, 'frame-copies'));
 
-  it('the control: from an app page of an owner, the copy is read by files.readOutside in pages, the read asked named and the tab’s agent, and a token is issued over the nameless descriptor', async () => {
+  it('the control: from an app page of an owner, the copy is read by files.readOutside in pages with the tab’s agent, the plain read today’s, and a token is issued over the nameless descriptor', async () => {
     expect(await invoke(appWindow().event, 'layout.frameFile', frame, MINI)).toMatchObject({ ok: true, value: { status: 'ready', framed: 'pdf' } });
     expect(outsideActs().length).toBeGreaterThan(0);
     for (const act of outsideActs()) {
       expect(act.request.args).toMatchObject({ appSessionId: APP, path: PDF, hash: true, agent: true });
       expect(act.request.args).not.toHaveProperty('named');
+      expect(act.request.args).not.toHaveProperty('open'); // main adds no open of its own (Decision Log 26)
     }
-    for (const call of plainReads()) expect(call.input).toMatchObject({ appSessionId: APP, path: PDF, named: true, agent: true, hash: true });
+    // the copy's plain read is today's to the byte (Decision Log 27): it may be carried to any peer
+    for (const call of plainReads()) expect(Object.keys(call.input as object).sort()).toEqual(['appSessionId', 'hash', 'length', 'offset', 'path']);
     expect(copiesListed()).toEqual([]);
   });
 
@@ -277,13 +294,46 @@ describe('a file’s frame of an outside file (layout.frameFile; P1 to P3; decis
     for (const act of outsideActs()) expect(act.request.args).not.toHaveProperty('agent');
   });
 
-  it('from a window that is no app window and through dispatchLocal: plain reads alone, no act, and the command fails with the read’s refusal (P1)', async () => {
-    const callers = noPageCallers();
-    for (const who of ['a window that is no app window', 'dispatchLocal'] as const) {
-      expect([who, await callers[who]('layout.frameFile', frame, MINI)]).toMatchObject([who, { ok: false, error: { message: REFUSAL } }]);
+  it('a frame in a protected folder there: asked without open, refused protected; asked with open, drawn, the open on its act alone (Decision Log 26)', async () => {
+    const page = appWindow().event;
+    expect(await invoke(page, 'layout.frameFile', { appSessionId: APP, path: PRIVATE_PDF }, MINI)).toMatchObject({ ok: false, error: { issues: { refusal: 'protected' } } });
+    for (const act of outsideActs()) expect(act.request.args).not.toHaveProperty('open');
+    const before = outsideActs().length;
+    expect(await invoke(page, 'layout.frameFile', { appSessionId: APP, path: PRIVATE_PDF, open: true }, MINI)).toMatchObject({ ok: true, value: { status: 'ready', framed: 'pdf' } });
+    const withOpen = outsideActs().slice(before);
+    expect(withOpen.length).toBeGreaterThan(0);
+    for (const act of withOpen) expect(act.request.args).toMatchObject({ path: PRIVATE_PDF, open: true });
+    for (const call of plainReads()) expect(call.input).not.toHaveProperty('open');
+  });
+
+  it('a frame asked with open by a caller that is no app page is refused before anything is read; the same request from an app page is drawn (Decision Log 26)', async () => {
+    const withOpen = { appSessionId: APP, path: PRIVATE_PDF, open: true };
+    for (const [who, ask] of Object.entries(noPageCallers())) {
+      expect([who, await ask('layout.frameFile', withOpen, MINI)]).toEqual([who, { ok: false, error: { code: 'forbidden_sender', message: 'layout.frameFile with open may only be invoked by the app window' } }]);
     }
-    expect(plainReads().length).toBeGreaterThan(0);
+    expect(link.calls).toEqual([]);
     expect(link.acts).toEqual([]);
+    // the control
+    expect(await invoke(appWindow().event, 'layout.frameFile', withOpen, MINI)).toMatchObject({ ok: true, value: { status: 'ready' } });
+  });
+
+  it('registers the guard of a frame’s open as src/main/app.ts does', () => {
+    expect(readFileSync(join(import.meta.dirname, '../app.ts'), 'utf8')).toContain('guardCommand(OPENS_FROM_APP_PAGE_ONLY, openFromAppPageOnly(appUrl))');
+  });
+
+  it('from a window that is no app window, through dispatchLocal and through invokeOwn: plain reads alone, no act, and the command fails with the read’s refusal (P1)', async () => {
+    for (const [who, ask] of Object.entries(noPageCallers())) {
+      expect([who, await ask('layout.frameFile', frame, MINI)]).toMatchObject([who, { ok: false, error: { message: REFUSAL } }]);
+    }
+    expect(plainReads().length).toBeGreaterThanOrEqual(3);
+    expect(link.acts).toEqual([]);
+  });
+
+  it('with the channel gone between the plain read’s refusal and the act: answers at once, and no act is sent (Decision Log 27)', async () => {
+    link.answers.set('files.read', (): CallResult => (link.lose(), { ok: false, error: { code: 'internal', message: REFUSAL } }));
+    expect(await invoke(appWindow().event, 'layout.frameFile', frame, MINI)).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(link.acts).toEqual([]);
+    expect(copiesListed()).toEqual([]);
   });
 
   it('from an app page of a person the roster does not say owns the machine: no act, the read’s refusal (P2)', async () => {

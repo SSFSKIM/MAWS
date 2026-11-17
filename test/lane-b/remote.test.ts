@@ -7,12 +7,14 @@
 // are a `main.tabs` value the suite moves.
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { open as openFile } from 'node:fs/promises';
 import { createServer, get as httpGet, type Server } from 'node:http';
 import { connect as dialTcp, type AddressInfo, type Socket } from 'node:net';
 import { tmpdir } from 'node:os';
 import { join, relative } from 'node:path';
 import { keyId, memoryOrgView, signRecord, SIGNING_DOMAINS, type Action, type ByteDuplex, type Grant, type SignedOrgState } from 'org-protocol';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
+import { OUTSIDE_FILES_CAPABILITY } from '@shared/files/outside';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { SessionRecord } from '@shared/graph/session';
@@ -300,7 +302,14 @@ type Device = {
 };
 type Lab = { f: Fixture; host: LaneBHost; pty: FakePtyHost; chain: SignedOrgState[]; a: Device; device(id: string, options?: DeviceOptions): Promise<Device>; place(app: string, engine?: string, fields?: Record<string, unknown>): void };
 /** `member`: whose device it is (A, the machine's owner, by default; B, a member who owns nothing there). */
-type DeviceOptions = { link?: Partial<RemoteTiming>; adapter?: Partial<RemoteLaneBTiming>; member?: 'A' | 'B'; budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */ };
+type DeviceOptions = {
+  link?: Partial<RemoteTiming>;
+  adapter?: Partial<RemoteLaneBTiming>;
+  member?: 'A' | 'B';
+  budgets?: CommandBudgets /* P5 O7 M5a: the link's per-command budgets */;
+  /** UX wave U6f: every caller an app page, of a person the roster says owns the machine (the adapter's two seams). */
+  outside?: true;
+};
 /** P5 O7 M3: the endpoint's own seams (a forward's window), and the pty host's ring. */
 type LabOptions = DeviceOptions & { endpoint?: Pick<StartOptions, 'subscriptions' | 'services' /* P5 O7 M5b: the machine's document host */>; ring?: number };
 
@@ -415,6 +424,7 @@ async function connect(l: Lab, id: string, keys: Awaited<ReturnType<typeof loadD
       opened.push(url);
       return { opened: true };
     },
+    ...(options.outside === true && { isAppPage: () => true, owns: () => true }),
   });
   cleanups.push(() => adapter.stop());
   // The manager's path, as the RL2 link's `dispatch` takes it: the session a path-class read was made from as `call.session`
@@ -2713,3 +2723,170 @@ describe('an outside read the ledger did not keep, through the real ledger and t
   });
 });
 
+
+// The UX wave (U6f, M3's fix wave; Decision Log 27, the review's Important 1, the architect's three conditions): a
+// session's file of the machine across a channel's end, through the real link and the real endpoint, the transmissions
+// read where they arrive (the endpoint's dispatch to the machine's services, `host.calls`). A copy asks the plain read with
+// today's keys alone and waits under the link's hold as it always has, so the link may carry it to any peer; a keyed read
+// carries `named` (and the tab's `agent` and `open`) and goes only on the channel whose peer's list was read for it, so it
+// is never carried; the act is bound to its channel as every outside act is.
+describe('a session’s file there across a channel’s end (U6f, Decision Log 27)', { timeout: 30_000 }, () => {
+  const APP_FILES = 'app-files';
+  const INSIDE = `${CHECKOUT}/notes.txt`;
+  const FAR = '/srv/elsewhere/far-notes.txt';
+  const TEXT = 'an invented line of a file there\n';
+  const answerOf = (input: Record<string, unknown>): FilesReadOutput => {
+    const offset = typeof input.offset === 'number' ? input.offset : 0;
+    const length = typeof input.length === 'number' ? input.length : 1024 * 1024;
+    const content = TEXT.slice(offset, offset + length);
+    return { encoding: 'utf8', content, bytes: TEXT.length, offset, length: content.length, truncated: offset + content.length < TEXT.length, mime: 'text/plain', hash: input.hash === true ? sha256(TEXT) : null, utf8: input.hash === true ? true : null };
+  };
+
+  async function served() {
+    const l = await lab({ outside: true });
+    l.place(APP_FILES);
+    const machine = l.f.ref as MachineRef;
+    const page = l.a.page('page-files');
+    let held: Promise<void> | null = null;
+    // the machine's files service: a file inside the checkout read, any other refused as outside the folders
+    l.f.spine.handle('files.read', async (input) => {
+      const asked = input as Record<string, unknown>;
+      if (held !== null) {
+        const wait = held;
+        held = null;
+        await wait;
+      }
+      if (asked.path !== INSIDE) throw new Error(FILES_REFUSAL);
+      return answerOf(asked);
+    });
+    let outsideRun: (() => void) | null = null;
+    l.f.spine.handle('files.readOutside', (input) => (outsideRun?.(), answerOf(input as Record<string, unknown>)));
+    const scratch = mkdtempSync(join(tmpdir(), 'maws-u6f-copy-'));
+    cleanups.push(() => rmSync(scratch, { recursive: true, force: true }));
+    let sinks = 0;
+    return {
+      l,
+      /** Each `files.read` that reached the machine, as it arrived. */
+      reads: () => l.host.calls.filter((c) => c.owner === 'machine' && c.name === 'files.read').map((c) => c.input as Record<string, unknown>),
+      /** Each `files.readOutside` act that reached the machine's ledger. */
+      acts: () => l.host.calls.filter((c) => c.name === 'machine.op' && (c.input as { name?: string }).name === 'files.readOutside'),
+      /** The next read reaches the machine and waits there until released. */
+      holdNext(): () => void {
+        let release!: () => void;
+        held = new Promise<void>((resolve) => (release = resolve));
+        return release;
+      },
+      onOutsideRun: (run: () => void) => void (outsideRun = run),
+      /** The page's keyed read, as the viewer asks it of a session there. */
+      keyed: (path: string, extra: Record<string, unknown> = {}) => l.a.route('files.read', { appSessionId: APP_FILES, path, offset: 0, length: 4096, named: true, ...extra }, { client: page.client }),
+      /** A frame's copy (`copyInto`) for the page, into a descriptor of the suite's. */
+      async copy(path: string, extra: { agent?: true; open?: true } = {}) {
+        const sink = await openFile(join(scratch, `sink-${++sinks}`), 'w+');
+        try {
+          const result = await l.a.adapter.artifacts.copyInto(machine, { appSessionId: APP_FILES as AppSessionId, path }, sink, 8 * MiB, { label: 'a frame of the suite', seen: () => {}, client: page.client, ...extra });
+          const { size } = await sink.stat();
+          const bytes = Buffer.alloc(size);
+          await sink.read(bytes, 0, size, 0);
+          return { result, written: bytes.toString('utf8') };
+        } finally {
+          await sink.close();
+        }
+      },
+      /** The carrier cut with its last answers lost on the way; resolves at the next channel's peer list. */
+      async drop(): Promise<void> {
+        const was = l.a.link.peerCapabilities();
+        const { carrier, tap } = l.a.carriers.at(-1)!;
+        tap.mute = true;
+        carrier.close('dropped');
+        await until(() => l.a.link.state() === 'up' && l.a.link.peerCapabilities() !== null && l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
+      },
+    };
+  }
+  /** Today's keys of a copy's read, and no other: what any build reads. */
+  const TODAYS = ['appSessionId', 'hash', 'length', 'offset', 'path'];
+  const NEW_KEYS = ['named', 'agent', 'open'];
+
+  it('a copy of a file inside the folders asked with no channel current waits under the link’s hold, and lands once a channel comes, its read today’s', async () => {
+    const o = await served();
+    o.l.a.direct.dead = true;
+    o.l.a.carriers.at(-1)!.carrier.close('dropped');
+    await until(() => o.l.a.link.peerCapabilities() === null, 'no channel current');
+    let settled = false;
+    const copying = o.copy(INSIDE, { agent: true, open: true }).finally(() => (settled = true));
+    await sleep(300);
+    expect(settled, 'the copy waits for a channel').toBe(false);
+    expect(o.reads()).toEqual([]);
+    o.l.a.direct.dead = false;
+    o.l.a.link.probe('network');
+    expect(await copying).toEqual({ result: { ok: true, value: { written: TEXT.length } }, written: TEXT });
+    expect(o.reads().map((input) => Object.keys(input).sort())).toEqual([TODAYS]);
+    expect(o.acts()).toEqual([]);
+  });
+
+  it('a copy carried across a reconnect to a peer without the capability is sent there with today’s keys, byte for byte as on the first channel (condition 3a)', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const copying = o.copy(INSIDE, { agent: true, open: true });
+    await until(() => o.reads().length === 1, 'the copy’s read at the machine');
+    endpointWithout(OUTSIDE_FILES_CAPABILITY);
+    await o.drop();
+    expect(o.l.a.link.peerCapabilities()).not.toContain(OUTSIDE_FILES_CAPABILITY);
+    expect(await copying).toEqual({ result: { ok: true, value: { written: TEXT.length } }, written: TEXT });
+    release();
+    const [first, carried, ...rest] = o.reads();
+    expect(rest).toEqual([]);
+    expect(JSON.stringify(carried)).toBe(JSON.stringify(first));
+    expect(Object.keys(first!).sort()).toEqual(TODAYS);
+  });
+
+  it('a keyed read made, the channel drops: it fails at once as not reachable and is not sent again; the page asks again and the read answers on the new channel (condition 2)', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const reading = o.keyed(INSIDE, { agent: true });
+    await until(() => o.reads().length === 1, 'the read at the machine');
+    const dropped = o.drop();
+    expect(await reading).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } });
+    await dropped;
+    release();
+    await sleep(200);
+    expect(o.reads()).toHaveLength(1); // the link carried nothing of it to the next channel
+    // the page asks again: the read on the channel current now
+    expect(await o.keyed(INSIDE, { agent: true })).toMatchObject({ ok: true, value: { content: TEXT } });
+    expect(o.reads()).toHaveLength(2);
+    expect(o.reads()[1]).toMatchObject({ named: true, agent: true });
+  });
+
+  it('after a reconnect to a peer without the capability, nothing carrying named, agent or open reaches it', async () => {
+    const o = await served();
+    const release = o.holdNext();
+    const reading = o.keyed(INSIDE, { agent: true, open: true });
+    await until(() => o.reads().length === 1, 'the read at the machine');
+    endpointWithout(OUTSIDE_FILES_CAPABILITY);
+    await o.drop();
+    expect(await reading).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    release();
+    // the page asks again, of the older build: today's read
+    expect(await o.keyed(INSIDE, { agent: true, open: true })).toMatchObject({ ok: true, value: { content: TEXT } });
+    const [first, ...after] = o.reads();
+    expect(first).toMatchObject({ named: true, agent: true }); // to the peer that listed it, on the channel that was checked
+    expect(after).toHaveLength(1);
+    for (const input of after) expect(NEW_KEYS.filter((key) => key in input)).toEqual([]);
+  });
+
+  it('a files.readOutside sent while its channel drops ends without its answer and is never sent again (condition 3b)', async () => {
+    const o = await served();
+    let runs = 0;
+    o.onOutsideRun(() => {
+      if (++runs > 1) return;
+      const { carrier, tap } = o.l.a.carriers.at(-1)!;
+      tap.mute = true; // its answer is lost on the way
+      setTimeout(() => carrier.close('dropped'), 20);
+    });
+    const was = o.l.a.link.peerCapabilities();
+    expect(await o.keyed(FAR)).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'files.readOutside: the connection to mini ended before it answered; it is unknown whether it ran' } });
+    await until(() => o.l.a.link.state() === 'up' && o.l.a.link.peerCapabilities() !== null && o.l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
+    await sleep(300);
+    expect(o.acts()).toHaveLength(1);
+    expect(runs).toBe(1);
+  });
+});

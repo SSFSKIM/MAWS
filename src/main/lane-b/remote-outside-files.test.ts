@@ -220,6 +220,67 @@ describe('a keyed read to a machine that lists the capability (decision 5 (ii) t
   });
 });
 
+// M3's fix wave (Decision Log 27; the review's Important 1): a keyed read goes only on the channel whose peer's list was
+// read for it, so a call carrying `named`, `agent` or `open` that the link would carry to the next channel can never reach
+// a build that does not list the capability. The link's fake fails such a call at its channel's end, as the real link does.
+describe('the channel a keyed read is bound to (Decision Log 27)', () => {
+  const PENDING = 'still pending';
+  /** The read's answer once the microtasks ran, or PENDING: a read the link would hold has not answered. */
+  async function answered(read: Promise<Result>): Promise<Result | typeof PENDING> {
+    let out: Result | typeof PENDING = PENDING;
+    void read.then((value) => void (out = value));
+    for (let i = 0; i < 50; i++) await Promise.resolve();
+    return out;
+  }
+  const unreachable = { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } };
+
+  it('a keyed read held on a channel that ends fails at once as not reachable, and nothing is sent again on the next channel', async () => {
+    const l = lab();
+    l.reads(() => new Promise<CallResult>(() => {})); // the machine took it; its answer never comes on this channel
+    const read = l.cmd('files.read', keyed({ agent: true, open: true }));
+    await answered(read);
+    l.link.lose();
+    expect(await answered(read)).toEqual(unreachable);
+    l.link.relink(SERVES);
+    await answered(read);
+    expect(l.files()).toHaveLength(1);
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('to a machine whose build does not list the capability, the plain read is bound the same way', async () => {
+    const l = lab();
+    l.link.relink(OLDER);
+    l.reads(() => new Promise<CallResult>(() => {}));
+    const read = l.cmd('files.read', keyed());
+    await answered(read);
+    l.link.lose();
+    expect(await answered(read)).toEqual(unreachable);
+    expect(l.files()).toHaveLength(1);
+  });
+
+  it('and so are its pages, when the first answer is too large for the channel', async () => {
+    const l = lab();
+    l.reads((input) => (input.length === 4 * 1024 * 1024 ? { ok: false, error: { code: 'too-large' } } : new Promise<CallResult>(() => {})));
+    const read = l.cmd('files.read', keyed({ length: 4 * 1024 * 1024 }));
+    await answered(read);
+    expect(l.files()).toHaveLength(2); // the whole read, refused too-large, and the first page, held
+    l.link.lose();
+    expect(await answered(read)).toEqual(unreachable);
+    l.link.relink(SERVES);
+    await answered(read);
+    expect(l.files()).toHaveLength(2);
+  });
+
+  it('the control: a read with no named key (today’s route) is not bound, and waits under the link’s hold', async () => {
+    const l = lab();
+    l.reads(() => new Promise<CallResult>(() => {}));
+    const read = l.cmd('files.read', { appSessionId: APP, path: NOTES });
+    await answered(read);
+    l.link.lose();
+    expect(await answered(read)).toBe(PENDING);
+  });
+});
+
 describe('the read’s pages (decision 4; R3, R4)', () => {
   it('reads a file of three pages, each an act on one channel, into the one answer the page asked for, outside and named from the pages', async () => {
     const l = lab();
