@@ -87,7 +87,7 @@ function lab(options: { owner?: boolean | null; farOwner?: boolean | null } = {}
 
 const refused: CallResult = { ok: false, error: { code: 'internal', message: REFUSAL } };
 const keyed = (extra: Record<string, unknown> = {}) => ({ appSessionId: APP, path: NOTES, offset: 0, length: 4096, named: true, ...extra });
-const actsOf = (link: FakeLink) => link.acts.map((act) => ({ action: act.request.action, args: act.request.args, oneChannel: act.request.oneChannel === true, requires: act.request.requires }));
+const actsOf = (link: FakeLink) => link.acts.map((act) => ({ action: act.request.action, args: act.request.args as Record<string, unknown>, oneChannel: act.request.oneChannel === true, requires: act.request.requires }));
 
 describe('a keyed read to a machine whose build does not list the capability (decision 5 (i))', () => {
   it('sends one files.read holding neither named, agent, raw nor open, and no act; a file inside the folders is answered as it is', async () => {
