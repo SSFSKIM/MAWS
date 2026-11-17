@@ -428,7 +428,7 @@ describe('every composed form, recalled by ↑ and sent, keeps the framing of it
     // person's words here type the second comment's quote again, before it
     {
       form: 'a message of several comments, the first’s words typing the second’s quote again before it',
-      sent: commentsMessage([{ anchor: added, text: quotedComment(added, 'First quote', 'My duplicate:\n`Second quote`', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'Second quote', 'Explain the second.', 'a1b2'), screenshot: false }], 'main'),
+      sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, 'My duplicate:\n`Second quote`', 'a1b2'), screenshot: false }, { anchor: removed, text: quotedComment(removed, 'Second quote', 'Explain the second.', 'a1b2'), screenshot: false }], 'main'),
       recalled: { kept: true },
     },
     { form: 'a comment whose words type its own quote again', sent: commentsMessage([{ anchor: added, text: quotedComment(added, MODEL, `Is \`${MODEL}\` safe?\n\`${MODEL}\``, 'a1b2'), screenshot: false }], 'main'), recalled: { kept: true } },
