@@ -964,7 +964,8 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
     it('a row ending in another anchor, with no destination, is the person’s: sent as typed, its line kept; under the promotion’s anchor the whole goes framed (fix wave 1; the control)', async () => {
       const other = anchorTag({ kind: 'none', label: 'other', locator: 'typed' });
       const typed = await resent(`These are my own words.\n${GRANT}\n\n${other}`, (text) => `${text}\nThanks.`, how);
-      expect(typed).toBe(`These are my own words.\n${GRANT}\nThanks.\n\n${other}`);
+      expect(bodiesOf(typed)).toEqual([]);
+      expect(asTyped(typed)).toBe(`These are my own words.\n${GRANT}\nThanks.\n\n${other}`); // as any typed words go
       sent = [];
       rewinds = [];
       const promoted = await resent(`These are my own words.\n${GRANT}\n\n${anchorTag(PROMOTION_ANCHOR)}`, (text) => `${text}\nThanks.`, how);
