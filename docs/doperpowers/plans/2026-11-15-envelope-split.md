@@ -152,7 +152,7 @@ No reader of a message's content is in `src/main`, in the attention services or 
 
 16. **One scene.** `e2e/composer.spec.ts`, beside "U4b, a waiting answer" (M3).
 
-17. **The split reads the person's part again until a reading takes nothing out.** One reading can leave a part that still holds a whole envelope: where an envelope's lines stand inside another envelope's text, the reader bounds the outer one out at the inner one's opening line, takes the inner one, and what is left pairs into the outer one. `splitPersonsMessage` therefore reads the part it would return again, and returns only parts that hold no whole envelope beside other content. It ends because every reading that takes something out shortens the part by at least an envelope. So a producer of this build, the window's ingest of an older host's raw message, and the ingest of this build's own events give the same events in the same order, and the split of any event it returned is that event (ruling B's exception, met inside the one function).
+17. **The split reads the person's part again until a reading takes nothing out** (at most 16 times, since ruling 4 of 2026-11-16; a text over the bound is left whole). One reading can leave a part that still holds a whole envelope: where an envelope's lines stand inside another envelope's text, the reader bounds the outer one out at the inner one's opening line, takes the inner one, and what is left pairs into the outer one. `splitPersonsMessage` therefore reads the part it would return again, and returns only parts that hold no whole envelope beside other content. It ends because every reading that takes something out shortens the part by at least an envelope. So a producer of this build, the window's ingest of an older host's raw message, and the ingest of this build's own events give the same events in the same order, and the split of any event it returned is that event (ruling B's exception, met inside the one function).
 
 ## Ruled by the architect (2026-11-15)
 
@@ -435,13 +435,18 @@ What must exist at the end, by name. An executor who needs to change a name or a
     export function envelopeSlices<T>(
       text: string,
       opening: (askId: string) => string,       // the writer's whole first line: `askSteerOpening`
-      pasted: RegExp,                            // a pasted segment, global: `PASTED_BLOCK`
+      pasted: (lines: readonly string[]) => boolean[], // the marking of a pasted segment's lines: `pastedBodies` (revised 2026-11-16, the rule R re-merge)
       read: (slice: string) => T | null,         // a whole slice, read or refused
+      maxChecks: number,                         // the cap of `read` calls a text: `MAX_ENVELOPE_CHECKS` (64); over it, { members: [], rest: text }
     ): { members: { text: string; read: T }[]; rest: string };
+
+    /** The one re-reading loop (decision 17): `slice` called until a reading takes nothing out, at most 16 times; a text whose
+     *  16th reading still takes an envelope is left whole, `{ own: text, envelopes: [] }`. It uses its arguments alone. */
+    export function takeEnvelopesOut(text: string, slice: (part: string) => { members: { text: string }[]; rest: string }): { own: string; envelopes: string[] };
 
     export function readAnswerEnvelopes(text: string): { envelopes: AskSteer[]; rest: string };   // unchanged
 
-`readAnswerEnvelopes` is `envelopeSlices` with `askSteerOpening`, `PASTED_BLOCK` and `parseAskSteer`, its members' `read` as `envelopes`; its answer keeps the shape it has (the review's second finding). Its rules are U4b's, word for word. A caller that needs a member's bytes calls `envelopeSlices` itself: `personsParts`, and `personsText`, which answers a consent as before, else one `answer` per member, its `summary` the member's text.
+`readAnswerEnvelopes` is `envelopeSlices` with `askSteerOpening`, `pastedBodies`, `parseAskSteer` and `MAX_ENVELOPE_CHECKS` (until 2026-11-16, `PASTED_BLOCK`), its members' `read` as `envelopes`; its answer keeps the shape it has (the review's second finding). Its rules are U4b's, word for word. A caller that needs a member's bytes calls `envelopeSlices` itself: `personsParts`, and `personsText`, which answers a consent as before, else one `answer` per member, its `summary` the member's text.
 
 ### C. The split (`src/shared/engine/persons-message.ts`, new, M1)
 
@@ -493,7 +498,7 @@ In the reducer's `user.message` case, for a message that is not synthetic, befor
 
 ### F. The search text's worker (`src/engine-host/fs/search-text.ts`, M3)
 
-The worker's source gains `askSteerOpening`, `PASTED_BLOCK`, `answeredBlock`, `envelopeSlices`, `answerOutsideTranscript` and the backfill's `parseBash` (its shell rows skipped exactly as the backfill skips them; the panel's ruling), each interpolated from its own source, and its `blocksOf` reads a `user` row with no origin object or of origin `human` through them (M3's decision). The reader's answer, the page's shape and the checkpoint do not change.
+The worker's source gains `ASK_STEER_OPENING` (as JSON), `askSteerOpening`, `answeredBlock`, `pastedBodies`, `MAX_ENVELOPE_CHECKS`, `envelopeSlices`, `takeEnvelopesOut`, `answerOutsideTranscript` and the backfill's `parseBash` (since the rule R re-merge of 2026-11-16; `PASTED_BLOCK` no longer; `WORKER` is exported for the guard that holds each copy to its source) (its shell rows skipped exactly as the backfill skips them; the panel's ruling), each interpolated from its own source, and its `blocksOf` reads a `user` row with no origin object or of origin `human` through them (M3's decision). The reader's answer, the page's shape and the checkpoint do not change.
 
 ### G. The preview, the title and the Rename dialog (M3)
 
@@ -629,7 +634,7 @@ Found while reading the code for this document.
   - *The new form through the split:* the cases use the real `askSteerText`, each with a choice, a text answer, a skipped answer and a note. They cover an envelope alone, the person's words and an envelope, an answer, a grant and an answer again, and two envelopes. The split and the exact reader read the new form as the earlier one. `recordAskSteer` records what the capsule needs, and the capsule's labels still come through the one application of `askAnswersFromSteer` in the ask row's derivation. A typed text answer that holds the consent sentence makes no grant through the split (U1c's Decision Log 56).
   - *The orphan:* the rule of "Reported to the architect", C(1), is pinned in both forms: an orphan is drawn only when it is the first event of its message. A lone orphan envelope still draws its raw text in a bubble and opens a turn as a prompt, which is master's drawing. This document does not rule otherwise, so it is left and stated for the architect.
   - *The scenes:* by reading, this landing's scene, U4b's restaged scene and U1c's S1 to S3 each draw what they expect, and none is restated. This landing's scene gains a comment: the host now writes the new form while the replayed joined line keeps the probe's earlier form.
-- **2026-11-16 (UTC) · The architect's ruling on the cascade reviews' MEDIUM (A, A2, A3), and the fix wave** (`694afa1d7`..`447af8c8b`). (the architect's message 3822 approved A as an amendment of the bound rule kept from U4b, with conditions A2 and A3.)
+- **STRUCK 2026-11-16 (UTC), by the architect's ruling 2 of the rule R re-merge (entry below):** with rule R carrying the security, the reading past the bound only redraws forged earlier-form envelopes, at up to nine times the work, so A and A3 are dropped, and A2 goes under ruling 1. What follows is kept as the record of what was built and then removed. ~~**2026-11-16 (UTC) · The architect's ruling on the cascade reviews' MEDIUM (A, A2, A3), and the fix wave**~~ (`694afa1d7`..`447af8c8b`). (the architect's message 3822 approved A as an amendment of the bound rule kept from U4b, with conditions A2 and A3.)
   - **A.** It amends the bound rule kept from U4b. Where a reading with the bound takes nothing, `envelopeSlices` reads once past it: the shortest slice from an opening line outside a pasted segment that the check of a whole slice takes, inner opening lines ignored, tried from the last opening line to the first, one taken per reading. `takeEnvelopesOut` repeats until a reading takes nothing, so bounded readings always run first. This keeps three things, each pinned:
     1. decision 17's nested case is unchanged;
     2. a later valid member is never swallowed, whether for the same ask or another;
@@ -641,6 +646,47 @@ Found while reading the code for this document.
   - **The rest of the wave.**
     - The guard skips definition sites and drops its three allowances that went unused; its parse list is unchanged.
     - The Minors: `TAGGED_ENVELOPE` is of the earlier form; `grants.test.ts`'s nested half runs on the earlier form only; tracker row 906 names (c5); a stale comment is fixed; the typed-answer case is marked as pinning the writer only.
+
+- **2026-11-16 (UTC) · The rule R re-merge, and the architect's rulings 1 to 3** (merge `869596b21` of `origin/ux-wave/U6b-2` at `5d78d2d23b9c341c40d8b917f950b6ccb2d6f2da` over `cac4f5e75`; fix `8e743aa69`). `WIRE_MINOR` 53 stands.
+  - *Ruling 1:* rule R is the one reader of grants on every route (the queue's gate, the live route, the file route), and it reads the WHOLE joined text of a message, never the part the split hands on. A tolerant reader placed before a fail-closed test is itself a reader of text that a model partly wrote. The chain's `personsLines(text, work)` and `personsGrants(text)` stand as merged. Gone: this landing's `personsGrants(content)` built on the split, `holdsEnvelopeOpening` (A2) and its use in `stack.ts`, and `ownLines` and `pastedLines`. `keysIn` is back to `personsGrants(messageText(content))`.
+  - *Ruling 2: the line above that records the architect's approval of A, A2 and A3 is STRUCK.* The reading past the bound (A) and its cap `PAST_THE_BOUND_OPENINGS` (A3) are dropped. The reason: with rule R carrying the security, the fallback only redraws forged earlier-form envelopes, at up to nine times the work. A2 goes under ruling 1. Their tests are dropped or restated to rule R's reading (the merge's report lists each).
+  - *Ruling 3:* the split (`takeEnvelopesOut`, `envelopeSlices`, the worker's copy) decides only which words are drawn and searched as the person's and which as MAWS's answers. No decision about a grant, or about a save outside a session's folders, depends on it. The callers are listed in the wave's entry below.
+  - *Interfaces B revised, and why* (the plan executor's resolution of the slicer hunk, accepted by the architect). The chain's slicer added two bounds: a cap of 64 `read` checks per text (`MAX_ENVELOPE_CHECKS`), and rule R's linear marking of pasted lines (`pastedBodies`), which replaces the quadratic regex. Keeping both inside ONE argument-pure slicer needed the marking and the cap passed in. The other choices were a second copy of `pastedBodies`, or two slicers that could draw and search differently, which is the drift this ticket removes. `envelopeSlices(text, opening, pasted: (lines) => boolean[], read, maxChecks)` returns `{ members: [], rest: text }` over the cap. `pastedBodies` is self-contained, with its tags inside it. `readAnswerEnvelopesWithCost` is the slicer with a counting `read` and a counting marking, so the chain's bound tests stand unedited. The architect's conditions:
+    - one definition of the paste tags, held by the new guard `src/shared/composer/pasted-tags.test.ts` over `framePasted`, neutralise/restore, `named.ts`'s `PASTE_OPENING` and `sessions.ts`'s `OPEN_PASTED`, with `PASTED_BLOCK` held by rule R's seeded case;
+    - rule R's marking tests unedited and passing (`arrival.test.ts` 113, `ask-strict.test.ts` 6).
+  - *Interfaces F:* the worker interpolates `ASK_STEER_OPENING` (as JSON), `askSteerOpening`, `answeredBlock`, `pastedBodies`, `MAX_ENVELOPE_CHECKS`, `envelopeSlices`, `takeEnvelopesOut`, `answerOutsideTranscript` and `parseBash`. `PASTED_BLOCK` is no longer interpolated.
+  - *The merge's decisions:*
+    1. `grantOf` (the stack) reads the whole-text sentence, the chain's form (its Decision Log 44), accepted by the architect. A waiting entry that holds answer, consent, answer therefore shows no grant row, while the gate and the handed row read the grant (ruling 5 pins it).
+    2. The worker interpolates `ASK_STEER_OPENING`, keeping U6e's one constant.
+    3. `readAnswerEnvelopesWithCost` counts by `counted(parseAskSteer)`, so the guard needs no new allowance.
+    4. `personsText` reads answers block by block through the split, and grants on the whole joined text (`messageText`).
+- **2026-11-16 (UTC) · The wave after the rule R re-merge: the architect's rulings 4 to 8** (`b5a16702e`..`5e80b6a1b`).
+  - *Ruling 4:* `takeEnvelopesOut` reads at most 16 passes. The bound is a literal inside the loop, so the worker keeps it, and a count of the slicer's calls pins it (red `b5a16702e`, change `041bd7826`). A text whose 16th pass still takes an envelope is left whole: it draws as the person's one message with its envelopes as text, and no answer is read from it. It is left whole rather than partly read for three reasons:
+    - it matches the slicer's cap;
+    - no answer is recorded from a text the reader gave up on;
+    - the result does not depend on how far the reading got.
+
+    The work per text is at most 16 × `MAX_ENVELOPE_CHECKS` checks. No recording nests envelopes; a join the writer made needs one pass plus the empty one.
+  - *Ruling 5:* the message of an answer, a grant and an answer again, in one row and in its second form, is pinned in both envelope forms (`38fc518df`).
+    - The queue's gate, the live route and the file route agree: each reads the grant in this build's form and none in an earlier build's.
+    - The stack's handed row reads "You approved …". Its waiting rows (next, after, uncertain, sending) read no grant and no answer, and draw the whole message. This is the merge's decision 1, accepted as the chain's form: `grantOf` reads the whole-text sentence and is not changed.
+    - The tracker holds ONE row for the message (`35510e098`): the chain's copy, rewritten. The stale duplicate and this landing's false "closed by ticket 704" copy are removed. Its Closed cell names the routes' agreement, and the row stays open for the stack's rows alone.
+    - The row carries the architect's sentence of fact: since the link above this one, what the composer sends holds no line that reads as a consent outside a pasted segment, so a waiting entry of this shape can only be hand-made content that did not pass the composer.
+  - *Ruling 6:* one definition of the opening-line test, kept by a guard rather than a shared predicate; a predicate would change Interfaces B's signature and would still need interpolating. The guard is in `search-text.test.ts`:
+    - it holds the worker's copy of every interpolated reader function to its own source;
+    - it holds three literals of the tag to `ASK_STEER_OPENING`: `envelopeSlices`' early return, `opens`' id pattern, and `answeredBlock`'s tag pattern.
+
+    `WORKER` is exported for it. Its bite was shown by five changes planted on the VM, each failing one case (`713cef779`, `5e80b6a1b`).
+  - *Ruling 7:* the earlier review's envelope names nothing for a save outside a session's folders (`rowClaim`: read only, `other: true`) and yields no grant. A control shows that the person's own linked words name the path (`3994856b1`).
+  - *Ruling 8:* the two reviews of the earlier fix wave, point by point.
+    - LOW 4's comments and LOW 6's three checks went with A, A2 and A3; their restated cases claim only the outcome.
+    - LOW 7's grant half no longer applies: rule R's forged input (a) reads no grant on the gate and on both routes.
+    - LOW 7's drawing half stands for hand-made text only, under U4b's shortest-slice rule, and is left.
+    - Two stale comments of the same class are restated (`3b2e36167`).
+  - *The callers of the split* (ruling 3): none decides a grant or a save outside a session's folders.
+    - `splitPersonsMessage`, `answerEnvelopeOf`, `readPersonsContent`, `personsParts`, `personsWords`, `envelopeSlices` and `takeEnvelopesOut` decide which events a message becomes, whether a message is one answer, and which words are drawn, searched, titled, previewed or prefilled.
+    - Every grant reader reads the whole joined text: `keysIn`, `personsText`'s grants, the host's `joinedMarks`, `grantOf`. `rowClaim` reads raw rows.
+    - The split shapes only where an already-read grant is drawn: the consent mark goes on the message's own row only when the person's part has no other words.
 
 ## Outcomes & Retrospective
 
