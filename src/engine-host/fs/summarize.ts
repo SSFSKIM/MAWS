@@ -4,6 +4,7 @@
 // window's cut edge is dropped), rather than scanned for byte needles, because 64 KiB parses in well under a
 // millisecond and a parsed record cannot be fooled by a value inside a torn line.
 import { basename } from 'node:path';
+import { asTyped } from '@shared/engine/grant';
 import type { MessageUuid, SessionId } from '@shared/graph/ids';
 import { isMadeUpFinalAnswer, isMessageTool, messageCallText } from '@shared/owner/message-call'; // P4-R7
 import { messageLine, previewLine } from '@shared/owner/preview';
@@ -61,7 +62,8 @@ export function summarize(
     // a relay's steer included, so it stands in only when the first prompt's record is cut by the head window, and
     // then its earliest copy the windows hold (debt wave 4). Ticket 704: the person's words of each, never MAWS's
     // answer envelope's: a copy with none left is passed over.
-    firstPrompt: firstUserText(headRecords) ?? firstLastPrompt([...headRecords, ...tailRecords]),
+    // UX wave U1c (the review round's R3): as typed, so a search for a word the title shows finds it
+    firstPrompt: nullable(asTyped, firstUserText(headRecords) ?? firstLastPrompt([...headRecords, ...tailRecords])),
     lastAssistantText: lastAssistant,
     // W9 (H2): the latest the windows hold; HEAD (a non-repository or a detached checkout) or empty is no branch
     gitBranch: branchName(firstString(tailReversed, 'gitBranch') ?? firstString(headReversed, 'gitBranch')),
@@ -222,6 +224,8 @@ function lastString(records: TranscriptRecord[], type: string, field: string): s
   }
   return null;
 }
+
+const nullable = (f: (text: string) => string, text: string | null): string | null => (text === null ? null : f(text));
 
 // The engine's head-scanning first-prompt extractor, reduced: skip tool results and meta records, cap at 200 characters.
 // Ticket 704: a person's row (no origin, or the person's: the row's form of the split's gate) titles with its words,

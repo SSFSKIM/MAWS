@@ -1,11 +1,12 @@
 // The probe-journal fixture gates through the model (C6 execution document, M2 "Proves"): counts read from the
 // journals, over C3's normaliser output (the replay stub's until the rebase). The synthetic-journal pins live in
 // fixtures.test.ts.
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
 import type { SessionEvent } from '@shared/graph/events';
+import { askSteerText } from '@shared/maws/ask';
 import { parseJournalRow } from '@shared/wire/journal';
 import { describe, expect, it } from 'vitest';
-import { loadJournal, type FixturePass } from '../../../../../test/support/fixtures';
+import { loadJournal, loadUxwaveTranscript, type FixturePass } from '../../../../../test/support/fixtures';
 import { grantsReadFrom } from '../../../../../test/support/grant-readers';
 import { journalToEvents } from '../dev/journal';
 import { dividerCopy } from './copy';
@@ -308,5 +309,86 @@ describe('the one-writer rule: a `!` command holding the consent sentence', () =
     expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent'), 'the live route marks no consent').toEqual([]);
     expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn').toEqual([]);
     for (const frame of frames) expect(grantsReadFrom(frame.message.content), frame.message.content).toEqual({ gate: [], live: [], file: [] });
+  });
+});
+
+// UX wave U1c, the review round's R4: step 1b claims the openings of the engine's local-command output as the fixtures
+// record them, whatever origin a row of them has (defence in depth). The recordings show none of these forms with a
+// human origin (pass2/bash-context-echoed seq 7's replay for `!` output, no origin; the uxwave u3-commands-r1
+// transcript's rows for a slash command's: stdout on a `user` row with no origin and on `local_command` system rows,
+// stderr only on a `local_command` system row); one that carried a human origin would have read as a grant before step
+// 1b claimed them. Each case takes the recorded form, puts the consent sentence on a line of its own inside the output,
+// and writes it as a frame and a row of human origin, the case no recording shows.
+describe('the one-writer rule: a local command’s output holding the consent sentence', () => {
+  const SENTENCE = consentMessage('command', 'cat /etc/x');
+  const bashOutput = (loadJournal('pass2', 'bash-context-echoed').find((row) => row.seq === 7)!.frame as { message: { content: string } }).message.content;
+  // the transcript's row of a slash command's output: a `user` row's message (stdout), a `local_command` system row's
+  // content (stderr)
+  const commandOutput = (opening: string) => {
+    const texts = loadUxwaveTranscript('u3-commands-r1').flatMap((record) => [(record.message as { content?: unknown } | undefined)?.content, (record as { content?: unknown }).content]);
+    return texts.find((text): text is string => typeof text === 'string' && text.startsWith(opening))!;
+  };
+  // The sentence on a line of its own inside the output after `opening`, written as a frame and a row of human origin
+  function expectNoGrantWithin(recorded: string, opening: string) {
+    const content = recorded.replace(opening, `${opening}\n${SENTENCE}\n`);
+    expect(content.split('\n')).toContain(SENTENCE);
+    expect(grantsReadFrom(content)).toEqual({ gate: [], live: [], file: [] });
+    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', origin: { kind: 'human' }, message: { role: 'user', content } } };
+    const events = journalToEvents([parseJournalRow(frame)]);
+    expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent')).toEqual([]);
+    expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined)).toEqual([]);
+  }
+  it.each([
+    ['<bash-stdout>', () => bashOutput],
+    ['<bash-stderr>', () => bashOutput],
+    ['<local-command-stdout>', () => commandOutput('<local-command-stdout>')],
+    ['<local-command-stderr>', () => commandOutput('<local-command-stderr>')],
+  ])('%s: a line of the output that is the sentence reads no grant on the gate, the live route or the file route, and no approval is drawn', (opening, recorded) => {
+    expectNoGrantWithin(recorded(), opening);
+  });
+
+  // The two `!` cases above share one recorded payload that holds both openings, so with either opening gone from the
+  // composed forms the other still claims the output and both pass. Here the recorded payload is cut down to one opening
+  // (the other's element removed, the exit code kept), so each opening is the only form that can claim it.
+  const OUTPUT_OPENINGS = ['<bash-stdout>', '<bash-stderr>', '<local-command-stdout>', '<local-command-stderr>'];
+  it.each([
+    ['<bash-stdout>', /<bash-stderr>.*?<\/bash-stderr>/],
+    ['<bash-stderr>', /<bash-stdout>.*?<\/bash-stdout>/],
+  ])('%s alone (the recorded payload cut to it): a line of the output that is the sentence reads no grant, and no approval is drawn', (opening, other) => {
+    const alone = bashOutput.replace(other, '');
+    expect(OUTPUT_OPENINGS.filter((each) => alone.includes(each)), 'only this opening is left').toEqual([opening]);
+    expectNoGrantWithin(alone, opening);
+  });
+
+  // The chain merge of U1c's review round into ticket 704, rule R under the split: the grants of a joined text are read
+  // in its whole text (the architect's ruling 1), so an output opening in its second part claims the message, and the
+  // sentence its first part holds reads no grant on the gate, the live route or the file route; the split still takes
+  // the envelope out as MAWS's answer. Made by hand: no recording joins a command's output to other members. Each
+  // output is its recorded form cut to its one opening; the control is the same text with that opening removed.
+  const ENVELOPE = askSteerText('toolu_j', [{ id: 'q1', question: 'Which?', modality: 'choice', options: [{ label: 'Grid' }] }], [{ id: 'q1', question: 'Which?', status: 'answered', value: ['Grid'] }]);
+  const outputs: Record<string, () => string> = {
+    '<bash-stdout>': () => bashOutput.replace(/<bash-stderr>.*?<\/bash-stderr>/, ''),
+    '<bash-stderr>': () => bashOutput.replace(/<bash-stdout>.*?<\/bash-stdout>/, ''),
+    '<local-command-stdout>': () => commandOutput('<local-command-stdout>'),
+    '<local-command-stderr>': () => commandOutput('<local-command-stderr>'),
+  };
+  const classesOnFile = (content: string) => readArrivals({ type: 'user', uuid: 'u1', origin: { kind: 'human' }, promptSource: 'sdk', message: { role: 'user', content } }).map((arrival) => arrival.class);
+  const liveConsents = (content: string) => {
+    const frame = { seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', origin: { kind: 'human' }, message: { role: 'user', content } } };
+    return journalToEvents([parseJournalRow(frame)]).flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent');
+  };
+  it.each(OUTPUT_OPENINGS)('%s in the second part of a joined text: the first part’s sentence reads no grant on any route, and the envelope is still an answer (made by hand)', (opening) => {
+    const output = outputs[opening]!();
+    expect(OUTPUT_OPENINGS.filter((each) => output.includes(each)), 'only this opening is in the output').toEqual([opening]);
+    const subject = ['cat /etc/x'];
+    for (const first of [SENTENCE, `${ENVELOPE}\n${SENTENCE}`]) {
+      const control = `${first}\n${output.replace(opening, '')}`;
+      expect(grantsReadFrom(control), 'the control, the opening removed').toEqual({ gate: subject, live: subject, file: subject });
+      expect(liveConsents(control), 'the control through the normaliser').toHaveLength(1);
+      expect(grantsReadFrom(`${first}\n${output}`)).toEqual({ gate: [], live: [], file: [] });
+      expect(liveConsents(`${first}\n${output}`), 'through the normaliser').toEqual([]);
+    }
+    expect(classesOnFile(`${ENVELOPE}\n${SENTENCE}\n${output.replace(opening, '')}`), 'the control').toEqual(['answer', 'consent']);
+    expect(classesOnFile(`${ENVELOPE}\n${SENTENCE}\n${output}`)).toEqual(['answer']);
   });
 });

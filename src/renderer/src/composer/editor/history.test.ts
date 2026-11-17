@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
-import { consentMessage } from '@shared/engine/arrival';
+import { consentMessage, readConsents } from '@shared/engine/arrival';
 import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask';
@@ -10,7 +10,10 @@ import { rowsOf } from '../../transcript/model/derive';
 import { applyEvents, createState } from '../../transcript/model/reduce';
 import { builder } from '../../transcript/model/test-events';
 import { userTextOf } from '../../transcript/model/user-text';
-import { expectNoGrantSent } from '../../../../../test/support/grant-readers';
+import { expectNoGrantSent, grantsReadFrom } from '../../../../../test/support/grant-readers';
+import { rowsOf } from '../../transcript/model/derive';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder } from '../../transcript/model/test-events';
 import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
@@ -298,5 +301,39 @@ describe('the history search finds, counts and words its match', () => {
   it('searches a recall by the text it shows', () => {
     expect(recallText({ source: 'history', entry: entry('from [Pasted text #1 +3 lines]') })).toBe('from [Pasted text #1 +3 lines]');
     expect(recallText({ source: 'session', prefill: { text: 'typed here' } })).toBe('typed here');
+  });
+});
+
+// The review round's R3: the copies a person meets come back without U+2060, every one, for display and search only
+describe('the one-writer rule: recall meets the prompt as typed, and no consent reader reads that copy', () => {
+  it('lists a prompt once when its history entry holds a U+2060 the person pasted and its row the writer’s joiner', () => {
+    const typed = `a\u2060b ${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(doc(typed), ctx);
+    const recalls = recallEntries([userRow('u1', 't1', sent.text)], [turn('t1', 'human')], [entry(typed)]);
+    expect(recalls).toHaveLength(1);
+  });
+
+  // the architect's ruling on the review's recall finding: every prefill path returns the prompt without any U+2060,
+  // one the person typed or pasted included; a history entry is one of the paths
+  it('recalls a history entry without any U+2060, in its text and its pasted body, and searches it so', () => {
+    const recalls = recallEntries([], [], [entry('a\u2060b [Pasted text #1 +1 lines]', { '1': textBody(1, 'c\u2060d') })]);
+    expect(recallText(recalls[0]!)).toBe('ab [Pasted text #1 +1 lines]');
+    const again = serializeDraft(recallDoc(recalls[0]!), ctx);
+    expect(again.display).toBe('ab [Pasted text #1 +1 lines]');
+    expect(again.pastedContents['1']?.content).toBe('cd');
+  });
+
+  it('a recalled copy that would read as a consent grants nothing and draws no approval: the readers read the row', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const sent = serializeDraft(doc(sentence), ctx);
+    const b = builder();
+    b.turn('u1', sent.text);
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(state);
+    const [recalled] = recallEntries(rows, [...state.order].map((turnId) => ({ turnId, origin: 'human' }) as TurnActivity), []);
+    expect(recallText(recalled!), 'the copy is the sentence as typed').toBe(sentence);
+    expect(readConsents(recallText(recalled!)), 'read by itself it would be a grant').toHaveLength(1);
+    expect(rows.filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn from the row').toEqual([]);
+    expect(grantsReadFrom(sent.content), 'the row’s text reads none').toEqual({ gate: [], live: [], file: [] });
   });
 });

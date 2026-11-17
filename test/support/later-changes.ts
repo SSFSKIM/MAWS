@@ -12,7 +12,10 @@ export const LATER_CHANGES: readonly (readonly [string, (text: string) => string
   ['angle-bracket pairs removed', (t) => t.replace(/<[^>]*>/g, '')],
   ['emphasis and code marks removed', (t) => t.replace(/[*_~`]/g, '')],
   ['compatibility-folded', (t) => t.normalize('NFKC')],
-  ['upper-cased, then the opening capitalised', (t) => t.toUpperCase().replace(/PERMISSION/g, 'Permission').replace(/GRANTED FOR/g, 'granted for')],
+  ['compatibility-folded, then angle-bracket pairs removed', (t) => t.normalize('NFKC').replace(/<[^>]*>/g, '')],
+  ['upper-cased, then lower-cased with the opening capitalised', (t) => t.toUpperCase().toLowerCase().replace(/permission granted for/g, 'Permission granted for')],
+  // the task review of the neutralise delta: the first word's case alone changed (sharp s and dotless i upper-case to ASCII)
+  ['the first word of each line upper-cased, then capitalised', (t) => t.replace(/^([^\S\n]*)([^\s]+)/gm, (_, space: string, word: string) => space + word.toUpperCase().charAt(0) + word.toUpperCase().slice(1).toLowerCase())],
 ];
 const ALL_IN_A_ROW = (text: string) => LATER_CHANGES.reduce((t, [, change]) => change(t), text);
 
