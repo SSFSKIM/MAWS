@@ -1225,9 +1225,11 @@ function* ownTexts(content: unknown, workPerChar = OWN_WORK_PER_CHAR, seen?: { m
       });
       if (read === null || read.destination === null) return none; // a tag the reader does not take: MAWS's form
       const { comments, destination } = read;
-      const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * n + 1, (work) => {
-        work.steps += ANCHOR_WRITE_WORK_PER_CHAR * n + 1;
-        return commentsMessage(comments, destination) === first && comments.every((comment) => !comment.text.includes(ANCHOR_TAG_OPENING));
+      // ticket 733a: the writer slots each anchor's fields and neutralises the whole, and is charged what it does
+      const whole = yield* inOneCall(m, ANCHOR_WRITE_WORK_PER_CHAR * Math.max(n, folded) + 1, (work) => {
+        const written = commentsMessage(comments, destination, work);
+        work.steps += 2 * (n + 1); // the compare, and the search of the comments' words for a tag
+        return written === first && comments.every((comment) => !comment.text.includes(ANCHOR_TAG_OPENING));
       });
       if (!whole) return none;
       parts = comments.map((comment) => comment.text);

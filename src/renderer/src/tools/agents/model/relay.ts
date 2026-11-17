@@ -6,6 +6,7 @@
 // `user.message` once the relay store follows the child (debt wave 4); a resumed child's receipt is its resume start.
 import type { SessionEvent } from '@shared/graph/events';
 import type { AgentId, AppSessionId, MessageUuid, ToolUseId } from '@shared/graph/ids';
+import { asTyped, NAME_LEFT_OUT, nameSlot, neutraliseGrant, quotesGrant } from '@shared/engine/grant'; // ticket 733a
 import { RELAY_CONTINUE } from '@shared/maws/relay-text'; // UX wave U6e: the one copy of the form's words the reader claims
 
 export type RelayState =
@@ -26,9 +27,27 @@ export const isPending = (state: RelayState) => state.kind === 'asked' || state.
 
 // R1 routed this wording first time in the idle, busy and foreground cases (verdict (1)). 2.1.283's `Agent` tool takes
 // no `name`, so the named clause fires only for a sidecar that carries one.
-export function relayText(agent: RelayTarget, text: string): string {
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3): an agent's name, and a peer's
+// name and address, are names a model or another session gave, so each goes by the name's rule: one line, and a name that
+// quotes the grant's opening is left out, its clause dropped (a peer is then named by its address). An address that
+// quotes the opening refuses the relay: null, which the store shows as the relay's failure (`RELAY_ADDRESS_REFUSED`). The
+// person's text is neither framed nor rewritten; the whole passes `neutraliseGrant`, as any text sent as theirs does.
+export function relayText(agent: AgentTarget, text: string): string;
+export function relayText(target: RelayTarget, text: string): string | null;
+export function relayText(agent: RelayTarget, text: string): string | null {
   if (isPeerTarget(agent)) return peerRelayText(agent, text); // E7
-  return `Relay to agent ${agent.agentId}${agent.name ? ` (named "${agent.name}")` : ''} with SendMessage, verbatim, ${RELAY_CONTINUE}${text}`;
+  const name = slotted(agent.name);
+  return neutraliseGrant(`Relay to agent ${agent.agentId}${name ? ` (named "${name}")` : ''} with SendMessage, verbatim, ${RELAY_CONTINUE}${text}`);
+}
+
+/** Ticket 733a (§E): why a relay to a peer whose address quotes the grant's opening is not sent. */
+export const RELAY_ADDRESS_REFUSED = "Can't relay to this session: its address reads as a permission grant";
+
+// A name by the name's rule, or null where it is left out (or there is none), its clause then not written
+function slotted(name: string | null): string | null {
+  if (!name) return null;
+  const slot = nameSlot(name);
+  return slot === NAME_LEFT_OUT ? null : slot;
 }
 
 // Ticket 733a (its document, Design 5 and §D): a relay's text read by its own form, as an edit of its row begins: one of
@@ -60,9 +79,11 @@ function textOf(content: string | { type: string; [key: string]: unknown }[]): s
 // (c): a child `user.message` carrying the text, any origin, live form or disk form (O3: so C4's tracked ask, surfacing
 // the `queued_command` attachment as a disk-form message, needs no change here); or the resume start of the agent whose
 // `prompt` carries it, the `agent-stopped` route's live receipt (relay-to-child.jsonl seq 548).
+// Ticket 733a: matched on the text as sent, which `neutraliseGrant` may have given a joiner: both sides are read as typed.
 export function matchesReceipt(event: SessionEvent, relay: Relay): boolean {
-  if (event.kind === 'user.message') return event.agentId === relay.agentId && textOf(event.content).includes(relay.text);
-  if (event.kind === 'subagent.started') return (event.taskId as string) === relay.agentId && (event.prompt ?? '').includes(relay.text);
+  const text = asTyped(relay.text);
+  if (event.kind === 'user.message') return event.agentId === relay.agentId && asTyped(textOf(event.content)).includes(text);
+  if (event.kind === 'subagent.started') return (event.taskId as string) === relay.agentId && asTyped(event.prompt ?? '').includes(text);
   return false;
 }
 
@@ -115,10 +136,13 @@ export interface PeerRelay {
 export const isPeerPending = (state: PeerRelayState) => state.kind === 'asked' || state.kind === 'forwarded';
 
 // M0 ran the reply wording verbatim on the first try (pass3/e7-peer-a seq 160 → 191).
-function peerRelayText(target: PeerTarget, text: string): string {
-  const tail = `with SendMessage, to: "${target.address}", sending exactly this text, ${RELAY_CONTINUE}${text}`;
-  if (target.mode === 'message') return `Send a message to ${target.name ?? target.address} ${tail}`;
-  return `Reply to the cross-session message from ${target.name ? `${target.name} (${target.address})` : target.address} ${tail}`;
+function peerRelayText(target: PeerTarget, text: string): string | null {
+  if (quotesGrant(target.address)) return null; // ticket 733a: no relay to such an address
+  const address = nameSlot(target.address);
+  const name = slotted(target.name);
+  const tail = `with SendMessage, to: "${address}", sending exactly this text, ${RELAY_CONTINUE}${text}`;
+  if (target.mode === 'message') return neutraliseGrant(`Send a message to ${name ?? address} ${tail}`);
+  return neutraliseGrant(`Reply to the cross-session message from ${name ? `${name} (${address})` : address} ${tail}`);
 }
 
 // The parent's own SendMessage to the address (or the sender's name) whose message carries the owner's text: the
@@ -127,7 +151,7 @@ function peerRelayText(target: PeerTarget, text: string): string {
 function matchesPeerSend(event: Extract<SessionEvent, { kind: 'tool.use' }>, target: PeerTarget, text: string): boolean {
   const input = (event.input ?? {}) as { message?: unknown; content?: unknown };
   const message = typeof input.message === 'string' ? input.message : typeof input.content === 'string' ? input.content : '';
-  return sendsToPeer(event, target) && text !== '' && message.includes(text);
+  return sendsToPeer(event, target) && text !== '' && asTyped(message).includes(asTyped(text)); // ticket 733a: as typed, as the receipt
 }
 
 // E11 W-D: the parent's own SendMessage to the address (or the sender's name), whatever it carries.

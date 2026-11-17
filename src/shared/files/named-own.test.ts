@@ -37,7 +37,7 @@ const readLinking = (() => {
   const read = JSON.parse(sent.read) as { markdown: string };
   return JSON.stringify({ ...read, markdown: `${read.markdown}\nSee ${LINK} for the schedule. ^n0tes001\n` }, null, 2);
 })();
-const attached = async (words: string) => (await withLinkedReads(words, async (_link, admit) => admit(readLinking))).content;
+const attached = async (words: string) => (await withLinkedReads(words, async (_link, admit) => admit(readLinking), 'ab12')).content;
 
 describe('the person’s own text: the linked read (the finding)', () => {
   it('the host attaches the read after the person’s words, as recorded', async () => {
@@ -62,8 +62,8 @@ describe('the person’s own text: what the engine host composes as the person�
   });
 
   it('the bash echo fails whole: a link in the output, and one in the typed command', () => {
-    expect(both(bashEcho('cat notes.md', `<bash-stdout>See ${LINK}</bash-stdout><bash-stderr></bash-stderr>`))).toEqual([OTHER, OTHER]);
-    expect(both(bashEcho(`echo ${LINK}`, '<bash-stdout></bash-stdout><bash-stderr></bash-stderr>'))).toEqual([OTHER, OTHER]);
+    expect(both(bashEcho('cat notes.md', `<bash-stdout>See ${LINK}</bash-stdout><bash-stderr></bash-stderr>`, 'ab12'))).toEqual([OTHER, OTHER]);
+    expect(both(bashEcho(`echo ${LINK}`, '<bash-stdout></bash-stdout><bash-stderr></bash-stderr>', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 });
 
@@ -79,7 +79,7 @@ describe('the person’s own text: what the window composes around a model’s w
 
   it('a relay to an agent or a peer: the whole instruction, the person’s words in it included', () => {
     const agent = relayText({ agentId: 'a1b2c3' as AgentId, name: null }, `Read ${LINK}`);
-    const peer = relayText({ kind: 'peer', address: 'session:7ef6ac00', name: null, mode: 'message' }, `Read ${LINK}`);
+    const peer = relayText({ kind: 'peer', address: 'session:7ef6ac00', name: null, mode: 'message' }, `Read ${LINK}`)!;
     expect([...both(agent), ...both(peer)]).toEqual([OTHER, OTHER, OTHER, OTHER]);
   });
 });

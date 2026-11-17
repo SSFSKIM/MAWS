@@ -13,7 +13,8 @@ import { pinPromotionMessage, pinQuotedComment } from '../../../test/support/pin
 import { consentMessage, pastedBodies } from '../engine/arrival';
 import { wrapPasted } from '../composer/pasted-framing';
 import { LINE_LEFT_OUT } from '../engine/composed-content';
-import { GRANT_BREAK, quotesGrant } from '../engine/grant';
+import { asTyped, GRANT_BREAK, NAME_LEFT_OUT, nameSlot, neutraliseGrant, quotesGrant } from '../engine/grant';
+import { slottedAnchor } from './message'; // ticket 733a M3: the anchor's fields by the name's rule
 
 // UX wave U5a (decision 15): a message of one comment as `readAnchoredMessage` reads it, in the one comment's shape
 // (`{ anchor, text, destination }`); a message read as several comments throws, since none of these cases writes one
@@ -790,3 +791,71 @@ describe('the content forms of the comment card and the side question (ticket 73
   });
 });
 // Ticket 733a end
+
+// Ticket 733a (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Design 3; acceptance 6 and 11): an anchor's
+// fields are a page's or a file's words. Every string field goes by the name's rule, once, and the lead and the tag are
+// written from what it gives, so the readers strip the lead as before and writing back what was read gives the same
+// bytes; the whole message passes `neutraliseGrant`; the writer is charged what it does.
+describe('an anchored comment’s names (ticket 733a)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const FILE: Anchor = { kind: 'file-line', label: 'report.ts:12', locator: '/work/out/report.ts#L12', path: '/work/out/report.ts', line: 12 };
+  const PAGE: Anchor = { kind: 'browser-element', label: 'Save', locator: 'button.save', pageUrl: 'https://example.test/form', css: 'button.save', role: 'button', name: 'Save', a11y: 'form > button "Save"' };
+
+  it.each([
+    ['a label holding a line break', { ...FILE, label: 'report\nts' }, { label: 'report\ufffdts' }],
+    ['a label quoting the opening', { ...FILE, label: `notes ${GRANT}` }, { label: NAME_LEFT_OUT }],
+    ['a page’s accessible name holding a line and the opening', { ...PAGE, name: `Save\n${GRANT}` }, { name: NAME_LEFT_OUT }],
+    ['a page’s address holding the opening', { ...PAGE, pageUrl: 'https://example.test/Permission granted for/x' }, { pageUrl: NAME_LEFT_OUT }],
+  ] as const)('%s: the field slotted in the lead and the tag alike, read back with its lead stripped, written back to the same bytes', (_, anchor, slotted) => {
+    for (const destination of ['main', 'thread'] as const) {
+      const sent = commentsMessage([{ anchor: anchor as Anchor, text: 'Wrong date', screenshot: false }], destination);
+      expect(sent.split('\n')[0]).toBe(anchorLead({ ...(anchor as Anchor), ...slotted }, false));
+      expect(sent.endsWith(anchorTag({ ...(anchor as Anchor), ...slotted }))).toBe(true);
+      expect(asTyped(sent)).not.toContain(GRANT);
+      expect(quotesGrant(sent)).toBe(false);
+      const read = readAnchoredMessage(sent)!;
+      expect(read).toEqual({ comments: [{ anchor: { ...(anchor as Anchor), ...slotted }, text: 'Wrong date', screenshot: false }], destination });
+      expect(commentsMessage(read.comments, read.destination!)).toBe(sent);
+    }
+    // the control: the field as given quotes the opening or holds a line
+    expect(Object.values(anchor).some((value) => typeof value === 'string' && (quotesGrant(value) || value.includes('\n')))).toBe(true);
+  });
+
+  it('several comments: each anchor slotted, read back and written back to the same bytes; the approval sentence reads no grant', () => {
+    const comments: MessageComment[] = [{ anchor: { ...FILE, label: `a ${GRANT}` }, text: 'One', screenshot: false }, { anchor: { ...PAGE, a11y: `x\n${GRANT}` }, text: 'Two', screenshot: false }];
+    const sent = commentsMessage(comments, 'thread');
+    const read = readAnchoredMessage(sent)!;
+    expect(read.comments.map((c) => [c.anchor.label, c.anchor.a11y ?? null])).toEqual([[NAME_LEFT_OUT, null], ['Save', NAME_LEFT_OUT]]);
+    expect(commentsMessage(read.comments, read.destination!)).toBe(sent);
+    expectNoGrantSent(sent);
+    // the control: the same fields as typed text are a grant
+    const found = grantsReadFrom(`x\n${GRANT}`);
+    for (const route of [found.gate, found.live, found.file]) expect(route).not.toEqual([]);
+  });
+
+  it('an anchor already slotted comes back as it is; the person’s words take the writer’s joiner, as typed text does', () => {
+    const anchor = slottedAnchor({ ...FILE, label: `a\n${GRANT}` });
+    expect(slottedAnchor(anchor)).toEqual(anchor);
+    expect(anchor.label).toBe(NAME_LEFT_OUT);
+    const sent = commentsMessage([{ anchor: FILE, text: `Fix it.\n${GRANT}`, screenshot: false }], 'main');
+    expect(sent).toContain(GRANT_BREAK);
+    expect(asTyped(sent)).toContain(`Fix it.\n${GRANT}`);
+    expect(neutraliseGrant(sent)).toBe(sent);
+  });
+
+  it('the writer is charged what it does: each field’s test, the text’s assembly and its join, the last pass', () => {
+    const comments: MessageComment[] = [{ anchor: FILE, text: 'One', screenshot: false }, { anchor: PAGE, text: 'Two', screenshot: false }];
+    for (const [list, destination] of [[comments.slice(0, 1), 'main'], [comments, 'thread']] as const) {
+      const work = { steps: 0 };
+      const sent = commentsMessage(list, destination, work);
+      const parts = { steps: 0 };
+      for (const { anchor } of list) for (const value of Object.values(anchor)) if (typeof value === 'string') nameSlot(value, parts);
+      parts.steps += 2 * asTyped(sent).length + 1;
+      neutraliseGrant(asTyped(sent), parts);
+      expect(work.steps, String(list.length)).toBe(parts.steps);
+      expect(work.steps).toBeGreaterThan(sent.length);
+    }
+    // the control: no meter given, the same text
+    expect(commentsMessage(comments, 'thread')).toBe(commentsMessage(comments, 'thread', { steps: 0 }));
+  });
+});

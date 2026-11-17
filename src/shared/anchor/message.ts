@@ -8,7 +8,7 @@ import { AnchorSchema, type Anchor, type AnchorBox /* E4d */ } from './anchor';
 import type { ArtifactKind } from '../artifacts/entity'; // P3-C
 import { wrapPasted } from '../composer/pasted-framing'; // ticket 733a
 import { leaveOutGrant, segmentsInPlace, takeSegment, type Range } from '../engine/composed-content'; // ticket 733a
-import { neutraliseGrant } from '../engine/grant'; // ticket 733a
+import { nameSlot, neutraliseGrant } from '../engine/grant'; // ticket 733a
 
 export type Destination = 'thread' | 'main';
 
@@ -105,9 +105,29 @@ export function anchorTag(anchor: Anchor): string {
   return `${ANCHOR_TAG_OPENING}${attributes.join('')}/>`;
 }
 
-export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }): string {
-  const { anchor, text, destination, screenshot } = input;
-  return `${anchorLead(anchor, screenshot)}\n${commentWords(text)}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+/**
+ * Ticket 733a (its document, Design 3): an anchor's fields are a page's or a file's words, so each string field goes by
+ * the name's rule (`nameSlot`), once, here, and the lead and the tag are both written from what it gives: the readers
+ * regenerate the lead from the tag's anchor, so they strip it as before, and a field already slotted comes back as it
+ * is, so writing back what was read gives the same bytes. `work`, when given, is charged each field's test.
+ */
+export function slottedAnchor(anchor: Anchor, work?: { steps: number }): Anchor {
+  const out: Record<string, unknown> = {};
+  for (const [field, value] of Object.entries(anchor)) out[field] = typeof value === 'string' ? nameSlot(value, work) : value;
+  return out as Anchor;
+}
+
+/**
+ * One comment's message: its lead, its words, the preamble for a thread, and its tag. Ticket 733a: the anchor by
+ * `slottedAnchor`, and the whole text through `neutraliseGrant`, as any text sent as the person's; `work`, when given,
+ * is charged what it does (the fields' tests, the text's assembly, the last pass), for the own-text rule's meter.
+ */
+export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }, work?: { steps: number }): string {
+  const { text, destination, screenshot } = input;
+  const anchor = slottedAnchor(input.anchor, work);
+  const message = `${anchorLead(anchor, screenshot)}\n${commentWords(text)}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+  if (work) work.steps += 2 * message.length + 1; // its parts written, then joined
+  return neutraliseGrant(message, work);
 }
 
 // Ticket 733a (its document, Designs 3 and 4): a comment's words as a message carries them, trimmed; words that begin
@@ -232,15 +252,22 @@ const ESCAPED = /^\\+<maws_anchor/; // a line the reader takes one backslash off
 const escapeLine = (line: string) => (ESCAPED_OR_NOT.test(line) ? `\\${line}` : line);
 const unescapeLine = (line: string) => (ESCAPED.test(line) ? line.slice(1) : line);
 
-/** The text of one message carrying `comments` (1 to 20), oldest first. */
-export function commentsMessage(comments: readonly MessageComment[], destination: Destination): string {
+/**
+ * The text of one message carrying `comments` (1 to 20), oldest first. Ticket 733a: each anchor by `slottedAnchor`, the
+ * whole through `neutraliseGrant`; `work`, when given, is charged what it does (the fields' tests, the blocks' assembly
+ * and their join, the last pass), the count the own-text rule's meter takes for its reconstruction.
+ */
+export function commentsMessage(comments: readonly MessageComment[], destination: Destination, work?: { steps: number }): string {
   if (comments.length < 1 || comments.length > MESSAGE_COMMENTS_MAX) throw new RangeError(`a message carries 1 to ${MESSAGE_COMMENTS_MAX} comments, not ${comments.length}`);
-  if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination });
-  const blocks = comments.map(({ anchor, text, screenshot }, index) => {
+  if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination }, work);
+  const blocks = comments.map(({ anchor: given, text, screenshot }, index) => {
+    const anchor = slottedAnchor(given, work);
     const preamble = destination === 'thread' && index === comments.length - 1 ? `\n\n${SIDE_THREAD_PREAMBLE_MANY}` : '';
     return `${anchorLead(anchor, screenshot)}\n${commentWords(text).split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
   });
-  return [framingLine(comments.length), ...blocks].join('\n\n');
+  const message = [framingLine(comments.length), ...blocks].join('\n\n');
+  if (work) work.steps += 2 * message.length + 1; // the blocks written, then joined
+  return neutraliseGrant(message, work);
 }
 
 /**
