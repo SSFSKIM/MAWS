@@ -161,7 +161,7 @@ describe('quotesGrant reads the composer writer’s shapes too (ticket 733a)', (
     expect(quotesGrant(text.replace('for', 'fur'))).toBe(false);
   });
 
-  it('a seeded differential: nothing true at the pin is false now, and now is the pin's reading or the writer's', () => {
+  it('a seeded differential: nothing true at the pin is false now, and now is the pin’s reading or the writer’s', () => {
     const next = random(733);
     let atPin = 0;
     let added = 0;
