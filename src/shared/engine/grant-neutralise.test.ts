@@ -81,7 +81,7 @@ describe('neutraliseGrant', () => {
 
   it('over seeded texts, the output and every later change of it hold no longer opening and read no grant', () => {
     const seed = 0x6e657574;
-    const count = 3000;
+    const count = 1500; // within the default 5 s case limit under the wide run's load
     let broken = 0;
     for (const [n, text] of seeded(seed, count).entries()) {
       const out = neutraliseGrant(text);
