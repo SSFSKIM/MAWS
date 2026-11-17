@@ -798,9 +798,11 @@ describe('files service listing: what git ignores', () => {
     });
 
     it('refuses the listing, and runs no git, under the substitution at before-ignored', async () => {
+      const warned = vi.spyOn(console, 'warn').mockImplementation(() => {});
       points['before-ignored'] = substitute;
       await expect(service({ ignored: check().names }).list({ appSessionId: A, path: inRoot('via', 'listed') })).rejects.toThrow(OUT);
       expect(calls).toEqual([]);
+      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the folder or its repository changed before git ran/)]); // naming no folder
     });
 
     it('refuses the listing under the same substitution once the names were read, with no check', async () => {

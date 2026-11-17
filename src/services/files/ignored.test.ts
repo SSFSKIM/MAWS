@@ -393,7 +393,7 @@ describe('where git runs', () => {
     expect(sorted(await answer)).toEqual(['a.log']);
   });
 
-  it('gives no answer and asks git nothing for the asks of a repository whose .git was replaced between the walk and the run, beside a repository that answers', async () => {
+  it('gives no answer and asks git nothing more for the asks of a repository whose .git was replaced after their walk, beside a repository that answers', async () => {
     const repo = fakeRepo('kept');
     const control = fakeRepo();
     const { execFile, pending, made, reached } = heldRuns();
@@ -406,8 +406,8 @@ describe('where git runs', () => {
     mkdirSync(join(repo, '.git'));
     const answered = check.names(control, ['b.log']);
     await drain(pending, [seed, late, answered]);
-    expect([sorted(await seed), await late, sorted(await answered)]).toEqual([['s.log'], null, ['b.log']]);
-    expect(made.filter((run) => run.directory === repo)).toHaveLength(2); // the seed's two calls, and none for the late ask
+    expect([await seed, await late, sorted(await answered)]).toEqual([null, null, ['b.log']]); // the seed's run too, from its next call
+    expect(made.filter((run) => run.directory === repo).map((run) => run.args[1])).toEqual(['ls-files']); // the seed's first call, made before the replacement, and no other
   });
 });
 
@@ -633,6 +633,7 @@ describe('the bound and the places', () => {
       expect(calls).toBe(1); // the runner gave the run up at 2,500, but its child has not closed: the place is still held
       close(children[0]!);
       await vi.advanceTimersByTimeAsync(0);
+      await settle(); // the next run confirms its folder on the disk before its call
       expect(calls).toBe(2); // the place is free once the child closed
       const disposed = check.dispose();
       expect(await second).toBeNull();
