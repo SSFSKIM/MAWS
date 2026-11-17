@@ -110,7 +110,7 @@ export const recallDoc = (recall: Recall): ComposerDoc => (recall.source === 'se
 export const recallLine = (index: number, count: number): string => `History ${count - index}/${count} · ↓ to restore your draft`;
 
 // The text a search reads in a recall: what the box shows for it, its placeholders included.
-export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : recall.entry.display);
+export const recallText = (recall: Recall): string => (recall.source === 'session' ? recall.prefill.text : asTyped(recall.entry.display)); // UX wave U1c: as typed
 
 const holds = (text: string, query: string) => text.toLowerCase().includes(query.toLowerCase());
 

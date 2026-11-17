@@ -65,10 +65,11 @@ const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string, 
   text: body,
 });
 
+// UX wave U1c: as typed (`asTyped`), as every prefill path is: no U+2060 comes back, one the person typed included
 export function historyEntryToDoc(entry: HistoryEntry): ComposerDoc {
-  return textToDoc(entry.display, (placeholder) => {
+  return textToDoc(asTyped(entry.display), (placeholder) => {
     const body = placeholder.kind === 'pasted' ? entry.pastedContents[String(placeholder.n)] : undefined;
-    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, body.content) : unavailable(placeholder);
+    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, asTyped(body.content)) : unavailable(placeholder);
   });
 }
 
