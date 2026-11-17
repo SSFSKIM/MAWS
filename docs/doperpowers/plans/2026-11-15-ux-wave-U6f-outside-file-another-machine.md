@@ -178,14 +178,12 @@ Each names what it beat. The numbers are cited as "decision N". The exact shapes
 
 ## The cards
 
-**Answered.** The architect put the four cards to the owner, who answered each on 2026-11-15 with the option this document builds. Recorded as the architect gave them, the card's heading and the answer verbatim (Decision Log 7):
+**Answered.** The architect put the four cards to the owner, who answered each on 2026-11-15 with the option this document builds. Recorded as they were put, each card's question, its options and the answer verbatim (the links to pictures, which are outside the repository, are left out; Decision Log 7, 14):
 
-| card | the heading it was put under | the owner's answer | date |
-|---|---|---|---|
-| 1 | "Chooser" | "One folder at a time (Recommended)" | 2026-11-15 |
-| 2 | "Start folder" | "That machine's home (Recommended)" | 2026-11-15 |
-| 3 | "Hidden files" | "Shown, after the others (Recommended)" | 2026-11-15 |
-| 4 | "Non-owners" | "Owners only for now (Recommended)" | 2026-11-15 |
+- **Card "Chooser".** Question: "“Open File…” for a chat that runs on another machine cannot use the Mac's own file chooser, which only shows this Mac. What should MAWS show in its place?" Options: "One folder at a time (Recommended)"; "A path field only"; "Columns, like Finder". Answer: "One folder at a time (Recommended)".
+- **Card "Start folder".** Question: "When “Open File…” opens its chooser for a chat on another machine, which folder should it show first? (No picture: the chooser looks the same either way.)" Options: "That machine's home (Recommended)"; "The session's working folder". Answer: "That machine's home (Recommended)".
+- **Card "Hidden files".** Question: "In MAWS's file chooser for another machine, should files and folders whose names begin with a dot (a shell profile, .env, .gitconfig, .git) be shown? The Mac's own chooser hides them until you press ⇧⌘. ." Options: "Shown, after the others (Recommended)"; "Hidden until a switch". Answer: "Shown, after the others (Recommended)".
+- **Card "Non-owners".** Question: "Earlier you answered that files outside a session's folders on another machine can be opened and edited by whoever may use a terminal there. For a person who was granted terminal use on a machine they do not own, the machine asks a Touch ID confirmation for every single act. The design review measured what that means: one confirmation per 256 KB of a file being opened, one per folder the chooser shows, one per choice and one per save. (You own your machines, so you are never asked.) What should MAWS offer such a person for now?" Options: "Owners only for now (Recommended)"; "Each act confirmed". Answer: "Owners only for now (Recommended)".
 
 So the chooser is built as Card 1's first option draws it, starts in the other machine's home, shows hidden names after the others of their kind, and this build offers the outside acts to the machine's owners alone; the optional section for a member with a terminal grant is not built. Each card stands below as it was written, with the question as drafted for the owner, its options and the one place its answer lives.
 
@@ -1015,7 +1013,7 @@ For the session that keeps master, which writes entry 277 at this landing. Entry
 
 7. **2026-11-15 · The owner's answers on the four cards** (from the architect, who put the cards; each card's heading and the answer verbatim). "Chooser": "One folder at a time (Recommended)". "Start folder": "That machine's home (Recommended)". "Hidden files": "Shown, after the others (Recommended)". "Non-owners": "Owners only for now (Recommended)". Each is the option this document builds, so no place of a card moves; the optional section for a member with a terminal grant is not built (constraint 14). "The cards".
 
-8. **2026-11-17 (recorded; UTC) · Revision 2 approved.** The session that keeps master approved the document at revision 2 (`a211428ae`) as written, on all seven points the architect put to it, as the architect reports.
+8. **2026-11-15T06:50Z (the date corrected by Decision Log 13) · Revision 2 approved.** The session that keeps master approved the document at revision 2 (`a211428ae`) as written, on all seven points the architect put to it, as the architect reports.
 
 9. **2026-11-17 (UTC) · The pre-build re-check.** The chain head `ux-wave/U5b-2` at `bdbfe863e` (master `77af813a4` plus the eight landings in review; U6e whole, U6b-1 and U6b-2 as built) was merged into the branch at `b630ad08e`, with no conflict; the parent pin moved to that master, and the build stands on the chain head. The 21 statements were read against the merged code: 11 hold, 10 are restated in place, and five things the tree holds that revision 2 did not know are added as rows 22 to 26 ("Statements read again on the merged tree"). None of the eight conditions' tests changes. Restated without a ruling, as the architect allowed: a refused read's sentence drawn as it is; the read-only cases in the built "Read-only" button and panel, whose "Open File…" opens the chooser for a session there; `isAppPage(client, appUrl)`; `files.readOutside`'s input without `raw`; `writeOutside`'s refusal of a remote caller with no claim as a refusal M1 adds; the committed tables' file names; the cross-build scene's peer told by a mark in its source; the guard of who sends as the person among the guards a milestone runs.
 
@@ -1026,6 +1024,12 @@ For the session that keeps master, which writes entry 277 at this landing. Entry
 12. **2026-11-17 (UTC) · Three requirements of the architect, written in.** (a) "What P5's Decision Log 237 changes, and what stays" names, in one place, the sentences of 237 this landing changes, what each says today and must say after, and what stays, for the session that keeps master to write entry 277 from; the charter is not edited by this branch. (b) The wire's minor and the link's are stand-ins one above the tree's (54 and 1.17 in the tree; one landing before this one takes wire 55), each in a commit of its own, retaken at each chain merge (Concrete Steps 7). (c) The pull request's body is the short form the owner chose on 2026-11-17: the proof, what differs from the plan, what is left over ("The pull request").
 
 The decisions as they stand are in "Decisions settled at authoring", each with what it beat. Entries below this line record what moves after.
+
+13. **2026-11-17T07:30Z · Decision Log 8's date** (the architect's dispatch of the build). Revision 2 was approved by the session that keeps master on 2026-11-15T06:50Z; entry 8 had it as recorded on 2026-11-17, and its heading now carries the approval's own date.
+
+14. **2026-11-17T07:30Z · The cards as put** (the architect's dispatch of the build). "The cards" recorded each card by the heading it was put under and its answer; it now holds the four questions as they were put to the owner on 2026-11-15, with their options and the answers, copied from the architect's record (the links to pictures left out). No answer moves, and every place of a card stands.
+
+15. **2026-11-17 (UTC) · The session that keeps master on the re-check** (from the architect's dispatch of the build). Both rulings of the re-check stand (Decision Log 10, decision 19 withdrawn; Decision Log 11, the frame's copy through the copy route's reader). The branch review's lens for the frame's read of another machine's session file is the high rung, where security decides (Decision Log 4's lens (a) for that route).
 
 ## Outcomes & Retrospective
 
