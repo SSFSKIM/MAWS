@@ -2813,7 +2813,7 @@ describe('files saves outside the folders', () => {
         const files = remoteService();
         for (const path of many) expect(await choose(files, path), path).toMatchObject({ status: 'granted' });
         expect([grants.has(A, many[0]!), grants.has(A, many[1]!), grants.has(A, many[256]!)]).toEqual([false, true, true]);
-      });
+      }, 20_000); // 257 choices, each a walk and a grants file written: about 4.5 s on the build VM, near the default 5 s
     });
 
     // Decision 10: the other machine's own record of each save and each choice made from another machine
