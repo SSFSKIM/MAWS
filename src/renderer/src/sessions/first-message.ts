@@ -31,7 +31,8 @@ export function messagePrefill(message: FirstMessage): Prefill {
   const blocks = base64Blocks(message.content).filter((b) => b.type === 'image');
   const images: NonNullable<Prefill['images']> = [];
   let text = asTyped(message.display); // UX wave U1c: as typed
-  const placeholders = parsePlaceholders(message.display).filter((p) => p.kind === 'image');
+  // found in the text they are cut from: a joiner the person typed before one would shift the display's offsets
+  const placeholders = parsePlaceholders(text).filter((p) => p.kind === 'image');
   // drop from the end so earlier offsets stay valid; each placeholder was joined to what precedes it with one space
   for (let i = Math.min(placeholders.length, blocks.length) - 1; i >= 0; i--) {
     const p = placeholders[i]!;
