@@ -51,9 +51,9 @@ which is the document's condition for that placement, computed from the numbers 
 | "zoom probe: the pin" | `e2e/browser-comment.spec.ts` | the card for the pick being drawn, and its caret naming the pick's position |
 | "(zoom probe) …" | `e2e/cross-build.spec.ts` | each launch's `s.ready(page)`; for the kill after a write, the write control's key in `Preferences` (bounded; "not established" when it never comes) |
 
-The cross-build probe names each build's page URL (by placeholder: `<this build>`, `<the peer>`) and whether it is
-this build's: a default-mode zoom is keyed by the whole file URL, so the peer's factor is P7 evidence only on the same
-URL. This build relaunched on the profile is the same-URL reading: the control in default mode (1.5 shows a kept zoom
+The cross-build probe names each build's page URL (by placeholder: `<this build>`, `<the peer>`) and whether its zoom
+key is this build's: a default-mode zoom of a file page is keyed by its whole URL less the fragment, query included,
+so the peer's factor is P7 evidence only on the same key, and the relaunch is a same-URL reading only on it. This build relaunched on the profile is the same-URL reading: the control in default mode (1.5 shows a kept zoom
 can be seen), P7's own observation in isolated mode. The forced exit at once is a labelled extra. The device box's
 ample room is taken by the separator, by the sheet as it stands, or by Expand surface; the menu's threshold needs a
 separator and is otherwise recorded as one sample, unestablished. The popup's two predictions go through

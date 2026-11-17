@@ -1365,7 +1365,9 @@ const appZoomOf = (run: Run) =>
     const wc = BrowserWindow.getAllWindows().find((w) => w.isVisible())!.webContents as Electron.WebContents & { getZoomMode?: () => string };
     return { factor: wc.getZoomFactor(), mode: typeof wc.getZoomMode === 'function' ? wc.getZoomMode() : null, url: wc.getURL() };
   });
-const pageOf = (url: string) => url.split(/[?#]/, 1)[0]!;
+// The key Chromium keeps a default-mode zoom of a hostless (file:) page under: its whole spec less the fragment, the
+// query kept (HostZoomMap's GetHostOrSpecFromURL, which Electron 44's zoom controller uses for the default mode).
+const zoomKeyOf = (url: string) => url.split('#', 1)[0]!;
 
 test('(zoom probe) the factor a build opens at, on a profile this build left at 150 % in isolated and in default zoom mode, by a quit, by a forced exit after a write, and by a forced exit at once', async () => {
   test.skip(!ZOOM_PROBE_ON, 'a probe of U6b-5b M1: runs only under MAWS_ZOOM_PROBE=1, on a Mac');
@@ -1434,13 +1436,18 @@ test('(zoom probe) the factor a build opens at, on a profile this build left at 
         await s.ready(again.page);
         const ours = await appZoomOf(again);
         await s.quit(again);
-        const peerMatches = pageOf(theirs.url) === pageOf(zoomed.url);
-        const sameUrl = pageOf(ours.url) === pageOf(zoomed.url);
-        const sameReading = mode === 'default' ? `the control (a kept default-mode zoom shows here): ${ours.factor === 1.5 ? 'established' : 'NOT established'}` : 'P7’s same-URL observation';
+        const peerMatches = zoomKeyOf(theirs.url) === zoomKeyOf(zoomed.url);
+        const sameUrl = zoomKeyOf(ours.url) === zoomKeyOf(zoomed.url);
+        // the relaunch is a same-URL reading only on the same zoom key; on another it is neither control nor evidence
+        const sameReading = !sameUrl
+          ? 'another zoom key: neither the control nor P7 evidence'
+          : mode === 'default'
+            ? `the control (a kept default-mode zoom shows here): ${ours.factor === 1.5 ? 'established' : 'NOT established'}`
+            : 'P7’s same-URL observation';
         say(
           `(zoom probe) ${mode} mode, ${exit}${established === true ? ' (the write control’s key was in Preferences)' : ''}: ${here.label} was at ${JSON.stringify({ factor: zoomed.factor, mode: zoomed.mode })} on ${zoomed.url}` +
-            `; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs.factor} on ${theirs.url}, ${peerMatches ? 'the same page URL' : 'another page URL: not P7 evidence'}` +
-            `; ${here.label} relaunched opened at ${ours.factor} on ${sameUrl ? 'the same page URL' : `another page URL (${ours.url})`}, ${sameReading}` +
+            `; ${peer.label} (wire ${wireOf(peer)}) opened at ${theirs.factor} on ${theirs.url}, ${peerMatches ? 'the same zoom key' : 'another zoom key: not P7 evidence'}` +
+            `; ${here.label} relaunched opened at ${ours.factor} on ${sameUrl ? 'the same zoom key' : ours.url}, ${sameReading}` +
             `; Preferences' zoom keys after ${here.label}'s run: ${JSON.stringify(prefsAfter)}`,
         );
       });

@@ -585,6 +585,8 @@ Found while this document was written and reviewed; each changed a decision abov
     - Paths: every printed record replaces the builds' roots, the scratch and the home folder by placeholders, and is refused if a path of the machine is left. `scrub.test.mjs` holds the harness's scrub to that, and `record` checks each probe line.
     - The placement map's running outside the e2e stands as accepted and is stated plainly. Decision Log 8's "inert" means only that nothing reads it.
 
+11. **2026-11-17 (UTC) · M1: the same-URL test compares Chromium's zoom key, which keeps the query.** For a hostless (`file:`) page in the default mode, Chromium keys the zoom by the whole spec less the fragment (Electron 44.4.5's zoom controller; `HostZoomMap`'s host-or-spec helper). The cross-build probe therefore compares the URLs with the query kept. On another key, the relaunch is labelled neither the control nor P7 evidence. This is the task review's finding on the second fix wave. Its other finding there, that `popupPlace` in the e2e duplicates `popupBounds`, is left as Decision Log 10 rules: extracting the pure clamp into a module both can load would edit U12's `popup.ts`, which M1 must not touch (it changes nothing of the product but the two seam additions). The architect decides whether M2 or M3 extracts it.
+
 ## Outcomes & Retrospective
 
 Pending — written at finish.
