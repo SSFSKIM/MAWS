@@ -138,7 +138,8 @@ async function findAndEnter(): Promise<void> {
   fireEvent.keyDown(field()!, { key: 'Enter' });
 }
 
-describe('Enter puts the keyboard in the file (S3; B5)', () => {
+// Each case waits on an editor's first drawing, which a loaded worker can take past a second, up to five each.
+describe('Enter puts the keyboard in the file (S3; B5)', { timeout: 20_000 }, () => {
   it('beside the chat, its read held: the keyboard is on the file’s body until the read lands, then in its text', async () => {
     const read = holdRead(APP);
     render(<Page />);
