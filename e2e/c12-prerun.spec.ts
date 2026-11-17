@@ -837,7 +837,7 @@ test('§10.4 one deep session: a relay to a running background child, Review wit
       const root = files.locator(`[role="treeitem"][data-kind="root"][data-path="${worktree}"]`);
       await expect(root).toBeVisible({ timeout: 15_000 });
       if ((await root.getAttribute('aria-expanded')) !== 'true') await root.click();
-      await files.locator(`[role="treeitem"][data-path="${worktree}/one.txt"]`).click();
+      await files.locator(`[role="treeitem"][data-kind][data-path="${worktree}/one.txt"]`).click(); // UX wave U6b-3a: the tree's row, not a Changed row of the path
       // UX wave U6b-1 (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): the file opens
       // beside the chat, as a tab of the side column; the session's tab and its composer stay in front in the main area
       await expect(panel(page).locator(`[data-file-viewer][data-path="${worktree}/one.txt"]`)).toBeVisible({ timeout: 15_000 });

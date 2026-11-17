@@ -7,11 +7,13 @@
 // is opened by writing it into layout.json and reloading (C5's restore path). UX wave U6b-1
 // (docs/doperpowers/plans/2026-11-14-ux-wave-U6b-1-file-beside-chat.md, Interfaces §G): a file a session opens is a tab of
 // its side column, beside the chat, with Files' tree at its left; the main strip gains a file tab only on ⌘-click.
+import { execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { expect, type Frame, type Locator, type Page } from '@playwright/test';
 import { slugOf } from '../src/engine-host/fs/paths';
+import { isolatedGitEnv } from '../test/support/git-env'; // UX wave U6b-3a: a conflict's stages written into the index
 import { ScratchRepo } from '../test/support/scratch-repo';
 import { StoreFixture } from '../test/support/store-fixture';
 import type { AppSessionId } from '../src/shared/graph/ids';
@@ -22,7 +24,7 @@ import {
   otherThemeColours, recordNotices, restoreWithTab, reveal, reviewSection, scrollIntoSection, sectionPaths, selectReviewFile, settledTop, shortWindow, sideFileTab, stackTop, toolbarLayout,
   treeRow, withProduct, type Product,
 } from './support/code-product';
-import { buildCodeScratch, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
+import { buildCodeScratch, CONFLICT_BLOCK, GENERATED_LINES, generatedLine, MARKER_LINE, SVG_TEXT, type CodeScratch } from './support/code-scratch';
 import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav, type Rgb } from './support/media-fixtures'; // UX wave U6b-2
 import { created } from './support/nothing-created'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
@@ -1329,7 +1331,13 @@ test.describe('the product in stub mode over a scratch repository', () => {
             // UX wave U6b-1: the scan covers the tree's column at the file's left and the preview tab's italic title
             await expect(p.panel.locator('[data-files-tree][data-place="beside"]')).toBeVisible();
             await expect(sideFileTab(p.page, basename(file))).toHaveAttribute('data-preview', 'true');
-            expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row beside ${file}, its tab the preview`).toEqual([]);
+            // UX wave U6b-3a: the scan covers the Changed group, a letter, a dot and an entry git ignores in the tree
+            await expect(p.panel.locator('[data-tool="files"] [data-files-changed]')).toBeVisible();
+            await expect(p.panel.locator('[data-tool="files"] [data-changed-row]').first()).toBeVisible();
+            await expect(treeRow(p, p.scratch.path('scratch.txt'))).toHaveAttribute('data-letter', 'U');
+            await expect(treeRow(p, p.scratch.path('src'))).toHaveAttribute('data-dot', 'M');
+            await expect(treeRow(p, p.scratch.path('big.log'))).toHaveAttribute('data-ignored', '');
+            expect(await otherThemeColours(p.page), `${theme}: the tree with a refused row, the Changed group and its marks beside ${file}, its tab the preview`).toEqual([]);
           }
           // UX wave U6b-2: the failure body and its button
           await sideFileTab(p.page, 'gone.pdf').getByRole('tab').click();
@@ -1340,6 +1348,9 @@ test.describe('the product in stub mode over a scratch repository', () => {
       },
       (scratch) => {
         mkdirSync(scratch.path('locked'), { mode: 0o000 });
+        // UX wave U6b-3a: an entry git ignores, by the repository's own exclude file, so no tracked file changes
+        mkdirSync(scratch.path('.git/info'), { recursive: true });
+        appendFileSync(scratch.path('.git/info/exclude'), '*.log\n');
         // UX wave U6b-2: a PDF the viewer can draw in place of the scratch's placeholder, and one to remove
         writeFileSync(scratch.path('doc.pdf'), minimalPdf());
         writeFileSync(scratch.path('gone.pdf'), minimalPdf());
@@ -1629,7 +1640,8 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
       // the Files tab in view (one group here, so one tree is drawn).
       const holding = (name: string) => sideColumn(page).locator(`[data-files-tab][data-file="${repo.path(name)}"]`);
       const preview = sideColumn(page).locator('[data-side-strip] [data-tab-id][data-preview="true"]');
-      const treeRowOf = (name: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-path="${repo.path(name)}"]`);
+      // UX wave U6b-3a (Decision Log 14, ruling 1): a tree row by its `data-kind`, which a Changed row of the same path lacks
+      const treeRowOf = (name: string) => sideColumn(page).locator(`[data-files-tab] [data-files-tree] [role="treeitem"][data-kind][data-path="${repo.path(name)}"]`);
       const titleOf = (name: string) => sideFileTab(page, name).getByRole('tab').getByText(name, { exact: true });
       const besideTheChat = async (name: string, by: string) => {
         await expect(holding(name).locator(`[data-file-viewer][data-path="${repo.path(name)}"]`), `${name} beside the chat, from ${by}`).toBeVisible({ timeout: 20_000 });
@@ -1695,5 +1707,226 @@ test.describe('UX wave U6b-1: a file opens beside the chat', () => {
       repo.dispose();
       await store.dispose();
     }
+  });
+});
+
+// ---- UX wave U6b-3a: Files shows what changed ------------------------------------------------------------------------
+// docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md (Interfaces §C and §F, scenes G1 and G2; acceptance B1
+// to B3). The stub-mode product over the scratch repository, reshaped before the launch so that git's status lists
+// exactly what a scene reads; every name in it is invented. Files draws a Changed group above the tree (its heading
+// `[data-files-changed]` with `data-count`; a row `[data-changed-row]` with `data-path` and `data-letter`), the letters
+// and dots on the tree's rows (`data-letter`, `data-dot`) and the entries git ignores muted (`data-ignored`); a tree row
+// is found by its `data-kind` (`treeRow`), which a Changed row does not carry. Each scene runs alone: it launches the
+// product over a repository of its own and reads nothing another scene left. No scene sleeps or reads a time: each
+// waits on the marker it then reads, under the ordinary timeout.
+
+const filesOf = (p: Product) => surface(p.page, 'files');
+const changedHeading = (p: Product) => filesOf(p).locator('[data-files-changed]');
+const changedRows = (p: Product) => filesOf(p).locator('[data-changed-row]');
+const changedRow = (p: Product, relative: string) => filesOf(p).locator(`[data-changed-row][data-path="${p.scratch.path(relative)}"]`);
+
+// The token an element is drawn in: the first of `TONES` whose colour is the element's computed `color`, else that colour
+// itself, so a failure says what was drawn.
+const TONES = ['--danger', '--warning', '--success', '--fg-muted', '--fg'];
+const drawnIn = (element: Locator) =>
+  element.evaluate((node, names) => {
+    const own = getComputedStyle(node).color;
+    const probe = document.createElement('span');
+    document.body.append(probe);
+    try {
+      for (const name of names) {
+        probe.style.color = `var(${name})`;
+        if (getComputedStyle(probe).color === own) return name;
+      }
+      return own;
+    } finally {
+      probe.remove();
+    }
+  }, TONES);
+// Decision 10 (R1): the token each letter is drawn in
+const LETTER_TOKEN = { M: '--warning', A: '--success', U: '--success', R: '--success', D: '--danger', '!': '--danger' } as const;
+// A measured box as a failure message prints it
+const boxText = (name: string, box: { x: number; y: number; width: number; height: number } | null) =>
+  box === null ? `${name}: not drawn` : `${name}: x ${Math.round(box.x)}, y ${Math.round(box.y)}, ${Math.round(box.width)} × ${Math.round(box.height)}`;
+
+// The three stages a merge leaves for a conflicted path (base, ours, theirs), written into the index with
+// `git update-index --index-info`, the working tree's file left as it is: `git status` then lists the path as unmerged
+// (UU), with its file on disk.
+function unmerged(scratch: CodeScratch, relative: string): void {
+  const git = (args: string[], input: string) => execFileSync('git', args, { cwd: scratch.dir, env: isolatedGitEnv(), input, encoding: 'utf8' }).trim();
+  const [base, ours, theirs] = [CONFLICT_BLOCK.base, CONFLICT_BLOCK.mine, CONFLICT_BLOCK.theirs].map((line) => git(['hash-object', '-w', '--stdin'], `${line}\n`));
+  git(['update-index', '--index-info'], [`0 ${'0'.repeat(40)}\t${relative}`, `100644 ${base} 1\t${relative}`, `100644 ${ours} 2\t${relative}`, `100644 ${theirs} 3\t${relative}`, ''].join('\n'));
+}
+
+// G1's repository: the scratch's own modified src/app.ts (M), staged src/staged.ts (A) and untracked scratch.txt (U), and
+// four more: README.md deleted from the working tree (D), notes/guide.md renamed in the index (R), the three stages of a
+// conflict on conflicts/merge.ts (!, its file still on disk) and a new folder of two files (one entry, U). The scratch's
+// other untracked entries (big.log, link-out) are removed. What git ignores is in the repository's own exclude file, so
+// that no tracked file changes: the folder build/ and the files *.bin, which name the untracked cache.bin and the tracked
+// data.bin, which stays plain (git never ignores a tracked file).
+const G1_ROWS = [
+  ['conflicts/merge.ts', '!', false],
+  ['README.md', 'D', false],
+  ['drafts', 'U', true],
+  ['notes/handbook.md', 'R', false],
+  ['scratch.txt', 'U', false],
+  ['src/app.ts', 'M', false],
+  ['src/staged.ts', 'A', false],
+] as const;
+function g1Repository(scratch: CodeScratch): void {
+  for (const name of ['big.log', 'link-out', 'README.md']) rmSync(scratch.path(name));
+  scratch.git('mv', 'notes/guide.md', 'notes/handbook.md');
+  unmerged(scratch, 'conflicts/merge.ts');
+  mkdirSync(scratch.path('drafts'));
+  writeFileSync(scratch.path('drafts/one.md'), '# An invented first draft\n');
+  writeFileSync(scratch.path('drafts/two.md'), '# An invented second draft\n');
+  mkdirSync(scratch.path('.git/info'), { recursive: true });
+  appendFileSync(scratch.path('.git/info/exclude'), 'build/\n*.bin\n');
+  mkdirSync(scratch.path('build'));
+  writeFileSync(scratch.path('build/out.js'), 'export const built = true;\n');
+  writeFileSync(scratch.path('cache.bin'), Buffer.from([0x00, 0x01, 0x02]));
+}
+
+// G2's repository: a committed .gitignore naming *.log, two files it ignores side by side (debug.log, trace.log), and the
+// scratch's big.log removed; the rest as the scratch leaves it (src/app.ts modified, src/staged.ts staged, scratch.txt and
+// link-out untracked).
+function g2Repository(scratch: CodeScratch): void {
+  rmSync(scratch.path('big.log'));
+  writeFileSync(scratch.path('.gitignore'), '*.log\n');
+  scratch.git('add', '.gitignore');
+  scratch.git('commit', '--quiet', '-m', 'An invented ignore file', '--', '.gitignore'); // that path alone: src/staged.ts stays staged
+  writeFileSync(scratch.path('debug.log'), 'An invented debug line.\n');
+  writeFileSync(scratch.path('trace.log'), 'An invented trace line.\n');
+}
+
+test.describe('UX wave U6b-3a: Files shows what changed', () => {
+  // G1 (B1, B2). Waits on the heading's `data-count="7"` before it reads a row; then reads the rows, their letters and
+  // tones and the tree's marks, each by its marker. After the folder's row, waits on that folder's tree row being open and
+  // selected; after the deleted row, on Review's chip and on the deleted file's section in view; after the modified row,
+  // on the file's viewer in its Files tab and the tab's preview mark. The heading's press waits on the rows' absence with
+  // the heading still there before it measures the tree under it, and a second press on the seven rows; Refresh is
+  // measured on the first root's row while the group is drawn. Each measured claim prints its boxes when it fails.
+  test('G1: the Changed group lists a modified, an added, an untracked, a deleted, a renamed and a conflicted file and an untracked folder with their letters; a click opens each where it should; the tree carries the letters, the dots and the muted entries', async () => {
+    await withProduct(async (p) => {
+      await addTool(p, 'Files');
+      const heading = changedHeading(p);
+      await expect(heading, 'the group drawn from the status, its count').toHaveAttribute('data-count', '7');
+      await expect(heading).toHaveText('Changed 7');
+      await expect(heading).toHaveAttribute('aria-expanded', 'true');
+      const listed = await changedRows(p).evaluateAll((rows) => rows.map((row) => [row.getAttribute('data-path'), row.getAttribute('data-letter'), row.hasAttribute('data-folder')]));
+      expect(listed, 'one row per entry with its letter, the conflict first, then by path').toEqual(G1_ROWS.map(([relative, letter, folder]) => [p.scratch.path(relative), letter, folder]));
+      for (const [relative, letter] of G1_ROWS) expect(await drawnIn(changedRow(p, relative).locator('[data-mark]')), `${relative}: ${letter} in its tone`).toBe(LETTER_TOKEN[letter]);
+
+      // the tree: a dot on each folder above a change in the weightiest change's tone, the letters, and what git ignores muted
+      const root = filesOf(p).locator('[role="treeitem"][data-kind="root"]');
+      await expect(root, 'the root: a dot, its weightiest change the conflict').toHaveAttribute('data-dot', '!');
+      expect(await drawnIn(root.locator('[data-mark]')), 'the root’s dot in the conflict’s tone').toBe('--danger');
+      await expect(treeRow(p, p.scratch.path('conflicts'))).toHaveAttribute('data-dot', '!');
+      await expect(treeRow(p, p.scratch.path('notes'))).toHaveAttribute('data-dot', 'R');
+      const drafts = treeRow(p, p.scratch.path('drafts'));
+      await expect(drafts, 'the untracked folder carries its own letter, no dot').toHaveAttribute('data-letter', 'U');
+      await expect(drafts).not.toHaveAttribute('data-dot');
+      await expect(treeRow(p, p.scratch.path('scratch.txt'))).toHaveAttribute('data-letter', 'U');
+      await expect(treeRow(p, p.scratch.path('README.md')), 'a deleted file has no row in the tree').toHaveCount(0);
+      for (const name of ['build', 'cache.bin']) {
+        const row = treeRow(p, p.scratch.path(name));
+        await expect(row, `${name}: git ignores it`).toHaveAttribute('data-ignored', '');
+        expect(await drawnIn(row.locator('[data-name]')), `${name}: its name muted`).toBe('--fg-muted');
+      }
+      const tracked = treeRow(p, p.scratch.path('data.bin'));
+      await expect(tracked).toBeVisible();
+      await expect(tracked, 'a tracked file a rule names is not ignored').not.toHaveAttribute('data-ignored');
+      expect(await drawnIn(tracked.locator('[data-name]')), 'data.bin: its name in the text colour').toBe('--fg');
+      const src = treeRow(p, p.scratch.path('src'));
+      await expect(src, 'src: a dot, its weightiest change the modified file').toHaveAttribute('data-dot', 'M');
+      expect(await drawnIn(src.locator('[data-mark]')), 'src’s dot in the modified tone').toBe('--warning');
+      const appRow = await reveal(p, 'src/app.ts');
+      await expect(appRow).toHaveAttribute('data-letter', 'M');
+      expect(await drawnIn(appRow.locator('[data-mark]')), 'src/app.ts: M in its tone').toBe('--warning');
+      await expect(treeRow(p, p.scratch.path('src/staged.ts'))).toHaveAttribute('data-letter', 'A');
+
+      // the folder's row: that folder opened and selected in the tree, and a file in it marked as the folder is
+      await changedRow(p, 'drafts').click();
+      await expect(drafts, 'drafts opened in the tree').toHaveAttribute('aria-expanded', 'true');
+      await expect(drafts, 'and selected').toHaveAttribute('aria-selected', 'true');
+      await expect(treeRow(p, p.scratch.path('drafts/one.md')), 'a file of the untracked folder').toHaveAttribute('data-letter', 'U');
+
+      // the deleted row: Review on Uncommitted at that file, and no file's tab
+      await changedRow(p, 'README.md').click();
+      const review = surface(p.page, 'review').locator('[data-review]');
+      await expect(review.locator('[data-chip="uncommitted"]'), 'Review on Uncommitted').toHaveAttribute('aria-pressed', 'true');
+      await expect(reviewSection(review, 'README.md'), 'at the deleted file’s section').toBeInViewport();
+      await expect(reviewSection(review, 'README.md')).toHaveAttribute('data-kind', 'deleted');
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${p.scratch.path('README.md')}"]`), 'no file’s tab for it').toHaveCount(0);
+
+      // back in Files: the heading folds the group to its one line, the tree rising under it, and opens it again
+      await openSurface(p.page, 'Files');
+      await heading.click();
+      await expect(heading).toHaveAttribute('aria-expanded', 'false');
+      await expect(changedRows(p), 'folded: no Changed row').toHaveCount(0);
+      await expect(heading, 'the heading and its count stay').toHaveText('Changed 7');
+      const [folded, under] = [await heading.boundingBox(), await root.boundingBox()];
+      expect(folded !== null && under !== null && Math.abs(under.y - (folded.y + folded.height)) <= 1, `the root’s row right under the folded heading: ${boxText('the heading', folded)}; ${boxText('the root’s row', under)}`).toBe(true);
+      await heading.click();
+      await expect(heading).toHaveAttribute('aria-expanded', 'true');
+      await expect(changedRows(p), 'open again: the seven rows').toHaveCount(7);
+
+      // Refresh stays on the first root's row, in its room at the row's end, with the group above it
+      const refresh = filesOf(p).getByRole('button', { name: 'Refresh', exact: true });
+      await expect(refresh).toHaveCount(1);
+      await expect(refresh).toBeVisible();
+      const [row, button] = [await root.boundingBox(), await refresh.boundingBox()];
+      const onRow = row !== null && button !== null && button.y >= row.y - 1 && button.y + button.height <= row.y + row.height + 1 && button.x >= row.x + row.width - 1;
+      expect(onRow, `Refresh on the first root’s row: ${boxText('the root’s row', row)}; ${boxText('Refresh', button)}; ${boxText('the heading', await heading.boundingBox())}`).toBe(true);
+
+      // the modified row: the file beside the chat in the session's preview tab; only the tree's row of it is selected
+      const app = p.scratch.path('src/app.ts');
+      await changedRow(p, 'src/app.ts').click();
+      await expect(sideColumn(p.page).locator(`[data-files-tab][data-file="${app}"] [data-file-viewer][data-path="${app}"]`), 'src/app.ts beside the chat').toBeVisible();
+      await expect(sideFileTab(p.page, 'app.ts'), 'in the preview tab').toHaveAttribute('data-preview', 'true');
+      await expect(treeRow(p, app), 'the tree’s row of the file in view selected').toHaveAttribute('aria-selected', 'true');
+      await expect(changedRow(p, 'src/app.ts'), 'its Changed row stays plain').toHaveAttribute('aria-selected', 'false');
+    }, g1Repository);
+  });
+
+  // G2 (B3). Waits on the first status's rows and the two ignored files' marks before it writes anything; after each act
+  // on the disk, on the row or attribute that act should bring or take away: notes/guide.md's row after its write, its
+  // absence after the restore with src/app.ts's row still there (the control); `data-ignored` on scratch.txt's tree row
+  // after the line added to .gitignore; debug.log's `data-letter="A"` and its `data-ignored` gone after `git add -f`,
+  // trace.log still muted beside it (the control). No act is made in the window between.
+  test('G2: the group and the dimming follow the disk: a write and its restore, a line added to .gitignore, an ignored file added to the index by force', async () => {
+    await withProduct(async (p) => {
+      await addTool(p, 'Files');
+      const control = changedRow(p, 'src/app.ts');
+      await expect(control, 'the group drawn from the first status').toHaveAttribute('data-letter', 'M');
+      for (const name of ['debug.log', 'trace.log']) await expect(treeRow(p, p.scratch.path(name)), `${name}: ignored at first`).toHaveAttribute('data-ignored', '');
+
+      // a file another process writes appears in the group, and goes once it is restored
+      const guide = p.scratch.path('notes/guide.md');
+      const committed = readFileSync(guide, 'utf8');
+      await expect(changedRow(p, 'notes/guide.md'), 'notes/guide.md clean at first').toHaveCount(0);
+      writeFileSync(guide, `${committed}An invented line another process wrote.\n`);
+      await expect(changedRow(p, 'notes/guide.md'), 'its row comes with no act in the window').toHaveAttribute('data-letter', 'M');
+      writeFileSync(guide, committed);
+      await expect(changedRow(p, 'notes/guide.md'), 'restored: its row goes').toHaveCount(0);
+      await expect(control, 'while another row stays').toBeVisible();
+
+      // a line added to .gitignore mutes the entry it names, with no Refresh
+      const scratchTxt = treeRow(p, p.scratch.path('scratch.txt'));
+      await expect(scratchTxt, 'scratch.txt untracked').toHaveAttribute('data-letter', 'U');
+      await expect(scratchTxt, 'and not ignored').not.toHaveAttribute('data-ignored');
+      appendFileSync(p.scratch.path('.gitignore'), 'scratch.txt\n');
+      await expect(scratchTxt, 'named by the new line: muted').toHaveAttribute('data-ignored', '');
+      await expect(changedRow(p, 'scratch.txt'), 'and gone from the group').toHaveCount(0);
+      await expect(scratchTxt, 'with no letter').not.toHaveAttribute('data-letter');
+
+      // an ignored file added to the index by force: A, and muted no longer; the ignored file beside it stays muted
+      p.scratch.git('add', '-f', 'debug.log');
+      const debug = treeRow(p, p.scratch.path('debug.log'));
+      await expect(debug, 'added by force: A').toHaveAttribute('data-letter', 'A');
+      await expect(debug, 'and no longer ignored').not.toHaveAttribute('data-ignored');
+      await expect(changedRow(p, 'debug.log')).toHaveAttribute('data-letter', 'A');
+      await expect(treeRow(p, p.scratch.path('trace.log')), 'trace.log still muted').toHaveAttribute('data-ignored', '');
+    }, g2Repository);
   });
 });

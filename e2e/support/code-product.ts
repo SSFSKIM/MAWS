@@ -133,7 +133,9 @@ export async function addTool({ page }: Product, name: 'Files' | 'Review'): Prom
   await openSurface(page, name);
 }
 
-export const treeRow = ({ page }: Product, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`);
+// UX wave U6b-3a (Decision Log 14, ruling 1): a tree row by its `data-kind`, which a row of the Changed group above the
+// tree, a `treeitem` with the same `data-path`, does not carry
+export const treeRow = ({ page }: Product, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`);
 
 // Files open, the repository's root expanded, and each directory on the way to `relative` expanded; then its row.
 export async function reveal(p: Product, relative: string): Promise<Locator> {

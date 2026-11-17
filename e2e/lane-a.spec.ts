@@ -482,7 +482,9 @@ test.describe('lane A: a terminal session driven through its bridge', () => {
     await drive(c);
     const before = await created(page, maws.userData, c.appId);
     await openSurface(page, 'Files');
-    const row = surface(page, 'files').locator(`[role="treeitem"][data-path="${path}"]`).first();
+    // UX wave U6b-3a (Decision Log 14, ruling 1): the tree's row by its `data-kind`; the new PDF's row in the Changed group
+    // above the tree has the same `data-path`, and `.first()` would take it
+    const row = surface(page, 'files').locator(`[role="treeitem"][data-kind][data-path="${path}"]`).first();
     await expect(row, 'the PDF in Files’ tree of the terminal session’s folder').toBeVisible({ timeout: 20_000 });
     await row.click();
     const viewer = sideColumn(page).locator(`[data-file-viewer][data-path="${path}"]`);

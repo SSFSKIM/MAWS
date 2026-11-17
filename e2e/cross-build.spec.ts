@@ -175,7 +175,7 @@ import { installUnitDaemon, type UnitDaemon } from './support/unit-daemon';
 import { REPO_ROOT } from './support/launch';
 import { addressed, localRef } from './support/address'; // U13a; UX wave U6e: localRef, a main file tab's machine
 import { menu } from './support/menu'; // U13a: Settings and the split
-import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
+import { activeMainTab, mainTabById, mainTabs, moveSideTab, openAppDestination, openArtifactInPanel, openSurface, pageRegion, pinSurfaceForSessions, sessionCard, sessionCards, sideColumn, sideGroup, sideTab, sideTabNames, settingsDialog, surface /* UX wave U6b-3a */, surfaceRow, unfoldSessionCard } from './support/shell'; // U13a; UX wave U8b: the side column's groups and tabs; UX wave U7b: the page and the dialog; U8c-2: unfoldSessionCard
 import { newChatIn, openProject, sidebarOf, sidebarRow } from './support/sidebar'; // U13a; UX wave U7a: sidebarOf; UX wave U5b: a new chat, the parent of a side thread
 import { answerOf, fitTo, refusedSample, sampleOf, samplesFor, type ProbeAnswer } from './support/cross-build-samples';
 import { endProfileProcesses, isAlive } from './support/processes';
@@ -1848,6 +1848,12 @@ test('(pre-O17 app, unit mawsd) the peer’s app over this build’s unit mawsd:
 //   |                                               |                                                       | answer without it". Both peers (F, M) run it       |
 //   | UX wave U5b-2: Review's and Source control's  | no new stored form; the reads, lineage and the        | no new stored form; the same block, below          |
 //   | view state stays in the window's memory       | commit's tag, below                                   |                                                    |
+//   | U6b-3a: nothing stored. On the wire (its      | (what changed, both ways), after its same-build       | the second half: the peer's app on this build's    |
+//   | minor 55 for now, a stand-in the chain's      | control: on the peer's mawsd this build's window      | mawsd lists the folder, shows the dirty submodule  |
+//   | merge takes again, Decision Log 13):          | lists the folder with nothing dimmed, draws the       | and then a second change in its own Review,        |
+//   | `files.list`'s entries' `ignored` and a       | dirty submodule as a file's row, and a second         | refuses no answer and no event, and its log names  |
+//   | status entry's `submodule`, in answers and    | change reaches the Changed group by the peer's        | both keys as dropped. Every peer the gate crosses  |
+//   | in `git.changed`                              | `git.changed`                                         | runs both halves: none is skipped                  |
 const keepsSets = (build: Build) => {
   const model = join(build.root ?? REPO_ROOT, 'src/renderer/src/stores/layout-model.ts');
   return existsSync(model) && readFileSync(model, 'utf8').includes('export function switchSet');
@@ -3642,7 +3648,14 @@ function filesBeside(s: Scratch, address: string): { id: string; file: string | 
   });
 }
 // Files' tree in this build's side column, a row of it clicked as a person clicks it
-const treeRow = (page: Page, name: string) => sideColumn(page).getByRole('treeitem', { name, exact: true });
+// UX wave U6b-3a (Decision Log 14, ruling 1): a Files tree row by its name, which ends with the row's state in this build
+// when the row carries a mark (a letter's word, "Contains changes", "Ignored by git"), and by its `data-kind`, which the
+// tree rows of every build carry and a row of this build's Changed group (a `treeitem` whose name also begins with the
+// file's) does not
+const ROW_STATES = ['Modified', 'Added', 'Untracked', 'Deleted', 'Renamed', 'Conflict', 'Contains changes', 'Ignored by git'];
+const namedRow = (scope: Locator, name: string) =>
+  scope.getByRole('treeitem', { name: new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}(?: (?:${ROW_STATES.join('|')}))*$`) }).and(scope.locator('[data-kind]'));
+const treeRow = (page: Page, name: string) => namedRow(sideColumn(page), name);
 async function addFilesTab(page: Page): Promise<void> {
   await sideGroup(page, 'upper').getByRole('button', { name: 'Add a tool', exact: true }).click();
   await page.getByRole('menuitem', { name: 'Files', exact: true }).click();
@@ -3726,7 +3739,7 @@ test('(files beside the chat, both ways) three files beside one chat and one bes
     const pinned = sideOf(s, address2).pinnedIds[0];
     await showSession(old.page, id, `session:${address}`);
     await showTool(old.page, 'Files');
-    await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'first.txt', exact: true }).click({ timeout: 20_000 });
+    await namedRow(toolBody(old.page, 'Files'), 'first.txt').click({ timeout: 20_000 }); // UX wave U6b-3a: a name with its state allowed
     await expect.poll(async () => mainFileIds(await stripIds(old.page)).some((tabId) => tabId.endsWith(`/${first}`)), { timeout: 20_000, message: `${peer.label} opens the first file as a main tab` }).toBe(true);
     await expect.poll(() => JSON.stringify(layoutJson(s)['main.tabs'] ?? null).includes(`/${first}`), { timeout: 20_000, message: `${peer.label} writes its main tab` }).toBe(true);
     expect(filesBeside(s, address).map((tab) => tab.file), `${peer.label} kept the first session's three tabs`).toEqual([third, other, first]);
@@ -4311,7 +4324,7 @@ test('(file frame, both ways) this build’s window on the peer’s unit mawsd d
       expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
       await showSession(old.page, id, `session:${address}`);
       await showTool(old.page, 'Files');
-      await toolBody(old.page, 'Files').getByRole('treeitem', { name: 'report.pdf', exact: true }).click({ timeout: 20_000 });
+      await namedRow(toolBody(old.page, 'Files'), 'report.pdf').click({ timeout: 20_000 }); // UX wave U6b-3a: a name with its state allowed
       const row = old.page.locator(`[data-file-viewer][data-path="${pdf}"] [data-external-row]`);
       await expect(row, `${peer.label}'s row, as it always drew it`).toContainText(PEER_ROW, { timeout: 20_000 });
       await expect(old.page.locator('iframe[src^="maws-artifact:"]'), `${peer.label} frames no file`).toHaveCount(0);
@@ -4645,5 +4658,173 @@ test('(a commit’s side thread, to the peer) a side thread this build opened fr
       await s.quit(run);
       record(said);
     });
+  });
+});
+
+// ---- UX wave U6b-3a: what changed, both ways (UC-14; B6) ---------------------------------------------------------------
+// U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, Interfaces §B and §F, scene G4; M3 decision 4)
+// stores nothing and adds two optional keys to what a daemon sends: `ignored: true` on an entry of `files.list`'s answer
+// that git ignores, and `submodule: true` on a status entry that is a submodule, in `git.watch`'s and `git.status`'s
+// answers and in the event `git.changed`. A daemon of an older build sends neither, so this build's window dims nothing
+// and draws a dirty submodule as a file's row; an older app's main drops both keys with its tolerant reader and logs each
+// once. The scene's repository holds an ignored folder with a file in it and a submodule (a second scratch repository
+// added from its path) whose working tree has a tracked file modified, dirty through all three steps; and three tracked
+// files committed clean, one per step, each the witness of that step's `git.changed`: its row is read as absent in the
+// surface already open, the file is written, and its row is waited on, with nothing shown, reopened or reloaded between,
+// so the row can only come by an event on the watch already held. Each daemon runs as the profile's unit (`withUnit`),
+// pinned by its pid and by `daemon.status`'s build against that build's out/main/mawsd.js before anything is read.
+//   (what changed, both ways)  the control: this build's app on this build's unit mawsd draws the submodule's Changed row
+//                              as a folder's and the ignored folder muted, and witness-control.txt's row comes. The first
+//                              half: on the peer's unit mawsd the same window draws the submodule's row as a file's and the
+//                              ignored folder plain, and witness-first.txt's row comes by the peer's `git.changed`; neither
+//                              main's log nor the peer's mawsd's refuses an answer or an event. The second half: the peer's
+//                              app on this build's unit mawsd lists the ignored folder in its tree, and its Review on
+//                              Uncommitted lists the submodule and then witness-second.txt with Review left as it was; its
+//                              logs refuse nothing, and its main names `ignored` dropped from files.list's output and
+//                              `submodule` dropped from the status, in an answer and in the event. Every peer the gate
+//                              crosses (build F, build M, master at b89d6d1d7 and the master this landing merges into)
+//                              lacks both keys and is an app this build's mawsd admits: no half has a reason not to run,
+//                              and the scene asserts that rather than annotating a half as not run.
+const knowsWhatChanged = (build: Build) => /\bignored: z\.literal\(true\)/.test(sourceOf(build, 'src/shared/ipc/schema/files.ts') ?? '') || /\bsubmodule: z\.literal\(true\)/.test(sourceOf(build, 'src/shared/ipc/schema/git.ts') ?? '');
+const knowsWhatChangedWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) knows files.list's ignored or a status entry's submodule: a build of U6b-3a or later; the runs of record cross build F, build M and the two masters the gate crosses, none of which knows them`;
+const XB_WITNESS = { control: 'witness-control.txt', first: 'witness-first.txt', second: 'witness-second.txt' } as const;
+// A refusal of what these commands and this event carry: the validation's words for an input or an answer
+// (src/shared/ipc/validate.ts) and a daemon's refusal to emit the event; main's own refusals are MAIN_REFUSES
+const CHANGED_REFUSED = /invalid (?:input for|output of) (?:files\.list|git\.(?:status|watch|unwatch))\b|refused to emit git\.changed/;
+// An older app's main's own lines for the two keys (`tolerantLog` in src/shared/ipc/tolerant.ts, written by
+// src/shared/host/host-supervisor.ts as `[hosts] dropped <path> from <what was read>, …`, the same in every peer)
+const DROPPED_IGNORED = /dropped \S*\bignored from the output of files\.list, a field this build does not know/;
+const DROPPED_SUBMODULE_ANSWER = /dropped \S*\bsubmodule from the output of git\.(?:watch|status), a field this build does not know/;
+const DROPPED_SUBMODULE_EVENT = /dropped \S*\bsubmodule from event git\.changed, a field this build does not know/;
+
+// The scene's repository, in the scratch's session folder: README.md, a .gitignore naming build/, the three witnesses and
+// the submodule `lib`, added from a second scratch repository's path (the file protocol allowed for that one command), all
+// committed; then build/out.txt written under the ignored folder and lib's tracked file modified, so that the outer status
+// lists `lib` alone, as a submodule whose working tree changed (porcelain v2's `sub` S.M.)
+function whatChangedRepo(s: Scratch): void {
+  const origin = join(s.root, 'lib-origin');
+  mkdirSync(origin);
+  writeFileSync(join(origin, 'lib.txt'), 'An invented library line.\n');
+  gitAt(origin, 'init', '-q');
+  gitAt(origin, 'add', '-A');
+  gitAt(origin, 'commit', '-q', '-m', 'An invented library');
+  writeFileSync(join(s.repo, 'README.md'), '# An invented project\n');
+  writeFileSync(join(s.repo, '.gitignore'), 'build/\n');
+  for (const name of Object.values(XB_WITNESS)) writeFileSync(join(s.repo, name), 'An invented witness, as committed.\n');
+  gitAt(s.repo, 'init', '-q');
+  gitAt(s.repo, '-c', 'protocol.file.allow=always', 'submodule', '--quiet', 'add', origin, 'lib');
+  gitAt(s.repo, 'add', '-A');
+  gitAt(s.repo, 'commit', '-q', '-m', 'An invented first commit');
+  mkdirSync(join(s.repo, 'build'));
+  writeFileSync(join(s.repo, 'build', 'out.txt'), 'An invented build output.\n');
+  writeFileSync(join(s.repo, 'lib', 'lib.txt'), 'An invented library line, changed in the working tree.\n');
+  expect(gitAt(s.repo, 'status', '--porcelain=v2').trim(), 'the outer status lists the dirty submodule alone').toMatch(/^1 \.M S\.M\. 160000 160000 160000 [0-9a-f]+ [0-9a-f]+ lib$/);
+}
+
+test('(what changed, both ways) after a same-build control, this build’s window on the peer’s unit mawsd lists the folder with nothing dimmed, draws the dirty submodule as a file’s row, and a second change reaches the Changed group; the peer’s app on this build’s unit mawsd lists the folder, shows the submodule and then a second change in its Review, refuses nothing, and its log names both keys dropped', async () => {
+  const { here, peer } = builds();
+  test.skip(knowsWhatChanged(peer), knowsWhatChangedWhy(peer));
+  test.skip(UNIT_SKIP !== null, UNIT_SKIP ?? '');
+  test.setTimeout(420_000);
+  await withScratch('xb-what-changed', async (s) => {
+    whatChangedRepo(s);
+    const said = [`${here.label} (wire ${wireOf(here)}) sends files.list's ignored and a status entry's submodule; ${peer.label} (wire ${wireOf(peer)}) knows neither`];
+    const lib = join(s.repo, 'lib');
+    const ignoredDir = join(s.repo, 'build');
+    const changedRowOf = (page: Page, path: string) => surface(page, 'files').locator(`[data-changed-row][data-path="${path}"]`);
+    const treeDirOf = (page: Page, path: string) => surface(page, 'files').locator(`[role="treeitem"][data-kind="dir"][data-path="${path}"]`);
+    const refusals = (text: string) => text.split('\n').filter((line) => CHANGED_REFUSED.test(line) || MAIN_REFUSES.test(line));
+    // A step's witness in this build's Files, open since the submodule's row was read: its Changed row absent, the file
+    // written, then its row
+    const witnessed = async (page: Page, name: string, step: string) => {
+      const row = changedRowOf(page, join(s.repo, name));
+      await expect(row, `${step}: ${name} clean, no row`).toHaveCount(0);
+      writeFileSync(join(s.repo, name), `An invented witness, changed in ${step}.\n`);
+      await expect(row, `${step}: ${name}'s row, by a git.changed on the watch already held`).toHaveAttribute('data-letter', 'M', { timeout: 30_000 });
+    };
+    let id = '' as AppSessionId;
+    let address = '';
+
+    // the control: this build's app on this build's unit mawsd
+    await withUnit(s, here, 'xb-what-changed-control', async (unit) => {
+      said.push(`  the control: ${here.label}'s app on its own unit mawsd, pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      id = await s.record(run.page);
+      address = await addressed(run.page, id);
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      const sub = changedRowOf(run.page, lib);
+      await expect(sub, 'the dirty submodule, a folder’s row: the status carries submodule and the window reads it').toHaveAttribute('data-folder', '', { timeout: 20_000 });
+      await expect(sub).toHaveAttribute('data-letter', 'M');
+      await expect(treeDirOf(run.page, ignoredDir), 'the ignored folder muted: the listing carries ignored').toHaveAttribute('data-ignored', '', { timeout: 20_000 });
+      await witnessed(run.page, XB_WITNESS.control, 'the control');
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing its mawsd sent`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the control: lib a folder's row, build/ muted, ${XB_WITNESS.control}'s row by git.changed`);
+      await s.quit(run);
+    });
+    await endProfileProcesses(s.userData);
+
+    // the first half: this build's app on the peer's unit mawsd
+    await withUnit(s, peer, 'xb-what-changed-peer', async (unit) => {
+      said.push(`  the first half: ${here.label}'s app on ${peer.label}'s unit mawsd (wire ${wireOf(peer)}), pid ${unit.pid}`);
+      const run = await s.launch({ MAWS_HOST_MODE: 'daemon' });
+      const status = await s.ready(run.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${peer.label}'s mawsd`).toBe(mawsdBuildOf(peer));
+      expect(run.output(), 'the build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(run.page, id, `session:${address}`);
+      await openSurface(run.page, 'Files');
+      const sub = changedRowOf(run.page, lib);
+      await expect(sub, 'the dirty submodule listed').toHaveAttribute('data-letter', 'M', { timeout: 20_000 });
+      await expect(sub, 'as a file’s row: the peer’s status carries no submodule').not.toHaveAttribute('data-folder');
+      const ignored = treeDirOf(run.page, ignoredDir);
+      await expect(ignored, 'the ignored folder listed').toBeVisible({ timeout: 20_000 });
+      await expect(ignored, 'and plain: the peer’s listing carries no ignored').not.toHaveAttribute('data-ignored');
+      await witnessed(run.page, XB_WITNESS.first, 'the first half');
+      expect(refusals(run.output()), `${here.label}'s main refuses nothing ${peer.label}'s mawsd sent`).toEqual([]);
+      expect(refusals(s.daemonLog()), `${peer.label}'s mawsd refuses nothing ${here.label} asked`).toEqual([]);
+      expect(run.maws.consoleErrors()).toEqual([]);
+      said.push(`  the first half: lib a file's row, build/ plain, ${XB_WITNESS.first}'s row by the peer's git.changed; no refusal in either log`);
+      await s.quit(run);
+    });
+    await endProfileProcesses(s.userData);
+
+    // the second half: the peer's app on this build's unit mawsd, which admits it (M3 decision 4)
+    expect(appObeysConnectors(peer), `${peer.label} (wire ${wireOf(peer)}) is an app ${here.label}'s mawsd admits: it lists ${CONNECTORS_CLIENT_CAPABILITY}`).toBe(true);
+    await withUnit(s, here, 'xb-what-changed-here', async (unit) => {
+      said.push(`  the second half: ${peer.label}'s app on ${here.label}'s unit mawsd (wire ${wireOf(here)}), pid ${unit.pid}`);
+      const old = await s.launch({ MAWS_HOST_MODE: 'daemon' }, peer.root);
+      const status = await s.ready(old.page, (st) => st.daemon?.pid === unit.pid, 60_000);
+      expect(status.daemon!.build.buildId, `served by ${here.label}'s mawsd`).toBe(mawsdBuildOf(here));
+      expect(old.output(), 'the peer’s build check leaves a unit of another bundle as it is').toContain('its unit runs another bundle, so it is left as it is');
+      await showSession(old.page, id, `session:${address}`);
+      await showTool(old.page, 'Files');
+      await expect(namedRow(toolBody(old.page, 'Files'), 'build'), `${peer.label}'s tree lists the ignored folder: the listing passed its reader`).toBeVisible({ timeout: 20_000 });
+      await showTool(old.page, 'Review');
+      const review = toolBody(old.page, 'Review');
+      const uncommitted = review.locator('[data-chip="uncommitted"]');
+      await expect(uncommitted).toBeVisible({ timeout: 20_000 });
+      if ((await uncommitted.getAttribute('aria-pressed')) !== 'true') await uncommitted.click();
+      await expect(uncommitted, `${peer.label}'s Review on Uncommitted`).toHaveAttribute('aria-pressed', 'true');
+      // the paths Review lists: the peer's list of files (an option's `data-path`), or a stack's sections in a later build
+      const listed = () => review.evaluate((root) => Array.from(root.querySelectorAll('[role="option"] [data-path], [data-review-stack] > [data-review-file]')).map((el) => el.getAttribute('data-path') ?? el.getAttribute('data-review-file') ?? ''));
+      await expect.poll(listed, { timeout: 20_000, message: `${peer.label}'s Review lists the submodule: the watch's answer passed its reader` }).toContain('lib');
+      expect(await listed(), `${XB_WITNESS.second} clean: not listed`).not.toContain(XB_WITNESS.second);
+      writeFileSync(join(s.repo, XB_WITNESS.second), 'An invented witness, changed in the second half.\n');
+      await expect.poll(listed, { timeout: 30_000, message: `${XB_WITNESS.second} listed with Review left as it was: a git.changed carrying submodule passed ${peer.label}'s event reader` }).toContain(XB_WITNESS.second);
+      // the logs: no refusal; the peer's main names both keys dropped, on both paths
+      const dropped = (line: RegExp) => old.output().split('\n').some((each) => line.test(each));
+      for (const [line, what] of [[DROPPED_IGNORED, 'ignored dropped from files.list’s output'], [DROPPED_SUBMODULE_ANSWER, 'submodule dropped from the status in an answer'], [DROPPED_SUBMODULE_EVENT, 'submodule dropped from the status in the event git.changed']] as const) {
+        await expect.poll(() => dropped(line), { timeout: 20_000, message: `${peer.label}'s main names ${what}` }).toBe(true);
+      }
+      expect(refusals(old.output()), `${peer.label}'s main refuses nothing ${here.label}'s mawsd sent`).toEqual([]);
+      expect(refusals(s.daemonLog()), `${here.label}'s mawsd refuses nothing ${peer.label} asked`).toEqual([]);
+      expect(old.maws.consoleErrors()).toEqual([]);
+      said.push(`  the second half: build/ in ${peer.label}'s tree; lib, then ${XB_WITNESS.second}, in its Review; its main dropped ignored and submodule (answer and event), refused nothing`);
+      await s.quit(old);
+    });
+    record(said);
   });
 });

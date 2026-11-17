@@ -3699,6 +3699,75 @@ test('U8c-2, a session MAWS runs on B whose agent moved: A’s card names the wo
   }
 });
 
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, §F, scene G3; acceptance B4): a
+// session MAWS runs on B, beside the U8c-2 scene. A's Files reads B's status and listings on B (`git.watch` and
+// `files.list` over the link, under B's checkout rule): the Changed group holds B's two changes, the tree carries their
+// letters and a dot on the root, and the folder B's git ignores is muted. B's checkout is made a repository before A
+// opens the session, so the first watch A holds of it (the session's cards, then Files) is answered with a status. With B
+// stopped the group and the tree stay as they were and Files draws no error. Waits on the heading's count and on the
+// muted row's `data-ignored` before it reads the group and the tree; after B stops, on the status line A draws for the
+// link and on B's state there before it reads them again. Every name in B's checkout is invented.
+const CHANGED_SESSION = 'b0c0d0e0-0000-4000-8000-0000000000e3';
+const CHANGED_REPLY = 'B’s agent left two changes.';
+test('U6b-3a G3, a session on B: A’s Files shows B’s changed files and marks and what B’s git ignores; with B stopped they stay and Files draws no error', async () => {
+  const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-remote-changed-')));
+  const aUserData = mkdtempSync(join(tmpdir(), 'maws-ra-changed-'));
+  const held: TerminalHeld = { scene: null, a: null };
+  try {
+    const checkout = join(root, 'b-checkout');
+    const journal = new SideJournal(CHANGED_SESSION, checkout);
+    journal.turn(CHANGED_REPLY);
+    const { b, page, app } = await laneBOpened({ root, aUserData, journal, first: 'Make two changes.', firstReply: CHANGED_REPLY, title: 'B’s changed session', open: false }, held);
+    // B's checkout made a repository, whatever the session left there committed with notes.txt and a .gitignore naming
+    // logs/; then notes.txt modified, draft.md new, and logs/run.log written under the ignored folder
+    git(checkout, 'init', '--quiet', '-b', 'main');
+    writeFileSync(join(checkout, NOTES), NOTES_TEXT);
+    writeFileSync(join(checkout, '.gitignore'), 'logs/\n');
+    git(checkout, 'add', '-A');
+    git(checkout, 'commit', '--quiet', '-m', 'B’s checkout');
+    writeFileSync(join(checkout, NOTES), `${NOTES_TEXT}A line B’s agent added.\n`);
+    writeFileSync(join(checkout, 'draft.md'), '# An invented draft on B\n');
+    mkdirSync(join(checkout, 'logs'));
+    writeFileSync(join(checkout, 'logs', 'run.log'), 'An invented log line on B.\n');
+    expect([git(checkout, 'diff', '--name-only'), git(checkout, 'ls-files', '--others', '--exclude-standard')], 'B’s checkout holds the two changes and nothing else').toEqual([NOTES, 'draft.md']);
+
+    // A opens B's session, then Files
+    await sessionRow(page, addressOf(b.ref, app)).click();
+    await quoting(expect(main(page).getByText(CHANGED_REPLY).first(), 'B’s history in A’s pane').toBeVisible({ timeout: 60_000 }), () => mainSaid(page));
+    await openSurface(page, 'Files');
+    const files = surface(page, 'files');
+    const heading = files.locator('[data-files-changed]');
+    await quoting(expect(heading, 'A’s Files: B’s two changes').toHaveAttribute('data-count', '2', { timeout: 60_000 }), () => mainSaid(page));
+    const logs = files.locator(`[role="treeitem"][data-kind="dir"][data-path="${join(checkout, 'logs')}"]`);
+    await quoting(expect(logs, 'the folder B’s git ignores, muted').toHaveAttribute('data-ignored', '', { timeout: 60_000 }), () => mainSaid(page));
+    // what A draws of B's changes: the Changed rows by letter and path, and every tree row that carries a mark
+    const drawn = async () => ({
+      rows: await files.locator('[data-changed-row]').evaluateAll((rows) => rows.map((row) => [row.getAttribute('data-letter'), row.getAttribute('data-path')])),
+      marked: await files
+        .locator('[role="treeitem"][data-kind]')
+        .evaluateAll((rows) => rows.filter((row) => row.hasAttribute('data-letter') || row.hasAttribute('data-dot') || row.hasAttribute('data-ignored')).map((row) => [row.getAttribute('data-path'), row.getAttribute('data-letter'), row.getAttribute('data-dot'), row.hasAttribute('data-ignored')])),
+    });
+    const expected = {
+      rows: [['U', join(checkout, 'draft.md')], ['M', join(checkout, NOTES)]],
+      marked: [[checkout, null, 'M', false], [join(checkout, 'logs'), null, null, true], [join(checkout, 'draft.md'), 'U', null, false], [join(checkout, NOTES), 'M', null, false]],
+    };
+    await expect.poll(drawn, { timeout: 30_000, message: 'A’s Files draws B’s changes, their marks and what B’s git ignores' }).toEqual(expected);
+
+    // B stopped: A says the link is down, and Files keeps what it drew, with no error
+    await b.stop();
+    await quoting(expect(linkLine(page), 'the status line A draws for the link to B').toHaveText(RECONNECTING, { timeout: 60_000 }), () => mainSaid(page));
+    await expect.poll(async () => (await machineOf(page, b.ref))?.state ?? null, { timeout: 60_000, message: 'A’s link to B is down' }).not.toBe('up');
+    expect(await drawn(), 'the group and the tree as they were').toEqual(expected);
+    await expect(heading, 'the heading and its count').toHaveAttribute('data-count', '2');
+    await expect(files.locator('[role="alert"], [data-notice="error"], [data-notice="refused"]'), 'Files draws no error').toHaveCount(0);
+  } finally {
+    await held.a?.cleanup();
+    await held.scene?.stop();
+    rmSync(aUserData, { recursive: true, force: true });
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 // UX wave U10b (M5; docs/doperpowers/plans/2026-11-15-ux-wave-U10b-artifacts.md, A4 on another machine, §C.3, §C.4): a
 // second session of B's makes its draft through its own tools (B's host runs the agent's seam, MAWS_DASHBOARD_E2E) and
 // its turn deletes it (`artifact_delete`, served by B's tool server; its journal is written once the draft exists, before

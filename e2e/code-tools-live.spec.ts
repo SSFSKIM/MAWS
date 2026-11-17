@@ -150,13 +150,15 @@ test('live: Files, the viewer and Review over this checkout', async () => {
           await expect(roots).toHaveAttribute('data-path', root);
           observed.roots = await roots.evaluateAll((rows) => rows.map((r) => `${r.getAttribute('data-path')} · ${r.textContent}`));
           await expect(roots).toHaveAttribute('aria-expanded', 'true');
-          const docs = panel.locator(`[data-tool="files"] [role="treeitem"][data-path="${root}/docs"]`);
+          // UX wave U6b-3a (Decision Log 14, ruling 1): tree rows by their `data-kind`, which a row of the Changed group
+          // above the tree (a `treeitem` with the same `data-path`, drawn for a changed file of this checkout) lacks
+          const docs = panel.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${root}/docs"]`);
           await expect(docs).toBeVisible();
           await docs.click();
         });
 
         await test.step('docs/charter.md renders, with its Source', async () => {
-          await panel.locator(`[data-path="${root}/docs/charter.md"]`).click();
+          await panel.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${root}/docs/charter.md"]`).click();
           const viewer = page.locator(`[data-file-viewer][data-path="${root}/docs/charter.md"]`);
           await expect(viewer.locator('[data-markdown-view] h1').first()).toBeVisible({ timeout: 10_000 });
           observed.charterHeading = await viewer.locator('[data-markdown-view] h1').first().textContent();
@@ -167,8 +169,8 @@ test('live: Files, the viewer and Review over this checkout', async () => {
         });
 
         await test.step('src/main/ipc/router.ts is highlighted', async () => {
-          for (const dir of ['src', 'src/main', 'src/main/ipc']) await panel.locator(`[data-path="${root}/${dir}"]`).click();
-          await panel.locator(`[data-path="${root}/src/main/ipc/router.ts"]`).click();
+          for (const dir of ['src', 'src/main', 'src/main/ipc']) await panel.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${root}/${dir}"]`).click();
+          await panel.locator(`[data-tool="files"] [role="treeitem"][data-kind][data-path="${root}/src/main/ipc/router.ts"]`).click();
           const viewer = page.locator(`[data-file-viewer][data-path="${root}/src/main/ipc/router.ts"]`);
           await expect(viewer.locator('[data-code-view]')).toHaveAttribute('data-language', 'TypeScript');
           await expect
