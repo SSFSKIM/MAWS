@@ -354,6 +354,13 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
     expect(treeColumn()).toBeNull();
     expect(setFolded).not.toHaveBeenCalled();
     expect(treeWrites()).toEqual([]);
+    observer.resize(filesTab()!, { width: WIDE, height: 600 }); // the control: with room, the button outside finding folds, and it is written
+    expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
+    fireEvent.click(toggle()!);
+    expect(setFolded).toHaveBeenCalledWith(A, true);
+    expect(treeColumn()).toBeNull();
+    await waitFor(() => expect(treeWrites()).toHaveLength(1));
+    expect(treeWrites()[0]).toMatchObject({ key: 'files.tree', value: { version: 1, sessions: { [A]: { width: null, folded: true } } } });
   });
 
   // The file's column is hidden and inert while the tree stands in its place, so the keyboard can go back into it only
