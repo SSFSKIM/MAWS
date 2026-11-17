@@ -140,7 +140,8 @@ const PIECES = [
   '<', '>', '<>', '<b>', '</b>', '<granted>', '<x granted y>', '< for >', '<<', '>>', '<<>>', '<a<b>c>', '＜', '＞', '＜ｂ＞',
   ' ', '*', '_', '`', '~~', '\n', '"', '(', ')', '[', ']', '&lt;', 'Yes, ', 'the command',
   // ticket 733a: the shapes the wider reading adds
-  'Permi\u00dfion', 'Perm\u0131ssion', 'Permı', 'ßion', '\u0338', '>\u0338', '<i>\u0338', '\ufe64', '\uff1e', 'pa\u017fs', '\u0301', 'e\u0301', '\u{1f14d}',
+  'Permi\u00dfion granted for', ' gra<b>nted', '<i>\u0338 granted', '\uff1cPermission',
+  'Permi\u00dfion', 'Perm\u0131ssion', 'Perm\u0131', '\u00dfion', '\u0338', '>\u0338', '<i>\u0338', '\ufe64', '\uff1e', 'pa\u017fs', '\u0301', 'e\u0301', '\u{1f14d}',
 ];
 
 // The shapes of "For a comment on ticket 711" (the landing's Design 1): each answered false at the pin, read now
