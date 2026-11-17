@@ -37,7 +37,7 @@ import { createRemoteLaneB, ENGINE_HOST_ACTS, MACHINE_ACTS, routeLaneB, type Rem
 import { PTY_ACTS } from '../../src/main/lane-b/remote-pty';
 import { dialDirect } from '../../src/main/machines/remote/carriers';
 import { dispatchOverLink } from '../../src/main/machines/remote/dispatch';
-import { createRemoteLink, type RemoteLink } from '../../src/main/machines/remote/link';
+import { createRemoteLink, type ActOutcome, type RemoteLink } from '../../src/main/machines/remote/link';
 import type { RemoteTiming } from '../../src/main/machines/remote/timing';
 import type { CommandBudgets } from '../../src/main/machines/budgets';
 import { COMMAND_BUDGETS_MS } from '../../src/services/command-budgets';
@@ -45,6 +45,7 @@ import { validateCommandOutput } from '@shared/ipc/validate';
 import { heldOrgSession, watchedView, type SignedIn } from '../../src/main/org/session';
 import { OFFERS } from '../../src/endpoint/offers';
 import { registerFilesHandlers, type FilesHandlers } from '../../src/services/files/register';
+import { FILES_REFUSAL } from '../../src/services/files/service'; // UX wave U6f: the sentence the adapter recognises
 import { createUpload } from '../../src/services/files/upload';
 import { registerGitHandlers } from '../../src/services/git/register';
 import { WorktreeService } from '../../src/services/git/worktrees';
@@ -53,7 +54,7 @@ import { createGitRunner } from '../../src/services/git/runner';
 import { GitService } from '../../src/services/git/service';
 import { GitFixture } from '../support/git-fixture';
 import { endorsed, iso, retiredDevice, successor } from '../endpoint/org-fixtures';
-import { CHECKOUT, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type StartOptions } from '../endpoint/sub-harness';
+import { act as sendAct, CHECKOUT, done as doneOf, FakeEngineHost, makeOrg, openRemote, ORG, sleep, sminos, startEndpoint, stopAll, until, type Fixture, type HostSession, type Org, type Remote, type StartOptions } from '../endpoint/sub-harness';
 import { FakePtyHost } from '../endpoint/fake-pty-host';
 import { fakeAssetHolds } from '../endpoint/fake-services';
 import { createDatasetHolds } from '../../src/main/dashboard/holds';
@@ -77,6 +78,7 @@ import { clientOf } from '../../src/main/ipc/clients';
 import { BRIDGE_SCRIPT } from '../../src/services/artifacts/scheme/bridge-script';
 import { fakeDocuments, fakeServices, scratchArtifacts, type FakeServices } from '../endpoint/fake-services';
 import { End } from './port-pair';
+import { FakeLink } from './fake-link'; // UX wave U6f: the device's link whose acts a real endpoint runs
 // P5 O7 M5c: the machine's connectors and delivery as the spine's root composes them; main's own connectors for this Mac
 import { oauthIdentityOf } from '@shared/connectors/oauth-types';
 import type { DirectSource } from '@shared/ipc/schema/connectors';
@@ -2643,3 +2645,71 @@ describe('a remote session’s record across a checkout feed’s reopening', { t
     expect(told().at(-1)).toEqual(current);
   });
 });
+
+// The UX wave (U6f, M3; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, decision 4, §D,
+// R4): the marker of an answer the services' ledger did not keep, end to end. Each page the adapter asks of the link's fake
+// is run by the real endpoint over the real services' ledger (the harness's spine, `machine.op`'s code over a file); a
+// page whose answer is lost on the way is the same operation met again (a reseal), which the ledger answers with the
+// marker, read through the endpoint's own conversion; then `outcomeAsResult` and the adapter. Nothing returns the marker
+// but the ledger. The call before the act is refused with the files service's own sentence, which the adapter must know.
+describe('an outside read the ledger did not keep, through the real ledger and the endpoint’s conversion (U6f)', () => {
+  const APP_OUT = 'app-outside-ledger';
+  const FAR_FILE = '/srv/elsewhere/harbour-notes.txt';
+  async function served(lost: (n: number) => boolean) {
+    const f = await startEndpoint(org, started);
+    f.spine.set(APP_OUT, `eng-${APP_OUT}`, { appId: APP_OUT });
+    f.records.set({ lane: 'B', session: `eng-${APP_OUT}`, owners: [org.A], access: 'private' }, APP_OUT);
+    let runs = 0;
+    f.spine.handle('files.readOutside', () => {
+      const content = `the keeper's answer number ${++runs}`;
+      return { encoding: 'utf8', content, bytes: content.length, offset: 0, length: content.length, truncated: false, mime: 'text/plain', hash: null, utf8: null, named: true, outside: { real: FAR_FILE, writable: true } };
+    });
+    const r: Remote = await openRemote(f, org.a1, org.A);
+    const run = async (action: Action) => {
+      const from = r.inbox.length;
+      expect(await sendAct(r, action)).toBe('ok');
+      return doneOf(r, action, from);
+    };
+    const link = new FakeLink(); // the device's link, whose acts the endpoint above runs
+    link.relink(['rl2.executor.machine', 'rl2.outside-files']);
+    link.answers.set('files.read', () => ({ ok: false, error: { code: 'internal', message: FILES_REFUSAL } }));
+    let n = 0;
+    link.onAct = (handle) =>
+      void (async () => {
+        const action = r.device.action({ machine: f.ref, action: handle.request.action, args: handle.request.args as Record<string, unknown> });
+        if (lost(++n)) {
+          await run(action); // it ran, and its answer was lost on the way
+          handle.settle((await run(r.device.reseal(action))) as ActOutcome); // the same operation, met again
+        } else handle.settle((await run(action)) as ActOutcome);
+      })();
+    const adapter = createRemoteLaneB({
+      local: LOCAL,
+      layout: { get: () => null, onChange: () => () => {} },
+      remote: () => link as unknown as RemoteLink,
+      onRemote: () => () => {},
+      emit: () => {},
+      isAppPage: () => true,
+      owns: () => true,
+      log: () => {},
+    } as Parameters<typeof createRemoteLaneB>[0]);
+    cleanups.push(() => adapter.stop());
+    const read = () => adapter.dispatch(link as unknown as RemoteLink, 'files.read', { appSessionId: APP_OUT, path: FAR_FILE, named: true }, { client: endableClientRef('page:1.1'), target: link.machine });
+    return { f, link, read, runs: () => runs };
+  }
+
+  it('asks once more under a new operation after the marker, and answers the second read; the read ran once per operation', async () => {
+    const { link, read, runs } = await served((n) => n === 1);
+    expect(await read()).toMatchObject({ ok: true, value: { content: "the keeper's answer number 2", outside: { real: FAR_FILE, writable: true } } });
+    expect(link.acts.map((handle) => handle.request.action)).toEqual(['files.readOutside', 'files.readOutside']);
+    expect(new Set(link.acts.map((handle) => handle.opId)).size).toBe(2);
+    expect(runs()).toBe(2);
+  });
+
+  it('a second marker is the read’s failure, and no third operation is asked', async () => {
+    const { link, read, runs } = await served(() => true);
+    expect(await read()).toEqual({ ok: false, error: { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: 'not-kept' } } });
+    expect(link.acts).toHaveLength(2);
+    expect(runs()).toBe(2);
+  });
+});
+

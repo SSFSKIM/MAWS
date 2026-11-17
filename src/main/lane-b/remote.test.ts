@@ -39,7 +39,7 @@ const tabsOf = (...apps: string[]) => {
 };
 const permission: SessionEvent = { id: `${APP}:L1:3:0`, sessionId: `eng-${APP}`, at: '2026-10-31T00:00:00.000Z', seq: 3, agentId: null, parentToolUseId: null, kind: 'permission.requested', requestId: 'req-1', toolUseId: 'tu-1', toolName: 'Bash', displayName: null, input: { command: 'ls' }, description: null, decisionReasonType: null, suggestions: [], blockedPath: null } as unknown as SessionEvent;
 
-function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult } = {}) {
+function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemoteLaneB>[0]['timing']; laneA?: string[]; others?: string[]; record?: (input: Record<string, unknown>) => CallResult; owns?: boolean | null } = {}) {
   const link = new FakeLink();
   let links: Map<MachineRef, FakeLink> = new Map([[MINI, link]]);
   const remoteListeners = new Set<(machines: readonly MachineRef[]) => void>();
@@ -60,6 +60,7 @@ function lab(options: { tabs?: string[]; timing?: Parameters<typeof createRemote
     },
     laneOf: (machine, session) => (machine === MINI && options.laneA?.includes(session) ? 'A' : null),
     othersOf: (machine, session) => machine === MINI && options.others?.includes(session) === true, // board #525
+    ...(options.owns !== undefined && { owns: () => options.owns! }), // the UX wave (U6f): whether the person owns the machine
     timing: { sendPendingMs: 60_000, ...options.timing },
     log: (line) => void logs.push(line),
   });
@@ -1838,10 +1839,11 @@ describe('the timing lines', () => {
   });
 });
 
-// The UX wave (U6f, M2; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C, "The
-// capability"): the four acts on a file outside a session's folders are `machine` acts the adapter carries, each only to
-// a peer whose handshake lists `rl2.outside-files` and carrying it as `requires`; a peer that does not list it is sent
-// nothing. M3 gives the adapter their order, their pages and their words.
+// The UX wave (U6f, M2 and M3; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C, "The
+// capability"; §D): the four acts on a file outside a session's folders are `machine` acts the adapter carries, each only
+// to a peer whose handshake lists `rl2.outside-files` and carrying it as `requires`, and only for a person the roster says
+// owns the machine; a peer that does not list it is sent nothing. Their order, pages and words are
+// ./remote-outside-files.test.ts's.
 describe('the outside acts (`rl2.outside-files`)', () => {
   const SERVES = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads', 'rl2.outside-files'];
   const OLDER = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads']; // an endpoint of a build before them
@@ -1857,13 +1859,25 @@ describe('the outside acts (`rl2.outside-files`)', () => {
     for (const [name] of ACTS) expect([name, l.adapter.handles(name as CommandName)]).toEqual([name, true]);
   });
 
-  it('go as `machine` acts carrying the capability to a peer that lists it, on a session no tab holds', async () => {
-    const l = lab({ tabs: [] });
+  it('go as `machine` acts carrying the capability to a peer that lists it, for an owner, on a session no tab holds', async () => {
+    const l = lab({ tabs: [], owns: true });
     l.link.relink(SERVES);
     l.link.onAct = (act) => act.settle({ state: 'done', result: ACTS.find(([name]) => name === act.request.action)![2] });
     for (const [name, input, output] of ACTS) expect([name, await l.cmd(name, input)]).toEqual([name, { ok: true, value: output }]);
-    expect(l.link.acts.map((a) => a.request)).toEqual(ACTS.map(([action, args]) => ({ action, args, executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.outside-files' })));
+    // M3: the read in pages on one channel (decision 4), the listing and the choice on one channel, the save held (decision 6)
+    const shapes: Record<string, Record<string, unknown>> = { 'files.readOutside': { oneChannel: true }, 'files.listOutside': { oneChannel: true }, 'files.chooseOutside': { oneChannel: true }, 'files.writeOutside': {} };
+    const pageOf = (action: string, args: Record<string, unknown>) => (action === 'files.readOutside' ? { ...args, offset: 0, length: 256 * 1024 } : args);
+    expect(l.link.acts.map((a) => a.request)).toEqual(ACTS.map(([action, args]) => ({ action, args: pageOf(action, args), executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.outside-files', ...shapes[action] })));
     expect(l.base).toEqual([]);
+  });
+
+  it('are refused `owners-only`, unsent, where the roster does not say the person owns the machine (R10)', async () => {
+    for (const owns of [false, null, undefined]) {
+      const l = lab({ tabs: [], ...(owns !== undefined && { owns }) });
+      l.link.relink(SERVES);
+      for (const [name, input] of ACTS) expect([owns, name, await l.cmd(name, input)]).toMatchObject([owns, name, { ok: false, error: { code: 'internal', issues: { refusal: 'owners-only' } } }]);
+      expect(l.link.acts).toEqual([]);
+    }
   });
 
   it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {

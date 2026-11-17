@@ -157,6 +157,13 @@ describe('no copy of the terminal’s grade', () => {
     expect(read('src/shared/files/outside.ts')).not.toMatch(SHELL);
   });
 
+  // M3 (Decision Log 25): main's adapter for the four, which decides when a request becomes one of them
+  it('in main’s adapter for the four', () => {
+    const adapter = read('src/main/lane-b/remote-outside-files.ts');
+    expect(adapter).toContain('outsideOffer');
+    expect(adapter).not.toMatch(SHELL);
+  });
+
   it('in the four rows and the four grade lines', () => {
     const offers = read('src/endpoint/offers.ts');
     const rows = offers.slice(offers.indexOf('export const outsideRows'), offers.indexOf(';', offers.indexOf('export const outsideRows')) + 1);
