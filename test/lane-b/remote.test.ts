@@ -2729,7 +2729,8 @@ describe('an outside read the ledger did not keep, through the real ledger and t
 // read where they arrive (the endpoint's dispatch to the machine's services, `host.calls`). A copy asks the plain read with
 // today's keys alone and waits under the link's hold as it always has, so the link may carry it to any peer; a keyed read
 // carries `named` (and the tab's `agent` and `open`) and goes only on the channel whose peer's list was read for it, so it
-// is never carried; the act is bound to its channel as every outside act is.
+// is never carried; ended under it, it is read afresh on the next channel within the link's hold of a call (fix wave 2);
+// the act is bound to its channel as every outside act is.
 describe('a session’s file there across a channel’s end (U6f, Decision Log 27)', { timeout: 30_000 }, () => {
   const APP_FILES = 'app-files';
   const INSIDE = `${CHECKOUT}/notes.txt`;
@@ -2742,8 +2743,8 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
     return { encoding: 'utf8', content, bytes: TEXT.length, offset, length: content.length, truncated: offset + content.length < TEXT.length, mime: 'text/plain', hash: input.hash === true ? sha256(TEXT) : null, utf8: input.hash === true ? true : null };
   };
 
-  async function served() {
-    const l = await lab({ outside: true });
+  async function served(options: LabOptions = {}) {
+    const l = await lab({ outside: true, ...options });
     l.place(APP_FILES);
     const machine = l.f.ref as MachineRef;
     const page = l.a.page('page-files');
@@ -2751,11 +2752,7 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
     // the machine's files service: a file inside the checkout read, any other refused as outside the folders
     l.f.spine.handle('files.read', async (input) => {
       const asked = input as Record<string, unknown>;
-      if (held !== null) {
-        const wait = held;
-        held = null;
-        await wait;
-      }
+      if (held !== null) await held;
       if (asked.path !== INSIDE) throw new Error(FILES_REFUSAL);
       return answerOf(asked);
     });
@@ -2770,15 +2767,20 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
       reads: () => l.host.calls.filter((c) => c.owner === 'machine' && c.name === 'files.read').map((c) => c.input as Record<string, unknown>),
       /** Each `files.readOutside` act that reached the machine's ledger. */
       acts: () => l.host.calls.filter((c) => c.name === 'machine.op' && (c.input as { name?: string }).name === 'files.readOutside'),
-      /** The next read reaches the machine and waits there until released. */
+      /** Every read reaching the machine from now waits there until released; one reaching it after is answered at once. */
       holdNext(): () => void {
         let release!: () => void;
         held = new Promise<void>((resolve) => (release = resolve));
-        return release;
+        return () => {
+          held = null;
+          release();
+        };
       },
       onOutsideRun: (run: () => void) => void (outsideRun = run),
       /** The page's keyed read, as the viewer asks it of a session there. */
       keyed: (path: string, extra: Record<string, unknown> = {}) => l.a.route('files.read', { appSessionId: APP_FILES, path, offset: 0, length: 4096, named: true, ...extra }, { client: page.client }),
+      /** Today's read of the same file, with no key of this landing: what a tab of a build before it asked. */
+      todays: (path: string) => l.a.route('files.read', { appSessionId: APP_FILES, path, offset: 0, length: 4096 }, { client: page.client }),
       /** A frame's copy (`copyInto`) for the page, into a descriptor of the suite's. */
       async copy(path: string, extra: { agent?: true; open?: true } = {}) {
         const sink = await openFile(join(scratch, `sink-${++sinks}`), 'w+');
@@ -2795,10 +2797,14 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
       /** The carrier cut with its last answers lost on the way; resolves at the next channel's peer list. */
       async drop(): Promise<void> {
         const was = l.a.link.peerCapabilities();
+        this.cut();
+        await until(() => l.a.link.state() === 'up' && l.a.link.peerCapabilities() !== null && l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
+      },
+      /** The carrier cut with its last answers lost on the way. */
+      cut(): void {
         const { carrier, tap } = l.a.carriers.at(-1)!;
         tap.mute = true;
         carrier.close('dropped');
-        await until(() => l.a.link.state() === 'up' && l.a.link.peerCapabilities() !== null && l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);
       },
     };
   }
@@ -2839,41 +2845,62 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
     expect(Object.keys(first!).sort()).toEqual(TODAYS);
   });
 
-  it('a keyed read made, the channel drops: it fails at once as not reachable and is not sent again; the page asks again and the read answers on the new channel (condition 2)', async () => {
+  // The architect's condition 2: at a brief drop the tab gets what today's carried read gives it, the answer and no error
+  // between, and at a lasting loss today's sentence at today's moment, each beside today's read (no key of this landing)
+  // made with it.
+  it('a keyed read made, the channel drops briefly: answered on the next channel, as today’s read beside it is; one fresh call with named there, never the old one carried', async () => {
     const o = await served();
     const release = o.holdNext();
-    const reading = o.keyed(INSIDE, { agent: true });
-    await until(() => o.reads().length === 1, 'the read at the machine');
+    const keyed = o.keyed(INSIDE, { agent: true });
+    const todays = o.todays(INSIDE);
+    await until(() => o.reads().length === 2, 'both reads at the machine');
     const dropped = o.drop();
-    expect(await reading).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } });
+    release(); // the first channel's answers go nowhere: its carrier is cut and muted
     await dropped;
-    release();
-    await sleep(200);
-    expect(o.reads()).toHaveLength(1); // the link carried nothing of it to the next channel
-    // the page asks again: the read on the channel current now
-    expect(await o.keyed(INSIDE, { agent: true })).toMatchObject({ ok: true, value: { content: TEXT } });
-    expect(o.reads()).toHaveLength(2);
-    expect(o.reads()[1]).toMatchObject({ named: true, agent: true });
+    const [mine, theirs] = await Promise.all([keyed, todays]);
+    expect(mine).toMatchObject({ ok: true, value: { content: TEXT } });
+    expect(theirs).toMatchObject({ ok: true, value: { content: TEXT } });
+    const keyedArrivals = o.reads().filter((input) => input.named === true);
+    expect(keyedArrivals).toHaveLength(2); // the first on the checked channel, the fresh one on the next
+    for (const input of keyedArrivals) expect(input).toEqual({ appSessionId: APP_FILES, path: INSIDE, offset: 0, length: 4096, named: true, agent: true });
   });
 
-  it('after a reconnect to a peer without the capability, nothing carrying named, agent or open reaches it', async () => {
+  it('a keyed read made, the channel drops to a peer without the capability: answered there by a fresh call with today’s keys alone', async () => {
     const o = await served();
     const release = o.holdNext();
     const reading = o.keyed(INSIDE, { agent: true, open: true });
     await until(() => o.reads().length === 1, 'the read at the machine');
     endpointWithout(OUTSIDE_FILES_CAPABILITY);
-    await o.drop();
-    expect(await reading).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    const dropped = o.drop();
     release();
-    // the page asks again, of the older build: today's read
-    expect(await o.keyed(INSIDE, { agent: true, open: true })).toMatchObject({ ok: true, value: { content: TEXT } });
+    await dropped;
+    expect(await reading).toMatchObject({ ok: true, value: { content: TEXT } });
     const [first, ...after] = o.reads();
     expect(first).toMatchObject({ named: true, agent: true }); // to the peer that listed it, on the channel that was checked
-    expect(after).toHaveLength(1);
-    for (const input of after) expect(NEW_KEYS.filter((key) => key in input)).toEqual([]);
+    expect(after.map((input) => JSON.stringify(input))).toEqual([JSON.stringify({ appSessionId: APP_FILES, path: INSIDE, offset: 0, length: 4096 })]);
   });
 
-  it('a files.readOutside sent while its channel drops ends without its answer and is never sent again (condition 3b)', async () => {
+  it('a keyed read made, the channel lost for longer than the link holds a call: today’s sentence at the hold’s end, as today’s read beside it, and no error before', async () => {
+    const HOLD = 1500;
+    const o = await served({ link: { CALL_TIMEOUT_MS: HOLD }, adapter: { carriedCallMs: HOLD } });
+    const release = o.holdNext();
+    const made = Date.now();
+    const keyed = o.keyed(INSIDE);
+    const todays = o.todays(INSIDE);
+    await until(() => o.reads().length === 2, 'both reads at the machine');
+    o.l.a.direct.dead = true;
+    o.cut();
+    release();
+    let early = false;
+    void keyed.then(() => void (early = Date.now() - made < HOLD - 200));
+    const sentence = { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } };
+    expect(await todays).toEqual(sentence);
+    expect(await keyed).toEqual(sentence);
+    expect(early, 'the keyed read answered before the hold’s end').toBe(false);
+    expect(o.reads()).toHaveLength(2);
+  });
+
+  it('a files.readOutside sent while its channel drops is never sent again; the keyed read is read afresh on the next channel, by a new act (condition 3b; fix wave 2)', async () => {
     const o = await served();
     let runs = 0;
     o.onOutsideRun(() => {
@@ -2882,6 +2909,16 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
       tap.mute = true; // its answer is lost on the way
       setTimeout(() => carrier.close('dropped'), 20);
     });
+    expect(await o.keyed(FAR)).toMatchObject({ ok: true, value: { content: TEXT } });
+    await sleep(300);
+    // two operations reached the machine's ledger, each run once: the lost one was never sent again, the second is new
+    const ops = o.acts().map((c) => (c.input as { opId: string }).opId);
+    expect(ops).toHaveLength(2);
+    expect(new Set(ops).size).toBe(2);
+    expect(runs).toBe(2);
+    // and a plain read before each act, the second on the next channel after its own check
+    expect(o.reads().filter((input) => input.path === FAR)).toHaveLength(2);
+  });
     const was = o.l.a.link.peerCapabilities();
     expect(await o.keyed(FAR)).toEqual({ ok: false, error: { code: 'host_unavailable', message: 'files.readOutside: the connection to mini ended before it answered; it is unknown whether it ran' } });
     await until(() => o.l.a.link.state() === 'up' && o.l.a.link.peerCapabilities() !== null && o.l.a.link.peerCapabilities() !== was, 'the next channel', 10_000);

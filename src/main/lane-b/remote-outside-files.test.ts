@@ -220,55 +220,135 @@ describe('a keyed read to a machine that lists the capability (decision 5 (ii) t
   });
 });
 
-// M3's fix wave (Decision Log 27; the review's Important 1): a keyed read goes only on the channel whose peer's list was
-// read for it, so a call carrying `named`, `agent` or `open` that the link would carry to the next channel can never reach
-// a build that does not list the capability. The link's fake fails such a call at its channel's end, as the real link does.
-describe('the channel a keyed read is bound to (Decision Log 27)', () => {
+// M3's fix waves (Decision Log 27; the review's Important 1; the architect's condition 2): a keyed read goes only on the
+// channel whose peer's list was read for it, so a call carrying `named`, `agent` or `open` is never carried by the link to
+// the next channel's peer. When that channel ends before the read is answered, the adapter waits for the next one within
+// the hold the link gives a carried call, and reads afresh there: a new check of the peer's list, a new call, the act if
+// one is due; once. The person sees what today's carried read shows: the answer, or at the hold's end today's sentence.
+// The link's fake fails a bound call at its channel's end, as the real link does.
+describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', () => {
   const PENDING = 'still pending';
-  /** The read's answer once the microtasks ran, or PENDING: a read the link would hold has not answered. */
+  /** The read's answer once the microtasks ran, or PENDING. */
   async function answered(read: Promise<Result>): Promise<Result | typeof PENDING> {
     let out: Result | typeof PENDING = PENDING;
     void read.then((value) => void (out = value));
     for (let i = 0; i < 50; i++) await Promise.resolve();
     return out;
   }
-  const unreachable = { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } };
+  /** What today's read held across a lasting loss answers at its hold's end (the link's `offline`, as refusalError words it). */
+  const lasting = { ok: false, error: { code: 'host_unavailable', message: 'files.read: machine mini is not reachable' } };
+  const HOLD = 10_000; // the link's hold of a carried call with no budget of its own (CALL_TIMEOUT_MS)
+  /** The machine takes the first read and never answers it on that channel; every later one is answered. */
+  function firstHeld(l: ReturnType<typeof lab>, answer: (input: Record<string, unknown>) => CallResult) {
+    let n = 0;
+    l.reads((input) => (++n === 1 ? new Promise<CallResult>(() => {}) : answer(input)));
+  }
+  const inside = (input: Record<string, unknown>): CallResult => ({ ok: true, output: answerOf('inside the checkout\n', input) });
 
-  it('a keyed read held on a channel that ends fails at once as not reachable, and nothing is sent again on the next channel', async () => {
+  it('a keyed read whose channel ends before it answers is asked afresh on the next channel: one new call with named, and the answer, never an error between', async () => {
     const l = lab();
-    l.reads(() => new Promise<CallResult>(() => {})); // the machine took it; its answer never comes on this channel
+    firstHeld(l, inside);
     const read = l.cmd('files.read', keyed({ agent: true, open: true }));
     await answered(read);
     l.link.lose();
-    expect(await answered(read)).toEqual(unreachable);
-    l.link.relink(SERVES);
-    await answered(read);
-    expect(l.files()).toHaveLength(1);
+    expect(await answered(read)).toBe(PENDING); // waiting for the next channel, as today's carried read does
+    l.link.relink([...SERVES]);
+    expect(await answered(read)).toEqual({ ok: true, value: answerOf('inside the checkout\n', { offset: 0, length: 4096 }) });
+    const sent = { appSessionId: APP, path: NOTES, offset: 0, length: 4096, named: true, agent: true };
+    expect(l.files()).toEqual([
+      { name: 'files.read', input: sent },
+      { name: 'files.read', input: sent },
+    ]);
     expect(l.link.acts).toEqual([]);
   });
 
-  it('to a machine whose build does not list the capability, the plain read is bound the same way', async () => {
+  it('with an older build on the next channel, the fresh call is today’s read to the byte, and its refusal the update sentence (decision 5 (i))', async () => {
     const l = lab();
-    l.link.relink(OLDER);
+    firstHeld(l, () => refused);
+    const read = l.cmd('files.read', keyed({ agent: true, open: true }));
+    await answered(read);
+    l.link.lose();
+    l.link.relink([...OLDER]);
+    expect(await answered(read)).toEqual({ ok: false, error: { code: 'internal', message: 'Not opened: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(l.files().map((call) => call.input)).toEqual([
+      { appSessionId: APP, path: NOTES, offset: 0, length: 4096, named: true, agent: true },
+      { appSessionId: APP, path: NOTES, offset: 0, length: 4096 },
+    ]);
+    expect(l.link.acts).toEqual([]);
+  });
+
+  it('with no channel back within the link’s hold: today’s sentence at the hold’s end, and nothing sent again', async () => {
+    const l = lab();
+    firstHeld(l, inside);
+    const read = l.cmd('files.read', keyed());
+    await answered(read);
+    l.link.lose();
+    await vi.advanceTimersByTimeAsync(HOLD - 1);
+    expect(await answered(read)).toBe(PENDING);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(await answered(read)).toEqual(lasting);
+    l.link.relink([...SERVES]);
+    await answered(read);
+    expect(l.files()).toHaveLength(1);
+  });
+
+  it('a second end under the fresh read answers today’s sentence; nothing is asked a third time', async () => {
+    const l = lab();
     l.reads(() => new Promise<CallResult>(() => {}));
     const read = l.cmd('files.read', keyed());
     await answered(read);
     l.link.lose();
-    expect(await answered(read)).toEqual(unreachable);
-    expect(l.files()).toHaveLength(1);
+    l.link.relink([...SERVES]);
+    await answered(read);
+    expect(l.files()).toHaveLength(2);
+    l.link.lose();
+    expect(await answered(read)).toEqual(lasting);
+    l.link.relink([...SERVES]);
+    await answered(read);
+    expect(l.files()).toHaveLength(2);
   });
 
-  it('and so are its pages, when the first answer is too large for the channel', async () => {
+  it('a read whose pages were under way when the channel ended is read afresh, whole, on the next channel', async () => {
     const l = lab();
-    l.reads((input) => (input.length === 4 * 1024 * 1024 ? { ok: false, error: { code: 'too-large' } } : new Promise<CallResult>(() => {})));
+    let held = false;
+    l.reads((input) => {
+      if (input.length === 4 * 1024 * 1024) return { ok: false, error: { code: 'too-large' } };
+      if (!held) return (held = true), new Promise<CallResult>(() => {});
+      return inside(input);
+    });
     const read = l.cmd('files.read', keyed({ length: 4 * 1024 * 1024 }));
     await answered(read);
     expect(l.files()).toHaveLength(2); // the whole read, refused too-large, and the first page, held
     l.link.lose();
-    expect(await answered(read)).toEqual(unreachable);
-    l.link.relink(SERVES);
+    l.link.relink([...SERVES]);
+    expect(await answered(read)).toMatchObject({ ok: true, value: { content: 'inside the checkout\n' } });
+    expect(l.files().map((call) => (call.input as { length: number }).length)).toEqual([4 * 1024 * 1024, expect.any(Number), 4 * 1024 * 1024, expect.any(Number)]);
+  });
+
+  it('a promoted read whose act’s channel ends before it answers is read afresh on the next: a new plain call, a new act, the file', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    const text = 'an invented line outside the folders\n';
+    let acts = 0;
+    l.link.onAct = (act) => {
+      if (++acts === 1) return; // the first page went out and its answer never came
+      act.settle({ state: 'done', result: answerOf(text, act.request.args as Record<string, unknown>, { named: true, outside: { real: NOTES, writable: true } }) });
+    };
+    const read = l.cmd('files.read', keyed());
     await answered(read);
+    expect(l.link.acts).toHaveLength(1);
+    l.link.lose(); // the act ends unknown: its channel ended with its copy out
+    l.link.relink([...SERVES]);
+    expect(await answered(read)).toMatchObject({ ok: true, value: { content: text, outside: { real: NOTES, writable: true } } });
     expect(l.files()).toHaveLength(2);
+    expect(l.link.acts).toHaveLength(2);
+  });
+
+  it('with no channel current when it is made, a keyed read answers at once (decision 6), and waits for none', async () => {
+    const l = lab();
+    l.link.lose();
+    expect(await answered(l.cmd('files.read', keyed()))).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(l.files()).toEqual([]);
   });
 
   it('the control: a read with no named key (today’s route) is not bound, and waits under the link’s hold', async () => {
