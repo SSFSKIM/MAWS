@@ -971,7 +971,8 @@ describe('the grants in a person’s message (rule R)', () => {
     const within = ({ work, lines, characters }: ReturnType<typeof counted>) => {
       expect(work.lines, 'lines looked at').toBeLessThanOrEqual(16 * lines);
       expect(work.blockCharacters, 'block characters parsed').toBeLessThanOrEqual(characters);
-      expect(work.formSteps, 'the composed forms’ steps').toBeLessThanOrEqual(10 * (characters + 1));
+      // UX wave U1c, the review round's R4: one more native pass, the local command's output openings
+      expect(work.formSteps, 'the composed forms’ steps').toBeLessThanOrEqual(11 * (characters + 1));
     };
 
     it('tens of thousands of envelopes, each taken out: the sentence after them is read', () => {
