@@ -75,7 +75,7 @@ export async function readPages(
 }
 
 /** The range asked, in pages; `changed` when the pages answered different hashes. */
-async function readOnce(page: (fields: Record<string, unknown>) => Promise<Result>, pageBytes: number, input: Record<string, unknown>): Promise<Result | 'changed'> {
+async function readOnce(readPage: (fields: Record<string, unknown>) => Promise<Result>, pageBytes: number, input: Record<string, unknown>): Promise<Result | 'changed'> {
   const start = typeof input.offset === 'number' ? input.offset : 0;
   const asked = typeof input.length === 'number' ? input.length : FILES_READ_DEFAULT_LENGTH;
   const pages: FilesReadOutput[] = [];
@@ -83,7 +83,7 @@ async function readOnce(page: (fields: Record<string, unknown>) => Promise<Resul
   let size = pageBytes;
   for (;;) {
     const left = start + asked - at;
-    const read = await page({ ...input, offset: at, length: Math.min(size, left) });
+    const read = await readPage({ ...input, offset: at, length: Math.min(size, left) });
     if (tooLarge(read) && size > REMOTE_READ_PAGE_MIN) {
       size = Math.max(REMOTE_READ_PAGE_MIN, Math.floor(size / 2));
       continue;

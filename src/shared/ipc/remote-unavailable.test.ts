@@ -28,7 +28,8 @@ describe('the acts the wave offers', () => {
   });
 
   it('word the menu acts as closing while the link connects, and Send, Stop and Dismiss as held', () => {
-    expect(Object.entries(ACT_WORDS).filter(([, words]) => words?.closes === true).map(([command]) => command).sort()).toEqual(['session.archive', 'session.fork', 'session.rename', 'session.update']);
+    // U6f: Open File… (`files.chooseOutside`) is a menu act too
+    expect(Object.entries(ACT_WORDS).filter(([, words]) => words?.closes === true).map(([command]) => command).sort()).toEqual(['files.chooseOutside', 'session.archive', 'session.fork', 'session.rename', 'session.update']);
     expect(ACT_WORDS['maws.pane.answer']).toBeUndefined();
   });
 });
