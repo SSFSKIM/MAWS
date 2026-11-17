@@ -26,6 +26,7 @@ import { useEffect, useState, useSyncExternalStore, type KeyboardEvent } from 'r
 import type { AppSessionId } from '@shared/graph/ids';
 import { disabledWords } from '@shared/ipc/remote-unavailable';
 import type { MachineRef } from '@shared/machine/ref';
+import { shellGeometryOf } from '../../../app/shell-view';
 import { ipc } from '../../../ipc/client';
 import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { registerAction } from '../../../keymap/actions-runtime';
@@ -396,12 +397,16 @@ class Search {
   };
 
   // M2 decision 6: the open at the text's line, then (Enter's) the request for the keyboard by the file's key, then finding
-  // ends (decision 9). Nothing reads which surface it opened on.
+  // ends (decision 9). Decision Log 15: Enter's open that brings a main-area tab forward while the side column is a sheet
+  // over a narrow window collapses the sheet first, so that the tab is on screen and its view takes the keyboard.
   private open(path: string, how: { keep: boolean; main: boolean }, keyboard: boolean): Opened | null {
     const inputs = this.inputs;
     if (inputs === null) return null;
     const opened = openFile(inputs.appSessionId, path, parseQuery(inputs.text).line, how);
-    if (keyboard) requestKeyboard({ into: 'file', key: fileKey(inputs.machine, path) });
+    if (keyboard) {
+      if (opened?.surface === 'main' && shellGeometryOf(useLayout.getState(), window.innerWidth).sheet) useLayout.getState().setPanel({ collapsed: true });
+      requestKeyboard({ into: 'file', key: fileKey(inputs.machine, path) });
+    }
     useTreeState.getState().setFinding(inputs.appSessionId, null);
     return opened;
   }

@@ -3,8 +3,9 @@
 // session's for this run (`tree-state.ts`). It takes the keyboard when ⌘P asked for it for this tab (`finder.ts`, S2): at
 // once when it is drawn and in view, else when it is; it selects its text, so typing replaces it. Its keys act only while
 // no input method composes, and never on a ⌘ key (root UC-6): Esc empties the field and then gives the keyboard back to
-// where ⌘P found it; ↓, ↑ and Enter are the search's. When the field loses the keyboard while it is empty, the search ends
-// (decision 9). It stands above the tree's context menu's trigger, so a right-click in it is a text field's own.
+// where ⌘P found it (over a narrow window's sheet, by dismissing the sheet: Decision Log 15); ↓, ↑ and Enter are the
+// search's. When the field loses the keyboard while it is empty, the search ends (decision 9). It stands above the tree's
+// context menu's trigger, so a right-click in it is a text field's own.
 // M2 (decisions 4 to 8; M2 decisions 2 and 3): while the field holds text the list stands in the tree's place, the tree
 // kept mounted for its hold on the git store and drawn again at its offset when the field is emptied. The list is a
 // `listbox` of the files the search answered, the field naming its highlighted row, or one line that says why there is
@@ -13,7 +14,10 @@
 import { useEffect, useMemo, useRef, type FocusEvent, type KeyboardEvent, type ReactNode } from 'react';
 import { flushSync } from 'react-dom';
 import type { AppSessionId } from '@shared/graph/ids';
+import { shellGeometryOf } from '../../../app/shell-view';
+import { dismissSheet } from '../../../panel/PanelRegion';
 import { useWorkingFolder } from '../../../sessions/working-folder';
+import { useLayout } from '../../../stores/layout';
 import { FILES_COPY } from '../copy';
 import type { Opened } from '../open-file';
 import { drawnRows, keyboardBefore, takeKeyboard, useFinder, useKeyboardRequest, type Finder, type FinderState } from './finder';
@@ -72,17 +76,31 @@ function FinderField({ appSessionId, tabId, visible, text, finder, expanded, act
   };
   // Esc in an empty field leaves it: the search ends first, and the page is drawn without it before the keyboard goes
   // back, since the element ⌘P found it in may be this tab's own file, hidden and inert while the tree stood in its place.
-  // With that element gone from the page the keyboard stays in the field, and so does the search.
+  // Where the keyboard cannot be given back (that element gone from the page, or still under an inert main area), the key
+  // is not the field's (Decision Log 15). Over a narrow window's sheet the sheet is dismissed by its own path: for that
+  // element, which takes the keyboard once main has left inert; with none, by the sheet's own Esc, and the search ends.
+  // Elsewhere the key goes on to whatever stands behind, and the keyboard stays in the field.
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Escape') return onKey(event);
     if (composing(event)) return;
-    event.preventDefault(); // the key is the field's: no sheet or layer behind it closes on it
-    if (event.repeat) return;
-    if (text !== '') return void useTreeState.getState().setFilter(appSessionId, '');
+    if (event.repeat) return void event.preventDefault(); // a held Esc does no more than its first press
+    if (text !== '') {
+      event.preventDefault(); // the key is the field's: no sheet or layer behind it closes on it
+      return void useTreeState.getState().setFilter(appSessionId, '');
+    }
     const back = keyboardBefore();
-    if (back === null) return;
-    flushSync(endFinding);
-    back.focus({ preventScroll: true });
+    if (back !== null) {
+      flushSync(endFinding);
+      if (back.closest('[inert]') === null) {
+        event.preventDefault();
+        return void back.focus({ preventScroll: true });
+      }
+    }
+    if (!shellGeometryOf(useLayout.getState(), window.innerWidth).sheet) return;
+    endFinding();
+    if (back === null) return; // the sheet's own Esc dismisses it
+    event.preventDefault();
+    dismissSheet(back);
   };
   // A blur while the element still has the page's keyboard is the window losing it, not the field.
   const onBlur = (event: FocusEvent<HTMLInputElement>) => {
