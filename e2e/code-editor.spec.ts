@@ -15,6 +15,7 @@ import { clickRevealed } from './support/hover';
 import { REPO_ROOT, test } from './support/launch';
 import { MEASURED_WAIT_MS } from './support/latency';
 import { hideSurface, openSurface } from './support/shell';
+import { resizePanel } from './support/toolbar-controls';
 
 const APP = 'src/app.ts';
 const MERGE = 'conflicts/merge.ts';
@@ -57,8 +58,28 @@ async function expectDirtyTab(page: Page, name: string, dirty: boolean): Promise
   }
 }
 
+// The editor's notice drawn whole (the architect's hands-on check: the bar can shrink its span to nothing): visible, and
+// its text not cut, the notice's needed and given widths and its bar's width in the failure message
+async function expectDrawnWhole(notice: Locator, where: string): Promise<void> {
+  await expect(notice, where).toBeVisible();
+  const widths = await notice.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, bar: el.closest('[data-editor-controls]')?.parentElement?.clientWidth ?? null }));
+  expect(widths.scrollWidth, `${where}: the notice needs ${widths.scrollWidth} px, has ${widths.clientWidth}, in a bar of ${widths.bar}`).toBeLessThanOrEqual(widths.clientWidth);
+}
+// The same at the width the scene has, then with the right panel holding the file at its narrowest (its divider's
+// minimum, through `resizePanel`), the panel's width restored after
+async function expectDrawnWholeAtBothWidths(page: Page, notice: Locator): Promise<void> {
+  await expectDrawnWhole(notice, 'at the width the scene has');
+  const divider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+  const [before, narrowest] = [Number(await divider.getAttribute('aria-valuenow')), Number(await divider.getAttribute('aria-valuemin'))];
+  await resizePanel(page, narrowest);
+  await expectDrawnWhole(notice, `with the panel at its narrowest, ${narrowest} px`);
+  await resizePanel(page, before);
+}
+
 async function awaitNotice(viewer: Locator): Promise<void> {
-  await expect(viewer.locator('[data-theirs-notice="notice"]')).toHaveText('Changed on disk', { timeout: MEASURED_WAIT_MS });
+  const notice = viewer.locator('[data-theirs-notice="notice"]');
+  await expect(notice).toHaveText('Changed on disk', { timeout: MEASURED_WAIT_MS });
+  await expectDrawnWhole(notice, 'at the width the scene has');
   await expect(viewer).toHaveAttribute('data-theirs', 'notice');
 }
 
@@ -216,7 +237,9 @@ test.describe('the editor in stub mode over a scratch repository', () => {
       // Saved from the notice, the stale baseline's hash answers conflict: the merge view, mine against the disk's.
       await barButton(viewer, 'Save').click();
       await expect(viewer).toHaveAttribute('data-theirs', 'merge');
-      await expect(viewer.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      const reason = viewer.locator('[data-theirs-notice="merge"]');
+      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expectDrawnWholeAtBothWidths(p.page, reason);
       const changes = viewer.locator('[data-merge-changes]');
       await expect(changes).toHaveText('2 changes from disk');
       const chunks = viewer.locator('.cm-deletedChunk');

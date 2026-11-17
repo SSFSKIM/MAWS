@@ -25,6 +25,7 @@ import { launchMaws, REPO_ROOT, test, type MawsLaunch } from './support/launch';
 import { slashPaletteMovesNothing } from './support/palette-geometry';
 import { clickRevealed } from './support/hover';
 import { activeMainTab, backToTabs, mainTabById, mainTabs, mountedTabs, openAppDestination, sideColumn, sideTab } from './support/shell'; // UX wave U6e: the side column, its tabs and the pages
+import { resizePanel } from './support/toolbar-controls'; // UX wave U1c round: the notice at the panel's narrowest
 import { processesNaming } from './support/processes'; // the UX wave, U9: A6's scene signals only its own engine host
 import { backgroundAgentRecords, backgroundAgentSidecars, turnEndRecords, userRecord } from './support/lane-a';
 import { newChatIn, openProject, projectLine, projectRow, showProjectList, sidebarRow } from './support/sidebar';
@@ -1226,7 +1227,9 @@ test.describe('sessions', () => {
       await expect(notes).toHaveAttribute('data-dirty', 'true');
       await save.click();
       await expect(notes).toHaveAttribute('data-theirs', 'merge', { timeout: 20_000 });
-      await expect(notes.locator('[data-theirs-notice="merge"]')).toHaveText('Changed on disk since you opened it');
+      const reason = notes.locator('[data-theirs-notice="merge"]');
+      await expect(reason).toHaveText('Changed on disk since you opened it');
+      await expectDrawnWholeAtBothWidths(page, reason);
       expect(readFileSync(file('notes.txt'), 'utf8'), 'the conflicting save wrote nothing').toBe(THEIRS);
 
       await chip('report.pdf').click(); // the session's tab never left the front, so its transcript is where it was
@@ -1585,3 +1588,21 @@ test.describe('sessions', () => {
     });
   });
 });
+
+// The editor's notice drawn whole (the architect's hands-on check: the bar can shrink its span to nothing): visible, and
+// its text not cut, the notice's needed and given widths and its bar's width in the failure message
+async function expectDrawnWhole(notice: Locator, where: string): Promise<void> {
+  await expect(notice, where).toBeVisible();
+  const widths = await notice.evaluate((el) => ({ scrollWidth: el.scrollWidth, clientWidth: el.clientWidth, bar: el.closest('[data-editor-controls]')?.parentElement?.clientWidth ?? null }));
+  expect(widths.scrollWidth, `${where}: the notice needs ${widths.scrollWidth} px, has ${widths.clientWidth}, in a bar of ${widths.bar}`).toBeLessThanOrEqual(widths.clientWidth);
+}
+// The same at the width the scene has, then with the right panel holding the file at its narrowest (its divider's
+// minimum, through `resizePanel`), the panel's width restored after
+async function expectDrawnWholeAtBothWidths(page: Page, notice: Locator): Promise<void> {
+  await expectDrawnWhole(notice, 'at the width the scene has');
+  const divider = page.locator('[data-region="panel"]').getByRole('separator', { name: 'Resize right panel' });
+  const [before, narrowest] = [Number(await divider.getAttribute('aria-valuenow')), Number(await divider.getAttribute('aria-valuemin'))];
+  await resizePanel(page, narrowest);
+  await expectDrawnWhole(notice, `with the panel at its narrowest, ${narrowest} px`);
+  await resizePanel(page, before);
+}
