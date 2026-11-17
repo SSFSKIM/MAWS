@@ -119,12 +119,14 @@ describe('no message of a person’s is drawn differently (the differential)', (
     () => 'Comment on "report.ts:12" (file /work/out/report.ts, line 12):',
     () => '/compact keep it short',
   ];
-  // The two recognisers' whole-form shapes, written from the spec and not from the code under test (fix wave 1): a text
-  // whose last line that is not blank is a tag line of MAWS's anchor (the schema may still refuse it: a superset), and a
-  // plan prompt in exactly its writer's shape, one segment and nothing after it
-  const TAG_LINE = /^<maws_anchor(?: [A-Za-z][A-Za-z0-9]*="[^"]*")+\/>$/;
+  // The two recognisers' whole-form shapes, read from the raw input and not by the code under test (fix waves 1 and 2):
+  // a message the pin's reader reads as anchored (its anchor reader, which this landing leaves unchanged), and a plan
+  // prompt in exactly its writer's shape, one segment and nothing after it, written from the spec
   const PLAN_SHAPE = /^Implement this plan:\n\n\n\n<pasted_content id="([0-9a-f]{4})">\n(?:(?!\n<\/pasted_content id="\1">)[\s\S])*\n<\/pasted_content id="\1">\n$/;
-  const allowedForm = (message: string) => TAG_LINE.test(message.trimEnd().split('\n').at(-1)!) || PLAN_SHAPE.test(message);
+  const allowedForm = (message: string) => {
+    const pin = pinUserTextOf(message);
+    return pin.anchor !== null || pin.comments !== null || PLAN_SHAPE.test(message);
+  };
   it(`${COUNT} seeded messages (seed ${SEED}): every row of no form is the pin’s row; a form among them is set aside, and a form is drawn otherwise (the control)`, () => {
     const next = random(SEED);
     let compared = 0;
@@ -143,7 +145,7 @@ describe('no message of a person’s is drawn differently (the differential)', (
     expect(compared).toBeGreaterThan(COUNT * 0.9);
     expect(compared + forms).toBe(COUNT);
     // the shapes set aside: each recogniser's own shape among them, a near miss of either not (the controls)
-    expect([allowedForm(planPrompt('one', 'a1b2')), allowedForm(promotionMessage([], null, 'a1b2')), allowedForm(`${planPrompt('one', 'a1b2')}more`), allowedForm(`${PLAN_LEAD}\n\none`), allowedForm(`${ANCHOR_TAG_OPENING} kind="x"/> and words`)]).toEqual([true, true, false, false, false]);
+    expect([allowedForm(planPrompt('one', 'a1b2')), allowedForm(promotionMessage([], null, 'a1b2')), allowedForm(`${planPrompt('one', 'a1b2')}more`), allowedForm(`${PLAN_LEAD}\n\none`), allowedForm(`${ANCHOR_TAG_OPENING} kind="x"/> and words`), allowedForm(`Look.\n\n${ANCHOR_TAG_OPENING} kind="x"/>`)]).toEqual([true, true, false, false, false, false]);
     // the control: a form of this build is drawn otherwise than the pin's reader draws it
     const plan = planPrompt('one\ntwo', 'a1b2');
     expect(userTextOf(plan).text).not.toBe(pinUserTextOf(plan).text);
