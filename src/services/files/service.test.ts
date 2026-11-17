@@ -3036,7 +3036,7 @@ describe('files saves outside the folders', () => {
         chmodSync(at('passage'), 0o111); // entered by name, never listed: the walk cannot read its entries
         try {
           const seen = recordTouches();
-          for (const open of [{}, { open: true }]) {
+          for (const open of [{}, { open: true as const }]) {
             await expect(readThere(files, A, via, 'op-read', open), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
             await expect(files.writeOutside({ appSessionId: A, path: via, content: 'pwned\n', expectedHash: sha('private as it was\n'), real: secret(), ...open }, claimed('op-save')), JSON.stringify(open)).rejects.toMatchObject(protectedRefusal);
           }

@@ -288,10 +288,12 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
     // U6f (decision 18): another machine's claimed caller touches nothing inside a protected folder the person did not
     // open, before the path is resolved and before any evidence is asked; a path under one of its roots, as written, is
     // the session's own
-    const walked = claimOf(caller) !== null && !roots.some((root) => under(root, path)) ? await protectedFirst(path, asked.open === true) : null;
+    const walk = claimOf(caller) !== null && !roots.some((root) => under(root, path)) ? await protectedFirst(path, asked.open === true) : null;
+    const walked = walk !== null && 'real' in walk ? walk.real : null;
     if (walked !== null) await at('after-outside-walk', path);
     let real0: string;
     try {
+      if (walk !== null && 'gone' in walk) throw walk.gone; // the walk showed the path is not there: nothing resolves it
       real0 = await fs.promises.realpath(path);
     } catch (error) {
       const answer = await missing(path, roots, error);
@@ -339,11 +341,33 @@ export function createFilesService({ records, hooks, emit = () => {}, port, env 
   }
 
   // U6f (decision 18): the walk of a claimed path that enters no protected folder unopened, answering the real path it
-  // ended at; `protected` is refused here, and every other refusal (null) leaves the path to the boundary's own steps
-  async function protectedFirst(path: string, open: boolean): Promise<string | null> {
+  // ended at. `protected` is refused here, and so, failing closed, is every walk that cannot finish (the branch review,
+  // Decision Log 33 (1)): a folder on the way that it cannot list (mode 0111) or a chain of links past its bound leaves
+  // what lies beyond unseen, a protected folder included, so nothing resolves the path unchecked after it. One ending
+  // alone goes on to the boundary's own steps, with no resolution of its own: a path shown not to be there (`gone`).
+  async function protectedFirst(path: string, open: boolean): Promise<{ real: string } | { gone: Error }> {
     const walked = await walkOutside(path, where(), open);
-    if (!walked.ok && walked.reason === 'protected') throw new HostCommandError(ipcError('internal', FILES_PROTECTED, { refusal: 'protected' }));
-    return walked.ok ? walked.real : null;
+    if (walked.ok) return { real: walked.real };
+    const gone = walked.reason === 'protected' ? null : await goneAt(path, open);
+    if (gone !== null) return { gone };
+    throw new HostCommandError(ipcError('internal', FILES_PROTECTED, { refusal: 'protected' }));
+  }
+  // Whether `path` is not there, shown by the walk alone: its deepest ancestor the same walk resolves (whose inside the
+  // walk found it may touch) holds no entry of the path's next part. The `lstat`'s own failure, or null when the part is
+  // there (the walk then could not finish past it) or no ancestor resolves. A protected folder an ancestor's own last link
+  // leads into is one the whole path's walk met on its way first, and refused there before this is asked.
+  async function goneAt(path: string, open: boolean): Promise<Error | null> {
+    const parts = path.split(sep).filter((part) => part !== '');
+    for (let depth = parts.length - 1; depth >= 0; depth--) {
+      const ancestor = await walkOutside(sep + parts.slice(0, depth).join(sep), where(), open);
+      if (!ancestor.ok && ancestor.reason === 'protected') return null;
+      if (!ancestor.ok) continue;
+      return fs.promises.lstat(join(ancestor.real, parts[depth]!)).then(
+        () => null,
+        (error: unknown) => (absent(error) ? (error as Error) : null),
+      );
+    }
+    return null;
   }
   const where = (): Home => ({ home: home(), platform });
 
