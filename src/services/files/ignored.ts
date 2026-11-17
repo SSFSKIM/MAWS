@@ -13,13 +13,15 @@
 // another tree's rules; and before each call every ask's folder is confirmed at the very spelling git is handed (its
 // realpath that spelling, the object the service opened) and the `.git` as the walk found it, so a substitution made
 // between the walk and the run is refused before git reads anything. An explicit GIT_DIR skips git's own check of who
-// owns a repository, so the walk makes it: the folder and its `.git` must be this user's. The threat model, and what
-// it leaves: whoever can write a `.git` the daemon user owns already runs code as that user (a hook,
-// in a terminal's git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that
-// stands when the listing's last confirmation runs is refused there; one made and undone while git itself runs is not
-// seen, and can answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a
-// restore between a listing's reads and its last confirmation can show outside names (service.ts). The asks of one repository share its runs: while
-// a run of the repository is in flight, or waits for a place, the asks that arrive join its next run (Decision Log 10).
+// owns a repository, so the walk makes it: the folder and its `.git` must be this user's. The threat model, and what it
+// leaves: whoever can write a `.git` the daemon's user owns already runs code as that user (a hook, in a terminal's
+// git; board ticket 756), so what that `.git` holds is trusted as the user's own; a substitution that stands when the
+// listing's last confirmation runs is refused there; one made and undone while git itself runs is not seen, and can
+// answer by another tree's rules for names the listing read in the confirmed folder, as a swap and a restore between a
+// listing's reads and its last confirmation can show outside names (service.ts).
+//
+// The asks of one repository share its runs: while a run of the repository is in flight, or waits for a place, the asks
+// that arrive join its next run (Decision Log 10).
 // A run is two git calls in read mode in the repository's root: `git --literal-pathspecs ls-files -z -- <dir>/…` for
 // the joined directories, whose paths name what is tracked in each, then `git check-ignore --no-index -z --stdin` on
 // every joined name that is no tracked path nor the first segment of one, each sent as `./<dir>/<name>` (the `./`
