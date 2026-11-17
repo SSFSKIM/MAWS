@@ -18,7 +18,8 @@ import { useLayout } from '../../../stores/layout';
 import { useSessions } from '../../../stores/sessions';
 import { useMachines } from '../../../stores/machines';
 import { deferred, fail, installFakeMain, ok as answer } from '../../../test-support/code';
-import { installDisk } from '../../../test-support/code-disk';
+import { installDisk, leaveRl2, overRl2, rosterSays } from '../../../test-support/code-disk';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
 import { A, B, mainShowing, panelOf, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { focusedFile, registerEditor, sideFilesViewer } from '../editor/register';
 import { openFile, resetKeptOpens } from '../open-file';
@@ -1432,5 +1433,75 @@ describe('a file beside the chat as an editor', () => {
     expect(sideTabs(B).map((tab) => paramsOf(tab.id))).toEqual([{ file: APP, line: null }]);
     expect(mainTab(APP)).toBeUndefined();
     expect(entryOf(APP)?.dirty).toBe(true);
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decision 12) --------
+// The Files list's row for a session that takes the remote route: enabled for one of the machine's owners, opening MAWS's
+// own chooser there; otherwise disabled with the first sentence of decision 12's table that applies as its title.
+describe('the Files list’s menu for a session on another machine (U6f)', () => {
+  const offs: (() => void)[] = [];
+  let main: ReturnType<typeof mainWith>;
+  const T = addressOf(OTHER_MACHINE, 'app-there') as AppSessionId;
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal') as AppSessionId;
+  beforeEach(() => {
+    resetPanelStores();
+    resetTreeState();
+    resetRemoteLaneBStore();
+    useFiles.getState().reset();
+    useViewer.getState().reset();
+    main = mainWith(REPO);
+    offs.push(connectCodeEvents(), registerPanelTool(filesTool));
+    useSessions.setState((s) => ({ records: new Map(s.records).set(T, record(T, { directory: '/r' })).set(TERMINAL, record(TERMINAL, { directory: '/r' })) }));
+    overRl2(T);
+  });
+  afterEach(() => {
+    document.querySelectorAll('[data-remote-chooser]').forEach((sheet) => fireEvent.click(within(sheet as HTMLElement).getByRole('button', { name: 'Cancel' })));
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    leaveRl2();
+  });
+  const menuRow = async (appSessionId: AppSessionId) => {
+    render(<TestHost />);
+    act(() => void panelHost.addTool('files', { appSessionId }));
+    fireEvent.contextMenu(await screen.findByRole('tree'));
+    return within(await screen.findByRole('menu')).getByRole('menuitem');
+  };
+
+  it('for one of the machine’s owners the row is enabled, reads Open File…, and opens the chooser there, never main’s', async () => {
+    const row = await menuRow(T);
+    expect(row.textContent).toBe('Open File…');
+    expect(row.hasAttribute('data-open-file')).toBe(true);
+    expect(row.getAttribute('aria-disabled')).toBeNull();
+    fireEvent.click(row);
+    await waitFor(() => expect(document.querySelector('[data-remote-chooser]')).not.toBeNull());
+    expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: bareOf(T) }]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it.each([
+    ['not one of the machine’s owners', { owner: false }, 'Only studio’s owners can open a file there.'],
+    ['the roster not yet saying (R10)', { owner: undefined }, 'Only studio’s owners can open a file there.'],
+    ['a build that does not list the capability', { capabilities: ['rl2.channel'] }, 'Can’t open a file on studio yet. Update MAWS on studio and try again.'],
+    ['the machine offline', { state: 'down', since: '2026-01-01T00:00:00.000Z', capabilities: undefined }, 'Open File is unavailable while studio is offline.'],
+    ['the link connecting', { state: 'connecting', capabilities: undefined }, 'Connecting to studio…'],
+  ] as const)('%s: the row is disabled, its title the sentence, and nothing is asked', async (_, over, sentence) => {
+    rosterSays(T, over as Partial<MachineState>);
+    const row = await menuRow(T);
+    expect(row.getAttribute('aria-disabled')).toBe('true');
+    expect(row.getAttribute('title')).toBe(sentence);
+    expect(row.textContent).toBe('Open File…');
+    fireEvent.click(row);
+    await act(flush);
+    expect(document.querySelector('[data-remote-chooser]')).toBeNull();
+    expect(main.callsOf('files.listOutside')).toEqual([]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it('for a terminal session there the row keeps U6e’s sentence', async () => {
+    overRl2(TERMINAL, {}, 'A');
+    const row = await menuRow(TERMINAL);
+    expect(row.getAttribute('title')).toBe('Open File… (this session runs on studio)');
+    expect(row.getAttribute('aria-disabled')).toBe('true');
   });
 });

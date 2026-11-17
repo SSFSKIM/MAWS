@@ -182,6 +182,18 @@ describe('the window’s helper', () => {
   });
 });
 
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, M4): the chooser's two
+// acts, which no declaration greys (they are offered behind a capability, and the helper's sentence closes Open File…), are
+// issued by the chooser's model alone, so no other control of the window lists or chooses a file on another machine.
+// Test support answers them as main does and issues none.
+describe('the chooser’s two acts on another machine', () => {
+  const CHOOSER = new Set(['files.listOutside', 'files.chooseOutside']);
+  it('are named by no renderer source but the chooser’s model', () => {
+    const naming = modules.filter((m) => !m.path.startsWith('test-support/') && literalsOf(m.path, m.source).some((text) => CHOOSER.has(text))).map((m) => m.path);
+    expect(naming).toEqual(['tools/code/files/remote-chooser.ts']);
+  });
+});
+
 // Review (M4): the rule holds a module to the helper in every form a command or an import is written, so a fixture in each
 // form the rule once missed is rejected, and only a real import of the helper exempts a module
 describe('the rule itself', () => {

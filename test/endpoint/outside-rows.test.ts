@@ -164,6 +164,13 @@ describe('no copy of the terminal’s grade', () => {
     expect(adapter).not.toMatch(SHELL);
   });
 
+  // M4 (Decision Log 25): the window's module that says which sessions take the remote route and words what is offered there
+  it('in the window’s module for a session on another machine', () => {
+    const window = read('src/renderer/src/tools/code/files/elsewhere.ts');
+    expect(window).toContain('disabledWords');
+    expect(window).not.toMatch(SHELL);
+  });
+
   it('in the four rows and the four grade lines', () => {
     const offers = read('src/endpoint/offers.ts');
     const rows = offers.slice(offers.indexOf('export const outsideRows'), offers.indexOf(';', offers.indexOf('export const outsideRows')) + 1);

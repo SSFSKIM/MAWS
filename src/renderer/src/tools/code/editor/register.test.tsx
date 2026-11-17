@@ -8,7 +8,9 @@ import userEvent from '@testing-library/user-event';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { LAYOUT_DEFAULTS, type TabRef } from '@shared/ipc/schema/layout';
-import { at, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { addressOf } from '@shared/machine/address';
+import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../../test/support/machine';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session'; // UX wave U6f
 import { connectCodeEvents } from '../../../ipc/events';
 import { replaceVerdict, requestCloseTab, runAction } from '../../../keymap/actions-runtime';
 import { Tab } from '../../../main/Tab';
@@ -16,8 +18,8 @@ import { panelHost, registerPanelTool } from '../../../panel/host';
 import { surfaceTabs } from '../../../panel/surface-model';
 import { useLayout } from '../../../stores/layout';
 import { activeTab, allTabs } from '../../../stores/layout-model';
-import { fakeHash, installDisk } from '../../../test-support/code-disk';
-import { resetPanelStores, TestHost } from '../../../test-support/panel';
+import { fakeHash, installDisk, leaveRl2, overRl2 } from '../../../test-support/code-disk';
+import { mainShowing, resetPanelStores, TestHost } from '../../../test-support/panel';
 import { registerCommentComposer } from '../anchor/anchor';
 import { filesTool } from '../files/FilesTool';
 import { useFiles } from '../files/store';
@@ -653,5 +655,98 @@ describe('a file beside the chat as an editor', () => {
       act(() => useLayout.getState().openSession(A));
       expect(focusedFile()).toBeNull();
     });
+  });
+});
+
+// ---- UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md; R8, B9) ----------------
+// A file outside the folders on another machine, beside its session's chat, whose save is on its way (main holds it under
+// the link's hold, and nothing the page does withdraws it): the close asks what any save on its way asks, with the guard
+// as U6b-1 leaves it, unchanged. Over the fake disk standing for main's adapter, which answers the save when released.
+describe('a file outside the folders on another machine, closed while its save is on its way (U6f, R8)', () => {
+  const T = addressOf(OTHER_MACHINE, 'app-there' as AppSessionId);
+  const OUT = '/elsewhere/notes.txt';
+  const OUT_ID = `file:${OTHER_MACHINE}:${OUT}`;
+  const offs: (() => void)[] = [];
+  let disk: ReturnType<typeof installDisk>;
+  beforeAll(() => import('../viewer/CodeView'));
+  beforeEach(() => {
+    resetPanelStores();
+    resetKeptOpens();
+    resetRemoteLaneBStore();
+    useViewer.getState().reset();
+    useFiles.getState().reset();
+    useEditorDialog.setState({ open: null });
+    overRl2(T);
+    useLayout.setState({ main: mainShowing(T) });
+    disk = installDisk({ [OUT]: 'one\n' }, { outside: ['/elsewhere'], names: (appSessionId, path) => appSessionId === 'app-there' && path === OUT });
+    offs.push(registerPanelTool(filesTool), registerEditor(), connectSideFiles(sideFilesViewer), connectCodeEvents());
+  });
+  afterEach(() => {
+    cleanup();
+    offs.splice(0).forEach((off) => off());
+    resetKeptOpens();
+    leaveRl2();
+  });
+
+  const sideTabs = () => (useLayout.getState().panelBySession.get(T)?.tabs ?? []).filter((tab) => tab.toolId === 'files');
+  const outside = () => useViewer.getState().entries.get(OUT_ID)!;
+  const sideEditor = () => {
+    const element = document.querySelector<HTMLElement>('[data-files-tab] .cm-editor');
+    return element ? EditorView.findFromDOM(element) : null;
+  };
+
+  async function savingBeside() {
+    act(() => void openFile(T, OUT, null, { keep: true }));
+    render(
+      <>
+        <TestHost />
+        <EditorDialogs />
+      </>,
+    );
+    await waitFor(() => expect(sideEditor()?.state.facet(EditorView.editable)).toBe(true));
+    act(() => sideEditor()!.dispatch({ changes: { from: 0, insert: 'mine ' }, userEvent: 'input.type', annotations: isolateHistory.of('full') }));
+    await waitFor(() => expect(outside().dirty).toBe(true));
+    const write = disk.hold('files.writeOutside');
+    const saving = useViewer.getState().save(OUT_ID);
+    await waitFor(() => expect(disk.callsOf('files.writeOutside')).toHaveLength(1));
+    expect(outside()).toMatchObject({ saving: true, dirty: true });
+    const [tab] = sideTabs();
+    return { tabId: tab.id, write, saving };
+  }
+
+  it('asks the close question; its Save sends no second save and the tab stays; a session opening in its place is refused as being saved', async () => {
+    const { tabId, write, saving } = await savingBeside();
+    const closing = panelHost.closeTab(tabId);
+    const asked = await screen.findByRole('dialog', { name: 'Save changes to notes.txt?' });
+    fireEvent.click(within(asked).getByRole('button', { name: 'Save' }));
+    expect(await act(() => closing)).toBe(false);
+    expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
+    expect(disk.callsOf('files.writeOutside')).toHaveLength(1);
+    expect(replaceVerdict({ id: OUT_ID, kind: 'file', path: OUT, line: null, appSessionId: T, machine: OTHER_MACHINE, pinned: false })).toEqual({ keep: 'notes.txt is being saved' });
+    await act(async () => write.release());
+    expect(await saving).toBe('ok');
+    expect(disk.files[OUT]).toBe('mine one\n');
+  });
+
+  it('its Don’t save closes the tab and takes nothing back: the save lands once', async () => {
+    const { tabId, write, saving } = await savingBeside();
+    const closing = panelHost.closeTab(tabId);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Don’t save' }));
+    expect(await act(() => closing)).toBe(true);
+    expect(sideTabs()).toEqual([]);
+    await act(async () => write.release());
+    await act(() => saving);
+    expect(disk.callsOf('files.writeOutside')).toHaveLength(1);
+    expect(disk.files[OUT]).toBe('mine one\n');
+  });
+
+  it('its Cancel keeps the tab and its edits', async () => {
+    const { tabId, write } = await savingBeside();
+    const closing = panelHost.closeTab(tabId);
+    fireEvent.click(within(await screen.findByRole('dialog')).getByRole('button', { name: 'Cancel' }));
+    expect(await act(() => closing)).toBe(false);
+    expect(sideTabs().map((tab) => tab.id)).toEqual([tabId]);
+    expect(outside().dirty).toBe(true);
+    await act(async () => write.release());
   });
 });

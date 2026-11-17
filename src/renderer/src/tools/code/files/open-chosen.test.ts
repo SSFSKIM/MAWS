@@ -2,8 +2,11 @@
 // decisions 14 to 16, sequence W1): `openChosen` asks main's chooser for a session and opens the chosen file beside the
 // chat as a kept tab, says a refusal or an error as a notice, and opens nothing for a cancel or a session the page no
 // longer knows; `file.open` is registered exactly while a session's chat of this Mac is in front. Invented paths.
-import { act, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; sequences C3, C4, C6
+// and R10): `openChosenFor` opens the chooser MAWS draws for a session that takes the remote route, and `file.open` is
+// registered for such a chat while the window's helper has no sentence for `files.chooseOutside`.
+import { act, fireEvent, waitFor, within } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import { addressOf, bareOf } from '@shared/machine/address';
 import { LAYOUT_DEFAULTS } from '@shared/ipc/schema/layout';
@@ -18,7 +21,11 @@ import { registerEditor } from '../editor/register';
 import { resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
 import { filesTool } from './FilesTool';
-import { connectOpenFile, openChosen } from './open-chosen';
+import { connectOpenFile, openChosen, openChosenFor } from './open-chosen';
+import { resetRemoteLaneBStore } from '../../../lane-b/remote-session';
+import { leaveRl2, overRl2, rosterSays } from '../../../test-support/code-disk';
+import { forgetOpenedThere } from './elsewhere';
+import { forgetStarts } from './remote-chooser';
 
 const OUT = '/elsewhere/chosen.txt';
 const R = addressOf(OTHER_MACHINE, 'app-remote') as AppSessionId; // a session of another machine
@@ -145,5 +152,155 @@ describe('file.open (connectOpenFile)', () => {
     expect(isActionEnabled('file.open')).toBe(true);
     off();
     expect(isActionEnabled('file.open')).toBe(false);
+  });
+});
+
+// ---- UX wave U6f: a session on another machine -------------------------------------------------------------------------
+
+describe('Open File… for a session on another machine (U6f)', () => {
+  const T = addressOf(OTHER_MACHINE, 'app-there') as AppSessionId; // a lane B session main runs there over RL2
+  const TERMINAL = addressOf(OTHER_MACHINE, 'app-terminal') as AppSessionId;
+  const HOME = '/home/someone';
+  const LISTING = { status: 'listed', path: HOME, parent: '/home', home: HOME, entries: [{ name: 'notes.txt', path: `${HOME}/notes.txt`, kind: 'file', protected: false }], cursor: null };
+  let choice: () => Answer | Promise<Answer>;
+  const sheets = () => document.querySelectorAll('[data-remote-chooser]');
+  const sheet = () => document.querySelector<HTMLElement>('[data-remote-chooser]');
+  const chooseNotes = async () => {
+    await waitFor(() => expect(sheet()?.querySelector('[data-entry]')).not.toBeNull());
+    fireEvent.click(sheet()!.querySelector('[data-entry]')!);
+    fireEvent.click(within(sheet()!).getByRole('button', { name: 'Open' }));
+  };
+
+  beforeEach(() => {
+    resetRemoteLaneBStore();
+    forgetOpenedThere();
+    forgetStarts();
+    overRl2(T);
+    choice = () => ok({ status: 'granted', path: '/data/notes.txt' });
+    main = installFakeMain(async (name) => {
+      if (name === 'layout.openFile') return answer();
+      if (name === 'files.listOutside') return ok(LISTING);
+      if (name === 'files.chooseOutside') return choice();
+      if (name === 'files.watch' || name === 'files.unwatch' || name === 'layout.set' || name === 'files.read') return name === 'files.read' ? fail('not found: here') : ok();
+      if (name === 'layout.get') return ok({ value: null });
+      return fail(`unexpected ${name}`);
+    });
+  });
+  afterEach(async () => {
+    const open = sheet();
+    if (open) fireEvent.click(within(open).getByRole('button', { name: 'Cancel' }));
+    await settle();
+    leaveRl2();
+  });
+
+  it('openChosenFor asks main’s chooser for a session of this Mac, and opens MAWS’s own sheet on that machine’s home for one there', async () => {
+    await act(() => openChosenFor(A));
+    expect(main.callsOf('layout.openFile')).toEqual([{ appSessionId: bareOf(A) }]);
+    main.calls.splice(0);
+    act(() => void openChosenFor(T));
+    await waitFor(() => expect(sheet()).not.toBeNull());
+    expect(within(sheet()!).getByRole('heading').textContent).toBe('Open a file on studio');
+    expect(main.callsOf('files.listOutside')).toEqual([{ appSessionId: bareOf(T) }]);
+    expect(main.callsOf('layout.openFile')).toEqual([]);
+  });
+
+  it('opens the granted file beside the chat as a kept tab, and reads the admission of an open tab of it again, as openChosen does', async () => {
+    const readAdmission = vi.spyOn(useViewer.getState(), 'readAdmission');
+    act(() => void openChosenFor(T));
+    await chooseNotes();
+    await waitFor(() => expect(filesOf(T)).toHaveLength(1));
+    expect(main.callsOf('files.chooseOutside')).toEqual([{ appSessionId: bareOf(T), path: `${HOME}/notes.txt` }]);
+    expect(paramsOf(filesOf(T)[0].id)).toEqual({ file: '/data/notes.txt', line: null });
+    expect(readAdmission).toHaveBeenCalledWith(T, '/data/notes.txt');
+    expect(sheet()).toBeNull();
+    readAdmission.mockRestore();
+  });
+
+  it('C6: asked again while the sheet is open, the sheet takes the keyboard and no second one opens', async () => {
+    act(() => void openChosenFor(T));
+    await waitFor(() => expect(sheet()).not.toBeNull());
+    act(() => (document.activeElement as HTMLElement | null)?.blur());
+    act(() => void openChosenFor(T));
+    await settle();
+    expect(sheets()).toHaveLength(1);
+    expect(sheet()!.contains(document.activeElement)).toBe(true);
+    expect(main.callsOf('files.listOutside')).toHaveLength(1);
+  });
+
+  it('C3: Cancel while the choice is in flight closes the sheet, and the grant that arrives then opens nothing', async () => {
+    const gate = deferred<void>();
+    choice = async () => {
+      await gate.promise;
+      return ok({ status: 'granted', path: '/data/notes.txt' });
+    };
+    act(() => void openChosenFor(T));
+    await chooseNotes();
+    await waitFor(() => expect(main.callsOf('files.chooseOutside')).toHaveLength(1));
+    fireEvent.click(within(sheet()!).getByRole('button', { name: 'Cancel' }));
+    await settle();
+    expect(sheet()).toBeNull();
+    gate.resolve();
+    await settle();
+    expect(filesOf(T)).toEqual([]);
+  });
+
+  it('C4: a choice that answers after its session left the page’s records opens nothing; after the chat in front changed, it opens beside the chosen session’s chat', async () => {
+    const gate = deferred<void>();
+    choice = async () => {
+      await gate.promise;
+      return ok({ status: 'granted', path: '/data/notes.txt' });
+    };
+    act(() => void openChosenFor(T));
+    await chooseNotes();
+    await waitFor(() => expect(main.callsOf('files.chooseOutside')).toHaveLength(1));
+    act(() => useLayout.setState({ knownSession: (id) => id !== T }));
+    gate.resolve();
+    await settle();
+    expect(filesOf(T)).toEqual([]);
+    expect(notices()).toEqual([]);
+
+    act(() => useLayout.setState({ knownSession: () => true, main: mainShowing(T) }));
+    const again = deferred<void>();
+    choice = async () => {
+      await again.promise;
+      return ok({ status: 'granted', path: '/data/notes.txt' });
+    };
+    act(() => void openChosenFor(T));
+    await chooseNotes();
+    await waitFor(() => expect(main.callsOf('files.chooseOutside')).toHaveLength(2));
+    act(() => useLayout.setState({ main: mainShowing(A) })); // another chat in front now
+    again.resolve();
+    await waitFor(() => expect(filesOf(T)).toHaveLength(1));
+    expect(filesOf(A)).toEqual([]);
+  });
+
+  describe('file.open', () => {
+    beforeEach(() => {
+      offs.push(connectOpenFile());
+      act(() => useLayout.setState({ main: mainShowing(T) }));
+    });
+
+    it('is registered while such a chat is in front for one of the machine’s owners, and opens the sheet, never main’s chooser', async () => {
+      expect(isActionEnabled('file.open')).toBe(true);
+      act(() => runAction('file.open'));
+      await waitFor(() => expect(sheet()).not.toBeNull());
+      expect(main.callsOf('layout.openFile')).toEqual([]);
+    });
+
+    it('is removed while the helper has a sentence for files.chooseOutside, and registered again when it has none (R10)', () => {
+      const cases = [{ owner: false }, { owner: undefined }, { capabilities: ['rl2.channel'] }, { state: 'down' as const, since: '2026-01-01T00:00:00.000Z' }, { state: 'connecting' as const }];
+      for (const over of cases) {
+        act(() => rosterSays(T, over));
+        expect(isActionEnabled('file.open'), JSON.stringify(over)).toBe(false);
+        act(() => rosterSays(T, {}));
+        expect(isActionEnabled('file.open'), JSON.stringify(over)).toBe(true);
+      }
+    });
+
+    it('is not registered for a terminal session there, which keeps U6e’s sentence', () => {
+      act(() => overRl2(TERMINAL, {}, 'A'));
+      act(() => useLayout.setState({ main: mainShowing(TERMINAL) }));
+      expect(isActionEnabled('file.open')).toBe(false);
+    });
   });
 });

@@ -66,3 +66,8 @@ export function connectOpenFile(): () => void {
     unregister = null;
   };
 }
+
+// UX wave U6f: Open File… for a session (not built yet: this Mac's chooser for every session).
+export function openChosenFor(appSessionId: AppSessionId): Promise<void> {
+  return openChosen(appSessionId);
+}
