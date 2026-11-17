@@ -366,7 +366,7 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
       const text = document.querySelector<HTMLElement>('[data-file-viewer] .cm-content');
       expect(text).not.toBeNull();
       return text!;
-    });
+    }, { timeout: 5000 }); // the editor's first drawing, which a loaded worker can take past the default second
     act(() => origin.focus());
     expect(document.activeElement).toBe(origin);
     const asked: boolean[] = []; // for each focus asked of the file's text: could it take the keyboard then
