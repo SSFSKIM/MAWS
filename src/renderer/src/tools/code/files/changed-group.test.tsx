@@ -415,6 +415,25 @@ describe('the Changed group (U6b-3a)', () => {
     expect(firstInView()).toBe(before);
   });
 
+  // The re-review's finding: the browser moves the offset of a person's scroll before it delivers the scroll's event, so
+  // a status that lands in between must be corrected from the offset the list really has before the change.
+  it('keeps the first tree row in view when the group grows after a scroll whose event has not come yet (S2)', async () => {
+    const many = Array.from({ length: 60 }, (_, i) => file(`/r/src/f${String(i).padStart(2, '0')}.ts`));
+    const main = changedMain({ ...TREE, '/r/src': many }, { '/r': statusOf([entry('src/f00.ts', '.M')]) });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('1'));
+    await expand('/r/src');
+    scroller().scrollTop = 30 * FILES_ROW_HEIGHT + 5; // the person's scroll, its event not yet delivered
+    changed(main, statusOf([entry('src/f00.ts', '.M'), entry('src/f01.ts', '.M'), entry('src/f02.ts', '.M')]));
+    await waitFor(() => expect(heldCount()).toBe(3));
+    expect(scroller().scrollTop).toBe(32 * FILES_ROW_HEIGHT + 5);
+    fireEvent.scroll(scroller()); // only now: the list draws the rows at its offset
+    const first = firstInView();
+    expect(first).toMatch(/^\/r\/src\/f/);
+    expect(first).toBe(`/r/src/f${String(30 - 6).padStart(2, '0')}.ts`); // the row that was first at the scroll: two of the group, the root, three folders above it
+  });
+
   // The task review's second finding: a folded group's heading that goes with a clean status, or comes back, is a
   // change of the group, not the person's press
   it('keeps the first tree row in view when a folded group goes clean and comes back while scrolled into the tree (S2)', async () => {
