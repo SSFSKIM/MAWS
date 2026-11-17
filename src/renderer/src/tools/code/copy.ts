@@ -31,6 +31,13 @@ export const FILES_COPY = {
   hideTree: 'Hide files',
   showTree: 'Show files',
   resizeTree: 'Resize files',
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, "The sentences a person reads"):
+  // the Changed group's heading, a folder's dot and an ignored entry for a screen reader, and the title of a row for an
+  // entry outside the session's folders; a letter's words are Review's (`REVIEW_COPY.kinds`)
+  changed: (count: number) => `Changed ${count.toLocaleString('en-US')}`,
+  containsChanges: 'Contains changes',
+  ignored: 'Ignored by git',
+  outside: (path: string) => `${path} · Outside the folders this session works in`,
 } as const;
 
 export const VIEWER_COPY = {

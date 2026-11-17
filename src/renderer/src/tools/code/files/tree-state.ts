@@ -49,8 +49,9 @@ export interface SessionTree {
   scrollTop: number; // this run's
   defaultRoot: string | null; // this run's: the first root, opened once
   restored: boolean; // read from the stored value: its first root is noted, not opened
-  reveal: string | null; // UX wave U6b-3a (stub)
-  changedFolded: boolean; // UX wave U6b-3a (stub)
+  // UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 7 and 11, S4): this run's
+  reveal: string | null; // a folder to scroll into view once, when its row is first in the list
+  changedFolded: boolean; // the Changed group folded by its heading; open at first in every session, never stored
 }
 
 const NEW_TREE: SessionTree = { width: null, folded: false, expanded: new Set(), selected: null, scrollTop: 0, defaultRoot: null, restored: false, reveal: null, changedFolded: false };
@@ -65,9 +66,12 @@ export interface TreeStateStore {
   select(appSessionId: AppSessionId, path: string): void;
   scrolled(appSessionId: AppSessionId, scrollTop: number): void;
   firstRoot(appSessionId: AppSessionId, root: string): void; // the session's first root, opened once
-  revealIn(appSessionId: AppSessionId, path: string, ancestors: readonly string[]): void; // UX wave U6b-3a (stub)
+  // UX wave U6b-3a: a folder opened from its Changed row, with the folders above it (each closed one opened as the
+  // person's toggle would, stored), selected and noted to show; the note dropped once shown, or when the person scrolls
+  // or selects another row
+  revealIn(appSessionId: AppSessionId, path: string, ancestors: readonly string[]): void;
   revealed(appSessionId: AppSessionId): void;
-  foldChanged(appSessionId: AppSessionId, folded: boolean): void;
+  foldChanged(appSessionId: AppSessionId, folded: boolean): void; // this run's: never written
 }
 
 export const treeOf = (state: Pick<TreeStateStore, 'trees'>, appSessionId: AppSessionId): SessionTree => state.trees.get(appSessionId) ?? NEW_TREE;
@@ -181,7 +185,7 @@ export function createTreeStateStore(
         act(id, () => ({ folded }));
       },
       select(id, path) {
-        change(id, () => ({ selected: path }));
+        change(id, (tree) => ({ selected: path, ...(tree.reveal !== null && tree.reveal !== path ? { reveal: null } : {}) })); // another selection ends the wait
       },
       scrolled(id, scrollTop) {
         change(id, () => ({ scrollTop }));
@@ -192,9 +196,17 @@ export function createTreeStateStore(
         const noted = tree.restored && tree.defaultRoot === null; // after a relaunch: the stored folders stand as the person left them
         change(id, (current) => ({ defaultRoot: root, ...(noted || current.expanded.has(root) ? {} : { expanded: new Set([...current.expanded, root]) }) }));
       },
-      revealIn() {},
-      revealed() {},
-      foldChanged() {},
+      revealIn(id, path, ancestors) {
+        const closed = [...ancestors, path].filter((folder) => !treeOf(get(), id).expanded.has(folder));
+        if (closed.length > 0) act(id, (tree) => ({ expanded: closed.reduce((open, folder) => withFolder(open, folder, true), tree.expanded) }));
+        change(id, () => ({ selected: path, reveal: path }));
+      },
+      revealed(id) {
+        if (treeOf(get(), id).reveal !== null) change(id, () => ({ reveal: null }));
+      },
+      foldChanged(id, folded) {
+        change(id, () => ({ changedFolded: folded }));
+      },
     };
   });
   resets.set(store, () => {

@@ -584,7 +584,7 @@ describe('the Changed group (U6b-3a)', () => {
     connect();
     await openTree();
     await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('120'));
-    observer.resize(scroller(), { width: 220, height: 600 });
+    observer.resize(scroller().firstElementChild!, { width: 220, height: 600 }); // the rows' box, which the list measures
     await flush();
     const drawn = calls.length;
     expect(drawn).toBeGreaterThan(0);

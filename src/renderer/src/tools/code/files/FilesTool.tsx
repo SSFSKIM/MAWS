@@ -20,6 +20,10 @@
 // tree's context menu (a right-click in it, or ⇧F10 with the keyboard in it) holds the one row "Open File…", the menus'
 // component as the Files icon's menu draws it, with no chord; for a session on another machine the row is disabled and
 // names the machine (until U6f). A tab's agent's mark is handed to its file's viewer (decision 19).
+// UX wave U6b-3a (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, M2): the drawn tree holds the git
+// store's watch of the working folder; a Changed group of what git lists as changed stands as the list's first rows, the
+// tree's rows carry the same letters and a dot above each change, and the entries git ignores are muted. A status whose
+// set of entries changed lists the drawn directories of its repository again (decision 14 (b)).
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
@@ -30,21 +34,24 @@ import { Resizer } from '../../../app/Resizer';
 import { panelHost } from '../../../panel/host';
 import type { PanelTool, PanelToolContext, PanelToolInit } from '../../../panel/tool';
 import { ipc } from '../../../ipc/client';
-import { machineFor } from '../../../ipc/machine';
+import { checkoutKey, machineFor } from '../../../ipc/machine';
+import { useGit } from '../../../stores/git';
 import { useMachines } from '../../../stores/machines';
 import { machineName } from '../../../stores/org-projects';
 import { useLayout } from '../../../stores/layout';
 import { paramsHoldFile } from '../../../stores/layout-model';
-import { FILES_COPY, OPEN_FILE_COPY, REFUSAL } from '../copy';
+import { FILES_COPY, OPEN_FILE_COPY, REFUSAL, REVIEW_COPY } from '../copy';
 import { closeGuardOf, registerSideFile } from '../editor/register';
 import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
+import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
 import { openChosen } from './open-chosen';
+import { folderFromEnd, measureIn } from './path-cut';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
-import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
+import { expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
 import { FILE_WIDTH_MIN, treeOf, treePlace, TREE_WIDTH_DEFAULT, TREE_WIDTH_MIN, useTreeState } from './tree-state';
 import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
@@ -334,9 +341,67 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     for (const path of shown.split('\0')) if (!useFiles.getState().listing(appSessionId, path)) useFiles.getState().list(appSessionId, path);
   }, [appSessionId, shown]);
 
+  // UX wave U6b-3a (M2 decision 1): the git store's watch of the working folder, the drawn tree's while it is drawn, and
+  // the status it holds; none: no Changed group and no mark (decision 3).
+  const machine = machineFor(appSessionId);
+  const working = folder?.path ?? null;
+  useEffect(() => (working === null ? undefined : useGit.getState().watch(machine, working, appSessionId)), [machine, working, appSessionId]);
+  const gitKey = working === null ? null : checkoutKey(machine, working);
+  const status = useGit((s) => (gitKey === null ? null : (s.entries.get(gitKey)?.status ?? null)));
+  const changes = useMemo(() => (status === null ? [] : changedRows(status)), [status]);
+  const marks = useMemo(() => marksOf(changes), [changes]);
+  // The Changed group, as the list's first rows once the roots' listing has answered (decision 6); folded to its heading.
+  const listed = roots?.status === 'ok';
+  const section = useMemo((): TreeRow[] => {
+    if (!listed || changes.length === 0) return [];
+    const heading: TreeRow = { kind: 'changed-heading', key: 'changed\n', count: changes.length, folded: view.changedFolded };
+    return view.changedFolded ? [heading] : [heading, ...changes.map((row): TreeRow => ({ kind: 'changed', key: `changed\n${row.rel}`, row }))];
+  }, [listed, changes, view.changedFolded]);
+  const listRows = useMemo(() => [...section, ...rows], [section, rows]);
+
+  // Decision 14 (b): a status whose set of entries differs from the last one this tree drew from lists again every drawn
+  // directory in its repository; the first status, and one of another folder, list nothing (S3, S5).
+  const seen = useRef<{ key: string; set: string } | null>(null);
+  useEffect(() => {
+    if (status === null || gitKey === null) return;
+    const set = statusSet(status);
+    const last = seen.current;
+    seen.current = { key: gitKey, set };
+    if (last === null || last.key !== gitKey || last.set === set || shown === '') return;
+    for (const path of shown.split('\0')) if (pathUnder(status.repoRoot, path) !== null) useFiles.getState().list(appSessionId, path);
+  }, [status, gitKey, shown, appSessionId]);
+
+  // A Changed row's click (decision 6): a file on disk opens as a tree row's does; a folder opens in the tree; a row with
+  // nothing on disk, and one outside every listed root (R6), opens Review on Uncommitted at its entry.
+  const rootPaths = rootEntries.map((root) => root.path);
+  const activateChanged = (row: ChangedRow, main: boolean) => {
+    const inside = expandTo(rootPaths, row.path);
+    if (inside === null || !row.onDisk) {
+      const entry = row.folder && row.letter === 'U' ? `${row.rel}/` : row.rel; // as the status lists it
+      panelHost.addTool('review', { appSessionId, params: { scope: 'uncommitted', path: entry } });
+      return;
+    }
+    if (row.folder) return useTreeState.getState().revealIn(appSessionId, inside.path, inside.ancestors);
+    useTreeState.getState().select(appSessionId, inside.path);
+    chosen();
+    if (main) return void openFile(appSessionId, row.path, null, { main: true });
+    chosenFile(row.path, openFile(appSessionId, row.path, null));
+  };
+  const keepChanged = (row: ChangedRow) => {
+    if (row.onDisk && !row.folder && expandTo(rootPaths, row.path) !== null) openFile(appSessionId, row.path, null, { keep: true });
+  };
+  const changed: ChangedProps = {
+    marks,
+    working,
+    rootPaths,
+    activate: activateChanged,
+    keep: keepChanged,
+    fold: (folded) => useTreeState.getState().foldChanged(appSessionId, folded),
+  };
+
   // A click: a folder opens or closes; a file opens in the preview tab, or with ⌘ as a main tab (L3).
   const activate = (row: TreeRow, main: boolean) => {
-    if (row.kind === 'notice') return;
+    if (row.kind !== 'root' && row.kind !== 'entry') return;
     const directory = row.kind === 'root' || row.entry.kind === 'dir';
     // Expanding a directory whose listing failed asks again (a refused root stays expandable for a retry).
     if (directory && !row.expanded && useFiles.getState().listing(appSessionId, row.path)?.status === 'error') useFiles.getState().list(appSessionId, row.path);
@@ -360,7 +425,7 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
         {roots?.status === 'error' ? <div className="flex items-center justify-between pr-1"><RootsFailure message={roots.message} /><RefreshButton refresh={refresh} /></div> : null}
-        <TreeList rows={rows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} />
+        <TreeList rows={listRows} selected={marked ?? view.selected} activate={activate} keepRow={keepRow} appSessionId={appSessionId} refresh={refresh} changed={changed} />
       </div>
     </FilesMenu>
   );
@@ -447,6 +512,24 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
   );
 }
 
+// UX wave U6b-3a: what the list needs to draw the Changed group and the marks.
+interface ChangedProps {
+  marks: Marks;
+  working: string | null; // the working folder's path, from which a row under it names its folder
+  rootPaths: readonly string[]; // the roots the files service listed: a row under none is outside the session's folders
+  activate(row: ChangedRow, main: boolean): void;
+  keep(row: ChangedRow): void;
+  fold(folded: boolean): void;
+}
+
+// The fonts a Changed row's name and folder are measured in (M2 decision 9), read from the page's tokens once per list.
+function rowFonts(): { name: string; folder: string } {
+  const style = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
+  const token = (name: string, fallback: string) => style?.getPropertyValue(name).trim() || fallback;
+  const family = token('--font-ui', 'system-ui, sans-serif');
+  return { name: `${token('--text-ui', '13px')} ${family}`, folder: `${token('--text-ui-sm', '12px')} ${family}` };
+}
+
 // The rows as one virtual list. Its own component because the React Compiler skips any component that calls
 // `useVirtualizer` (its API returns functions it cannot memoise); the tree above stays compiled.
 function TreeList({
@@ -456,6 +539,7 @@ function TreeList({
   keepRow,
   appSessionId,
   refresh,
+  changed,
 }: {
   rows: TreeRow[];
   selected: string | null;
@@ -463,8 +547,11 @@ function TreeList({
   keepRow: (row: TreeRow) => void;
   appSessionId: AppSessionId;
   refresh(): void;
+  changed: ChangedProps;
 }) {
   const scroller = useRef<HTMLDivElement>(null);
+  const [width, measureWidth] = useWidth(); // the rows' width, from which a Changed row's folder gets its room
+  const fonts = useMemo(rowFonts, []);
   const getItemKey = useCallback((index: number) => rows[index].key, [rows]);
   // eslint-disable-next-line react-hooks/incompatible-library -- see above
   const virtualizer = useVirtualizer({
@@ -497,16 +584,38 @@ function TreeList({
     el.scrollTop = want;
     if (el.scrollTop >= want) pending.current = null;
   }, [total]);
-  const scrolledByOwner = () => void (pending.current = null);
+  // UX wave U6b-3a (S4): a folder opened from its Changed row is scrolled into view in the first render in which its row
+  // exists, and the note is dropped; the person's own scroll or another selection drops it first.
+  const reveal = useTreeState((s) => treeOf(s, appSessionId).reveal);
+  const revealAt = reveal === null ? -1 : rows.findIndex((row) => (row.kind === 'root' || row.kind === 'entry') && sameFile(row.path, reveal));
+  useLayoutEffect(() => {
+    if (revealAt < 0) return;
+    const el = scroller.current!;
+    const top = revealAt * FILES_ROW_HEIGHT;
+    const height = el.clientHeight || el.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
+    if (top < el.scrollTop) el.scrollTop = top;
+    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) el.scrollTop = top + FILES_ROW_HEIGHT - height;
+    useTreeState.getState().revealed(appSessionId);
+  }, [revealAt, appSessionId]);
+  const scrolledByOwner = () => {
+    pending.current = null;
+    useTreeState.getState().revealed(appSessionId);
+  };
   return (
     <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
-      <div className="relative w-full">
+      <div ref={measureWidth} className="relative w-full">
         <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
             const row = rows[item.index];
             return (
               <div key={item.key} className={`absolute inset-x-0 flex items-center ${item.index === 0 && row.kind === 'root' ? 'pr-8' : 'pr-1'}`} style={{ top: item.start, height: FILES_ROW_HEIGHT }}>
-                <Row row={row} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} />
+                {row.kind === 'changed-heading' ? (
+                  <ChangedHeading count={row.count} folded={row.folded} fold={changed.fold} />
+                ) : row.kind === 'changed' ? (
+                  <ChangedItem row={row.row} changed={changed} width={width} fonts={fonts} />
+                ) : (
+                  <Row row={row} marks={changed.marks} selected={selected !== null && row.kind !== 'notice' && sameFile(row.path, selected)} activate={activate} keepRow={keepRow} />
+                )}
               </div>
             );
           })}
@@ -544,7 +653,102 @@ function Chevron({ open }: { open: boolean }) {
   );
 }
 
-function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void }) {
+// A letter's words, Review's (`REVIEW_COPY.kinds`): after a name for a screen reader, and as the letter's title.
+const KIND: Record<ChangeLetter, string> = {
+  M: REVIEW_COPY.kinds.modified,
+  A: REVIEW_COPY.kinds.added,
+  U: REVIEW_COPY.kinds.untracked,
+  D: REVIEW_COPY.kinds.deleted,
+  R: REVIEW_COPY.kinds.renamed,
+  '!': REVIEW_COPY.kinds.conflict,
+};
+
+// UX wave U6b-3a (decision 9): the mark's slot at the row's end, 16 px after the row's gap, only on a row that carries a
+// letter or a dot; hidden from a screen reader, which hears the state after the name. `plain`: the selected row, whose
+// letter takes the row's own colour.
+function Mark({ letter, dot, plain }: { letter: ChangeLetter | null; dot: ChangeLetter | null; plain: boolean }) {
+  if (letter !== null) {
+    return (
+      <span data-mark aria-hidden="true" title={KIND[letter]} className={`ml-auto inline-flex w-4 shrink-0 justify-center text-ui-sm font-semibold ${plain ? '' : LETTER_TONE[letter]}`}>
+        {letter}
+      </span>
+    );
+  }
+  if (dot === null) return null;
+  return (
+    <span data-mark aria-hidden="true" className={`ml-auto inline-flex w-4 shrink-0 items-center justify-center ${LETTER_TONE[dot]}`}>
+      <span className="size-1.5 rounded-full bg-current" />
+    </span>
+  );
+}
+
+// UX wave U6b-3a (decision 11; the owner's answer on the card): the Changed group's heading, a button that folds the
+// group to its one line; its chevron at the tree's root indent, as a root's row has one.
+function ChangedHeading({ count, folded, fold }: { count: number; folded: boolean; fold(folded: boolean): void }) {
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-level={1}
+      aria-expanded={!folded}
+      aria-selected={false}
+      data-files-changed=""
+      data-count={count}
+      onClick={() => fold(!folded)}
+      className="flex h-full min-w-0 flex-1 items-center gap-1.5 truncate pr-2 text-left text-ui-sm text-fg-muted hover:bg-bg-hover"
+      style={indent(0)}
+    >
+      <Chevron open={!folded} />
+      <span className="truncate">{FILES_COPY.changed(count)}</span>
+    </button>
+  );
+}
+
+// What a Changed row leaves of its width for the folder, besides its name: the list row's end (pr-1), the button's end
+// (pr-2), one level's indent, the gap between the name and the folder, and the gap and slot of its letter.
+const CHANGED_ROW_FIXED = 4 + 8 + 20 + 6 + 6 + 16;
+
+// UX wave U6b-3a (decisions 6 and 8): a Changed row, one level in: its name, then its folder in the muted colour, cut at
+// its start where it does not fit and gone below two characters of room, then its letter.
+function ChangedItem({ row, changed, width, fonts }: { row: ChangedRow; changed: ChangedProps; width: number; fonts: { name: string; folder: string } }) {
+  const label = labelOf(row, changed.working);
+  const outside = expandTo(changed.rootPaths, row.path) === null;
+  const oldPath = row.oldRel === null ? null : row.path.slice(0, row.path.length - row.rel.length) + row.oldRel;
+  const title = outside
+    ? FILES_COPY.outside(`${row.rel}${row.folder ? '/' : ''}`)
+    : row.letter === 'R' && oldPath !== null && row.oldRel !== null
+      ? REVIEW_COPY.renamedFrom(shownPath(oldPath, row.oldRel, changed.working))
+      : label.shown;
+  // The folder gives way first; until the list has a width (its first layout) it is drawn whole.
+  const folder = label.folder === '' || width <= 0 ? label.folder : folderFromEnd(label.folder, width - CHANGED_ROW_FIXED - measureIn(fonts.name)(label.name), measureIn(fonts.folder));
+  return (
+    <button
+      type="button"
+      role="treeitem"
+      aria-level={2}
+      aria-selected={false}
+      data-changed-row=""
+      data-path={row.path}
+      data-letter={row.letter}
+      data-folder={row.folder ? '' : undefined}
+      data-outside={outside ? '' : undefined}
+      title={title}
+      onClick={(event) => changed.activate(row, event.metaKey)}
+      onDoubleClick={() => changed.keep(row)}
+      className="flex h-full min-w-0 flex-1 items-center gap-1.5 overflow-hidden pr-2 text-left text-ui text-fg hover:bg-bg-hover"
+      style={indent(1)}
+    >
+      <span data-name className="truncate">
+        {label.name}
+      </span>
+      {folder ? <span className="shrink-0 whitespace-nowrap text-ui-sm text-fg-muted">{folder}</span> : null}
+      <span className="sr-only"> {KIND[row.letter]}</span>
+      <Mark letter={row.letter} dot={null} plain={false} />
+    </button>
+  );
+}
+
+function Row({ row, marks, selected, activate, keepRow }: { row: ListedRow; marks: Marks; selected: boolean; activate: (row: TreeRow, main: boolean) => void; keepRow: (row: TreeRow) => void }) {
   if (row.kind === 'notice') {
     const text =
       row.notice === 'empty'
@@ -566,6 +770,12 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
   const secondary =
     row.kind === 'root' ? row.role : row.entry.kind === 'symlink' ? FILES_COPY.symlink(row.entry.target) : null;
   const inert = row.kind === 'entry' && (row.entry.kind === 'symlink' || row.entry.kind === 'other');
+  // UX wave U6b-3a (decisions 9 and 15): a changed entry's letter, a dot on a folder with a change beneath it and no letter
+  // of its own, and an entry git ignores muted (the selected row keeps its own colour)
+  const letter = marks.letter(row.path);
+  const dot = directory && letter === null ? marks.dot(row.path) : null;
+  const ignored = row.kind === 'entry' && row.entry.ignored === true;
+  const state = letter !== null ? KIND[letter] : dot !== null ? FILES_COPY.containsChanges : null;
   return (
     <button
       type="button"
@@ -575,6 +785,9 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
       aria-selected={selected}
       data-path={row.path}
       data-kind={row.kind === 'root' ? 'root' : row.entry.kind}
+      data-letter={letter ?? undefined}
+      data-dot={dot ?? undefined}
+      data-ignored={ignored ? '' : undefined}
       title={row.path}
       onClick={(event) => activate(row, event.metaKey)}
       onDoubleClick={() => keepRow(row)}
@@ -582,8 +795,13 @@ function Row({ row, selected, activate, keepRow }: { row: TreeRow; selected: boo
       style={indent(row.depth)}
     >
       {directory ? <Chevron open={row.expanded} /> : <span className="size-3 shrink-0" />}
-      <span className={`truncate ${row.kind === 'root' ? 'font-medium' : ''}`}>{name}</span>
+      <span data-name className={`truncate ${row.kind === 'root' ? 'font-medium' : ''} ${ignored && !selected ? 'text-fg-muted' : ''}`}>
+        {name}
+      </span>
       {secondary ? <span className="truncate text-ui-sm text-fg-faint">{secondary}</span> : null}
+      {ignored ? <span className="sr-only"> {FILES_COPY.ignored}</span> : null}
+      {state !== null ? <span className="sr-only"> {state}</span> : null}
+      <Mark letter={letter} dot={dot} plain={selected} />
     </button>
   );
 }
