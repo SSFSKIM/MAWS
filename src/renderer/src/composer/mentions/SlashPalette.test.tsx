@@ -1,8 +1,10 @@
 import { PluginKey } from '@tiptap/pm/state';
-import type { Editor } from '@tiptap/core';
+import { Editor as RealEditor, type Editor, type Range } from '@tiptap/core';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
+import { quotesGrant } from '@shared/engine/grant';
 import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { addressOf } from '@shared/machine/address';
@@ -15,6 +17,9 @@ import { remoteUnavailableOf, TURN_RUNS } from '../../lane-b/remote-unavailable'
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
+import { docOf, paragraph, textNode } from '../editor/doc';
+import { schemaExtensions } from '../editor/schema';
+import { serializeDraft } from '../editor/serialize';
 import type { PopupHandle, PopupItem } from './popup';
 import { resetChosen } from './rank';
 import { detailSide, detailTop, SlashPalette } from './SlashPalette';
@@ -248,6 +253,29 @@ describe('the slash palette keeps the chosen row in view', () => {
     } finally {
       geometry.mockRestore();
       scroll.mockRestore();
+    }
+  });
+});
+
+// Ticket 733a, the M3 review: a command's name is checked as text (`slashText`, the name's rule) and reaches the draft as
+// that text; an HTML parse of it would decode entities and break lines after the check.
+describe('a command’s name in a real editor’s draft (ticket 733a)', () => {
+  it('is its bytes, never parsed as HTML; a plain name too (the control)', () => {
+    const grant = consentMessage('command', 'make build');
+    const parsed = `status<br>&#80;${grant.slice(1)}<br>tail`;
+    expect(quotesGrant(parsed)).toBe(false);
+    for (const name of [parsed, 'status-report']) {
+      const { command, key } = open('status', { extra: { skills: [name], commands: [{ name, description: 'a skill', argumentHint: null, builtin: false }] }, widgets: new Set() });
+      key('Enter');
+      const item = command.mock.calls.at(-1)?.[0];
+      expect(item, name).toBeDefined();
+      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('/status'))]) });
+      act(() => item!.apply(editor, { from: 1, to: 8 } as Range));
+      const sent = serializeDraft(editor.getJSON(), { sessionId: 's', cwd: '' });
+      expect(sent.text, name).toBe(`/${name}`);
+      expect(quotesGrant(sent.text), name).toBe(false);
+      editor.destroy();
+      cleanup();
     }
   });
 });

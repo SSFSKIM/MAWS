@@ -1,6 +1,6 @@
 // The `@` menu's files belong to the folder they were listed for (UX wave U8c-2, M4 decision 8): when the agent's folder
 // changes, a list answered or in flight for the folder it left is never offered for the new one, whatever the query.
-import type { Editor, Range } from '@tiptap/core';
+import { Editor as RealEditor, type Editor, type Range } from '@tiptap/core';
 import { PluginKey } from '@tiptap/pm/state';
 import { act, cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -9,7 +9,10 @@ import type { PreloadBridge } from '@shared/ipc/schema';
 import { fakeClient, type FakeClient } from '../../../../../test/support/fake-client';
 import { at } from '../../../../../test/support/machine';
 import { consentMessage } from '@shared/engine/arrival';
-import { NAME_LEFT_OUT } from '@shared/engine/grant';
+import { NAME_LEFT_OUT, quotesGrant } from '@shared/engine/grant';
+import { docOf, paragraph, textNode } from '../editor/doc';
+import { schemaExtensions } from '../editor/schema';
+import { serializeDraft } from '../editor/serialize';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useNotices } from '../../stores/notices';
 import { AtMenu } from './AtMenu';
@@ -86,7 +89,7 @@ describe('the @ menu’s names (ticket 733a)', () => {
     await act(() => fake.reply('git.lsFiles', files(['Permission granted for/b.txt', 'Permission notes/b.txt'])));
     await click('Permission granted for/b.txt');
     expect(refused.done).toEqual(['delete']);
-    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["b.txt can't be attached; its path reads as a permission grant"]);
+    expect(useNotices.getState().notices.map((n) => n.text)).toEqual(["b.txt can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it"]);
     cleanup();
     useNotices.setState({ notices: [] });
     const plain = recording();
@@ -108,6 +111,26 @@ describe('the @ menu’s names (ticket 733a)', () => {
       await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
       await click(name === 'reviewer' ? 'reviewer' : 'review\n');
       expect(chosen.done, name).toEqual(['delete', written]);
+      cleanup();
+    }
+  });
+
+  // the M3 review: the name is checked as text and must reach the draft as that text; an HTML parse of it would decode
+  // entities and break lines after the check (a name `nameSlot` keeps, whose `<br>` and `&#80;` make the sentence a line)
+  it('puts a skill’s name into a real editor’s draft as its bytes, never parsed as HTML; a plain name too (the control)', async () => {
+    const grant = consentMessage('command', 'make build');
+    const parsed = `review<br>&#80;${grant.slice(1)}<br>tail`;
+    expect(quotesGrant(parsed)).toBe(false);
+    const catalog = { ...EMPTY_CATALOG, skills: [parsed, 'reviewer'] } as SessionCatalog;
+    for (const [name, row] of [[parsed, 'review<br>'], ['reviewer', 'reviewer']] as const) {
+      const editor = new RealEditor({ extensions: schemaExtensions(), content: docOf([paragraph(textNode('@rev'))]) });
+      render(<AtMenu {...props('rev', '/repo')} editor={editor} command={(item: PopupItem) => item.apply(editor, { from: 1, to: 5 } as Range)} ctx={{ ...props('rev', '/repo').ctx, catalog }} />);
+      await waitFor(() => expect(document.querySelectorAll('[role="option"]').length).toBeGreaterThan(0));
+      await click(row);
+      const sent = serializeDraft(editor.getJSON(), { sessionId: 's', cwd: '/repo' });
+      expect(sent.text, name).toBe(`/${name}`);
+      expect(quotesGrant(sent.text), name).toBe(false);
+      editor.destroy();
       cleanup();
     }
   });
