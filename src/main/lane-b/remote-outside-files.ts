@@ -148,14 +148,13 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
   function nextChannel(link: RemoteLink, until: number): Promise<boolean> {
     if (link.peerCapabilities() !== null) return Promise.resolve(true);
     return new Promise((resolve) => {
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      const off = link.onChannel((event) => void (event === 'current' && done(true)));
       const done = (current: boolean) => {
         clearTimeout(timer);
         off();
         resolve(current);
       };
-      timer = setTimeout(() => done(false), Math.max(0, until - deps.now()));
+      const timer = setTimeout(() => done(false), Math.max(0, until - deps.now()));
+      const off = link.onChannel((event) => void (event === 'current' && done(true)));
     });
   }
 

@@ -2810,7 +2810,6 @@ describe('a session’s file there across a channel’s end (U6f, Decision Log 2
   }
   /** Today's keys of a copy's read, and no other: what any build reads. */
   const TODAYS = ['appSessionId', 'hash', 'length', 'offset', 'path'];
-  const NEW_KEYS = ['named', 'agent', 'open'];
 
   it('a copy of a file inside the folders asked with no channel current waits under the link’s hold, and lands once a channel comes, its read today’s', async () => {
     const o = await served();
