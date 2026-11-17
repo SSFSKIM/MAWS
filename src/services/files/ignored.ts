@@ -187,11 +187,14 @@ export function createIgnoreCheck(
     const deadline = Math.max(...asks.map((ask) => ask.deadline));
     const rest = () => Math.max(1, deadline - Date.now()); // every call shares the latest deadline the run carries
     const live = () => asks.filter((ask) => pending.has(ask));
+    // The asks a read is made for, taken with no await between them and its spawn: the reaction to an answer `holding`
+    // gave runs before the run resumes, and may stop the check, which then had no child to end
+    const reading = () => (disposed ? [] : live());
     const asking = runnerFor(owned); // where the repository is: git's own discovery
     let named: Repository | null = null; // the repository git named before the run's first call
     // Before each call: the asks whose folder and `.git` are still what was confirmed, in the repository git names now,
     // the one it named before the first call; the others get no answer
-    const holding = async (): Promise<Ask[]> => {
+    const holding = async (): Promise<void> => {
       const marker = await fs.promises.lstat(join(root, '.git'), { bigint: true }).catch(() => null);
       const asked = live();
       const held = await Promise.all(asked.map(async (ask) => marker !== null && sameMarker(marker, ask.marker!) && (await stillNames(ask.dir, ask.opened!))));
@@ -204,17 +207,18 @@ export function createIgnoreCheck(
         noAnswer(held[i] && typeof found === 'string' ? found : CHANGED);
         ask.answer(null);
       });
-      return live();
     };
     try {
-      const listed = await holding();
+      await holding();
+      const listed = reading();
       if (listed.length === 0) return; // nothing left to ask: no git runs
       const { gitDir, commonDir } = named!;
       const run = runnerFor(owned, { GIT_DIR: gitDir, GIT_COMMON_DIR: commonDir, GIT_WORK_TREE: root });
       const rels = [...new Set(listed.map((ask) => ask.rel))];
       const listing = await run(root, ['--literal-pathspecs', 'ls-files', '-z', '--', ...rels.map((rel) => (rel === '' ? '.' : `${rel}/`))], { timeoutMs: rest() });
       const tracked = trackedBeneath(listing, rels);
-      const carried = await holding();
+      await holding();
+      const carried = reading();
       if (carried.length === 0) return; // every ask answered meanwhile (the bounds, the stop, a substitution): the second call is not made
       const byPath = new Map<string, Ask[]>(); // `./<rel>/<name>` as sent and as git answers it
       const answers = new Map<Ask, Set<string>>(carried.map((ask) => [ask, new Set<string>()]));
