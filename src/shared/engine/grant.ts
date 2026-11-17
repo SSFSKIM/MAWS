@@ -81,7 +81,7 @@ export function quotesGrant(text: string, work?: { steps: number }): boolean {
 export const GRANT_BREAK = '⁠';
 
 // The opening read backwards, each letter the set of positions it stands at, as `AT` is for the opening read forwards: a
-// pass from the text's end finds where each occurrence begins (its first letter), in every reading `quotesGrant` reads.
+// pass from the text's end finds where each occurrence begins (its first letter), in every reading it reads.
 const AT_BACKWARDS = new Int32Array(128);
 for (let k = 0; k < FOLDED_GRANT.length; k += 1) {
   const code = FOLDED_GRANT.charCodeAt(FOLDED_GRANT.length - 1 - k);
@@ -89,19 +89,23 @@ for (let k = 0; k < FOLDED_GRANT.length; k += 1) {
 }
 const IS_LETTER = /^[\p{L}\p{N}]$/u;
 const MARK = /\p{M}/uy; // a combining mark after a span's first letter stays with it: the joiner goes after it
-const OTHER_LETTER = -1; // in the folded stream: a letter or digit beyond ASCII, which ends every beginning
-const OPEN = 0x3c; // `<`
-const CLOSE = 0x3e; // `>`
+// the folded stream's codes beyond a letter's ASCII one
+const OTHER_LETTER = -1; // a letter or digit beyond ASCII, which ends every beginning
+const OPEN = -2; // `<`, or a character that folds to it
+const CLOSE = -3; // `>` as typed
+const FOLDED_CLOSE = -4; // a character that folds to `>` (the full-width one)
 
 /**
  * What MAWS sends as a person's own free text (the composer's serialised draft, its last step; the sites that send raw
- * text, theirs): the text with U+2060 (`GRANT_BREAK`) put inside the first word of every span `quotesGrant` reads as the
+ * text, theirs): the text with U+2060 (`GRANT_BREAK`) put inside the first word of every span that reads as the
  * opening, after its first letter (and that letter's combining marks), so no line of what goes out is the consent
- * sentence, and no later change of white space, line ends, case, marks, compatibility forms or angle-bracket pairs can
- * make it one. The reading is `quotesGrant`'s, each character folded by itself (so a letter a combining mark follows is
- * read as the letter: more spans than the whole-string folding finds, never fewer). A span whose first letter the joiner
- * already follows is left as it is, so a text sent again does not grow; a text with no span is returned as it was.
- * `work`, when given, is charged the characters the passes go over.
+ * sentence, and no later change of white space, line ends, case, marks, compatibility forms, pasted tags or angle-bracket
+ * pairs can make it one. The reading is `quotesGrant`'s, widened: each character folded by itself (a letter a combining
+ * mark follows is read as the letter), and the words from any `<` to any later `>` with no `>` as typed between them read
+ * both kept and removed (a later layer's tag, a pair cut at a full-width bracket, as well as `quotesGrant`'s pairs). So it
+ * breaks every span `quotesGrant` finds, and more, never fewer. A span whose first letter the joiner already follows is
+ * left as it is, so a text sent again does not grow; a text with no span is returned as it was. `work`, when given, is
+ * charged the characters the passes go over.
  */
 export function neutraliseGrant(text: string, work?: { steps: number }): string {
   // the folded stream: each letter or digit (by its ASCII code, or OTHER_LETTER) and each angle bracket, with the end
@@ -112,46 +116,44 @@ export function neutraliseGrant(text: string, work?: { steps: number }): string 
   while (i < text.length) {
     const point = text.codePointAt(i)!;
     const end = i + (point > 0xffff ? 2 : 1);
-    const folded = point < 128 ? String.fromCharCode(point).toLowerCase() : String.fromCodePoint(point).normalize('NFKC').toLowerCase();
-    for (const char of folded) {
-      const c = char.codePointAt(0)!;
-      if (c < 128 ? isAsciiLetter(c) || c === OPEN || c === CLOSE : IS_LETTER.test(char)) {
-        codes.push(c < 128 ? c : OTHER_LETTER);
+    if (point < 128) {
+      const c = point >= 0x41 && point <= 0x5a ? point + 0x20 : point;
+      const code = isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? CLOSE : null;
+      if (code !== null) {
+        codes.push(code);
         ends.push(end);
+      }
+    } else {
+      for (const char of String.fromCodePoint(point).normalize('NFKC').toLowerCase()) {
+        const c = char.codePointAt(0)!;
+        const code = c < 128 ? (isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? FOLDED_CLOSE : null) : IS_LETTER.test(char) ? OTHER_LETTER : null;
+        if (code !== null) {
+          codes.push(code);
+          ends.push(end);
+        }
       }
     }
     i = end;
   }
-  // the pairs, as `quotesGrant` cuts them: a `<` that a later `>` closes, up to the first `>` after it
-  const pair = new Int8Array(codes.length); // 1 opens a pair, 2 closes one
-  const lastClose = codes.lastIndexOf(CLOSE);
-  let inPair = false;
-  for (let k = 0; k < codes.length; k += 1) {
-    if (inPair && codes[k] === CLOSE) {
-      pair[k] = 2;
-      inPair = false;
-    } else if (!inPair && codes[k] === OPEN && k < lastClose) {
-      pair[k] = 1;
-      inPair = true;
-    }
-  }
-  // from the end: each pair read both ways (the reading at its `>`, which the pair removed with its words leaves as it
-  // was, joins the reading at its `<`); a first letter that ends the opening read backwards begins a span
+  // from the end, the opening read backwards: at a `>`, the reading so far is one a `<` before it may go on from, its
+  // words between removed (a `>` as typed ends what an earlier `>` saved, a folded one adds to it); a first letter that
+  // ends the opening read backwards begins a span
   const starts: number[] = [];
   let reached = 1;
-  let before = 0;
+  let saved = 0;
   for (let k = codes.length - 1; k >= 0; k -= 1) {
     const c = codes[k]!;
-    if (pair[k] === 2) before = reached;
-    else if (pair[k] === 1) reached |= before;
+    if (c === CLOSE) saved = reached;
+    else if (c === FOLDED_CLOSE) saved |= reached;
+    else if (c === OPEN) reached |= saved;
     else if (c === OTHER_LETTER) reached = 1;
-    else if (c !== OPEN && c !== CLOSE) {
+    else {
       const moved = reached & AT_BACKWARDS[c]!;
       if ((moved & WHOLE) !== 0) starts.push(ends[k]!);
       reached = 1 | (moved << 1);
     }
   }
-  if (work) work.steps += text.length + 3 * codes.length;
+  if (work) work.steps += text.length + 2 * codes.length;
   if (starts.length === 0) return text;
   let out = '';
   let from = 0;
