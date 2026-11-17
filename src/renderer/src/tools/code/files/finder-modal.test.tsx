@@ -182,6 +182,32 @@ describe('Go to file while a modal that holds nothing a person would lose has th
     expect(composer().isConnected).toBe(true);
   });
 
+  // The re-review's finding: a lender opened over another lender is over nothing that keeps the keyboard
+  it('Keyboard shortcuts opened over the Command palette: Go to file stays enabled, closes both and the field has the keyboard, Esc giving it back to the composer; the control, a sheet under the palette, disables it', async () => {
+    renderShell(<TestSheet />);
+    await composerHoldsKeyboard();
+    act(() => openPalette());
+    await waitFor(() => expect(palette()?.contains(document.activeElement)).toBe(true));
+    act(() => toggleKeyboardShortcuts());
+    await waitFor(() => expect(shortcuts()?.contains(document.activeElement)).toBe(true));
+    await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(true));
+    expect(menuEnables()).toContain('files.goToFile');
+    menuGoToFile();
+    await waitFor(() => expect([shortcuts(), palette()]).toEqual([null, null]));
+    await waitFor(() => expect(document.activeElement).toBe(field()));
+    esc();
+    expect(document.activeElement).toBe(composer());
+    // the control, in the same page: a sheet under the palette keeps Go to file disabled
+    act(() => useTestSheet.setState({ open: true }));
+    await waitFor(() => expect(document.querySelector('input[aria-label="An invented name"]')?.contains(document.activeElement)).toBe(true));
+    act(() => openPalette());
+    await waitFor(() => expect(palette()?.contains(document.activeElement)).toBe(true));
+    await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(false));
+    act(() => usePalette.setState({ open: false }));
+    act(() => useTestSheet.setState({ open: false }));
+    await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(true));
+  });
+
   it('the control: with no modal open, the same Go ▸ Go to file takes the keyboard from the composer and Esc twice gives it back', async () => {
     renderShell();
     await composerHoldsKeyboard();
