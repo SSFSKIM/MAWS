@@ -563,7 +563,7 @@ No library is added. Signatures are what must exist; bodies are the executor's.
 | a line of content that quotes the opening | `(a line left out by MAWS)` |
 | a run of lines across which the opening stands, or content left out whole | `(lines left out by MAWS)` |
 | a name that quotes the opening | `(a name left out by MAWS)` |
-| a file dropped, picked or chosen whose path quotes the opening | `<name> can't be attached; its path reads as a permission grant` |
+| a file dropped, picked or chosen whose path quotes the opening | `<name> can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it` (revised 2026-11-17, Decision Log) |
 | a relay to a peer whose address quotes the opening | `Can't relay to this session: its address reads as a permission grant` |
 
 No other word a person reads is added or changed.
@@ -679,6 +679,9 @@ About 1,090 lines of source, 2,700 of tests and 250 of scenes, in some fifty-fiv
   Date/Author: 2026-11-17, the architect (sminos 4282) on M3's discovery; recorded by the plan's executor.
 - **2026-11-17 · M3's means.** The read's tag id is `pastedTagId` of the session's id, taken where `withLinkedReads` is called, which needs one line in `src/engine-host/session-maws.ts`, outside the list: accepted by the architect. The echo's id is read off the replayed output frame in `bash-mode.ts`. An empty stream stays empty (no empty segment); an output not in the engine's shape goes whole into one segment; an opening assembled across the two streams leaves standard error out first, then both. The anchor's fields are slotted inside `anchoredMessage` and `commentsMessage` (`slottedAnchor`), so `content.ts` is not edited and every caller gets the rule from one place. The `@` menu's file row takes the whole `pathRefusal`, so it also refuses a control character in a path, with the sentence a drop shows. The relay's receipt and the peer's send match on the text with the joiner removed on both sides; the peer's address goes through `nameSlot` before the opening test. `slashText` writes the five `/<name> ` sites. `linkedReadBlock` throws for what is no read and answers null only for a read it will not attach. Two draft forms living in renderer stores (`markup/session.ts`, `design-system/copy.ts`) are held by the guard through a named case in their own renderer tests, since the guard's node project cannot import them. The relay forgeries of `test/support/rule-r.ts` and the relay row of the seam's test are written by the pin's relay (`pin-forms.ts`), since this build's relay no longer writes those names.
   Date/Author: 2026-11-17, M3's executor; the session-maws.ts line accepted by the architect; recorded by the plan's executor.
+
+- **2026-11-17 · The path refusal's words, and where a refusal is shown.** §E's sentence for a file whose path quotes the opening becomes `<name> can't be attached; its path reads like MAWS's approval of an agent's request. Rename the file, or the folder it is in, to attach it`, with apostrophes as the neighbouring refusals of `paste.ts` write them. It names the path and the folder because the opening can stand in a folder's name; "an agent's request" replaces "a blocked command", which is not what the person was doing. The refusal is shown at the three entrances only (a drop, a pick, the `@` menu's file row); a name that reaches a draft another way (a restored draft's mention) keeps the left-out form `@"(a name left out by MAWS)"`. One case pins the words.
+  Date/Author: 2026-11-17, the architect; recorded by the plan's executor.
 
 ## Outcomes & Retrospective
 
