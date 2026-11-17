@@ -1,6 +1,8 @@
 import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { consentMessage, readArrivals } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
 import { previewLine } from '@shared/owner/preview';
 import { currentChain } from '@shared/wire/transcript';
 import { loadJournal, loadTranscriptFixture, TEST_FIXTURE_DIR } from '../../../test/support/fixtures';
@@ -423,5 +425,19 @@ describe("the newest row's folder", () => {
 
   it('is null for a file of bookkeeping rows only', () => {
     expect(of(whole({ type: 'custom-title', customTitle: 't' }, { type: 'relocated', relocatedCwd: '/repo' })).newestCwd).toBeNull();
+  });
+});
+
+// The review round's R3 (b): the first-prompt title holds no joiner, so a search for a word it shows finds it; no consent
+// reader reads the title (the row's own reading is the file route's, of the row text)
+describe('the one-writer rule: the first-prompt title', () => {
+  it('is the prompt without U+2060, and the row it comes from reads no grant', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const row = { type: 'user', uuid: 'u1', parentUuid: null, cwd: '/d', timestamp: '2026-11-17T10:00:00.000Z', origin: { kind: 'human' }, message: { role: 'user', content: neutraliseGrant(sentence) } };
+    const bytes = Buffer.from(line(row), 'utf8');
+    const title = summarize(bytes, bytes, { size: bytes.length, mtimeMs: 1, birthtimeMs: 0 }, '/p/S.jsonl', '-p').firstPrompt;
+    expect(title).toBe(sentence.slice(0, title?.length));
+    expect(title!.includes('\u2060')).toBe(false);
+    expect(readArrivals(row).filter((arrival) => arrival.class === 'consent')).toEqual([]);
   });
 });

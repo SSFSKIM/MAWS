@@ -2,6 +2,7 @@
 // editor, and the message a resubmit's content becomes. Both follow C7's serialiser (`serializeDraft`), so the round
 // trip through a real document is the pin.
 import { describe, expect, it } from 'vitest';
+import { consentMessage } from '@shared/engine/arrival';
 import { framePasted } from '@shared/composer/pasted-content';
 import { atomId, docOf, paragraph, pastedNode, textNode, type Attachment } from '../composer/editor/doc';
 import { prefillToDoc } from '../composer/editor/recall';
@@ -48,5 +49,16 @@ describe('firstMessageOf', () => {
     expect(firstMessageOf('hello')).toEqual({ content: 'hello', display: 'hello' });
     expect(firstMessageOf('a <\\pasted_content b')).toEqual({ content: 'a <\\pasted_content b', display: 'a <pasted_content b' });
     expect(firstMessageOf(`x\n\n${framePasted('ab12', 'body')}\n`).display).toBe('x[Pasted text #1 +1 lines]');
+  });
+});
+
+// The review round's R3 (b): a spawned session's display text (a fork's first message) holds no joiner
+describe('the one-writer rule: a first message’s display and prefill', () => {
+  it('hold the text and the pasted body as typed, without U+2060', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const sent = serializeDraft(docOf([paragraph(textNode(sentence), pasted(`said:\n${sentence}`))]), ctx);
+    expect(sent.text).toContain('\u2060');
+    expect(firstMessageOf(sent.content).display.includes('\u2060')).toBe(false);
+    expect(JSON.stringify(messagePrefill({ content: sent.content, display: sent.display })).includes('\u2060')).toBe(false);
   });
 });
