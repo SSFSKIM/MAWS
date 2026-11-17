@@ -530,6 +530,12 @@ function rowFonts(): { name: string; folder: string } {
   return { name: `${token('--text-ui', '13px')} ${family}`, folder: `${token('--text-ui-sm', '12px')} ${family}` };
 }
 
+// A write of the list's offset, and the offset it came to (clamped), noted as the list's last seen (UX wave U6b-3a).
+function writeOffset(el: HTMLElement, top: number, seen: { current: number }): void {
+  el.scrollTop = top;
+  seen.current = el.scrollTop;
+}
+
 // The rows as one virtual list. Its own component because the React Compiler skips any component that calls
 // `useVirtualizer` (its API returns functions it cannot memoise); the tree above stays compiled.
 function TreeList({
@@ -569,10 +575,14 @@ function TreeList({
   // the scroller clamps the offset to the rows there are; the offset is then pending, re-applied as the rows arrive
   // until the content reaches it once, and dropped if the owner scrolls first. Unmounted while pending, it keeps it.
   const pending = useRef<number | null>(null);
+  // UX wave U6b-3a (the task review's first finding): the offset as the list last saw it, from a scroll's event or the
+  // list's own write. The group's correction below starts from it, not from the offset read after the commit, which the
+  // browser has already clamped when the content shrank near its end.
+  const seenOffset = useRef(0);
   useLayoutEffect(() => {
     const el = scroller.current!;
     const saved = treeOf(useTreeState.getState(), appSessionId).scrollTop;
-    el.scrollTop = saved;
+    writeOffset(el, saved, seenOffset);
     pending.current = el.scrollTop < saved ? saved : null;
     return () => {
       const kept = pending.current ?? el.scrollTop;
@@ -584,7 +594,7 @@ function TreeList({
     const want = pending.current;
     if (want === null) return;
     const el = scroller.current!;
-    el.scrollTop = want;
+    writeOffset(el, want, seenOffset);
     if (el.scrollTop >= want) pending.current = null;
   }, [total]);
   // UX wave U6b-3a (S4): a folder opened from its Changed row is scrolled into view in the first render in which its row
@@ -596,32 +606,33 @@ function TreeList({
     const el = scroller.current!;
     const top = revealAt * FILES_ROW_HEIGHT;
     const height = el.clientHeight || el.offsetHeight; // happy-dom lays nothing out: its offsetHeight is the tests' viewport
-    if (top < el.scrollTop) el.scrollTop = top;
-    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) el.scrollTop = top + FILES_ROW_HEIGHT - height;
+    if (top < el.scrollTop) writeOffset(el, top, seenOffset);
+    else if (top + FILES_ROW_HEIGHT > el.scrollTop + height) writeOffset(el, top + FILES_ROW_HEIGHT - height, seenOffset);
     useTreeState.getState().revealed(appSessionId);
   }, [revealAt, appSessionId]);
   // UX wave U6b-3a (S2; M2 decision 4): when the Changed group gains or loses rows while a tree row is the first row in
   // view, the offset moves by the same height, so the tree does not move under the person's eyes as the agent writes. A
-  // press on the heading moves nothing, nor does a group that changes while the list is at its top (it grows in view) or
-  // while an offset is being restored.
+  // press on the heading moves nothing (the person's fold, read from the tree's state: a folded heading that comes or goes
+  // with the status is a change of the group), nor does a group that changes while the list is at its top (it grows in
+  // view) or while an offset is being restored.
   const treeAt = rows.findIndex((row) => row.kind !== 'changed-heading' && row.kind !== 'changed');
   const sectionLength = treeAt < 0 ? rows.length : treeAt;
-  const sectionFolded = rows[0]?.kind === 'changed-heading' && rows[0].folded;
-  const drawnSection = useRef({ length: sectionLength, folded: sectionFolded });
+  const folded = useTreeState((s) => treeOf(s, appSessionId).changedFolded);
+  const drawnSection = useRef({ length: sectionLength, folded });
   useLayoutEffect(() => {
     const last = drawnSection.current;
-    drawnSection.current = { length: sectionLength, folded: sectionFolded };
-    if (last.length === sectionLength || last.folded !== sectionFolded || pending.current !== null) return;
-    const el = scroller.current!;
-    if (el.scrollTop <= 0 || Math.floor(el.scrollTop / FILES_ROW_HEIGHT) < last.length) return;
-    el.scrollTop = Math.max(0, el.scrollTop + (sectionLength - last.length) * FILES_ROW_HEIGHT);
-  }, [sectionLength, sectionFolded]);
+    drawnSection.current = { length: sectionLength, folded };
+    if (last.length === sectionLength || last.folded !== folded || pending.current !== null) return;
+    const before = seenOffset.current;
+    if (before <= 0 || Math.floor(before / FILES_ROW_HEIGHT) < last.length) return;
+    writeOffset(scroller.current!, Math.max(0, before + (sectionLength - last.length) * FILES_ROW_HEIGHT), seenOffset);
+  }, [sectionLength, folded]);
   const scrolledByOwner = () => {
     pending.current = null;
     useTreeState.getState().revealed(appSessionId);
   };
   return (
-    <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} className="min-h-0 flex-1 overflow-auto">
+    <div ref={scroller} data-files-scroller onWheel={scrolledByOwner} onPointerDown={scrolledByOwner} onKeyDown={scrolledByOwner} onScroll={(event) => void (seenOffset.current = event.currentTarget.scrollTop)} className="min-h-0 flex-1 overflow-auto">
       <div ref={measureWidth} className="relative w-full">
         <div role="tree" aria-label={FILES_COPY.title} style={{ height: total }}>
           {virtualizer.getVirtualItems().map((item) => {
@@ -727,8 +738,10 @@ function ChangedHeading({ count, folded, fold }: { count: number; folded: boolea
   );
 }
 
-// What a Changed row leaves of its width for the folder, besides its name: the list row's end (pr-1), the button's end
-// (pr-2), one level's indent, the gap between the name and the folder, and the gap and slot of its letter.
+// What a Changed row leaves of its width for the folder, besides its name, mirroring the classes it is drawn with (the
+// architect's ruling 2, Decision Log 14; a case reads them off a drawn row): the list row's `pr-1` (4), the button's
+// `pr-2` (8), one level's indent (`indent(1)`, 20), the button's `gap-1.5` twice (6 after the name, 6 before the slot),
+// and the slot's `w-4` (16). A change of any of these classes changes this number.
 export const CHANGED_ROW_FIXED = 4 + 8 + 20 + 6 + 6 + 16;
 
 // UX wave U6b-3a (decisions 6 and 8): a Changed row, one level in: its name, then its folder in the muted colour, cut at

@@ -12,8 +12,8 @@ const LEAST = '00'; // a room of two characters of the font, below which the fol
 // end of it that fits, begun at a segment's start where one fits and otherwise at any character; null when two
 // characters of the font do not fit, or nothing does.
 export function folderFromEnd(folder: string, room: number, measure: Measure): string | null {
+  if (measure(LEAST) > room) return null; // first: a narrow folder that fits a smaller room is still not drawn there
   if (measure(folder) <= room) return folder;
-  if (measure(LEAST) > room) return null;
   const fits = (start: number) => measure(ELLIPSIS + folder.slice(start)) <= room;
   let last = 0; // the start of the folder's last segment
   for (let start = 1; start < folder.length; start += 1) {
