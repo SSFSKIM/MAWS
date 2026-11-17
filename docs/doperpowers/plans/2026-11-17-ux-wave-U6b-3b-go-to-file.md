@@ -28,7 +28,7 @@ How to see it working: with the side column closed and the caret in the composer
 - [x] (2026-11-17) The example drawn at real sizes by the architect and its 24 notes ruled; the owner's answer on the card ("Show it, then fold again"); a delta review of both documents and the rulings on it. Revision 2: all folded in (Decision Log 5 to 7).
 - [x] (2026-11-17 15:10Z) M1 — The action and the field: ⌘P puts the keyboard above the tree. Commits `c663edbe1`..`fd49c9b7e`; task review clean after two fix rounds (Decision Log 9).
 - [x] (2026-11-17 18:40Z) M2 — The search and the open: the list, its keys, the keyboard in the file. Commits `2c41c66b9`..`4fe467660`; task review clean after one fix round (Decision Log 10 to 12).
-- [ ] M3 — The scenes, the record, and the acceptance run.
+- [x] (2026-11-17 22:30Z) M3 — The scenes, the record, and the acceptance run. Commits `5e8b58c3a`..`e64f8c86d`; task review clean after one fix round (Decision Log 14). Scenes written and typechecked, not run (the Mac's); the whole unit suite ran once at `a69855420`: 48 failed of 45,814, all on the VM list or at the base (task 3's report, section 6).
 - [ ] The proof an executor does not run ("Proof that an executor does not run", 1 to 7).
 
 ## Words used in this document
@@ -706,6 +706,15 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
    - *Every e2e use of `[data-files-tree]` is read against the new column*: the field, then the list or the tree's wrapper. `[data-files-tree]` (with `data-place`) stays on the column, the element the scenes meant. Each locator or measurement whose meaning changed (a box read from the column, a child selector through it) is adapted; the wrapper takes an attribute of its own if a scene must measure the tree alone. Each use is listed as adapted or unchanged with its reason, in the hand-back.
    - *The U6b-2 framed-file scenes that click the file's bar or a notice* are named in the hand-back (the body is focusable now, Decision Log 11), for the Mac run.
    - *Every scene that reaches a shared e2e helper M3 changes* is listed, from a grep of the helper's callers, since each runs alone on the Mac first.
+14. **2026-11-17 (UTC) · M3's decisions** (executor's report and its task review, folded by the controller).
+   - The menu read the new scenes share (the row enabled with `Cmd+P`, then its click) is one new support file, `e2e/support/go-to-file.ts`, called by the new scenes only; `e2e/support/menu.ts` and every existing helper are unchanged, so no existing scene is reached through a changed helper.
+   - Of the 11 e2e uses of `[data-files-tree]`, one is adapted: `sessions.spec.ts`'s "A3, K12" step measures the list (`[data-files-tree] [data-tool="files"]`, the menu's trigger and collision box) rather than the column, which now holds the field above it; the column keeps its least-width check, and prints its box. The other ten read visibility or descendant rows and stand. No product attribute was added: the list's wrapper already has `data-tool="files"`.
+   - No U6b-2 framed-file scene clicks the bar's empty space or a notice; the two nearest the focusable body (deliverables' "a hostile PDF's link is a blocked navigation", a click inside the PDF frame; "a read that fails before a PDF's first byte…", Open again in the body) run alone first on the Mac.
+   - G1 starts with the side column closed and proves Files opening; its offset check is a second pass with Files open and scrolled. G1b (new) is B1's terminal case: the terminal in the upper group, Files in the lower, the terminal's own textarea focus before Go to file and after Esc twice. G4 waits, with the field empty, on the scratch's own Changed row before it types, since the finder takes its first status as its baseline. G6 focuses the page by main's `webContents.focus()` on its view; G7 takes B's link down and back by the hub's cut and restore and waits on the link's offline phase.
+   - The tokens scene draws the "none" and "failed" lines (the other two share the "none" line's classes); the failure line is made by an unreadable `.git/config`, restored in `finally`.
+   - The register's row of l5-code-09 reads "built, not yet on master"; the tracker gains six rows (M3 decision 5's five and the palette case's act() warnings); desk-web's chunk-size advice already has a row.
+   - The whole suite's one failure off the VM list, `src/engine-host/dashboards/read.test.ts` (a 5 s timeout under load; passes alone at the default), was ruled a load timeout by the architect and added to the VM list.
+   - Deferred: `expectLandedOn` (`e2e/support/code-product.ts`) prints a normalised position rather than measured boxes when it fails; G1 uses it as the existing "jumps to the line" scene does.
 
 ## Outcomes & Retrospective
 
