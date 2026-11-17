@@ -51,6 +51,8 @@ const LANDED = [
   'composer.historySearch',
   // U6e: Open File…
   'file.open',
+  // U6b-3b: Go to file
+  'files.goToFile',
 ];
 
 // Decision 8 (A13 as amended): two dispatched rows share a default chord only if both are `renderer` rows and at most one
@@ -220,6 +222,19 @@ describe('keymap: the table', () => {
     expect(ACTION_IDS.indexOf('file.open')).toBe(ACTION_IDS.indexOf('file.save') - 1);
     expect(isRebindable('file.open')).toBe(false);
     expect(effectiveChord('file.open', over('file.open', 'Cmd+Alt+O'))).toBe('Cmd+O'); // a stored value is never read
+  });
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 11; A13): Go to file, the Go
+  // menu's row directly after the palette, at ⌘P; build F knows it not, so it takes no rebinding and gives ⌘P up to a
+  // stored rebinding of another row that holds it
+  it('carries files.goToFile in Go at ⌘P, the row after palette.open, which takes no rebinding and yields ⌘P to a stored one', () => {
+    expect(ACTIONS['files.goToFile' as ActionId]).toEqual({ title: 'Go to file', chord: 'Cmd+P', sink: 'menu', menu: 'go', scope: 'app' });
+    expect(ACTION_IDS.indexOf('files.goToFile' as ActionId)).toBe(ACTION_IDS.indexOf('palette.open') + 1);
+    expect(BUILD_F_ACTION_IDS as readonly string[]).not.toContain('files.goToFile');
+    expect(isRebindable('files.goToFile' as ActionId)).toBe(false);
+    expect(effectiveChord('files.goToFile' as ActionId, {})).toBe('Cmd+P');
+    expect(effectiveChord('files.goToFile' as ActionId, { 'attention.next': 'Cmd+P' })).toBeNull(); // a stored rebinding wins
+    expect(effectiveChord('files.goToFile' as ActionId, { 'attention.next': 'Cmd+Shift+P' })).toBe('Cmd+P'); // the control
+    expect(effectiveChord('files.goToFile' as ActionId, over('files.goToFile' as ActionId, 'Cmd+Alt+P'))).toBe('Cmd+P'); // a stored value is never read
   });
 });
 

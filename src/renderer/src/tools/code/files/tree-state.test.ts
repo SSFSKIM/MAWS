@@ -34,6 +34,24 @@ describe('treePlace: the tree at the file’s left, and in the file’s place wh
   it.each(cases)('%s', (_, input, place) => expect(treePlace(input)).toBe(place));
 });
 
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 9; the owner's answer on the
+// card): a tab Go to file chose shows the tree column for the search, beside the file where the tab has room for both
+// whatever the stored fold, and in the file's place where it has not
+describe('treePlace while a tab is finding', () => {
+  const W = TREE_WIDTH_DEFAULT;
+  const place = (input: Omit<Parameters<typeof treePlace>[0], 'finding'>, finding: boolean) => treePlace({ ...input, finding } as Parameters<typeof treePlace>[0]);
+  const cases: [string, Omit<Parameters<typeof treePlace>[0], 'finding'>, TreePlace, TreePlace][] = [
+    ['no file: the tree alone', { holdsFile: false, tabWidth: 900, treeWidth: W, folded: true, shown: false }, 'alone', 'alone'],
+    ['room for both, folded by the person: beside for the search', { holdsFile: true, tabWidth: 900, treeWidth: W, folded: true, shown: false }, 'folded', 'beside'],
+    ['room for both, exactly, folded: beside for the search', { holdsFile: true, tabWidth: W + FILE_WIDTH_MIN, treeWidth: W, folded: true, shown: false }, 'folded', 'beside'],
+    ['room for both, not folded: beside either way', { holdsFile: true, tabWidth: 900, treeWidth: W, folded: false, shown: false }, 'beside', 'beside'],
+    ['one pixel short: in the file’s place for the search', { holdsFile: true, tabWidth: W + FILE_WIDTH_MIN - 1, treeWidth: W, folded: false, shown: false }, 'folded', 'instead'],
+    ['narrow and folded: in the file’s place for the search', { holdsFile: true, tabWidth: 300, treeWidth: W, folded: true, shown: false }, 'folded', 'instead'],
+    ['narrow, the button pressed: in the file’s place either way', { holdsFile: true, tabWidth: 300, treeWidth: W, folded: false, shown: true }, 'instead', 'instead'],
+  ];
+  it.each(cases)('%s', (_, input, resting, finding) => expect([place(input, false), place(input, true)]).toEqual([resting, finding]));
+});
+
 describe('the session’s tree state', () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -267,6 +285,34 @@ describe('the Changed group’s fold and a folder to show', () => {
 
 // The branch review's first finding: an unstarted chat has no record yet, only its setup intent; the window knows it, so
 // a write keeps its tree.
+// UX wave U6b-3b (decision 9; "What is stored and sent"): the field's text and the tab that is finding are the session's
+// for this run, and never written
+describe('the field’s text and the finding tab', () => {
+  afterEach(() => vi.useRealTimers());
+
+  it('keep the field’s text and the finding tab for the session and write nothing for them, beside a fold that does write', async () => {
+    const fake = fakeClient({ 'layout.get': { value: null }, 'layout.set': undefined });
+    const store = createTreeStateStore(fake.client, { writeDelayMs: DELAY, knows: () => true });
+    await store.getState().load();
+    vi.useFakeTimers();
+    const state = store.getState() as ReturnType<typeof store.getState> & { setFilter(id: AppSessionId, text: string): void; setFinding(id: AppSessionId, tabId: string | null): void };
+    expect(treeOf(store.getState(), A)).toMatchObject({ filter: '', finding: null }); // at first in every session
+    state.setFilter(A, 'tide');
+    state.setFinding(A, 'files:one');
+    expect([treeOf(store.getState(), A), treeOf(store.getState(), B)]).toMatchObject([{ filter: 'tide', finding: 'files:one' }, { filter: '', finding: null }]);
+    vi.advanceTimersByTime(DELAY * 4);
+    expect(fake.invoked('layout.set')).toEqual([]);
+    state.setFinding(A, null);
+    state.setFilter(A, '');
+    expect(treeOf(store.getState(), A)).toMatchObject({ filter: '', finding: null });
+    vi.advanceTimersByTime(DELAY * 4);
+    expect(fake.invoked('layout.set')).toEqual([]);
+    store.getState().setFolded(A, true); // the control: the person's fold is written
+    vi.advanceTimersByTime(DELAY);
+    expect(fake.invoked('layout.set')).toEqual([{ key: 'files.tree', value: stored({ [A]: { width: null, folded: true, expanded: [] } }) }]);
+  });
+});
+
 describe('the sessions the window knows', () => {
   const U = at('app-unstarted') as AppSessionId;
   afterEach(() => {
