@@ -9,20 +9,23 @@
 // Pure: the result is a prefill the composer's serialiser frames (its one segment is a pasted atom).
 import { BEFORE_THE_CHANGE, PROMOTION_ANCHOR, PROMOTION_HEAD, anchorTag, readPromotion, readQuote } from '@shared/anchor/message';
 import { pastedPlaceholder } from '@shared/composer/pasted-content';
+import { asTyped } from '@shared/engine/grant';
 import { countLines, parsePlaceholders } from '@shared/composer/pasted-framing';
 import { leaveOutGrant, type Range } from '@shared/engine/composed-content';
 import { PLAN_LEAD } from '@shared/engine/host-prompts';
 import type { Prefill } from '../stores/composer';
 import { readRelay } from '../tools/agents/model/relay';
 import { rowPrefill, type UserRow } from './edit-prefill';
-import { bodiesByPlaceholder, typedFromRowText } from './editor/recall';
+import { typedFromRowText } from './editor/recall';
+import { placeholdersOf } from '../transcript/model/user-text'; // the architect's ruling 4368
 
 /**
  * The form of the row an edit began from, by the forms' own readers (§D); null is a person's message. `whole`: a comment
  * whose words hold a segment that is not its quoted line (words an earlier resend framed whole, say), its whole text the
- * slot.
+ * slot. `several` (the architect's ruling 4366): a message of several comments, every segment its comments' words held
+ * drawn in place, each a slot (`bodies`, in order).
  */
-export type StoredForm = { kind: 'plan' } | { kind: 'promotion'; body: string | null } | { kind: 'comment'; quote: string | null } | { kind: 'whole' } | { kind: 'relay' } | null;
+export type StoredForm = { kind: 'plan' } | { kind: 'promotion'; body: string | null } | { kind: 'comment'; quote: string | null } | { kind: 'several'; bodies: string[] } | { kind: 'whole' } | { kind: 'relay' } | null;
 
 const PLAN_HEAD = `${PLAN_LEAD}\n\n`;
 const PROMOTION_PARAGRAPH = `${PROMOTION_HEAD}\n\n`;
@@ -45,6 +48,8 @@ const typedAt = (row: UserRow, [from, to]: Range) => typedFromRowText(row.text.s
  */
 export function storedFormOf(row: UserRow): StoredForm {
   const composed = row.composed ?? [];
+  // the architect's ruling 4366: several comments, each segment of their words a slot, as their writer framed it
+  if (row.comments !== undefined && row.comments !== null) return { kind: 'several', bodies: composed.map((range) => typedAt(row, range)) };
   if (row.anchor !== undefined && row.anchorFrame !== undefined) {
     if (row.anchorFrame.destination !== null) {
       // every segment is a slot or the whole is: a quote only where it is the words' one segment (or, from the earlier
@@ -64,22 +69,50 @@ export function storedFormOf(row: UserRow): StoredForm {
 type Edit = { text: string; bodies?: Readonly<Record<string, string>>; images?: Prefill['images']; form: StoredForm };
 
 /**
- * The edit a stored row opens (Design 5): its text as drawn and typed, each pasted placeholder with the body it names,
- * its images, and its form by the forms' own readers. The bubble's editor holds it; it goes out through
- * `composedPrefill` and back into the composer through `handBackEdit`.
+ * The edit a stored row opens (Design 5): its text as drawn and typed, each chip with the body pasted at its place, its
+ * images, and its form by the forms' own readers. The bubble's editor holds it; it goes out through `composedPrefill`
+ * and back into the composer through `handBackEdit`.
  */
 export function storedRowEdit(row: UserRow): { text: string; bodies: Record<string, string>; images: NonNullable<Prefill['images']>; form: StoredForm } {
-  const prefill = rowPrefill(row);
-  return { text: prefill.text, bodies: bodiesByPlaceholder(prefill), images: prefill.images ?? [], form: storedFormOf(row) };
+  const { text, bodies } = chipsAtTheirPlaces(row);
+  const prefill = rowPrefill({ ...row, text });
+  return { text: prefill.text, bodies, images: prefill.images ?? [], form: storedFormOf(row) };
 }
 
 /**
- * A stored row put back into the composer from where it is kept (the branch's review, the architect's ruling on history
- * recall): `prefill`, what the composer loads, the row's edit as its form's reader says; `drawn`, the row as drawn,
- * which history keys and searches its entries by, and which nothing loads.
+ * The architect's rulings 4345 (2) and 4368: a placeholder's spelling is a chip only where the row records one, at that
+ * place (`placeholders`, which the transcript derives from the pasted blocks of every row it reads, `splitPastedSegments`
+ * in transcript/model/user-text.ts); every other spelling of it is the text's own. The edit's text is the person's to
+ * change and keys a chip by its spelling, so where a recorded chip's spelling also stands elsewhere in the text, the
+ * recorded chips take numbers no spelling in the text holds; the body each names is the one pasted at its place.
  */
-export function storedRowPrefill(row: UserRow): { prefill: Prefill; drawn: Prefill } {
-  return { prefill: composedPrefill(storedRowEdit(row)), drawn: rowPrefill(row) };
+function chipsAtTheirPlaces(row: UserRow): { text: string; bodies: Record<string, string> } {
+  const chips = placeholdersOf(row.text, row.attachments, row.placeholders);
+  const spellings = parsePlaceholders(row.text).filter((placeholder) => placeholder.kind === 'pasted');
+  const spellingAt = (from: number, to: number) => row.text.slice(from, to);
+  const shared = spellings.some((spelling) => !chips.some((chip) => chip.from === spelling.start) && chips.some((chip) => spellingAt(chip.from, chip.to) === spellingAt(spelling.start, spelling.end)));
+  let n = shared ? Math.max(0, ...spellings.map((spelling) => spelling.n)) : 0;
+  const bodies: Record<string, string> = {};
+  let text = '';
+  let from = 0;
+  for (const chip of chips) {
+    const spelling = shared ? pastedPlaceholder((n += 1), chip.lines) : spellingAt(chip.from, chip.to);
+    text += row.text.slice(from, chip.from) + spelling;
+    from = chip.to;
+    if (chip.attachment.text !== null) bodies[spelling] = asTyped(chip.attachment.text); // UX wave U1c: as pasted
+  }
+  return { text: text + row.text.slice(from), bodies };
+}
+
+/**
+ * A stored row put back into the composer from where it is kept (the branch's review, the architect's rulings on history
+ * recall and 4366): `prefill`, what the composer loads, the row's edit as its form's reader says. The row as drawn leaves
+ * here only as strings: `search`, the text the history's search reads, and `key`, what `keyOf` makes of the drawn text and
+ * its pasted bodies, by which the history collapses its entries.
+ */
+export function storedRowPrefill(row: UserRow, keyOf: (text: string, bodies: (string | null)[]) => string): { prefill: Prefill; search: string; key: string } {
+  const drawn = rowPrefill(row);
+  return { prefill: composedPrefill(storedRowEdit(row)), search: drawn.text, key: keyOf(drawn.text, (drawn.pasted ?? []).map((body) => body.text)) };
 }
 
 /** What an edited row is sent again as (Design 5's table): the edit's prefill with each slot of its form one pasted atom. */
@@ -92,6 +125,10 @@ export function composedPrefill(edit: Edit): Prefill {
       return text.startsWith(PLAN_HEAD) ? slotAt(edit, PLAN_HEAD.length, text.length) : whole(edit);
     case 'promotion':
       return form.body !== null && standsOnceAt(text, form.body, PROMOTION_PARAGRAPH.length, '\n\n') && text.startsWith(PROMOTION_PARAGRAPH) ? slotAt(edit, PROMOTION_PARAGRAPH.length, PROMOTION_PARAGRAPH.length + form.body.length) : whole(edit);
+    case 'several': {
+      const ranges = placedInOrder(text, form.bodies);
+      return ranges === null ? whole(edit) : slotsAt(edit, ranges);
+    }
     case 'comment': {
       if (form.quote === null) return typed;
       const at = text.startsWith(`${BEFORE_THE_CHANGE}\n`) ? BEFORE_THE_CHANGE.length + 1 : 0;
@@ -110,6 +147,21 @@ function standsOnceAt(text: string, body: string, at: number, separator: string)
   return text.indexOf(body, at + 1) < 0 && (end === text.length || text.startsWith(separator, end));
 }
 
+// Where each of `bodies` stands in `text`, in order, each on lines of its own (from a line's start to a line's end); null
+// where one does not, and the whole text is then the slot
+function placedInOrder(text: string, bodies: readonly string[]): Range[] | null {
+  const ranges: Range[] = [];
+  let from = 0;
+  for (const body of bodies) {
+    const at = body === '' ? -1 : text.indexOf(body, from);
+    const end = at + body.length;
+    if (at < 0 || (at > 0 && text[at - 1] !== '\n') || (end < text.length && text[end] !== '\n')) return null;
+    ranges.push([at, end]);
+    from = end;
+  }
+  return ranges;
+}
+
 // The slot's text with every chip in it opened to the body it named when the edit began. A placeholder's spelling is a
 // chip only where the stored row recorded an attachment under it (the edit's `bodies`, keyed by the placeholder); any
 // other is the slot's own text, a form's body drawn in place holding none (the branch's review: a model's text that
@@ -126,15 +178,28 @@ function opened(slot: string, bodies: Readonly<Record<string, string>>): string 
   return out + slot.slice(from);
 }
 
-// The edit with [from, to) of its text one pasted atom: the slot opened and left out, under a placeholder no other in the
-// text or the edit's bodies holds; an empty slot is no atom
-function slotAt(edit: Edit, from: number, to: number): Prefill {
+// The edit with each of `ranges` (in order, apart) of its text one pasted atom: the slot opened and left out, under a
+// placeholder no other in the text or the edit's bodies holds; an empty slot is no atom
+function slotsAt(edit: Edit, ranges: readonly Range[]): Prefill {
   const bodies = edit.bodies ?? {};
-  const content = leaveOutGrant(opened(edit.text.slice(from, to), bodies));
   const others = parsePlaceholders([edit.text, ...Object.keys(bodies)].join('\n')).filter((placeholder) => placeholder.kind === 'pasted');
-  const key = pastedPlaceholder(Math.max(0, ...others.map((placeholder) => placeholder.n)) + 1, countLines(content));
-  const text = `${edit.text.slice(0, from)}${content === '' ? '' : key}${edit.text.slice(to)}`;
-  return { text, bodies: content === '' ? bodies : { ...bodies, [key]: content }, images: edit.images ?? [] };
+  let n = Math.max(0, ...others.map((placeholder) => placeholder.n));
+  const added: Record<string, string> = {};
+  let text = '';
+  let at = 0;
+  for (const [from, to] of ranges) {
+    const content = leaveOutGrant(opened(edit.text.slice(from, to), bodies));
+    text += edit.text.slice(at, from);
+    if (content !== '') {
+      n += 1;
+      const key = pastedPlaceholder(n, countLines(content));
+      text += key;
+      added[key] = content;
+    }
+    at = to;
+  }
+  return { text: text + edit.text.slice(at), bodies: { ...bodies, ...added }, images: edit.images ?? [] };
 }
 
+const slotAt = (edit: Edit, from: number, to: number): Prefill => slotsAt(edit, [[from, to]]);
 const whole = (edit: Edit): Prefill => slotAt(edit, 0, edit.text.length);

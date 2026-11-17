@@ -190,7 +190,7 @@ function resultTaken(sources: readonly Source[]): string[] {
       else if (destructured !== undefined) taken.push(...destructured.split(',').map((entry) => entry.trim()).filter(Boolean).map((entry) => (entry.startsWith('...') ? 'the rest' : entry.split(':')[0]!.trim())));
       else if (bound !== undefined) for (const use of after.matchAll(new RegExp(`\\b${bound.replace(/\$/g, '\\$')}\\b(\\s*\\.\\s*([\\w$]+))?`, 'g'))) taken.push(use[2] ?? 'the result whole');
       else taken.push('the result whole');
-      for (const name of taken) if (!RESULT_FIELDS.has(name)) problems.push(`${file}: takes ${RESULT_FIELDS.has(name) ? name : `\`${name}\``} of storedRowPrefill’s result`);
+      for (const name of taken) if (!RESULT_FIELDS.has(name)) problems.push(`${file}: takes \`${name}\` of storedRowPrefill’s result`);
     }
   }
   return problems;

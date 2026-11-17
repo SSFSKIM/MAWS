@@ -51,7 +51,6 @@ const ATTACHMENT_PLACEHOLDER = /\s*\[(?:Image|PDF) #\d+\]/g;
 // UX wave U1c (the review round's R3): both sides as typed (`asTyped`), so one prompt is one entry whichever path it came back by
 const keyOf = (display: string, bodies: (string | null)[]) => `${asTyped(display).replace(ATTACHMENT_PLACEHOLDER, '').replace(PLACEHOLDER_SPACE, '$1').trim()}\u0000${JSON.stringify(bodies.map((body) => (body === null ? null : asTyped(body))))}`;
 
-const prefillKey = (p: Prefill) => keyOf(p.text, (p.pasted ?? []).map((b) => b.text));
 const entryKey = (e: HistoryEntry) =>
   keyOf(
     e.display,
@@ -79,12 +78,11 @@ export function recallEntries(rows: readonly Row[], activity: readonly TurnActiv
     if (row.kind !== 'user' || row.messageUuid === null || row.turnId === null || !human.has(row.turnId)) continue;
     if (allAnswer(row)) continue; // an answer is not a prompt (U4b)
     // the keys and the search read the row as drawn, as before; what loads is the row as its form's reader says
-    const { prefill, drawn } = storedRowPrefill(row);
-    const key = prefillKey(drawn);
+    const { prefill, search, key } = storedRowPrefill(row, keyOf);
     if (key === last) continue;
     last = key;
     keys.add(key);
-    session.push({ source: 'session', prefill, text: drawn.text });
+    session.push({ source: 'session', prefill, text: search });
   }
   const earlier = [...listed].sort((a, b) => Date.parse(a.at) - Date.parse(b.at)).filter((e) => !keys.has(entryKey(e)));
   return [...earlier.map((entry): Recall => ({ source: 'history', entry })), ...session];
