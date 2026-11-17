@@ -7,7 +7,7 @@ export const LATER_CHANGES: readonly (readonly [string, (text: string) => string
   ['each line trimmed', (t) => t.split('\n').map((line) => line.trim()).join('\n')],
   ['runs of white space collapsed', (t) => t.replace(/\s+/g, ' ')],
   ['runs of spaces and tabs collapsed', (t) => t.replace(/[^\S\n]+/g, ' ')],
-  ['CRLF, a lone CR and the separators to LF', (t) => t.replace(/\r\n?|[  ]/g, '\n')],
+  ['CRLF, a lone CR and the separators to LF', (t) => t.replace(/\r\n?|[\u2028\u2029]/g, '\n')],
   ['pasted tags removed', (t) => t.replace(/<\\?\/?\\?pasted_content id="[0-9a-f]{4}">/g, '')],
   ['angle-bracket pairs removed', (t) => t.replace(/<[^>]*>/g, '')],
   ['emphasis and code marks removed', (t) => t.replace(/[*_~`]/g, '')],

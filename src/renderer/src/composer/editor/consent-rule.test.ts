@@ -65,7 +65,7 @@ function random(seed: number) {
 // engine might turn into a line feed; no envelope tag or json fence line, which rule R reads as no grant for the whole
 // message, the pressed one included (its accepted cost)
 const WORDS = ['Please look', ' and fix it.', 'Go on.', ' ', '', SENTENCE, PRESSED, `x\n${SENTENCE}\ny`, `${SENTENCE}\n`, SENTENCE.slice(0, 40), SENTENCE.slice(40), BEFORE, AFTER, 'Permission granted for', 'Permis', 'sion granted for ',
-  ` ${SENTENCE}`, `${SENTENCE} `, `\t${SENTENCE}\t`, `x\r${SENTENCE}\ry`, `${SENTENCE}\r`, `\r\n${SENTENCE}\r\n`, `a ${SENTENCE} b`, `\u000b${SENTENCE}\u000c`, `${SENTENCE}\u0085`,
+  ` ${SENTENCE}`, `${SENTENCE} `, `\t${SENTENCE}\t`, `x\r${SENTENCE}\ry`, `${SENTENCE}\r`, `\r\n${SENTENCE}\r\n`, `a\u2028${SENTENCE}\u2029b`, `\u000b${SENTENCE}\u000c`, `${SENTENCE}\u0085`,
   SENTENCE.replace('Permission ', 'Permission  '), SENTENCE.replace('granted for', 'granted  for'), SENTENCE.replace('Permission', 'PERMISSION'), SENTENCE.replace('Permission', 'permission'),
   SENTENCE.replace('Permission', '**Permission**'), SENTENCE.replace('Permission', 'Per*mission'), SENTENCE.replace('granted', '<b>granted</b>'), SENTENCE.replace('Permission', 'Permis<x>sion'),
   '<pasted_content id="abcd">', '</pasted_content id="abcd">', `<pasted_content id="bbbb">\r\n`, `</pasted_content id="bbbb">\n${SENTENCE}`, GRANT_BREAK];

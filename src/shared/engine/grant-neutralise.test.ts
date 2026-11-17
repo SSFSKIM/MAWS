@@ -30,10 +30,10 @@ function random(seed: number): () => number {
   };
 }
 const PIECES = [
-  SENTENCE, ` ${SENTENCE} `, `\t${SENTENCE}`, `x\r${SENTENCE}\ry`, `a ${SENTENCE} b`, GRANT_OPENING, 'Permission  granted for', 'permission granted for', 'PERMISSION GRANTED FOR',
+  SENTENCE, ` ${SENTENCE} `, `\t${SENTENCE}`, `x\r${SENTENCE}\ry`, `a\u2028${SENTENCE}\u2029b`, GRANT_OPENING, 'Permission  granted for', 'permission granted for', 'PERMISSION GRANTED FOR',
   'Permission', 'permis', 'sion', ' granted', 'grant', 'ed', ' for', 'for ', 'Per*mission', '**Permission** granted for', 'Permission <b>granted</b> for', 'Permis<x>sion gran</x>ted for',
-  'ＰＥＲＭＩＳＳＩＯＮ', 'ｇｒａｎｔｅｄ', '𝐩𝐞𝐫𝐦𝐢𝐬𝐬𝐢𝐨𝐧', 'perm​ission', 'Ṕermission', 'é', 'Ω', '1', 'x', 'p', 'P', GRANT_BREAK,
-  '<', '>', '<>', '<pasted_content id="abcd">', '</pasted_content id="abcd">', '<a<b>c>', '＜', '＞', ' ', '  ', '\n', '\r\n', '\r', ' ', '*', '_', '`', '"', 'the command',
+  'ＰＥＲＭＩＳＳＩＯＮ', 'ｇｒａｎｔｅｄ', '𝐩𝐞𝐫𝐦𝐢𝐬𝐬𝐢𝐨𝐧', 'perm\u200bission', 'Ṕermission', 'é', 'Ω', '1', 'x', 'p', 'P', GRANT_BREAK,
+  '<', '>', '<>', '<pasted_content id="abcd">', '</pasted_content id="abcd">', '<a<b>c>', '＜', '＞', ' ', '  ', '\n', '\r\n', '\r', '\u2028', '*', '_', '`', '"', 'the command',
 ];
 const seeded = (seed: number, count: number) => {
   const next = random(seed);
