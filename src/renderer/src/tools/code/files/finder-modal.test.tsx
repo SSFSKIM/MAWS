@@ -225,7 +225,7 @@ describe('Go to file while any other modal is open: disabled in the menu (Decisi
     await waitFor(() => expect(menuEnables()).not.toContain('files.goToFile'));
     act(() => open());
     await waitFor(() => expect(modal()?.contains(document.activeElement)).toBe(true));
-    expect(screen.queryByRole('dialog', { name: 'Rename', hidden: true })).not.toBeNull(); // still open, under it
+    expect(document.querySelector('input[aria-label="An invented name"]')).not.toBeNull(); // the sheet still open, under it
     await waitFor(() => expect(isActionEnabled('files.goToFile')).toBe(false));
     expect(menuEnables()).not.toContain('files.goToFile');
     act(() => close());
