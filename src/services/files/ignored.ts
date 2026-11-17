@@ -13,7 +13,7 @@
 // another tree's rules; and before each call every ask's folder is confirmed at the very spelling git is handed (its
 // realpath that spelling, the object the service opened) and the `.git` as the walk found it, so a substitution made
 // between the walk and the run is refused before git reads anything. An explicit GIT_DIR skips git's own check of who
-// owns a repository (`safe.directory`), so the check makes one over what git will read (Decision Log 18, as ruled): the
+// owns a repository (`safe.directory`), so the check makes one over what git will read (as the architect ruled): the
 // folder and its `.git` entry, and, by `stat`, the git directory the entry leads to as git resolves it (a folder, a link
 // followed, a gitdir pointer read), a linked worktree's common directory, and the `config` in each, all this user's;
 // that resolution is made again before each call and must name the same directories, so a pointer rewritten in place
