@@ -264,6 +264,24 @@ describe('“Open externally” on an outside file (remote.openCopy; P1, P2; dec
     expect(plainReads().filter((call) => ['named', 'agent', 'open', 'raw'].some((key) => key in (call.input as object)))).toEqual([]);
   });
 
+  // The branch review (scalpel-3#1; Decision Log 33 (2)): a copy's act is bound, whole, to the channel of its first page
+  it('a copy of two pages whose channel is replaced after the first: no page goes on the new channel, and nothing is opened', async () => {
+    const big = Buffer.from('E'.repeat(300_000), 'utf8');
+    let first = true;
+    link.onAct = (act: FakeAct) => {
+      if (act.request.action !== 'files.readOutside') return;
+      act.settle({ state: 'done', result: pageOf(big, act.request.args as Record<string, unknown>, 'text/plain', { named: true, outside: { real: NOTES, writable: true } }) });
+      if (first) {
+        first = false;
+        link.lose();
+        link.relink([...SERVES]);
+      }
+    };
+    expect(await invoke(appWindow().event, 'remote.openCopy', copyOf(NOTES))).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(outsideActs()).toHaveLength(1);
+    expect(opened).toEqual([]);
+  });
+
   it('with the channel gone between the plain read’s refusal and the act: answers at once, and no act is sent (Decision Log 27)', async () => {
     link.answers.set('files.read', (): CallResult => (link.lose(), { ok: false, error: { code: 'internal', message: REFUSAL } }));
     expect(await invoke(appWindow().event, 'remote.openCopy', copyOf(NOTES))).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });

@@ -420,6 +420,85 @@ describe('the channel a keyed read is bound to (Decision Log 27; condition 2)', 
     expect(l.link.acts).toHaveLength(2);
   });
 
+  // The branch review (scalpel-3#1; Decision Log 33 (2)): the whole keyed read is bound to the channel of its first page;
+  // a channel change mid-read discards the pages and restarts from page 0 under the new channel's own decision
+  /** Each page of `files.readOutside` answered over the text of the channel current when it is asked; after the first page's answer, `then` runs once. */
+  function pagesByChannel(l: ReturnType<typeof lab>, textOf: () => string, then: () => void) {
+    let first = true;
+    l.link.onAct = (act) => {
+      if (act.request.action !== 'files.readOutside') return;
+      if (!l.link.peers.includes(OUTSIDE_FILES_CAPABILITY)) return act.settle({ state: 'refused', reason: 'not-offered' }); // as an older build answers a name it has no row for
+      act.settle({ state: 'done', result: answerOf(textOf(), act.request.args as Record<string, unknown>, { named: true, outside: { real: NOTES, writable: true } }) });
+      if (first) (first = false), then();
+    };
+  }
+  const switchTo = (l: ReturnType<typeof lab>, peers: string[]) => () => {
+    l.link.lose();
+    l.link.relink([...peers]);
+  };
+
+  it('a channel replaced after the first page of a promoted read: its pages are discarded and the read starts again from page 0 on the new channel, never joining two channels’ bytes', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    const before = 'A'.repeat(300_000); // two pages of 256 KiB
+    const after = 'B'.repeat(300_000);
+    let current = before;
+    pagesByChannel(l, () => current, () => void ((current = after), switchTo(l, SERVES)()));
+    const read = await l.cmd('files.read', keyed({ length: 1024 * 1024 }));
+    expect(read).toMatchObject({ ok: true, value: { bytes: after.length, length: after.length, outside: { real: NOTES, writable: true } } });
+    const content = (read as { value: FilesReadOutput }).value.content;
+    expect({ A: content.split('A').length - 1, B: content.split('B').length - 1 }, 'the bytes of each channel').toEqual({ A: 0, B: after.length });
+    expect(actsOf(l.link).map((act) => act.args.offset)).toEqual([0, 0, PAGE]); // the new channel's read from page 0
+    expect(l.files()).toHaveLength(2); // and its own decision: a fresh plain call first
+  });
+
+  it('a channel replaced by an older build after the first page: no page is asked of it; the read takes the ordinary reconnect, today’s read to the byte, and its refusal says to update', async () => {
+    const l = lab();
+    l.reads((input) => (!l.link.peers.includes(OUTSIDE_FILES_CAPABILITY) && ['named', 'agent', 'open'].some((key) => key in input) ? { ok: false, error: { code: 'malformed' } } : refused));
+    pagesByChannel(l, () => 'A'.repeat(300_000), switchTo(l, OLDER));
+    expect(await l.cmd('files.read', keyed({ length: 1024 * 1024, agent: true }))).toEqual({ ok: false, error: { code: 'internal', message: 'Not opened: update MAWS on mini and try again', issues: { refusal: 'not-offered' } } });
+    expect(l.link.acts).toHaveLength(1); // the first page alone, on the channel that listed the capability
+    expect(l.files().map((call) => call.input)).toEqual([
+      { appSessionId: APP, path: NOTES, offset: 0, length: 1024 * 1024, named: true, agent: true },
+      { appSessionId: APP, path: NOTES, offset: 0, length: 1024 * 1024 },
+    ]);
+  });
+
+  it('a page the ledger did not keep, asked again after the channel was replaced: not asked of the new channel; the read starts again from page 0 there', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    const text = 'C'.repeat(1000);
+    const marker = { code: 'internal', message: 'the answer was not kept: ask again', issues: { refusal: NOT_KEPT_REFUSAL } };
+    let n = 0;
+    l.link.onAct = (act) => {
+      if (++n === 1) {
+        act.settle({ state: 'failed', error: marker });
+        return switchTo(l, SERVES)();
+      }
+      act.settle({ state: 'done', result: answerOf(text, act.request.args as Record<string, unknown>, { named: true, outside: { real: NOTES, writable: true } }) });
+    };
+    expect(await l.cmd('files.read', keyed())).toMatchObject({ ok: true, value: { content: text } });
+    expect(l.files()).toHaveLength(2); // the retry was not sent on the new channel: decision 5 ran there afresh
+    expect(l.link.acts).toHaveLength(2);
+  });
+
+  it('a files.readOutside the page sends by hand, its channel replaced after the first page: no page goes on the new channel, and the read fails as the machine not reachable', async () => {
+    const l = lab();
+    pagesByChannel(l, () => 'A'.repeat(300_000), switchTo(l, SERVES));
+    expect(await l.cmd('files.readOutside', { appSessionId: APP, path: NOTES, offset: 0, length: 1024 * 1024 })).toMatchObject({ ok: false, error: { code: 'host_unavailable' } });
+    expect(l.link.acts).toHaveLength(1);
+  });
+
+  it('the control: a promoted read of two pages on one channel joins its pages and asks no more', async () => {
+    const l = lab();
+    l.reads(() => refused);
+    const text = 'D'.repeat(300_000);
+    pagesByChannel(l, () => text, () => {});
+    expect(await l.cmd('files.read', keyed({ length: 1024 * 1024 }))).toMatchObject({ ok: true, value: { content: text } });
+    expect(actsOf(l.link).map((act) => act.args.offset)).toEqual([0, PAGE]);
+    expect(l.files()).toHaveLength(1);
+  });
+
   it('with no channel current when it is made, a keyed read answers at once (decision 6), and waits for none', async () => {
     const l = lab();
     l.link.lose();
