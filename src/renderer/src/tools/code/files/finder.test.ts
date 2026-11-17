@@ -104,11 +104,15 @@ describe('files.goToFile (connectGoToFile)', () => {
     expect(takeKeyboard(filter(tab.id))).toBe(true);
   });
 
-  it('does nothing when called while it cannot end in the field', () => {
+  it('does nothing when called while it cannot end in the field; once it can, it shows Files', () => {
     act(() => useLayout.getState().openSettings());
     act(() => goToFile());
     expect(filesOf(A)).toEqual([]);
     expect(useLayout.getState().settings).not.toBeNull();
+    act(() => useLayout.getState().closeSettings());
+    act(() => goToFile()); // the control: the same call where canGoToFile holds
+    expect(filesOf(A)).toHaveLength(1);
+    expect(treeOf(useTreeState.getState(), A).finding).toBe(filesOf(A)[0].id);
   });
 
   it('is mounted by the editor’s registrations', () => {

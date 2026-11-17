@@ -208,9 +208,13 @@ describe('Esc in the field', () => {
     expect(document.activeElement).toBe(composer());
   });
 
-  it('leaves the keyboard in the field when that element has left the page', async () => {
+  it('leaves the keyboard in the field when that element has left the page; while it is in the page it gets the keyboard back', async () => {
     const view = render(<Page />);
     composer().focus();
+    goToFile();
+    await inField();
+    esc(); // the control: the element is in the page
+    expect(document.activeElement).toBe(composer());
     goToFile();
     await inField();
     view.rerender(<Page composer={false} />);
@@ -285,6 +289,9 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
     expect(treeOf(useTreeState.getState(), A).folded).toBe(true);
     expect(setFolded).not.toHaveBeenCalled();
     expect(treeWrites()).toEqual([]);
+    fireEvent.click(toggle()!); // the control: the person's press outside finding is the stored fold, and it is written
+    expect(setFolded).toHaveBeenCalledWith(A, false);
+    await waitFor(() => expect(treeWrites()).toEqual([{ key: 'files.tree', value: { version: 1, sessions: { [A]: { width: null, folded: false, expanded: ['/r'] } } } }]));
   });
 
   it('folded: the tree’s button pressed while finding ends finding and hides the column, writing nothing; pressed again it writes', async () => {
@@ -294,25 +301,29 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
     await waitFor(() => expect(useTreeState.getState().loaded).toBe(true));
     const setFolded = vi.fn(useTreeState.getState().setFolded);
     useTreeState.setState({ setFolded });
+    const user = userEvent.setup();
     goToFile();
     expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
+    await inField(); // the field empty, with the keyboard: a press elsewhere would end the search on its blur
     expect(toggle()!.getAttribute('aria-label')).toBe(FILES_COPY.hideTree);
-    fireEvent.click(toggle()!);
+    await user.click(toggle()!); // a whole click: pointerdown, mousedown and the keyboard's move, then click
     expect(finding()).toBeNull();
     expect(treeColumn()).toBeNull();
     expect(setFolded).not.toHaveBeenCalled();
-    fireEvent.click(toggle()!); // the control: the person's press, not finding, is the stored fold
+    await user.click(toggle()!); // the control: the person's press, not finding, is the stored fold
     expect(setFolded).toHaveBeenCalledWith(A, false);
     expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
   });
 
   it('not folded, with room: the button pressed while finding ends finding and folds the tree as it did', async () => {
+    const user = userEvent.setup();
     render(<Page />);
     await openBeside(WIDE);
     await waitFor(() => expect(useTreeState.getState().loaded).toBe(true));
     goToFile();
     expect(treeColumn()?.getAttribute('data-place')).toBe('beside');
-    fireEvent.click(toggle()!);
+    await inField();
+    await user.click(toggle()!);
     expect(finding()).toBeNull();
     expect(treeColumn()).toBeNull();
     expect(treeOf(useTreeState.getState(), A).folded).toBe(true);
@@ -343,6 +354,32 @@ describe('a tree folded away, or without room (decision 9; B3, M1’s half)', ()
     expect(treeColumn()).toBeNull();
     expect(setFolded).not.toHaveBeenCalled();
     expect(treeWrites()).toEqual([]);
+  });
+
+  // The file's column is hidden and inert while the tree stands in its place, so the keyboard can go back into it only
+  // once the search has ended and the file is shown (happy-dom does not refuse a focus on a hidden or inert element:
+  // the case reads whether the element could take it when the focus is asked; Chromium's own refusal is the Mac scenes')
+  it('too narrow: ⌘P from the tab’s own file, then Esc in the empty field, shows the file again and only then puts the keyboard back in it', async () => {
+    render(<Page />);
+    await openBeside(NARROW);
+    const origin = await waitFor(() => document.querySelector<HTMLElement>('[data-file-viewer] .cm-content')!);
+    act(() => origin.focus());
+    expect(document.activeElement).toBe(origin);
+    const asked: boolean[] = []; // for each focus asked of the file's text: could it take the keyboard then
+    const focus = HTMLElement.prototype.focus;
+    vi.spyOn(origin, 'focus').mockImplementation(function (this: HTMLElement, options?: FocusOptions) {
+      asked.push(origin.closest('[hidden], [inert]') === null);
+      focus.call(this, options);
+    });
+    goToFile();
+    expect(treeColumn()?.getAttribute('data-place')).toBe('instead');
+    expect(origin.closest('[hidden]')).not.toBeNull(); // the file is out of view while the search lasts
+    await inField();
+    esc();
+    expect(finding()).toBeNull();
+    expect(treeColumn()).toBeNull();
+    expect(asked).toEqual([true]);
+    expect(document.activeElement).toBe(origin);
   });
 
   it('finding ends when the field loses the keyboard while empty; not while it holds text, nor when only the window loses it', async () => {
