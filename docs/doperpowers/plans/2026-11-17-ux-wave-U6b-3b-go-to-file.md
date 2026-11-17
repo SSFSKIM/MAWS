@@ -691,6 +691,12 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
    - The result list stands outside `FilesMenu`; the listbox's accessible name is `FILES_COPY.goToFile` (no new sentence).
    - Above a gitlink the lister lists its parent folders too (`vendor/` for `vendor/sub/`), as for any path.
    - S3's cases are in `files/finder-open.test.tsx`, which draws the main area and the side column as the shell does; one sits a level below Enter, so that its red reads at its own line.
+11. **2026-11-17 (UTC) · The architect's rulings on M2's report.**
+   - The state "the field holds a query and the window knows no working folder for the side column's session (no record)" shows "Files could not be searched.": kept, one of the fixed sentences; the other two would say something false.
+   - In a narrow tab, finding turns off the person's earlier press of the tree's button, under decision 9's "where the stored fold and the tab's width put it": accepted.
+   - The file view's body is focusable with `tabIndex={-1}` (no new tab stop), and its outline is drawn under `focus-visible` only (`outline-accent focus-visible:outline-2 -outline-offset-2`), so a mouse click that lands the keyboard on it draws no ring: accepted on those two conditions, the classes pinned by a unit test. M3 names the U6b-2 framed-file scenes that click the bar or a notice, for the Mac run.
+   - S1's red evidence is a mutation run on the VM (the generation compare removed and restored, never committed), and the composing Enter's the same where cheap.
+   - M3 reads every e2e use of `[data-files-tree]` against the new column (the field, then the list or the tree's wrapper) and adapts each locator or measurement whose meaning changed, or says why it stands; `[data-files-tree]` stays on the column, and the wrapper takes an attribute of its own if a scene must measure the tree alone.
 
 ## Outcomes & Retrospective
 
