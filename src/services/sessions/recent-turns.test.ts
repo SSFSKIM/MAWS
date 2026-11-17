@@ -9,6 +9,9 @@ import { NO_TURNS, readRecentTurns, recentTurnsOf } from './recent-turns';
 import { linkedReadBlock } from '@shared/maws/linked-read'; // P4-A3
 import type { ContentBlock } from '@shared/graph/events';
 import { PROBE_JOINS, recordedJoin } from '../../../test/support/recorded-joins'; // ticket 704
+import { planPrompt } from '@shared/engine/host-prompts'; // ticket 733a
+import { commentsMessage, quotedComment } from '@shared/anchor/message'; // ticket 733a
+import { pinPlanPrompt, pinQuotedComment } from '../../../test/support/pin-forms'; // ticket 733a
 
 const ROOT = join(__dirname, '../../..');
 const fixture = (name: string) => join(ROOT, 'test/fixtures/transcripts', `${name}.jsonl`);
@@ -56,6 +59,19 @@ describe('recentTurnsOf', () => {
     const answer = recentTurnsOf(records(user('u1', null, [{ type: 'text', text: words }, { type: 'text', text: linkedReadBlock(read) }]), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
     expect(prompts(answer)).toEqual([words]);
   });
+  // Ticket 733a (its document, Design 4; acceptance 7): a prompt of one of MAWS's forms reads with its segments in place,
+  // the pin writer's text; a person's pasted block reads as it always did (the control)
+  it('a plan prompt and a comment with a quoted line read in place, as the pin’s writers wrote them', () => {
+    const anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 } as const;
+    const comment = commentsMessage([{ anchor, text: quotedComment(anchor, 'return total;', 'Count it.', 'a1b2'), screenshot: false }], 'main');
+    const pinComment = commentsMessage([{ anchor, text: pinQuotedComment(anchor, 'return total;', 'Count it.'), screenshot: false }], 'main');
+    const pasted = 'Review this\n\n<pasted_content id="ab12">\nline one\n</pasted_content id="ab12">\n';
+    for (const [sent, expected] of [[planPrompt('one\ntwo', 'a1b2'), pinPlanPrompt('one\ntwo')], [comment, pinComment], [[{ type: 'text', text: comment }], pinComment], [pasted, pasted.trim()]] as const) {
+      const answer = recentTurnsOf(records(user('u1', null, sent), assistant('a1', 'u1', [{ type: 'text', text: 'Done.' }])), 20, false);
+      expect(prompts(answer)).toEqual([expected.slice(0, RECENT_TURN_PROMPT_MAX)]);
+    }
+  });
+
   it('one turn per human prompt, its last answer and its tool calls (a steer the engine took folds into its turn)', () => {
     expect(brief('w1-steer-next-disk')).toEqual([{ prompt: expect.stringMatching(/^Count to 8 with separate Bash sleep 1 calls/), answer: 'COUNTED', tools: 8 }]);
   });

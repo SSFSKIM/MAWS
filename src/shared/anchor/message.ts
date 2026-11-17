@@ -6,6 +6,9 @@
 // the queued steer and the engine's JSONL, and nothing a human typed in that shape is taken for MAWS's framing.
 import { AnchorSchema, type Anchor, type AnchorBox /* E4d */ } from './anchor';
 import type { ArtifactKind } from '../artifacts/entity'; // P3-C
+import { wrapPasted } from '../composer/pasted-framing'; // ticket 733a
+import { leaveOutGrant, segmentsInPlace, takeSegment, type Range } from '../engine/composed-content'; // ticket 733a
+import { neutraliseGrant } from '../engine/grant'; // ticket 733a
 
 export type Destination = 'thread' | 'main';
 
@@ -20,7 +23,7 @@ const SCREENSHOT_SENTENCE = '. A screenshot of it is attached:';
 export const PROMOTION_HEAD = 'This side thread continues side questions the user asked beside the main conversation. The exchange so far:';
 export const ANCHOR_TAG_OPENING = '<maws_anchor';
 const PROMOTION_CONTINUE = 'Continue from here.';
-const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' };
+export const PROMOTION_ANCHOR: Anchor = { kind: 'none', label: 'Side question', locator: 'btw' }; // ticket 733a: an edit asks it of a row
 
 // The parenthetical's parts per kind, each present only when its fields are (the schema leaves them optional; a
 // producer that gives them all gets exactly Interfaces' table).
@@ -104,15 +107,52 @@ export function anchorTag(anchor: Anchor): string {
 
 export function anchoredMessage(input: { anchor: Anchor; text: string; destination: Destination; screenshot: boolean }): string {
   const { anchor, text, destination, screenshot } = input;
-  return `${anchorLead(anchor, screenshot)}\n${text.trim()}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+  return `${anchorLead(anchor, screenshot)}\n${commentWords(text)}${destination === 'thread' ? `\n\n${SIDE_THREAD_PREAMBLE}` : ''}\n\n${anchorTag(anchor)}`;
+}
+
+// Ticket 733a (its document, Designs 3 and 4): a comment's words as a message carries them, trimmed; words that begin
+// with a pasted segment (a quoted line, `quotedComment`) keep the segment's two line breaks before it, which the trim
+// would take and which the segment's own reader (`takeSegment`) reads. The readers trim them off again (`readOneComment`,
+// as build F reads), so writing back what was read gives the same bytes.
+export function commentWords(text: string): string {
+  const words = text.trim();
+  return takeSegment(`\n\n${words}`, 0) === null ? words : `\n\n${words}`;
+}
+
+/**
+ * A comment's words read in place (Design 4): every pasted segment in them, the one at their start included (whose two
+ * line breaks a reader's trim took off), drawn as its body where it stood, and each body's range in the text it gives.
+ * Called only on the words of a message `readAnchoredMessage` read.
+ */
+export function commentInPlace(words: string): { text: string; composed: Range[] } {
+  return segmentsInPlace(takeSegment(`\n\n${words}`, 0) === null ? words : `\n\n${words}`);
 }
 
 // A `/btw` exchange promoted to a side thread: its first prompt lists the answered exchanges, then the text the human
 // typed (else a line asking to continue), then the anchorless tag, so the thread's first row reads as a side question.
-export function promotionMessage(exchanges: { question: string; response: string }[], text: string | null): string {
-  const pairs = exchanges.map(({ question, response }) => `Q: ${question}\nA: ${response}`);
+// Ticket 733a (Design 3; the architect's rulings of 2026-11-17): each answer is the model's, so its lines that quote the
+// grant's opening are left out, and the exchanges, `Q:` and `A:` pairs as before, stand inside one pasted segment after
+// the head (a question is the person's own and is not rewritten); the typed words after it. Read in place, it is the
+// text it was before.
+export function promotionMessage(exchanges: { question: string; response: string }[], text: string | null, tagId: string): string {
+  const pairs = exchanges.map(({ question, response }) => `Q: ${question}\nA: ${leaveOutGrant(response)}`);
+  const exchange = pairs.length === 0 ? [] : [wrapPasted(tagId, pairs.join('\n\n'))];
   const typed = text?.trim() || PROMOTION_CONTINUE;
-  return [PROMOTION_HEAD, ...pairs, typed, anchorTag(PROMOTION_ANCHOR)].join('\n\n');
+  return neutraliseGrant([PROMOTION_HEAD, ...exchange, typed, anchorTag(PROMOTION_ANCHOR)].join('\n\n'));
+}
+
+/**
+ * A promoted side question's text, read in place as the transcript's row holds it with its segments' ranges (§D, Design
+ * 5): null unless it begins with the head and a blank line; `body`, the range of the segment's body that stands directly
+ * after them with the typed words after it, a blank line between (this build's shape), else null (the earlier writer's,
+ * or the head's paragraph edited).
+ */
+export function readPromotion(text: string, composed: readonly Range[]): { body: Range | null } | null {
+  const head = `${PROMOTION_HEAD}\n\n`;
+  if (!text.startsWith(head)) return null;
+  const first = composed[0];
+  const shaped = first !== undefined && first[0] === head.length && text.startsWith('\n\n', first[1]);
+  return { body: shaped ? first : null };
 }
 
 // E4d (2026-10-06): attribute names widened from `[A-Za-z]+` to `[A-Za-z][A-Za-z0-9]*` so X10's `a11y` parses (E4d
@@ -188,7 +228,7 @@ export function commentsMessage(comments: readonly MessageComment[], destination
   if (comments.length === 1) return anchoredMessage({ ...comments[0]!, destination });
   const blocks = comments.map(({ anchor, text, screenshot }, index) => {
     const preamble = destination === 'thread' && index === comments.length - 1 ? `\n\n${SIDE_THREAD_PREAMBLE_MANY}` : '';
-    return `${anchorLead(anchor, screenshot)}\n${text.trim().split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
+    return `${anchorLead(anchor, screenshot)}\n${commentWords(text).split('\n').map(escapeLine).join('\n')}${preamble}\n\n${anchorTag(anchor)}`;
   });
   return [framingLine(comments.length), ...blocks].join('\n\n');
 }
@@ -293,13 +333,43 @@ function codeSpan(line: string): string {
   return `${ticks}${pad}${line}${pad}${ticks}`;
 }
 
-/** A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a commit's diff); unchanged when `quote` is null and the line is not such a removed one. */
-export function quotedComment(anchor: Anchor, quote: string | null, text: string): string {
+/**
+ * A comment's words as they are sent: the quoted line above them (under BEFORE_THE_CHANGE for a removed line outside a
+ * commit's diff); unchanged when `quote` is null and the line is not such a removed one. Ticket 733a (Design 3): the
+ * line is a file's text, so it is left out when it quotes the grant's opening, and its code span stands inside a pasted
+ * segment on lines of its own, which MAWS's readers draw in place: read so, the words are what they were before.
+ */
+export function quotedComment(anchor: Anchor, quote: string | null, text: string, tagId: string): string {
   if (text.trim() === '') return text; // a comment with no words is not sent
   const line = quote === null ? null : quoteLine(quote);
   // UX wave U5b-2: a commit's old side says so in its lead ("the first parent of commit"), so its words take no caption
   const caption = anchor.kind === 'file-line' && anchor.side === 'old' && anchor.commit === undefined;
-  const parts = [...(caption ? [BEFORE_THE_CHANGE] : []), ...(line === null ? [] : [codeSpan(line)]), text];
-  return parts.join('\n');
+  if (line === null) return [...(caption ? [BEFORE_THE_CHANGE] : []), text].join('\n');
+  return `${caption ? `${BEFORE_THE_CHANGE}\n` : ''}${wrapPasted(tagId, codeSpan(leaveOutGrant(line)))}\n${text}`;
+}
+
+/**
+ * The quoted line of an anchored comment's words, read by its own form at an edit (§D, Design 5): this build's segment
+ * of one line at the words' start, after the caption line when they have one (its range among the row's `composed`); or,
+ * from the earlier writer, a first line (after the caption) that is one whole code span, under an anchor on a file's
+ * line. Null when the words hold none.
+ */
+export function readQuote(anchor: Anchor, words: string, composed: readonly Range[]): Range | null {
+  const at = words.startsWith(`${BEFORE_THE_CHANGE}\n`) ? BEFORE_THE_CHANGE.length + 1 : 0;
+  const first = composed[0];
+  if (first !== undefined && first[0] === at && !/[\n\r]/.test(words.slice(first[0], first[1]))) return first;
+  if (anchor.kind !== 'file-line') return null;
+  const end = words.indexOf('\n', at);
+  const line = words.slice(at, end < 0 ? words.length : end);
+  return isCodeSpan(line) ? [at, at + line.length] : null;
+}
+
+// One whole inline code span, as `codeSpan` writes one: a run of backticks, the line, the same run, and no run of that
+// length inside
+function isCodeSpan(line: string): boolean {
+  const ticks = /^`+/.exec(line)?.[0];
+  if (ticks === undefined || line.length < 2 * ticks.length + 1 || !line.endsWith(ticks) || line.charAt(line.length - ticks.length - 1) === '`') return false;
+  const inner = line.slice(ticks.length, line.length - ticks.length);
+  return (inner.match(/`+/g) ?? []).every((run) => run.length !== ticks.length);
 }
 // UX wave U5b end

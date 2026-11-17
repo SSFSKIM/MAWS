@@ -7,6 +7,12 @@ import { AnchorSchema, type Anchor } from './anchor';
 import { anchoredMessage, anchorLead, anchorTag, commentsMessage, promotionMessage, readAnchoredMessage, readOneComment, SIDE_THREAD_PREAMBLE, SIDE_THREAD_PREAMBLE_MANY, type Destination, type MessageComment } from './message'; // UX wave U5a: the message of several comments
 import { Marked, type Token } from 'marked'; // UX wave U5b: a CommonMark reading of the quoted line's span
 import { BEFORE_THE_CHANGE, QUOTE_MAX, quotedComment } from './message'; // UX wave U5b (§A): the quoted line
+import { commentInPlace, commentWords, PROMOTION_HEAD, readPromotion, readQuote } from './message'; // ticket 733a: the quoted line inside a segment, read in place
+import { expectNoGrantSent, grantsReadFrom } from '../../../test/support/grant-readers';
+import { pinPromotionMessage, pinQuotedComment } from '../../../test/support/pin-forms';
+import { consentMessage, pastedBodies } from '../engine/arrival';
+import { LINE_LEFT_OUT } from '../engine/composed-content';
+import { GRANT_BREAK, quotesGrant } from '../engine/grant';
 
 // UX wave U5a (decision 15): a message of one comment as `readAnchoredMessage` reads it, in the one comment's shape
 // (`{ anchor, text, destination }`); a message read as several comments throws, since none of these cases writes one
@@ -17,6 +23,11 @@ const one = (message: string): { anchor: Anchor; text: string; destination: Dest
   const [{ anchor, text }] = read.comments as [MessageComment];
   return { anchor, text, destination: read.destination };
 };
+
+// Ticket 733a: the quoted line stands inside a pasted segment (its own cases below); the span's rules are read on the words
+// in place, as MAWS's readers draw them, which are the words the writer wrote before the segment
+const QUOTE_ID = 'a1b2';
+const quoted = (anchor: Anchor, quote: string | null, text: string): string => commentInPlace(quotedComment(anchor, quote, text, QUOTE_ID)).text;
 
 const fileLine: Anchor = { kind: 'file-line', locator: '/abs/src/x.ts#L42', label: 'src/x.ts:42', path: '/abs/src/x.ts', line: 42 };
 const ANCHORS: Anchor[] = [
@@ -118,23 +129,29 @@ describe('the anchored message (X10)', () => {
       { question: 'What word did I ask you to remember?', response: 'ZEBRA' },
       { question: 'Why?', response: 'You asked.' },
     ];
-    const message = promotionMessage(exchanges, null);
+    // ticket 733a: the writer's bytes for a named input, the exchanges inside one segment of the given id
+    const message = promotionMessage(exchanges, null, 'a1b2');
     expect(message).toBe(
       [
         'This side thread continues side questions the user asked beside the main conversation. The exchange so far:',
         '',
+        '',
+        '',
+        '<pasted_content id="a1b2">',
         'Q: What word did I ask you to remember?',
         'A: ZEBRA',
         '',
         'Q: Why?',
         'A: You asked.',
+        '</pasted_content id="a1b2">',
+        '',
         '',
         'Continue from here.',
         '',
         '<maws_anchor kind="none" label="Side question" locator="btw"/>',
       ].join('\n'),
     );
-    expect(promotionMessage(exchanges.slice(0, 1), '  Now spell it backwards. ').split('\n').slice(-3)).toEqual(['Now spell it backwards.', '', '<maws_anchor kind="none" label="Side question" locator="btw"/>']);
+    expect(promotionMessage(exchanges.slice(0, 1), '  Now spell it backwards. ', 'a1b2').split('\n').slice(-3)).toEqual(['Now spell it backwards.', '', '<maws_anchor kind="none" label="Side question" locator="btw"/>']);
     expect(one(message)).toEqual({ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, text: message.slice(0, message.lastIndexOf('\n\n')), destination: null });
   });
 
@@ -320,7 +337,7 @@ describe('a message of several comments (UX wave U5a)', () => {
     const fork = loadJournal('pass3', 'p1-side-thread-live-fork').find((row) => row.seq === 4)!.frame as { firstPrompt: string };
     expect(readAnchoredMessage(fork.firstPrompt)).toEqual(asOne(fork.firstPrompt));
     expect(readAnchoredMessage(fork.firstPrompt)).toMatchObject({ comments: [{ screenshot: false }], destination: 'thread' });
-    const promotion = promotionMessage([{ question: 'What word?', response: 'ZEBRA' }], null);
+    const promotion = promotionMessage([{ question: 'What word?', response: 'ZEBRA' }], null, 'a1b2');
     expect(readAnchoredMessage(promotion)).toEqual({ comments: [{ anchor: { kind: 'none', label: 'Side question', locator: 'btw' }, text: promotion.slice(0, promotion.lastIndexOf('\n\n')), screenshot: false }], destination: null });
     for (const text of ['', 'Look: <maws_anchor kind="x"/> here', `${anchorTag(fileLine)}\nand then more words`, 'Comment on "src/x.ts:42" (file /abs/src/x.ts, line 42):\nhello'])
       expect(readAnchoredMessage(text), text).toBeNull();
@@ -473,39 +490,39 @@ describe('a quoted line (UX wave U5b)', () => {
   });
 
   it('quotes the line as an inline code span on a line of its own, then the words', () => {
-    expect(quotedComment(added, 'const total = rows.length;', 'Count the header too.')).toBe('`const total = rows.length;`\nCount the header too.');
-    expect(spans(quotedComment(added, 'const total = rows.length;', 'Count the header too.'))).toEqual(['const total = rows.length;']);
+    expect(quoted(added, 'const total = rows.length;', 'Count the header too.')).toBe('`const total = rows.length;`\nCount the header too.');
+    expect(spans(quoted(added, 'const total = rows.length;', 'Count the header too.'))).toEqual(['const total = rows.length;']);
   });
 
   it('puts "Before the change:" first for a removed line, whether or not a quote follows', () => {
     expect(BEFORE_THE_CHANGE).toBe('Before the change:');
-    expect(quotedComment(removed, 'if (row.berth) skip();', 'Why was this dropped?')).toBe('Before the change:\n`if (row.berth) skip();`\nWhy was this dropped?');
-    expect(quotedComment(removed, null, 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
-    expect(quotedComment(removed, '', 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
+    expect(quoted(removed, 'if (row.berth) skip();', 'Why was this dropped?')).toBe('Before the change:\n`if (row.berth) skip();`\nWhy was this dropped?');
+    expect(quoted(removed, null, 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
+    expect(quoted(removed, '', 'Why was this dropped?')).toBe('Before the change:\nWhy was this dropped?');
   });
 
   it('is the words unchanged with no quote on an added or unchanged line, and for every other kind', () => {
-    expect(quotedComment(added, null, 'Rename it.')).toBe('Rename it.');
-    for (const anchor of ANCHORS.filter((each) => each.kind !== 'file-line')) expect(quotedComment(anchor, null, 'Rename it.')).toBe('Rename it.');
+    expect(quoted(added, null, 'Rename it.')).toBe('Rename it.');
+    for (const anchor of ANCHORS.filter((each) => each.kind !== 'file-line')) expect(quoted(anchor, null, 'Rename it.')).toBe('Rename it.');
     // a pull request's line keeps its own side in its lead: no caption
-    expect(quotedComment({ ...ANCHORS[1]!, side: 'old' }, null, 'Rename it.')).toBe('Rename it.');
+    expect(quoted({ ...ANCHORS[1]!, side: 'old' }, null, 'Rename it.')).toBe('Rename it.');
   });
 
   it('has no quote for an empty line or a line of spaces', () => {
-    expect(quotedComment(added, '', 'Why blank?')).toBe('Why blank?');
-    expect(quotedComment(added, '    ', 'Why blank?')).toBe('Why blank?');
-    expect(quotedComment(added, ' \t ', 'Why blank?')).toBe('Why blank?');
+    expect(quoted(added, '', 'Why blank?')).toBe('Why blank?');
+    expect(quoted(added, '    ', 'Why blank?')).toBe('Why blank?');
+    expect(quoted(added, ' \t ', 'Why blank?')).toBe('Why blank?');
   });
 
   it('has no quote for a line of spaces or tabs past QUOTE_MAX: blankness is read before the cut', () => {
-    expect(quotedComment(added, ' '.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
-    expect(quotedComment(added, '\t'.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
-    expect(quotedComment(removed, ' \t'.repeat(QUOTE_MAX), 'Why blank?')).toBe('Before the change:\nWhy blank?');
+    expect(quoted(added, ' '.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quoted(added, '\t'.repeat(QUOTE_MAX + 1), 'Why blank?')).toBe('Why blank?');
+    expect(quoted(removed, ' \t'.repeat(QUOTE_MAX), 'Why blank?')).toBe('Before the change:\nWhy blank?');
   });
 
   it('sends nothing more for a comment with no words', () => {
-    expect(quotedComment(added, 'const total = rows.length;', '')).toBe('');
-    expect(quotedComment(removed, 'const total = rows.length;', '  ')).toBe('  ');
+    expect(quoted(added, 'const total = rows.length;', '')).toBe('');
+    expect(quoted(removed, 'const total = rows.length;', '  ')).toBe('  ');
   });
 
   it('takes a run of backticks one longer than the line’s longest, and a space inside each end where the line begins or ends with a backtick or a space; a CommonMark reading gives the line back exactly', () => {
@@ -518,7 +535,7 @@ describe('a quoted line (UX wave U5b)', () => {
       ['```', '```` ``` ````'],
     ];
     for (const [line, span] of cases) {
-      const words = quotedComment(added, line, 'Look here.');
+      const words = quoted(added, line, 'Look here.');
       expect(words, line).toBe(`${span}\nLook here.`);
       expect(spans(words), line).toEqual([line]);
       // and inside the lead's paragraph, as the agent and the transcript read it
@@ -527,27 +544,27 @@ describe('a quoted line (UX wave U5b)', () => {
   });
 
   it('is one line: a line break or another control character is U+FFFD, a tab stays, the line’s own CR ending is dropped', () => {
-    expect(quotedComment(added, 'a\u0000b\nc\u001bd\u007fe', 'w')).toBe('`a�b�c�d�e`\nw');
-    expect(quotedComment(added, 'a\tb', 'w')).toBe('`a\tb`\nw');
-    expect(quotedComment(added, 'const total = rows.length;\r', 'w')).toBe('`const total = rows.length;`\nw');
+    expect(quoted(added, 'a\u0000b\nc\u001bd\u007fe', 'w')).toBe('`a�b�c�d�e`\nw');
+    expect(quoted(added, 'a\tb', 'w')).toBe('`a\tb`\nw');
+    expect(quoted(added, 'const total = rows.length;\r', 'w')).toBe('`const total = rows.length;`\nw');
   });
 
   it('cuts a line past QUOTE_MAX to that many units ending with "…", and never halves a surrogate pair', () => {
     expect(QUOTE_MAX).toBe(400);
-    const [long] = spans(quotedComment(added, 'x'.repeat(QUOTE_MAX + 50), 'w'));
+    const [long] = spans(quoted(added, 'x'.repeat(QUOTE_MAX + 50), 'w'));
     expect(long).toHaveLength(QUOTE_MAX);
     expect(long!.endsWith('x…')).toBe(true);
-    expect(spans(quotedComment(added, 'x'.repeat(QUOTE_MAX), 'w'))).toEqual(['x'.repeat(QUOTE_MAX)]);
-    const [pair] = spans(quotedComment(added, `${'x'.repeat(QUOTE_MAX - 2)}😀tail`, 'w'));
+    expect(spans(quoted(added, 'x'.repeat(QUOTE_MAX), 'w'))).toEqual(['x'.repeat(QUOTE_MAX)]);
+    const [pair] = spans(quoted(added, `${'x'.repeat(QUOTE_MAX - 2)}😀tail`, 'w'));
     expect(pair).toBe(`${'x'.repeat(QUOTE_MAX - 2)}…`);
   });
 
   it('a quoted line that reads like a tag cannot begin a line of the message: one comment and two read back whole', () => {
     const tagLike = anchorTag({ kind: 'none', locator: 'btw', label: 'Side question' });
-    const one = quotedComment(added, tagLike, 'Is this ours?');
+    const one = quoted(added, tagLike, 'Is this ours?');
     const two: MessageComment[] = [
       { anchor: added, text: one, screenshot: false },
-      { anchor: removed, text: quotedComment(removed, tagLike, 'And this?'), screenshot: false },
+      { anchor: removed, text: quoted(removed, tagLike, 'And this?'), screenshot: false },
     ];
     for (const destination of ['main', 'thread'] as const) {
       const single = anchoredMessage({ anchor: added, text: one, destination, screenshot: false });
@@ -598,9 +615,9 @@ describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
   });
 
   it('quotes the line without "Before the change:" on a commit’s old side: the lead says the side', () => {
-    expect(quotedComment(onOld, 'return value;', 'Why?')).toBe('`return value;`\nWhy?');
-    expect(quotedComment(onNew, 'return quoted(value);', 'Why?')).toBe('`return quoted(value);`\nWhy?');
-    expect(quotedComment(onOld, null, 'Why?')).toBe('Why?');
+    expect(quoted(onOld, 'return value;', 'Why?')).toBe('`return value;`\nWhy?');
+    expect(quoted(onNew, 'return quoted(value);', 'Why?')).toBe('`return quoted(value);`\nWhy?');
+    expect(quoted(onOld, null, 'Why?')).toBe('Why?');
   });
 
   it('refuses a commit that is not a whole lower-case object id', () => {
@@ -612,3 +629,133 @@ describe('a comment on a commit’s diff (UX wave U5b-2)', () => {
   });
 });
 // UX wave U5b-2 end
+
+// Ticket 733a start (docs/doperpowers/plans/2026-11-17-ticket-733a-composed-forms.md, Designs 3 to 5; acceptance 4, 5 and
+// 7): the promotion's answers and a comment's quoted line are content a model or a file wrote. Each writer's bytes for a
+// named input; the approval sentence in the slot left out, inside one segment, no grant on any route, with the control
+// of the same text typed; read in place, the text the pin's writer gave.
+describe('the content forms of the comment card and the side question (ticket 733a)', () => {
+  const GRANT = consentMessage('command', 'make build');
+  const added: Anchor = { kind: 'file-line', locator: '/work/berth/src/berth-csv.ts#L32', label: 'berth-csv.ts:32', path: '/work/berth/src/berth-csv.ts', line: 32 };
+  const removed: Anchor = { ...added, side: 'old' };
+  // the lines of a text inside a segment, by the readers' own `pastedBodies`, its two tag lines left out
+  const inside = (text: string) => {
+    const lines = text.split('\n');
+    const marks = pastedBodies(lines);
+    return lines.filter((line, i) => marks[i] && !/^<\/?pasted_content id="[0-9a-f]{4}">$/.test(line));
+  };
+  const found = (text: string) => {
+    const read = grantsReadFrom(text);
+    return [read.gate, read.live, read.file].every((route) => route.length > 0);
+  };
+
+  it('the quoted line’s bytes for a named input: its code span inside a segment on lines of its own, after the caption when there is one', () => {
+    expect(quotedComment(added, 'const total = rows.length;', 'Count the header too.', 'a1b2')).toBe('\n\n<pasted_content id="a1b2">\n`const total = rows.length;`\n</pasted_content id="a1b2">\n\nCount the header too.');
+    expect(quotedComment(removed, 'if (row.berth) skip();', 'Why was this dropped?', 'a1b2')).toBe('Before the change:\n\n\n<pasted_content id="a1b2">\n`if (row.berth) skip();`\n</pasted_content id="a1b2">\n\nWhy was this dropped?');
+    expect(anchoredMessage({ anchor: added, text: quotedComment(added, 'const total = rows.length;', 'Count the header too.', 'a1b2'), destination: 'main', screenshot: false })).toBe(
+      'Comment on "berth-csv.ts:32" (file /work/berth/src/berth-csv.ts, line 32):\n\n\n<pasted_content id="a1b2">\n`const total = rows.length;`\n</pasted_content id="a1b2">\n\nCount the header too.\n\n<maws_anchor kind="file-line" label="berth-csv.ts:32" locator="/work/berth/src/berth-csv.ts#L32" path="/work/berth/src/berth-csv.ts" line="32"/>',
+    );
+  });
+
+  it('a quoted line holding the approval sentence: the marker in its span, inside the segment, no grant in the message on any route; the line typed is found', () => {
+    for (const anchor of [added, removed]) {
+      const words = quotedComment(anchor, GRANT, 'Is this ours?', 'a1b2');
+      expect(inside(words), JSON.stringify(anchor)).toEqual([`\`${LINE_LEFT_OUT}\``]);
+      expect(quotesGrant(words)).toBe(false);
+      for (const destination of ['main', 'thread'] as const) expectNoGrantSent(commentsMessage([{ anchor, text: words, screenshot: false }], destination));
+    }
+    // the control: the same line as the comment's typed words is found, and so is the pin's span of it
+    expect(quotesGrant(pinQuotedComment(added, GRANT, 'Is this ours?'))).toBe(true);
+    expect(found(GRANT)).toBe(true);
+  });
+
+  it('read in place, a comment’s words are the pin writer’s, alone, in a message, and among several', () => {
+    const quotes = ['const total = rows.length;', '`raw` template', '    return total;', 'a<pasted_content id="ffff">b', 'x'.repeat(QUOTE_MAX + 5)];
+    for (const quote of quotes) {
+      for (const anchor of [added, removed]) {
+        const words = quotedComment(anchor, quote, 'Look here.', 'c3d4');
+        expect(commentInPlace(words).text, quote).toBe(pinQuotedComment(anchor, quote, 'Look here.'));
+        const single = readAnchoredMessage(anchoredMessage({ anchor, text: words, destination: 'main', screenshot: false }))!;
+        expect(commentInPlace(single.comments[0]!.text).text, quote).toBe(pinQuotedComment(anchor, quote, 'Look here.'));
+      }
+      const two = readAnchoredMessage(commentsMessage([{ anchor: added, text: quotedComment(added, quote, 'One.', 'c3d4'), screenshot: false }, { anchor: removed, text: quotedComment(removed, quote, 'Two.', 'c3d4'), screenshot: false }], 'thread'))!;
+      expect(two.comments.map((comment) => commentInPlace(comment.text).text), quote).toEqual([pinQuotedComment(added, quote, 'One.'), pinQuotedComment(removed, quote, 'Two.')]);
+    }
+  });
+
+  it('writing back what was read gives the same bytes: a comment, several, to main and to a thread (the own-text rule’s whole reading)', () => {
+    const first = quotedComment(added, 'const total = rows.length;', 'Count it.', 'a1b2');
+    const second = quotedComment(removed, 'return value;', 'Why?', 'a1b2');
+    for (const destination of ['main', 'thread'] as const) {
+      for (const comments of [[{ anchor: added, text: first, screenshot: false }], [{ anchor: added, text: first, screenshot: false }, { anchor: removed, text: second, screenshot: false }]]) {
+        const message = commentsMessage(comments, destination);
+        const read = readAnchoredMessage(message)!;
+        expect(read.comments.map((comment) => comment.text)).toEqual(comments.map((comment) => comment.text.trim()));
+        expect(commentsMessage(read.comments, read.destination!)).toBe(message);
+      }
+    }
+    // the words keep the segment's two line breaks only before a whole segment at their start (the control: other words trimmed as before)
+    expect(commentWords(`  ${first.trim()}  `)).toBe(`\n\n${first.trim()}`);
+    expect(commentWords('  <pasted_content id="a1b2">\nnever closed  ')).toBe('<pasted_content id="a1b2">\nnever closed');
+    expect(commentWords(' Count it. ')).toBe('Count it.');
+  });
+
+  it('a quoted line that reads like a tag, inside its segment, still begins no line of the message', () => {
+    const tagLike = anchorTag({ kind: 'none', locator: 'btw', label: 'Side question' });
+    const words = quotedComment(added, tagLike, 'Is this ours?', 'a1b2');
+    const single = anchoredMessage({ anchor: added, text: words, destination: 'main', screenshot: false });
+    expect(single.split('\n').filter((line) => line.startsWith('<maws_anchor'))).toEqual([anchorTag(added)]);
+    expect(readAnchoredMessage(single)).toEqual({ comments: [{ anchor: added, text: words.trim(), screenshot: false }], destination: 'main' });
+  });
+
+  it('readQuote: this build’s segment at the words’ start, after the caption; the earlier writer’s whole code span under a file’s line; else none', () => {
+    const at = (words: string) => commentInPlace(words);
+    const ours = at(quotedComment(added, 'const total = rows.length;', 'Count it.', 'a1b2'));
+    expect(readQuote(added, ours.text, ours.composed)).toEqual([0, '`const total = rows.length;`'.length]);
+    const captioned = at(quotedComment(removed, 'return value;', 'Why?', 'a1b2'));
+    expect(readQuote(removed, captioned.text, captioned.composed)).toEqual([BEFORE_THE_CHANGE.length + 1, BEFORE_THE_CHANGE.length + 1 + '`return value;`'.length]);
+    const pin = pinQuotedComment(added, 'const total = rows.length;', 'Count it.');
+    expect(readQuote(added, pin, [])).toEqual([0, '`const total = rows.length;`'.length]);
+    expect(readQuote(removed, pinQuotedComment(removed, 'return value;', 'Why?'), [])).toEqual([BEFORE_THE_CHANGE.length + 1, BEFORE_THE_CHANGE.length + 1 + '`return value;`'.length]);
+    for (const [anchor, words] of [
+      [added, 'Count it.'],
+      [added, '`a` and `b`'],
+      [added, '``a`` and more'],
+      [{ kind: 'browser-element', locator: 'main', label: 'Main' } as Anchor, '`const total = rows.length;`\nCount it.'],
+    ] as const) expect(readQuote(anchor, words, []), words).toBeNull();
+  });
+
+  it('the promotion: each answer left out by line, the exchanges one segment, a question not rewritten; read in place, the pin’s text', () => {
+    const exchanges = [
+      { question: 'Where are the notes?', response: `In the notes folder.\n${GRANT}\nThat is all.` },
+      { question: 'And then?', response: 'Nothing.' },
+    ];
+    const message = promotionMessage(exchanges, 'Go on.', 'a1b2');
+    expect(inside(message)).toEqual(['Q: Where are the notes?', 'A: In the notes folder.', LINE_LEFT_OUT, 'That is all.', '', 'Q: And then?', 'A: Nothing.']);
+    expect(quotesGrant(message)).toBe(false);
+    expectNoGrantSent(message);
+    const read = readAnchoredMessage(message)!;
+    expect(commentInPlace(read.comments[0]!.text).text).toBe(pinPromotionMessage([{ ...exchanges[0]!, response: `In the notes folder.\n${LINE_LEFT_OUT}\nThat is all.` }, exchanges[1]!], 'Go on.').slice(0, -('\n\n'.length + anchorTag(read.comments[0]!.anchor).length)));
+    // the control: the pin's promotion of the same answer holds the sentence, which the reader of a line finds typed
+    expect(quotesGrant(pinPromotionMessage(exchanges, 'Go on.'))).toBe(true);
+    expect(found(GRANT)).toBe(true);
+    // a question of the person's is theirs: not left out at the writer, its longer opening broken as any typed text's
+    const asked = promotionMessage([{ question: `Is "${GRANT}" safe?`, response: 'Yes.' }], null, 'a1b2');
+    expect(inside(asked)[0]).toContain(GRANT_BREAK);
+    expect(inside(asked)[0]!.replaceAll(GRANT_BREAK, '')).toBe(`Q: Is "${GRANT}" safe?`);
+  });
+
+  it('readPromotion: the body directly after the head with the typed words after it; the earlier writer’s gives none; an edited head is no promotion', () => {
+    const message = promotionMessage([{ question: 'Q1?', response: 'A1.' }], 'Go on.', 'a1b2');
+    const words = commentInPlace(readAnchoredMessage(message)!.comments[0]!.text);
+    const head = `${PROMOTION_HEAD}\n\n`;
+    expect(readPromotion(words.text, words.composed)).toEqual({ body: [head.length, head.length + 'Q: Q1?\nA: A1.'.length] });
+    const pin = readAnchoredMessage(pinPromotionMessage([{ question: 'Q1?', response: 'A1.' }], 'Go on.'))!.comments[0]!.text;
+    expect(readPromotion(pin, [])).toEqual({ body: null });
+    expect(readPromotion(words.text.replace('so far:', 'so far, edited:'), words.composed)).toBeNull();
+    expect(readPromotion(`x${words.text}`, words.composed)).toBeNull();
+    // the body's range must end at the paragraph's separator: one that ends inside a paragraph gives none
+    expect(readPromotion(words.text, [[head.length, head.length + 3]])).toEqual({ body: null });
+  });
+});
+// Ticket 733a end

@@ -16,6 +16,7 @@ import type { ListingSection } from './agent-listing'; // E7
 import type { BrowserToolName, BrowserWaitReason } from '@shared/maws/browser'; // E4c
 import type { BrowserActivity } from '@shared/browser/activity'; // E13
 import type { Arrival } from '@shared/engine/arrival-schema'; // UX wave U3
+import type { Range } from '@shared/engine/composed-content'; // ticket 733a
 
 /** UX wave U1c: what a grant names (the U1c document, Interfaces §B); here with the row types, so they need nothing of `blocked.ts`. */
 export interface BlockedCall { kind: 'command' | 'call'; subject: string }
@@ -83,6 +84,10 @@ export type Row = RowBase &
         // one sign by which its blocked call reads approved, absent in every state before that and in any the model
         // cannot place
         started?: true;
+        // Ticket 733a (its document, Design 4 and §D): where each pasted segment of one of MAWS's forms (an anchored message,
+        // a promotion, a plan prompt) was drawn in place in `text`, in order, as `placeholders` records each chip's place;
+        // absent when none was. Layout only: what an edit sends again is the form's own reader's to say
+        composed?: Range[];
       } // steer: sent while its turn was running (joins that turn at its delivery position, no turn of its own); dropped: the engine never ran it; lines: its hard line breaks (W2: the bubble folds by its rendered height, not by these)
     | { kind: 'assistant_text'; messageUuid: MessageUuid | null; blockIndex: number; markdown: string; live: boolean; phase: 'answer' | 'commentary'; forHuman?: boolean; model: string | null; cut?: true; partway?: true; reportOnly?: true } // cut (P5 O9): a terminal session's reply an interrupt cut before the engine wrote it, which the session kept none of; partway: its text starts partway through; reportOnly (UX wave U2b): set by the mirror alone, on a closed stretch's head, whose words outside its messages are out of sight
     | {

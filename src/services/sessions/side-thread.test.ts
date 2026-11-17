@@ -82,7 +82,9 @@ describe('side threads', () => {
     const outcome = await h.service.openSideThread(parent.appId, { kind: 'btw', exchanges, text: 'Spell it backwards.' });
     const child = outcome.appSessionId;
     await h.settled(child);
-    expect(sent(child)).toEqual([[{ type: 'text', text: promotionMessage(exchanges, 'Spell it backwards.') }]]);
+    // ticket 733a: the thread's session did not exist when the promotion was composed, so its segment's id is random
+    const id = /<pasted_content id="([0-9a-f]{4})">/.exec(JSON.stringify(sent(child)))?.[1] ?? '';
+    expect(sent(child)).toEqual([[{ type: 'text', text: promotionMessage(exchanges, 'Spell it backwards.', id) }]]);
     expect(h.index.sessions.get(child)!.lineage).toEqual({ kind: 'side-thread', parentAppSessionId: parent.appId, parentEngineSessionId: SID, openedBy: 'btw' });
     expect(h.host.calledWith('session.renameSession')).toEqual([{ appSessionId: child, title: 'Side question' }]);
     expect(h.index.sessions.get(child)!.title).toEqual({ text: 'Side question', source: 'none' }); // M5

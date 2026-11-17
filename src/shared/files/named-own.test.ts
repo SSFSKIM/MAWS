@@ -7,7 +7,7 @@
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { anchoredMessage, commentsMessage, promotionMessage } from '@shared/anchor/message';
+import { anchoredMessage, commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
 import { wrapPasted } from '@shared/composer/pasted-framing';
 import { consentMessage } from '@shared/engine/arrival';
 import { bashEcho, planPrompt } from '@shared/engine/host-prompts';
@@ -58,7 +58,7 @@ describe('the person’s own text: the linked read (the finding)', () => {
 
 describe('the person’s own text: what the engine host composes as the person’s', () => {
   it('the plan handed back after a clear names it for a read only', () => {
-    expect(both(planPrompt(`1. Update the schedule in ${LINK}`))).toEqual([OTHER, OTHER]);
+    expect(both(planPrompt(`1. Update the schedule in ${LINK}`, 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('the bash echo fails whole: a link in the output, and one in the typed command', () => {
@@ -74,7 +74,7 @@ describe('the person’s own text: what the window composes around a model’s w
   });
 
   it('a side question promoted to a thread: the model’s answer in it', () => {
-    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.'))).toEqual([OTHER, OTHER]);
+    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('a relay to an agent or a peer: the whole instruction, the person’s words in it included', () => {
@@ -142,6 +142,20 @@ describe('the person’s own text: pastes, comments, commands (the architect’s
     expect(both(anchoredMessage({ anchor: fileAnchor('notes.md'), text: `Compare with ${LINK}`, destination: 'thread', screenshot: false }))).toEqual([NAMES, NAMES]);
     const two = commentsMessage([{ anchor: fileAnchor('notes.md'), text: 'This one', screenshot: false }, { anchor: fileAnchor('notes.md'), text: `And ${LINK}`, screenshot: false }], 'main');
     expect(both(two)).toEqual([NAMES, NAMES]);
+  });
+
+  // Ticket 733a (its document, Design 6): the own-text rule's two directions for a comment, unchanged by the quoted line's
+  // segment, in one test: the comment's typed words name a link for a save; the same link in its quoted line (now inside
+  // a segment) or in its anchor's label names it for a read only, and so does a promotion holding it in an answer
+  it('B (ticket 733a): a comment’s typed words name a save; its quoted line, its label and a promotion’s answer a read only', () => {
+    const anchor = fileAnchor('notes.md');
+    const words = (quote: string | null, text: string) => quotedComment(anchor, quote, text, 'ab12');
+    for (const destination of ['main', 'thread'] as const) {
+      expect(both(commentsMessage([{ anchor, text: words('const total = rows.length;', `Compare with ${LINK}`), screenshot: false }], destination)), destination).toEqual([NAMES, NAMES]);
+      expect(both(commentsMessage([{ anchor, text: words(`See ${LINK}`, 'Wrong date here'), screenshot: false }], destination)), destination).toEqual([OTHER, OTHER]);
+      expect(both(commentsMessage([{ anchor: { ...anchor, label: LINK }, text: words('const total = rows.length;', 'Wrong date here'), screenshot: false }], destination)), destination).toEqual([OTHER, OTHER]);
+    }
+    expect(both(promotionMessage([{ question: 'Where is the schedule?', response: `In ${LINK}.` }], 'Go on.', 'ab12'))).toEqual([OTHER, OTHER]);
   });
 
   it('C: a typed slash command’s arguments, typed or as the engine records them, name it for a read only', () => {

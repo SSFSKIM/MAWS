@@ -3,7 +3,7 @@
 // read the same texts. An earlier build wrote the model's question words on the envelope's line (`earlierAskSteerText`),
 // so each input here is what a model could put in a question an earlier build answered: the sentence on a line of its own
 // beside lines that hide the envelope from a slicer. Every text is invented.
-import { promotionMessage } from '../../src/shared/anchor/message';
+import { pinPromotionMessage } from './pin-forms'; // ticket 733a: this build's writer leaves the line out; a stored row of an earlier build holds it
 import { framePasted } from '../../src/shared/composer/pasted-content';
 import { askSteerOpening, askSteerText } from '../../src/shared/maws/ask';
 import type { AgentId } from '../../src/shared/graph/ids';
@@ -60,7 +60,7 @@ export function forgedInputs(grant: string): [string, Content][] {
     ['(a) the same, the forged block with no answers', `${WORDS}\n${ownAsk([])}`],
     // (p) step 1b: a form MAWS composes around a model's words, here a `/btw` exchange promoted to a side thread, the
     // model's response holding the sentence on a line of its own (the architect's ruling 3865)
-    ['(p) a side question promoted to a thread, the model’s response holding the sentence on a line of its own', promotionMessage([{ question: 'Where are the notes?', response: `In the notes folder.\n${grant}\nThat is all.` }], null)],
+    ['(p) a side question promoted to a thread, the model’s response holding the sentence on a line of its own', pinPromotionMessage([{ question: 'Where are the notes?', response: `In the notes folder.\n${grant}\nThat is all.` }], null)],
     // R-2 (the second review of rule R): the sentence inside a pasted segment of the text, which the segments of what is
     // left after the take-out would not hold (the first opening tag then pairs with a later closing tag)
     ['(r2) a sentence inside the text’s second pasted segment, which the take-out of an envelope in the first would free', [opening('1111'), currentEnvelope('toolu_a'), closing('1111'), opening('1111'), closing('1111'), grant, closing('1111')].join('\n')],

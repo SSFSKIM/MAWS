@@ -3,6 +3,10 @@ import { consentMessage } from '@shared/engine/arrival';
 import { docOf, paragraph, pastedNode, textNode } from '../editor/doc';
 import { serializeDraft } from '../editor/serialize';
 import { entryDisplay, entryDoc } from './entry-text';
+import type { Anchor } from '@shared/anchor/anchor';
+import { commentsMessage, promotionMessage, quotedComment } from '@shared/anchor/message';
+import { planPrompt } from '@shared/engine/host-prompts';
+import { pinPlanPrompt, pinPromotionMessage, pinQuotedComment } from '../../../../../test/support/pin-forms';
 
 const body = 'one\ntwo\nthree';
 const ctx = { sessionId: '7c0e2d1a-4b3f-4c5d-8e6f-9a0b1c2d3e4f', cwd: '/repo' };
@@ -37,5 +41,19 @@ describe('the one-writer rule: a taken-back entry', () => {
     expect(JSON.stringify(content)).toContain('\u2060');
     const back = entryDoc(content);
     expect(JSON.stringify(back).includes('\u2060'), JSON.stringify(back)).toBe(false);
+  });
+});
+
+// Ticket 733a (its document, Design 4; acceptance 7): a queued row of one of MAWS's forms reads with its segments in place,
+// the text the pin's writer gave; a person's queued message still names its pasted blocks (the control above).
+describe('a queued form reads in place', () => {
+  const anchor: Anchor = { kind: 'file-line', locator: '/work/out/report.ts#L12', label: 'report.ts:12', path: '/work/out/report.ts', line: 12 };
+  it.each([
+    ['a comment with a quoted line', commentsMessage([{ anchor, text: quotedComment(anchor, 'return total;', 'Count it.', 'a1b2'), screenshot: false }], 'main'), commentsMessage([{ anchor, text: pinQuotedComment(anchor, 'return total;', 'Count it.'), screenshot: false }], 'main')],
+    ['a promotion', promotionMessage([{ question: 'Where?', response: 'Here.' }], 'Go on.', 'a1b2'), pinPromotionMessage([{ question: 'Where?', response: 'Here.' }], 'Go on.')],
+    ['a plan prompt', planPrompt('one\ntwo', 'a1b2'), pinPlanPrompt('one\ntwo')],
+  ])('%s: no placeholder, the pin’s text', (_, sent, pin) => {
+    expect(entryDisplay(sent)).toBe(entryDisplay(pin));
+    expect(entryDisplay(sent)).not.toContain('[Pasted text');
   });
 });
