@@ -119,8 +119,9 @@ export function CommandPalette() {
   const pendingFocus = useRef<ActionId | null>(null);
   const run = (id: ActionId) => {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
-    // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop.
-    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious';
+    // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
+    // U6b-3b: Go to file records where the keyboard is for Esc's second step, which is the opener, not the palette's field.
+    const afterClose = id === 'sidebar.focus' || id === 'region.focusNext' || id === 'region.focusPrevious' || id === 'files.goToFile';
     pendingFocus.current = afterClose ? id : null;
     usePalette.setState({ open: false });
     if (!afterClose) runAction(id, id === 'tab.select' ? 1 : null);
