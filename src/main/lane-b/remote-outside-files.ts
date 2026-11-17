@@ -25,7 +25,9 @@
 //   channel current when the act goes (Decision Log 27). The frame's `agent` and `open` ride that act alone.
 // - The act's reads cross in pages of REMOTE_OUTSIDE_PAGE_BYTES, each an act on one channel, assembled and checked as
 //   a call's pages are (./remote-files-read.ts); a page the services' ledger did not keep (its marker) is asked once more
-//   under a new operation (decision 4).
+//   under a new operation (decision 4). The whole read is bound to the channel of its first page, its retries included
+//   (the branch review, Decision Log 33 (2)): a page is never asked of, nor answered from, another, so no answer joins
+//   two channels' bytes; a keyed read meets such a change as a channel's end above, a copy's or a page's own read fails.
 // - With no channel current a keyed read, a listing and a choice answer at once (a copy's plain read waits, as above);
 //   the save waits under the link's hold within its send window, as `files.write` does, and nothing withdraws it
 //   (decision 6; R8).
@@ -102,19 +104,36 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
   const mayPromote = (client: ClientRef | null, machine: MachineRef) => client !== null && deps.isAppPage(client) && outsideOffer(deps.owns(machine));
   const deadline = () => deps.now() + deps.pendingMs;
 
-  /** A read or a listing, on one channel; a copy of its operation the ledger answered with the marker is asked once more. */
-  async function askedAgainOnce(link: RemoteLink, name: 'files.readOutside' | 'files.listOutside', fields: Fields, said: string): Promise<Result> {
-    const first = await deps.act(link, name, fields, { oneChannel: true, deadline: deadline() });
+  /**
+   * A read or a listing, on one channel; a copy of its operation the ledger answered with the marker is asked once more.
+   * `boundTo`: the channel the whole read is bound to is still the current one, asked before each act and after its
+   * answer; once it is not, the answer is the machine not reachable, and nothing more is asked.
+   */
+  async function askedAgainOnce(link: RemoteLink, name: 'files.readOutside' | 'files.listOutside', fields: Fields, said: string, boundTo?: () => boolean): Promise<Result> {
+    const bound = (ask: () => Promise<Result>) => async (): Promise<Result> => {
+      if (boundTo !== undefined && !boundTo()) return unreachable(name, link);
+      const result = await ask();
+      return boundTo !== undefined && !boundTo() ? unreachable(name, link) : result;
+    };
+    const once = bound(() => deps.act(link, name, fields, { oneChannel: true, deadline: deadline() }));
+    const first = await once();
     if (refusalOf(first) !== NOT_KEPT_REFUSAL) return first;
     deps.log(`lane B: ${name} of ${link.name} ${said}: the machine kept no answer for it; asked again`);
-    return deps.act(link, name, fields, { oneChannel: true, deadline: deadline() });
+    return once();
   }
 
-  /** `files.readOutside` in pages, `fields` as its schema holds them. */
-  function readOutside(link: RemoteLink, fields: Fields, label?: string): Promise<Result> {
+  /**
+   * `files.readOutside` in pages, `fields` as its schema holds them, bound, whole, to one channel (the branch review,
+   * Decision Log 33 (2)): `boundTo` when the read's keys were chosen on a channel, else the channel current at its first
+   * page. A page is never asked of, nor answered from, another channel; the read's answer then is the machine not
+   * reachable, which a keyed read meets as a channel's end and reads afresh from page 0 on the next.
+   */
+  function readOutside(link: RemoteLink, fields: Fields, label?: string, boundTo?: () => boolean): Promise<Result> {
     const said = label ?? String(fields.path);
+    const first = link.peerCapabilities(); // a channel's own list: another channel's is another
+    const bound = boundTo ?? (() => link.peerCapabilities() === first);
     return readPages(link, 'files.readOutside', fields, deps.log, {
-      page: (page) => askedAgainOnce(link, 'files.readOutside', page, said),
+      page: (page) => askedAgainOnce(link, 'files.readOutside', page, said, bound),
       pageBytes: REMOTE_OUTSIDE_PAGE_BYTES,
       ...(label !== undefined && { label }),
     });
@@ -184,7 +203,7 @@ export function createRemoteOutsideFiles(deps: RemoteOutsideDeps): RemoteOutside
     // (iv) no act for any other caller, nor for a person this build does not offer it to
     if (!mayPromote(client, link.machine)) return client !== null && deps.isAppPage(client) && !added ? refusalResult('files.readOutside', link.name, 'owners-only') : plain;
     // (iii) the act, by the outside rule: no `named` (the act always asks by it) and no raw read across a link
-    const outside = await readOutside(link, without(fields, 'named', 'raw'), label);
+    const outside = await readOutside(link, without(fields, 'named', 'raw'), label, bound.boundTo);
     return added && !outside.ok ? plain : outside;
   }
 
