@@ -4,7 +4,7 @@
 // disposal, on a clock the test moves, and once over a real process group held open.
 import { execFileSync } from 'node:child_process';
 import { EventEmitter } from 'node:events';
-import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
+import fs, { type BigIntStats, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
@@ -277,6 +277,81 @@ describe('the ignore check over a real repository', () => {
     expect(await check.names(repo.root, ['a.log'])).toBeNull();
   });
 
+  // The ruling on ownership: with GIT_DIR set git checks no owner, so the check stats what git will read, the git
+  // directory the `.git` entry leads to and its config, not the entry. No second user exists on the build VM, so these
+  // cases make another user's repository by a stand-in `stat` that gives every path under it another owner.
+  const ownedByAnother = (root: string) => {
+    const stat = fs.promises.stat.bind(fs.promises);
+    const uid = BigInt(process.getuid!());
+    return vi.spyOn(fs.promises, 'stat').mockImplementation((async (path: fs.PathLike, options?: fs.StatOptions) => {
+      const found = await stat(path, options as never);
+      if (String(path) === root || String(path).startsWith(`${root}${sep}`)) Object.assign(found, { uid: typeof found.uid === 'bigint' ? uid + 1n : Number(uid) + 1 });
+      return found;
+    }) as typeof fs.promises.stat);
+  };
+  const ownLink = async (how: 'link' | 'pointer') => {
+    const other = await repository();
+    const tree = temp();
+    writeFileSync(join(tree, '.gitignore'), '*.log\n');
+    writeFileSync(join(tree, 'a.log'), 'x\n');
+    if (how === 'link') symlinkSync(other.path('.git'), join(tree, '.git'));
+    else writeFileSync(join(tree, '.git'), `gitdir: ${other.path('.git')}\n`);
+    return { other, tree, check: checkOf({ env: other.serviceEnv() }) };
+  };
+
+  for (const how of ['link', 'pointer'] as const) {
+    it(`gives no answer for a .git ${how === 'link' ? 'symbolic link' : 'gitdir pointer'} of this user’s that leads into a repository another user owns, beside the same one leading into this user’s`, async () => {
+      const { other, tree, check } = await ownLink(how);
+      expect(sorted(await check.names(tree, ['a.log']))).toEqual(['a.log']); // the control: the git directory is this user's
+      ownedByAnother(other.root);
+      expect(await check.names(tree, ['a.log'])).toBeNull();
+      expect(warned.mock.calls.map(([line]) => String(line))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the repository belongs to another user/)]);
+    });
+  }
+
+  it('gives no answer when only the config of the git directory is another user’s, beside the same repository whose config is this user’s', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('a.log', 'x\n');
+    const check = checkOf({ env: repo.serviceEnv() });
+    expect(sorted(await check.names(repo.root, ['a.log']))).toEqual(['a.log']);
+    ownedByAnother(repo.path('.git/config'));
+    expect(await check.names(repo.root, ['a.log'])).toBeNull();
+  });
+
+  it('gives no answer for a linked worktree whose common git directory is another user’s, beside the same worktree answering as this user’s', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.git('add', '.gitignore');
+    await repo.git('commit', '-q', '-m', 'rules');
+    const worktree = await repo.addWorktree('wt');
+    writeFileSync(join(worktree, 'trace.log'), 'x\n');
+    const check = checkOf({ env: repo.serviceEnv() });
+    expect(sorted(await check.names(worktree, ['trace.log']))).toEqual(['trace.log']);
+    ownedByAnother(repo.path('.git/config')); // the common directory's config; the worktree's own git directory stays this user's
+    expect(await check.names(worktree, ['trace.log'])).toBeNull();
+  });
+
+  // The ruling on mount points: git's discovery stops where the device changes between a folder and the one above it
+  // (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so the walk stops there too. No mount can be made on the build VM without
+  // root: a stand-in `lstat` gives the folder between the asked one and the repository's root another device.
+  it('gives no answer for a folder below a filesystem boundary under the repository’s root, as git’s discovery stops there, beside the same folder with no boundary', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('mount/inner/a.log', 'x\n');
+    const check = checkOf({ env: repo.serviceEnv() });
+    const asked = repo.path('mount/inner');
+    expect(sorted(await check.names(asked, ['a.log']))).toEqual(['a.log']); // the control
+    const lstat = fs.promises.lstat.bind(fs.promises);
+    vi.spyOn(fs.promises, 'lstat').mockImplementation((async (path: fs.PathLike, options?: fs.StatOptions) => {
+      const found = await lstat(path, options as never);
+      // the folder above the boundary: the repository's root and everything above it are on another device
+      if (!String(path).startsWith(repo.path('mount'))) Object.assign(found, { dev: typeof found.dev === 'bigint' ? found.dev + 1n : found.dev + 1 });
+      return found;
+    }) as typeof fs.promises.lstat);
+    expect(await check.names(asked, ['a.log'])).toBeNull();
+  });
+
 });
 
 // A repository as the check finds one, by its `.git` entry, for a spawn function that stands in for git
@@ -391,6 +466,31 @@ describe('where git runs', () => {
     const answer = check.names(join(repo, 'harbor'), ['a.log'], { dev: own.dev, ino: own.ino }); // the control
     await drain(pending, [answer]);
     expect(sorted(await answer)).toEqual(['a.log']);
+  });
+
+  // The gap the coordinator named: a gitdir pointer rewritten in place keeps its inode, so the git directory is resolved
+  // again before each call and must be the one the walk resolved
+  it('gives no answer and asks git nothing for the asks of a folder whose gitdir pointer was rewritten in place after their walk, beside a repository that answers', async () => {
+    const first = temp();
+    const second = temp();
+    for (const dir of [first, second]) mkdirSync(join(dir, 'git'));
+    const tree = temp();
+    mkdirSync(join(tree, 'kept'));
+    writeFileSync(join(tree, '.git'), `gitdir: ${join(first, 'git')}\n`);
+    const control = fakeRepo();
+    const { execFile, pending, made, reached } = heldRuns();
+    const check = checkOf({ execFile, allowanceMs: 600_000 });
+    const seed = check.names(tree, ['s.log']);
+    await reached(1);
+    const late = check.names(join(tree, 'kept'), ['a.log']);
+    await settle();
+    const inode = statSync(join(tree, '.git')).ino;
+    writeFileSync(join(tree, '.git'), `gitdir: ${join(second, 'git')}\n`);
+    expect(statSync(join(tree, '.git')).ino).toBe(inode); // the premise: rewritten in place
+    const answered = check.names(control, ['b.log']);
+    await drain(pending, [seed, late, answered]);
+    expect([await seed, await late, sorted(await answered)]).toEqual([null, null, ['b.log']]);
+    expect(made.filter((run) => run.directory === tree).map((run) => run.args[1])).toEqual(['ls-files']); // the seed's first call, made before the rewrite
   });
 
   it('gives no answer and asks git nothing more for the asks of a repository whose .git was replaced after their walk, beside a repository that answers', async () => {

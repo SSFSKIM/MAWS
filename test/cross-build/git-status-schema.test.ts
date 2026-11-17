@@ -53,31 +53,32 @@ const STATUS = {
     { path: 'src/cart.ts', oldPath: null, index: '.', worktree: 'M', untracked: false },
     { path: 'lib/gauges', oldPath: null, index: '.', worktree: 'M', untracked: false },
     { path: 'notes/', oldPath: null, index: '?', worktree: '?', untracked: true },
+    { path: 'src/old.ts', oldPath: null, index: '.', worktree: 'D', untracked: false },
   ],
   stashCount: 0,
   checkedAt: '2026-11-17T09:00:00.000Z',
 };
-// The same status as this build answers it: the second entry is a submodule
-const WITH_SUBMODULE = { ...STATUS, files: STATUS.files.map((file, i) => (i === 1 ? { ...file, submodule: true } : file)) };
+// The same status as this build answers it: the second entry is a submodule, and the work tree holds nothing at the fourth
+const WITH_SUBMODULE = { ...STATUS, files: STATUS.files.map((file, i) => (i === 1 ? { ...file, submodule: true } : i === 3 ? { ...file, worktreeKind: 'none' } : file)) };
 const droppedBy = (read: ReturnType<typeof readTolerant>) => (read.ok ? [...read.dropped].sort() : null);
 
 describe.each(PEERS)('a peer of build $build', () => {
-  it('reads this build’s git.status and git.watch answers less exactly the submodule key', () => {
+  it('reads this build’s git.status and git.watch answers less exactly the submodule and worktreeKind keys', () => {
     expect(built['git.status'].output).toBe(GitStatusSchema);
     expect(built['git.watch'].output).toBe(GitStatusSchema);
     expect(GitStatusSchema.safeParse(WITH_SUBMODULE).success).toBe(true);
     expect(PeerStatusSchema.safeParse(WITH_SUBMODULE).success).toBe(false); // the peer's schema is strict: the reader is what passes it
     const read = readTolerant(PeerStatusSchema, WITH_SUBMODULE);
-    expect(droppedBy(read)).toEqual(['files.1.submodule']);
+    expect(droppedBy(read)).toEqual(['files.1.submodule', 'files.3.worktreeKind']);
     expect(read.ok && read.value).toEqual(STATUS);
   });
 
-  it('reads this build’s git.changed less exactly the submodule key', () => {
+  it('reads this build’s git.changed less exactly the submodule and worktreeKind keys', () => {
     expect(builtEvents['git.changed']).toBe(GitChangedSchema);
     const event = { repoRoot: STATUS.repoRoot, status: WITH_SUBMODULE, reason: 'worktree' as const };
     expect(GitChangedSchema.safeParse(event).success).toBe(true);
     const read = readTolerant(PeerChangedSchema, event);
-    expect(droppedBy(read)).toEqual(['status.files.1.submodule']);
+    expect(droppedBy(read)).toEqual(['status.files.1.submodule', 'status.files.3.worktreeKind']);
     expect(read.ok && read.value).toEqual({ ...event, status: STATUS });
   });
 
@@ -85,7 +86,7 @@ describe.each(PEERS)('a peer of build $build', () => {
     expect(PeerStatusSchema.safeParse(STATUS).success).toBe(true);
     const parsed = GitStatusSchema.safeParse(STATUS);
     expect(parsed.success && parsed.data).toEqual(STATUS);
-    expect(parsed.success && parsed.data.files.some((file) => 'submodule' in file)).toBe(false);
+    expect(parsed.success && parsed.data.files.some((file) => 'submodule' in file || 'worktreeKind' in file)).toBe(false);
     const event = { repoRoot: STATUS.repoRoot, status: STATUS, reason: 'index' as const };
     const changed = GitChangedSchema.safeParse(event);
     expect(changed.success && changed.data).toEqual(event);

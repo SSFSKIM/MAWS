@@ -263,6 +263,29 @@ describe('the Changed group (U6b-3a)', () => {
     expect(filesTab().getAttribute('data-file')).toBe('');
   });
 
+  // The ruling on the panel's sweep 1 and scalpel 3's second finding: the viewer refuses a path whose last part is a link,
+  // and a conflicted file the work tree has lost has nothing to open. (A) the status says so for a tracked path; (B) for
+  // an untracked link, the folder's listing the store holds says so.
+  it('opens Review and no viewer for a tracked link, a conflict deleted from the work tree and an untracked link whose folder is listed; a file beside them opens its tab', async () => {
+    // the tracked link in a folder the tree has not listed, so the status alone can say it is one
+    const linked = { ...TREE, '/r/src': [file('/r/src/cart.ts'), file('/r/src/fresh.ts'), file('/r/src/merge.ts'), { ...file('/r/src/latest.ts'), kind: 'symlink' as const, target: 'cart.ts' }] };
+    changedMain(linked, {
+      '/r': statusOf([entry('notes/today.md', '.M', { worktreeKind: 'link' } as Partial<GitFileStatus>), entry('src/merge.ts', 'UU', { worktreeKind: 'none' } as Partial<GitFileStatus>), entry('src/latest.ts', '??'), entry('src/fresh.ts', '??')]),
+    });
+    connect();
+    await openTree();
+    await waitFor(() => expect(heading()?.getAttribute('data-count')).toBe('4'));
+    await expand('/r/src'); // the folder's listing, which says latest.ts is a link
+    expect(useFiles.getState().listing(A, '/r/notes')).toBeUndefined();
+    for (const path of ['/r/notes/today.md', '/r/src/merge.ts', '/r/src/latest.ts']) fireEvent.click(changedRow(path)!);
+    expect(reviews).toEqual(['notes/today.md', 'src/merge.ts', 'src/latest.ts'].map((path) => ({ appSessionId: A, params: { scope: 'uncommitted', path } })));
+    await flush();
+    expect(filesTab().getAttribute('data-file')).toBe(''); // no viewer onto a refusal
+    fireEvent.click(changedRow('/r/src/fresh.ts')!); // the control: an untracked file in the same listed folder
+    await waitFor(() => expect(filesTab().getAttribute('data-file')).toBe('/r/src/fresh.ts'));
+    expect(reviews).toHaveLength(3);
+  });
+
   it('a row outside the session’s folders opens Review at its entry, a file and a folder alike; the file inside opens its tab', async () => {
     setRecord({ directory: '/coast/harbor' });
     changedMain(
