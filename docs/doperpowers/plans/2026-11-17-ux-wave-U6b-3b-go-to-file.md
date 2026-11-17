@@ -26,7 +26,7 @@ How to see it working: with the side column closed and the caret in the composer
 - [x] (2026-11-17) The review's findings 3 to 6 and the architect's rulings on R3, R5, R7, R9 and the card folded in (Decision Log 2 to 4).
 - [x] (2026-11-17) U6b-3a built, and this landing's branch cut from its head (`05556372c`); "Statements to check again" read on it: every row holds (Decision Log 8).
 - [x] (2026-11-17) The example drawn at real sizes by the architect and its 24 notes ruled; the owner's answer on the card ("Show it, then fold again"); a delta review of both documents and the rulings on it. Revision 2: all folded in (Decision Log 5 to 7).
-- [ ] M1 — The action and the field: ⌘P puts the keyboard above the tree.
+- [x] (2026-11-17 15:10Z) M1 — The action and the field: ⌘P puts the keyboard above the tree. Commits `c663edbe1`..`fd49c9b7e`; task review clean after two fix rounds (Decision Log 9).
 - [ ] M2 — The search and the open: the list, its keys, the keyboard in the file.
 - [ ] M3 — The scenes, the record, and the acceptance run.
 - [ ] The proof an executor does not run ("Proof that an executor does not run", 1 to 7).
@@ -670,6 +670,7 @@ Opened by the architect when U6b-3a is on master. Its body is the short form the
    - The field also has `bg-transparent`, `text-fg`, `autoComplete="off"` and `spellCheck={false}`.
    - `palette/CommandPalette.tsx`: `files.goToFile` joins `afterClose` (U6's file, added to §F; the architect told), so that "Go to file" chosen in the palette records the palette's opener for Esc. Red first (`670af724c`), fixed at `e21424434`.
    - Until M2 draws the list, the field's `aria-controls` names an id no element has; M2 closes it.
+   - From M1's task review (fixed at `8ae4f86a5`, red first): while finding, the tree's button prevents `mousedown`'s default, so a press leaves the keyboard in the field and the click acts on the column the person pressed (before, the empty field's blur ended finding first and the click unfolded and wrote the fold). Esc in an empty field ends finding synchronously (`flushSync`), so a file the search hid in a narrow tab is shown and no longer inert, and only then gives the keyboard back to the recorded element (`keyboardBefore`, once; null when it has left the page, and then the keyboard and the search stay in the field). Chromium's refusal of focus on a hidden or inert element is not modelled by the unit tests' DOM; scene G2 covers the narrow tab on a Mac.
 
 ## Outcomes & Retrospective
 
