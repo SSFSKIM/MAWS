@@ -66,9 +66,10 @@ describe('the write-back’s two calls, and the pause between them', () => {
     // a send through a sending site, while the reading is paused between its calls
     const [block] = await commentsContent([{ ...SENDING, screenshot: null }], 'main', async () => [], (index) => [index]);
     const before = commentsMessageBeforeLastPass([SENDING], 'main');
-    expect(block).toEqual({ type: 'text', text: commentsMessage([SENDING], 'main') });
-    expect((block as { text: string }).text).toContain(GRANT_BREAK);
-    expect((block as { text: string }).text).not.toBe(before);
+    const sent = commentsMessage([SENDING], 'main');
+    expect(block).toEqual({ type: 'text', text: sent });
+    expect(sent).toContain(GRANT_BREAK);
+    expect(sent).not.toBe(before);
 
     // cut at the pause: the reading ends with no claim
     expect(steps.return(undefined as never)).toEqual({ done: true, value: undefined });
