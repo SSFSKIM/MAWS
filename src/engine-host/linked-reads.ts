@@ -76,7 +76,8 @@ export async function withLinkedReads(content: SendContent, read: LinkedReader, 
 function blockOf(text: string, tagId: string): { text: string; revision: number } | null {
   try {
     const revision = (JSON.parse(text) as { revision?: unknown }).revision;
-    const block = typeof revision === 'number' ? linkedReadBlock(text, tagId) : null;
+    if (typeof revision !== 'number') return null;
+    const block = linkedReadBlock(text, tagId);
     return block === null ? null : { text: block, revision }; // null: a read whose block quotes the grant's opening
   } catch {
     return null; // not a read answer (linkedReadBlock refuses one that is not of status read)

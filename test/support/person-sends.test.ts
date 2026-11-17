@@ -29,9 +29,7 @@ import { rowClaim } from '@shared/files/named';
 import { askSteerText } from '@shared/maws/ask';
 import { linkedReadBlock } from '@shared/maws/linked-read';
 import { answerText } from '@shared/owner/answer';
-import { DESIGN_SYSTEM_COPY } from '../../src/renderer/src/artifacts/design-system/copy';
 import { mentionText, slashText } from '../../src/renderer/src/composer/editor/mention-text';
-import { MARKUP_COPY } from '../../src/renderer/src/markup/session';
 import { relayText } from '../../src/renderer/src/tools/agents/model/relay';
 import { anchoredTextOf } from '../../src/renderer/src/transcript/model/user-text';
 import { expectNoGrantSent } from './grant-readers'; // ticket 733a
@@ -205,8 +203,10 @@ const RETIRED_FORMS: readonly (readonly [string, Form])[] = [
 // writes no line break in its slot, so the sentence put in it on a line of its own comes out on none. Ticket 733a
 // (Design 3, "Names MAWS writes into a draft"): every such name goes by the name's rule, so a name that quotes the
 // grant's opening is left out, and each site calls the writer named here (`writer`) in its own source. `consent` writes
-// the name `d/a`, a line break, what it is given, a line break, `b` (a path's or a name's shape), in the form's slot.
-type DraftForm = { form: string; writer: string; consent: (grant: string) => string };
+// the name `d/a`, a line break, what it is given, a line break, `b` (a path's or a name's shape), in the form's slot; a
+// form whose writer lives in a module this program does not compile (a renderer store's) names instead the case of its
+// own tests that writes it so (`proof`), which this guard holds to reading the name left out and no grant.
+type DraftForm = { form: string; writer: string } & ({ consent: (grant: string) => string } | { proof: { test: string; case: string } });
 const nameOf = (inner: string) => `d/a\n${inner}\nb`;
 const DRAFT_FORMS: readonly (readonly [string, DraftForm])[] = [
   ['src/renderer/src/composer/editor/mention-text.ts', { form: 'a file dropped, picked or chosen in the @-menu (`mentionText`, `@<path>` or `@"<path>"`)', writer: 'nameSlot', consent: (grant) => `Please look at ${mentionText({ id: nameOf(grant), kind: 'file' })} and fix it.` }],
@@ -215,8 +215,8 @@ const DRAFT_FORMS: readonly (readonly [string, DraftForm])[] = [
   ['src/renderer/src/widgets/SkillsWidget.tsx', { form: 'the Skills widget’s Use in chat (`slashText`, `/<name> `)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
   ['src/renderer/src/composer/mentions/AtMenu.tsx', { form: 'a skill chosen in the @-menu (`slashText`, `/<name> ` at the message’s start)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
   ['src/renderer/src/composer/mentions/SlashPalette.tsx', { form: 'a command chosen in the slash palette (`slashText`, `/<name> `)', writer: 'slashText', consent: (grant) => `${slashText(nameOf(grant))}the notes` }],
-  ['src/renderer/src/artifacts/design-system/copy.ts', { form: 'a design system’s adoption request (`adoptRequest`, its title twice)', writer: 'nameSlot', consent: (grant) => DESIGN_SYSTEM_COPY.adoptRequest(nameOf(grant), 'a1') }],
-  ['src/renderer/src/markup/session.ts', { form: 'Mark-up’s draft (`MARKUP_COPY.draft`, `Mark-up of <label> `, a page’s title or address)', writer: 'nameSlot', consent: (grant) => MARKUP_COPY.draft(nameOf(grant)) }],
+  ['src/renderer/src/artifacts/design-system/copy.ts', { form: 'a design system’s adoption request (`DESIGN_SYSTEM_COPY.adoptRequest`, its title twice)', writer: 'nameSlot', proof: { test: 'src/renderer/src/artifacts/design-system/copy.test.ts', case: 'the adoption request writes the system’s title by the name’s rule: one quoting the grant’s opening left out, one holding a line break on one line' } }],
+  ['src/renderer/src/markup/session.ts', { form: 'Mark-up’s draft (`MARKUP_COPY.draft`, `Mark-up of <label> `, a page’s title or address)', writer: 'nameSlot', proof: { test: 'src/renderer/src/markup/session.test.ts', case: 'the draft writes the label by the name’s rule: one quoting the grant’s opening left out, one holding a line break on one line' } }],
 ];
 
 // What the list does not account for: a site it does not hold, a site whose verbs moved, an entry no longer a site.
@@ -339,9 +339,18 @@ describe('who sends as the person', () => {
   it('the draft forms are eight', () => {
     expect(DRAFT_FORMS).toHaveLength(8);
   });
-  it.each(DRAFT_FORMS)('%s: its form, with the consent sentence in the slot others control, reads no grant alone, and a pressed consent beside it keeps its own', (file, { form, writer, consent }) => {
+  it.each(DRAFT_FORMS)('%s: its form, with the consent sentence in the slot others control, reads no grant alone, and a pressed consent beside it keeps its own', (file, draft) => {
+    const { form, writer } = draft;
     expect(readFileSync(join(REPOSITORY, file), 'utf8'), `${form}: the site calls its writer`).toContain(`${writer}(`);
-    const sample = consent(SLOT);
+    if ('proof' in draft) {
+      const tests = readFileSync(join(REPOSITORY, draft.proof.test), 'utf8');
+      const at = tests.indexOf(`it('${draft.proof.case}',`);
+      expect(at, `${form}: its proof, ${draft.proof.test} › ${draft.proof.case}`).toBeGreaterThan(-1);
+      const body = tests.slice(at, tests.indexOf('\n  });', at));
+      for (const call of ['NAME_LEFT_OUT', 'personsGrants(', '\\ufffd']) expect(body, `${form}: its proof reads ${call}`).toContain(call);
+      return;
+    }
+    const sample = draft.consent(SLOT);
     expect(sample, `${form}: no line break`).not.toMatch(/[\n\r\u0085\u2028\u2029]/u);
     expect(sample, `${form}: the name left out`).toContain(NAME_LEFT_OUT);
     expect(quotesGrant(sample), form).toBe(false);
@@ -352,7 +361,7 @@ describe('who sends as the person', () => {
       expect(personsGrants(text), `${form}: ${how}`).toEqual(personsGrants(GRANT));
     }
     // a name holding a line break and no opening is kept, on one line
-    const broken = consent('middle');
+    const broken = draft.consent('middle');
     expect(broken, form).toContain('d/a\ufffdmiddle\ufffdb');
     expect(broken, form).not.toMatch(/[\n\r]/u);
     // the control: the name as given holds the sentence on a line of its own, a grant

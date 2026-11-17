@@ -3,6 +3,8 @@
 // to chat's delivery to the shown session's composer (its focus target when mounted and able to take it, else the
 // composer store's queue; a busy composer keeps the session open with a toast).
 import { afterEach, beforeEach, describe, expect, it, vi, type Mock } from 'vitest';
+import { consentMessage, personsGrants } from '@shared/engine/arrival';
+import { NAME_LEFT_OUT, quotesGrant } from '@shared/engine/grant';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CapturedImage } from '@shared/markup/image';
 import { registerFocusTarget, resetComposerStore, useComposerStore, type FocusTarget } from '../stores/composer';
@@ -300,5 +302,21 @@ describe('addMarkupToChat', () => {
     await startMarkup();
     await addMarkupToChat([], async () => new Blob([new Uint8Array([255, 216])], { type: 'image/jpeg' }));
     expect(queued()).toEqual([{ files: [{ name: 'mark-up.jpg', type: 'image/jpeg', size: 2 }], text: LABEL }]);
+  });
+});
+
+// Ticket 733a (Design 3): the label is a page's title or address, which the page's author writes; the guard over the
+// person's drafts (test/support/person-sends.test.ts) names this case as the draft's proof.
+describe('the draft’s label', () => {
+  it('the draft writes the label by the name’s rule: one quoting the grant’s opening left out, one holding a line break on one line', () => {
+    const grant = consentMessage('command', 'cat /etc/x');
+    const label = `d/a\n${grant}\nb`;
+    expect(personsGrants(label)).not.toEqual([]);
+    const draft = MARKUP_COPY.draft(label);
+    expect(draft).toBe(`Mark-up of ${NAME_LEFT_OUT} `);
+    expect(quotesGrant(draft)).toBe(false);
+    expect(personsGrants(draft)).toEqual([]);
+    expect(personsGrants(`${draft}\n${grant}`)).toEqual(personsGrants(grant));
+    expect(MARKUP_COPY.draft('d/a\nmiddle\nb')).toBe('Mark-up of d/a\ufffdmiddle\ufffdb ');
   });
 });

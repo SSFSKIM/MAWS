@@ -96,7 +96,7 @@ describe('withLinkedReads', () => {
     const out = await withLinkedReads(`[a](maws-artifact:${A}) [b](maws-artifact:${B})`, reader((id) => (id === B ? across : readOf(A, 1))), TAG);
     expect(out.skipped).toEqual([{ artifactId: B, why: 'refused' }]);
     expect(out.attached.map((a) => a.artifactId)).toEqual([A]);
-    expect((out.content as { text: string }[]).slice(1).map((b) => b.text)).toEqual([linkedReadBlock(readOf(A, 1))]);
+    expect((out.content as { type: string; text: string }[]).slice(1).map((b) => b.text)).toEqual([linkedReadBlock(readOf(A, 1))]);
   });
 
   it('attaches nothing a cap cannot hold, and leaves the message as it is', async () => {
