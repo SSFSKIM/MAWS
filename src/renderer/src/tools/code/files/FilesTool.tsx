@@ -27,7 +27,8 @@
 // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, M1; decision 9, "The look"): Go to
 // file's field stands above the tree in every tree column, outside the tree's context menu; in the file's place, under the
 // "Files" bar. A tab Go to file chose is finding: its column is drawn for the search whatever the fold, and the tree's
-// button ends that before it does what it did.
+// button ends that before it does what it did. M2: while the field holds text the list stands in the tree's place, the
+// tree kept mounted (its hold on the git store) and drawing nothing.
 import { useVirtualizer } from '@tanstack/react-virtual';
 import { ContextMenu } from 'radix-ui';
 import { Component, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode, type RefObject } from 'react';
@@ -51,9 +52,10 @@ import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
 import { changedRows, labelOf, LETTER_TONE, marksOf, pathUnder, shownPath, statusSet, type ChangedRow, type ChangeLetter, type Marks } from './changed';
-import { FinderField } from './FinderView';
+import { FinderColumn } from './FinderView';
 import { openChosen } from './open-chosen';
 import { folderFromEnd, measureIn } from './path-cut';
+import { FILES_ROW_HEIGHT, indent, rowFonts, useWidth } from './row-metrics';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
 import { expandTo, firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type ListedRow, type RootRole, type TreeRow } from './tree';
@@ -62,7 +64,7 @@ import { useSetup } from '../../../sessions/store'; // E11
 import type { SetupIntent } from '@shared/sessions/intent'; // E11
 
 export { FILES_TOOL_ID };
-export const FILES_ROW_HEIGHT = 24;
+export { FILES_ROW_HEIGHT }; // U6b-3b: kept in `row-metrics.ts`, which the result rows read too
 
 // What an add of Files is given: a file to show (`openFile`'s), or nothing for the tree. A restored tab's params are
 // whatever the layout holds for it (X5), read through `fileOfTab`.
@@ -135,20 +137,6 @@ function FilesBody({ state, ctx }: { state: FilesState; ctx: PanelToolContext })
   return <FilesTab tabId={state.tabId} appSessionId={ctx.appSessionId} session={ctx.session} held={held} visible={ctx.visible} />;
 }
 
-// The tab's own width, measured as it draws and followed as it changes (happy-dom measures 0: a tab too narrow for both).
-function useWidth(): [number, (element: HTMLDivElement | null) => (() => void) | undefined] {
-  const [width, setWidth] = useState(0);
-  const measure = useCallback((element: HTMLDivElement | null) => {
-    if (element === null) return;
-    setWidth(element.getBoundingClientRect().width);
-    if (typeof ResizeObserver === 'undefined') return;
-    const observer = new ResizeObserver(([entry]) => setWidth(entry.contentRect.width));
-    observer.observe(element);
-    return () => observer.disconnect();
-  }, []);
-  return [width, measure];
-}
-
 const treeBar = 'flex min-h-8 shrink-0 items-center gap-x-2 border-b border-border bg-bg px-3 py-1 text-ui-sm';
 
 // A Files tab: the tree alone when it holds no file; with a file, the tree in a column at the file's left, folded away,
@@ -173,6 +161,9 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   const file = held?.file ?? null;
   const [shown, setShown] = useState<{ file: string | null; on: boolean }>({ file, on: false });
   if (shown.file !== file) setShown({ file, on: false });
+  // U6b-3b (decision 9): when the search ends the column is where the stored fold and the tab's width put it, so a press
+  // of the button in a narrow tab does not outlast a search begun over it.
+  if (tree.finding === tabId && shown.on) setShown({ file, on: false });
   const treeWidth = Math.max(TREE_WIDTH_MIN, tree.width ?? TREE_WIDTH_DEFAULT);
   const roomy = tabWidth >= treeWidth + FILE_WIDTH_MIN;
   const finding = tree.finding === tabId; // U6b-3b (decision 9): Go to file chose this tab
@@ -192,21 +183,27 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
   };
   const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
-  const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
-  const field = <FinderField appSessionId={appSessionId} tabId={tabId} visible={visible} />; // U6b-3b: above the tree, outside its menu
+  // U6b-3b: the field above the tree, outside its menu, and while it holds text the list in the tree's place
+  const column = (
+    <FinderColumn
+      appSessionId={appSessionId}
+      tabId={tabId}
+      visible={visible}
+      clicked={chosenFile}
+      tree={(searching) => (loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} searching={searching} /> : null)}
+    />
+  );
   return (
     <div ref={measure} data-files-tab data-file={file ?? ''} onDoubleClick={(event) => keepChosen(tabId, event.target)} className="flex h-full min-h-0 min-w-0">
       {place === 'alone' ? (
         <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 min-w-0 flex-1 flex-col">
-          {field}
-          <div className="min-h-0 flex-1">{sessionTree}</div>
+          {column}
         </div>
       ) : null}
       {place === 'beside' ? (
         <>
           <div id={treeId} data-files-tree data-place={place} className="flex h-full min-h-0 shrink-0 flex-col border-r border-border" style={{ width: treeWidth }}>
-            {field}
-            <div className="min-h-0 flex-1">{sessionTree}</div>
+            {column}
           </div>
           <Resizer
             label={FILES_COPY.resizeTree}
@@ -227,8 +224,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
             {button}
             <span className="truncate text-fg-muted">{FILES_COPY.title}</span>
           </div>
-          {field}
-          <div className="min-h-0 flex-1">{sessionTree}</div>
+          {column}
         </div>
       ) : null}
       {held ? (
@@ -301,8 +297,9 @@ function TreeToggle({ drawn, onToggle, keepKeyboard }: { drawn: boolean; onToggl
 }
 
 // The session's tree. `marked`: the file the tab holds, whose row is marked when it is listed (Decision 8: the tree marks
-// and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it.
-function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void }) {
+// and does not follow); a tab with no file marks the row last activated. `chosen`: a file was chosen from it. U6b-3b:
+// `searching`, Go to file's list stands in its place: it keeps its holds and draws nothing.
+function SessionTree({ appSessionId, session, marked, chosen, searching }: { appSessionId: AppSessionId; session: SessionRecord | null; marked: string | null; chosen(): void; searching: boolean }) {
   const view = useTreeState((s) => treeOf(s, appSessionId));
   const listings = useFiles((s) => s.listings);
   const roots = listings.get(listingKey(appSessionId, null));
@@ -437,6 +434,7 @@ function SessionTree({ appSessionId, session, marked, chosen }: { appSessionId: 
     for (const path of view.expanded) useFiles.getState().list(appSessionId, path);
   };
 
+  if (searching) return null;
   return (
     <FilesMenu appSessionId={appSessionId}>
       <div data-tool="files" className="flex h-full min-h-0 flex-col">
@@ -536,14 +534,6 @@ interface ChangedProps {
   activate(row: ChangedRow, main: boolean): void;
   keep(row: ChangedRow): void;
   fold(folded: boolean): void;
-}
-
-// The fonts a Changed row's name and folder are measured in (M2 decision 9), read from the page's tokens once per list.
-function rowFonts(): { name: string; folder: string } {
-  const style = typeof document === 'undefined' ? null : getComputedStyle(document.documentElement);
-  const token = (name: string, fallback: string) => style?.getPropertyValue(name).trim() || fallback;
-  const family = token('--font-ui', 'system-ui, sans-serif');
-  return { name: `${token('--text-ui', '13px')} ${family}`, folder: `${token('--text-ui-sm', '12px')} ${family}` };
 }
 
 // UX wave U6b-3a (S2; M2 decision 4; the task review's findings): when the Changed group gains or loses rows while a tree
@@ -698,7 +688,6 @@ function RootsFailure({ message }: { message: string }) {
   );
 }
 
-const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 });
 
 function Chevron({ open }: { open: boolean }) {
   return (

@@ -17,6 +17,10 @@
 // merge view is open, so the two never stack; `comments` holds the comment gutter (`editor/comment-gutter.ts`),
 // always. The view reports the chunks and blocks it holds to its bar and steps through them for it
 // (`editor/navigation.ts`).
+//
+// UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, M2 decision 5): `onEditor` is told how
+// to put the keyboard in the editor's text while one is drawn (and null once it is gone), so a file tab's body that took
+// the keyboard hands it on: at once when the editor is drawn already, or when it is made while the body still has it.
 import { highlightSelectionMatches, search, searchKeymap } from '@codemirror/search';
 import { syntaxHighlighting } from '@codemirror/language';
 import { Compartment, EditorState, StateEffect, StateField, Text, Transaction, type Extension } from '@codemirror/state';
@@ -122,7 +126,7 @@ function samePlace(before: Text, position: number, after: Text): number {
 // E5: the document as the file's text, its line breaks the store's current baseline's.
 const baselineText = (tabId: string) => useViewer.getState().entries.get(tabId)?.text ?? '';
 
-export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: boolean }) {
+export default function CodeView({ entry, wrap, onEditor }: { entry: ViewerEntry; wrap: boolean; onEditor?(focus: (() => void) | null): void }) {
   const host = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
   const applied = useRef<{ epoch: number; baseline: number; length: number }>({ epoch: -1, baseline: -1, length: 0 });
@@ -177,6 +181,14 @@ export default function CodeView({ entry, wrap }: { entry: ViewerEntry; wrap: bo
       editor.current = null;
     };
   }, [tabId]);
+
+  // UX wave U6b-3b: the editor made, its body is told how to put the keyboard in its text (after the effect that made it).
+  useEffect(() => {
+    const view = editor.current;
+    if (!view || !onEditor) return;
+    onEditor(() => view.focus());
+    return () => onEditor(null);
+  }, [onEditor, tabId]);
 
   // E5: read-only or editing, as the entry allows; the history and the document stand across the switch.
   useEffect(() => {

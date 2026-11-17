@@ -25,7 +25,7 @@ import { CommandPalette, usePalette } from '../../../palette/CommandPalette';
 import { FILES_COPY } from '../copy';
 import { openFile, resetKeptOpens } from '../open-file';
 import { useViewer } from '../viewer/viewer-store';
-import { filesTool } from './FilesTool';
+import { filesTool, FILES_ROW_HEIGHT } from './FilesTool';
 import { connectGoToFile } from './finder';
 import { RESULT_ROW_FIXED, resultsId } from './FinderView';
 import { measureWith } from './path-cut';
@@ -568,7 +568,8 @@ describe('the list (decision 4; M2 decisions 2 and 3)', () => {
     expect(folder()!.textContent).toBe('src/deep/harbor/'); // the list has no width yet: drawn whole
     expect(folder()!.className.split(/\s+/)).toEqual(expect.arrayContaining(['text-ui-sm', 'text-fg-muted']));
     expect(row().querySelector('[data-mark]')).toBeNull();
-    expect(row().className.split(/\s+/)).toEqual(expect.arrayContaining(['h-6', 'bg-bg-active']));
+    expect(row().className.split(/\s+/)).toContain('bg-bg-active'); // the highlighted row, the first
+    expect([row().style.height, row().style.paddingLeft]).toEqual([`${FILES_ROW_HEIGHT}px`, '20px']); // the tree's row, one level in
     measureWith((_font, text) => text.length * 6);
     observer.resize(results()!, { width: RESULT_ROW_FIXED + 'app.ts'.length * 6 + 60, height: 600 });
     expect(folder()!.textContent).toBe('…harbor/');

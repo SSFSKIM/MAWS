@@ -11,12 +11,32 @@
 // taker is told at once (`useKeyboardRequest`), one drawn later takes it when it draws (`takeKeyboard`, true once). The
 // person's next key or pointer press anywhere drops it, so the keyboard stays where that act put it; the menu's own key
 // reaches the page before the action runs, so the press that made the request is never heard. M1 builds the field's
-// taker; a file's view is M2's, on the same request.
-import { useSyncExternalStore } from 'react';
+// taker; a file's view is M2's, on the same request (`viewer/FileViewer.tsx`).
+//
+// The search (M2; decisions 1 to 5, 8 and 12; sequences S1, S4 and S5): one hook (`useFinder`) owns the states and the
+// generation. The text's query (`parseQuery`) is asked of the working folder by `git.lsFiles` 80 ms after the last
+// keystroke, at once when the folder, the session or its machine changes; every ask carries the generation current when
+// it goes out, and its answer or its failure is taken only while that generation is still the finder's. A held Enter (one
+// pressed before the text's answer came) opens only on its own generation's answer. An open filter is asked again (a
+// refresh: ⌘P, the field taking the keyboard again, the working folder's status changing its set of entries) at once and
+// once more `FINDER_AGAIN_MS` later, past the ten seconds the daemon keeps a folder's list; a refresh that falls while the
+// text's own answer is awaited is owed and issued when that answer settles. Enter opens the highlighted file as a kept tab
+// and asks the keyboard for it by its key (the request's `file` half), which the file's view takes wherever it is drawn.
+import { useEffect, useState, useSyncExternalStore, type KeyboardEvent } from 'react';
+import type { AppSessionId } from '@shared/graph/ids';
+import { disabledWords } from '@shared/ipc/remote-unavailable';
+import type { MachineRef } from '@shared/machine/ref';
+import { ipc } from '../../../ipc/client';
+import { checkoutKey, machineFor, pathTarget } from '../../../ipc/machine';
 import { registerAction } from '../../../keymap/actions-runtime';
+import { useRemoteStanding } from '../../../lane-b/remote-standing';
 import { surfaceSession } from '../../../panel/surface-model';
+import { useGit } from '../../../stores/git';
 import { pageOpen, useLayout, type LayoutState } from '../../../stores/layout';
-import { showFiles } from './tabs';
+import { FILES_COPY } from '../copy';
+import { openFile, type Opened } from '../open-file';
+import { statusSet } from './changed';
+import { fileKey, showFiles } from './tabs';
 import { useTreeState } from './tree-state';
 
 // ---- the request for the keyboard ---------------------------------------------------------------------------------------
@@ -125,4 +145,283 @@ export function connectGoToFile(): () => void {
     unregister?.();
     unregister = null;
   };
+}
+
+// ---- the search (M2) ----------------------------------------------------------------------------------------------------
+
+export const FINDER_ASK = 200; // git.lsFiles' limit, the command's most
+export const FINDER_LIMIT = 50; // the files shown
+export const FINDER_WAIT_MS = 80; // after the last keystroke, the `@` menu's
+export const FINDER_AGAIN_MS = 10_500; // a refresh's later ask: just past the ten seconds the daemon keeps a folder's list (CACHE_MS, src/services/git/ls-files.ts)
+const QUERY_MAX = 256; // the schema's bound on git.lsFiles' query
+
+// A trailing `:<digits>`, or `:<digits>:<digits>` (a column, read and dropped).
+const LINE_AT_END = /:(\d+)(?::\d+)?$/;
+
+/** Decision 2: the query, and the line a trailing `:<digits>` names (at least 1); with nothing before it, the whole text is the query. */
+export function parseQuery(text: string): { query: string; line: number | null } {
+  const found = LINE_AT_END.exec(text);
+  if (found === null || found.index === 0) return { query: text.slice(0, QUERY_MAX), line: null };
+  const line = Math.min(Math.max(1, Number(found[1])), Number.MAX_SAFE_INTEGER);
+  return { query: text.slice(0, found.index).slice(0, QUERY_MAX), line };
+}
+
+/** S1's states. `rows` and `shown` are absolute paths: the working folder's path joined with the answer's. */
+export type FinderState =
+  | { status: 'empty' }
+  | { status: 'waiting'; shown: readonly string[] | null; held: boolean }
+  | { status: 'answered'; rows: readonly string[]; at: number; refreshing: boolean }
+  | { status: 'failed' }
+  | { status: 'offline'; words: string };
+
+export interface Finder {
+  state: FinderState;
+  onKey(event: KeyboardEvent<HTMLInputElement>): void; // decision 5: ↓ and ↑, Enter
+  choose(index: number, how: { keep: boolean; main: boolean }): Opened | null; // a row opened: Enter keeps; a click as decision 6
+  refresh(): void; // decision 8: ⌘P, and the field taking the keyboard again
+  left(): void; // the field lost the keyboard: a held Enter ends
+}
+
+/** The rows a state draws: an answer's, or the earlier answer's while the text's is awaited; null where none are. */
+export function drawnRows(state: FinderState): readonly string[] | null {
+  return state.status === 'answered' ? state.rows : state.status === 'waiting' ? state.shown : null;
+}
+
+const EMPTY: FinderState = { status: 'empty' };
+const KEEP = { keep: true, main: false };
+
+type Answer = { ok: true; rows: string[] } | { ok: false };
+type Timer = ReturnType<typeof setTimeout>;
+
+// What the hook is given: the session, its machine, the working folder (null: the window holds no record of it), the
+// field's text and, while the session's machine is offline, the words that say so.
+interface Inputs {
+  appSessionId: AppSessionId;
+  machine: MachineRef;
+  directory: string | null;
+  text: string;
+  offline: string | null;
+}
+const placeOf = (inputs: Inputs) => JSON.stringify([inputs.machine, inputs.appSessionId, inputs.directory]);
+
+// S1 as one object the hook holds for its mount: the generation, the state, what is owed, the two timers.
+class Search {
+  private state: FinderState = EMPTY;
+  private generation = 0;
+  private owed = false; // a refresh fell while the text's own answer was awaited
+  private wait: Timer | null = null; // the 80 ms after the last keystroke
+  private again: Timer | null = null; // a refresh's later ask
+  private inputs: Inputs | null = null;
+  private seen: { key: string; set: string } | null = null; // the working folder's status set last seen
+  private readonly listeners = new Set<() => void>();
+
+  readonly subscribe = (listener: () => void) => {
+    this.listeners.add(listener);
+    return () => void this.listeners.delete(listener);
+  };
+  readonly get = (): FinderState => this.state;
+
+  private set(next: FinderState): void {
+    this.state = next;
+    this.listeners.forEach((listener) => listener());
+  }
+
+  // Every ask of an earlier generation is stale from here on; the later ask and anything owed go with it.
+  private next(): void {
+    this.generation += 1;
+    if (this.wait !== null) clearTimeout(this.wait);
+    this.wait = null;
+    this.dropAgain();
+    this.owed = false;
+  }
+  private dropAgain(): void {
+    if (this.again !== null) clearTimeout(this.again);
+    this.again = null;
+  }
+
+  /** The hook's inputs as they stand after a render. */
+  update(inputs: Inputs): void {
+    const last = this.inputs;
+    this.inputs = inputs;
+    if (inputs.text === '') {
+      if (last === null || last.text !== '' || this.state.status !== 'empty') this.toEmpty();
+      return;
+    }
+    if (inputs.offline !== null) {
+      if (this.state.status === 'offline') {
+        if (this.state.words !== inputs.offline) this.set({ status: 'offline', words: inputs.offline });
+        return;
+      }
+      this.next();
+      this.set({ status: 'offline', words: inputs.offline });
+      return;
+    }
+    if (last === null || last.offline !== null || placeOf(last) !== placeOf(inputs)) return this.restart();
+    if (last.text !== inputs.text) this.typed();
+  }
+
+  /** The working folder's status set as the git store holds it now (null: no status); a set that differs from the last one seen is a refresh. */
+  statusSeen(key: string | null, set: string | null): void {
+    if (key === null || set === null) return;
+    const last = this.seen;
+    this.seen = { key, set };
+    if (last !== null && last.key === key && last.set !== set) this.refresh();
+  }
+
+  /** The hook's unmount: nothing asked is taken, no timer runs. */
+  stop(): void {
+    this.next();
+    this.inputs = null;
+    this.seen = null;
+  }
+
+  private toEmpty(): void {
+    this.next();
+    this.set(EMPTY);
+  }
+
+  // The folder, the session or its machine changed, the link came back, a retry: asked at once, nothing drawn.
+  private restart(): void {
+    this.next();
+    this.set({ status: 'waiting', shown: null, held: false });
+    this.send();
+  }
+
+  // The text changed: the rows drawn stay while its answer is awaited, asked 80 ms after the last keystroke.
+  private typed(): void {
+    const drawn = drawnRows(this.state);
+    this.next();
+    this.set({ status: 'waiting', shown: drawn !== null && drawn.length > 0 ? drawn : null, held: false });
+    const generation = this.generation;
+    this.wait = setTimeout(() => {
+      this.wait = null;
+      if (this.generation === generation) this.send();
+    }, FINDER_WAIT_MS);
+  }
+
+  // One ask of the current generation; its answer or failure is taken only while that generation stands.
+  private send(): void {
+    const inputs = this.inputs;
+    if (inputs === null) return;
+    const generation = this.generation;
+    const { directory } = inputs;
+    if (directory === null) return this.settle(generation, { ok: false }); // no working folder this window knows
+    const base = directory.replace(/\/+$/, '');
+    void ipc.invoke('git.lsFiles', { directory, query: parseQuery(inputs.text).query, limit: FINDER_ASK }, pathTarget(inputs.machine, inputs.appSessionId)).then(
+      (result) => {
+        // M2 decision 3: the folders go (a submodule's among them, decision 14), then the cut
+        const rows = result.ok ? result.value.paths.filter((path) => !path.endsWith('/')).slice(0, FINDER_LIMIT).map((path) => `${base}/${path}`) : null;
+        this.settle(generation, rows === null ? { ok: false } : { ok: true, rows });
+      },
+      () => this.settle(generation, { ok: false }),
+    );
+  }
+
+  private settle(generation: number, answer: Answer): void {
+    if (generation !== this.generation) return; // an earlier generation's: dropped, a success and a failure alike
+    const state = this.state;
+    if (state.status === 'waiting') {
+      if (answer.ok) {
+        this.set({ status: 'answered', rows: answer.rows, at: 0, refreshing: false });
+        if (state.held && answer.rows.length > 0) this.open(answer.rows[0], KEEP, true);
+      } else this.set({ status: 'failed' });
+    } else if (state.status === 'answered' && state.refreshing) {
+      if (answer.ok) {
+        const at = answer.rows.indexOf(state.rows[state.at]);
+        this.set({ status: 'answered', rows: answer.rows, at: Math.max(0, at), refreshing: false });
+      } else this.set({ ...state, refreshing: false }); // the drawn rows stay, and nothing is said
+    } else return;
+    if (!this.owed) return;
+    this.owed = false;
+    this.refresh(); // in the state reached
+  }
+
+  readonly refresh = (): void => {
+    const state = this.state;
+    if (state.status === 'answered') {
+      this.next();
+      this.set({ ...state, refreshing: true });
+      this.send();
+      this.again = setTimeout(() => {
+        this.again = null;
+        this.due();
+      }, FINDER_AGAIN_MS);
+    } else if (state.status === 'waiting') this.owed = true; // the text's own ask is on its way, and a held Enter stays bound to it
+    else if (state.status === 'failed') this.restart();
+  };
+
+  // The later ask: the first ask of a refresh can be answered from a list the daemon loaded before the change; this one cannot.
+  private due(): void {
+    const state = this.state;
+    if (state.status === 'answered') {
+      this.next();
+      this.set({ ...state, refreshing: true });
+      this.send();
+    } else if (state.status === 'waiting') this.owed = true;
+  }
+
+  readonly onKey = (event: KeyboardEvent<HTMLInputElement>): void => {
+    if (event.nativeEvent.isComposing || event.keyCode === 229) return; // an input method composes: the key is its own
+    if (event.altKey || event.ctrlKey || event.metaKey || event.shiftKey) return;
+    const state = this.state;
+    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+      if (state.status === 'answered') {
+        event.preventDefault();
+        const at = Math.min(Math.max(0, state.at + (event.key === 'ArrowDown' ? 1 : -1)), Math.max(0, state.rows.length - 1));
+        if (at !== state.at) this.set({ ...state, at });
+      } else if (state.status === 'waiting') {
+        event.preventDefault();
+        if (state.held) this.set({ ...state, held: false });
+      }
+      return;
+    }
+    if (event.key !== 'Enter') return;
+    if (state.status === 'answered' && state.rows.length > 0) {
+      event.preventDefault();
+      this.open(state.rows[state.at], KEEP, true);
+    } else if (state.status === 'waiting') {
+      event.preventDefault();
+      if (!state.held) this.set({ ...state, held: true });
+    }
+  };
+
+  readonly left = (): void => {
+    const state = this.state;
+    if (state.status === 'waiting' && state.held) this.set({ ...state, held: false });
+  };
+
+  readonly choose = (index: number, how: { keep: boolean; main: boolean }): Opened | null => {
+    const path = drawnRows(this.state)?.[index];
+    return path === undefined ? null : this.open(path, how, false);
+  };
+
+  // M2 decision 6: the open at the text's line, then (Enter's) the request for the keyboard by the file's key, then finding
+  // ends (decision 9). Nothing reads which surface it opened on.
+  private open(path: string, how: { keep: boolean; main: boolean }, keyboard: boolean): Opened | null {
+    const inputs = this.inputs;
+    if (inputs === null) return null;
+    const opened = openFile(inputs.appSessionId, path, parseQuery(inputs.text).line, how);
+    if (keyboard) requestKeyboard({ into: 'file', key: fileKey(inputs.machine, path) });
+    useTreeState.getState().setFinding(inputs.appSessionId, null);
+    return opened;
+  }
+}
+
+/** The search for the field's text in the working folder (`directory`; null while the window holds no record of the session). */
+export function useFinder(appSessionId: AppSessionId, directory: string | null, text: string): Finder {
+  const machine = machineFor(appSessionId);
+  const standing = useRemoteStanding(appSessionId); // a session reached over the link (U9)
+  const offline = standing?.phase === 'offline' ? disabledWords('git.lsFiles', standing, FILES_COPY.fileSearch) : null;
+  const key = directory === null ? null : checkoutKey(machine, directory);
+  // the drawn tree's hold on the git store stands while the list is in its place (M2 decision 4): the hook takes none
+  const set = useGit((s) => {
+    const status = key === null ? null : s.entries.get(key)?.status;
+    return status ? statusSet(status) : null;
+  });
+  const [search] = useState(() => new Search());
+  const state = useSyncExternalStore(search.subscribe, search.get);
+  useEffect(() => search.update({ appSessionId, machine, directory, text, offline }), [search, appSessionId, machine, directory, text, offline]);
+  useEffect(() => search.statusSeen(key, set), [search, key, set]);
+  useEffect(() => () => search.stop(), [search]);
+  return { state, onKey: search.onKey, choose: search.choose, refresh: search.refresh, left: search.left };
 }

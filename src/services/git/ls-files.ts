@@ -1,6 +1,6 @@
 // `git.lsFiles`, the composer's `@` file source (C7 execution document, Interfaces "X2 additions"; C4's git invocation
-// conventions through its runner): `git ls-files --cached --others --exclude-standard -z` in `directory`, so tracked and
-// untracked files that are not ignored, relative to `directory`, with their parent directories (a trailing `/`) as
+// conventions through its runner): `git ls-files --cached --others --exclude-standard --stage -z` in `directory`, so tracked
+// and untracked files that are not ignored, relative to `directory`, with their parent directories (a trailing `/`) as
 // items too; outside a repository, a bounded walk (depth 6, 20,000 entries, never into node_modules, .git, dist or
 // .claude/worktrees). The listing is cached per directory for 10 s and filtered per query by the fuzzy scorer. Only a
 // directory inside one an unarchived session or a project names is listed, so the command cannot enumerate arbitrary
@@ -127,10 +127,12 @@ export class FileLister {
     return set;
   }
 
+  // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, decision 14): with `--stage` git writes
+  // each index entry's mode before its path, so a clean submodule (a gitlink) is listed as the folder it is.
   private async load(directory: string): Promise<Omit<Listing, 'admitted'>> {
     try {
-      const files = (await this.opts.run(directory, ['ls-files', '--cached', '--others', '--exclude-standard', '-z'])).split('\0').filter((p) => p !== '');
-      return { at: Date.now(), paths: withDirectories(files), source: 'git', capped: false };
+      const entries = (await this.opts.run(directory, ['ls-files', '--cached', '--others', '--exclude-standard', '--stage', '-z'])).split('\0').filter((p) => p !== '');
+      return { at: Date.now(), paths: withDirectories(...listed(entries)), source: 'git', capped: false };
     } catch (error) {
       if (!(error instanceof NotARepositoryError)) throw error;
     }
@@ -144,10 +146,30 @@ function inside(roots: readonly string[], resolved: string): boolean {
   return roots.some((root) => resolved === root || resolved.startsWith(root.endsWith('/') ? root : `${root}/`));
 }
 
-// The files and every directory above one of them, a directory written with its trailing `/`.
-function withDirectories(files: string[]): string[] {
+// An index entry as `ls-files --stage` writes it: its mode, its object id and its stage, then a tab and its path. An
+// untracked path comes bare, so an untracked name that itself begins so is read as an index entry (decision 14's limit).
+const INDEX_ENTRY = /^([0-7]{6}) [0-9a-f]+ [0-3]\t/;
+const GITLINK = '160000';
+
+// The paths of git's answer: an index entry's after its head, a path the index holds at several stages (a conflict) once,
+// and apart from them the gitlinks, each as `<path>/`.
+function listed(entries: readonly string[]): [files: string[], gitlinks: string[]] {
+  const files = new Set<string>();
+  const gitlinks = new Set<string>();
+  for (const entry of entries) {
+    const head = INDEX_ENTRY.exec(entry);
+    if (head === null) files.add(entry);
+    else if (head[1] === GITLINK) gitlinks.add(`${entry.slice(head[0].length)}/`);
+    else files.add(entry.slice(head[0].length));
+  }
+  return [[...files], [...gitlinks]];
+}
+
+// The files and every directory above one of them, a directory written with its trailing `/`; a gitlink (`<path>/`)
+// among the directories, with those above it.
+function withDirectories(files: string[], gitlinks: readonly string[] = []): string[] {
   const dirs = new Set<string>();
-  for (const file of files) {
+  for (const file of [...files, ...gitlinks]) {
     for (let i = file.indexOf('/'); i !== -1; i = file.indexOf('/', i + 1)) dirs.add(file.slice(0, i + 1));
   }
   return [...files, ...dirs];

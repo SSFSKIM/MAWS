@@ -39,8 +39,13 @@ export const FILES_COPY = {
   ignored: 'Ignored by git',
   outside: (path: string) => `${path} · Outside the folders this session works in`,
   // UX wave U6b-3b (docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3b-go-to-file.md, "The sentences a person reads"): the
-  // field's placeholder and its accessible name
+  // field's placeholder and its accessible name; the list's lines; the label `disabledWords` words the offline line from
+  // ("File search is unavailable while <machine> is offline.")
   goToFile: 'Go to file',
+  noMatchingFiles: 'No matching files',
+  searchingFiles: 'Searching files…', // the `@` menu's words
+  searchFailed: 'Files could not be searched.',
+  fileSearch: 'file search',
 } as const;
 
 export const VIEWER_COPY = {
