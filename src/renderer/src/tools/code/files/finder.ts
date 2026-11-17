@@ -81,13 +81,11 @@ function recordKeyboard(): void {
   before = active;
 }
 
-/** Esc in an empty field: the keyboard back to the element ⌘P found it in, while that element is in the page. */
-export function giveKeyboardBack(): boolean {
+/** Esc in an empty field: the element ⌘P found the keyboard in, once, while it is in the page; else null. */
+export function keyboardBefore(): HTMLElement | null {
   const element = before;
   before = null;
-  if (element === null || !element.isConnected) return false;
-  element.focus({ preventScroll: true });
-  return true;
+  return element?.isConnected ? element : null;
 }
 
 // ---- the action -------------------------------------------------------------------------------------------------------

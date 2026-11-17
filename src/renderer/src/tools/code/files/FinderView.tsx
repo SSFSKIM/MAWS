@@ -7,9 +7,10 @@
 // It stands above the tree's context menu's trigger, so a right-click in it is a text field's own. M2 draws the list in
 // the tree's place.
 import { useEffect, useRef, type FocusEvent, type KeyboardEvent } from 'react';
+import { flushSync } from 'react-dom';
 import type { AppSessionId } from '@shared/graph/ids';
 import { FILES_COPY } from '../copy';
-import { giveKeyboardBack, takeKeyboard, useKeyboardRequest } from './finder';
+import { keyboardBefore, takeKeyboard, useKeyboardRequest } from './finder';
 import { treeOf, useTreeState } from './tree-state';
 
 // The look: one row of 33 px with its bottom border, so its line meets the file bar's; 8 px at each side (the tree's
@@ -33,17 +34,25 @@ export function FinderField({ appSessionId, tabId, visible }: { appSessionId: Ap
     element.select();
   }, [asked, visible, tabId]);
 
+  const endFinding = () => {
+    if (treeOf(useTreeState.getState(), appSessionId).finding === tabId) useTreeState.getState().setFinding(appSessionId, null);
+  };
+  // Esc in an empty field leaves it: the search ends first, and the page is drawn without it before the keyboard goes
+  // back, since the element ⌘P found it in may be this tab's own file, hidden and inert while the tree stood in its place.
+  // With that element gone from the page the keyboard stays in the field, and so does the search.
   const onKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
     if (event.key !== 'Escape' || composing(event)) return;
     event.preventDefault(); // the key is the field's: no sheet or layer behind it closes on it
     if (event.repeat) return;
-    if (text !== '') useTreeState.getState().setFilter(appSessionId, '');
-    else giveKeyboardBack();
+    if (text !== '') return void useTreeState.getState().setFilter(appSessionId, '');
+    const back = keyboardBefore();
+    if (back === null) return;
+    flushSync(endFinding);
+    back.focus({ preventScroll: true });
   };
   // A blur while the element still has the page's keyboard is the window losing it, not the field.
   const onBlur = (event: FocusEvent<HTMLInputElement>) => {
-    if (document.activeElement === event.currentTarget || event.currentTarget.value !== '') return;
-    if (treeOf(useTreeState.getState(), appSessionId).finding === tabId) useTreeState.getState().setFinding(appSessionId, null);
+    if (document.activeElement !== event.currentTarget && event.currentTarget.value === '') endFinding();
   };
 
   return (

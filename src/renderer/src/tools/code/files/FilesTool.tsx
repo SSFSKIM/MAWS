@@ -190,7 +190,7 @@ function FilesTab({ tabId, appSessionId, session, held, visible }: { tabId: stri
       if (tree.folded !== hide) useTreeState.getState().setFolded(appSessionId, hide);
     } else setShown({ file, on: !hide });
   };
-  const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} />;
+  const button = <TreeToggle drawn={place === 'beside' || place === 'instead'} onToggle={toggleTree} keepKeyboard={finding} />;
   const treeId = `files-tree-${tabId}`;
   const sessionTree = loaded ? <SessionTree key={appSessionId} appSessionId={appSessionId} session={session} marked={file} chosen={() => setShown({ file, on: false })} /> : null;
   const field = <FinderField appSessionId={appSessionId} tabId={tabId} visible={visible} />; // U6b-3b: above the tree, outside its menu
@@ -289,10 +289,12 @@ function MoveToMainIcon({ className }: { className?: string }) {
   );
 }
 
-function TreeToggle({ drawn, onToggle }: { drawn: boolean; onToggle(): void }) {
+// U6b-3b (the task review's finding 1): while finding, a press of the button leaves the keyboard in the field, so the
+// field's blur does not end the search and fold the column before the click acts on the column the person pressed.
+function TreeToggle({ drawn, onToggle, keepKeyboard }: { drawn: boolean; onToggle(): void; keepKeyboard: boolean }) {
   const label = drawn ? FILES_COPY.hideTree : FILES_COPY.showTree;
   return (
-    <button type="button" data-files-tree-toggle aria-label={label} title={label} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
+    <button type="button" data-files-tree-toggle aria-label={label} title={label} onMouseDown={keepKeyboard ? (event) => event.preventDefault() : undefined} onClick={onToggle} className="inline-flex size-6 shrink-0 items-center justify-center rounded-sm text-fg-muted outline-accent hover:bg-bg-hover hover:text-fg focus-visible:outline-2">
       <TreeIcon className="size-3.5" />
     </button>
   );
