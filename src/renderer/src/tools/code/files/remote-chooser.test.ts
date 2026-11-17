@@ -139,13 +139,33 @@ describe('C2: a listing that never answers', () => {
     expect(chooser.state()).toMatchObject({ at: 'listed', entries: [file('/srv/slow/new.txt')] });
   });
 
-  it('an answer that comes after the bound, to the ask still the newest, lands', async () => {
+  // The branch review (scalpel-4#2; Decision Log 33 (5)): the bound invalidates the ask
+  it('an answer that comes after the bound lands nowhere: the sentence and Try again stand', async () => {
     vi.useFakeTimers();
     const { chooser, lists } = harness('/srv/slow');
     vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
     vi.useRealTimers();
     await lists[0].answer(listed('/srv/slow', []));
-    expect(chooser.state()).toMatchObject({ at: 'listed', path: '/srv/slow' });
+    expect(chooser.state()).toEqual({ at: 'failed', path: '/srv/slow', words: 'studio has not answered yet.' });
+  });
+
+  it('a More… whose bound passed: its late answer is dropped; Try again asks that page again, appends it and keeps the selection', async () => {
+    const { chooser, lists } = harness('/srv/many');
+    const first = [file('/srv/many/a.txt')];
+    await lists[0].answer(listed('/srv/many', first, 'a.txt'));
+    chooser.select('/srv/many/a.txt');
+    vi.useFakeTimers();
+    chooser.more();
+    vi.advanceTimersByTime(REMOTE_ACT_PENDING_MS);
+    vi.useRealTimers();
+    const unanswered = { at: 'failed', path: '/srv/many', words: 'studio has not answered yet.' };
+    expect(chooser.state()).toEqual(unanswered);
+    await lists[1].answer(listed('/srv/many', [file('/srv/many/b.txt')])); // late
+    expect(chooser.state()).toEqual(unanswered);
+    chooser.retry();
+    expect(lists[2].input).toEqual({ appSessionId: R, path: '/srv/many', cursor: 'a.txt' });
+    await lists[2].answer(listed('/srv/many', [file('/srv/many/b.txt')]));
+    expect(chooser.state()).toMatchObject({ at: 'listed', entries: [...first, file('/srv/many/b.txt')], cursor: null, selected: '/srv/many/a.txt' });
   });
 });
 
@@ -516,6 +536,33 @@ describe('the offer withdrawn while the chooser is open', () => {
     await chooses[0].answer(granted('/data/roadmap.md'));
     expect(await chosen).toBeNull();
     expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: ONLY });
+  });
+});
+
+// The branch review (scalpel-4#1; Decision Log 33 (4)): the sheet withdraws the offer in a passive effect, so a choice's
+// completion asks the offer again itself
+describe('a choice that completes after the offer went', () => {
+  const ONLY = 'Only studio’s owners can open a file there.';
+
+  it('before the sheet heard of it: answers nothing, the sentence where the list stood', async () => {
+    const offer = { words: null as string | null };
+    const { chooser, lists, chooses } = harness(null, offer);
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.select(`${HOME}/roadmap.md`);
+    const chosen = chooser.choose();
+    offer.words = ONLY; // the roster moved; the sheet's effect has not run
+    await chooses[0].answer(granted('/data/roadmap.md'));
+    expect(await chosen).toBeNull();
+    expect(chooser.state()).toEqual({ at: 'failed', path: HOME, words: ONLY });
+  });
+
+  it('the control: with the offer standing, the same completion answers the granted path', async () => {
+    const { chooser, lists, chooses } = harness();
+    await lists[0].answer(listed(HOME, AT_HOME));
+    chooser.select(`${HOME}/roadmap.md`);
+    const chosen = chooser.choose();
+    await chooses[0].answer(granted('/data/roadmap.md'));
+    expect(await chosen).toBe('/data/roadmap.md');
   });
 });
 

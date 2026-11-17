@@ -27,6 +27,20 @@ import { leaveRl2, overRl2, rosterSays } from '../../../test-support/code-disk';
 import { forgetOpenedThere } from './elsewhere';
 import { forgetStarts } from './remote-chooser';
 
+// The branch review (scalpel-4#1; Decision Log 33 (4)): the chooser's model as it stands in the window the sheet's passive
+// effect leaves, having not yet heard the offer go (`blind`), so the check open-chosen.ts makes itself is seen alone
+const blind = vi.hoisted(() => ({ on: false }));
+vi.mock('./remote-chooser', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('./remote-chooser')>();
+  return {
+    ...actual,
+    createRemoteChooser: (...[appSessionId, deps]: Parameters<typeof actual.createRemoteChooser>) => {
+      const chooser = actual.createRemoteChooser(appSessionId, { ...deps, unoffered: () => (blind.on ? null : (deps.unoffered?.() ?? null)) });
+      return { ...chooser, withdraw: (words: string) => (blind.on ? undefined : chooser.withdraw(words)) };
+    },
+  };
+});
+
 const OUT = '/elsewhere/chosen.txt';
 const R = addressOf(OTHER_MACHINE, 'app-remote') as AppSessionId; // a session of another machine
 const NOT_A_FILE = 'Open File opens one file. A folder or an app’s package cannot be opened here.';
@@ -256,6 +270,33 @@ describe('Open File… for a session on another machine (U6f)', () => {
     gate.resolve();
     await settle();
     expect(filesOf(T)).toEqual([]);
+  });
+
+  it('a grant that lands after the owners’ offer went, before the sheet heard of it, opens nothing; with the offer standing it opens (the control)', async () => {
+    blind.on = true;
+    try {
+      const gate = deferred<void>();
+      choice = async () => {
+        await gate.promise;
+        return ok({ status: 'granted', path: '/data/notes.txt' });
+      };
+      act(() => void openChosenFor(T));
+      await chooseNotes();
+      await waitFor(() => expect(main.callsOf('files.chooseOutside')).toHaveLength(1));
+      act(() => rosterSays(T, { owner: false }));
+      gate.resolve();
+      await settle();
+      expect(sheet()).toBeNull();
+      expect(filesOf(T)).toEqual([]);
+      // the control
+      act(() => rosterSays(T, {}));
+      choice = () => ok({ status: 'granted', path: '/data/notes.txt' });
+      act(() => void openChosenFor(T));
+      await chooseNotes();
+      await waitFor(() => expect(filesOf(T)).toHaveLength(1));
+    } finally {
+      blind.on = false;
+    }
   });
 
   it('C4: a choice that answers after its session left the page’s records opens nothing; after the chat in front changed, it opens beside the chosen session’s chat', async () => {
