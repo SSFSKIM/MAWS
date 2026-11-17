@@ -174,7 +174,7 @@ describe('Esc in Go to file’s field over a narrow window’s sheet (Decision L
     expect([panelCollapsed(), sheetDismissal(), finding()]).toEqual([false, null, null]);
   });
 
-  it('at full width, an Esc the field cannot answer (nothing to give the keyboard back to) is not swallowed, and the keyboard stays in the field', async () => {
+  it('at full width, an Esc the field cannot answer (nothing to give the keyboard back to) is not swallowed, and the keyboard stays in the field; with an element recorded, the same field takes Esc and gives it back', async () => {
     setWidth(WIDE);
     renderShell();
     act(() => void showFiles(A));
@@ -182,6 +182,13 @@ describe('Esc in Go to file’s field over a narrow window’s sheet (Decision L
     act(() => field()!.focus()); // no ⌘P: nothing recorded
     expect(esc()).toBe(true); // not prevented: it goes on to whatever stands behind
     expect([document.activeElement, panelCollapsed(), sheetDismissal()]).toEqual([field(), false, null]);
+    // the control, in the same field: ⌘P from the composer records it, and the field's Esc is its own and gives it back
+    act(() => composer().focus());
+    act(() => runAction('files.goToFile'));
+    await waitFor(() => expect(document.activeElement).toBe(field()));
+    expect(field()!.value).toBe('');
+    expect(esc()).toBe(false); // prevented: the field's
+    expect([document.activeElement, panelCollapsed(), sheetDismissal()]).toEqual([composer(), false, null]);
   });
 });
 
