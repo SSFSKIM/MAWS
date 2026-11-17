@@ -31,17 +31,19 @@ import type { TabRef } from '@shared/ipc/schema/layout';
 import { opensExternally } from '@shared/ipc/schema/files';
 import { ChevronDownIcon } from '../../../app/IconButton';
 import { useMainAreaOnScreen } from '../../../app/shell-view'; // UX wave U6b-2 (Decision Log 35)
-import { EDITOR_COPY, OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
+import { OPEN_FILE_COPY, VIEWER_COPY } from '../copy';
 import '../code.css';
 import { EditorControls, SaveFailure } from '../editor/EditorControls';
-import { openChosen } from '../files/open-chosen';
-import { ExternalRow, OpenExternally } from './ExternalRow';
+import { useRemoteStanding } from '../../../lane-b/remote-standing';
+import { useTakesRemoteRoute } from '../files/elsewhere';
+import { openChosenFor } from '../files/open-chosen';
+import { ExternalRow, OpenExternally, rowButton } from './ExternalRow';
 import { FrameBody } from './FrameBody';
 import { ImageView } from './ImageView';
 import { CODE_CAP } from './kinds';
 import { MarkdownView } from './MarkdownView';
 import { useMediaZoom, ZoomControls, type MediaZoom } from './MediaZoom';
-import { readOnlyReason, useViewer, type ArtifactRead, type ViewerEntry } from './viewer-store';
+import { readOnlyReason, readOnlyWords, useViewer, type ArtifactRead, type ReadOnlyReason, type ViewerEntry } from './viewer-store';
 
 const CodeView = lazy(() => import('./CodeView'));
 
@@ -94,8 +96,10 @@ function outsideOf(entry: ViewerEntry | null): string | null {
   return entry.locked ?? (entry.pin !== null ? 'writable' : 'outside');
 }
 
-type LabelledReason = 'maws' | 'added' | 'result' | 'outside';
-const labelled = (reason: ReturnType<typeof readOnlyReason>): reason is LabelledReason => reason === 'maws' || reason === 'added' || reason === 'result' || reason === 'outside';
+// UX wave U6f (§E): and `elsewhere`, an outside file of a session on another machine its standing does not let this
+// person save there, with the window's helper's sentence and no Open File…
+type LabelledReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'outside';
+const labelled = (reason: ReadOnlyReason | null): reason is LabelledReason => reason === 'maws' || reason === 'elsewhere' || reason === 'added' || reason === 'result' || reason === 'outside';
 
 // UX wave U6e (§D, K2, K5, K8, K10, K11, K13): "Read-only", in the normal text colour, a button whose accessible
 // description is the reason's sentence; a press (Enter or Space with the keyboard on it) opens the panel under it with the
@@ -104,11 +108,11 @@ const labelled = (reason: ReturnType<typeof readOnlyReason>): reason is Labelled
 // and hidden from assistive technology, so the button keeps one target and one accessible name.
 // The panel is never wider than the file's column: min(24rem, the column's width less 1rem), the column measured as it
 // opens and its edges the panel's boundary.
-function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSessionId: AppSessionId }) {
+// UX wave U6f: the sentence is the entry's (`readOnlyWords`), and Open File… opens the chooser the session's files call for.
+function ReadOnlyLabel({ reason, sentence, appSessionId }: { reason: LabelledReason; sentence: string; appSessionId: AppSessionId }) {
   const trigger = useRef<HTMLButtonElement>(null);
   const [column, setColumn] = useState<Element | null>(null);
   const [width, setWidth] = useState(0);
-  const sentence = EDITOR_COPY.readOnly[reason];
   const offersOpenFile = reason === 'added' || reason === 'result';
   const opened = (open: boolean) => {
     if (!open) return;
@@ -139,7 +143,7 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
           <p>{sentence}</p>
           {offersOpenFile ? (
             <Popover.Close asChild>
-              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosen(appSessionId)}>
+              <button type="button" className="self-start rounded-sm border border-border px-2 py-0.5 text-ui-sm text-fg hover:bg-bg-hover" onClick={() => void openChosenFor(appSessionId)}>
                 {OPEN_FILE_COPY.row}
               </button>
             </Popover.Close>
@@ -157,18 +161,22 @@ function ReadOnlyLabel({ reason, appSessionId }: { reason: LabelledReason; appSe
 // whether the mounted body is in view; in view when absent.
 export function FileViewer({ tab, start, end, host, inView = true, agent = false }: { tab: FileTab; start?: ReactNode; end?: ReactNode; host?: 'side' | 'main'; inView?: boolean; agent?: boolean }) {
   const mainOnScreen = useMainAreaOnScreen();
+  // UX wave U6f (§E): a session that takes the remote route, and its machine's standing as it moves (W1, R9)
+  const remote = useTakesRemoteRoute(tab.appSessionId ?? ('' as AppSessionId));
+  const standing = useRemoteStanding(tab.appSessionId ?? ('' as AppSessionId));
   if (tab.appSessionId === null) return <NoSession path={tab.path} />;
   const { appSessionId } = tab;
   const lead = (entry: ViewerEntry | null) => {
-    const reason = entry === null ? null : readOnlyReason(entry);
+    const reason = entry === null ? null : readOnlyReason(entry, standing);
     // UX wave U6b-2 at the chain merge (the architect's ruling): only a body that can be saved (the code view's text) says
-    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is
-    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown');
-    const savesTo = savable && entry.pin !== null && entry.locked === null ? VIEWER_COPY.savesTo(entry.pin) : null;
+    // where Save writes; a framed file, an image or a row shows its plain path, its outside mark as it is. UX wave U6f:
+    // on another machine, it names the machine.
+    const savable = entry !== null && (entry.kind === 'code' || entry.kind === 'markdown') && reason !== 'elsewhere';
+    const savesTo = savable && entry.pin !== null && entry.locked === null ? (remote && standing !== null ? VIEWER_COPY.savesToOn(entry.pin, standing.machine) : VIEWER_COPY.savesTo(entry.pin)) : null;
     return (
       <>
         {start}
-        {labelled(reason) ? <ReadOnlyLabel reason={reason} appSessionId={appSessionId} /> : null}
+        {labelled(reason) ? <ReadOnlyLabel reason={reason} sentence={readOnlyWords(entry!, standing)!} appSessionId={appSessionId} /> : null}
         <PathLead path={tab.path} savesTo={savesTo} outside={outsideOf(entry)} />
       </>
     );
@@ -199,11 +207,25 @@ function NoSession({ path }: { path: string }) {
   );
 }
 
-function Refused({ path, message }: { path: string; message: string }) {
+// UX wave U6f (§E; decision 18, Decision Log 20): a UC-7 sentence (`said`) is drawn as it is; a file in a folder macOS
+// protects there offers Open it, and one behind a link into another such folder Open File…, each in the shape of the
+// failed frame's body (`rowButton`).
+function Refused({ entry }: { entry: ViewerEntry }) {
+  const { path, tabId, appSessionId } = entry;
+  const message = entry.error ?? '';
   return (
     <div role="alert" data-refusal className="flex h-full flex-col items-center justify-center gap-1 p-6 text-center">
-      <p className="text-ui text-fg">{VIEWER_COPY.refused(message)}</p>
+      <p className="text-ui text-fg">{entry.said ? message : VIEWER_COPY.refused(message)}</p>
       <p className="font-mono text-ui-sm text-fg-muted break-all">{path}</p>
+      {entry.needsOpen ? (
+        <button type="button" data-open-protected="" className={`${rowButton} mt-1`} onClick={() => useViewer.getState().openProtected(tabId)}>
+          {VIEWER_COPY.openIt}
+        </button>
+      ) : entry.offersOpenFile && appSessionId !== null ? (
+        <button type="button" className={`${rowButton} mt-1`} onClick={() => void openChosenFor(appSessionId)}>
+          {OPEN_FILE_COPY.row}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -292,7 +314,7 @@ const showsImage = (entry: ViewerEntry) => entry.kind === 'image' && !showsCode(
 
 function Body({ entry, wrap, zoom, host, inView }: { entry: ViewerEntry; wrap: boolean; zoom: MediaZoom; host: 'side' | 'main'; inView: boolean }) {
   if (entry.status === 'loading') return <Loading />;
-  if (entry.status === 'error') return <Refused path={entry.path} message={entry.error ?? ''} />;
+  if (entry.status === 'error') return <Refused entry={entry} />;
   if (entry.kind === 'frame') return <FrameBody entry={entry} host={host} inView={inView} />;
   if (showsCode(entry)) {
     return (

@@ -41,7 +41,9 @@ import { openFile, type Opened } from '../open-file';
 import { FileViewer } from '../viewer/FileViewer';
 import { moveFileToMain, useTransferRefusal } from '../../../shell/transfer'; // M4
 import { TRANSFER_COPY } from '../../artifacts/copy'; // M4: the words an artifact's move has
-import { openChosen } from './open-chosen';
+import { useRemoteUnavailable } from '../../../lane-b/remote-unavailable';
+import { useTakesRemoteRoute } from './elsewhere';
+import { openChosenFor } from './open-chosen';
 import { listingKey, useFiles } from './store';
 import { closeAnswered, fileKey, fileOfTab, FILES_TOOL_ID, keep, sideFileOf, type FilesTabParams } from './tabs';
 import { firstRoot, roleOf, rootsFor, rowsOf, sameFile, workingRoot, type RootRole, type TreeRow } from './tree';
@@ -413,9 +415,12 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
     const box = (event.target as Element).getBoundingClientRect();
     event.target.dispatchEvent(new MouseEvent('contextmenu', { bubbles: true, cancelable: true, clientX: box.left, clientY: box.bottom }));
   };
-  // Another machine (Decision Log 6: until U6f): the row disabled, its parenthesis in the muted colour, a long name cut
-  // with the whole row as its title.
-  const whole = elsewhere === null ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
+  // Another machine (U6e's Decision Log 6): the row disabled, its parenthesis in the muted colour, a long name cut with
+  // the whole row as its title. A session that takes the remote route (UX wave U6f, §E; decision 12): the row opens MAWS's
+  // own chooser there, or is disabled with the helper's sentence as its title (the sentence alone, decision 12's words).
+  const remote = useTakesRemoteRoute(appSessionId);
+  const unavailable = useRemoteUnavailable(remote ? appSessionId : null, 'files.chooseOutside');
+  const whole = elsewhere === null || remote ? null : OPEN_FILE_COPY.elsewhere(elsewhere);
   return (
     <ContextMenu.Root modal={false} onOpenChange={opened}>
       <ContextMenu.Trigger ref={list} asChild onKeyDown={atKeyboard}>
@@ -431,8 +436,12 @@ function FilesMenu({ appSessionId, children }: { appSessionId: AppSessionId; chi
           onInteractOutside={() => void (outside.current = true)}
           style={column && column.width > 0 ? ({ '--files-menu-column': `${column.width}px` } as CSSProperties) : undefined}
         >
-          {whole === null ? (
-            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosen(appSessionId)}>
+          {remote && unavailable !== null ? (
+            <ContextMenu.Item data-open-file="" disabled title={unavailable} aria-description={unavailable} className={MENU_ROW}>
+              {OPEN_FILE_COPY.row}
+            </ContextMenu.Item>
+          ) : whole === null ? (
+            <ContextMenu.Item data-open-file="" className={MENU_ROW} onSelect={() => void openChosenFor(appSessionId)}>
               {OPEN_FILE_COPY.row}
             </ContextMenu.Item>
           ) : (
@@ -536,7 +545,8 @@ function RootsFailure({ message }: { message: string }) {
 
 const indent = (depth: number) => ({ paddingLeft: 8 + depth * 12 });
 
-function Chevron({ open }: { open: boolean }) {
+// Exported for the chooser of another machine's files (UX wave U6f, §E): a folder's mark there, closed.
+export function Chevron({ open }: { open: boolean }) {
   return (
     <svg viewBox="0 0 16 16" aria-hidden="true" className={`size-3 shrink-0 text-fg-faint transition-transform ${open ? 'rotate-90' : ''}`} fill="none" stroke="currentColor" strokeWidth={1.6} strokeLinecap="round" strokeLinejoin="round">
       <path d="M6 4l4 4-4 4" />

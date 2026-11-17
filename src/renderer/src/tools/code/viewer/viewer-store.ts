@@ -38,6 +38,16 @@
 // (main's `layout.frameFailed`) starts nothing by itself: it is read again by the person (Open again, showing its tab
 // again, opening the file again: `revisitable`) or by a `files.changed`, never by a clock.
 //
+// UX wave U6f (docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §E; decisions 11 to 14
+// and 18; Decision Log 16, 20, 21 and 26): a session that takes the remote route (a lane B session main runs on another
+// machine over RL2) reads with `named` and `agent` as a session on this Mac does, and main's adapter turns a read of a
+// file outside the folders into the act there; every other session of another machine is asked as before, to the byte.
+// A read, a save and a frame's ask of a path the person opened on that machine (`openedThere`) carry `open`. A failure
+// that carries `issues.refusal` is a sentence of UC-7 (`said`), drawn as it is; one refused `protected` asks the person
+// first (`needsOpen`, the tab's Open it), and one refused so again under `open` (a link into another such folder) offers
+// Open File… instead. A savable outside file whose standing has a sentence for the save (not one of the owners, or a build
+// without the capability) is read-only for it (`'elsewhere'`), its edits kept; offline its save waits for the machine.
+//
 // No CodeMirror here: this module is in the main chunk. The editor state a CodeView leaves behind is kept opaque in
 // `viewState(tabId)`, beside the scroll offsets, where rendering never reads it.
 //
@@ -55,14 +65,18 @@ import type { FramedKind } from '@shared/files/framed';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import { FILES_READ_DEFAULT_LENGTH, FILES_READ_MAX_LENGTH, type FilesChanged, type FilesReadOutput } from '@shared/ipc/schema/files';
+import { failureWords, type RemoteStanding } from '@shared/ipc/remote-unavailable';
 import { ipc } from '../../../ipc/client';
+import { remoteStandingOf } from '../../../lane-b/remote-standing';
 import { useLayout } from '../../../stores/layout';
+import { useMachines } from '../../../stores/machines';
 import { allTabs } from '../../../stores/layout-model';
 import { machineOf } from '@shared/machine/address';
+import { openedThere, outsideUnavailable, takesRemoteRoute } from '../files/elsewhere'; // UX wave U6f
 import { useFiles, type WatchHold } from '../files/store';
 import { sideFileKeys } from '../files/tabs'; // UX wave U6b-1
 import { dirname, sameFile } from '../files/tree';
-import { EDITOR_COPY, REFUSAL } from '../copy';
+import { EDITOR_COPY, REFUSAL, VIEWER_COPY } from '../copy';
 import { CODE_CAP, kindOf, type ViewerKind } from './kinds';
 
 export const VIEWER_ENTRIES_MAX = 20;
@@ -81,6 +95,10 @@ export interface ViewerEntry {
   path: string;
   status: 'loading' | 'ready' | 'error';
   error: string | null; // the read's refusal, word for word
+  // UX wave U6f (§E; decision 18, Decision Log 20)
+  said: boolean; // the error is a sentence of UC-7 (the failure carried `issues.refusal`), drawn as it is
+  needsOpen: boolean; // the read was refused for a folder macOS protects there: the tab offers Open it
+  offersOpenFile: boolean; // refused so again under `open` (a link into another such folder): the tab offers Open File…
   kind: ViewerKind | null;
   mime: string;
   encoding: FilesReadOutput['encoding'];
@@ -208,6 +226,9 @@ export interface ViewerStore {
   frameFailed(token: string): void;
   frameUnplayable(tabId: string): void;
   openAgain(tabId: string): void;
+  // UX wave U6f (decision 18; W3): the tab's Open it, for a file in a folder macOS protects on another machine: the path
+  // joins what the person opened there and is read again with `open`, once; nothing while that read is on its way
+  openProtected(tabId: string): void;
 }
 
 // E5 (M5): a tab the quit question's Save all left unsaved, with what its bar says about it.
@@ -270,12 +291,31 @@ const admissionOf = (read: FilesReadOutput): Admission => ({
 });
 // Whether the admission and the pin let a text the editor takes be edited: not mounted read-only, not locked, and outside
 // the folders only with the real path pinned (a daemon of the parent pin answers `named` with no `outside`: W6).
-const admits = (entry: Pick<ViewerEntry, 'readOnly' | 'locked' | 'named' | 'pin'>): boolean => !entry.readOnly && entry.locked === null && (!entry.named || entry.pin !== null);
+// U6f (§E, W1, R9): nor, on another machine, while the standing has a sentence for the save there.
+const admits = (entry: Pick<ViewerEntry, 'readOnly' | 'locked' | 'named' | 'pin' | 'appSessionId'>): boolean =>
+  !entry.readOnly && entry.locked === null && (!entry.named || entry.pin !== null) && (entry.pin === null || elsewhereWords(entry) === null);
+
+/**
+ * UX wave U6f (§E; decision 12's third column, W1, R9): why an outside file of a session that takes the remote route
+ * cannot be saved there, in the window's helper's words; null where it can, or where no outside save is at stake (a file
+ * inside the folders, one named with no pin, MAWS's own). Offline is no reason: a save waits for the machine (decision 14).
+ */
+export function elsewhereWords(entry: Pick<ViewerEntry, 'appSessionId' | 'locked' | 'pin'>, standing?: RemoteStanding | null): string | null {
+  const { appSessionId } = entry;
+  if (appSessionId === null || entry.locked === 'maws' || (entry.locked === null && entry.pin === null) || !takesRemoteRoute(appSessionId)) return null;
+  const now = standing === undefined ? remoteStandingOf(appSessionId) : standing;
+  return now === null || now.phase === 'offline' ? null : outsideUnavailable(now, 'files.writeOutside');
+}
 
 // E5: why a code view is read-only, shown as its content's title; null when it is editable or no reason is the owner's
 // to know (an svg's source). U6c: a file the transcript names is read-only for being outside the folders, first. U6e:
-// first what locks it, then a file outside the folders with no pin (W6); a savable outside file has no reason.
-export function readOnlyReason(entry: ViewerEntry): 'maws' | 'added' | 'result' | 'outside' | 'head' | 'encoding' | 'loading' | null {
+// first what locks it, then a file outside the folders with no pin (W6); a savable outside file has no reason. U6f: on
+// another machine, after MAWS's own, the standing's sentence for a save there (`elsewhereWords`); `standing`, the one a
+// render follows, else the one now.
+export type ReadOnlyReason = 'maws' | 'elsewhere' | 'added' | 'result' | 'outside' | 'head' | 'encoding' | 'loading';
+export function readOnlyReason(entry: ViewerEntry, standing?: RemoteStanding | null): ReadOnlyReason | null {
+  if (entry.locked === 'maws') return 'maws';
+  if (elsewhereWords(entry, standing) !== null) return 'elsewhere';
   if (entry.locked !== null) return entry.locked;
   if (entry.named && entry.pin === null) return 'outside';
   if (entry.editable) return null;
@@ -284,6 +324,13 @@ export function readOnlyReason(entry: ViewerEntry): 'maws' | 'added' | 'result' 
   if (entry.kind !== 'code' && entry.kind !== 'markdown') return null;
   if (entry.complete && entry.hash !== null && entry.encoding === 'utf8') return 'encoding';
   return 'loading';
+}
+
+/** The reason's sentence, as the editor's title and the "Read-only" panel say it; null with no reason. */
+export function readOnlyWords(entry: ViewerEntry, standing?: RemoteStanding | null): string | null {
+  const reason = readOnlyReason(entry, standing);
+  if (reason === 'elsewhere') return EDITOR_COPY.readOnly.elsewhere(elsewhereWords(entry, standing)!);
+  return reason === null ? null : EDITOR_COPY.readOnly[reason];
 }
 
 async function settled<N extends 'files.read' | 'files.write' | 'files.writeOutside' | 'library.read' | 'layout.frameFile' | 'layout.releaseFrame'>(call: Promise<CommandResult<N>>): Promise<CommandResult<N>> {
@@ -298,8 +345,23 @@ const isNotFound = (message: string) => message.startsWith('not found:');
 
 // UX wave U6e (decision 18): an outside save's refusal in words that say the way on, and a daemon that does not know the
 // command in its own; every other failure (`FILES_MOVED`, `not writable: <path>`) in the service's words.
+// U6f (R7): the service's refusal from another machine, as main's adapter words a failure there, says the way on alike.
+const REFUSED_THERE = failureWords('files.writeOutside', REFUSAL);
 const outsideFailure = (error: { code: string; message: string }): string =>
-  error.code === 'unknown_command' ? EDITOR_COPY.outsideUnavailable : error.message === REFUSAL ? EDITOR_COPY.outsideRefused : error.message;
+  error.code === 'unknown_command' ? EDITOR_COPY.outsideUnavailable : error.message === REFUSAL || error.message === REFUSED_THERE ? EDITOR_COPY.outsideRefused : error.message;
+
+// UX wave U6f: a failure as the store meets it, and the UC-7 word it carries, if any.
+type Failure = { code: string; message: string; issues?: unknown };
+const refusalOf = (error: Failure): string | null => {
+  const issues = error.issues as { refusal?: unknown } | undefined;
+  return typeof issues?.refusal === 'string' ? issues.refusal : null;
+};
+// U6f (decision 18; Decision Log 16, 26): whether a request for the entry's path carries `open`: a session that takes the
+// remote route, and a path the person opened on its machine this run.
+const opensThere = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>): boolean =>
+  entry.appSessionId !== null && takesRemoteRoute(entry.appSessionId) && openedThere(machineOf(entry.appSessionId)).has(entry.path);
+const opens = (entry: Pick<ViewerEntry, 'appSessionId' | 'path'>) => (opensThere(entry) ? { open: true as const } : {});
+const machineNameOf = (appSessionId: AppSessionId | null): string => (appSessionId === null ? '' : (remoteStandingOf(appSessionId)?.machine ?? ''));
 const sameSource = (a: ArtifactRead | null, b: ArtifactRead | null) => a?.artifactId === b?.artifactId && a?.revision === b?.revision;
 
 // What a load read, committed whole at its end (a `change` load) or patched as it goes (an `open` load). `utf8` (E5) is
@@ -318,7 +380,8 @@ const heldToken = (frame: EntryFrame | null): string | null =>
 
 // UX wave U6b-2: what the window asks main for a framed file: the one place U6e's `agent` joins ("What this document
 // assumes of landings in flight"), for an entry that holds the agent's mark, as its own reads carry it (`readChunk`).
-const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path, ...(entry.agent ? { agent: true as const } : {}) });
+// UX wave U6f (Decision Log 26): and `open` under the test of the entry's reads.
+const frameAsk = (entry: ViewerEntry) => ({ appSessionId: entry.appSessionId!, path: entry.path, ...(entry.agent ? { agent: true as const } : {}), ...opens(entry) });
 
 // U6c (M3 decision 3; Decision Log 15 b, 16): an unhashed read that found what the entry shows, so a revisit of an image
 // or an external kind (or of a named head, which a revisit re-reads too) does not flash Updated over a file that did not
@@ -359,6 +422,8 @@ export function createViewerStore(client: MawsBridge) {
   let lastFrameAsk = 0;
   let clock = 0;
   let unsubscribe: (() => void) | null = null;
+  let unfollowStanding: (() => void) | null = null; // UX wave U6f: the machines' standing, for `editable` there
+  const pressedOpen = new Set<string>(); // UX wave U6f (W3): tabs whose Open it asked for a load not started yet
 
   return create<ViewerStore>()((set, get) => {
     const patch = (tabId: string, next: Partial<ViewerEntry>) =>
@@ -372,13 +437,15 @@ export function createViewerStore(client: MawsBridge) {
     // One chunk of the entry's file: under its session (`files.read`), or by its artifact alone (`library.read`, P3-L
     // M6b fix wave 2), which answers alike. U6c (M3 decision 1): `named` for a session on this Mac alone; a session on
     // another machine is asked as today, to the byte (decision 10). U6e (decision 19): and `agent` beside it while the
-    // entry holds the agent's mark.
+    // entry holds the agent's mark. U6f (decision 11; Decision Log 16): `named` and `agent` also for a session that takes
+    // the remote route, and `open` there for a path the person opened (`opensThere`).
     const readChunk = (entry: Pick<ViewerEntry, 'appSessionId' | 'artifact' | 'path' | 'agent'>, offset: number, length: number, hash: boolean): Promise<CommandResult<'files.read'>> => {
       const chunk = { offset, length, ...(hash ? { hash: true } : {}) };
       if (entry.artifact) return settled(client.invoke('library.read', { ...entry.artifact, ...chunk }));
       const { appSessionId } = entry;
       const local = appSessionId !== null && machineOf(appSessionId) === client.localMachine;
-      const asking = local ? { named: true as const, ...(entry.agent ? { agent: true as const } : {}) } : {};
+      const remote = appSessionId !== null && !local && takesRemoteRoute(appSessionId);
+      const asking = local || remote ? { named: true as const, ...(entry.agent ? { agent: true as const } : {}), ...(remote ? opens({ appSessionId, path: entry.path }) : {}) } : {};
       return settled(client.invoke('files.read', { appSessionId: appSessionId!, path: entry.path, ...chunk, ...asking }));
     };
 
@@ -410,6 +477,7 @@ export function createViewerStore(client: MawsBridge) {
       stale.delete(tabId);
       used.delete(tabId);
       held.delete(tabId);
+      pressedOpen.delete(tabId);
       mounted.delete(tabId);
       views.delete(tabId);
       set((s) => {
@@ -452,11 +520,21 @@ export function createViewerStore(client: MawsBridge) {
       if (!entry || asked <= (admittedAt.get(tabId) ?? 0)) return;
       admittedAt.set(tabId, asked);
       const { named, locked } = admissionOf(read);
-      patch(tabId, { named, locked, editable: entry.textEditable && admits({ readOnly: entry.readOnly, named, locked, pin: entry.pin }) });
+      patch(tabId, { named, locked, editable: entry.textEditable && admits({ readOnly: entry.readOnly, named, locked, pin: entry.pin, appSessionId: entry.appSessionId }) });
     };
     // What the entry's admission, as it stands, and a pin let it be: editable or not.
     const editableWith = (entry: ViewerEntry, pin: string | null, textEditable = entry.textEditable) =>
-      textEditable && admits({ readOnly: entry.readOnly, named: entry.named, locked: entry.locked, pin });
+      textEditable && admits({ readOnly: entry.readOnly, named: entry.named, locked: entry.locked, pin, appSessionId: entry.appSessionId });
+
+    // UX wave U6f (W1, R9): the standing of a machine moved; an outside file of a session there is editable again, or no
+    // longer, as its save is offered there (`admits`), its document standing.
+    const followStanding = () => {
+      for (const entry of get().entries.values()) {
+        if (entry.pin === null || entry.appSessionId === null || !takesRemoteRoute(entry.appSessionId)) continue;
+        const editable = editableWith(entry, entry.pin);
+        if (editable !== entry.editable) patch(entry.tabId, { editable });
+      }
+    };
 
     // U6c (decision 15): an entry read again when it is asked for again: its last read failed, or no watch keeps it
     // current (a file the transcript names), and no load of it is in flight nor edits of it unsaved. A failed entry is
@@ -466,18 +544,33 @@ export function createViewerStore(client: MawsBridge) {
     const revisitable = (entry: ViewerEntry) => (entry.status === 'error' || entry.named || entry.frame?.status === 'failed') && entry.pending === 0 && !unsaved(entry);
     const reasonOf = (entry: ViewerEntry): 'open' | 'change' => (entry.status === 'error' && !unsaved(entry) ? 'open' : 'change');
 
-    const fail = (tabId: string, message: string, reason: 'open' | 'change') => {
+    // U6f (decision 18; Decision Log 20; W3): what a failure shows. A UC-7 sentence (`issues.refusal`) as it is; a folder
+    // macOS protects there asks the person first, and refused so again under `open` offers Open File…; a load that
+    // follows an Open it press (`pressed`) and fails otherwise keeps the question and its button, so it can be asked again.
+    const shownFailure = (entry: ViewerEntry | undefined, error: Failure, pressed: boolean): Pick<ViewerEntry, 'error' | 'said' | 'needsOpen' | 'offersOpenFile'> => {
+      const machine = machineNameOf(entry?.appSessionId ?? null);
+      const remote = entry !== undefined && entry.appSessionId !== null && takesRemoteRoute(entry.appSessionId);
+      const refusal = refusalOf(error);
+      if (remote && refusal === 'protected' && opensThere(entry))
+        return { error: VIEWER_COPY.protectedThrough(machine), said: true, needsOpen: false, offersOpenFile: true };
+      if (remote && (refusal === 'protected' || pressed)) return { error: VIEWER_COPY.protectedThere(machine), said: true, needsOpen: true, offersOpenFile: false };
+      return { error: error.message, said: refusal !== null, needsOpen: false, offersOpenFile: false };
+    };
+
+    const fail = (tabId: string, error: Failure, reason: 'open' | 'change', pressed = false) => {
       const entry = get().entries.get(tabId);
+      const { message } = error;
       // A file gone during a re-read keeps its last content; U6c: and `named`, since outside the folders only a named path
       // answers `not found` (decision 16), so the entry is still read again when asked for again.
       if (reason === 'change' && isNotFound(message) && entry?.status === 'ready') return patch(tabId, { removed: true, loadingMore: false });
+      const shown = shownFailure(entry, error, pressed);
       // E5: unsaved edits keep their baseline and their document (the view's) under a refusal, which shows over them; a
       // later read lands as any change load does. U6e (decision 6): a refusal moves neither the lock nor the pin, so the
       // label stays and a save asks the daemon, which decides.
-      if (unsaved(entry)) return patch(tabId, { status: 'error', error: message, loadingMore: false, named: false, editable: entry!.textEditable && admits({ ...entry!, named: false }) });
+      if (unsaved(entry)) return patch(tabId, { status: 'error', ...shown, loadingMore: false, named: false, editable: entry!.textEditable && admits({ ...entry!, named: false }) });
       dropFrame(tabId); // UX wave U6b-2: a refused file shows no frame
       patch(tabId, {
-        status: 'error', error: message, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false, textEditable: false, frame: null,
+        status: 'error', ...shown, kind: null, text: '', base64: null, loaded: 0, complete: false, epoch: (entry?.epoch ?? 0) + 1, loadingMore: false, hash: null, editable: false, named: false, textEditable: false, frame: null,
       });
     };
 
@@ -492,7 +585,7 @@ export function createViewerStore(client: MawsBridge) {
       const entry = get().entries.get(tabId);
       if (!entry) return;
       const pin = pinAfter(entry, read.real);
-      const ready = { status: 'ready' as const, error: null, removed: false, loadingMore: false, diskUnusable: null, pin, editable: editableWith(entry, pin) };
+      const ready = { status: 'ready' as const, error: null, said: false, needsOpen: false, offersOpenFile: false, removed: false, loadingMore: false, diskUnusable: null, pin, editable: editableWith(entry, pin) };
       const admissionMoved = pin !== entry.pin || ready.editable !== entry.editable;
       const settledAlready = entry.status === 'ready' && !entry.removed && !entry.loadingMore && entry.diskUnusable === null && !admissionMoved;
       if (unsaved(entry)) {
@@ -553,7 +646,7 @@ export function createViewerStore(client: MawsBridge) {
       if (!answer.ok) {
         release(before);
         patch(tabId, { frame: null });
-        return fail(tabId, answer.error.message, 'open'); // a read's failure, which `revisit` reads again
+        return fail(tabId, answer.error, 'open'); // a read's failure, which `revisit` reads again
       }
       const value = answer.value;
       const frame: EntryFrame =
@@ -592,6 +685,7 @@ export function createViewerStore(client: MawsBridge) {
       // A re-read of a head covers what Load more had reached, not only the first chunk.
       const extent = reason === 'change' && entry.kind === 'head' ? Math.min(CODE_CAP, entry.loaded) : 0;
       const { path } = entry;
+      const pressed = pressedOpen.delete(tabId); // U6f (W3): the load an Open it press asked for
       // The reads are sent one after another, each awaited: `asked` is the number of the one last sent (U6e: `admit`).
       let asked = 0;
       const read = (offset: number, length: number, hash: boolean) => {
@@ -606,11 +700,11 @@ export function createViewerStore(client: MawsBridge) {
       const hashed = reason === 'open' || editableKind(entry.kind);
       let first = await read(0, FILES_READ_DEFAULT_LENGTH, hashed);
       if (!live()) return;
-      if (!first.ok) return fail(tabId, first.error.message, reason);
+      if (!first.ok) return fail(tabId, first.error, reason, pressed);
       if (!hashed && editableKind(kindOf({ name: path, mime: first.value.mime, bytes: first.value.bytes, encoding: first.value.encoding }))) {
         first = await read(0, FILES_READ_DEFAULT_LENGTH, true);
         if (!live()) return;
-        if (!first.ok) return fail(tabId, first.error.message, reason);
+        if (!first.ok) return fail(tabId, first.error, reason, pressed);
       }
       const head = first.value;
       // U6e (decision 6): each answer's admission lands as the answer does, before the load's content commits; the head's is
@@ -618,7 +712,7 @@ export function createViewerStore(client: MawsBridge) {
       admit(tabId, asked, head);
       const kind = kindOf({ name: path, mime: head.mime, bytes: head.bytes, encoding: head.encoding });
       const file = { kind, mime: head.mime, encoding: head.encoding, bytes: head.bytes };
-      const opened = { status: 'ready' as const, error: null, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
+      const opened = { status: 'ready' as const, error: null, said: false, needsOpen: false, offersOpenFile: false, removed: false, loadingMore: false, epoch: (get().entries.get(tabId)?.epoch ?? 0) + 1, dirty: false, theirs: null, diskUnusable: null, saveError: null };
       // An open load puts the document on the entry, so the pin is the real path it read (decision 6).
       const commit = ({ utf8, real, ...loaded }: LoadedFile) => {
         if (reason === 'change') commitChange(tabId, { ...loaded, utf8, real }, cause);
@@ -637,7 +731,7 @@ export function createViewerStore(client: MawsBridge) {
         if (head.truncated) {
           const all = await read(0, head.bytes, false);
           if (!live()) return;
-          if (!all.ok) return fail(tabId, all.error.message, reason);
+          if (!all.ok) return fail(tabId, all.error, reason, pressed);
           whole = all.value;
           admit(tabId, asked, whole);
         }
@@ -657,7 +751,7 @@ export function createViewerStore(client: MawsBridge) {
         const next = await read(loaded, kind === 'head' ? Math.min(FILES_READ_DEFAULT_LENGTH, extent - loaded) : FILES_READ_DEFAULT_LENGTH, hash !== null);
         if (!live()) return;
         // Mid-file: nothing of either version stays, except that a file gone during a re-read keeps its last content.
-        if (!next.ok) return fail(tabId, next.error.message, reason);
+        if (!next.ok) return fail(tabId, next.error, reason, pressed);
         // Changed mid-load, whatever the chunk's length (a shrunk file answers zero bytes with its new hash): the load ends
         // here, an open one read-only with `hash: null`; its files.changed re-reads it. Checked before the shrink exit,
         // which would otherwise commit the old file's partial text with its whole-file hash, as editable.
@@ -797,6 +891,7 @@ export function createViewerStore(client: MawsBridge) {
       mount(tabId, { appSessionId, path, line, readOnly = false, artifact, agent = false }) {
         used.set(tabId, ++clock);
         if (!unsubscribe) unsubscribe = useLayout.subscribe((state, prev) => state.main !== prev.main && prune());
+        if (!unfollowStanding) unfollowStanding = useMachines.subscribe(followStanding);
         const entry = get().entries.get(tabId);
         const source = artifact ?? null;
         // U6e (decision 19): the mount reads as the agent's when the tab holds the agent's mark or the agent's show drew it
@@ -829,7 +924,7 @@ export function createViewerStore(client: MawsBridge) {
           stale.delete(tabId);
           supersede(tabId); // an older load lands nowhere
           const fresh: ViewerEntry = {
-            tabId, appSessionId, artifact: source, path, status: 'loading', error: null, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
+            tabId, appSessionId, artifact: source, path, status: 'loading', error: null, said: false, needsOpen: false, offersOpenFile: false, kind: null, mime: '', encoding: 'utf8', bytes: 0, loaded: 0, complete: false,
             text: '', epoch: (entry?.epoch ?? 0) + 1, base64: null, removed: false, updated: 0, sourceView: false, line, pendingJump: line, loadingMore: false,
             hash: null, editable: false, dirty: false, saving: false, saveError: null, theirs: null, diskUnusable: null, baseline: 0, loads: 0, pending: 0, readOnly, named: false,
             locked: null, pin: null, agent: asAgent, textEditable: false, frame: null,
@@ -884,7 +979,7 @@ export function createViewerStore(client: MawsBridge) {
         void readChunk(entry, entry.loaded, length, false).then((next) => {
           // A newer load, or one that replaced the text this read continues, superseded it and cleared `loadingMore`.
           if (generations.get(tabId) !== generation || get().entries.get(tabId)?.epoch !== entry.epoch) return;
-          if (!next.ok) return fail(tabId, next.error.message, 'open');
+          if (!next.ok) return fail(tabId, next.error, 'open');
           // U6e (decision 6): the answer's admission by the order; the pin moves by the document and dirty rule
           admit(tabId, asked, next.value);
           const current = get().entries.get(tabId)!;
@@ -927,7 +1022,8 @@ export function createViewerStore(client: MawsBridge) {
         const entry = get().entries.get(tabId);
         const expectedHash = entry?.theirs?.view === 'merge' ? entry.theirs.hash : (entry?.hash ?? null);
         // U6c: a file named with no pin is never written (U6e: a daemon of the parent pin's answer, W6); U6e: nor a locked one
-        if (!entry || entry.locked !== null || (entry.named && entry.pin === null) || entry.saving || !unsaved(entry) || expectedHash === null) return 'noop';
+        // U6f (W1, R9): nor one whose standing has a sentence for the save on its machine
+        if (!entry || entry.locked !== null || (entry.named && entry.pin === null) || entry.saving || !unsaved(entry) || expectedHash === null || elsewhereWords(entry) !== null) return 'noop';
         const content = documentOf(tabId);
         if (content === undefined) return 'noop';
         const incarnation = incarnations.get(tabId);
@@ -939,7 +1035,7 @@ export function createViewerStore(client: MawsBridge) {
         // answer; a daemon that does not know the command writes nothing and is said so
         const answer =
           pin !== null
-            ? await settled(client.invoke('files.writeOutside', { appSessionId, path, content, expectedHash, real: pin }))
+            ? await settled(client.invoke('files.writeOutside', { appSessionId, path, content, expectedHash, real: pin, ...opens(entry) }))
             : await settled(client.invoke('files.write', { appSessionId, path, content, expectedHash }));
         if (!current()) return 'noop';
         if (!answer.ok) {
@@ -1090,6 +1186,14 @@ export function createViewerStore(client: MawsBridge) {
         if (entry && revisitable(entry)) readAgain(tabId, entry, 'revisit');
       },
 
+      openProtected(tabId) {
+        const entry = get().entries.get(tabId);
+        if (!entry?.needsOpen || entry.appSessionId === null || entry.pending > 0 || pressedOpen.has(tabId)) return;
+        openedThere(machineOf(entry.appSessionId)).add(entry.path);
+        pressedOpen.add(tabId);
+        readAgain(tabId, entry, 'revisit');
+      },
+
       reset() {
         for (const entry of get().entries.values()) release(heldToken(entry.frame)); // UX wave U6b-2 (M5, decision 10)
         asks.clear(); // the store forgets everything (tests, a hot reload): an answer still out finds no slot and is released
@@ -1105,8 +1209,11 @@ export function createViewerStore(client: MawsBridge) {
         used.clear();
         held.clear();
         views.clear();
+        pressedOpen.clear();
         unsubscribe?.();
         unsubscribe = null;
+        unfollowStanding?.();
+        unfollowStanding = null;
         set({ entries: new Map(), wrap: false });
       },
     };
