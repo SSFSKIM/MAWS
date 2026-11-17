@@ -7,7 +7,7 @@ import { EventEmitter } from 'node:events';
 import fs, { existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, renameSync, rmSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import { lstat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, sep } from 'node:path';
+import { dirname, join, sep } from 'node:path';
 import type { ChildProcess } from 'node:child_process';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
@@ -604,6 +604,71 @@ describe('where git runs', () => {
     expect(reads).toEqual([]);
     expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the git in use does not know rev-parse --path-format/)]);
     for (const repo of repos) expect(String(warned.mock.calls[0]![0])).not.toContain(repo);
+  });
+
+  // The second read of the delta: git's answer is decoded as UTF-8 (`execGit`), each byte that is no UTF-8 read as
+  // U+FFFD, so a git directory whose name holds such a byte would be read as another path, one that may be another
+  // repository of this user's. A stand-in answers as git's bytes decode: the path it names exists, and is this user's.
+  it('gives no answer, and starts no read, when git names a repository by a path that is no UTF-8, beside the same answer in UTF-8', async () => {
+    const decoy = join(temp(), '\uFFFD');
+    mkdirSync(decoy);
+    execFileSync('/usr/bin/git', ['init', '-q', '-b', 'main', decoy], { stdio: 'ignore' }); // where U+FFFD leads: this user's
+    for (const encoded of [false, true]) {
+      const repo = fakeRepo();
+      const named = encoded ? Buffer.concat([Buffer.from(`${dirname(decoy)}/`), Buffer.from([0xff]), Buffer.from('/.git')]).toString('utf8') : join(repo, '.git');
+      const reads: string[] = [];
+      const execFile: ExecFileFn = (_file, args, _options, callback) => {
+        if (isResolution(args)) {
+          queueMicrotask(() => callback(null, `${named}\n${named}\n${repo}\n`, ''));
+          return undefined;
+        }
+        reads.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
+        queueMicrotask(() => callback(null, args.includes('ls-files') ? '' : './a.log\0', ''));
+        return undefined;
+      };
+      const answer = await checkOf({ execFile }).names(repo, ['a.log']);
+      if (encoded) {
+        expect(answer).toBeNull();
+        expect(reads).toEqual([]);
+      } else expect(sorted(answer)).toEqual(['a.log']); // the control
+    }
+  });
+
+  // The second read of the delta: a run whose asks were all answered (the check disposed, their bounds passed) while it
+  // confirmed their folders asks git nothing, its question of where the repository is included
+  it('asks git nothing once the check is disposed while a run confirms its folder, beside the same timing without the disposal', async () => {
+    for (const disposing of [false, true]) {
+      const repo = fakeRepo('harbor');
+      const dir = join(repo, 'harbor');
+      const { execFile, pending, resolutions } = heldRuns();
+      const check = checkOf({ execFile });
+      const realpath = fs.promises.realpath.bind(fs.promises);
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => (release = resolve));
+      let confirming!: () => void;
+      const confirmed = new Promise<void>((resolve) => (confirming = resolve));
+      const spied = vi.spyOn(fs.promises, 'realpath').mockImplementation((async (path: fs.PathLike, options?: never) => {
+        if (String(path) === dir) {
+          confirming();
+          await gate; // the run's confirmation of the folder, held
+        }
+        return realpath(path, options);
+      }) as typeof fs.promises.realpath);
+      const answer = check.names(dir, ['a.log']);
+      await confirmed;
+      if (disposing) void check.dispose();
+      release();
+      if (disposing) {
+        expect(await answer).toBeNull();
+        await settle();
+        expect(resolutions).toEqual([]);
+      } else {
+        await drain(pending, [answer]);
+        expect(sorted(await answer)).toEqual(['a.log']); // the control
+        expect(resolutions).toHaveLength(2);
+      }
+      spied.mockRestore();
+    }
   });
 
   it('gives no answer and asks git nothing for a folder that is not the object the service confirmed, beside the same ask with its identity', async () => {
