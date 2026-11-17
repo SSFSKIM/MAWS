@@ -117,21 +117,13 @@ const OPEN = -2; // `<`, or a character that folds to it
 const CLOSE = -3; // `>` as typed
 const FOLDED_CLOSE = -4; // a character that folds to `>` (the full-width one)
 
-/**
- * What MAWS sends as a person's own free text (the composer's serialised draft, its last step; the sites that send raw
- * text, theirs): the text with U+2060 (`GRANT_BREAK`) put inside the first word of every span that reads as the
- * consent sentence's longer opening (`WRITER_OPENINGS`), after its first letter (and that letter's combining marks).
- * The claim: no text the reader (`readConsents`) accepts goes out, as sent or after one of the later changes
- * test/support/later-changes.ts lists (white space trimmed or collapsed, line ends made LF, pasted tags or angle-bracket
- * pairs removed, emphasis marks removed, compatibility folding, case changes), since the reader accepts only a sentence
- * that opens with one of the two. The reading is `quotesGrant`'s (letters and digits, compatibility and case folding),
- * each character folded by itself, and the words from any `<` to any later `>` with no `>` as typed between them read
- * both kept and removed. A span whose first letter the joiner already follows is left as it is, so a text sent again does
- * not grow; a text with no span is returned as it was. `work`, when given, is charged the characters the passes go over.
- */
-export function neutraliseGrant(text: string, work?: { steps: number }): string {
-  // the folded stream: each letter or digit (by its ASCII code, or OTHER_LETTER) and each angle bracket, with the end
-  // in `text` of the character it came from
+// The folded stream of a text, in one of the two case images (the review round's R2): each letter or digit (by its ASCII
+// code, or OTHER_LETTER) and each angle bracket, with the end in the text of the character it came from. Each character
+// is folded by itself: compatibility folding, then lower case (`lower`), or upper case then lower case (`upper`, where a
+// sharp s gives "ss" and a dotless i gives "i", as a later upper-casing would). A `>` that a combining mark follows is a
+// folded close, since compatibility folding of the whole text composes the two (U+0338 makes U+226F) and then the
+// refusing side pairs the `<` with a later `>`.
+function foldedStream(text: string, image: 'lower' | 'upper'): { codes: number[]; ends: number[] } {
   const codes: number[] = [];
   const ends: number[] = [];
   let i = 0;
@@ -140,13 +132,15 @@ export function neutraliseGrant(text: string, work?: { steps: number }): string 
     const end = i + (point > 0xffff ? 2 : 1);
     if (point < 128) {
       const c = point >= 0x41 && point <= 0x5a ? point + 0x20 : point;
-      const code = isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? CLOSE : null;
+      MARK.lastIndex = end;
+      const code = isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? (MARK.test(text) ? FOLDED_CLOSE : CLOSE) : null;
       if (code !== null) {
         codes.push(code);
         ends.push(end);
       }
     } else {
-      for (const char of String.fromCodePoint(point).normalize('NFKC').toLowerCase()) {
+      const compatible = String.fromCodePoint(point).normalize('NFKC');
+      for (const char of image === 'lower' ? compatible.toLowerCase() : compatible.toUpperCase().toLowerCase()) {
         const c = char.codePointAt(0)!;
         const code = c < 128 ? (isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? FOLDED_CLOSE : null) : IS_LETTER.test(char) ? OTHER_LETTER : null;
         if (code !== null) {
@@ -157,27 +151,51 @@ export function neutraliseGrant(text: string, work?: { steps: number }): string 
     }
     i = end;
   }
-  // from the end, each pattern read backwards: at a `>`, the reading so far is one a `<` before it may go on from, its
-  // words between removed (a `>` as typed ends what an earlier `>` saved, a folded one adds to it); a first letter that
-  // ends a pattern read backwards begins a span
+  return { codes, ends };
+}
+
+/**
+ * What MAWS sends as a person's own free text (the composer's serialised draft, its last step; the sites that send raw
+ * text, theirs): the text with U+2060 (`GRANT_BREAK`) put inside the first word of every span that reads as the
+ * consent sentence's longer opening (`WRITER_OPENINGS`), after its first letter (and that letter's combining marks).
+ * The claim: no text the reader (`readConsents`) accepts goes out, as sent or after one of the later changes
+ * test/support/later-changes.ts lists, and no wider: the whole text or each line trimmed; runs of white space, or of
+ * spaces and tabs, collapsed; CRLF, a lone CR, U+2028 and U+2029 made LF; pasted tags removed; angle-bracket pairs
+ * removed, before or after compatibility folding; emphasis and code marks removed; compatibility folding; upper case then
+ * lower case with the opening capitalised; each line's first word upper-cased then capitalised. The reader accepts only
+ * a sentence that opens with one of the two openings. The reading is `quotesGrant`'s (letters and digits, compatibility
+ * and case folding), each character folded by itself in two case images (`foldedStream`), and the words from any `<` to
+ * any later `>` with no `>` as typed between them (a `>` a combining mark follows is no such `>`) read both kept and
+ * removed. Its limit: a precomposed letter (é for e), which only a later removal of marks would make the opening's
+ * letter, is read as another letter. A span whose first letter the joiner already follows is left as it is, so a text
+ * sent again does not grow; a text with no span is returned as it was. `work`, when given, is charged the characters the
+ * passes go over.
+ */
+export function neutraliseGrant(text: string, work?: { steps: number }): string {
+  // from the end, each pattern read backwards over each case image: at a `>`, the reading so far is one a `<` before it
+  // may go on from, its words between removed (a `>` as typed ends what an earlier `>` saved, a folded one adds to it);
+  // a first letter that ends a pattern read backwards begins a span
   const starts = new Set<number>();
-  for (const { at, whole } of PATTERNS) {
-    let reached = 1;
-    let saved = 0;
-    for (let k = codes.length - 1; k >= 0; k -= 1) {
-      const c = codes[k]!;
-      if (c === CLOSE) saved = reached;
-      else if (c === FOLDED_CLOSE) saved |= reached;
-      else if (c === OPEN) reached |= saved;
-      else if (c === OTHER_LETTER) reached = 1;
-      else {
-        const moved = reached & at[c]!;
-        if ((moved & whole) !== 0) starts.add(ends[k]!);
-        reached = 1 | (moved << 1);
+  for (const image of ['lower', 'upper'] as const) {
+    const { codes, ends } = foldedStream(text, image);
+    for (const { at, whole } of PATTERNS) {
+      let reached = 1;
+      let saved = 0;
+      for (let k = codes.length - 1; k >= 0; k -= 1) {
+        const c = codes[k]!;
+        if (c === CLOSE) saved = reached;
+        else if (c === FOLDED_CLOSE) saved |= reached;
+        else if (c === OPEN) reached |= saved;
+        else if (c === OTHER_LETTER) reached = 1;
+        else {
+          const moved = reached & at[c]!;
+          if ((moved & whole) !== 0) starts.add(ends[k]!);
+          reached = 1 | (moved << 1);
+        }
       }
     }
+    if (work) work.steps += text.length + (1 + PATTERNS.length) * codes.length;
   }
-  if (work) work.steps += text.length + (1 + PATTERNS.length) * codes.length;
   if (starts.size === 0) return text;
   let out = '';
   let from = 0;
