@@ -2038,6 +2038,16 @@ const resultOf = (p: Product, path: string) => answered(p).locator(`[data-files-
 const resultPaths = (p: Product) => answered(p).locator('[data-files-result]').evaluateAll((rows) => rows.map((row) => row.getAttribute('data-path') ?? ''));
 const fieldOf = (p: Product) => filesOf(p).locator('[data-files-filter]');
 const composerOf = (p: Product) => p.page.locator('[data-region="main"]').getByRole('textbox', { name: 'Message' });
+// G8 and G9 (Decision Log 15): the window narrower than the shell's 700 px, so a side column is a sheet over an inert main
+// area (the native window resized, as ux2-shell's 620 px scene does, and waited on in the page); the sheet's dismissal and
+// the main area.
+const NARROW_WIDTH = 640;
+async function narrowWindow(p: Product): Promise<void> {
+  await p.maws.app.evaluate(({ BrowserWindow }, [width, height]) => BrowserWindow.getAllWindows()[0]!.setContentSize(width, height), [NARROW_WIDTH, 820] as const);
+  await expect.poll(() => p.page.evaluate(() => window.innerWidth), { message: `the page at ${NARROW_WIDTH} px` }).toBe(NARROW_WIDTH);
+}
+const sheetDismissalOf = (p: Product) => p.page.getByRole('button', { name: 'Close surface sheet', exact: true });
+const mainRegionOf = (p: Product) => p.page.locator('[data-region="main"]');
 // files.tree as the layout's own read answers it, for this session (its key the session's address)
 type StoredTree = { sessions: Record<string, { width: number | null; folded: boolean; expanded: string[] }> };
 async function storedTreeOf(p: Product): Promise<StoredTree['sessions'][string] | null> {
@@ -2290,6 +2300,96 @@ test.describe('UX wave U6b-3b: Go to file', () => {
       await expect(resultOf(p, annex), 'the file written in the working folder joins the list, no key pressed').toBeVisible({ timeout: 30_000 });
       expect((await resultPaths(p)).sort(), 'the three files').toEqual([...quay, annex].sort());
       await expect(answered(p).locator('[data-files-result][aria-selected="true"]'), 'the highlight on the row it was on').toHaveAttribute('data-path', held);
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G8 (Decision Log 15, Esc's second step over a narrow window's sheet). The side column closed at full width, then the
+  // window at 640 px (`narrowWindow`, waited on in the page). After Go to file, waits on the sheet's dismissal in view, main
+  // inert and the field being the active element; on the list holding the three files; after Esc, on the field emptied and
+  // still the active element; after the second Esc, on no sheet (its dismissal gone, the side column's width 0, main no
+  // longer inert) and the composer's editor being the active element. Then Files shown again as a sheet by its own
+  // command and the field clicked (nothing recorded to give the keyboard back to): after Esc, on no sheet again.
+  test('G8: in a narrow window, Go to file opens Files as a sheet; Esc twice closes the sheet and gives the composer the keyboard; an Esc with nowhere to give it back closes the sheet', async () => {
+    await withProduct(async (p) => {
+      const expected = PIER_FILES.map((relative) => p.scratch.path(relative));
+      await hideSurfaces(p.page);
+      await narrowWindow(p);
+      const composer = composerOf(p);
+      await composer.click();
+      await expect(composer, 'the keyboard in the composer').toBeFocused();
+
+      await goToFile(p.maws.app);
+      await expect(sheetDismissalOf(p), 'Files a sheet').toBeVisible();
+      await expect(mainRegionOf(p), 'main inert under it').toHaveJSProperty('inert', true);
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('pier');
+      await expect.poll(async () => (await resultPaths(p)).sort(), { message: 'the three files' }).toEqual([...expected].sort());
+      await p.page.keyboard.press('Escape');
+      await expect(fieldOf(p), 'Esc empties the field').toHaveValue('');
+      expect(await fieldHasKeyboard(p.page), 'the keyboard still in the field').toBe(true);
+      await p.page.keyboard.press('Escape');
+      await expect(sheetDismissalOf(p), 'Esc again: the sheet closed').toHaveCount(0);
+      await expect.poll(async () => (await p.page.locator('[data-region="panel"]').boundingBox())?.width ?? null, { message: 'the side column folded away' }).toBe(0);
+      await expect(mainRegionOf(p), 'main no longer inert').toHaveJSProperty('inert', false);
+      await expect(composer, 'the keyboard back in the composer').toBeFocused();
+
+      // nothing recorded: Files shown as a sheet by its own command, the field clicked; Esc reaches the sheet's dismissal
+      await openSurface(p.page, 'Files');
+      await expect(sheetDismissalOf(p), 'Files a sheet again').toBeVisible();
+      await fieldOf(p).click();
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.press('Escape');
+      await expect(sheetDismissalOf(p), 'Esc: the sheet closed, not swallowed by the field').toHaveCount(0);
+      await expect(mainRegionOf(p), 'main no longer inert').toHaveJSProperty('inert', false);
+    }, goToFileRepository, { gitHome: true });
+  });
+
+  // G9 (Decision Log 15, Enter on a file whose tab is in the main area, over a narrow window's sheet; G3 in a narrow
+  // window). At full width: harbor/berth-log.ts opened in a main tab by ⌘-click, the session's tab brought in front, the
+  // side column closed; then the window at 640 px. After Go to file from the composer, waits on the sheet in view and the
+  // list holding the file; after Enter, on no sheet, the file's main tab selected, main no longer inert and the active
+  // element inside that tab's text in the main area. The control: Go to file again, `app.ts` typed over the selected
+  // text; after Enter (src/app.ts opens beside the tree, in the sheet), on the keyboard in its text, inside the side
+  // column, with the sheet still in view and main inert.
+  test('G9: in a narrow window, Enter on a file whose tab is in the main area closes the Files sheet and the keyboard is in its text; a file that opens beside the tree keeps the sheet', async () => {
+    await withProduct(async (p) => {
+      const machine = await localRef(p.page);
+      const log = p.scratch.path('harbor/berth-log.ts');
+      const key = `file:${machine}:${log}`;
+      const fileTab = mainTabById(p.page, key);
+      await (await reveal(p, 'harbor/berth-log.ts')).click({ modifiers: ['Meta'] });
+      await expect(fileTab, '⌘-click: a main tab of the file, in front').toHaveAttribute('aria-selected', 'true', { timeout: 20_000 });
+      const sessionTab = mainTabById(p.page, `session:${await addressed(p.page, p.scratch.appSessionId)}`);
+      await sessionTab.click();
+      await expect(sessionTab, 'the session’s tab in front').toHaveAttribute('aria-selected', 'true');
+      await hideSurfaces(p.page);
+      await narrowWindow(p);
+
+      await composerOf(p).click();
+      await goToFile(p.maws.app);
+      await expect(sheetDismissalOf(p), 'Files a sheet').toBeVisible();
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('berthlog');
+      await expect.poll(() => resultPaths(p), { message: 'the file alone' }).toEqual([log]);
+      await p.page.keyboard.press('Enter');
+      await expect(sheetDismissalOf(p), 'Enter: the sheet closed').toHaveCount(0);
+      await expect(fileTab, 'its main tab in front').toHaveAttribute('aria-selected', 'true');
+      await expect(mainRegionOf(p), 'main no longer inert').toHaveJSProperty('inert', false);
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in the main tab’s text' }).toBe(key);
+      expect(await p.page.evaluate(() => document.activeElement?.closest('[data-region="main"]') !== null), 'in the main area').toBe(true);
+
+      // the control: a file that opens beside the tree, in the sheet, which stays
+      const app = p.scratch.path('src/app.ts');
+      await goToFile(p.maws.app);
+      await expect(sheetDismissalOf(p), 'Files a sheet again').toBeVisible();
+      await expect.poll(() => fieldHasKeyboard(p.page), { message: 'the field has the keyboard' }).toBe(true);
+      await p.page.keyboard.type('app.ts');
+      await expect.poll(() => resultPaths(p), { message: 'src/app.ts alone' }).toEqual([app]);
+      await p.page.keyboard.press('Enter');
+      await expect.poll(() => keyboardInText(p.page), { message: 'the keyboard in app.ts’s text' }).toBe(`file:${machine}:${app}`);
+      expect(await p.page.evaluate(() => document.activeElement?.closest('[data-region="panel"]') !== null), 'in the side column').toBe(true);
+      await expect(sheetDismissalOf(p), 'the sheet stays').toBeVisible();
+      await expect(mainRegionOf(p), 'main still inert under it').toHaveJSProperty('inert', true);
     }, goToFileRepository, { gitHome: true });
   });
 });
