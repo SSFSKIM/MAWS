@@ -4,15 +4,15 @@
 // keyboard, and the place it records for later is the modal's own field, gone once the modal closes.
 //
 // A modal that holds nothing a person would lose (the Command palette, Keyboard shortcuts) *lends* itself: it draws its
-// content with `useModalHandoff`, and an action invoked while the keyboard is in it, by its own row or from the menu or a
+// content with a `modalHandoff`, and an action invoked while the keyboard is in it, by its own row or from the menu or a
 // key, closes it and runs from its close, once Radix has given the keyboard back to its opener (`handOffModal`, or the
-// hook's `closeThen`). Every other modal keeps the keyboard: `modalKeepsKeyboard` says so while one holds it, and
+// handoff's own `closeThen`). Every other modal keeps the keyboard: `modalKeepsKeyboard` says so while one holds it, and
 // `subscribeModalKeyboard` tells when that may have changed, so an action can stay out of the menu while it does.
 //
 // "A modal is open" is Radix's own lock: while any modal layer is mounted (a dialog, an alert dialog, a menu or a popover
 // drawn modal) Radix sets `pointer-events: none` on the body, and takes it off when the last one goes. The modal that holds
 // the keyboard is the one the focused element is in, since a modal traps focus.
-import { useRef, type RefCallback } from 'react';
+import type { RefCallback } from 'react';
 
 interface Lender {
   content: HTMLElement;
@@ -69,17 +69,20 @@ export function subscribeModalKeyboard(listener: () => void): () => void {
 export interface ModalHandoff {
   /** The modal's content: it lends itself while drawn. */
   ref: RefCallback<HTMLElement>;
-  /** The content's `onCloseAutoFocus`: `restore` (the modal's own return of the keyboard), then what was handed off. */
-  onCloseAutoFocus(event: Event): void;
   /** Closes the modal and runs `run` from its close (the modal's own row of an action that moves the keyboard). */
   closeThen(run: () => void): void;
+  /** Called from the content's `onCloseAutoFocus`, after the modal's own return of the keyboard: runs what was handed off. */
+  closed(): void;
 }
 
-/** For a modal that holds nothing a person would lose: `close` closes it; `restore` gives the keyboard back as it closes. */
-export function useModalHandoff(close: () => void, restore: (event: Event) => void): ModalHandoff {
-  const then = useRef<(() => void) | null>(null);
+/**
+ * The handoff of a modal that holds nothing a person would lose, whose `close` closes it. Made once per modal (a
+ * component keeps it with `useState(() => modalHandoff(close))`).
+ */
+export function modalHandoff(close: () => void): ModalHandoff {
+  let then: (() => void) | null = null;
   const closeThen = (run: () => void) => {
-    then.current = run;
+    then = run;
     close();
   };
   return {
@@ -89,12 +92,11 @@ export function useModalHandoff(close: () => void, restore: (event: Event) => vo
       lenders.add(lender);
       return () => void lenders.delete(lender);
     },
-    onCloseAutoFocus: (event) => {
-      restore(event);
-      const run = then.current;
-      then.current = null;
+    closeThen,
+    closed: () => {
+      const run = then;
+      then = null;
       run?.();
     },
-    closeThen,
   };
 }

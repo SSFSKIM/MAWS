@@ -28,7 +28,6 @@ import { INVENTED_RED, markPixels, minimalPdf, recordedWebm, silentWav, type Rgb
 import { created } from './support/nothing-created'; // UX wave U6b-2
 import { addressed, localRef } from './support/address';
 import { goToFile, goToFileRow } from './support/go-to-file'; // UX wave U6b-3b
-import { menu } from './support/menu'; // UX wave U6b-3b, G10
 import { launchMaws, test, type MawsLaunch } from './support/launch';
 import { latencyBudgets, MEASURED_WAIT_MS } from './support/latency';
 import { activeMainTab, hideSurfaces, mainTabById, mainTabs, mountedTabs, moveSideTab, openSurface, pinSurfaceForSessions, sessionCard, sideColumn, sideGroup, sideTab, surface, unfoldSessionCard } from './support/shell';
@@ -2412,7 +2411,7 @@ test.describe('UX wave U6b-3b: Go to file', () => {
         await hideSurfaces(p.page);
         await composer.click();
         await expect(composer, 'the keyboard in the composer').toBeFocused();
-        await menu(p.maws.app, action);
+        await menu(p.maws, action);
         const modal = p.page.getByRole('dialog', { name, exact: true });
         await expect.poll(() => modal.evaluate((element) => element.contains(document.activeElement)), { message: `${name} holds the keyboard` }).toBe(true);
         await goToFile(p.maws.app);

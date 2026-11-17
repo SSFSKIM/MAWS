@@ -21,7 +21,7 @@ import { formatChord } from '@shared/keymap/chord';
 import { GlyphMark } from '../attention/GlyphMark';
 import { glyphFor, listedGlyph } from '../attention/glyph';
 import { runAction, useActionEnabled } from '../keymap/actions-runtime';
-import { useModalHandoff } from '../keymap/modal-handoff';
+import { modalHandoff } from '../keymap/modal-handoff';
 import { sessionMatcher } from '../sidebar/derive';
 import { revealProject } from '../sidebar/reveal';
 import { selectPendingOf, useAttention } from '../stores/attention';
@@ -49,6 +49,7 @@ export const togglePalette = () => {
   const query = field instanceof HTMLInputElement && field.hasAttribute('data-palette-query') ? field.value : '';
   usePalette.setState((state) => ({ open: !state.open, scope: 'all', query }));
 };
+const closePalette = () => usePalette.setState({ open: false });
 export const openConversationSearch = (query = '') => usePalette.setState({ open: true, scope: 'sessions', query });
 
 export interface PaletteEntries {
@@ -119,7 +120,7 @@ export function CommandPalette() {
   const focus = useDialogFocus();
   // UX wave U6b-3b (Decision Log 16): the palette holds nothing a person would lose, so it lends itself to an action that
   // moves the keyboard, from its own row and from the menu alike (keymap/modal-handoff.ts)
-  const handoff = useModalHandoff(() => usePalette.setState({ open: false }), focus.onCloseAutoFocus);
+  const [handoff] = useState(() => modalHandoff(closePalette));
   const run = (id: ActionId) => {
     // These actions rightly refuse keys from an active modal. A palette selection is an explicit destination: wait
     // for Radix to release the dialog and restore its opener, then navigate from that real shell focus stop. UX wave
@@ -138,7 +139,10 @@ export function CommandPalette() {
         <Dialog.Content
           {...focus}
           ref={handoff.ref}
-          onCloseAutoFocus={handoff.onCloseAutoFocus}
+          onCloseAutoFocus={(event) => {
+            focus.onCloseAutoFocus(event);
+            handoff.closed();
+          }}
           aria-describedby={undefined}
           className="fixed top-[16%] left-1/2 z-50 w-[min(560px,90vw)] -translate-x-1/2 overflow-hidden rounded-lg border border-border-strong bg-bg-overlay text-fg"
         >
