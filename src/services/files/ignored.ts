@@ -1,9 +1,13 @@
 // What git ignores among a listed directory's entries (UX wave U6b-3a,
-// docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13, Interfaces §A). One
-// `git check-ignore -z --stdin` in read mode, run in the listed directory itself, so git answers by the innermost
-// repository that holds it (a submodule's or a nested repository's own rules) and no path asked lies in a submodule; each
-// name is sent as `./<name>`, so a name that begins with `:` or `-` stays a name and not pathspec magic. Exit 1 is
-// "nothing ignored". A tracked file that matches a pattern is not named, as `git status` would not list it.
+// docs/doperpowers/plans/2026-11-17-ux-wave-U6b-3a-what-changed.md, decisions 12 and 13, Interfaces §A; the mechanism as
+// Decision Log 9 amends it). Two runs in read mode, both in the listed directory itself, so git answers by the innermost
+// repository that holds it (a submodule's or a nested repository's own rules) and no path asked lies in a submodule:
+// `git ls-files -z`, whose paths' first segments are the names tracked there or holding a tracked file, then
+// `git check-ignore --no-index -z --stdin` on the other names. A tracked file, and a folder that holds one, is never
+// named, as `check-ignore` without `--no-index` answers; asking with `--no-index` spares git a look into the index for
+// each name, which cost about 0.33 ms a name at 22,000 entries (probe 8's first run). Each name is sent as `./<name>`,
+// so a name that begins with `:` stays a name and not pathspec magic. Exit 1 is "nothing ignored". A listing of more
+// than the runner's 64 MiB of tracked paths beneath the directory overflows and gives no answer.
 //
 // The check can only cost what it is allowed: at most `concurrency` run at once in a daemon and the rest wait in order;
 // each answers within `allowanceMs` of being asked, its wait included, or gives no answer (null). No answer is never a
@@ -75,11 +79,16 @@ export function createIgnoreCheck(options: { env?: NodeJS.ProcessEnv; execFile?:
 
   async function check(ask: Ask): Promise<ReadonlySet<string> | null> {
     const { dir, names, deadline } = ask;
+    const rest = () => Math.max(1, deadline - Date.now()); // both runs share the ask's one deadline
     try {
+      const tracked = firstSegments(await run(dir, ['ls-files', '-z'], { timeoutMs: rest() }));
+      const asked = names.filter((name) => !tracked.has(name));
+      if (!pending.has(ask)) return null; // answered meanwhile (the bound, the stop): the second run is not started
+      if (asked.length === 0) return new Set();
       const out = await run(dir, ['check-ignore', '--no-index', '-z', '--stdin'], {
-        input: names.map((name) => `./${name}\0`).join(''),
+        input: asked.map((name) => `./${name}\0`).join(''),
         acceptExitCodes: [1], // nothing ignored
-        timeoutMs: Math.max(1, deadline - Date.now()),
+        timeoutMs: rest(),
       });
       return new Set(out.split('\0').filter((path) => path !== '').map((path) => (path.startsWith('./') ? path.slice(2) : path)));
     } catch (error) {
@@ -131,6 +140,21 @@ export function createIgnoreCheck(options: { env?: NodeJS.ProcessEnv; execFile?:
       return children.size === 0 ? Promise.resolve() : new Promise((resolve) => idle.push(resolve));
     },
   };
+}
+
+// The first segment of every path `ls-files -z` lists: the names in the directory that are tracked or hold a tracked
+// file. Each entry is cut out before it is searched for a slash, so a long listing is read once.
+function firstSegments(listing: string): ReadonlySet<string> {
+  const segments = new Set<string>();
+  for (let start = 0; start < listing.length; ) {
+    const end = listing.indexOf('\0', start);
+    const stop = end < 0 ? listing.length : end;
+    const path = listing.slice(start, stop);
+    const slash = path.indexOf('/');
+    if (path !== '') segments.add(slash < 0 ? path : path.slice(0, slash));
+    start = stop + 1;
+  }
+  return segments;
 }
 
 // Why a run gave no answer, in words that name no folder (a git message can quote the repository's path)

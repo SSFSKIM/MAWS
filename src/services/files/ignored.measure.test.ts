@@ -4,7 +4,8 @@
 // label and asserts counts alone (how many entries came back marked). It makes its repositories with invented names
 // under a temporary folder, with an empty home, runs a real files service in this process with the real check and once
 // without it, and removes what it made. Run on request, on the build VM:
-// `MAWS_IGNORED_MEASURE=1 pnpm exec vitest run src/services/files/ignored.measure.test.ts --testTimeout 600000`.
+// `MAWS_IGNORED_MEASURE=1 pnpm exec vitest run src/services/files/ignored.measure.test.ts --testTimeout 600000`, and the
+// same command on a Mac host (it reads the machine through `node:os` and git by `/usr/bin/git`, as the service does).
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
@@ -14,7 +15,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesListOutput } from '@shared/ipc/schema/files';
 import { GitFixture } from '../../../test/support/git-fixture';
-import { execGit, type ExecFileFn } from '../git/runner';
+import { createGitRunner, execGit, type ExecFileFn } from '../git/runner';
 import { createIgnoreCheck, type IgnoreCheck } from './ignored';
 import { createFilesService, type FilesService } from './service';
 
@@ -131,6 +132,19 @@ describe.skipIf(process.env.MAWS_IGNORED_MEASURE !== '1')('probe 8: the ignore c
         counts.push(...markedEach);
       } else expect(markedEach.every((count) => count === 0)).toBe(true);
     }
+    // the check's first run on its own (Decision Log 9): ls-files of the directory, in a repository of 22,000 tracked files
+    // (outside any repository it fails at once, which is what the check pays there)
+    const run = createGitRunner({ env: repo.serviceEnv() });
+    const lsFiles = () => run(path, ['ls-files', '-z']).catch(() => '');
+    for (let i = 0; i < WARM; i++) await lsFiles();
+    const lsTimes: number[] = [];
+    for (let i = 0; i < TIMED; i++) {
+      const started = performance.now();
+      await lsFiles();
+      lsTimes.push(performance.now() - started);
+    }
+    print(`${label}.lsfiles.median_ms`, median(lsTimes).toFixed(1));
+    print(`${label}.lsfiles.max_ms`, Math.max(...lsTimes).toFixed(1));
     expect(counts).toEqual(Array(TIMED).fill(expected));
   }
 
