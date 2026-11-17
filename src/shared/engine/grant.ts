@@ -90,9 +90,9 @@ function readsWhole(text: string, work?: { steps: number }): boolean {
 // any later `>` with no typed `>` between them, so a `>` a combining mark follows, or one that folds to `>`, closes
 // without ending the `<`s before it. When `spans` is given, each partly read beginning carries the place its first
 // letter began (the earliest, where readings meet), and each place a reading ends adds its range; else the first such
-// place answers. Charged a step a code unit, one for each code a character beyond ASCII folds to, and one for each
-// partly read beginning a bracket carries. Answers whether it read any character beyond ASCII (the other image then
-// reads the same).
+// place answers. Charged a step a code unit, one for each code a character beyond ASCII folds to, and, when it tells
+// places, one for each beginning a letter moves on or a bracket carries. It also answers whether it read a character
+// beyond ASCII: when it read none, the other case image is the same stream and need not be read.
 const BEGAN = new Int32Array(FOLDED_GRANT.length); // the reading so far: by its count of letters, where it began
 const SAVED_BEGAN = new Int32Array(FOLDED_GRANT.length); // the same, for the readings the `<`s since the last typed `>` saved
 type Spans = [from: number, to: number][];

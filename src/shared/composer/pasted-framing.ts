@@ -16,7 +16,7 @@ import { sha256Hex } from './sha256';
 // the ASCII spelling; its writer also scrubs letters of other scripts that look alike, which MAWS does not reproduce.
 const ASCII_TAG = /<(?!\\)(?=\/?pasted_content)/gi;
 const ASCII_NEUTRALISED = /<\\(?=\/?pasted_content)/gi;
-const BEYOND_ASCII = /[^\x00-\x7f]/;
+const BEYOND_ASCII = /[^\p{ASCII}]/u;
 const FOLDED_TAG = /<(?=\/?pasted_content)/g;
 const FOLDED_NEUTRALISED = /<\\(?=\/?pasted_content)/g;
 
