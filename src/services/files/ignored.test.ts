@@ -430,6 +430,20 @@ describe('the ignore check over a real repository', () => {
     });
   }
 
+  // A repository whose configuration makes it bare has no work tree for git to name: it gets no answer
+  it('gives no answer, and starts no read, for a repository its configuration makes bare, beside the same repository not bare', async () => {
+    const repo = await repository();
+    await repo.write('.gitignore', '*.log\n');
+    await repo.write('a.log', 'x\n');
+    const spawns = recorded();
+    const check = checkOf({ env: repo.serviceEnv(), execFile: spawns.execFile });
+    expect(sorted(await check.names(repo.root, ['a.log']))).toEqual(['a.log']); // the control
+    await repo.git('config', 'core.bare', 'true');
+    const before = spawns.reads().length;
+    expect(await check.names(repo.root, ['a.log'])).toBeNull();
+    expect(spawns.reads().slice(before)).toEqual([]); // no read of the names is started
+  });
+
   // The ruling on mount points: git's discovery stops where the device changes between a folder and the one above it
   // (GIT_DISCOVERY_ACROSS_FILESYSTEM unset), so the walk stops there too. No mount can be made on the build VM without
   // root: a stand-in `lstat` gives the folder between the asked one and the repository's root another device.
@@ -567,6 +581,29 @@ describe('where git runs', () => {
     await drain(pending, [seed, kept, moved, linked]);
     expect([sorted(await seed), sorted(await kept), await moved, await linked]).toEqual([['s.log'], ['a.log'], null, null]);
     expect(made.slice(2).map((run) => (isLsFiles(run) ? run.args.slice(4) : run.input))).toEqual([['kept/'], './kept/a.log\0']);
+  });
+
+  // A git that does not know `rev-parse --path-format` takes it for a flag to show: it prints it back and goes on, exit 0
+  // (rev-parse's `show_flag`); a stand-in answers so, as no machine's git here is that old
+  it('logs one line naming no folder for a git that does not know --path-format, however many listings ask, and marks nothing', async () => {
+    const reads: string[] = [];
+    const execFile: ExecFileFn = (_file, args, _options, callback) => {
+      if (isResolution(args)) {
+        const root = args[1]!;
+        queueMicrotask(() => callback(null, `--path-format=absolute\n${root}/.git\n.git\n${root}\n`, ''));
+        return undefined;
+      }
+      reads.push(args.includes('ls-files') ? 'ls-files' : 'check-ignore');
+      queueMicrotask(() => callback(null, args.includes('ls-files') ? '' : './a.log\0', ''));
+      return undefined;
+    };
+    const check = checkOf({ execFile });
+    const repos = [fakeRepo('src'), fakeRepo(), fakeRepo()];
+    const answers = await Promise.all([check.names(repos[0]!, ['a.log']), check.names(join(repos[0]!, 'src'), ['a.log']), check.names(repos[1]!, ['a.log']), check.names(repos[2]!, ['a.log'])]);
+    expect(answers).toEqual([null, null, null, null]);
+    expect(reads).toEqual([]);
+    expect(warned.mock.calls.map((call: unknown[]) => String(call[0]))).toEqual([expect.stringMatching(/^\[files\] the ignore check gave no answer: the git in use does not know rev-parse --path-format/)]);
+    for (const repo of repos) expect(String(warned.mock.calls[0]![0])).not.toContain(repo);
   });
 
   it('gives no answer and asks git nothing for a folder that is not the object the service confirmed, beside the same ask with its identity', async () => {
