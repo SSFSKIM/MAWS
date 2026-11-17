@@ -301,6 +301,16 @@ describe('the one-writer rule: recall meets the prompt as typed, and no consent 
     expect(recalls).toHaveLength(1);
   });
 
+  // the architect's ruling on the review's recall finding: every prefill path returns the prompt without any U+2060,
+  // one the person typed or pasted included; a history entry is one of the paths
+  it('recalls a history entry without any U+2060, in its text and its pasted body, and searches it so', () => {
+    const recalls = recallEntries([], [], [entry('a\u2060b [Pasted text #1 +1 lines]', { '1': textBody(1, 'c\u2060d') })]);
+    expect(recallText(recalls[0]!)).toBe('ab [Pasted text #1 +1 lines]');
+    const again = serializeDraft(recallDoc(recalls[0]!), ctx);
+    expect(again.display).toBe('ab [Pasted text #1 +1 lines]');
+    expect(again.pastedContents['1']?.content).toBe('cd');
+  });
+
   it('a recalled copy that would read as a consent grants nothing and draws no approval: the readers read the row', () => {
     const sentence = consentMessage('command', 'cat /etc/x');
     const sent = serializeDraft(doc(sentence), ctx);
