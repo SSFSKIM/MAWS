@@ -542,7 +542,9 @@ describe('a recalled chip opens only at the place its row records it (ticket 733
   });
 
   // the architect's ruling 4376: a spelling at no recorded place opens nothing, whatever the digits it writes its numbers with
-  it.each([LITERAL, 'Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].'])('recalled and sent, the paste goes once, at its place, and the typed spelling goes as text: %s', (literal) => {
+  // the reviewer's last re-read: a recorded chip's new number is one no spelling holds, small enough to read back, beside a
+  // typed spelling of a number at or past 2^53 or past 1e21
+  it.each([LITERAL, 'Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #9007199254740992 +1 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #1000000000000000000000 +1 lines].'])('recalled and sent, the paste goes once, at its place, and the typed spelling goes as text: %s', (literal) => {
     const b = builder();
     b.turn('u1', sent.replace(LITERAL, literal));
     b.end(['u1']);

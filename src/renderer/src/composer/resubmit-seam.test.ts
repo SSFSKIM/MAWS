@@ -1040,7 +1040,7 @@ describe('an edited row is sent again as its form’s reader says (ticket 733a, 
 
     // the architect's ruling 4376: a spelling at no recorded place opens nothing, whatever the digits of its numbers
     it('a chip and its spelling typed after it with other digits: sent again, the paste goes once, the spelling as text (the architect’s ruling 4376)', async () => {
-      for (const literal of ['Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].']) {
+      for (const literal of ['Literal [Pasted text #01 +1 lines].', 'Literal [Pasted text #1 +01 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #9007199254740992 +1 lines].', 'Alias [Pasted text #01 +1 lines]. Huge [Pasted text #1000000000000000000000 +1 lines].']) {
         sent = [];
         rewinds = [];
         const content = await resent(`Implement this plan:\n\nStart.${wrapPasted('ab12', 'ATTACHMENT')}${literal}`, (text) => text, how);
