@@ -25,7 +25,7 @@ export const LEAVE_OUT_ROUNDS = 8;
  * fails closed, left out whole.
  */
 export const LEAVE_OUT_WORK_PER_CHAR = 54;
-const LEAVE_OUT_WORK_FLOOR_CHARS = 32; // the pass over a marker that ends the last round, 4 units a character of its 24
+export const LEAVE_OUT_WORK_FLOOR_CHARS = 32; // the pass over a marker that ends the last round, 4 units a character of its 24
 
 // A line break of content: LF, CRLF, a lone CR, NEL, the line and paragraph separators
 const BREAK = /\r\n|[\n\r\u0085\u2028\u2029]/g;

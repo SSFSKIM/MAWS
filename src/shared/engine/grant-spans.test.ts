@@ -2,7 +2,7 @@
 // stands (`grantSpans`, what the leave-out of content cuts by), and the rule for a name MAWS writes (`nameSlot`). Seeded,
 // with the seed and the count stated; the work pinned by the functions' own count, never by a time.
 import { describe, expect, it } from 'vitest';
-import { GRANT_OPENING, grantSpans, LINE_OR_CONTROL, NAME_LEFT_OUT, nameSlot, quotesGrant } from './grant';
+import { GRANT_OPENING, GRANT_TEST_WORK_PER_CHAR, grantSpans, LINE_OR_CONTROL, NAME_LEFT_OUT, nameSlot, quotesGrant } from './grant';
 import { MENTION_BREAKS } from '../../renderer/src/composer/editor/mention-text';
 
 // mulberry32, a fixed seed's strings
@@ -85,6 +85,29 @@ describe('grantSpans: the reading told with its places', () => {
       expect(spans.steps, `${n}`).toBeGreaterThan(0);
       expect(spans.steps, `${n}: the ranges`).toBeLessThanOrEqual(SPANS_WORK_PER_CHAR * text.length + 16);
       expect(test.steps, `${n}: the test`).toBeLessThanOrEqual(TEST_WORK_PER_CHAR * text.length + 16);
+    }
+  });
+});
+
+// The own-text rule plans each call of the forms' list by GRANT_TEST_WORK_PER_CHAR units a character of the longer of the
+// text and its compatibility fold: the test's count stays within it on the characters that cost it most, each by its
+// own count (the most a character costs, over every code point: U+0130 at 11, which lower-casing lengthens; then the
+// Greek letters an upper-casing lengthens, and the sharp s)
+describe('quotesGrant: its count within the bound the own-text rule plans it by', () => {
+  it.each([
+    ['plain words', (n: number) => 'word '.repeat(n / 5)],
+    ['a capital I with a dot above, which lower-casing makes two', (n: number) => '\u0130'.repeat(n)],
+    ['a sharp s, which upper-casing makes two', (n: number) => '\u00df'.repeat(n)],
+    ['an iota with dialytika and tonos, which upper-casing makes three', (n: number) => '\u0390'.repeat(n)],
+    ['full-width letters', (n: number) => 'ＰＥＲＭＩＳＳＩＯＮ '.repeat(n / 11)],
+    ['a character that folds to eighteen', (n: number) => '\ufdfa'.repeat(n / 18)],
+    ['mixed', (n: number) => 'Permi\u00df\u0130on \u0390<\uff1c>'.repeat(n / 16)],
+  ])('%s', (_, shape) => {
+    for (const n of [2_000, 80_000]) {
+      const text = shape(n);
+      const work = { steps: 0 };
+      quotesGrant(text, work);
+      expect(work.steps, `${n}`).toBeLessThanOrEqual(GRANT_TEST_WORK_PER_CHAR * Math.max(text.length, text.normalize('NFKC').length) + 2);
     }
   });
 });

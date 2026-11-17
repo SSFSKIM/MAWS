@@ -178,6 +178,12 @@ function readsOpening(text: string, image: 'lower' | 'upper', spans: Spans | nul
 }
 
 /**
+ * The most `quotesGrant` charges, a character of the longer of a text and its compatibility fold (NFKC): the bound the
+ * own-text rule plans each call of the forms' list by (src/shared/files/named.ts).
+ */
+export const GRANT_TEST_WORK_PER_CHAR = 7;
+
+/**
  * Whether a string quotes the grant's opening, in any reading of it: the one test the ask tool's guard
  * (src/engine-host/tool-server/ask.ts), the steer's writer (src/shared/maws/ask.ts), the save rule's list of forms
  * (./composed-forms.ts), `nameSlot` and the leave-out of content (./composed-content.ts) all call. Two readings, either

@@ -11,6 +11,7 @@ import { neutralisePastedTags } from '../composer/pasted-framing';
 import { framePasted } from '../composer/pasted-content';
 import { readArrivals } from '../engine/arrival';
 import { CLAIMED_FOR_SAVES } from '../engine/composed-forms';
+import { GRANT_TEST_WORK_PER_CHAR } from '../engine/grant';
 
 // `.`, `..` and repeated separators collapsed without touching the disk (ruled 2026-09-29, O1): a receipt's path comes
 // from the model's input and may carry `..`, which `files.*` refuses as not normal; the boundary then judges the
@@ -1136,7 +1137,7 @@ const CLAIMED = CLAIMED_FOR_SAVES;
 // units a character; the budget rose from 48 to 52, the margin it had.
 const ANCHOR_READ_WORK_PER_CHAR = 16;
 const ANCHOR_WRITE_WORK_PER_CHAR = 8; // the read comments written back by their writer, and the compare
-const CLAIM_WORK_PER_CHAR = 7; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
+const CLAIM_WORK_PER_CHAR = GRANT_TEST_WORK_PER_CHAR; // the costliest reader of the forms' list, the grant's test, by the longer of text and fold
 export const OWN_TEXT_MAX_CHARS = STRETCH_MAX / ANCHOR_READ_WORK_PER_CHAR;
 export const OWN_WORK_PER_CHAR = 52;
 const OWN_WORK_FLOOR_CHARS = 128; // the readers' constant work on a short text, in characters' worth
