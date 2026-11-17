@@ -422,12 +422,38 @@ describe('the write-back’s assembly', () => {
       if (entry.isDirectory()) return SKIPPED.has(entry.name) || entry.name.startsWith('.') ? [] : files(path);
       return /\.[cm]?[jt]sx?$/.test(entry.name) ? [path] : [];
     });
+  // Whether a file's text, at `path`, takes the assembly
+  const holdsAssembly = (_path: string, text: string) => /^\s*(?:import|export)\s[^;]*\bcommentsMessageBeforeLastPass\b[^;]*\sfrom\s/m.test(text);
   it('is imported by the own-text rule alone, and by the tests that hold it to its pass', () => {
     const importers = ['src', 'apps', 'test', 'e2e', 'scripts', 'plugins']
       .flatMap((top) => files(join(REPOSITORY, top)))
-      .filter((path) => /^\s*(?:import|export)\s[^;]*\bcommentsMessageBeforeLastPass\b[^;]*\sfrom\s/m.test(readFileSync(path, 'utf8')))
+      .filter((path) => holdsAssembly(path, readFileSync(path, 'utf8')))
       .map((path) => relative(REPOSITORY, path).split(sep).join('/'))
       .sort();
     expect(importers).toEqual([...IMPORTERS].sort());
+  });
+  // Ticket 733a, M4: every way a file can reach the assembly, each read as holding it, beside the ways that do not
+  it('reads a file as holding the assembly however it takes it: by name, or the module whole', () => {
+    const at = join(REPOSITORY, 'src/shared/files/a.ts'); // a file beside the own-text rule, which names the module `../anchor/message`
+    const holds = {
+      'a named import': "import { commentsMessageBeforeLastPass } from '../anchor/message';",
+      'a named import, renamed': "import { commentsMessageBeforeLastPass as assemble } from '@shared/anchor/message';",
+      'a named re-export': "export { commentsMessageBeforeLastPass } from '../anchor/message';",
+      'a namespace import': "import * as message from '../anchor/message';\nexport const assemble = message.writer;",
+      'a namespace re-export': "export * as message from '@shared/anchor/message';",
+      'a wildcard re-export': "export * from '../anchor/message';",
+      'a dynamic import': "export const load = () => import('../anchor/message');",
+      'a require': "const message = require('../../shared/anchor/message.ts');",
+      'a mock of the module': "vi.mock('@shared/anchor/message', async (original) => original());",
+      'the name in any other place': 'const assemble = (m: Record<string, unknown>) => m.commentsMessageBeforeLastPass;',
+    };
+    const holdsNot = {
+      'a named import of the writer': "import { commentsMessage } from '../anchor/message';",
+      'a namespace import of another module': "import * as content from '../anchor/content';",
+      'a wildcard re-export of another module': "export * from './named-rows';",
+      'a dynamic import of a module of the same name elsewhere': "export const load = () => import('../composer/message');",
+    };
+    expect(Object.entries(holds).filter(([, text]) => !holdsAssembly(at, text)).map(([how]) => how), 'each way read as holding it').toEqual([]);
+    expect(Object.entries(holdsNot).filter(([, text]) => holdsAssembly(at, text)).map(([how]) => how), 'the controls, read as not').toEqual([]);
   });
 });
