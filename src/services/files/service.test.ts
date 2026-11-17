@@ -2793,17 +2793,16 @@ describe('files saves outside the folders', () => {
         write(out('readonly.txt'), 'read-only as it was\n');
         chmodSync(out('readonly.txt'), 0o444);
         mkdirSync(out('folder'));
-        await transcriptOf(A, [said(link(out('named.txt'))), said(link(out('gone.txt'))), said(link(out('readonly.txt')))]);
-        records.set(H, record(base)); // a chat whose folder holds the profile
-        const files = remoteService();
         const settings = join(profile, 'settings.json');
+        await transcriptOf(A, [said(link(out('named.txt'))), said(link(out('gone.txt'))), said(link(out('readonly.txt'))), said(link(settings))]);
+        const files = remoteService();
         const read = await readThere(files, A, out('named.txt'));
         const save = (appSessionId: AppSessionId, path: string, opId: string, extra: object = {}) =>
           files.writeOutside({ appSessionId, path, content: 'the words typed\n', expectedHash: read.hash!, real: path, ...extra }, claimed(opId));
         expect(await save(A, out('named.txt'), 'op-save')).toEqual({ status: 'ok', hash: sha('the words typed\n') });
         expect(await save(A, out('named.txt'), 'op-conflict')).toEqual({ status: 'conflict', hash: sha('the words typed\n') });
         await expect(save(A, out('unnamed.txt'), 'op-outside')).rejects.toThrow(new Error(OUT));
-        await expect(save(H, settings, 'op-own')).rejects.toThrow(new Error(`not writable: ${settings}`));
+        await expect(save(A, settings, 'op-own')).rejects.toThrow(new Error(`not writable: ${settings}`));
         await expect(save(A, out('named.txt'), 'op-moved', { real: out('elsewhere.txt') })).rejects.toThrow(new Error(FILES_MOVED));
         await expect(save(A, out('gone.txt'), 'op-missing')).rejects.toThrow(new Error(`not found: ${out('gone.txt')}`));
         await expect(save(A, out('readonly.txt'), 'op-locked')).rejects.toThrow(new Error(`not writable: ${out('readonly.txt')}`));
@@ -2815,7 +2814,7 @@ describe('files saves outside the folders', () => {
           `outside write: ${by(A, 'op-save')}: ok 16 bytes ${out('named.txt')}`,
           `outside write: ${by(A, 'op-conflict')}: conflict ${out('named.txt')}`,
           `outside write: ${by(A, 'op-outside')}: refused (outside) ${out('unnamed.txt')}`,
-          `outside write: ${by(H, 'op-own')}: refused (own) ${settings}`,
+          `outside write: ${by(A, 'op-own')}: refused (own) ${settings}`,
           `outside write: ${by(A, 'op-moved')}: refused (moved) ${out('named.txt')}`,
           `outside write: ${by(A, 'op-missing')}: refused (missing) ${out('gone.txt')}`,
           `outside write: ${by(A, 'op-locked')}: refused (not-writable) ${out('readonly.txt')}`,
