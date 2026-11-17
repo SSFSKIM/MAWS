@@ -11,7 +11,7 @@ import { COMPOSED_FORMS } from './composed-forms';
 import { consentMessage, pastedBodies } from './arrival';
 import { LINE_LEFT_OUT, LINES_LEFT_OUT } from './composed-content';
 import { asTyped, quotesGrant } from './grant';
-import { BASH_INPUT_OPENING, bashEcho, PLAN_LEAD, planPrompt, planPromptOpened, readPlanPrompt } from './host-prompts';
+import { bashEcho, PLAN_LEAD, planPrompt, planPromptOpened, readPlanPrompt } from './host-prompts';
 
 const GRANT = consentMessage('command', 'make build');
 const PLAN = '1. Edit the notes.\n2. Run the tests.';
