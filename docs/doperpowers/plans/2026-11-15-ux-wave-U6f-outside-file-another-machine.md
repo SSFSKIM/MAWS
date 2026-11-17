@@ -26,7 +26,7 @@ How to see it working: on this Mac open the chat of a session that runs on a sec
 - [x] (2026-11-15) The owner's answers on the four cards, each the option built (Decision Log 7), and the approval of revision 2 by the session that keeps master (Decision Log 8).
 - [x] (2026-11-17) The pre-build re-check: the chain head merged (`b630ad08e`), the statements read again on the merged tree, revision 3 (Decision Log 9 to 12).
 - [x] (2026-11-17T09:12Z) M1 — The other machine's daemon: the claimed caller, the read, the listing, the choice, the save, the log. Commits `75170591e`..`d29d795e3`, reviewed clean after three fix rounds (Decision Log 16 to 19, 21, 22).
-- [ ] M2 — The endpoint and the link's vocabulary: the four rows, the capability, what the ledger keeps, the two older builds' tables.
+- [x] (2026-11-17T10:15Z) M2 — The endpoint and the link's vocabulary: the four rows, the capability, what the ledger keeps, the two older builds' tables. Commits `57164d8e3`..`e90440bd4` (RL2 minor 18 at `3a26f7780`), reviewed clean (Decision Log 23 to 25).
 - [ ] M3 — This Mac's main: the adapter for the outside acts, the caller at every promotion, the copy's reader, the words.
 - [ ] M4 — The window: reading and saving there, the chooser, Open File… for a session on another machine.
 - [ ] M5 — The scenes, the two older builds, the record, and the acceptance run.
