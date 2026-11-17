@@ -15,7 +15,7 @@ import { ASK_STEER_OPENING } from '../maws/ask';
 import { LINKED_READ_OPENING } from '../maws/linked-read';
 import { RELAY_CONTINUE } from '../maws/relay-text';
 import { answersOf } from '../owner/answer';
-import { COMMAND_NAME_OPENING, TYPED_COMMAND } from '../wire/local-command';
+import { COMMAND_NAME_OPENING, LOCAL_COMMAND_OUTPUT_OPENINGS, TYPED_COMMAND } from '../wire/local-command';
 import { quotesGrant } from './grant';
 import { BASH_INPUT_OPENING, PLAN_LEAD } from './host-prompts';
 
@@ -60,6 +60,9 @@ export const COMPOSED_FORMS: readonly ComposedForm[] = [
   { what: 'a side question promoted to a thread, the model’s answers in it (anchor/message.ts `promotionMessage`)', claims: holds(PROMOTION_HEAD), forSaves: true, forGrants: true },
   { what: 'a relay to an agent or a peer (renderer tools/agents/model/relay.ts)', claims: holds(RELAY_CONTINUE), forSaves: true, forGrants: true },
   { what: 'a slash command as the engine records it (ruling C)', claims: holds(COMMAND_NAME_OPENING), forSaves: true, forGrants: true },
+  // UX wave U1c, the review round's R4: a command's output is the command's words, not the person's; for saves as the `!`
+  // echo is, the same fail-closed direction (a text holding one names no path)
+  ...LOCAL_COMMAND_OUTPUT_OPENINGS.map((opening): ComposedForm => ({ what: `a local command's output as the engine records it (\`${opening}\`)`, claims: holds(opening), forSaves: true, forGrants: true })),
   // Not for grants: a typed command's arguments are the person's own typing, so a sentence on a line after it is theirs
   {
     what: 'a slash command as typed (ruling C), at the start of any line of the text',
