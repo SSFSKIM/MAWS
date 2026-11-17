@@ -1529,7 +1529,10 @@ test.describe('the floating session card (P3-G)', () => {
         console.log(`[panel floor] ${where}`);
       }
       expect(await card.evaluate((element) => element.scrollTop), 'the card itself never scrolls').toBe(0);
-      await expect(card.getByRole('heading', { name: title })).toBeInViewport();
+      // The card's header, by its level and not by the seeded title: this scene launches fresh under replay, so the
+      // index rebinds the selected session to the launch's own engine id, as it does at /clear, and the session reads
+      // "New chat" while the seeded transcript stays a row of its own (a person's resume keeps the id and the title).
+      await expect(card.getByRole('heading', { level: 2 }), 'the card’s header stays in place').toBeInViewport();
       expect(maws.consoleErrors(), 'the console stays free of errors').toEqual([]);
     } finally {
       await maws.cleanup();
