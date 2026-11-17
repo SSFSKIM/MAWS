@@ -1837,3 +1837,41 @@ describe('the timing lines', () => {
     expect(timing(l)).toHaveLength(1);
   });
 });
+
+// The UX wave (U6f, M2; docs/doperpowers/plans/2026-11-15-ux-wave-U6f-outside-file-another-machine.md, §C, "The
+// capability"): the four acts on a file outside a session's folders are `machine` acts the adapter carries, each only to
+// a peer whose handshake lists `rl2.outside-files` and carrying it as `requires`; a peer that does not list it is sent
+// nothing. M3 gives the adapter their order, their pages and their words.
+describe('the outside acts (`rl2.outside-files`)', () => {
+  const SERVES = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads', 'rl2.outside-files'];
+  const OLDER = ['rl2.executor.machine', 'rl2.session-acts', 'rl2.git-reads']; // an endpoint of a build before them
+  const ACTS: Array<[string, Record<string, unknown>]> = [
+    ['files.readOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }],
+    ['files.listOutside', { appSessionId: APP, path: '/srv/elsewhere' }],
+    ['files.chooseOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt' }],
+    ['files.writeOutside', { appSessionId: APP, path: '/srv/elsewhere/notes.txt', content: 'an invented line\n', expectedHash: 'a'.repeat(64), real: '/srv/elsewhere/notes.txt' }],
+  ];
+
+  it('are taken by the adapter', () => {
+    const l = lab({ tabs: [] });
+    for (const [name] of ACTS) expect([name, l.adapter.handles(name as CommandName)]).toEqual([name, true]);
+  });
+
+  it('go as `machine` acts carrying the capability to a peer that lists it, on a session no tab holds', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(SERVES);
+    l.link.onAct = settleWith({ state: 'done', result: { status: 'ok' } });
+    for (const [name, input] of ACTS) expect([name, await l.cmd(name, input)]).toEqual([name, { ok: true, value: { status: 'ok' } }]);
+    expect(l.link.acts.map((a) => a.request)).toEqual(ACTS.map(([action, args]) => ({ action, args, executor: 'machine', sendBy: expect.any(Number), requires: 'rl2.outside-files' })));
+    expect(l.base).toEqual([]);
+  });
+
+  it('are refused `not-offered`, unsent, by a peer whose handshake lacks the capability', async () => {
+    const l = lab({ tabs: [] });
+    l.link.relink(OLDER);
+    for (const [name, input] of ACTS) expect([name, await l.cmd(name, input)]).toMatchObject([name, { ok: false, error: { code: 'internal', issues: { refusal: 'not-offered' } } }]);
+    expect(l.link.acts).toEqual([]);
+    expect(l.link.calls.filter((c) => c.name.startsWith('files.'))).toEqual([]);
+    expect(l.base).toEqual([]);
+  });
+});
