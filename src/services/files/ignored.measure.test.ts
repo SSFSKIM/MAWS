@@ -9,14 +9,14 @@
 import { execFileSync, type ChildProcess } from 'node:child_process';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
-import { join } from 'node:path';
+import { join, relative } from 'node:path';
 import { performance } from 'node:perf_hooks';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
 import type { FilesListOutput } from '@shared/ipc/schema/files';
 import { GitFixture } from '../../../test/support/git-fixture';
 import { createGitRunner, execGit, type ExecFileFn } from '../git/runner';
-import { createIgnoreCheck, type IgnoreCheck } from './ignored';
+import { createIgnoreCheck, type IgnoreCheck, type IgnoreCheckEvent } from './ignored';
 import { createFilesService, type FilesService } from './service';
 
 const FOLDERS = 200; // the mixed repository's folders
@@ -29,6 +29,23 @@ const MIXED = 'app-probe8-mixed' as AppSessionId;
 const NOWHERE = 'app-probe8-nowhere' as AppSessionId;
 
 const print = (label: string, value: string | number) => console.log(`probe8.${label} ${value}`);
+// What the check reported while a measurement ran (Decision Log 10): each ask's wait from its ask to the start of its
+// run, each run's count of asks, and the asks whose bound passed while they waited or while their run ran
+const events: IgnoreCheckEvent[] = [];
+function printQueue(label: string): void {
+  const runs = events.filter((event): event is Extract<IgnoreCheckEvent, { kind: 'run' }> => event.kind === 'run');
+  const waits = runs.flatMap((event) => event.waitedMs);
+  const sizes = runs.map((event) => event.waitedMs.length);
+  const expired = events.filter((event): event is Extract<IgnoreCheckEvent, { kind: 'expired' }> => event.kind === 'expired');
+  print(`${label}.runs`, runs.length);
+  print(`${label}.wait.median_ms`, waits.length === 0 ? 'none' : median(waits).toFixed(1));
+  print(`${label}.wait.max_ms`, waits.length === 0 ? 'none' : Math.max(...waits).toFixed(1));
+  print(`${label}.batch.median`, sizes.length === 0 ? 'none' : median(sizes));
+  print(`${label}.batch.max`, sizes.length === 0 ? 'none' : Math.max(...sizes));
+  print(`${label}.expired_waiting`, expired.filter((event) => event.waiting).length);
+  print(`${label}.expired_running`, expired.filter((event) => !event.waiting).length);
+  events.length = 0;
+}
 const marked = (listing: FilesListOutput) => listing.entries.filter((entry) => entry.ignored === true).length;
 const median = (values: number[]) => {
   const sorted = [...values].sort((a, b) => a - b);
@@ -92,8 +109,9 @@ describe.skipIf(process.env.MAWS_IGNORED_MEASURE !== '1')('probe 8: the ignore c
     for (let i = 0; i < WIDE; i++) writeFileSync(join(nowhere, `buoy-${String(i).padStart(4, '0')}.txt`), 'buoy\n');
 
     spawns = counted();
-    check = createIgnoreCheck({ env: repo.serviceEnv(), execFile: spawns.execFile });
-    unbounded = createIgnoreCheck({ env: repo.serviceEnv(), execFile: spawns.execFile, concurrency: Number.POSITIVE_INFINITY });
+    const observe = (event: IgnoreCheckEvent) => void events.push(event);
+    check = createIgnoreCheck({ env: repo.serviceEnv(), execFile: spawns.execFile, observe });
+    unbounded = createIgnoreCheck({ env: repo.serviceEnv(), execFile: spawns.execFile, concurrency: Number.POSITIVE_INFINITY, observe });
     withCheck = createFilesService({ records, ignored: check.names });
     withUnbounded = createFilesService({ records, ignored: unbounded.names });
     without = createFilesService({ records });
@@ -116,6 +134,7 @@ describe.skipIf(process.env.MAWS_IGNORED_MEASURE !== '1')('probe 8: the ignore c
     const counts: number[] = [];
     for (const [variant, files] of [['with', withCheck], ['without', without]] as const) {
       for (let i = 0; i < WARM; i++) await files.list({ appSessionId, path });
+      events.length = 0;
       const times: number[] = [];
       const markedEach: number[] = [];
       for (let i = 0; i < TIMED; i++) {
@@ -128,14 +147,21 @@ describe.skipIf(process.env.MAWS_IGNORED_MEASURE !== '1')('probe 8: the ignore c
       print(`${label}.${variant}.median_ms`, median(times).toFixed(1));
       print(`${label}.${variant}.max_ms`, Math.max(...times).toFixed(1));
       if (variant === 'with') {
+        printQueue(label);
         print(`${label}.marked`, new Set(markedEach).size === 1 ? markedEach[0]! : markedEach.join(','));
         counts.push(...markedEach);
       } else expect(markedEach.every((count) => count === 0)).toBe(true);
     }
-    // the check's first run on its own (Decision Log 9): ls-files of the directory, in a repository of 22,000 tracked files
-    // (outside any repository it fails at once, which is what the check pays there)
+    // the run's first call on its own (Decision Log 9 and 10): ls-files of the directory, asked in the repository's root,
+    // in a repository of 22,000 tracked files; outside any repository the check starts no git
+    if (appSessionId === NOWHERE) {
+      print(`${label}.lsfiles.median_ms`, 'none');
+      print(`${label}.lsfiles.max_ms`, 'none');
+      expect(counts).toEqual(Array(TIMED).fill(expected));
+      return;
+    }
     const run = createGitRunner({ env: repo.serviceEnv() });
-    const lsFiles = () => run(path, ['ls-files', '-z']).catch(() => '');
+    const lsFiles = () => run(repo.root, ['--literal-pathspecs', 'ls-files', '-z', '--', `${relative(repo.root, path)}/`]);
     for (let i = 0; i < WARM; i++) await lsFiles();
     const lsTimes: number[] = [];
     for (let i = 0; i < TIMED; i++) {
@@ -167,9 +193,11 @@ describe.skipIf(process.env.MAWS_IGNORED_MEASURE !== '1')('probe 8: the ignore c
     const results: Record<string, number> = {};
     for (const [variant, files] of [['with', withCheck], ['unbounded', withUnbounded], ['without', without]] as const) {
       spawns.reset();
+      events.length = 0;
       const started = performance.now();
       const listings = await burst(files);
       print(`burst.${variant}.total_ms`, (performance.now() - started).toFixed(1));
+      if (variant !== 'without') printQueue(`burst.${variant}`);
       for (const listing of listings) expect(listing.entries).toHaveLength(TRACKED_PER_FOLDER + IGNORED_PER_FOLDER);
       if (variant === 'without') continue;
       results[variant] = listings.filter((listing) => marked(listing) === IGNORED_PER_FOLDER).length;
