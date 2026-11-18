@@ -61,7 +61,7 @@ test('a run needs a Mac exactly when gate-plan.mjs and gate.yml put one of its j
   const macs = ['["self-hosted","macOS","ARM64"]', '["self-hosted","macOS","ARM64","ci-kit-mac-home"]', '["ci-kit-mac-shared"]', '["ci-kit-mac-solo"]', '["ci-kit-mac-vm"]', '["ci-kit-mac-vm-trial"]'];
   // The placements outside the legacy plan: the plan job under GATE_RUNNER=macos; packaged's mirror fallback
   // on the Mac. unit:darwin takes the Mac runner the plan writes for it.
-  assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}\n/);
+  assert.match(workflow, /\n {2}plan:\n(?: {4}.*\n|\n)*? {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| vars\.GATE_LIGHT_RUNNER \|\| 'ubuntu-slim' \}\}\n/);
   assert.match(workflow, /\n {2}packaged:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.packaged_runner \|\| '\["self-hosted","macOS","ARM64"\]'\) \}\}\n/);
   assert.match(workflow, /\n {2}unit-darwin:\n(?: {4}.*\n)*? {4}runs-on: \$\{\{ fromJSON\(needs\.plan\.outputs\.unit_darwin_runner\) \}\}\n/);
   // Each e2e job takes the runner its matrix entry carries, the lane's or, for POOL_E2E, the pool's or hosted Linux.
