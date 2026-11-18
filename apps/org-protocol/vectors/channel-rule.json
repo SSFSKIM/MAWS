@@ -54,6 +54,12 @@
       "steps": [
         {"event": {"kind": "joined"}, "member": true},
         {"event": {"kind": "retired", "reason": "ended"}, "member": false}
+      ] },
+    { "name": "a stamped joined, then an unstamped moved, then an unstamped ended: a member no more",
+      "steps": [
+        {"event": {"kind": "joined", "thread": "11111111-1111-4111-8111-111111111111"}, "member": true},
+        {"event": {"kind": "retired", "reason": "moved"}, "member": false},
+        {"event": {"kind": "retired", "reason": "ended"}, "member": false}
       ] }
   ]
 }

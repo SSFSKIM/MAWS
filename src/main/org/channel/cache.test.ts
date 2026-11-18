@@ -226,9 +226,9 @@ describe("a stopped thread's membership, through the kept lifecycle", () => {
     });
   }
 
-  it('keeps a moved that an unstamped end follows: no member, and the file holds both', async () => {
+  // The shared fifth case's membership runs above; here, that the file keeps both of its `retired` events.
+  it('keeps a moved that an unstamped end follows in the file, the two side by side', async () => {
     const o = await ChannelOrg.make();
-    expect(await membership(o, [stampedJoin, { kind: 'retired', reason: 'moved' }, unstampedEnd])).toEqual([true, false, false]);
     const log = emptyLog(reader(o), PROJECT, ONE);
     await log.add(at([await asS1(o, stampedJoin, 1), await asS1(o, { kind: 'retired', reason: 'moved' }, 2), await asS1(o, unstampedEnd, 3)]), ground(o));
     expect(log.file().lifecycle.map((e) => [e.offset, e.event.kind, e.event.reason])).toEqual([

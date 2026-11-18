@@ -43,12 +43,13 @@ describe('the channel rule vectors', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 
-  it('hold the parent four retired cases, in its order', () => {
+  it("hold the parent's four retired cases in its order, then the one a reader keeping one retired per session fails", () => {
     expect(CHANNEL_RULE.retired.map((c) => c.name)).toEqual([
       'a stamped joined, then an unstamped ended: still a member',
       'then an unstamped moved: a member no more',
       'a stamped ended after the unstamped one: a member no more',
       'an unstamped joined, then an unstamped ended: a member no more',
+      'a stamped joined, then an unstamped moved, then an unstamped ended: a member no more',
     ]);
   });
 
