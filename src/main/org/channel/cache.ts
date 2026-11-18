@@ -17,6 +17,11 @@
 //   authenticated (`verified`, `migrated`) and the `legacy` are kept apart, so an unchecked record never displaces an
 //   authenticated one, which alone is the session's identity and makes it addressable (address.ts). At most
 //   CHANNEL_CACHE_SESSIONS sessions: those with only a legacy lifecycle go first, then those named longest ago.
+//   A `retired` the reader may pass by (`isUnstampedEnd`: what a sminos from before threads writes when a thread's
+//   process ends) is kept apart from every other `retired` of the session, so it never displaces one the reader
+//   honours (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §G). The latest `joined`, honoured
+//   `retired` and unstamped `ended` decide membership as the whole log does, and the file may hold two `retired` of one
+//   session.
 // - The log is one reader's, an org's member: the hub serves each member only what it may read (an audience stream to
 //   its audience alone, P5 O18), so the events, the sessions, the checkpoints and the offset one member's socket reached
 //   are never another's. The file names its reader.
@@ -30,7 +35,7 @@
 import { join } from 'node:path';
 import { isHistoryAttestation, isLogSeq, isSigned, streamOf, writerMachine, type HistoryAttestation, type Signed, type StoredEvent } from '../../../../apps/org-protocol/src/index.ts';
 import type { ChannelEvent, ChannelSession, OrgMember } from '@shared/ipc/schema/org';
-import { isAuthenticated, lifecycleOf, projectSessions } from './address';
+import { isAuthenticated, isUnstampedEnd, lifecycleOf, projectSessions } from './address';
 import { privateFiles, type OrgFiles } from '../files';
 import type { LoggedEvent } from './project-socket';
 import { attestationSigned, checkpointOf, extendCheckpoint, isDx1, judgeEvent, recheckCheckpoint, type Checkpoint, type Judging, type Verdict } from './verify';
@@ -149,12 +154,16 @@ function makeLog(reader: ChannelReader | null, project: string, limits: ChannelL
   /** The log caught up since the attestations were read: a writer they cover that hasn't verified by then never will. */
   let settled = true;
 
-  /** By `<session>\n<kind>\n<authenticated or legacy>`: the latest of each that didn't fail. */
+  /**
+   * By `<session>\n<kind>\n<authenticated or legacy>`: the latest of each that didn't fail, where an unstamped `ended`
+   * is a kind of its own (`retired-unstamped-ended`) beside the `retired` every reader honours.
+   */
   const lifecycle = new Map<string, CachedEvent>();
   const keyOf = (entry: CachedEvent): string | null => {
     const named = lifecycleOf(entry.event);
     if (named === null || 'failed' in entry.verdict) return null;
-    return `${named.session}\n${named.kind}\n${isAuthenticated(entry.verdict) ? 'authenticated' : 'legacy'}`;
+    const kind = isUnstampedEnd(entry.event) ? 'retired-unstamped-ended' : named.kind;
+    return `${named.session}\n${kind}\n${isAuthenticated(entry.verdict) ? 'authenticated' : 'legacy'}`;
   };
   const sessionOfKey = (key: string) => key.slice(0, key.indexOf('\n'));
   /** At most `limits.sessions` sessions: those with only a legacy lifecycle go first, then those named longest ago. */

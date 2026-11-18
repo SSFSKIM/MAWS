@@ -169,7 +169,10 @@ function capabilitiesByKind(s: CapabilityInput): Record<KindVerb, Capability> {
   }
   const running = turnRunning(s);
   const name = sessionName(s);
-  const retire = s.member ? yes(s.seat ? undefined : 'records it retired; the process stays yours to close') : no(`${name} is retired`);
+  // The two notes of a session with no seat say what holds under every sminos in the field, since the desk cannot tell
+  // which one a machine runs: one from before threads, a thread with no wake, a thread its machine wakes for a message
+  // (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §H).
+  const retire = s.member ? yes(s.seat ? undefined : 'records it retired; it returns only if its human reopens it') : no(`${name} is retired`);
   switch (kind) {
     case 'offline': {
       const off = no(`${s.machine} is offline`);
@@ -187,7 +190,7 @@ function capabilitiesByKind(s: CapabilityInput): Record<KindVerb, Capability> {
         const send = yes(`recorded, not delivered: ${s.machine} serves no transcript of it to resume`);
         return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume: no(`${s.machine} serves no transcript of ${name} to resume`), stop: stopped };
       }
-      const send = yes(s.seat ? 'resumes the seat to read it' : 'recorded, not delivered: a closed terminal session is reopened only by Resume');
+      const send = yes(s.seat ? 'resumes the seat to read it' : `recorded: ${s.machine} wakes it for this, or holds it until its human reopens it`);
       const resume = s.transcript === 'served' ? yes() : no(`offered once ${s.machine} serves ${name}'s transcript`);
       return { send, steer: stopped, interrupt: stopped, answer: stopped, decide: stopped, model: stopped, compact: stopped, retire, resume, stop: stopped };
     }
