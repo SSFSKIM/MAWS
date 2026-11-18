@@ -440,7 +440,7 @@ describe('the round trip with the real transcript and composer', () => {
   const scrolls: number[] = [];
   const scroller = () => document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
   const rows = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')];
-  const startOf = (row: HTMLElement) => Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)![1]);
+  const startOf = (row: HTMLElement) => Number.parseFloat(row.style.top); // a row is placed at its start by `top`
   const rowAt = (y: number) => rows().find((row) => startOf(row) <= y && y < startOf(row) + 40)!.dataset.rowId!;
   const shownAt = (id: string) => startOf(rows().find((row) => row.dataset.rowId === id)!);
   const scrollTo = (y: number) =>

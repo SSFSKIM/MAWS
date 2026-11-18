@@ -73,7 +73,7 @@ function scheduledPoolDemand(outputs) {
   const boxes = [];
   for (const [, name, body] of jobs) {
     if (name === 'plan') {
-      assert.match(body, /^ {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| 'ubuntu-slim' \}\}$/m);
+      assert.match(body, /^ {4}runs-on: \$\{\{ vars\.GATE_RUNNER == 'macos' && fromJSON\('\["self-hosted","macOS","ARM64"\]'\) \|\| vars\.GATE_LIGHT_RUNNER \|\| 'ubuntu-slim' \}\}$/m);
       continue; // never a pool job
     }
     const runner = /^ {4}runs-on: (.*)$/m.exec(body)?.[1];

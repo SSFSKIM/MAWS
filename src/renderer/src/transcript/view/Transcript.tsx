@@ -443,8 +443,10 @@ export function TranscriptList({ rows, renderRow, onFollowChange, handle, classN
                 ref={virtualizer.measureElement}
                 data-index={item.index}
                 data-row-id={row.id}
-                className="absolute left-0 top-0 w-full"
-                style={{ transform: `translateY(${item.start}px)` }}
+                className="absolute left-0 w-full"
+                // placed by `top`, not a transform: Chromium places a sticky box inside (a code block's actions row) from
+                // the untransformed position, so under a translateY it slid to the bottom of its frame (ruling R8)
+                style={{ top: item.start }}
               >
                 <RowSlot row={row} renderRow={renderRow} />
               </div>
