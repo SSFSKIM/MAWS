@@ -228,15 +228,12 @@ export class Members implements RecordSource, CheckoutSource {
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
     // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
     // frame is not kept, restates nothing and reports no listing. A lane B frame is still a sminos record seen (P5 O12
-    // M11): its engine session is marked handed off and authorization told, so a spawner's bridge ends at it as at any
-    // first record, and the session stays closed with no record to decide on.
+    // M11), handed off as the join hands one off (`#refusedSight`), so a spawner's bridge ends at it as at any first
+    // record, and the session stays closed with no record to decide on.
     if (isChannelId(member.project)) {
       this.#ctx.log(`endpoint: session ${member.session.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`);
-      const unseen = member.lane === 'B' && this.#members.get(member.session)?.lane !== 'B';
-      if (member.lane === 'B') this.#mark('engines', member.session);
-      await this.gone(member.session);
-      if (unseen) this.#tell({ lane: 'B', session: member.session, appSessionId: '' });
-      return;
+      if (member.lane === 'B') await this.#refusedSight(member);
+      return this.gone(member.session);
     }
     // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
     // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
@@ -453,21 +450,47 @@ export class Members implements RecordSource, CheckoutSource {
    */
   async #join(session: string): Promise<void> {
     if (this.#apps.has(session)) return;
+    for (const status of await this.#liveRows()) {
+      if (this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
+      this.#apps.set(status.engineSessionId, status.appSessionId);
+      this.#superseded.delete(status.engineSessionId); // Decision Log 190 (b): the live rows name it now
+      this.#placed(status.engineSessionId, status.appSessionId);
+    }
+    if (!this.#apps.has(session)) await this.#bySpawn(session);
+  }
+
+  /** The engine host's live rows (`engine.sessions`), each naming both its sessions; none while it can't answer. */
+  async #liveRows(): Promise<Array<{ appSessionId: string; engineSessionId: string }>> {
     let response;
     try {
       response = await this.#ctx.dispatch('engine-host', 'engine.sessions', undefined);
     } catch (error) {
       this.#ctx.log(`endpoint: engine.sessions could not be read (${(error as Error).message}); a lane B session waits for its appSessionId`);
     }
-    if (response?.ok === true && Array.isArray(response.value)) {
-      for (const status of response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>) {
-        if (!isId(status.appSessionId) || !isId(status.engineSessionId) || this.#members.get(status.engineSessionId)?.lane !== 'B') continue;
-        this.#apps.set(status.engineSessionId, status.appSessionId);
-        this.#superseded.delete(status.engineSessionId); // Decision Log 190 (b): the live rows name it now
-        this.#placed(status.engineSessionId, status.appSessionId);
-      }
+    if (response?.ok !== true || !Array.isArray(response.value)) return [];
+    return (response.value as Array<{ appSessionId?: unknown; engineSessionId?: unknown }>).flatMap((status) => (isId(status.appSessionId) && isId(status.engineSessionId) ? [{ appSessionId: status.appSessionId, engineSessionId: status.engineSessionId }] : []));
+  }
+
+  /**
+   * P5 O12 M11 for a lane B record refused, its member held by nothing (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
+   * M2's review): its sight handed off as the join hands one off. Before anything is awaited, the app session it is joined to
+   * keeps its mark (placed again), or else its engine session is marked, and authorization is told; then the app session
+   * is placed as the join finds it, the live rows' first and else the spawn's (`#bySpawn`, which tells each app session it
+   * passes the sight to), so a `/clear` either side of it finds its app session handed off.
+   */
+  async #refusedSight(member: Member): Promise<void> {
+    const { session } = member;
+    const joined = this.#apps.get(session);
+    if (joined !== undefined) {
+      this.#placed(session, joined);
+      return this.#tell({ lane: 'B', session, appSessionId: joined });
     }
-    if (!this.#apps.has(session)) await this.#bySpawn(session);
+    this.#mark('engines', session);
+    this.#tell({ lane: 'B', session, appSessionId: '' });
+    const live = (await this.#liveRows()).find((status) => status.engineSessionId === session);
+    if (live === undefined) return this.#bySpawn(session, member.ownersProof);
+    this.#placed(session, live.appSessionId);
+    this.#tell({ lane: 'B', session, appSessionId: live.appSessionId });
   }
 
   /**
@@ -479,8 +502,8 @@ export class Members implements RecordSource, CheckoutSource {
    * op ledger's `KEPT_S`) joins neither and marks each handed off, the mark's closed side: a spawner's bridge on either
    * ends until that session's own record decides. Every record counts, the archived too, so a reuse is never missed.
    */
-  async #bySpawn(session: string): Promise<void> {
-    const proof = this.#members.get(session)?.ownersProof.find((act) => isObject(act) && act.action === 'session.spawn');
+  async #bySpawn(session: string, ownersProof: readonly unknown[] | undefined = this.#members.get(session)?.ownersProof): Promise<void> {
+    const proof = ownersProof?.find((act) => isObject(act) && act.action === 'session.spawn');
     const opId = isObject(proof) ? proof.opId : undefined;
     if (!isId(opId)) return;
     let response;

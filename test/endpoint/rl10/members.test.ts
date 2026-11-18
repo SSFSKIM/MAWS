@@ -35,9 +35,9 @@ const memberFrame = (session: string, lane: 'A' | 'B', fields: Record<string, un
  * the listings it keeps (`listed`, seeded with `before`, the ids listed at the hub before this `Members` started), every
  * report, every withdrawal and every session notify forgets, in order. A withdrawal is counted as `Listings` makes one:
  * of a session that is listed (a second of one already withdrawn signs and sends nothing), and a private report
- * withdraws, since a private session is never listed.
+ * withdraws, since a private session is never listed. `withdrawing`: each withdrawal waits for it.
  */
-function machine(live: Record<string, string> = {}, { before = [] }: { before?: string[] } = {}) {
+function machine(live: Record<string, string> = {}, { before = [], withdrawing }: { before?: string[]; withdrawing?: Promise<void> } = {}) {
   const listed = new Map<string, SessionReport>(before.map((session) => [session, { session, project: P, lane: 'A', state: 'idle', title: '', owners: ['@machine'] }]));
   const reports: SessionReport[] = [];
   const withdrawn: string[] = [];
@@ -57,7 +57,10 @@ function machine(live: Record<string, string> = {}, { before = [] }: { before?: 
         if (report.access === 'private') withdraw(report.session);
         else listed.set(report.session, report);
       },
-      gone: async (session) => withdraw(session),
+      gone: async (session) => {
+        await withdrawing;
+        withdraw(session);
+      },
     },
     listed: () => [...listed.keys()],
     forget: (session) => void forgotten.push(session),
@@ -252,10 +255,41 @@ describe('a member whose project is a declared channel’s id', () => {
     expect(m.members.handedOff(target)).toBe(false);
     await m.members.member(memberFrame(S1, 'B', { project: C }));
     expect(m.members.handedOff(target)).toBe(true);
-    expect(told).toEqual([{ lane: 'B', session: S1, appSessionId: '' }]);
+    // the app session placed as the join places it, so its next engine session is handed off too
+    expect(m.members.handedOff({ lane: 'B', session: S2, appSessionId: APP })).toBe(true);
+    expect(told).toEqual([
+      { lane: 'B', session: S1, appSessionId: '' },
+      { lane: 'B', session: S1, appSessionId: APP },
+    ]);
     expect(m.members.record(target)).toBeNull();
+    expect(m.members.appSessionId(S1)).toBeNull();
     expect(m.members.sessions()).toEqual([]);
     expect(m.reports).toEqual([]);
+  });
+
+  it('hands a first lane B record off and tells authorization before anything it awaits', async () => {
+    let open!: () => void;
+    const withdrawing = new Promise<void>((resolve) => (open = resolve));
+    const m = machine({ [S1]: APP }, { before: [S1], withdrawing });
+    const told: unknown[] = [];
+    m.members.onChange((changed) => void told.push(changed));
+    const refused = m.members.member(memberFrame(S1, 'B', { project: C }));
+    expect(told).toEqual([{ lane: 'B', session: S1, appSessionId: '' }]);
+    expect(m.members.handedOff({ lane: 'B', session: S1, appSessionId: APP })).toBe(true);
+    open();
+    await refused;
+    expect(m.withdrawn).toEqual([S1]);
+  });
+
+  it('keeps the app session’s mark for a held member already joined to it, and writes no engine mark back', async () => {
+    const m = machine({ [S1]: APP });
+    await m.members.member(memberFrame(S1, 'B'));
+    expect(m.members.handedOff({ lane: 'B', session: S1, appSessionId: '' })).toBe(false); // the join placed it under APP
+    await m.members.member(memberFrame(S1, 'B', { project: C }));
+    expect(m.members.handedOff({ lane: 'B', session: S1, appSessionId: '' })).toBe(false);
+    expect(m.members.handedOff({ lane: 'B', session: S2, appSessionId: APP })).toBe(true);
+    expect(m.members.sessions()).toEqual([]);
+    expect(m.withdrawn).toEqual([APP]);
   });
 
   it('restates nothing: inside a restatement the session is left out, and a listing it had from before is withdrawn', async () => {

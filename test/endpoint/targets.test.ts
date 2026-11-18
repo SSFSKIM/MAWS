@@ -688,6 +688,31 @@ describe('a record the join can’t place under its app session, placed by its s
     expect(changes).toContainEqual(laneB('eng-1', 'app-g'));
   });
 
+  // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, M2's review round 2: a first record refused because its
+  // project is a sminos declared channel's id is placed as the join places one, never held, with no decision between
+  // it and a `/clear` to pass the engine session's mark on
+  const CHANNEL = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
+  it('hands off the app session of a refused channel record, so the engine session after a later `/clear` is no bridge', async () => {
+    const { members, reports } = membersOf({ live: () => [{ appSessionId: 'app-a', engineSessionId: 'eng-1' }], records: () => [] });
+    await members.member(laneBMember('eng-1', [org.B], { project: CHANNEL }));
+    expect(members.get('eng-1')).toBeNull();
+    expect(members.appSessionId('eng-1')).toBeNull();
+    expect(reports).toEqual([]);
+    expect(members.handedOff(laneB('eng-2', 'app-a'))).toBe(true); // the `/clear`'s engine session, never decided on
+  });
+
+  it('hands off, by its spawn, the app session of a refused channel record that arrives after a `/clear`', async () => {
+    const { members, reports } = membersOf({
+      live: () => [{ appSessionId: 'app-b', engineSessionId: 'eng-2' }],
+      records: () => [{ appId: 'app-b', engineSessionId: 'eng-2', launchedBy: launchedBy(org.B, 'op-b') }],
+    });
+    await members.member(laneBMember('eng-1', [org.B], { project: CHANNEL, ownersProof: [spawnProof('op-b')] }));
+    expect(members.get('eng-1')).toBeNull();
+    expect(members.appSessionId('eng-1')).toBeNull();
+    expect(reports).toEqual([]);
+    expect(members.handedOff(laneB('eng-2', 'app-b'))).toBe(true);
+  });
+
   // the review's finding: a predecessor's record placed by its spawn after its successor's never replaces the listing
   it('never lets a superseded record placed by its spawn replace the listing its successor reported', async () => {
     let live = 'eng-2';
