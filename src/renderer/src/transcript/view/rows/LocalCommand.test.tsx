@@ -33,12 +33,13 @@ async function fromFileRows(name: string): Promise<CommandRow[]> {
 }
 const starting = (rows: CommandRow[], text: string) => rows.find((row) => row.text.startsWith(text))!;
 
-// The line boxes a layout would measure in an output: `tall` ones draw seven 18 px lines, the rest one; `boxes`, when a
-// case gives it, says what is drawn instead.
+// The text a layout would measure in an output, as a range measures it (font boxes, 1.5 px under each 18 px line's top
+// and 2 px above its bottom, as the Mac run measured them), through the module's own reading of lines: `tall` ones draw
+// seven lines, the rest one; `boxes`, when a case gives it, gives the line boxes drawn instead.
 const measured = vi.hoisted((): { tall: (element: HTMLElement) => boolean; boxes: (() => { top: number; bottom: number }[]) | null } => ({ tall: () => false, boxes: null }));
 vi.mock('./command-bound', async (importOriginal) => {
   const actual = await importOriginal<typeof import('./command-bound')>();
-  return { ...actual, drawnLineBoxes: (element: HTMLElement) => measured.boxes?.() ?? (measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top, bottom: top + 18 })) };
+  return { ...actual, drawnLineBoxes: (element: HTMLElement) => measured.boxes?.() ?? actual.textLines((measured.tall(element) ? [0, 18, 36, 54, 72, 90, 108] : [0]).map((top) => ({ top: top + 1.5, bottom: top + 16, lineHeight: 18 }))) };
 });
 function renderedOutputs(tall: (element: HTMLElement) => boolean) {
   measured.tall = tall;
@@ -79,7 +80,7 @@ describe('a command’s output, drawn', () => {
       const closed = output.textContent;
       expect(output.hasAttribute('data-open'), text).toBe(false);
       expect(output.hasAttribute('data-collapsed'), text).toBe(true);
-      expect(output.style.getPropertyValue('--command-bound'), text).toBe('36px'); // the bottom of the second drawn line (R19)
+      expect(output.style.getPropertyValue('--command-bound'), text).toBe('35.75px'); // the bottom of the second drawn line box (R19): the font box at 34 grown by its 1.75 px half-leading
       const more = within(container).getByRole('button', { name: 'Show more' });
       expect(more.getAttribute('aria-expanded'), text).toBe('false');
       fireEvent.click(more);
