@@ -150,8 +150,6 @@ export class Members implements RecordSource, CheckoutSource {
   readonly #listeners = new Set<(target: SessionTarget) => void>();
   /** U9: what the spine's record says of each joined lane B app session's listing, by its appSessionId (read, or heard). */
   readonly #records = new Map<string, RecordSays>();
-  /** By listing id: the member (by engine session id) whose record the listing was last reported from. */
-  readonly #reporters = new Map<string, string>();
   /** The members held at the latest welcome, by engine session id, not restated since; null outside a restatement. */
   #unrestated: Set<string> | null = null;
   /**
@@ -234,18 +232,17 @@ export class Members implements RecordSource, CheckoutSource {
       this.#superseded.delete(session);
       this.#changed(member, member);
     }
-    if (listing === null) return;
-    // A lane B app's listing outlives an engine session that shared it: while another member holds the listing (the
-    // app's engine session before or after a `/clear`), retiring the old record withdraws and forgets nothing. When the
-    // listing was last reported from the record that left, it is reported again from the records that stay, so it no
-    // longer carries the departed one's title or access. `#report` keeps P5 Decision Log 190 (b): a superseded record
-    // defers to a standing one, and reports the listing itself once none stands (the spine's index can lag a `/clear`,
-    // so the record it deferred to may have been the older).
-    if (!this.#listedBy(listing)) return this.#withdraw(listing);
-    if (member === undefined || this.#reporters.get(listing) !== session) return;
-    for (const other of this.sessions()) {
-      const stays = this.#members.get(other);
-      if (stays !== undefined && this.listingId(other) === listing) await this.#report(stays);
+    // A lane B app's listing outlives an engine session it superseded: while another member holds the listing (the
+    // app's engine session now), retiring the old record withdraws and forgets nothing.
+    if (listing !== null && !this.#listedBy(listing)) {
+      await this.#withdraw(listing);
+    } else if (listing !== null && member !== undefined) {
+      // P5 Decision Log 190 (b): a superseded record that deferred to the one that left reports the listing now (the
+      // spine's index can lag a `/clear`, so the record it deferred to may have been the older).
+      for (const other of this.sessions()) {
+        const stays = this.#members.get(other);
+        if (stays !== undefined && this.#superseded.has(other) && this.listingId(other) === listing) await this.#report(stays);
+      }
     }
   }
 
@@ -407,7 +404,6 @@ export class Members implements RecordSource, CheckoutSource {
     await this.#ctx.listings.gone(listing);
     this.#ctx.forget(listing);
     this.#records.delete(listing); // U9: read again if the session comes back
-    this.#reporters.delete(listing);
   }
 
   /**
@@ -555,7 +551,6 @@ export class Members implements RecordSource, CheckoutSource {
     if (session === null) return;
     // P5 Decision Log 190 (b): a superseded record never replaces the listing of one that is not.
     if (this.#superseded.has(member.session) && this.sessions().some((other) => other !== member.session && !this.#superseded.has(other) && this.listingId(other) === session)) return;
-    this.#reporters.set(session, member.session);
     // U9: a lane B session's listing follows its record: withdrawn while archived, under the record's title
     const says = member.lane === 'B' ? await this.#recordOf(session) : null;
     if (says?.archived === true) return this.#ctx.listings.gone(session);
