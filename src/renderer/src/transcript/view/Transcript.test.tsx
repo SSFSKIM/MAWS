@@ -3,8 +3,11 @@ import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
+import { useAttention } from '../../stores/attention'; // UX wave U1b
+import type { AttentionItem } from '@shared/graph/attention'; // UX wave U1b
 import { afterAccepted } from '../../composer/editor/submit';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine'; // UX wave U1b
 import type { Serialized } from '../../composer/editor/serialize';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
@@ -418,15 +421,21 @@ describe('Transcript', () => {
     expect(screen.queryByText('Loading…'), 'the rows are the content').toBeNull();
   });
 
-  it('docks C7’s card through renderRequest in a pending request’s slot', async () => {
+  // UX wave U1b (§C, §D): a pending question has its own row; while the session's list names its call the row draws the
+  // host's card through renderRequest in place of its receipt, and no slot row is made for the request
+  it('draws C7’s card through renderRequest in a waiting question’s own row', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
-    const source = sourceOf(b.events);
-    render(<Transcript source={source} variant="session" renderRequest={(slot) => <div data-card="">{`Card ${slot.requestKind}`}</div>} />);
-    await waitFor(() => expect(document.querySelector('[data-card]')?.textContent).toBe('Card question'));
-    expect(document.querySelector('[data-kind="request_slot"]')?.textContent).toBe('Card question');
+    const source = { ...sourceOf(b.events), key: at('transcript-test-waiting') }; // a MAWS session's key is its address (M5's fix)
+    const item = { id: 'att-r1', appSessionId: source.key, sessionId: null, kind: 'question', request: { requestId: 'r1', toolUseId: 'q1', taskId: null, agentId: null }, summary: 'Question', createdAt: '2026-09-28T10:00:00.000Z', state: 'pending', stateChangedAt: '2026-09-28T10:00:00.000Z', expiresAt: null } as unknown as AttentionItem;
+    useAttention.setState({ bySession: new Map([[source.key as AppSessionId, [item]]]), version: useAttention.getState().version + 1 });
+    onTestFinished(() => useAttention.setState({ bySession: new Map(), version: useAttention.getState().version + 1 }));
+    render(<Transcript source={source} variant="session" renderRequest={(slot) => <div data-card="">{`Card ${slot.requestKind} ${slot.requestId}`}</div>} />);
+    await waitFor(() => expect(document.querySelector('[data-card]')?.textContent).toBe('Card question r1'));
+    expect(document.querySelector('.transcript-row[data-kind="question"] [data-card]')).not.toBeNull();
+    expect(document.querySelectorAll('.transcript-row[data-kind="request_slot"]')).toHaveLength(0);
   });
 
   it('pass2/rewind: Show reveals the hidden branch muted and not in context, Hide removes it, and the boundary stays put', async () => {

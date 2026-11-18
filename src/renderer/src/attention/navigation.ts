@@ -7,7 +7,10 @@
 // P5 O7 M6 (docs/doperpowers/plans/2026-10-28-p5-o7-remote-lane-b.md, M6): another machine's item opens the same three
 // ways through its lane's opener (M2's pane, `sessions/remote-openers.ts`), with or without a record; its toast names its
 // listed row when there is no record. A greyed machine's item is never ⌘⇧J's (`selectNeedsYou` holds none).
-import { waits } from '@shared/attention/kinds';
+// UX wave U1b (M5; its document's Interfaces §E and §I): once the session is in front, ⌘⇧J goes to its oldest waiting
+// request, and an open that names a request that waits on an answer (a notification's, its fallback toast's) to that
+// request, through `showWaiting`, the one way to a request from outside its transcript.
+import { waits, waitsOnAnswer } from '@shared/attention/kinds';
 import { previewLine } from '@shared/owner/preview';
 import type { AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, AttentionId } from '@shared/graph/ids';
@@ -33,6 +36,7 @@ import { displayTitle, listedTitle } from '../sessions/title';
 import { openListed } from '../sessions/remote-openers'; // P5 O7 M6
 import { panelInMain } from '../app/regions'; // P3-G
 import { openCardSession } from '../shell/floating'; // P3-G
+import { showWaiting } from '../request-card/show-waiting'; // UX wave U1b
 
 const openInFocusedPane = (appSessionId: AppSessionId) => {
   const layout = useLayout.getState();
@@ -41,6 +45,9 @@ const openInFocusedPane = (appSessionId: AppSessionId) => {
   layout.openTab({ kind: 'session', appSessionId }, { pane: 'focused' });
 };
 
+// UX wave U1b: the request an open names, when its item waits on an answer; else it goes to none
+const requestOf = (item: AttentionItem | undefined): AttentionId | undefined => (item !== undefined && waitsOnAnswer(item) ? item.id : undefined);
+
 function openNextNeedsYou(): void {
   const rows = selectNeedsYou(useAttention.getState(), useSessions.getState());
   // UX wave U7b (§N, the second table; the architect's ruling): behind a page no session is current, so the session
@@ -48,19 +55,24 @@ function openNextNeedsYou(): void {
   const tab = tabOnScreen(useLayout.getState());
   const current = tab?.kind === 'session' ? tab.appSessionId : null;
   const next = nextNeedsYou(rows, current);
-  if (next) openItem(next.appSessionId, next.oldest);
+  if (next) openItem(next.appSessionId, next.oldest, null);
 }
 
 function navigate({ appSessionId, attentionId }: EventPayload<'attention.navigate'>): void {
   const id = appSessionId as AppSessionId;
-  openItem(id, attentionId === null ? undefined : itemOf(id, attentionId as AttentionId));
+  const item = attentionId === null ? undefined : itemOf(id, attentionId as AttentionId);
+  openItem(id, item, requestOf(item));
 }
 
 // P2-C start (2026-10-10; M6): an owner-channel item opens at its anchor in the report (anchor.ts); any other, its session
-function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined): void {
+// UX wave U1b: and then its request, `request` (null: its oldest waiting; absent: none)
+function openItem(appSessionId: AppSessionId, item: AttentionItem | undefined, request?: AttentionId | null): void {
   const anchor = item === undefined ? null : ownerAnchorOf(item);
   if (anchor !== null) openAnchor(appSessionId, anchor);
-  else openInFocusedPane(appSessionId);
+  else {
+    openInFocusedPane(appSessionId);
+    if (request !== undefined) showWaiting(appSessionId, request);
+  }
 }
 // P2-C end
 
@@ -96,7 +108,7 @@ function requestOnScreen(appSessionId: AppSessionId, item: AttentionItem | undef
   return item !== undefined && isMawsAsk(item) && toolOnScreen(ASK_SHEET_TOOL_ID) && context === appSessionId;
 }
 
-// A `maws` ask's item: its originating event read as `maws.ask.opened` (swapOf's test), or, not read yet, an ask the
+// A `maws` ask's item: its originating event read as `maws.ask.opened`, or, not read yet, an ask the
 // Question sheet's store holds under its request id (the store follows every live `maws.ask.*` batch). P2-C2: an async
 // ask's `async_input` item too, which carries no mark anchor.
 function isMawsAsk(item: AttentionItem): boolean {
@@ -145,7 +157,7 @@ function fallbackToast(toasted: ToastedItems, { appSessionId, attentionId, deliv
     id: toastId(attentionId as AttentionId),
     level: 'warning',
     text: item?.summary ? `${title} needs you · ${previewLine(item.summary, 200) ?? item.summary}` : `${title} needs you`, // E11 F2b (plan 2.6)
-    actions: [{ label: 'Open session', run: () => openItem(id, item) }], // P2-C: an owner-channel item at its mark
+    actions: [{ label: 'Open session', run: () => openItem(id, item, requestOf(item)) }], // P2-C: an owner-channel item at its mark; U1b: a request at its request
     dismissible: true,
   });
   toasted.set(attentionId as AttentionId, { appSessionId: id, held: item !== undefined });

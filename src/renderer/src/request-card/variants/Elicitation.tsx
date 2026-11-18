@@ -1,7 +1,7 @@
 // The elicitation body (C7 execution document, Request card): the server's message; for `mode: 'form'` a form from
 // `requested_schema` (elicitation-form.ts), for `mode: 'url'` the link with Open. Accept (Enter) sends the form's
 // content; Decline and Cancel (Esc) send nothing else. A schema the form cannot map leaves Decline as the only action.
-import { useEffect, useState } from 'react';
+import { useLayoutEffect, useState } from 'react';
 import { ipc } from '../../ipc/client';
 import { toAnswer } from '../answers';
 import { CardButton, Controls, Muted } from '../controls';
@@ -64,7 +64,7 @@ export function ElicitationBody({ request, busy, submit, bindKeys }: VariantProp
   const decline = () => submit(toAnswer({ kind: 'elicitation', action: 'decline' }), 'Declined');
   const cancel = () => submit(toAnswer({ kind: 'elicitation', action: 'cancel' }), 'Cancelled');
   // A form MAWS cannot show leaves Decline as the one answer (M2 decisions): no Accept, no Cancel, no key.
-  useEffect(() => bindKeys({ accept: form.ok ? accept : null, decline: form.ok ? cancel : null }));
+  useLayoutEffect(() => bindKeys({ accept: form.ok ? accept : null, decline: form.ok ? cancel : null }));
 
   return (
     <div className="flex flex-col gap-3">

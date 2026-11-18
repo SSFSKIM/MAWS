@@ -1297,20 +1297,22 @@ describe('the stopped form', () => {
 });
 
 // Decision 18: a waiting request's slot is no boundary of a run; it follows the run's row, whenever that row is made
-describe('a waiting request’s slot, as sequences through the reducer', () => {
+// UX wave U1b (§B, rule 3): a request makes no row, so a run reads the same before, during and after its requests (U2a's
+// carry of a slot past a run, `groups.ts`, now carries nothing)
+describe('a waiting request, as sequences through the reducer', () => {
   const asked = (b: Builder, r: string, t: string) => b.emit('permission.requested', { requestId: request(r), toolUseId: tool(t), toolName: 'Bash', displayName: null, input: {}, description: null, decisionReasonType: null, suggestions: [], blockedPath: null });
   const answered = (b: Builder, r: string, t: string, resolvedBy: 'user' | 'abort' = 'user') => b.emit('permission.resolved', { requestId: request(r), toolUseId: tool(t), behavior: resolvedBy === 'user' ? 'allow' : 'deny', message: null, updatedInput: null, updatedPermissions: [], resolvedBy });
   const read = (list: Row[]) => list.filter((row) => row.kind !== 'time' && row.kind !== 'user' && row.kind !== 'divider').map((row) => (row.kind === 'group' ? `group ${row.id} ${row.cells.map((cell) => cell.toolUseId).join(',')}` : row.kind === 'request_slot' ? `slot ${row.requestId}` : row.kind === 'cell' ? `cell ${row.toolUseId}` : row.kind));
   const live = (b: Builder) => read(rowsOf(withAllExpanded(reduce(b.events))));
   const RUN = (ids: string) => `group ${rowId.group(`cell:${ids.split(',')[0]}` as never)} ${ids}`;
 
-  it('a run of one, then its request, its answer and its result: one group row with one id, the slot directly after it while it waits', () => {
+  it('a run of one, then its request, its answer and its result: one group row with one id throughout', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'make' });
     expect(live(b)).toEqual([RUN('t1')]);
     asked(b, 'r1', 't1');
-    expect(live(b)).toEqual([RUN('t1'), 'slot r1']);
+    expect(live(b)).toEqual([RUN('t1')]);
     answered(b, 'r1', 't1');
     expect(live(b)).toEqual([RUN('t1')]);
     b.result('t1', 'ok');
@@ -1323,7 +1325,7 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
     b.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
     asked(b, 'r1', 't1');
     b.toolUse('t2', 'Bash', { command: 'make check' }, 'msg-1', 1);
-    expect(live(b)).toEqual([RUN('t1,t2'), 'slot r1']);
+    expect(live(b)).toEqual([RUN('t1,t2')]);
     answered(b, 'r1', 't1');
     expect(live(b)).toEqual([RUN('t1,t2')]);
     const without = builder();
@@ -1343,7 +1345,7 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
     expect(rowsOf(withAllExpanded(reduce(b.events)))).toEqual(before);
   });
 
-  it('a slot with no run open stands in place, as before', () => {
+  it('a question with no run open has its own row in place', () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('t1', 'Bash', { command: 'make' });
@@ -1351,10 +1353,10 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
     b.text('m1', 0, 'One question first.');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [{ question: 'Which?', header: 'Pick', options: [{ label: 'A', description: null, preview: null }, { label: 'B', description: null, preview: null }], multiSelect: false }] });
-    expect(live(b)).toEqual(['cell t1', 'assistant_text', 'slot r1']);
+    expect(live(b)).toEqual(['cell t1', 'assistant_text', 'question']);
   });
 
-  it('two requests waiting at once on two calls of one run: one group row, both slots after it in arrival order, and the same row when either is answered first', () => {
+  it('two requests waiting at once on two calls of one run: one group row, the same when either is answered first', () => {
     const waiting = () => {
       const b = builder();
       b.turn('u1');
@@ -1364,16 +1366,16 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
       asked(b, 'r1', 't1');
       return b;
     };
-    expect(live(waiting())).toEqual([RUN('t1,t2'), 'slot r2', 'slot r1']);
+    expect(live(waiting())).toEqual([RUN('t1,t2')]);
     const first = waiting();
     answered(first, 'r1', 't1');
-    expect(live(first)).toEqual([RUN('t1,t2'), 'slot r2']);
+    expect(live(first)).toEqual([RUN('t1,t2')]);
     const second = waiting();
     answered(second, 'r2', 't2');
-    expect(live(second)).toEqual([RUN('t1,t2'), 'slot r1']);
+    expect(live(second)).toEqual([RUN('t1,t2')]);
   });
 
-  it('a real row arriving while a slot is carried: the run’s row is made there, the slot follows it and the real row comes after', () => {
+  it('a real row arriving while a request waits: the run’s row is made there and the real row comes after', () => {
     const subagent = builder();
     subagent.turn('u1');
     subagent.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
@@ -1381,7 +1383,7 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
     asked(subagent, 'r1', 't2');
     subagent.toolUse('a1', 'Agent', { description: 'Survey', prompt: 'p' }, 'msg-1', 2);
     subagent.emit('subagent.started', { taskId: task('k1'), toolUseId: tool('a1'), description: 'Survey', subagentType: null, isBackground: false, spawnDepth: 1, prompt: null });
-    expect(live(subagent)).toEqual([RUN('t1,t2'), 'slot r1', 'subagent']);
+    expect(live(subagent)).toEqual([RUN('t1,t2'), 'subagent']);
     const steer = builder();
     steer.turn('u1');
     steer.toolUse('t1', 'Bash', { command: 'make' }, 'msg-1', 0);
@@ -1390,10 +1392,10 @@ describe('a waiting request’s slot, as sequences through the reducer', () => {
     steer.emit('user.message', { messageUuid: uuid('u2'), content: 'also run the linter', isReplay: false, isSynthetic: false, origin: 'human', bash: null });
     steer.emit('turn.started', { userMessageUuid: uuid('u2'), origin: 'human' });
     const list = rowsOf(withAllExpanded(reduce(steer.events)));
-    expect(list.filter((row) => row.kind !== 'time' && row.kind !== 'divider').map((row) => (row.kind === 'user' ? `user ${row.steer}` : row.kind))).toEqual(['user false', 'group', 'request_slot', 'user true']);
+    expect(list.filter((row) => row.kind !== 'time' && row.kind !== 'divider').map((row) => (row.kind === 'user' ? `user ${row.steer}` : row.kind))).toEqual(['user false', 'group', 'user true']);
   });
 
-  it('the rows with a slot are the rows without it but for the slot', () => {
+  it('the rows with a request waiting are the rows without it', () => {
     const turn = (slot: boolean) => {
       const b = builder();
       b.turn('u1');
@@ -1426,7 +1428,8 @@ describe('`background` over a recorded MCP call moved to the background (uxwave/
 });
 
 // UX wave U2, M2 (C2, C5; O-15): a turn an answer's notice opened reads `Worked for` where it did work, and has no line
-// where it only answers; the notice stays in view through a fold either way
+// where it only answers. UX wave U1b (decision 9 and the architect's ruling of 2026-11-15 on M1's D-7): with other work
+// the notice folds with it, its question's row saying the answer; as the turn's only work it stays in view
 describe('the line of a turn an answer opened', () => {
   const ANSWER: CarriedArrival = { class: 'answer', tool: 'sminos', call: 'tu-q7', summary: 'Your questions have been answered: "Which colour?"="Teal". You can now continue with these answers in mind.', answers: null, dismissed: false };
   const opened = (work: boolean) => {
@@ -1446,9 +1449,9 @@ describe('the line of a turn an answer opened', () => {
     expect(kinds(opened(false))).toEqual(['notice', 'assistant_text']);
   });
 
-  it('with one call reads `Worked for …` and keeps its notice in view when folded', () => {
+  it('with one call reads `Worked for …` and folds its notice with the call', () => {
     const list = opened(true);
-    expect(kinds(list)).toEqual(['divider', 'notice', 'assistant_text']);
+    expect(kinds(list)).toEqual(['divider', 'assistant_text']);
     const line = find(list, 'divider');
     expect(line.opener).toMatchObject({ class: 'answer' });
     expect(dividerCopy({ ...line, durationMs: line.summary.durationMs ?? 0 })).toBe('Worked for 1s · Ran a command');

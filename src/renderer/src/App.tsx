@@ -282,7 +282,8 @@ export function App() {
   // session; the capsule's and the delivery row's actions (the Question sheet, Open externally, Reveal in Finder)
   useEffect(() => connectPaneShows(), []);
   useEffect(() => registerMawsTranscriptActions(mawsTranscriptActions), []);
-  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that open it
+  // M4: the Question sheet, registered once and never unregistered (C8a's rule above), and the live asks that feed its
+  // store (UX wave U1b: an ask opens no sheet; the person opens it)
   useEffect(() => {
     registerPanelTool(askSheetTool);
   }, []);

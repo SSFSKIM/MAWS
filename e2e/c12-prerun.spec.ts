@@ -1486,7 +1486,7 @@ test('§10.9 queue, steer, stop and resume as labelled; a paused queue survives 
       }
       await send(page, 'Use the Bash tool to run exactly this command and nothing else: mkdir c12-lost');
       await expect(main(page).getByRole('group', { name: 'Approval needed' })).toBeVisible({ timeout: 120_000 });
-      await page.keyboard.press('Meta+.'); // app-level: the card has replaced the composer
+      await page.keyboard.press('Meta+.'); // app-level: Stop, with the keyboard in the composer beside the card at the transcript's end (UX wave U1b)
       rec.note('10.9.lost.interruptSentAt', new Date().toISOString());
       await page.waitForTimeout(5_000);
       const s = await statusOf(page, d);

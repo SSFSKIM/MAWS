@@ -430,6 +430,12 @@ describe('request preview', () => {
     expect(screen.getByText(`${W1}/src`).getAttribute('title')).toBe(`${W1}/src`);
   });
 
+  // UX wave U1b (M3): the slot's two placements, card and hover, each offer Open session
+  it.each(['card', 'hover'] as const)('offers Open session in the %s placement', (placement) => {
+    render(<RequestPreview item={readAttention.items[0]} request={requests['req-synthetic-read-9a1d4262']} placement={placement} paneIndex={null} />);
+    expect(screen.getByRole('button', { name: 'Open session' })).toBeTruthy();
+  });
+
   it('shows the item’s summary while the request is not known', () => {
     render(<RequestPreview item={pageItem('a1', 'interrupted', WHEN, { summary: 'Session interrupted, 1 approval lost' })} request={null} placement="hover" paneIndex={null} />);
     expect(screen.getByText('Session interrupted, 1 approval lost')).toBeTruthy();

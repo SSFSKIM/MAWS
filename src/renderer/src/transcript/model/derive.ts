@@ -134,14 +134,17 @@ function flatten(state: TranscriptState, before: Map<RowId, Row>, times: Map<Row
 // API diagnostics (transient retries remain work), and the `maws` server's capsule, delivery row and artifact row (E1,
 // E2: what the agent asked, delivered and registered stays in view, as an answered question does), and a message tool's
 // message (P4-R7: always addressed to the human, whatever the owner lane says, as a `<message>` span is, which the
-// presenter draws and so keeps with the lane off), and a task's end that reports an outcome, a scheduled fire and an
-// answer's notice (UX wave U3: one short fact each, which a failed task would otherwise show nowhere, and the answer
-// until U1b puts it on its question's row; every message between agents and sessions folds, O-12). The divider folds everything else, so a turn of a local command
+// presenter draws and so keeps with the lane off), a task's end that reports an outcome and a scheduled fire (UX wave
+// U3: one short fact each, which a failed task would otherwise show nowhere; every message between agents and sessions
+// folds, O-12; UX wave U1b: an answer's notice folds too where its turn did other work, its question's row saying the
+// answer), and a plan whose request
+// waits (UX wave U1b: its form is in the row). The divider folds everything else, so a turn of a local command
 // alone (`/compact`: its boundary and its output) has no work and no "Worked for 0s" divider. A question still counts as
 // work for where the answer starts (WORK_ROWS).
 export const isPersistentRow = (row: Row): boolean =>
   (row.kind === 'assistant_text' && row.cut === true) /* P5 O9: a reply an interrupt cut off, no work of the turn */ || row.kind === 'to_human' /* P4-R7 */ || row.kind === 'ask' || row.kind === 'delivery' /* E1 */ || row.kind === 'side_thread' /* E3 */ || row.kind === 'artifact' /* E2 */ || row.kind === 'browser_action' /* E4c */ || row.kind === 'browser_activity' /* E13: never derived here; placed by the view */ || row.kind === 'user' || row.kind === 'boundary' || row.kind === 'local_command' || row.kind === 'question' || (row.kind === 'assistant_text' && (row.phase === 'answer' || row.forHuman === true)) || (row.kind === 'error' && (row.scope === 'hook' || row.scope === 'plugin' || (row.scope === 'api' && row.severity === 'error')))
-  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome, a scheduled fire and, until U1b, an answer stay
+  || isPersistentNotice(row) // UX wave U3 (O-12, O-28): a message folds with its turn; a task's end with an outcome and a scheduled fire stay
+  || (row.kind === 'plan' && row.waiting === true) // UX wave U1b (Interfaces §B, rule 4): a form folded away could not be answered
   || row.kind === 'gap'; // P5 O7 M8: events here were not delivered; a closed turn's fold never hides that
 
 // P5 O9 (the M10 sitting): the rows the fold leaves in view, the persistent ones and, while any agent it names still
@@ -749,8 +752,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
         const toolUseId = 'toolUseId' in event ? event.toolUseId : null;
         const pending = toolUseId ? pendingRows.get(toolUseId) : undefined;
         if (pending) pending.requestId = event.requestId;
-        if (state?.pending.has(event.requestId)) items.push({ kind: 'row', row: slotRow(event, turn.id, toolUseId) });
-        break;
+        break; // UX wave U1b (§B, rule 3): no row for a request; it is drawn in its call's row or at the transcript's end
       }
       case 'permission.resolved': {
         const rec = toolRecord(event.toolUseId);
@@ -892,7 +894,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       }
       // E1 start
       case 'ask':
-        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers) });
+        resolved.push({ kind: 'row', row: askRow(asks.get(item.toolUseId)!, turn.id, context, turn.askSteers, ui?.waitingForms) });
         break;
       case 'delivery':
         resolved.push({ kind: 'row', row: deliveryRow(deliveries.get(item.toolUseId)!, turn.id, context) });
@@ -965,7 +967,11 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
   // P4-R7: a message tool's message needs no such flag: it is addressed to the human whatever the lane, as a span the
   // presenter draws with the lane off is (inked, so kept), and `isPersistentRow` keeps every one
   const allRows = groupItems(ordered, turn, ui).map((row): Row => (row.kind === 'assistant_text' && forHuman(row) ? { ...row, forHuman: true } : row));
-  const workRows = allRows.filter((row) => !isPersistentRow(row));
+  // UX wave U1b (the architect's ruling of 2026-11-15 on M1's D-7): an answer's line that is the turn's only work is no
+  // work: it stays in view and the turn has no line (U2a's O-15), where with other work it folds with it (decision 9)
+  const folding = allRows.filter((row) => !isPersistentRow(row));
+  const answerAlone = folding.length > 0 && folding.every(isAnswerNotice);
+  const workRows = answerAlone ? [] : folding;
   const cells = collectCells(workRows);
   // The architect's ruling (2026-11-13, "A refused sent message and the turn's denied count"): a fold never hides a
   // denial. A refused send is drawn as its message row, no cell, and that row folds with its turn (O-12, `staysInView`),
@@ -1020,7 +1026,7 @@ function deriveTurn(turn: TurnState, state: TranscriptState | null): TurnDerivat
       caption: captionText(parts, true), parts: parts.map((part) => part.text), counts: finishedLines(cells),
     });
   }
-  rows.push(...(expanded ? allRows : allRows.filter(staysInView))); // with no divider there is no work: every row is persistent
+  rows.push(...(expanded ? allRows : allRows.filter((row) => staysInView(row) || answerAlone))); // with no divider there is no work: every row is persistent
   return { rows, summary, cells, work: workOf(turn, tools, cells, subagents, state?.cwd ?? null), readAgents };
 }
 
@@ -1241,15 +1247,19 @@ function subagentRow(group: SubagentGroup, turnId: TurnId): RowOf<'subagent'> {
 function requestOrHistoricalRow(pending: Pending, turnId: TurnId, state: TranscriptState | null): Row | null {
   const { use } = pending;
   const input = record(use.input);
-  if (pending.requestId && state?.pending.has(pending.requestId)) return null; // its slot row was emitted at the request's position
+  const waiting = state?.ui.waitingForms?.has(use.toolUseId) === true ? { waiting: true as const } : {}; // UX wave U1b (§B, rule 2)
   if (pending.kind === 'question') {
     const questions = Array.isArray(input.questions) ? input.questions.map(record).map((q) => ({
       question: str(q.question), header: str(q.header), multiSelect: q.multiSelect === true,
       options: Array.isArray(q.options) ? q.options.map(record).map((o) => ({ label: str(o.label), description: typeof o.description === 'string' ? o.description : null, preview: typeof o.preview === 'string' ? o.preview : null })) : [],
     })) : [];
-    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers: pending.answers, error: pending.error };
+    // UX wave U1b (§B, the answer's join): an asynchronous question's own result answers nothing; its delivery, joined
+    // by the call wherever it landed, reads as the blocking call's result would (a refusal: a decline, an empty map)
+    const delivered = pending.answers === null ? state?.index.answers.get(use.toolUseId) : undefined;
+    const answers = delivered === undefined || delivered.dismissed ? pending.answers : askModAnswers(questions, { content: delivered.summary, isError: false });
+    return { id: rowId.question(use.toolUseId), turnId, at: use.at, kind: 'question', toolUseId: use.toolUseId, questions, answers, error: pending.error, ...waiting, ...(delivered?.dismissed === true && { dismissed: true as const }) };
   }
-  return { id: rowId.plan(use.toolUseId), turnId, at: use.at, kind: 'plan', toolUseId: use.toolUseId, plan: str(input.plan), outcome: pending.outcome, feedback: pending.feedback };
+  return { id: rowId.plan(use.toolUseId), turnId, at: use.at, kind: 'plan', toolUseId: use.toolUseId, plan: str(input.plan), outcome: pending.outcome, feedback: pending.feedback, ...waiting };
 }
 
 // E1 start: the capsule and the delivery row from their records.
@@ -1285,7 +1295,7 @@ function resultOfDelivery(delivery: DeliveryRecord, result: Event<'tool.result'>
 // with no result and no cancellation (a session that ended mid-ask, read from disk, where no meta row says so) can no
 // longer be answered, so it reads cancelled rather than waiting forever; no event says why, so it carries no reason
 // (`cancelReason` is the event's, for a cancelled row only).
-function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined): RowOf<'ask'> {
+function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: ReadonlyMap<string, AskAnswer[]> | undefined, waitingForms: ReadonlySet<ToolUseId> | undefined): RowOf<'ask'> {
   const { use, input, opened } = ask;
   const askId = opened?.askId ?? ask.askId ?? use.toolUseId;
   const blocking = opened?.blocking ?? input?.blocking ?? true;
@@ -1300,6 +1310,7 @@ function askRow(ask: AskRecord, turnId: TurnId, context: TurnContext, steers: Re
     title: opened ? opened.title : (input?.title ?? null), context: opened ? opened.context : (input?.context ?? null), blocking,
     questions, state, answers, error: ask.error,
     cancelReason: state === 'cancelled' ? (ask.cancelled ?? (ask.stopped ? 'withdrawn' : null)) : null, // the host's own reason first
+    ...(waitingForms?.has(use.toolUseId) === true && { waiting: true as const }), // UX wave U1b (§B, rule 2)
   };
 }
 
@@ -1419,11 +1430,15 @@ export function artifactTitlesIn(state: TranscriptState | null, turn: TurnState)
 }
 
 
-// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome, a
-// scheduled fire and, until U1b fills the question's row with it, an answer stay in view when their turn folds (the
-// architect's ruling of 2026-11-13; U1b removes the answer's term); a notice with no outcome and the wake's fold with it.
+// UX wave U3 (O-28, the fold table of the U3a document's Interfaces D): a task's end that reports an outcome and a
+// scheduled fire stay in view when their turn folds; a notice with no outcome and the wake's fold with it. UX wave U1b
+// (decision 9, U3a's hand-over): an answer's notice folds with the turn it reached the agent in, now that its question's
+// row carries the answer; it is still derived there, the head row a turn's `opener` is read from. As the turn's only
+// work it stays in view (deriveTurn, `answerAlone`).
+const isAnswerNotice = (row: Row): boolean => row.kind === 'notice' && row.class === 'answer';
+
 function isPersistentNotice(row: Row): boolean {
-  return row.kind === 'notice' && (row.class === 'schedule' || row.class === 'answer' || (row.class === 'task' && row.outcome !== null));
+  return row.kind === 'notice' && (row.class === 'schedule' || (row.class === 'task' && row.outcome !== null));
 }
 
 // Whether a peer user.message is drawn by its companion event (E7): an envelope (peer.message, subagent.message), or, UX
@@ -1691,12 +1706,6 @@ function browserActionRow(rec: BrowserActionRecord, turnId: TurnId, context: Tur
 }
 // E4c end
 
-function slotRow(event: Event<'permission.requested' | 'question.requested' | 'plan.requested' | 'dialog.requested' | 'elicitation.requested'>, turnId: TurnId | null, toolUseId: ToolUseId | null): RowOf<'request_slot'> {
-  const requestKind = event.kind.split('.')[0] as RowOf<'request_slot'>['requestKind'];
-  const toolName = event.kind === 'permission.requested' ? event.toolName : event.kind === 'question.requested' ? 'AskUserQuestion' : event.kind === 'plan.requested' ? 'ExitPlanMode' : event.kind === 'elicitation.requested' ? event.mcpServerName : null;
-  return { id: rowId.slot(event.requestId), turnId, at: event.at, kind: 'request_slot', requestId: event.requestId, toolUseId, requestKind, toolName, requestedAt: event.at };
-}
-
 function boundaryRow(event: Event<'boundary.compaction' | 'boundary.reset' | 'boundary.retraction'>, turnId: TurnId | null): RowOf<'boundary'> {
   const base = { id: rowId.boundary(event.id), turnId, at: event.at, kind: 'boundary' as const, hiddenRows: 0, revealed: false };
   switch (event.kind) {
@@ -1857,8 +1866,7 @@ function looseRows(state: TranscriptState, events: SessionEvent[]): Row[] {
       case 'plan.requested':
       case 'dialog.requested':
       case 'elicitation.requested':
-        if (state.pending.has(event.requestId)) rows.push(slotRow(event, null, 'toolUseId' in event ? event.toolUseId : null));
-        break;
+        break; // UX wave U1b (§B, rule 3): no row for a request
       // E3 start
       case 'side.thread.opened':
       case 'side.thread.summarised': {

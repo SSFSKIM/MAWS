@@ -1,110 +1,50 @@
 import { describe, expect, it } from 'vitest';
-import type { SessionEvent } from '@shared/graph/events';
 import type { AttentionId } from '@shared/graph/ids';
 import { item } from '../../../../../test/support/builders';
 import { askItemFor, askOpened, itemFor, permission, syntheticRequest } from '../../request-card/test-requests';
-import { swapOf } from './swap';
+import { noticeOf } from './swap';
 
 const A = 'app-a';
+const none = { request: { requestId: null, toolUseId: null, taskId: null, agentId: null } };
 
-describe('the docked swap takes the oldest answerable request, once it is read', () => {
-  it('docks the oldest read request, counts the rest, and reads the unread first', () => {
-    const older = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
-    const newer = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:05:00.000Z' });
-    const unread = permission({ requestId: 'req-3' as never, at: '2026-09-29T08:00:00.000Z' });
-    const items = [itemFor(newer, A), itemFor(older, A), itemFor(unread, A)];
-    const requests = new Map<AttentionId, SessionEvent | null>([
-      [items[0].id, newer],
-      [items[1].id, older],
-    ]);
-    const swap = swapOf(items, requests);
-    expect(swap.item?.id).toBe(items[1].id);
-    expect(swap.waiting).toBe(1);
-    expect(swap.unread.map((i) => i.id)).toEqual([items[2].id]); // the oldest waits until its request is read
+// UX wave U1b (decision 14): what the composer shows above itself is the oldest waiting notice that names no request; a
+// request is drawn in the session's transcript, never here and never in the editor's place.
+describe('the notice above the composer', () => {
+  it('is the oldest open notice that names no request: an error, an interruption, auto mode unavailable', () => {
+    const error = item(A, 'error', '2026-09-29T09:10:00.000Z', { ...none, id: 'a:error:1' as AttentionId });
+    const interrupted = item(A, 'interrupted', '2026-09-29T09:05:00.000Z', { ...none, id: 'a:interrupted:1' as AttentionId });
+    const auto = item(A, 'auto_mode_unavailable', '2026-09-29T09:00:00.000Z', { ...none, id: 'a:auto:1' as AttentionId });
+    expect(noticeOf([error, interrupted, auto])?.id).toBe(auto.id);
+    expect(noticeOf([error, interrupted])?.id).toBe(interrupted.id);
+    expect(noticeOf([error])?.id).toBe(error.id);
   });
 
-  it('never swaps for an undeclared dialog or a notice: those show above the frame', () => {
-    const undeclared = syntheticRequest('undeclared-dialog');
-    const dialog = itemFor(undeclared, A);
-    const error = item(A, 'error', '2026-09-29T09:10:00.000Z', { request: { requestId: null, toolUseId: null, taskId: null, agentId: null } });
-    const swap = swapOf([dialog, error], new Map<AttentionId, SessionEvent | null>([[dialog.id, undeclared]]));
-    expect(swap.item).toBeNull();
-    expect(swap.notice?.id).toBe(dialog.id);
-    const declared = syntheticRequest('refusal-fallback-dialog');
-    const answerable = itemFor(declared, A);
-    expect(swapOf([answerable], new Map([[answerable.id, declared as SessionEvent]])).item?.id).toBe(answerable.id);
+  it('is never a request, whatever its kind and whether or not it was read: the transcript draws it', () => {
+    const requests = [
+      itemFor(permission(), A),
+      itemFor({ ...permission(), kind: 'question.requested', questions: [] } as never, A),
+      itemFor(syntheticRequest('undeclared-dialog'), A), // drawn at the end, with the card's own words
+      itemFor(syntheticRequest('refusal-fallback-dialog'), A),
+      askItemFor(askOpened({ at: '2026-09-29T08:00:00.000Z' }), A), // a blocking ask: its row's form
+      item(A, 'async_input', '2026-09-29T09:00:00.000Z', { id: 'lane-a:eng-1:toolu_q' as AttentionId, request: { requestId: 'toolu_q' as never, toolUseId: 'toolu_q' as never, taskId: null, agentId: null } }),
+    ];
+    expect(noticeOf(requests)).toBeNull();
+    const error = item(A, 'error', '2026-09-29T10:00:00.000Z', { ...none, id: 'a:error:2' as AttentionId });
+    expect(noticeOf([...requests, error])?.id).toBe(error.id);
   });
 
-  it('shows a request main no longer holds as a notice, never in the editor’s place, whatever its kind', () => {
-    const kinds = [permission(), { ...permission(), kind: 'question.requested', questions: [] }, syntheticRequest('refusal-fallback-dialog')] as SessionEvent[];
-    for (const event of kinds) {
-      const gone = itemFor(event as never, A);
-      const swap = swapOf([gone], new Map<AttentionId, SessionEvent | null>([[gone.id, null]])); // attention.request answered null
-      expect(swap.item).toBeNull();
-      expect(swap.notice?.id).toBe(gone.id);
-      expect(swap.waiting).toBe(0);
-    }
-  });
-
-  it('docks no answered or retired request (UC-1: the composer is back at the answer)', () => {
-    const event = permission();
-    const delivered = itemFor(event, A, { state: 'delivered' });
-    expect(swapOf([delivered], new Map([[delivered.id, event as SessionEvent]])).item).toBeNull();
-    expect(swapOf([itemFor(event, A, { state: 'retired' })], new Map()).item).toBeNull();
-  });
-
-  // UC-1 (A17, §C): the composer's place is given back at the answer
-  it('docks no answered request: the next waiting one docks, and the count behind it leaves the answered one out', () => {
-    const first = permission({ requestId: 'req-1' as never, at: '2026-09-29T09:00:00.000Z' });
-    const second = permission({ requestId: 'req-2' as never, at: '2026-09-29T09:05:00.000Z' });
-    const third = permission({ requestId: 'req-3' as never, at: '2026-09-29T09:10:00.000Z' });
-    const items = [itemFor(first, A, { state: 'delivered' }), itemFor(second, A), itemFor(third, A)];
-    const swap = swapOf(items, new Map<AttentionId, SessionEvent | null>(items.map((i, n) => [i.id, [first, second, third][n] as SessionEvent])));
-    expect(swap.item?.id).toBe(items[1].id);
-    expect(swap.waiting).toBe(1);
-    expect(swapOf([items[0]], new Map([[items[0].id, first as SessionEvent]])).item).toBeNull();
-  });
-
-  // E1 M4b: the Question sheet answers an ask, not the composer, so its item never takes the editor's place
-  it('shows a blocking ask as a notice above the frame, leaving the editor and any request to dock', () => {
-    const ask = askOpened({ at: '2026-09-29T08:00:00.000Z' });
-    const asked = askItemFor(ask, A);
-    const event = permission();
-    const approval = itemFor(event, A);
-    const swap = swapOf([asked, approval], new Map<AttentionId, SessionEvent | null>([[asked.id, ask], [approval.id, event]]));
-    expect(swap.notice?.id).toBe(asked.id);
-    expect(swap.item?.id).toBe(approval.id);
-    expect(swap.waiting).toBe(0);
-    expect(swapOf([asked], new Map<AttentionId, SessionEvent | null>([[asked.id, ask]]))).toMatchObject({ item: null, notice: { id: asked.id }, waiting: 0 });
-  });
-
-  // U1a (Reported 1, §C's last rows): a terminal session's asynchronous question keeps the dock until U1b gives it its
-  // row: an `async_input` item with a request id and no anchor, once its request reads as a question. An owner-channel
-  // question (its anchor) and MAWS's non-blocking ask (read as `maws.ask.opened`) dock nothing and are no notice.
-  it('docks a terminal session’s asynchronous question once its request reads as a question, and no other async_input', () => {
-    const question = { ...permission(), kind: 'question.requested', requestId: 'toolu_q', toolUseId: 'toolu_q', questions: [] } as unknown as SessionEvent;
-    const asked = item(A, 'async_input', '2026-09-29T09:00:00.000Z', { id: 'lane-a:eng-1:toolu_q' as AttentionId, request: { requestId: 'toolu_q' as never, toolUseId: 'toolu_q' as never, taskId: null, agentId: null } });
-    expect(swapOf([asked], new Map())).toMatchObject({ item: null, notice: null, unread: [{ id: asked.id }] }); // read first
-    expect(swapOf([asked], new Map([[asked.id, question]]))).toMatchObject({ item: { id: asked.id }, notice: null, waiting: 0, unread: [] });
-    expect(swapOf([asked], new Map([[asked.id, null]]))).toMatchObject({ item: null, notice: null, unread: [] }); // no longer held: nothing to answer
-
-    const owner = item(A, 'async_input', '2026-09-29T08:00:00.000Z', { anchor: { messageUuid: 'm-1' as never, blockIndex: 0, span: 0 } });
-    expect(swapOf([owner], new Map())).toMatchObject({ item: null, notice: null, unread: [] }); // never read: its card is in the transcript
-    const ask = askOpened({ blocking: false, at: '2026-09-29T08:00:00.000Z' });
-    const nonBlocking = askItemFor(ask, A, { kind: 'async_input' });
-    expect(swapOf([nonBlocking], new Map<AttentionId, SessionEvent | null>([[nonBlocking.id, ask]]))).toMatchObject({ item: null, notice: null, unread: [] });
-    expect(swapOf([asked, nonBlocking, owner], new Map<AttentionId, SessionEvent | null>([[asked.id, question], [nonBlocking.id, ask]])).item?.id).toBe(asked.id);
+  it('is no owner-channel question and no must-read: they stand in the transcript (P2-C)', () => {
+    const anchor = { anchor: { messageUuid: 'm-1' as never, blockIndex: 0, span: 0 } };
+    expect(noticeOf([item(A, 'async_input', '2026-09-29T08:00:00.000Z', { ...none, ...anchor }), item(A, 'essential_unread', '2026-09-29T08:01:00.000Z', { ...none, ...anchor })])).toBeNull();
   });
 
   // The owner's ruling (2026-10-30; it withdraws E11 F2b's kept notice): an error seen or dismissed is no notice, only an
   // unseen one is
   it('shows an open error as the notice and none once it is seen or dismissed', () => {
-    const none = { request: { requestId: null, toolUseId: null, taskId: null, agentId: null } };
     const seenBefore = item(A, 'error', '2026-09-29T09:00:00.000Z', { ...none, id: 'a:error:1' as AttentionId, state: 'confirmed' }); // a store's from before the ruling
     const retired = item(A, 'error', '2026-09-29T08:00:00.000Z', { ...none, id: 'a:error:0' as AttentionId, state: 'retired' });
     const fresh = item(A, 'error', '2026-09-29T10:00:00.000Z', { ...none, id: 'a:error:2' as AttentionId });
-    const requests = new Map<AttentionId, SessionEvent | null>();
-    expect(swapOf([seenBefore, retired], requests).notice).toBeNull();
-    expect(swapOf([seenBefore, retired, fresh], requests).notice?.id).toBe(fresh.id);
+    expect(noticeOf([seenBefore, retired])).toBeNull();
+    expect(noticeOf([seenBefore, retired, fresh])?.id).toBe(fresh.id);
   });
 });

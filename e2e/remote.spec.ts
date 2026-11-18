@@ -2116,12 +2116,14 @@ test('M8: a session spawned on B leads a full project past its cap and stays amo
       const capsuleOn = (on: Page) => main(on).locator('section.transcript-ask');
       await quoting(expect(capsuleOn(page), 'the ask’s card in A’s pane, waiting').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
       await quoting(expect(capsuleOn(page2), 'and in A2’s').toHaveAttribute('data-ask-state', 'pending', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);
-      const sheet = page.locator('[data-ask-sheet]');
-      await expect(sheet, 'its sheet, read from A').toHaveAttribute('data-ask-id', askId, { timeout: 30_000 });
-      const question = sheet.locator('section[data-question-id="q1"]');
+      // UX wave U1b (O-17): the ask's form stands in its capsule's row, read from A, and no sheet opens by itself
+      const form = capsuleOn(page).locator('.transcript-ask-form [data-hover-ask]');
+      await quoting(expect(form, 'its form in the capsule’s row, read from A').toHaveAttribute('data-hover-ask', askId, { timeout: 30_000 }), async () => `${await paneSaid(page)}\n${mainSaid(page)}`);
+      await expect(page.locator('[data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
+      const question = form.locator('section[data-question-id="q1"]');
       await expect(question).toContainText(M8_QUESTION);
       await question.getByRole('radio', { name: 'Yes' }).click();
-      await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+      await form.getByRole('button', { name: 'Submit', exact: true }).click();
       await quoting(expect(capsuleOn(page), 'settled on A').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${mainSaid(page)}\n${await bSaid()}`);
       await expect.poll(async () => (await b.request<Asks>('maws.asks.list', { appSessionId: spawnedApp })).asks, { timeout: 30_000, message: 'on B: nothing pending' }).toEqual([]);
       await quoting(expect(capsuleOn(page2), 'and on A2, which answered nothing').toHaveAttribute('data-ask-state', 'answered', { timeout: 60_000 }), async () => `${await paneSaid(page2)}\n${mainSaid(page2)}`);

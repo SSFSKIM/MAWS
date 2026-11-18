@@ -545,3 +545,140 @@ describe('a fresh press', () => {
     expect(fresh).toHaveBeenCalledTimes(3);
   });
 });
+
+// UX wave U1b (the U1b document, Interfaces §F; an insertion in U6's dispatcher, its §I): a binding may say at the press
+// whether the key is its own (`claims`), whatever element holds the focus. Asked once the chord matched and the refusals
+// that hold for every binding passed; true takes the key past the row's own refusal of a text field, a key sink or a
+// button, and past `within`; false passes the binding over as if it were not bound, so the row's other bindings by
+// containment and the next rows of the table see the key. Of two that claim, the later registration; `fresh` after.
+describe('a binding that claims the press', () => {
+  const claimed = vi.fn();
+  const contained = vi.fn();
+  const queued = vi.fn();
+  let claim: (event: KeyboardEvent) => boolean = () => true;
+  const asked = vi.fn((event: KeyboardEvent) => claim(event));
+  function Claiming({ id = 'request.allowOnce', spy = claimed, fresh = false }: { id?: ActionId; spy?: () => void; fresh?: boolean }) {
+    useKeyChord(id, spy, { claims: asked, fresh });
+    return null;
+  }
+  function Page({ children }: { children?: ReactNode }) {
+    const row = useRef<HTMLDivElement>(null);
+    const sink = useRef<HTMLDivElement>(null);
+    useKeyChord('request.allowOnce', contained, { within: row });
+    useKeyChord('composer.queue', queued, { within: sink });
+    return (
+      <section data-pane={0}>
+        <div ref={row} tabIndex={-1} aria-label="other row">
+          <button type="button">a button in the row</button>
+        </div>
+        <div ref={sink} data-key-sink="composer">
+          <textarea aria-label="composer box" />
+        </div>
+        <input type="search" aria-label="a text field" />
+        {children}
+      </section>
+    );
+  }
+  const cmdEnter = (target: HTMLElement, init: KeyboardEventInit = {}) => {
+    const event = new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', metaKey: true, bubbles: true, cancelable: true, ...init });
+    target.dispatchEvent(event);
+    return event;
+  };
+  const focused = (label: string) => {
+    const element = screen.getByLabelText(label);
+    act(() => element.focus());
+    return element;
+  };
+
+  beforeEach(() => {
+    cleanup();
+    claim = () => true;
+    for (const spy of [claimed, contained, queued, asked]) spy.mockClear();
+  });
+
+  it('true: takes the key from a text field, a key sink, a button and the body, with no element of its own', () => {
+    render(
+      <Page>
+        <Claiming />
+      </Page>,
+    );
+    for (const target of [focused('a text field'), focused('composer box'), screen.getByRole('button', { name: 'a button in the row' }), document.body]) {
+      if (target !== document.body) act(() => target.focus());
+      else act(() => (document.activeElement as HTMLElement | null)?.blur());
+      expect(cmdEnter(target).defaultPrevented).toBe(true);
+    }
+    expect(claimed).toHaveBeenCalledTimes(4);
+    expect(contained).not.toHaveBeenCalled();
+    expect(queued).not.toHaveBeenCalled(); // composer.queue stands later in the table: the claimed row took the key
+  });
+
+  it('false: prevents nothing, and the row’s binding by containment, then the next row of the table, see the key', () => {
+    claim = () => false;
+    render(
+      <Page>
+        <Claiming />
+      </Page>,
+    );
+    focused('other row');
+    expect(cmdEnter(screen.getByLabelText('other row')).defaultPrevented).toBe(true);
+    expect(contained).toHaveBeenCalledOnce(); // request.allowOnce's other binding, by containment as before
+    const box = focused('composer box');
+    expect(cmdEnter(box).defaultPrevented).toBe(true);
+    expect(queued).toHaveBeenCalledOnce(); // the next row of the table, composer.queue
+    const field = focused('a text field');
+    expect(cmdEnter(field).defaultPrevented).toBe(false); // nobody's: left untouched
+    expect(claimed).not.toHaveBeenCalled();
+    expect(asked).toHaveBeenCalledTimes(3); // asked at each press
+  });
+
+  it('of two bindings that claim one press, the later registration runs', () => {
+    const later = vi.fn();
+    render(
+      <Page>
+        <Claiming />
+        <Claiming spy={later} />
+      </Page>,
+    );
+    cmdEnter(focused('a text field'));
+    expect(later).toHaveBeenCalledOnce();
+    expect(claimed).not.toHaveBeenCalled();
+  });
+
+  it('fresh applies after the claim: a claimed repeat is taken and runs nothing; an unclaimed one is passed', () => {
+    render(
+      <Page>
+        <Claiming fresh />
+      </Page>,
+    );
+    const box = focused('composer box');
+    expect(cmdEnter(box, { repeat: true }).defaultPrevented).toBe(true);
+    expect(claimed).not.toHaveBeenCalled();
+    expect(queued).not.toHaveBeenCalled();
+    claim = () => false;
+    cmdEnter(box, { repeat: true });
+    expect(queued).toHaveBeenCalledOnce(); // passed over: the composer's own row ran it
+  });
+
+  it('is not asked while an input method composes, a menu is open or the chord capture records', () => {
+    render(
+      <Page>
+        <Claiming />
+        <kbd data-chord-capture tabIndex={0} aria-label="recording" />
+      </Page>,
+    );
+    const field = focused('a text field');
+    cmdEnter(field, { isComposing: true });
+    const menu = document.createElement('div');
+    menu.setAttribute('role', 'menu');
+    menu.dataset.state = 'open';
+    document.body.append(menu);
+    try {
+      cmdEnter(field);
+    } finally {
+      menu.remove();
+    }
+    cmdEnter(focused('recording'));
+    expect(asked).not.toHaveBeenCalled();
+    expect(claimed).not.toHaveBeenCalled();
+  });
+});

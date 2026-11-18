@@ -138,7 +138,7 @@ test('legacy mark text stays unboxed; attention jumps and owner-channel read/ans
 });
 
 // P2-C2 start
-test('a style declaring the plugin’s message tool (6): the supplement once and no contract, the native ask withdrawn, unboxed <message> text and the plugin’s message call in source order, an async maws ask answered from its sheet, and a native ask on the wire still drawn', async () => {
+test('a style declaring the plugin’s message tool (6): the supplement once and no contract, the native ask withdrawn, unboxed <message> text and the plugin’s message call in source order, an async maws ask answered in its capsule’s row, and a native ask on the wire still drawn', async () => {
   test.setTimeout(150_000);
   const root = realpathSync(mkdtempSync(join(tmpdir(), 'maws-p2c2-supplement-')));
   const repo = join(root, 'repo');
@@ -210,16 +210,18 @@ test('a style declaring the plugin’s message tool (6): the supplement once and
     expect(settings.hooks).toBeUndefined(); // P4-R7z: P4-R7y's SessionStart alias is gone
     await expect.poll(async () => { const row = await lane(); return [row.source, row.pending ?? null]; }).toEqual(['external-style-plus-supplement', null]);
 
-    // The async ask: acknowledged at once, answered from its sheet, the answer written as a `next` steer.
+    // The async ask: acknowledged at once, answered in its capsule's row (UX wave U1b: its form stands there, and no sheet
+    // opens by itself), the answer written as a `next` steer.
     const capsule = pane.locator('section.transcript-ask');
     await expect(capsule).toHaveAttribute('data-ask-state', 'asked');
     // Decision Log 32: the waiting question is an async_input item, retired at the committed answer
     const waiting = async () => value(await invoke(page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.kind === 'async_input' && item.state === 'pending');
     await expect.poll(async () => (await waiting()).length).toBe(1);
-    const sheet = page.locator('[data-region="panel"] [data-ask-sheet]');
-    await sheet.locator('section[data-question-id="q1"]').getByRole('radio', { name: 'Yes' }).click();
+    const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+    await form.locator('section[data-question-id="q1"]').getByRole('radio', { name: 'Yes' }).click();
+    await expect(page.locator('[data-region="panel"] [data-ask-sheet]'), 'no sheet opened by itself').toHaveCount(0);
     await clearToasts(page);
-    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
     await expect.poll(async () => (await waiting()).length).toBe(0);

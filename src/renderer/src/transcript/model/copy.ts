@@ -262,7 +262,9 @@ export const planBadge = (outcome: keyof typeof PLAN_OUTCOME_BADGE | null, feedb
   outcome === null ? 'Pending' : outcome === 'keep_planning' && feedback ? `${PLAN_OUTCOME_BADGE.keep_planning}: ${feedback}` : PLAN_OUTCOME_BADGE[outcome];
 
 export const PLAN = { heading: 'Plan', showMore: 'Show more', showLess: 'Show less' } as const;
-export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped' } as const;
+// UX wave U1b (decision 10): `dismissed`, every line of a question dismissed or declined whole; `skipped` stays an ask's
+// line for a question passed over.
+export const QUESTION = { heading: 'Question', notAnswered: 'Not answered', skipped: 'Skipped', dismissed: 'Dismissed' } as const;
 
 export const requestSlotPlaceholder = (subject: string) => `Waiting for you · ${subject} · answer in the composer`;
 
@@ -417,9 +419,10 @@ export const RECEIPT = {
 export const ASK = {
   title: 'Questions', // the capsule's heading when the ask has no title
   count: (n: number) => `Asked ${plural(n, 'question')}`,
-  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended' },
+  state: { pending: 'Waiting for you', asked: 'Asked, answer when ready', answered: 'Answered', cancelled: 'Cancelled, the session ended', dismissed: 'Dismissed' /* UX wave U1b: answered, every answer skipped */ },
   withdrawn: 'Cancelled, the turn was interrupted', // a cancelled ask whose call the engine withdrew (`cancelReason: 'withdrawn'`)
   open: 'Open',
+  openBeside: 'Open beside', // UX wave U1b: the capsule's button while its form stands in the row
   viewAnswers: 'View answers',
   notAnswered: 'Not answered',
   decideForMe: 'Decide for me',
@@ -428,8 +431,10 @@ export const ASK = {
 
 // The capsule's state line, the same in the capsule's chip and in Copy (scale-review C scalpel-1#2): a refused ask its
 // error, a withdrawn one its interrupt wording, every other its state's.
-export function askStateCopy(row: { state: keyof typeof ASK.state | 'error'; error: string | null; cancelReason: string | null }): string {
+// UX wave U1b: an answered ask every one of whose answers was skipped was dismissed, and says so (its lines read Skipped).
+export function askStateCopy(row: { state: Exclude<keyof typeof ASK.state, 'dismissed'> | 'error'; error: string | null; cancelReason: string | null; answers?: readonly AskAnswer[] | null }): string {
   if (row.state === 'error') return row.error ?? '';
+  if (row.state === 'answered' && row.answers != null && row.answers.length > 0 && row.answers.every((answer) => answer.status === 'skipped')) return ASK.state.dismissed;
   return row.state === 'cancelled' && row.cancelReason === 'withdrawn' ? ASK.withdrawn : ASK.state[row.state];
 }
 
