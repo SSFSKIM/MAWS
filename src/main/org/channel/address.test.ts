@@ -3,7 +3,8 @@
 // to everyone. The project's sessions are what its log's lifecycle events say: each session's latest `joined`,
 // `retired`, `renamed` and `titled` from its own writer, by offset.
 import { describe, expect, it } from 'vitest';
-import { addressOf, lifecycleOf, projectSessions } from './address';
+import { CHANNEL_RULE, type ChannelRuleEvent } from '../../../../apps/org-protocol/vectors/index.ts';
+import { addressOf, isStamped, isUnstampedEnd, lifecycleOf, projectSessions } from './address';
 
 const S1 = 'e0ad139c-18bc-45bd-9489-be8653145f80';
 const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091';
@@ -57,6 +58,58 @@ describe('the sessions a project log names', () => {
     expect(lifecycleOf(titled(S1, 'x'))).toEqual({ session: S1, kind: 'titled' });
     expect(lifecycleOf({ ...joined(S3, 'forged'), writer: `mini/${S1}` })).toBeNull();
     expect(lifecycleOf({ writer: `mini/${S1}`, seq: 1, kind: 'say', session: S1 })).toBeNull();
+  });
+});
+
+// sminos's threads (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §G; the design's D7): a
+// `retired` with reason `ended` and no `thread` is what a sminos from before threads writes when a thread's process
+// ends, and it is passed by for a session whose latest `joined` carries its thread. Every other `retired` is honoured.
+describe("a stopped thread's membership", () => {
+  const THREAD = '11111111-1111-4111-8111-111111111111';
+  /** One shared event as S1's own, from its own writer, with what each kind carries beside the fields the rule reads. */
+  const asS1 = (event: ChannelRuleEvent, seq: number): Logged =>
+    event.kind === 'joined' ? { ...joined(S1, 'maws-45'), seq, ...event } : { writer: `mini/${S1}`, seq, session: S1, by: '', ...event };
+  /** S1's membership once the events are read, verified, at rising offsets. */
+  const memberAfter = (events: Logged[]) => projectSessions(logged(...events)).find((s) => s.session === S1)?.member;
+  const stampedJoin = { kind: 'joined', thread: THREAD } as const;
+  const unstampedEnd = { kind: 'retired', reason: 'ended' } as const;
+
+  for (const { name, steps } of CHANNEL_RULE.retired) {
+    it(`passes the shared case: ${name}`, () => {
+      const events = steps.map((s, i) => asS1(s.event, i + 1));
+      expect(steps.map((_, i) => memberAfter(events.slice(0, i + 1)))).toEqual(steps.map((s) => s.member));
+    });
+  }
+
+  it('reads the latest joined: an unstamped one after a stamped one leaves an unstamped end honoured', () => {
+    expect(memberAfter([asS1(stampedJoin, 1), asS1({ kind: 'joined' }, 2), asS1(unstampedEnd, 3)])).toBe(false);
+  });
+
+  it('honours every other unstamped retired after a stamped joined', () => {
+    for (const reason of ['moved', 'continued', 'retire']) expect(memberAfter([asS1(stampedJoin, 1), asS1({ kind: 'retired', reason }, 2)]), reason).toBe(false);
+    expect(memberAfter([asS1(stampedJoin, 1), asS1({ kind: 'retired', reason: 'moved' }, 2), asS1(unstampedEnd, 3)])).toBe(false);
+  });
+
+  it('keeps a member through an unstamped end whatever order the entries are given in', () => {
+    const [join, end] = logged(asS1(stampedJoin, 1), asS1(unstampedEnd, 2));
+    expect(projectSessions([end, join]).map((s) => s.member)).toEqual([true]);
+  });
+
+  it('reads the joined of the provenance the session is read from: a legacy stamped joined passes no end by', () => {
+    const [join, end] = logged(joined(S1, 'maws-45'), asS1(unstampedEnd, 3));
+    const forged = { offset: 2, event: asS1(stampedJoin, 2), verdict: { label: 'legacy' as const } };
+    expect(projectSessions([join, forged, { ...end, offset: 3 }]).map((s) => s.member)).toEqual([false]);
+  });
+
+  it('calls an event stamped only when its thread is a non-empty string, and an end unstamped only when it is not', () => {
+    expect(isStamped(asS1(stampedJoin, 1))).toBe(true);
+    for (const thread of [undefined, '', 7, null, {}]) expect(isStamped({ ...asS1({ kind: 'joined' }, 1), thread }), String(thread)).toBe(false);
+    expect(isUnstampedEnd(asS1(unstampedEnd, 2))).toBe(true);
+    expect(isUnstampedEnd(asS1({ kind: 'retired', reason: 'ended', thread: '' }, 2))).toBe(true);
+    expect(isUnstampedEnd(asS1({ kind: 'retired', reason: 'ended', thread: THREAD }, 2))).toBe(false);
+    expect(isUnstampedEnd(asS1({ kind: 'retired', reason: 'moved' }, 2))).toBe(false);
+    expect(isUnstampedEnd(asS1({ kind: 'retired' }, 2))).toBe(false);
+    expect(isUnstampedEnd({ ...asS1({ kind: 'joined' }, 1), reason: 'ended' })).toBe(false);
   });
 });
 
