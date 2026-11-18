@@ -67,19 +67,20 @@
     "device:a1": "a1",
     "words:b1": "<the arriving words of b1, as the endpoint sent them down: the event with its sig>",
     "words:b2": "<the arriving words of b2, likewise>",
-    "words:b3": "<the arriving words of b3, likewise>"
+    "words:b3": "<the arriving words of b3, likewise>",
+    "channel:C": "5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c"
   },
   "cases": [
     {
       "name": "the token: a hello without it is closed with nothing written; one with it is welcomed, then the revocation set, the directory and the legacy key's ask",
       "steps": [
         { "open": "stranger" },
-        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations"], "token": "{{wrongToken}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "conn": "stranger", "vary": ["sminos.version"] },
+        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations", "channels"], "token": "{{wrongToken}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "conn": "stranger", "vary": ["sminos.version"] },
         { "closed": "stranger" },
         { "open": "main" },
-        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations"], "token": "{{token}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "vary": ["sminos.version"], "note": "the policy is taken only while the endpoint holds none" },
+        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations", "channels"], "token": "{{token}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "vary": ["sminos.version"], "note": "the policy is taken only while the endpoint holds none" },
         {
-          "down": { "t": "welcome", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["access", "reach", "record", "locations"], "build": "{{build}}", "identity": { "org": "{{org}}", "hub": "{{hub}}", "name": "{{name}}", "former": [], "ref": "{{ref}}", "enrolled": "{{enrolled}}" }, "policy": { "read_only": false, "ceiling": "settings" }, "stateVersion": 3 },
+          "down": { "t": "welcome", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["access", "reach", "record", "locations", "channels"], "build": "{{build}}", "identity": { "org": "{{org}}", "hub": "{{hub}}", "name": "{{name}}", "former": [], "ref": "{{ref}}", "enrolled": "{{enrolled}}" }, "policy": { "read_only": false, "ceiling": "settings" }, "stateVersion": 3 },
           "vary": ["stateVersion"],
           "note": "former is names only; capabilities name no kind filter"
         },
@@ -295,8 +296,8 @@
         { "scene": "restart" },
         { "closed": "main" },
         { "open": "main" },
-        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations"], "token": "{{token}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "vary": ["sminos.version"] },
-        { "down": { "t": "welcome", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["access", "reach", "record", "locations"], "build": "{{build}}", "identity": { "org": "{{org}}", "hub": "{{hub}}", "name": "{{name}}", "former": [], "ref": "{{ref}}", "enrolled": "{{enrolled}}" }, "policy": { "read_only": false, "ceiling": "settings" }, "stateVersion": 3 }, "vary": ["stateVersion"] },
+        { "up": { "t": "hello", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["audience", "record", "locations", "channels"], "token": "{{token}}", "sminos": { "version": "1.25.0" }, "policy": { "read_only": false, "ceiling": "settings" } }, "vary": ["sminos.version"] },
+        { "down": { "t": "welcome", "protocol": { "major": 1, "minor": 0 }, "capabilities": ["access", "reach", "record", "locations", "channels"], "build": "{{build}}", "identity": { "org": "{{org}}", "hub": "{{hub}}", "name": "{{name}}", "former": [], "ref": "{{ref}}", "enrolled": "{{enrolled}}" }, "policy": { "read_only": false, "ceiling": "settings" }, "stateVersion": 3 }, "vary": ["stateVersion"] },
         { "down": { "t": "revoked", "version": 3, "devices": [], "members": [], "keys": [] }, "vary": ["version"] },
         { "quiet": ["legacy-key?"], "ms": 300, "note": "the key is held: not asked again" },
         { "up": { "t": "session", "message": { "project": "{{project:P}}", "machine": "{{name}}", "session": null, "kind": "machine", "sub": null, "n": null, "body": { "online": true, "policy": { "read_only": false, "ceiling": "settings" }, "checkouts": [{ "path": "{{checkout}}", "branch": "main" }], "desk": { "sminos": "1.25.0", "rpcs": [], "reads": [] } } } }, "vary": ["message.body.desk"] },
@@ -343,6 +344,17 @@
         { "scene": "notify", "session": "{{session:S1}}", "kind": "settled", "pending": 1 },
         { "up": { "t": "session", "message": { "project": "{{project:P}}", "machine": "{{name}}", "session": "{{session:S1}}", "kind": "settled", "sub": null, "n": null, "body": { "request": "req-4", "winner": "terminal", "outcome": "allow", "by": "terminal" } } } },
         { "scene": "notify", "session": "{{session:S1}}", "kind": "settled", "pending": 0, "note": "nothing pending: notified.json holds the session no longer" }
+      ]
+    },
+    {
+      "name": "a declared channel: a lane A member's channels count while the hello listed channels, and stop counting once the member states none",
+      "steps": [
+        { "up": { "t": "hello", "project": "{{channel:C}}", "name": "desk-integration", "have": {} }, "note": "the channel's log, opened without follow: this machine holds a member of it" },
+        { "down": { "t": "have", "project": "{{channel:C}}", "have": {}, "archive": false }, "vary": ["have", "archive"] },
+        { "up": { "t": "member", "session": "{{session:S1}}", "alias": "main", "project": "{{project:P}}", "lane": "A", "state": "idle", "title": "the main session", "cwd": "{{checkout}}", "launch": "{{launch:L1b}}", "owners": ["@machine"], "ownersProof": [], "origin": { "kind": "terminal" }, "principal": "@machine", "inference": { "kind": "slot", "configDir": "{{configDir}}" }, "controller": { "lane": "A", "since": "2026-10-27T18:01:00Z" }, "access": "listed", "shares": [], "policyRev": 0, "channels": ["{{channel:C}}"] }, "vary": ["controller.since"], "note": "S1's project stays P: its declared channels are stated beside it" },
+        { "scene": "holds", "log": "{{channel:C}}", "held": true, "within": 2000, "note": "the endpoint counts a member of the channel's log, which puts it in the machine's record as known" },
+        { "up": { "t": "member", "session": "{{session:S1}}", "alias": "main", "project": "{{project:P}}", "lane": "A", "state": "idle", "title": "the main session", "cwd": "{{checkout}}", "launch": "{{launch:L1b}}", "owners": ["@machine"], "ownersProof": [], "origin": { "kind": "terminal" }, "principal": "@machine", "inference": { "kind": "slot", "configDir": "{{configDir}}" }, "controller": { "lane": "A", "since": "2026-10-27T18:01:00Z" }, "access": "listed", "shares": [], "policyRev": 0 }, "vary": ["controller.since"], "note": "a member in no declared channel carries no channels key: this is case 11's frame" },
+        { "scene": "holds", "log": "{{channel:C}}", "held": false, "within": 2000 }
       ]
     }
   ]

@@ -324,6 +324,13 @@ const scenes = async (step: { scene: string } & Record<string, unknown>, binding
       bindings.token = rl10Info().token;
       return;
     }
+    case 'holds': {
+      // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §I: whether the endpoint counts a member of
+      // `log` among the logs this machine holds one of (this suite's endpoint signs no record, so not its `known`)
+      const log = step.log as string;
+      await until(() => (endpoint.rl10.sminosView()?.sessionProjects().includes(log) ?? false) === step.held, `${log} ${step.held === true ? 'held' : 'not held'}`, step.within as number);
+      return;
+    }
     case 'not-rejected':
       expect(toHub.some((f) => f.t === 'rejected' && (f.event as { writer: string; seq: number } | null)?.seq === step.seq && (f.event as { writer: string }).writer === step.writer)).toBe(false);
       return;
