@@ -67,7 +67,7 @@ class FakeResizeObserver {
 export const resized = (only?: (target: Element) => boolean): void => act(() => report(only));
 
 /**
- * #760: reports a resize as the frame's rendering step does, outside act (React's act environment off meanwhile), so
+ * Ticket 760: reports a resize as the frame's rendering step does, outside act (React's act environment off meanwhile), so
  * what a test reads right after it is what that frame paints: a render React only scheduled has not happened yet.
  */
 export function resizedInFrame(only?: (target: Element) => boolean): void {

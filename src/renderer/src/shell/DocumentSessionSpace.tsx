@@ -9,7 +9,7 @@ export function DocumentSessionSpace({ surface, enabled, children }: { surface: 
   const spacer = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const requested = useColumnWidth(surface);
-  // #760: measured also as the column is requested or enabled, not only when the observer reports: the render that
+  // Ticket 760: measured also as the column is requested or enabled, not only when the observer reports: the render that
   // floats the panel is laid out at the floated width before any frame runs the observer, so the column is reserved in
   // that render rather than a frame after it
   useLayoutEffect(() => {

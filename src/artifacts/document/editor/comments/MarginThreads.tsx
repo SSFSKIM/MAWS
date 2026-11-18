@@ -123,7 +123,7 @@ export function MarginThreads({ editor, doc, tabId, author, readOnly, view, rela
   const open = useCardThreads(useOpenThreads(doc, tabId));
 
   // ── the tier: the body's, the scroll box's and the page's widths through one observer ──
-  // #760: the observer's tier is committed inside its callback (flushSync), so the frame that reports a resize paints
+  // Ticket 760: the observer's tier is committed inside its callback (flushSync), so the frame that reports a resize paints
   // the tier it brings: nothing else re-measures the margin when the panel floats, and a commit React only schedules
   // lands after that frame's paint. A tier resizes none of the boxes it reads (theme.css: the column never narrows the
   // page), so the commit queues no further resize in the frame. The widths the drawn tier was read from are written on

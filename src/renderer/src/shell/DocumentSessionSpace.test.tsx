@@ -46,7 +46,7 @@ it('keeps a document reading column beside the session, clamps a resize, and rel
   expect(column()).toBeNull();
 });
 
-// #760: the render that floats the panel reserves the column at the floated width, before any frame lets the observer
+// Ticket 760: the render that floats the panel reserves the column at the floated width, before any frame lets the observer
 // report it (the stub here never fires), so no frame shows the document across the whole panel.
 it('reserves the column in the render that floats the panel, with no resize reported', () => {
   dockPanel();

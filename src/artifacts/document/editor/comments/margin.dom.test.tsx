@@ -787,7 +787,7 @@ describe('the tiers (N1 to N6) and the view states', () => {
     expect(margin()).toBeNull();
   });
 
-  // #760: the panel floated, the body widens out of the drawer's range; the frame whose observer reports it paints the
+  // Ticket 760: the panel floated, the body widens out of the drawer's range; the frame whose observer reports it paints the
   // cards, not the docked panel's off, and the column says which widths it drew them from
   it('draws the tier a resize brings in the frame that reports it, with the widths it read', async () => {
     scene.bodyWidth = 600;

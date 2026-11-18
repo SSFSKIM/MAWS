@@ -423,7 +423,7 @@ test('a comment draft moves with its document, panel → main and back, kept onc
 // beside a session in main after Expand pane, which folds the right panel (P4-B3x, P4 Decision Log 40: the expanded
 // document keeps WR #12's reading column beside the conversation), then after Restore split, the panel back and the tier as it was in the split. What
 // the margin draws in each is asserted; the widths go to the report.
-// `current`: whether the app has read the layout measured here (#760). The session space and the margin write the widths
+// `current`: whether the app has read the layout measured here (ticket 760). The session space and the margin write the widths
 // they last drew from (`data-document-session-width`, `data-margin-measured`), each read the way the app reads it, in
 // the same evaluate as the reading.
 type MarginReading = { host: number; body: number; scrollBox: number; page: number; conversation: number; tier: string | null; threads: number; current: boolean };
@@ -445,7 +445,7 @@ const marginOf = (scope: Locator): Promise<MarginReading> =>
       current: (space === null || space.dataset.documentSessionWidth === String(space.clientWidth)) && (!widths || margin!.dataset.marginMeasured === widths),
     };
   });
-// A reading taken once the app has read the layout it is taken in (#760): its `current`, polled until it holds. The
+// A reading taken once the app has read the layout it is taken in (ticket 760): its `current`, polled until it holds. The
 // column and the tier follow the widths through a ResizeObserver, which reports only in a frame's rendering, so a read
 // can land after the layout changed and before the app has drawn from it (the docked panel's readings after ⌥⌘B). A
 // reading that merely holds still is no proof: a late frame holds the old drawing as still as a settled one. The wait
