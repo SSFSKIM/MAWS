@@ -51,6 +51,12 @@
 // advertises it too, and every org frame carries `complete` and, once anything is known of them, this machine's
 // `locations`; sminos answers each kept frame with `locations-kept {gen}`, which counts only on the connection that
 // carried that `gen` (`locationsKept`). Any other sminos is told neither, nor the capability: it reads the frame as before.
+//
+// sminos's declared channels (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §C). To an sminos whose
+// hello advertises `channels` the welcome advertises it too, last, and from then each held lane A member's counted
+// `channels` (members.ts, `memberChannels`) are logs this machine holds a member of, beside each held member's project:
+// `sminosView().sessionProjects()`, which the registry's `known` reads, is the one place they are read. Any other sminos
+// is not told the capability, and a member frame's `channels` count for nothing.
 import { RL1_CAPABILITIES, type Action, type Certificates, type OrgState, type SigningKey } from 'org-protocol';
 import type { EndpointPolicy, Policy } from '../policy';
 import { isCeiling } from '../policy';
@@ -62,7 +68,7 @@ import { InboundIndex } from './inbound-index';
 import { LegacyKey } from './legacy';
 import { localPolicy, digestOf, withdrawnBy, type AudienceContext } from './audiences';
 import { LogRelay, type RelayContext } from './log-relay';
-import { Members, type MembersContext } from './members';
+import { Members, memberChannels, type MembersContext } from './members';
 import { PolicyCache } from './policy-cache';
 import { decideReach } from './reach';
 import { Rebuild } from './rebuild';
@@ -82,6 +88,12 @@ export const RL10_CAPABILITIES = ['access', 'reach'] as const;
  * welcome once this build serves the three `record.*` offers.
  */
 export const RECORD_CAPABILITY = 'record';
+
+/**
+ * sminos's declared channels (Interfaces §C): listed in sminos's hello, it makes a lane A member frame's `channels`
+ * count; the welcome lists it, last, only in answer.
+ */
+export const CHANNELS_CAPABILITY = 'channels';
 
 /** The welcome's capabilities: RL10_CAPABILITIES, and `record` exactly when `offers` serve every record act. */
 export function welcomeCapabilities(offers: Offers = OFFERS): string[] {
@@ -297,6 +309,11 @@ export class Rl10 {
     return this.#sminos.includes(LOCATIONS_CAPABILITY);
   }
 
+  /** Whether sminos's hello on this connection advertised `channels` (Interfaces §C). */
+  get #channels(): boolean {
+    return this.#sminos.includes(CHANNELS_CAPABILITY);
+  }
+
   /** P5 O8 M6b: what the welcomed sminos's hello advertised, null while none is connected and welcomed. */
   sminosCapabilities(): readonly string[] | null {
     return this.connected ? this.#sminos : null;
@@ -434,13 +451,23 @@ export class Rl10 {
     return () => this.#projectsMoved.delete(listener);
   }
 
-  /** What the registry reads of the connected sminos (registry.ts' `SminosView`); null while none is welcomed. */
+  /**
+   * What the registry reads of the connected sminos (registry.ts' `SminosView`); null while none is welcomed. The logs
+   * this machine holds a member of are each held member's project and, when this connection's hello listed `channels`,
+   * each held lane A member's counted declared channels (Interfaces §C; lane B's count for nothing, D1).
+   */
   sminosView(): { capabilities: readonly string[]; restating: boolean; sessionProjects(): string[]; logProjects(): Array<{ project: string; name: string; follow: boolean }> } | null {
     if (!this.connected) return null;
+    const channels = this.#channels;
     return {
       capabilities: this.#sminos,
       restating: this.members.restating,
-      sessionProjects: () => this.members.sessions().flatMap((session) => this.members.get(session)?.project ?? []),
+      sessionProjects: () =>
+        this.members.sessions().flatMap((session) => {
+          const member = this.members.get(session);
+          if (member === null) return [];
+          return channels && member.lane === 'A' ? [member.project, ...memberChannels(member)] : [member.project];
+        }),
       logProjects: () => this.relay.hellos(),
     };
   }
@@ -648,8 +675,9 @@ export class Rl10 {
       t: 'welcome',
       protocol: RL10_PROTOCOL,
       // P5 O18 D9: sminos may send a member's access, shares and policyRev, and ask `reach?`; P5 O8 M6b: `record`, while
-      // this build serves the record acts; the project registry: `locations`, to an sminos that reads them.
-      capabilities: [...welcomeCapabilities(this.#ctx.offers), ...(this.#locations ? [LOCATIONS_CAPABILITY] : [])],
+      // this build serves the record acts; the project registry: `locations`, to an sminos that reads them; sminos's
+      // declared channels: `channels`, last, to an sminos that sends them.
+      capabilities: [...welcomeCapabilities(this.#ctx.offers), ...(this.#locations ? [LOCATIONS_CAPABILITY] : []), ...(this.#channels ? [CHANNELS_CAPABILITY] : [])],
       build: this.#ctx.build,
       identity: { org: identity.org, hub: identity.hub, name: identity.name, former: formerNames(head.state, identity.ref, identity.name), ref: identity.ref, enrolled: identity.enrolled },
       policy: { read_only: current.read_only, ceiling: current.ceiling },

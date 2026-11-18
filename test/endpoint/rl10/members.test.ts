@@ -1,7 +1,8 @@
 // The machine's sessions as sminos reports them on RL10 (src/endpoint/rl10/members.ts), as a thread's lifecycle moves
 // them (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md). A lane change (Interfaces §E): a `member` frame whose
 // lane is not the held one is the session leaving and arriving, so the listing under its old lane is withdrawn, once,
-// and what notify keeps of it forgotten, by `gone`'s own path.
+// and what notify keeps of it forgotten, by `gone`'s own path. A member whose project is a declared channel's id
+// (Interfaces §D): not held, by the same path.
 import { describe, expect, it } from 'vitest';
 import type { SessionReport } from '../../../src/endpoint/listings';
 import { Members } from '../../../src/endpoint/rl10/members';
@@ -10,6 +11,8 @@ const P = '7d2b9c40-1f3e-4a6b-8c5d-9e0f1a2b3c4d';
 const S1 = 'e0ad139c-18bc-45bd-9489-be8653145f80';
 const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091';
 const APP = 'b4d1e2f3-0a1b-4c2d-9e3f-4a5b6c7d8e9f';
+/** A declared channel's id (version 8). */
+const C = '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c';
 
 /** A `member` frame of `session` under `lane`, as sminos sends one. */
 const memberFrame = (session: string, lane: 'A' | 'B', fields: Record<string, unknown> = {}): Record<string, unknown> => ({
@@ -39,6 +42,7 @@ function machine(live: Record<string, string> = {}, { before = [] }: { before?: 
   const reports: SessionReport[] = [];
   const withdrawn: string[] = [];
   const forgotten: string[] = [];
+  const lines: string[] = [];
   const withdraw = (session: string) => {
     if (listed.delete(session)) withdrawn.push(session);
   };
@@ -57,10 +61,10 @@ function machine(live: Record<string, string> = {}, { before = [] }: { before?: 
     },
     listed: () => [...listed.keys()],
     forget: (session) => void forgotten.push(session),
-    log: () => {},
+    log: (line) => void lines.push(line),
     now: Date.now,
   });
-  return { members, listed, reports, withdrawn, forgotten };
+  return { members, listed, reports, withdrawn, forgotten, lines };
 }
 
 describe('a lane change', () => {
@@ -209,5 +213,45 @@ describe('a listing two members share, when one leaves', () => {
     expect(m.reports.slice(reported)).toEqual([]);
     expect(m.withdrawn).toEqual([APP]);
     expect(m.listed.size).toBe(0);
+  });
+});
+
+// A channel is no project (Interfaces §D): an older sminos's `join` can put a session in a declared channel's log as its
+// project, and the endpoint holds no such member.
+describe('a member whose project is a declared channel’s id', () => {
+  it('leaves a session not held before not held, with no listing, and says so', async () => {
+    const m = machine();
+    await m.members.member(memberFrame(S1, 'A', { project: C }));
+    expect(m.members.get(S1)).toBeNull();
+    expect(m.members.sessions()).toEqual([]);
+    expect(m.reports).toEqual([]);
+    expect(m.listed.size).toBe(0);
+    expect(m.lines).toEqual([`endpoint: session ${S1.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`]);
+  });
+
+  it('withdraws a session held under a project as gone withdraws it, in either lane', async () => {
+    const m = machine({ [S2]: APP });
+    await m.members.member(memberFrame(S1, 'A'));
+    await m.members.member(memberFrame(S2, 'B'));
+    expect([...m.listed.keys()].sort()).toEqual([APP, S1].sort());
+    const reported = m.reports.length;
+    await m.members.member(memberFrame(S1, 'A', { project: C }));
+    await m.members.member(memberFrame(S2, 'B', { project: C }));
+    expect(m.withdrawn).toEqual([S1, APP]);
+    expect(m.forgotten).toEqual([S1, APP]);
+    expect(m.reports.slice(reported)).toEqual([]);
+    expect(m.members.sessions()).toEqual([]);
+    expect(m.members.recordOf(S1)).toBeNull();
+  });
+
+  it('restates nothing: inside a restatement the session is left out, and a listing it had from before is withdrawn', async () => {
+    const m = machine({}, { before: [S1] });
+    m.members.welcome();
+    await m.members.member(memberFrame(S1, 'A', { project: C }));
+    await m.members.member(memberFrame(S2, 'A'));
+    await m.members.restated();
+    expect(m.withdrawn).toEqual([S1]);
+    expect(m.members.sessions()).toEqual([S2]);
+    expect([...m.listed.keys()]).toEqual([S2]);
   });
 });

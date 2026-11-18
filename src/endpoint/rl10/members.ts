@@ -19,6 +19,12 @@
 // lane is not the held one is taken after `gone`, so its old listing, under its session id or its appSessionId, is
 // withdrawn then and not left at the hub (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §E).
 //
+// sminos's declared channels (the same document, Interfaces §C and §D). A member frame may carry `channels`, the ids of
+// the declared channels its thread is in, which `readMember` neither requires nor checks; what counts of it is
+// `memberChannels`'s, read by RL10's one reader of the logs this machine holds a member of (link.ts, `sminosView`). A
+// frame whose `project` is a declared channel's id (an older sminos's `join` allows one) is no project's member: the
+// session is handled as `gone`, held by nothing and listed nowhere, whatever the hello listed.
+//
 // P5 O12 M11 (docs/doperpowers/plans/2026-10-27-p5-o12-sminos-owners.md, M11's Decisions): the handed-off mark. Until the
 // endpoint first sees a sminos record for a lane B session, authorization ranks the spawner the spine's record names
 // (`launchedBy`) as its owner (authorize.ts's bridge); once it has, the record decides, and a missing record fails closed,
@@ -45,6 +51,7 @@
 // `session.changed` the spine says of it (`recordChanged`), so it holds alike for the listing the hub keeps and for the
 // one a channel's `endpoint.listings` signs afresh (`recordSays`). No listing field is added. Each read runs inside an
 // operation's hold, so the daemon does not collect over it.
+import { isChannelId } from 'org-protocol';
 import type { EndpointServices } from '../services';
 import type { SessionReport } from '../listings';
 import type { Access, CheckoutSource, RecordSource, SessionRecord, SessionTarget, Share } from '../sources';
@@ -70,7 +77,18 @@ export type Member = {
   /** P5 O18: the record's policy revision, bumped by sminos on each access, share or owner change. */
   policyRev?: number;
   controller?: unknown;
+  /** The declared channels the session's thread is in, as sminos states them; absent for a thread in none (`memberChannels` counts it). */
+  channels?: unknown;
 };
+
+/** The most declared channels one member frame counts for (Interfaces §C): far past any use, a frame's list kept under five kilobytes. */
+export const MEMBER_CHANNELS_MAX = 128;
+
+/** The declared channels a member frame states, as the endpoint counts them. */
+export function memberChannels(member: Member): string[] {
+  if (!Array.isArray(member.channels)) return [];
+  return [...new Set(member.channels.filter(isChannelId))].slice(0, MEMBER_CHANNELS_MAX);
+}
 
 const ACCESS: ReadonlySet<string> = new Set(['private', 'listed', 'org-view', 'org-converse']);
 const SHARE_GRADES: ReadonlySet<string> = new Set(['list', 'view', 'converse', 'approve']);
@@ -199,6 +217,12 @@ export class Members implements RecordSource, CheckoutSource {
     }
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
+    // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
+    // frame is not kept, restates nothing and reports no listing.
+    if (isChannelId(member.project)) {
+      this.#ctx.log(`endpoint: session ${member.session.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`);
+      return this.gone(member.session);
+    }
     // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
     // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,
     // and the frame is then the session's first.
