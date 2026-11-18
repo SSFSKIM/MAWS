@@ -31,7 +31,7 @@ Status words: *specified* (ready to build), *building*, *built* (reviewed clean 
 - [ ] Step 0 — The pre-adoption check (the architect and the owner; no executor). Done: the records half and the local sminos store on one Mac, read 2026-11-18, no id of version 8 (Surprises & Discoveries 1). Remaining: the hub's own table, which only the owner reads ("Step 0's commands").
 - [x] (2026-11-18) The adversarial review of the execution section (Decision Log 1): two findings, both taken. A listing record that reaches the hub before its channel's row is registered (Decision Log 2), and a mixed-fleet proof that compared the new endpoint only with itself (Decision Log 3).
 - [x] (2026-11-18) The order made binding: M1 lands alone and first (Decision Log 4).
-- [ ] M1 — The predicate, the shared vectors, and the readers of a stopped thread; the first pull request, alone — building (built on the branch 2026-11-18; the fifth vector of Decision Log 6; review round 1 fixed, Decision Log 9 to 11)
+- [x] (2026-11-18) M1 — The predicate, the shared vectors, and the readers of a stopped thread; the first pull request, alone — built: reviewed clean at `doperpowers:reviewer-high` in three rounds (Decision Log 6 to 11); `channel-rule.json` at version 1 with five `retired` cases.
 - [ ] The master commit that holds `channel-rule.json` handed to the session holding the parent, for T1's pin.
 - [ ] M2 — Channels at the endpoint: the capability pair, `channels` into `known`, the two refusals, the baseline — specified
 - [ ] M3 — The hub retires an unlisted channel's row and brings it back — specified
