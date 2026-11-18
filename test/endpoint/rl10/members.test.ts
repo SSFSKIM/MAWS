@@ -244,6 +244,20 @@ describe('a member whose project is a declared channel’s id', () => {
     expect(m.members.recordOf(S1)).toBeNull();
   });
 
+  it('is still a lane B record seen: a spawned session not handed off is handed off, and authorization told, nothing held', async () => {
+    const m = machine({ [S1]: APP });
+    const target = { lane: 'B' as const, session: S1, appSessionId: APP };
+    const told: unknown[] = [];
+    m.members.onChange((changed) => void told.push(changed));
+    expect(m.members.handedOff(target)).toBe(false);
+    await m.members.member(memberFrame(S1, 'B', { project: C }));
+    expect(m.members.handedOff(target)).toBe(true);
+    expect(told).toEqual([{ lane: 'B', session: S1, appSessionId: '' }]);
+    expect(m.members.record(target)).toBeNull();
+    expect(m.members.sessions()).toEqual([]);
+    expect(m.reports).toEqual([]);
+  });
+
   it('restates nothing: inside a restatement the session is left out, and a listing it had from before is withdrawn', async () => {
     const m = machine({}, { before: [S1] });
     m.members.welcome();

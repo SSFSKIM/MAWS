@@ -84,10 +84,19 @@ export type Member = {
 /** The most declared channels one member frame counts for (Interfaces §C): far past any use, a frame's list kept under five kilobytes. */
 export const MEMBER_CHANNELS_MAX = 128;
 
-/** The declared channels a member frame states, as the endpoint counts them. */
+/**
+ * The declared channels a member frame states, as the endpoint counts them: one pass in the frame's order, stopped at the
+ * MEMBER_CHANNELS_MAXth distinct id, so a long list costs no more than the bound.
+ */
 export function memberChannels(member: Member): string[] {
   if (!Array.isArray(member.channels)) return [];
-  return [...new Set(member.channels.filter(isChannelId))].slice(0, MEMBER_CHANNELS_MAX);
+  const counted = new Set<string>();
+  for (const entry of member.channels) {
+    if (!isChannelId(entry)) continue;
+    counted.add(entry);
+    if (counted.size === MEMBER_CHANNELS_MAX) break;
+  }
+  return [...counted];
 }
 
 const ACCESS: ReadonlySet<string> = new Set(['private', 'listed', 'org-view', 'org-converse']);
@@ -218,10 +227,16 @@ export class Members implements RecordSource, CheckoutSource {
     const member = readMember(frame);
     if (member === null) return this.#ctx.log('endpoint: an RL10 member frame that is not one was ignored');
     // A session whose project is a declared channel's id is not held (Interfaces §D): a channel is no project, and its
-    // frame is not kept, restates nothing and reports no listing.
+    // frame is not kept, restates nothing and reports no listing. A lane B frame is still a sminos record seen (P5 O12
+    // M11): its engine session is marked handed off and authorization told, so a spawner's bridge ends at it as at any
+    // first record, and the session stays closed with no record to decide on.
     if (isChannelId(member.project)) {
       this.#ctx.log(`endpoint: session ${member.session.slice(0, 8)} names a sminos channel as its project; a channel is no project, and the session is not held`);
-      return this.gone(member.session);
+      const unseen = member.lane === 'B' && this.#members.get(member.session)?.lane !== 'B';
+      if (member.lane === 'B') this.#mark('engines', member.session);
+      await this.gone(member.session);
+      if (unseen) this.#tell({ lane: 'B', session: member.session, appSessionId: '' });
+      return;
     }
     // A lane change is the session leaving and then arriving (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md,
     // Interfaces §E): `gone` withdraws the listing under the old lane and drops what notify and the join kept of it,

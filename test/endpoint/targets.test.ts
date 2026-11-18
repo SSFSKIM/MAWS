@@ -374,6 +374,25 @@ describe('the spawner as owner (P5 O12 M11)', () => {
     expect(await gone).toBe('grade');
   });
 
+  // docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §D, and M2's review: a first lane B record whose
+  // project is a sminos declared channel's id is refused, never held, and is still a record seen: the bridge ends there
+  it('ends the bridge at a first record whose project is a declared channel’s id, though the record is refused and never held', async () => {
+    const f = await startEndpoint(org, started, withSminosRecords());
+    const s = spawned(f, 'app-s', org.B, { recorded: 'eng-s', live: 'eng-s' });
+    const b = await openRemote(f, org.b1, org.B);
+    expect(await subscribe(b, 'sb', { lane: 'B', id: 'app-s' })).toMatchObject({ t: 'subbed' });
+    expect(await statusOf(b, 'app-s')).toBe('ok');
+    const sm = await sminos(f);
+    const from = b.inbox.length;
+    sm.send({ t: 'member', ...laneBMember('eng-s', [org.B], { project: '5c2a9e10-7b3d-8f41-9a6c-2d4e6f8a0b1c' }) });
+    expect(await waitFor(b, (m) => m.sub === 'sb' && m.t === 'ended', 'the held subscription’s end', from)).toMatchObject({ t: 'ended' });
+    expect(f.endpoint.rl10.members.get('eng-s')).toBeNull();
+    expect(await statusOf(b, 'app-s')).toBe('grade');
+    expect(await act(b, sendOf(f, b, s, 'after the refused record'))).toBe('grade');
+    expect(f.host.runs).toEqual([]);
+    await until(() => handedOff(f).includes('app-s'), 'the hand-off on disk');
+  });
+
   // the review's finding: before M11 a first record could only grant; under the bridge it can take, and its join awaits
   // the engine host, so the held subscription is held at the record, by its engine session, not after the join
   it('holds a subscription the bridge granted as soon as a first record grants its spawner nothing, before its join answers', async () => {

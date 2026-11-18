@@ -186,6 +186,21 @@ describe('memberChannels', () => {
     expect(read(many)).toEqual(many.slice(0, MEMBER_CHANNELS_MAX));
   });
 
+  it('reads no entry past the one that completes the bound', () => {
+    const ids = Array.from({ length: MEMBER_CHANNELS_MAX }, (_, i) => `00000000-0000-8000-8000-${String(i).padStart(12, '0')}`);
+    const list = [ids[0], 'not an id', ...ids, ...Array.from({ length: 10_000 }, () => C)];
+    const read = new Set<number>();
+    const watched = new Proxy(list, {
+      get(target, key, receiver) {
+        if (typeof key === 'string' && /^\d+$/.test(key)) read.add(Number(key));
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    expect(memberChannels(readMember(memberFrame(S1, { channels: watched }))!)).toEqual(ids);
+    // the first id twice and one entry that is no id come before the 128th distinct id, the last entry read
+    expect(Math.max(...read)).toBe(MEMBER_CHANNELS_MAX + 1);
+  });
+
   it('is not read by readMember: a malformed list costs the member nothing', () => {
     expect(readMember(memberFrame(S1, { channels: 'not a list' }))).not.toBeNull();
     expect(readMember(memberFrame(S1, { channels: [{}] }))).not.toBeNull();
