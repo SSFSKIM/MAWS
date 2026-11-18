@@ -250,7 +250,9 @@ describe('one asynchronous answer is stated once outside the record (R13)', () =
     });
 
     it('a question whose row carries no answers: the notice is the one statement and stays', () => {
-      const rows = derived((b) => b.toolUse('q1', 'AskUserQuestion', { questions: QUESTIONS }), 'sminos', 'q1');
+      // UX wave U1b joins a held question's delivery to its row, so a row with no answers beside the notice is one the
+      // delivery does not name: here the answer is for a question this session does not hold
+      const rows = derived((b) => b.toolUse('q1', 'AskUserQuestion', { questions: QUESTIONS }), 'sminos', 'q-elsewhere');
       expect(rows.find((r) => r.kind === 'question')).toMatchObject({ answers: null });
       expect(notices(mirrorRows(rows, {}))).toHaveLength(1);
     });

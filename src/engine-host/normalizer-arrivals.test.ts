@@ -8,7 +8,7 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { deserialize, serialize } from 'node:v8';
 import { describe, expect, it } from 'vitest';
-import { carriedOf, consentMessage } from '@shared/engine/arrival';
+import { carriedOf, commandOf, consentMessage } from '@shared/engine/arrival';
 import { SessionEventSchema, type SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, EventId } from '@shared/graph/ids';
 import type { JournalRow } from '@shared/wire/journal';
@@ -172,7 +172,8 @@ describe('a background task’s end is kept until the model is told (Interfaces 
       let onTurn = 0;
       for (const event of live(loadUxwaveJournal(name))) {
         if (event.kind === 'turn.started' && event.parentToolUseId === null) [lastTurn, onTurn] = [event.origin, 0];
-        if (event.kind !== 'user.message' || event.arrival === undefined) continue;
+        // a line's carrier is a synthetic message; a command's output carries its `command` entry and is none (UX wave U3b, decision 2)
+        if (event.kind !== 'user.message' || !event.isSynthetic || event.arrival === undefined) continue;
         if (carriedOf(event.arrival).length === 0) {
           expect(standing.has(event.messageUuid), `${name} ${event.seq}: a withdrawal of a line that stands`).toBe(true);
           standing.delete(event.messageUuid);
@@ -361,6 +362,20 @@ describe('where each class is read (M4)', () => {
     expect(events[1]).not.toHaveProperty('arrival');
   });
 
+  // UX wave U1c, M1 (the U1c document, Interfaces §C, 1 to 3): the frame MAWS writes is read as the person's text, whole
+  // or by lines, in the engine's encoding of a subject
+  it('a frame MAWS writes in the engine’s encoding, or with the person’s words beside a grant line, carries the grant’s mark', () => {
+    const subject = 'echo one\u00a0two';
+    const sentence = consentMessage('command', subject);
+    expect(sentence).toContain('\\u00a0');
+    const events = live(handWritten([out(prompt('u-1', sentence)), out(prompt('u-2', `Also check the logs.\n${sentence}`)), out(prompt('u-3', `Also check the logs. ${sentence}`))]));
+    expect(events.map((event) => (event.kind === 'user.message' ? (event.arrival ?? null) : event.kind))).toEqual([
+      [{ class: 'consent', kind: 'command', subject }],
+      [{ class: 'consent', kind: 'command', subject }],
+      null,
+    ]);
+  });
+
   it('u3-tasks-r1: the notification a hand-back claimed at one tool boundary (667, after 666) emits nothing; the hand-back is its line', () => {
     expect(r1Events.filter((event) => event.seq === 667)).toEqual([]);
     expect(r1Events.filter((event) => event.seq === 666).map((event) => event.kind)).toEqual(['user.message', 'subagent.message']);
@@ -380,6 +395,23 @@ describe('where each class is read (M4)', () => {
     expect(notices(drawn(stateOf(live(loadUxwaveJournal('u3-tasks-bare')))))).toEqual(['task failed: Background command "uxw fail" failed with exit code 1']);
     const outputs = drawn(stateOf(live(loadUxwaveJournal('u3-commands-bare')))).flatMap((row) => (row.kind === 'local_command' ? [row.text.split('\n', 1)[0]] : []));
     expect(outputs).toEqual(['Error: No messages to compact', 'Total cost:            $0.0013', 'Session renamed to: uxw renamed', 'Compaction canceled.', 'Compacted']);
+  });
+});
+
+// UX wave U3b (M1; docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, decision 2 and Interfaces A):
+// the live wire's output frame names the command the engine ran (`local_command_run`), and its event carries it in a
+// `command` entry; an output whose frame named none carries no entry. No output on the live wire is a terminal's text.
+describe('a command’s output carries the command the engine ran', () => {
+  it('u3-commands-r1: each output event names its run where the frame did, none is plain, and no synthetic message carries the entry', () => {
+    const events = live(loadUxwaveJournal('u3-commands-r1'));
+    const outputs = events.filter((event): event is Message => event.kind === 'user.message' && event.origin === 'local-command');
+    expect(outputs.map((event) => [event.seq, event.arrival === undefined ? null : commandOf(event.arrival).run?.command ?? '?'])).toEqual([
+      [28, 'compact'], [155, null], [167, 'usage'], [179, 'context'], [191, 'reload-plugins'], [204, 'rename'], [216, 'effort'], [228, 'model'], [406, null], [423, null],
+    ]);
+    expect(outputs.find((event) => event.seq === 204)!.arrival).toEqual([{ class: 'command', run: { command: 'rename', args: 'uxw renamed' } }]);
+    expect(outputs.filter((event) => commandOf(event.arrival).plain)).toEqual([]);
+    expect(events.filter((event) => event.kind === 'user.message' && event.isSynthetic && (event.arrival ?? []).some((entry) => entry.class === 'command'))).toEqual([]);
+    expect(outputs.every((event) => carriedOf(event.arrival).length === 0)).toBe(true);
   });
 });
 

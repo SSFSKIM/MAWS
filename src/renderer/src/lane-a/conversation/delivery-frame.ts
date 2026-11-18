@@ -62,10 +62,12 @@ export function supersededDeliveries(rows: readonly JsonObject[]): Set<string> {
 /**
  * A user row the bridge appended into the running turn, as MAWS draws a prompt queued there: the shape the engine
  * writes for a prompt typed mid-turn (`queued_command`, origin `human`, MAWS's `humanQueuedPrompt`), its words
- * `prompt`, under the row's own uuid.
+ * `prompt`, under the row's own uuid. UX wave U1c (M4, Decision Log 38): `mawsDrawn` says the row is this drawing, which
+ * the engine reads at its next request, not a prompt the engine wrote as it took it; MAWS's backfill holds an approval
+ * so drawn as waiting for that read. The drawn row lives only in the call that maps its row (`plane-transcript.ts`).
  */
 export function asQueuedPrompt(row: JsonObject, prompt: string | JsonObject[]): JsonObject {
-  const drawn: JsonObject = { ...row, type: 'attachment', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: row.uuid as string } };
+  const drawn: JsonObject = { ...row, type: 'attachment', attachment: { type: 'queued_command', prompt, commandMode: 'prompt', origin: { kind: 'human' }, source_uuid: row.uuid as string, mawsDrawn: true } };
   delete drawn.message;
   delete drawn.origin;
   delete drawn.isMeta;

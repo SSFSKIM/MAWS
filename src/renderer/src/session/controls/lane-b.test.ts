@@ -8,6 +8,7 @@ import type { MawsBridge } from '@shared/ipc/schema';
 import type { Availability } from '@shared/ipc/schema/session';
 import { digest, humanTurn, item, record, status, T0 } from '../../../../../test/support/builders';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../../test/support/grant-readers';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/machine';
 import { addressOf } from '@shared/machine/address';
 import { REMOTE_INLINE_MAX_BYTES, REMOTE_TOO_LARGE_WORDS, type RemoteSession } from '@shared/ipc/schema/remote';
@@ -181,6 +182,14 @@ describe('lane B’s compact and background stop answer as controls', () => {
     ]);
   });
 
+  it('the one-writer rule: Compact’s instructions holding the consent sentence go out reading no grant', async () => {
+    const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q3', messageUuid: UUID } });
+    await laneBControls(null, { appSessionId: APP, client: fake.client }).compact(`keep it\n${TYPED_CONSENT}`);
+    const [sent] = fake.invoked('session.send') as { content: string }[];
+    expect(sent!.content.startsWith('/compact keep it\n')).toBe(true);
+    expectNoGrantSent(sent!.content);
+  });
+
   it('keeps a failed compact’s code and words, a timeout included', async () => {
     const error = { code: 'timeout' as const, message: 'compact unanswered after 10 s' };
     const client = { invoke: async () => ({ ok: false, error }), on: () => () => {} } as unknown as MawsBridge;
@@ -293,6 +302,21 @@ describe('lane B on another machine', () => {
 
   // One deadline per send (A4): main's adapter resumes a released session itself under the send's own bound, so the
   // renderer makes one invocation, never `session.acquire` first nor a status or queue read across the link
+  // UX wave U4b (Interfaces C): Send now on a waiting message is offered over the link, so the port's `sendNow` reaches
+  // main's adapter whatever this Mac's own engine host is; that machine's host is the one that runs it
+  it('sends a waiting message now through the machine, under any engine host of this Mac', async () => {
+    const before = useHosts.getState().supervisor;
+    useHosts.setState({ supervisor: hostStatus({ supervisor: supervisorStatus({ wire: 'w-older' }), matches: 'wire' }) });
+    try {
+      const fake = fakeClient({ 'session.steer.sendNow': { outcome: 'delivering' } });
+      const port = laneBControls(record(REMOTE), remoteInputs(fake.client));
+      expect(await port.queue()!.sendNow({ messageUuid: UUID })).toEqual({ ok: true, value: { outcome: 'delivering' } });
+      expect(fake.invoked('session.steer.sendNow')).toEqual([{ appSessionId: REMOTE, messageUuid: UUID }]);
+    } finally {
+      useHosts.setState({ supervisor: before });
+    }
+  });
+
   it('sends to a released session with one invocation, leaving the resume to main', async () => {
     remoteRecord();
     const fake = fakeClient({ 'session.send': { disposition: 'sent', queueId: 'q1', messageUuid: UUID } });

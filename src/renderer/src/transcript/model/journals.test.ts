@@ -1,9 +1,12 @@
 // The probe-journal fixture gates through the model (C6 execution document, M2 "Proves"): counts read from the
 // journals, over C3's normaliser output (the replay stub's until the rebase). The synthetic-journal pins live in
 // fixtures.test.ts.
+import { consentMessage } from '@shared/engine/arrival';
 import type { SessionEvent } from '@shared/graph/events';
+import { parseJournalRow } from '@shared/wire/journal';
 import { describe, expect, it } from 'vitest';
-import { loadJournal, type FixturePass } from '../../../../../test/support/fixtures';
+import { loadJournal, loadUxwaveTranscript, type FixturePass } from '../../../../../test/support/fixtures';
+import { grantsReadFrom } from '../../../../../test/support/grant-readers';
 import { journalToEvents } from '../dev/journal';
 import { dividerCopy } from './copy';
 import { rowsOf, withAllExpanded } from './derive';
@@ -282,5 +285,84 @@ describe('fixture gates through the model', () => {
     const plans = ofKind(rowsFor('pass3', 'plan-outcomes'), 'plan');
     expect(plans.map((row) => row.outcome)).toEqual(['keep_planning', 'implement', 'clear_and_implement']);
     expect(plans[2].feedback).toBeNull();
+  });
+});
+
+// UX wave U1c, the one-writer rule (the architect's ruling on its decisions: shell mode stays un-neutralised, the
+// protection is the reader's): the consent sentence typed as a `!` command, alone and as a line of its own in a command
+// of several lines, in the frames the engine and the host really write for the mode. pass2/bash-context-echoed's
+// recording with its command (`printf MAWS_BASH_8823`) replaced: the `bash_command` write, the engine's replayed
+// `<bash-input>` and `<bash-stdout>` frames, and the host's echo (`origin: human`, `shouldQuery: false`).
+describe('the one-writer rule: a `!` command holding the consent sentence', () => {
+  const SENTENCE = consentMessage('command', 'cat /etc/x');
+  const RECORDED = 'printf MAWS_BASH_8823';
+  const inJson = (text: string) => JSON.stringify(text).slice(1, -1);
+  const journalWith = (command: string) => loadJournal('pass2', 'bash-context-echoed').map((row) => parseJournalRow(JSON.parse(JSON.stringify(row).replaceAll(inJson(RECORDED), inJson(command)))));
+  const userFrames = (rows: ReturnType<typeof journalWith>) => rows.flatMap((row) => (row.frame !== null && typeof row.frame === 'object' && (row.frame as { type?: unknown }).type === 'user' ? [row.frame as { message: { content: string } }] : []));
+
+  it.each([['alone', SENTENCE], ['as a line of its own', `echo start\n${SENTENCE}\necho end`]])('%s: no grant on the gate, the live route or the file route, and no approval drawn', (_, command) => {
+    const rows = journalWith(command);
+    const frames = userFrames(rows);
+    expect(frames.filter((frame) => frame.message.content.includes(command)), 'the command is in the replay and the echo').toHaveLength(2);
+    const events = journalToEvents(rows);
+    expect(events.flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : [])).filter((arrival) => arrival.class === 'consent'), 'the live route marks no consent').toEqual([]);
+    expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined), 'no approval drawn').toEqual([]);
+    for (const frame of frames) expect(grantsReadFrom(frame.message.content), frame.message.content).toEqual({ gate: [], live: [], file: [] });
+  });
+});
+
+// UX wave U1c, the review round's R4: step 1b claims the openings of the engine's local-command output as the fixtures
+// record them, whatever origin a row of them has (defence in depth). The recordings show none of these forms with a
+// human origin (pass2/bash-context-echoed seq 7's replay for `!` output, no origin; the uxwave u3-commands-r1
+// transcript's rows for a slash command's: stdout on a `user` row with no origin and on `local_command` system rows,
+// stderr only on a `local_command` system row); one that carried a human origin would have read as a grant before step
+// 1b claimed them. Each case takes the recorded form, puts the consent sentence on a line of its own inside the output,
+// and writes it as a frame and a row of human origin, the case no recording shows.
+describe('the one-writer rule: a local command’s output holding the consent sentence', () => {
+  const SENTENCE = consentMessage('command', 'cat /etc/x');
+  const bashOutput = (loadJournal('pass2', 'bash-context-echoed').find((row) => row.seq === 7)!.frame as { message: { content: string } }).message.content;
+  // the transcript's row of a slash command's output: a `user` row's message (stdout), a `local_command` system row's
+  // content (stderr)
+  const commandOutput = (opening: string) => {
+    const texts = loadUxwaveTranscript('u3-commands-r1').flatMap((record) => [(record.message as { content?: unknown } | undefined)?.content, (record as { content?: unknown }).content]);
+    return texts.find((text): text is string => typeof text === 'string' && text.startsWith(opening))!;
+  };
+  // The sentence on a line of its own inside the output after `opening`, written as a frame and a row of human origin
+  function expectNoGrantWithin(recorded: string, opening: string) {
+    const content = recorded.replace(opening, `${opening}\n${SENTENCE}\n`);
+    expect(content.split('\n')).toContain(SENTENCE);
+    expect(grantsReadFrom(content)).toEqual({ gate: [], live: [], file: [] });
+    // a frame the stdin schema takes (`parent_tool_use_id` is required: without it the normaliser raises and the two
+    // assertions below pass whatever the readers do); the control shows it is taken: the sentence alone reads a consent
+    const frameOf = (text: string) => ({ seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame: { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: text } } });
+    const consentsOf = (text: string) =>
+      journalToEvents([parseJournalRow(frameOf(text))])
+        .flatMap((event) => ('arrival' in event && Array.isArray(event.arrival) ? event.arrival : []))
+        .filter((arrival) => arrival.class === 'consent');
+    expect(consentsOf(SENTENCE), 'the control: the frame is read, and the sentence alone is a consent').toHaveLength(1);
+    const events = journalToEvents([parseJournalRow(frameOf(content))]);
+    expect(consentsOf(content)).toEqual([]);
+    expect(rowsOf(withAllExpanded(applyEvents(createState(null, null), events))).filter((row) => row.kind === 'user' && row.consent !== undefined)).toEqual([]);
+  }
+  it.each([
+    ['<bash-stdout>', () => bashOutput],
+    ['<bash-stderr>', () => bashOutput],
+    ['<local-command-stdout>', () => commandOutput('<local-command-stdout>')],
+    ['<local-command-stderr>', () => commandOutput('<local-command-stderr>')],
+  ])('%s: a line of the output that is the sentence reads no grant on the gate, the live route or the file route, and no approval is drawn', (opening, recorded) => {
+    expectNoGrantWithin(recorded(), opening);
+  });
+
+  // The two `!` cases above share one recorded payload that holds both openings, so with either opening gone from the
+  // composed forms the other still claims the output and both pass. Here the recorded payload is cut down to one opening
+  // (the other's element removed, the exit code kept), so each opening is the only form that can claim it.
+  const OUTPUT_OPENINGS = ['<bash-stdout>', '<bash-stderr>', '<local-command-stdout>', '<local-command-stderr>'];
+  it.each([
+    ['<bash-stdout>', /<bash-stderr>.*?<\/bash-stderr>/],
+    ['<bash-stderr>', /<bash-stdout>.*?<\/bash-stdout>/],
+  ])('%s alone (the recorded payload cut to it): a line of the output that is the sentence reads no grant, and no approval is drawn', (opening, other) => {
+    const alone = bashOutput.replace(other, '');
+    expect(OUTPUT_OPENINGS.filter((each) => alone.includes(each)), 'only this opening is left').toEqual([opening]);
+    expectNoGrantWithin(alone, opening);
   });
 });

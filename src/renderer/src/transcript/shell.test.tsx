@@ -18,6 +18,8 @@ import { builder } from './model/test-events';
 import { connectTranscript, ShellTranscript } from './shell';
 import { DEFAULT_ACTIONS } from './view/default-actions';
 import { registeredActions } from './view/registry';
+import { useForkUnavailable } from '../lane-b/remote-unavailable'; // UX wave U3b
+import { forkInPlace } from '../sessions/record-ops'; // UX wave U3b
 import { currentSet } from '../stores/layout-model';
 
 const offsetHeight = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'offsetHeight')!;
@@ -55,6 +57,16 @@ function history() {
   b.end(['u1']);
   return b.events;
 }
+
+// UX wave U3b (M3; Interfaces §D): "Fork from here" is U9's own two names, and decides nothing itself.
+describe('the answer’s Fork', () => {
+  it('is registered as U9’s sentence and the in-place fork', () => {
+    expect(registeredActions().forkFrom).toEqual({ useUnavailable: useForkUnavailable, run: forkInPlace });
+    disconnect();
+    expect(registeredActions().forkFrom).toBeUndefined();
+    disconnect = connectTranscript();
+  });
+});
 
 describe('the transcript slot', () => {
   it('resolves to the shell transcript once connected, and C5’s fallback again after a reset', () => {

@@ -34,6 +34,7 @@ import { useSettings } from '../../stores/settings'; // UX wave U2b
 import { attachQueue, EMPTY_QUEUE, useQueueStore } from '../../stores/queue';
 import { usePromptAuthor } from '../../sessions/share/reader'; // board 525
 import { useTranscriptStore } from '../../stores/transcript'; // L276
+import { useCompactingSince } from '../../stores/compacting'; // UX wave U3b (M4)
 import { askAnsweredHere, askSteerOf, heldRow } from '../model/derive';
 import type { Row } from '../model/rows';
 import { ipcRewind, ipcSource } from '../source/ipc';
@@ -150,6 +151,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
   const effort = useShownEffort(appSessionId);
   const ownerLane = useViewLane(agentId === undefined ? appSessionId : null); // P2-C: a session's, never a child's; UX wave U2b: its three sources
   const promptAuthor = usePromptAuthor(agentId === undefined ? appSessionId : null); // board 525: another member's session names its prompts' authors
+  const compacting = useCompactingSince(agentId === undefined ? appSessionId : null); // UX wave U3b (M4): a session's, never a child's
   return (
     <Transcript
       source={source}
@@ -170,6 +172,7 @@ function LocalTranscriptSlot({ appSessionId, agentId, className, startAt, presen
       placed={streaming.kept}
       promptAuthor={promptAuthor}
       waiting={waiting}
+      compacting={compacting}
     />
   );
 }

@@ -18,7 +18,8 @@
 // UX wave U4a (decision 30; Interfaces D): the stack's Send now on a next-step row (`session.steer.sendNow`) goes only to an
 // engine host of this build's wire, by the same reading of `host.status`; under another build's host the port answers the
 // sentence and invokes nothing (that host does not know the command). A session on another machine is never gated here:
-// its host is that machine's, and the command is declared not offered there.
+// its host is that machine's, and main's adapter sends the act only to a machine whose handshake lists `rl2.send-now`
+// (UX wave U4b).
 import type { RequestAnswer } from '@shared/engine/answers';
 import type { EngineSessionStatus } from '@shared/engine/status';
 import type { AppSessionId, TaskId } from '@shared/graph/ids';
@@ -38,6 +39,7 @@ import { hostAppliesPlanMode, namesPlanMode, PLAN_MODE_OTHER_HOST } from '@share
 import { useHosts } from '../../stores/hosts';
 import { hostHasThisWire } from '@shared/sessions/host-wire';
 import { HOST_UPDATING } from '../../composer/queue/host-wire';
+import { neutraliseGrant } from '@shared/engine/grant'; // UX wave U1c
 import { useSessions } from '../../stores/sessions';
 import type { Capability, ControlKey, ControlResult, SessionControls } from './types';
 
@@ -208,7 +210,8 @@ export function laneBControls(record: SessionRecord | null, { appSessionId, clie
     }),
     btw: (question, options) => client.invoke('session.sideQuestion', { appSessionId, question, ...(options?.retryOf !== undefined && { retryOf: options.retryOf }) }),
     command: () => refusedHere('command'),
-    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? `/compact ${instructions}` : '/compact' })),
+    // UX wave U1c: the one-writer rule (shared/engine/grant.ts `neutraliseGrant`), its last step on what goes out
+    compact: async (instructions) => controlResultOf(await client.invoke('session.send', { appSessionId, content: instructions ? neutraliseGrant(`/compact ${instructions}`) : '/compact' })),
     stopAgent: () => refusedHere('stop-agent'),
     tell: () => refusedHere('tell'),
     stopTask: async (taskId) => controlResultOf(await client.invoke('session.stopTask', { appSessionId, taskId: taskId as TaskId })),

@@ -8,6 +8,15 @@
  */
 export const GRANT_OPENING = 'Permission granted for ';
 
+/**
+ * The consent sentence's next two words after the opening, for one call and for several (the engine's `Yn`; the U1c
+ * review round's R1, the architect's ruling of 2026-11-17, UTC): the reader's sentence (`grantHead`, ./arrival.ts) is built
+ * from them, and the writer (`neutraliseGrant`) breaks the opening only where one of them follows it, so the two cannot
+ * drift apart.
+ */
+export const GRANT_ONE = 'this exact';
+export const GRANT_SEVERAL = 'these exact';
+
 // Board ticket 711: how a string is read. Letters and digits alone, after Unicode compatibility folding (NFKC: full-width
 // letters and brackets, the no-break space) and case folding: Markdown's emphasis, code and strike marks, white space,
 // zero-width characters and every other mark go. Each pair of angle brackets is read both ways by itself, whichever way
@@ -71,4 +80,143 @@ export function quotesGrant(text: string, work?: { steps: number }): boolean {
   }
   if (work) work.steps += text.length + s.length + s.length;
   return false;
+}
+
+/**
+ * UX wave U1c, the one-writer rule in its neutralise form (the architect's rulings of 2026-11-16 and 2026-11-17, UTC): the
+ * character `neutraliseGrant` puts inside the first word of every span that reads as the consent sentence's longer
+ * opening. U+2060, the word joiner: no white space, no line break, no wrap point, and invisible; only its own removal can
+ * give the opening back.
+ */
+export const GRANT_BREAK = '\u2060';
+
+/**
+ * The as-typed copy of a text that went on the wire (the review round's R3): every U+2060 removed, the writer's joiner
+ * and one a person typed or pasted alike. The one helper every copy a person meets takes: recall, take-back, a bubble's
+ * edit, the rewind's prefill, a first message handed back, the first-prompt title, a spawn's display text. For display,
+ * search and prefill only: no consent reader reads its output (they read the wire or the row text).
+ */
+export function asTyped(text: string): string {
+  return text.replaceAll(GRANT_BREAK, '');
+}
+
+/**
+ * The writer's patterns, folded as `quotesGrant` folds (letters and digits only): the opening with "this exact" and with
+ * "these exact" after it (the review round's R1). The refusing side keeps the short opening (`quotesGrant`); the writer
+ * breaks only these, since the short one is everyday text (a file's name, an identifier, a prose line) and the reader
+ * accepts no sentence without one of them.
+ */
+export const WRITER_OPENINGS: readonly string[] = [GRANT_ONE, GRANT_SEVERAL].map((next) => `${GRANT_OPENING}${next}`.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]/gu, ''));
+// Each pattern read backwards, each letter the set of positions it stands at, as `AT` is for the opening read forwards: a
+// pass from the text's end finds where each occurrence begins (its first letter), in every reading it reads. A pattern's
+// positions are one bit each of a 32-bit word, so a pattern holds at most 31 letters (29 and 30 here).
+const PATTERNS = WRITER_OPENINGS.map((pattern) => {
+  if (pattern.length > 31) throw new Error(`a writer's pattern of ${pattern.length} letters does not fit the word`);
+  const at = new Int32Array(128);
+  for (let k = 0; k < pattern.length; k += 1) {
+    const code = pattern.charCodeAt(pattern.length - 1 - k);
+    at[code] = at[code]! | (1 << k);
+  }
+  return { at, whole: 1 << (pattern.length - 1) };
+});
+const IS_LETTER = /^[\p{L}\p{N}]$/u;
+const MARK = /\p{M}/uy; // a combining mark after a span's first letter stays with it: the joiner goes after it
+// the folded stream's codes beyond a letter's ASCII one
+const OTHER_LETTER = -1; // a letter or digit beyond ASCII, which ends every beginning
+const OPEN = -2; // `<`, or a character that folds to it
+const CLOSE = -3; // `>` as typed
+const FOLDED_CLOSE = -4; // a character that folds to `>` (the full-width one)
+
+// The folded stream of a text, in one of the two case images (the review round's R2): each letter or digit (by its ASCII
+// code, or OTHER_LETTER) and each angle bracket, with the end in the text of the character it came from. Each character
+// is folded by itself: compatibility folding, then lower case (`lower`), or upper case then lower case (`upper`, where a
+// sharp s gives "ss" and a dotless i gives "i", as a later upper-casing would). A `>` that a combining mark follows is a
+// folded close, since compatibility folding of the whole text composes the two (U+0338 makes U+226F) and then the
+// refusing side pairs the `<` with a later `>`.
+function foldedStream(text: string, image: 'lower' | 'upper'): { codes: number[]; ends: number[] } {
+  const codes: number[] = [];
+  const ends: number[] = [];
+  let i = 0;
+  while (i < text.length) {
+    const point = text.codePointAt(i)!;
+    const end = i + (point > 0xffff ? 2 : 1);
+    if (point < 128) {
+      const c = point >= 0x41 && point <= 0x5a ? point + 0x20 : point;
+      MARK.lastIndex = end;
+      const code = isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? (MARK.test(text) ? FOLDED_CLOSE : CLOSE) : null;
+      if (code !== null) {
+        codes.push(code);
+        ends.push(end);
+      }
+    } else {
+      const compatible = String.fromCodePoint(point).normalize('NFKC');
+      for (const char of image === 'lower' ? compatible.toLowerCase() : compatible.toUpperCase().toLowerCase()) {
+        const c = char.codePointAt(0)!;
+        const code = c < 128 ? (isAsciiLetter(c) ? c : c === 0x3c ? OPEN : c === 0x3e ? FOLDED_CLOSE : null) : IS_LETTER.test(char) ? OTHER_LETTER : null;
+        if (code !== null) {
+          codes.push(code);
+          ends.push(end);
+        }
+      }
+    }
+    i = end;
+  }
+  return { codes, ends };
+}
+
+/**
+ * What MAWS sends as a person's own free text (the composer's serialised draft, its last step; the sites that send raw
+ * text, theirs): the text with U+2060 (`GRANT_BREAK`) put inside the first word of every span that reads as the
+ * consent sentence's longer opening (`WRITER_OPENINGS`), after its first letter (and that letter's combining marks).
+ * The claim: no text the reader (`readConsents`) accepts goes out, as sent or after one of the later changes
+ * test/support/later-changes.ts lists, and no wider: the whole text or each line trimmed; runs of white space, or of
+ * spaces and tabs, collapsed; CRLF, a lone CR, U+2028 and U+2029 made LF; pasted tags removed; angle-bracket pairs
+ * removed, before or after compatibility folding; emphasis and code marks removed; compatibility folding; upper case then
+ * lower case with the opening capitalised; each line's first word upper-cased then capitalised. The reader accepts only
+ * a sentence that opens with one of the two openings. The reading is `quotesGrant`'s (letters and digits, compatibility
+ * and case folding), each character folded by itself in two case images (`foldedStream`), and the words from any `<` to
+ * any later `>` with no `>` as typed between them (a `>` a combining mark follows is no such `>`) read both kept and
+ * removed. Its limit: a precomposed letter (é for e), which only a later removal of marks would make the opening's
+ * letter, is read as another letter. A span whose first letter the joiner already follows is left as it is, so a text
+ * sent again does not grow; a text with no span is returned as it was. `work`, when given, is charged the characters the
+ * passes go over.
+ */
+export function neutraliseGrant(text: string, work?: { steps: number }): string {
+  // from the end, each pattern read backwards over each case image: at a `>`, the reading so far is one a `<` before it
+  // may go on from, its words between removed (a `>` as typed ends what an earlier `>` saved, a folded one adds to it);
+  // a first letter that ends a pattern read backwards begins a span
+  const starts = new Set<number>();
+  for (const image of ['lower', 'upper'] as const) {
+    const { codes, ends } = foldedStream(text, image);
+    for (const { at, whole } of PATTERNS) {
+      let reached = 1;
+      let saved = 0;
+      for (let k = codes.length - 1; k >= 0; k -= 1) {
+        const c = codes[k]!;
+        if (c === CLOSE) saved = reached;
+        else if (c === FOLDED_CLOSE) saved |= reached;
+        else if (c === OPEN) reached |= saved;
+        else if (c === OTHER_LETTER) reached = 1;
+        else {
+          const moved = reached & at[c]!;
+          if ((moved & whole) !== 0) starts.add(ends[k]!);
+          reached = 1 | (moved << 1);
+        }
+      }
+    }
+    if (work) work.steps += text.length + (1 + PATTERNS.length) * codes.length;
+  }
+  if (starts.size === 0) return text;
+  let out = '';
+  let from = 0;
+  for (let at of [...starts].sort((a, b) => a - b)) {
+    if (at <= from) continue; // one character's folding gave two first letters
+    MARK.lastIndex = at;
+    while (MARK.test(text)) at = MARK.lastIndex;
+    if (text.startsWith(GRANT_BREAK, at)) continue;
+    out += text.slice(from, at) + GRANT_BREAK;
+    from = at;
+  }
+  if (work) work.steps += text.length;
+  return from === 0 ? text : out + text.slice(from);
 }

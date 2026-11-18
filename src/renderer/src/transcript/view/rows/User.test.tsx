@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { formatClock } from '@shared/app/date-format';
 import { cleanup, fireEvent, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { applyEvents, createState } from '../../model/reduce';
 import { rowsOf } from '../../model/derive';
@@ -95,16 +97,78 @@ describe('user row', () => {
     expect(screen.queryByRole('button', { name: 'Show more' })).toBeNull();
   });
 
-  // W2 (B2): the time, Copy and Edit sit in one overlay beside the bubble, apart from the captions that always show.
-  it('keeps the hover actions in their overlay and the captions under the bubble', () => {
-    const { container } = renderRow({ ...userRow('later'), dropped: true });
-    const overlay = container.querySelector('.transcript-user-actions')!;
-    expect(overlay.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(true);
-    expect(overlay.contains(screen.getByRole('button', { name: 'Edit' }))).toBe(true);
-    expect(overlay.contains(screen.getByText('Not sent'))).toBe(false);
-    expect(container.querySelector('.transcript-user-meta')?.textContent).toBe('Not sent');
+  // UX wave U3b (decision 10; R12, R14): one line under the bubble, at its side: the time, Copy and Edit, then the
+  // caption last. Outside the bubble's body, so nothing of it overlays the bubble or stands beside it.
+  const lineOf = (container: HTMLElement) => container.querySelector('section.transcript-user > .transcript-user-line');
+  const wordsOf = (line: Element) => [...line.children].flatMap((part) => (part.classList.contains('transcript-user-line-actions') ? [...part.children] : [part])).map((part) => part.textContent);
+
+  it('draws the time, Copy and Edit, then the caption last, on one line under the bubble', () => {
+    const row = { ...userRow('look at b too'), steer: true };
+    const { container } = renderRow(row);
+    const line = lineOf(container)!;
+    expect(line.previousElementSibling?.classList.contains('transcript-user-body')).toBe(true);
+    expect(wordsOf(line)).toEqual([formatClock(Date.parse(row.at)), 'Copy', 'Edit', 'Sent during this turn']);
+    const caption = line.lastElementChild!;
+    expect(caption.classList.contains('transcript-user-caption')).toBe(true);
+    expect(caption.getAttribute('title')).toBe('Sent during this turn'); // a narrow pane cuts it with an ellipsis (R14)
+    expect(line.querySelector('.transcript-user-line-actions')!.contains(screen.getByRole('button', { name: 'Copy' }))).toBe(true);
+    expect(container.querySelector('.transcript-user-actions, .transcript-user-meta')).toBeNull(); // W2's overlay and its meta line are gone
+  });
+
+  it('holds the time, Copy and Edit alone where no caption follows; a dropped prompt’s Not sent takes the caption’s place', () => {
+    const plain = renderRow(userRow('plain'));
+    expect(wordsOf(lineOf(plain.container)!)).toEqual([expect.any(String), 'Copy', 'Edit']);
+    expect(lineOf(plain.container)!.lastElementChild!.classList.contains('transcript-user-line-actions')).toBe(true);
     cleanup();
-    expect(renderRow(userRow('plain')).container.querySelector('.transcript-user-meta')).toBeNull(); // nothing reserved
+    const dropped = renderRow({ ...userRow('later'), dropped: true });
+    const notSent = lineOf(dropped.container)!.lastElementChild!;
+    expect(notSent.textContent).toBe('Not sent');
+    expect(notSent.classList.contains('transcript-not-sent')).toBe(true);
+    expect(notSent.getAttribute('title')).toBe('Not sent');
+  });
+
+  it('draws no Edit where the message is not editable, and keeps the time and Copy', () => {
+    const { container } = renderRow({ ...userRow('a message of several comments'), editable: false });
+    expect(screen.queryByRole('button', { name: 'Edit' })).toBeNull();
+    expect(wordsOf(lineOf(container)!)).toEqual([expect.any(String), 'Copy']);
+  });
+
+  it('draws no line under MAWS’s “You approved” line', () => {
+    const { container } = renderRow({ ...userRow('approve and retry'), consent: { kind: 'command', subject: 'npm test' } });
+    expect(container.querySelector('.transcript-consent')).not.toBeNull();
+    expect(container.querySelector('.transcript-user-line')).toBeNull();
+    expect(screen.queryAllByRole('button')).toEqual([]);
+  });
+
+  // R20: at rest the time, Copy and Edit take no width, yet stay in the tab order: Tab from the message's row reaches Copy.
+  it('keeps Copy and Edit in the tab order at rest', async () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync(join(__dirname, '../../../styles/tokens.css'), 'utf8') + readFileSync(join(__dirname, '../transcript.css'), 'utf8');
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const { container } = renderRow({ ...userRow('look at b too'), pending: 'held' as const });
+    const user = userEvent.setup();
+    container.querySelector<HTMLElement>('.transcript-row')!.focus();
+    await user.tab();
+    expect(document.activeElement).toBe(screen.getByRole('button', { name: 'Copy' }));
+    expect(getComputedStyle(lineOf(container)!.querySelector('.transcript-user-line-actions')!).display).not.toBe('none');
+  });
+
+  // Decision 10: the desk's own chat bubble writes W2's markup by hand (an actions group inside the bubble's body), and
+  // the old rule still styles it there; MAWS's own line is in flow under the bubble.
+  it('keeps W2’s overlay rule for an actions group inside the bubble’s body, and lays MAWS’s line in flow', () => {
+    const style = document.createElement('style');
+    style.textContent = readFileSync(join(__dirname, '../transcript.css'), 'utf8');
+    document.head.append(style);
+    onTestFinished(() => style.remove());
+    const desk = document.createElement('section');
+    desk.className = 'transcript-user';
+    desk.innerHTML = '<div class="transcript-user-body"><div class="transcript-user-bubble" data-bubble=""></div><div class="transcript-user-actions"><button type="button">Copy</button></div></div>';
+    document.body.append(desk);
+    onTestFinished(() => desk.remove());
+    expect(getComputedStyle(desk.querySelector('.transcript-user-actions')!).position).toBe('absolute');
+    const { container } = renderRow(userRow('plain'));
+    expect(getComputedStyle(lineOf(container)!).position).not.toBe('absolute');
   });
 
   it('renders a pasted block as a chip inside the bubble that expands to its body as text, and keeps typed <\\pasted_content> intact', () => {
@@ -144,7 +208,7 @@ describe('user row', () => {
   it('says why a dropped prompt never ran when its mount knows, in place of Not sent; other rows keep their captions', () => {
     const actions = { ...spyActions(), droppedRowMark: () => 'Not read: the turn was undone' };
     const { container } = renderRow({ ...userRow('later'), dropped: true }, { actions });
-    expect(container.querySelector('.transcript-user-meta')?.textContent).toBe('Not read: the turn was undone');
+    expect(container.querySelector('.transcript-user-line > .transcript-not-sent')?.textContent).toBe('Not read: the turn was undone');
     cleanup();
     const steered = renderRow({ ...userRow('look at b too'), steer: true }, { actions });
     expect(steered.container.textContent).toContain('Sent during this turn');

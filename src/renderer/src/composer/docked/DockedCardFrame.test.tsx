@@ -15,7 +15,7 @@ const B = 'app-b' as AppSessionId;
 // A card another child docks (C10's trust card, here a stub): its own content and outcome, the frame's rules.
 function ForeignCard({ appSessionId, onAccept, onDecline }: { appSessionId: AppSessionId; onAccept: () => void; onDecline: (() => void) | null }) {
   return (
-    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" titleAlone onAccept={onAccept} onDecline={onDecline}>
+    <DockedCardFrame appSessionId={appSessionId} title="Trust this folder" onAccept={onAccept} onDecline={onDecline}>
       <p>Do you trust the files in this folder?</p>
       <textarea aria-label={`note ${appSessionId}`} />
       <button type="button">Trust</button>
@@ -232,20 +232,23 @@ describe('the frame’s request keys', () => {
 // the answered one left (a replayed or real engine asks about its next call once the first is answered). The hand-over
 // mark then lives until the animation frame in which the editor's deferred focus has had its turn, and a frame of the
 // session mounting meanwhile takes the focus when it is on the body or inside its own pane.
-describe('the hand-over to a frame that mounts a commit later', () => {
+// UX wave U1b (decision 11): the frame's later-commit hand-over went with the dock (no request mounts a frame now); the
+// cards another child docks keep the same-commit hand-over C7 built, and a frame mounting later takes the focus only by its
+// pane holding it.
+describe('the hand-over to the next frame', () => {
   const nextFrame = () => new Promise<void>((resolve) => requestAnimationFrame(() => resolve()));
   const microtasks = async () => {
     await Promise.resolve();
     await Promise.resolve();
   };
-  function View({ shown, onAccept = () => {} }: { shown: string | null; onAccept?: () => void }) {
+  function View({ shown }: { shown: string | null }) {
     return (
       <>
         <button type="button">outside</button>
         <Pane index={0}>
           <input aria-label="editor" />
           {shown !== null && (
-            <DockedCardFrame key={shown} appSessionId={A} title={`prompt ${shown}`} onAccept={onAccept} onDecline={null}>
+            <DockedCardFrame key={shown} appSessionId={A} title={`prompt ${shown}`} onAccept={() => {}} onDecline={null}>
               <p>{shown}</p>
             </DockedCardFrame>
           )}
@@ -256,29 +259,33 @@ describe('the hand-over to a frame that mounts a commit later', () => {
   const frameOf = (shown: string) => screen.getByRole('group', { name: `prompt ${shown}` });
   const editorFocus = (focusEditor: () => void) => registerFocusTarget(A, { focusEditor, focusFrame: () => {}, insertText: () => {} });
   // the first prompt docked and focused, then answered: it leaves, and its microtask has run
-  async function answered(focusEditor: () => void, accept?: () => void) {
+  async function answered(focusEditor: () => void) {
     editorFocus(focusEditor);
-    const view = render(<View shown="one" onAccept={accept} />);
+    const view = render(<View shown="one" />);
     act(() => frameOf('one').focus());
-    view.rerender(<View shown={null} onAccept={accept} />);
+    view.rerender(<View shown={null} />);
     await microtasks();
     return view;
   }
 
-  it('(a) gives the focus to the next frame mounting before the editor’s deferred focus has had its turn, and a key held from the first answer does not answer it', async () => {
-    const accept = vi.fn();
-    const view = await answered(() => {}, accept); // the editor's focus is still outstanding (Tiptap defers it a frame)
-    view.rerender(<View shown="two" onAccept={accept} />);
+  it('(a) gives the focus to a frame mounting in the same commit the focused one left, and the editor is not asked for it', async () => {
+    const focusEditor = vi.fn();
+    editorFocus(focusEditor);
+    const view = render(<View shown="one" />);
+    act(() => frameOf('one').focus());
+    view.rerender(<View shown="two" />);
     expect(document.activeElement).toBe(frameOf('two'));
-    const press = (repeat: boolean) => frameOf('two').dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', code: 'Enter', repeat, bubbles: true, cancelable: true }));
-    press(true);
-    press(true);
-    expect(accept).not.toHaveBeenCalled();
-    press(false);
-    expect(accept).toHaveBeenCalledTimes(1);
+    await microtasks();
+    expect(focusEditor).not.toHaveBeenCalled();
   });
 
-  it('(b) gives it, in the other order, to a frame mounting after the editor took the focus, by its pane holding it', async () => {
+  it('(b) gives nothing to a frame mounting a commit later, while the editor’s deferred focus is outstanding', async () => {
+    const view = await answered(() => {}); // the editor's focus is still outstanding (Tiptap defers it a frame)
+    view.rerender(<View shown="two" />);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it('(c) gives it to a frame mounting after the editor took the focus, by its pane holding it', async () => {
     // the editor as Tiptap focuses it, a frame later; held by reference, so a later test's editor is never this one
     const view = await answered(() => {
       const editor = document.querySelector<HTMLElement>('[aria-label="editor"]');
@@ -291,20 +298,11 @@ describe('the hand-over to a frame that mounts a commit later', () => {
     expect(document.activeElement).toBe(frameOf('two'));
   });
 
-  it('(c) takes nothing when the focus was moved outside the pane before the frame mounted', async () => {
+  it('(d) takes nothing when the focus was moved outside the pane before the frame mounted', async () => {
     const view = await answered(() => {});
     act(() => screen.getByRole('button', { name: 'outside' }).focus());
     view.rerender(<View shown="two" />);
     expect(document.activeElement).toBe(screen.getByRole('button', { name: 'outside' }));
-  });
-
-  it('(d) takes nothing once the animation frame has passed with no frame mounted and the body focused', async () => {
-    const view = await answered(() => {});
-    await nextFrame();
-    await nextFrame();
-    expect(document.activeElement).toBe(document.body);
-    view.rerender(<View shown="two" />);
-    expect(document.activeElement).toBe(document.body);
   });
 });
 
@@ -337,19 +335,21 @@ describe('dockCard', () => {
   });
 });
 
-describe('the frame’s title line (UX wave U1a §J)', () => {
-  it('says the composer is paused for a request, and nothing more for a card that passes its title alone', () => {
+// UX wave U1a §J said the composer was paused for a request; UX wave U1b: no request docks, and every frame reads its
+// title alone.
+describe('the frame’s title line', () => {
+  it('reads the title and nothing after it', () => {
     render(
       <Pane index={0}>
-        <DockedCardFrame appSessionId={A} title="Approval needed" onAccept={null} onDecline={null}>
-          <p>a request</p>
+        <DockedCardFrame appSessionId={A} title="Relay is down" onAccept={null} onDecline={null}>
+          <p>a card</p>
         </DockedCardFrame>
-        <DockedCardFrame appSessionId={B} title="Trust this folder?" titleAlone onAccept={null} onDecline={null}>
+        <DockedCardFrame appSessionId={B} title="Trust this folder?" onAccept={null} onDecline={null}>
           <p>a setup card</p>
         </DockedCardFrame>
       </Pane>,
     );
-    expect(screen.getByRole('group', { name: 'Approval needed' }).querySelector(':scope > p')?.textContent).toBe('Approval needed · Composer paused · draft preserved');
+    expect(screen.getByRole('group', { name: 'Relay is down' }).querySelector(':scope > p')?.textContent).toBe('Relay is down');
     expect(screen.getByRole('group', { name: 'Trust this folder?' }).querySelector(':scope > p')?.textContent).toBe('Trust this folder?');
   });
 });

@@ -13,20 +13,21 @@
 // recorded words. Every case seeds a scratch config home with one transcript per session so C4 indexes the scratch
 // directory as a project (the sheet's repository list) and the sidebar shows the session; no engine runs.
 // The M4b cases: a blocking ask is a question attention item (the Overview card, Needs you) that goes at Submit, and an
-// ask from a session not shown never switches the main view; its sheet opens when that session is selected.
+// ask from a session not shown never switches the main view. UX wave U1b (O-17, M6): a waiting ask's form stands in its
+// capsule's row, and the sheet opens only when the person opens it (the capsule's Open beside, Open or View answers).
 // P2-C3 (the P2 spec's Decision Log 34): a choice's previews beside its options and a note beside an answer, over the
 // same recordings with the ask's arguments rewritten (`askFixture`, which says why the replay still holds).
 // Runs under `pnpm e2e:tools` (a harness build, MAWS_HARNESS=1 for playwright.config.ts's list). MAWS_E1_SHOTS=1 also
 // writes the replay's screenshots in both themes under docs/doperpowers/evidence/p1-e1/ (`e1-replay-<surface>-<theme>`).
 import { addressed, localRef } from './support/address';
-import { sideColumn, surface, mainTabById } from './support/shell';
+import { openSurface, sideColumn, sideTab, sideTabNames, surface, mainTabById } from './support/shell';
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { expect, test, type Locator } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import type { AskAnswer } from '@shared/maws/tools';
 import { parseAskSteer } from '../src/shared/maws/ask';
 import { TOOL_ERRORS } from '../src/shared/maws/tools';
-import { invoke, value } from './support/c7-replay';
+import { askWaitJournal, invoke, value } from './support/c7-replay';
 import { asDocumentReplay } from './support/document-replay'; // P3-B (M7)
 import { FIRST_CREATED_REVISION } from './support/design-systems'; // P3-D (the P3 spec's Decision Log 67)
 import { REPO_ROOT } from './support/launch';
@@ -61,6 +62,23 @@ async function shoot(s: Scene, surface: string, before?: () => Promise<void>): P
 const sheetOf = (s: Scene) => s.panel.locator('[data-ask-sheet]');
 const sectionOf = (sheet: Locator, questionId: string) => sheet.locator(`section[data-question-id="${questionId}"]`);
 const capsuleOf = (s: Scene) => s.pane.locator('section.transcript-ask');
+// UX wave U1b (Interfaces §D, "A waiting row"; M6): while its ask waits, the capsule's row holds the ask's form under its
+// title line (the request card's in-place body: the sheet's own sections, drafts and Submit), and its button reads Open
+// beside, which opens the sheet on the same form and draft. Nothing opens the sheet by itself.
+// Two animation frames, taken once the row's form shows the ask (the check before each call): the ask store holds it
+// by then, so a layout write made in the same handler or the microtask after it, as the open M6 removed was, is
+// committed to the page by their end. It says nothing of work that runs later than that.
+const settledFrames = (page: Page) => page.evaluate(() => new Promise<void>((resolve) => requestAnimationFrame(() => requestAnimationFrame(() => resolve()))));
+const formOf = (s: Scene) => capsuleOf(s).locator('.transcript-ask-form [data-hover-ask]');
+async function openBeside(s: Scene, askId: string): Promise<Locator> {
+  await capsuleOf(s).getByRole('button', { name: 'Open beside', exact: true }).click();
+  const sheet = sheetOf(s);
+  await expect(sheet).toHaveAttribute('data-ask-id', askId);
+  return sheet;
+}
+
+type Box = { x: number; y: number; width: number; height: number };
+const box = async (locator: Locator): Promise<Box> => (await locator.boundingBox())!;
 
 // The folder the next native pick answers (main's e2e pick seam, read at each pick).
 const setPick = (s: Scene, path: string) => s.maws.app.evaluate((_electron, dir) => void (process.env.MAWS_E2E_PICK_PATHS = dir), path);
@@ -122,7 +140,7 @@ test('send_file: the delivery row names hello.txt and the caption, its two butto
 
 // ---- G3 and the attention item: a blocking ask ----------------------------------------------------------------------
 
-test('a blocking ask: the capsule waits, the sheet holds every modality, the attention item shows on the Overview card and in Needs you, and Submit answers it', async () => {
+test('a blocking ask: the capsule waits with its form in its row, which holds every modality, no sheet opens, the attention item shows on the Overview card and in Needs you, and Submit in the row answers it', async () => {
   await scene({ titles: ['E1 tools: blocking ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -141,16 +159,18 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     expect(opened).toMatchObject({ blocking: true, questions: [{ id: 'q1' }, { id: 'q2' }, { id: 'q3' }, { id: 'q4' }, { id: 'q5' }] });
     await expect(capsule).toHaveAttribute('data-ask-id', opened!.askId);
 
-    // the sheet opened by itself for the shown session, one section per question with its modality's control
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-    await expect(sheet.locator('section[data-question-id]')).toHaveCount(5);
-    await expect(sectionOf(sheet, 'q1').getByRole('radio')).toHaveCount(4); // Red, Green, Blue, Other…
-    await expect(sectionOf(sheet, 'q2').getByRole('checkbox')).toHaveCount(4); // Mon, Tue, Wed, Other…
-    await expect(sectionOf(sheet, 'q3').getByRole('textbox')).toBeVisible();
-    await expect(sectionOf(sheet, 'q4').getByRole('button', { name: 'Choose folder…' })).toBeVisible();
-    await expect(sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' })).toBeVisible(); // the scratch project
-    await expect(capsule).toBeInViewport(); // follow mode keeps it in view as the notice grows the composer (E11)
+    // UX wave U1b (O-17): the form stands in the capsule's row, one section per question with its modality's control, the
+    // capsule's button reads Open beside, and no sheet opened by itself
+    const form = formOf(s);
+    await expect(form.locator('section[data-question-id]')).toHaveCount(5);
+    await expect(sectionOf(form, 'q1').getByRole('radio')).toHaveCount(4); // Red, Green, Blue, Other…
+    await expect(sectionOf(form, 'q2').getByRole('checkbox')).toHaveCount(4); // Mon, Tue, Wed, Other…
+    await expect(sectionOf(form, 'q3').getByRole('textbox')).toBeVisible();
+    await expect(sectionOf(form, 'q4').getByRole('button', { name: 'Choose folder…' })).toBeVisible();
+    await expect(sectionOf(form, 'q5').getByRole('radio', { name: 'repo' })).toBeVisible(); // the scratch project
+    await expect(capsule.getByRole('button', { name: 'Open beside', exact: true })).toBeVisible();
+    await expect(sheetOf(s)).toHaveCount(0);
+    await expect(capsule).toBeInViewport(); // follow mode keeps it in view (E11)
     await shoot(s, 'capsule-pending');
 
     // the attention item: in Needs you and on the session's Overview card, compact, with its one button
@@ -172,22 +192,22 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
 
     // every modality filled: a radio, checkboxes with Other, a typed text then skipped, the native folder pick, a
     // project picked then delegated
-    await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Blue' }).click();
-    await sectionOf(sheet, 'q2').getByRole('checkbox', { name: 'Mon' }).click();
-    await sectionOf(sheet, 'q2').getByRole('checkbox', { name: 'Wed' }).click();
-    await sectionOf(sheet, 'q2').getByRole('checkbox', { name: 'Other…' }).click();
-    await sectionOf(sheet, 'q2').getByRole('textbox').fill('Fri');
-    await sectionOf(sheet, 'q3').getByRole('textbox').fill('A title I will not send');
-    await sectionOf(sheet, 'q3').getByRole('button', { name: 'Skip' }).click();
+    await sectionOf(form, 'q1').getByRole('radio', { name: 'Blue' }).click();
+    await sectionOf(form, 'q2').getByRole('checkbox', { name: 'Mon' }).click();
+    await sectionOf(form, 'q2').getByRole('checkbox', { name: 'Wed' }).click();
+    await sectionOf(form, 'q2').getByRole('checkbox', { name: 'Other…' }).click();
+    await sectionOf(form, 'q2').getByRole('textbox').fill('Fri');
+    await sectionOf(form, 'q3').getByRole('textbox').fill('A title I will not send');
+    await sectionOf(form, 'q3').getByRole('button', { name: 'Skip' }).click();
     const assets = join(s.repo, 'assets');
     await setPick(s, assets);
-    await sectionOf(sheet, 'q4').getByRole('button', { name: 'Choose folder…' }).click();
-    await expect(sectionOf(sheet, 'q4').getByRole('list')).toHaveText(assets);
-    await sectionOf(sheet, 'q5').getByRole('radio', { name: 'repo' }).click();
-    await sectionOf(sheet, 'q5').getByRole('button', { name: 'Decide for me' }).click();
-    await shoot(s, 'sheet');
+    await sectionOf(form, 'q4').getByRole('button', { name: 'Choose folder…' }).click();
+    await expect(sectionOf(form, 'q4').getByRole('list')).toHaveText(assets);
+    await sectionOf(form, 'q5').getByRole('radio', { name: 'repo' }).click();
+    await sectionOf(form, 'q5').getByRole('button', { name: 'Decide for me' }).click();
+    await shoot(s, 'ask-form');
     await clearToasts(s.page);
-    await sheet.getByRole('button', { name: 'Submit · 1 skipped' }).click();
+    await form.getByRole('button', { name: 'Submit · 1 skipped' }).click();
 
     const text = (questionId: string) => opened!.questions.find((q) => q.id === questionId)!.question;
     expect(await answersWritten(s, id, opened!.requestId)).toEqual([
@@ -199,21 +219,89 @@ test('a blocking ask: the capsule waits, the sheet holds every modality, the att
     ]);
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Answered');
-    await expect(sheet).toHaveCount(0);
-    await expect(s.panel).toHaveJSProperty('inert', true); // an automatic Questions surface gives main its space back
+    await expect(form, 'the form leaves the row with its request').toHaveCount(0);
+    await expect(capsule.locator('[data-ask-answer]'), 'and the capsule reads its answer lines').toHaveCount(5);
+    await expect(sheetOf(s)).toHaveCount(0);
     // the attention item went at Submit
     await expect(questionRow).toHaveCount(0);
     expect(value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id && item.state === 'pending')).toEqual([]);
     await idle(s, id);
     await shoot(s, 'capsule-answered');
 
-    // View answers reopens the ask read-only from the capsule's own data
+    // View answers opens the ask read-only from the capsule's own data
     await capsule.getByRole('button', { name: 'View answers' }).click();
+    const sheet = sheetOf(s);
     const readOnly = sheet.locator('[data-ask-readonly]');
     await expect(readOnly).toBeVisible();
     await expect(sectionOf(readOnly, 'q1')).toContainText('Blue');
     await expect(sectionOf(readOnly, 'q3')).toContainText('Skipped');
     await expect(sheet.getByRole('button', { name: /^Submit/ })).toHaveCount(0);
+  });
+});
+
+// UX wave U1b, acceptance 8's first sentence (probe 9a; the architect's ruling of 2026-11-15 on it): a message sent from
+// the composer while MAWS's blocking ask waits is a message, and waits as any message sent during a turn waits: the
+// queue's row above the composer, by U4a's rules. It reaches the agent with the answer. The ask's form does not leave,
+// keep less of its draft, or change. Over the engine's own frames (`askWaitJournal`, `uxwave/u1b-askwait-mcp-answer-r1`):
+// the replay holds at the recorded message until the composer writes it, and at the ask's answer until the row's form
+// submits; then the ask's result, and the message's replay and start (10 to 30 ms after it on the recording).
+test('a message sent while a blocking ask waits: its queue row stands while the form keeps its draft; after the answer it leaves the queue and is drawn after the ask', async () => {
+  await scene({ titles: ['U1b: a message while the ask waits'] }, async (s) => {
+    const [id] = s.ids;
+    const MESSAGE = 'Also: end your reply with the word KIWI.'; // the recorded message: its replay draws the recorded words
+    await show(s, id);
+    await replay(s, id, askWaitJournal(s.scratch.root, id));
+    // UX wave U2b: the recording holds no message, so no to-human view is in force (the plain transcript, no switch)
+    await expect(s.pane.locator('[data-view-switch]')).toHaveCount(0);
+
+    const capsule = capsuleOf(s);
+    const form = formOf(s);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'pending', { timeout: 30_000 });
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    expect(opened).toMatchObject({ blocking: true, questions: [{ id: 'q1', question: 'Which fruit do you prefer?' }] });
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+    const mango = sectionOf(form, 'q1').getByRole('radio', { name: 'Mango' });
+    await mango.click(); // a draft, before the message
+    await expect(mango).toBeChecked();
+
+    // the message: written at once as a steer, queued by the engine (64), and waiting in the queue's row; nothing of the ask moves
+    const box = s.pane.getByRole('textbox', { name: 'Message', exact: true });
+    await box.click();
+    await box.pressSequentially(MESSAGE);
+    await box.press('Enter');
+    await expect(box, 'the box is cleared by the send').toHaveText('');
+    const stack = s.pane.getByRole('region', { name: 'Queued messages' });
+    const row = stack.locator('li[data-queue-state="next"]');
+    await expect(row, 'the queue’s row while the ask waits').toContainText(MESSAGE);
+    await expect(row.locator('[data-mark]')).toHaveText('Next step');
+    const written = () => s.journal(id).find((r) => r.direction === 'out' && (r.frame as Frame).type === 'user' && ((r.frame as Frame).message as { content?: unknown } | undefined)?.content === MESSAGE);
+    await expect.poll(() => written() !== undefined, { message: 'written to the engine' }).toBe(true);
+    const write = written()!;
+    const uuid = (write.frame as Frame).uuid;
+    expect(uuid, 'the message’s uuid').toEqual(expect.any(String));
+    // its own `queued` frame, after its write (the first prompt has one of its own, earlier); the replay maps the
+    // recorded uuid onto the one the host wrote
+    await expect
+      .poll(() => s.journal(id).some((r) => r.direction === 'in' && r.seq > write.seq && (r.frame as Frame).type === 'command_lifecycle' && (r.frame as Frame).state === 'queued' && (r.frame as Frame).command_uuid === uuid), { message: 'the engine queued it' })
+      .toBe(true);
+    const transcript = s.pane.locator('[data-transcript-scroller]');
+    await expect(transcript.locator('.transcript-row[data-kind="user"]').filter({ hasText: MESSAGE }), 'no bubble while it waits').toHaveCount(0);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
+    await expect(form, 'the form stays').toHaveAttribute('data-hover-ask', opened!.askId);
+    await expect(mango, 'with its draft').toBeChecked();
+    await expect(sheetOf(s)).toHaveCount(0);
+
+    // the answer: the ask's result, then the message's replay and start; it leaves the queue and stands after the ask
+    await clearToasts(s.page);
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Which fruit do you prefer?', status: 'answered', value: ['Mango'] }]);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await expect(stack, 'it leaves the queue').toHaveCount(0);
+    const bubble = transcript.locator('.transcript-row[data-kind="user"]').filter({ hasText: MESSAGE });
+    await expect(bubble, 'drawn as the person’s message').toHaveCount(1);
+    const indexOf = (locator: Locator) => locator.evaluate((element) => Number(element.closest<HTMLElement>('[data-row-id]')?.dataset.index ?? -1));
+    expect(await indexOf(bubble), 'after the ask’s row').toBeGreaterThan(await indexOf(capsule));
+    await idle(s, id);
   });
 });
 
@@ -272,7 +360,7 @@ test('a waiting question is answered in its sidebar hover card, never queued as 
 
 // ---- G6: the host holds the ask across a renderer reload ------------------------------------------------------------
 
-test('a reload mid-ask: the sheet lists the ask again from the host and Submit answers it; after another reload View answers reopens it read-only', async () => {
+test('a reload mid-ask: the row holds the form again and the sheet opened beside lists the ask again from the host, and Submit answers it; after another reload View answers reopens it read-only', async () => {
   await scene({ titles: ['E1 tools: reload'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -281,13 +369,15 @@ test('a reload mid-ask: the sheet lists the ask again from the host and Submit a
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
     const askId = (await capsule.getAttribute('data-ask-id'))!;
-    await expect(sheetOf(s)).toHaveAttribute('data-ask-id', askId);
+    await expect(formOf(s)).toHaveAttribute('data-hover-ask', askId);
+    await openBeside(s, askId); // UX wave U1b: the sheet only by the person's open
 
     await s.page.reload();
     await recordEvents(s.page);
     const sheet = sheetOf(s);
     await expect(sheet).toHaveAttribute('data-ask-id', askId, { timeout: 20_000 }); // the restored tab reads maws.asks.list
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'pending');
+    await expect(formOf(s), 'the row holds the form again, read from the host').toHaveAttribute('data-hover-ask', askId, { timeout: 20_000 });
     const [pending] = value(await invoke(s.page, 'maws.asks.list', { appSessionId: id as never })).asks;
     expect(pending).toMatchObject({ askId, blocking: true });
 
@@ -325,7 +415,7 @@ test('a reload mid-ask: the sheet lists the ask again from the host and Submit a
 
 // The ask lost with the process is counted as a question lost (exit parity with an AskUserQuestion; M5 fix): on the
 // transcript's exit row and in the session's interrupted attention item.
-test('a stop with a blocking ask pending: the capsule reads cancelled, the exit names a question lost, and the journal holds maws_ask_cancelled before the exit', async () => {
+test('a stop with a blocking ask pending: the capsule reads cancelled and its form leaves the row, the sheet opened from it says so, the exit names a question lost, and the journal holds maws_ask_cancelled before the exit', async () => {
   await scene({ titles: ['E1 tools: stop'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -333,9 +423,13 @@ test('a stop with a blocking ask pending: the capsule reads cancelled, the exit 
     await allowNext(s, id);
     const capsule = capsuleOf(s);
     await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
+    await expect(formOf(s)).toBeVisible();
     value(await invoke(s.page, 'session.stop', { appSessionId: id as never, reason: 'stop' }));
     await expect(capsule).toHaveAttribute('data-ask-state', 'cancelled');
     await expect(capsule.locator('[data-ask-chip]')).toHaveText('Cancelled, the session ended');
+    await expect(formOf(s), 'the form leaves the row with its request').toHaveCount(0);
+    await expect(sheetOf(s), 'nothing opened by itself').toHaveCount(0);
+    await capsule.getByRole('button', { name: 'Open', exact: true }).click();
     await expect(sheetOf(s)).toContainText('This session ended before you answered');
     await expect(s.pane.locator('[data-scope="exit"]')).toHaveText('Session process exited (stop) · 1 question lost');
     await expect
@@ -349,7 +443,7 @@ test('a stop with a blocking ask pending: the capsule reads cancelled, the exit 
 
 // ---- the architect's ruling 2: an ask from a session not shown -----------------------------------------------------
 
-test('an ask from a session not shown never switches the main view; its sheet opens when that session is selected', async () => {
+test('an ask from a session not shown never switches the main view; when that session is selected its form is in the capsule’s row and no sheet opens', async () => {
   await scene({ titles: ['E1 tools: shown', 'E1 tools: asking'] }, async (s) => {
     const [shown, asking] = s.ids;
     await show(s, shown);
@@ -376,15 +470,109 @@ test('an ask from a session not shown never switches the main view; its sheet op
     await expect.poll(async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === asking).map((item) => [item.kind, item.state, item.request.requestId]))
       .toEqual([['question', 'pending', opened!.requestId]]);
 
-    // the person goes to the asking session: its sheet opens on the ask
+    // the person goes to the asking session: the ask's form is in its capsule's row, and no sheet opens (UX wave U1b, O-17)
     await show(s, asking);
-    await expect(sheetOf(s)).toHaveAttribute('data-ask-id', opened!.askId);
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'pending');
+    await expect(formOf(s)).toHaveAttribute('data-hover-ask', opened!.askId);
+    // the form reads the ask from the ask store (HoverAsk draws `data-hover-ask` only for an ask it holds pending), drawn
+    // after the layout write that showed the session: the deferred open M6 removed ran in a microtask after that write,
+    // so it would have opened by now; two frames more and any layout write it made would be committed
+    await settledFrames(s.page);
+    await expect(sheetOf(s)).toHaveCount(0);
     await clearToasts(s.page);
-    await sheetOf(s).getByRole('button', { name: 'Submit', exact: true }).click();
+    await formOf(s).getByRole('button', { name: 'Submit', exact: true }).click();
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
     await expect(questionRow).toHaveCount(0);
     await idle(s, asking);
+  });
+});
+
+// ---- UX wave U1b: the ask's form in its capsule's row, beside a file the person reads (acceptance 3; O-17) -----------
+
+// Two questions in place of the blocking recording's five (invented words); the replay matches the ask's result by its id
+// alone, so whatever the form answers is written.
+const BESIDE_ASK = {
+  title: 'Release notes',
+  questions: [
+    { id: 'tone', header: 'Tone', question: 'Which tone should the release notes take?', modality: 'choice', options: [{ label: 'Plain' }, { label: 'Upbeat' }] },
+    { id: 'heading', header: 'Heading', question: 'What heading goes on top?', modality: 'text' },
+  ],
+};
+
+test('an ask beside an open file: its form stands in the capsule’s row under the title line, nothing shows above the composer, the side column keeps the file with no sheet tab added, Open beside opens the sheet on the same draft, and Submit turns the form into the capsule’s answer lines', async () => {
+  await scene({ titles: ['U1b: ask beside a file'] }, async (s) => {
+    const [id] = s.ids;
+    // a code file: a Markdown one opens in the rendered view (`[data-markdown-view]`), not in the editor's `.cm-line`s
+    const notes = join(s.repo, 'notes.ts');
+    writeFileSync(notes, "export const steps = ['draft', 'review', 'publish'];\n");
+    await show(s, id);
+
+    // the file open in the side column, through Files
+    await openSurface(s.page, 'Files');
+    const files = surface(s.page, 'files');
+    const treeRow = (path: string) => files.locator(`[data-tool="files"] [role="treeitem"][data-path="${path}"]`);
+    await expect(treeRow(s.repo)).toBeVisible();
+    if ((await treeRow(s.repo).getAttribute('aria-expanded')) !== 'true') await treeRow(s.repo).click();
+    await expect(treeRow(s.repo)).toHaveAttribute('aria-expanded', 'true'); // the tree expands its first root by itself
+    await treeRow(notes).click();
+    // the file opens beside the chat: a tab in the side column, the session's tab still in front in the main area
+    const viewer = sideColumn(s.page).locator(`[data-file-viewer][data-path="${notes}"]`);
+    await expect(viewer.locator('.cm-line').first()).toBeVisible();
+    const fileTab = sideTab(sideColumn(s.page), 'notes.ts');
+    await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+    const sessionTab = mainTabById(s.page, `session:${await addressed(s.page, id)}`);
+    await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
+    const strip = await sideTabNames(s.page, 'upper');
+    expect(strip).toContain('notes.ts');
+
+    await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, BESIDE_ASK));
+    await allowNext(s, id); // mcp__maws__ask (the recording's redundant approval)
+    const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
+    const capsule = capsuleOf(s);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'pending');
+    const form = formOf(s);
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+
+    // the form under the capsule's title line, whose button reads Open beside
+    const top = capsule.locator('.transcript-ask-top');
+    await expect(top.locator('.transcript-ask-title')).toHaveText('Release notes');
+    await expect(top.getByRole('button', { name: 'Open beside', exact: true })).toBeVisible();
+    await expect(async () => {
+      const [line, body] = [await box(top), await box(form)];
+      expect(body.y, 'the form stands under the title line').toBeGreaterThanOrEqual(line.y + line.height - 1);
+    }).toPass({ timeout: 10_000 });
+    // nothing above the composer, and the side column as it was: the file in view, no sheet tab
+    // the form above reads the ask from the ask store, which the live batch filled: the open M6 removed ran in that same
+    // batch's handler, right after the store was filled, so it would have opened by now; two frames more and any layout
+    // write it made would be committed
+    await settledFrames(s.page);
+    await expect(s.pane.locator('[data-composer] [data-request-card]'), 'no notice above the composer').toHaveCount(0);
+    await expect(viewer.locator('.cm-line').first()).toBeVisible();
+    await expect(sheetOf(s)).toHaveCount(0);
+    expect(await sideTabNames(s.page, 'upper'), 'no tab added to the side column').toEqual(strip);
+    await expect(fileTab).toHaveAttribute('aria-selected', 'true');
+    await expect(sessionTab).toHaveAttribute('aria-selected', 'true');
+
+    // a draft in the row; Open beside opens the sheet on the same draft
+    await sectionOf(form, 'tone').getByRole('radio', { name: 'Upbeat' }).click();
+    await sectionOf(form, 'heading').getByRole('textbox').fill('What changed this week');
+    const sheet = await openBeside(s, opened!.askId);
+    await expect(sectionOf(sheet, 'tone').getByRole('radio', { name: 'Upbeat' })).toHaveAttribute('aria-checked', 'true');
+    await expect(sectionOf(sheet, 'heading').getByRole('textbox')).toHaveValue('What changed this week');
+    await expect(form, 'the row keeps its form beside the sheet').toBeVisible();
+
+    // Submit in the row: the form turns into the capsule's answer lines
+    await clearToasts(s.page);
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
+    expect(await answersWritten(s, id, opened!.requestId)).toEqual([
+      { id: 'tone', question: BESIDE_ASK.questions[0]!.question, status: 'answered', value: ['Upbeat'] },
+      { id: 'heading', question: BESIDE_ASK.questions[1]!.question, status: 'answered', value: 'What changed this week' },
+    ]);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    await expect(form).toHaveCount(0);
+    await expect(capsule.locator('[data-ask-answer] .transcript-question-label')).toHaveText(['Tone', 'Heading']);
+    await expect(capsule.locator('[data-ask-answer] .transcript-question-answer')).toHaveText(['Upbeat', 'What changed this week']);
+    await idle(s, id);
   });
 });
 
@@ -394,33 +582,38 @@ test('an ask from a session not shown never switches the main view; its sheet op
 // result by its id alone, so whatever the form answers is written; the result read back is the form's answer.
 const ONE_QUESTION_ASK = { questions: [{ id: 'q1', header: 'Release', question: 'Ship the release notes today?', modality: 'choice', options: [{ label: 'Yes' }, { label: 'Not yet' }] }] };
 
-test('the Question sheet’s Dismiss sends one answer with every question skipped', async () => {
+test('the ask’s Dismiss in its row sends one answer with every question skipped, and the capsule reads Dismissed with its line Skipped', async () => {
   await scene({ titles: ['U1a: ask dismissed'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
     await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, ONE_QUESTION_ASK));
     await allowNext(s, id); // mcp__maws__ask
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    const form = formOf(s);
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
     await clearToasts(s.page);
-    await sheet.getByRole('button', { name: 'Dismiss', exact: true }).click(); // the sheet's own: every question card has one
+    await form.getByRole('button', { name: 'Dismiss', exact: true }).click(); // the form's own, as the sheet's
     expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Ship the release notes today?', status: 'skipped' }]);
-    await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
+    const capsule = capsuleOf(s);
+    await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
+    // UX wave U1b (acceptance 8, decision 10): an ask every answer of which was skipped reads Dismissed, its lines Skipped
+    await expect(capsule.locator('[data-ask-chip]')).toHaveText('Dismissed');
+    await expect(capsule.locator('[data-ask-answer] .transcript-question-answer')).toHaveText(['Skipped']);
+    await expect(sheetOf(s)).toHaveCount(0);
   });
 });
 
-test('a double-click on a single-choice option that completes the Question sheet submits it', async () => {
+test('a double-click on a single-choice option that completes the ask’s form in its row submits it', async () => {
   await scene({ titles: ['U1a: ask by double-click'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
     await replay(s, id, askFixture(s.scratch.root, ASK_BLOCKING, ONE_QUESTION_ASK));
     await allowNext(s, id); // mcp__maws__ask
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    const form = formOf(s);
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
     await clearToasts(s.page);
-    await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).dblclick();
+    await sectionOf(form, 'q1').getByRole('radio', { name: 'Yes' }).dblclick();
     expect(await answersWritten(s, id, opened!.requestId)).toEqual([{ id: 'q1', question: 'Ship the release notes today?', status: 'answered', value: ['Yes'] }]);
     await expect(capsuleOf(s)).toHaveAttribute('data-ask-state', 'answered');
   });
@@ -428,7 +621,7 @@ test('a double-click on a single-choice option that completes the Question sheet
 
 // ---- G4: an async ask -----------------------------------------------------------------------------------------------
 
-test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2), Submit sends the steer by the question’s number with no words of the model’s and retires the item, and the capsule turns answered across the second turn', async () => {
+test('an async ask: acknowledged at once, an async_input item while it waits (P2-C2) with its form in the capsule’s row, Submit there sends the steer by the question’s number with no words of the model’s and retires the item, and the capsule turns answered across the second turn', async () => {
   await scene({ titles: ['E1 tools: async ask'] }, async (s) => {
     const [id] = s.ids;
     await show(s, id);
@@ -447,11 +640,13 @@ test('an async ask: acknowledged at once, an async_input item while it waits (P2
     const items = async () => value(await invoke(s.page, 'attention.list', undefined)).filter((item) => item.appSessionId === id);
     await expect.poll(async () => (await items()).map((item) => [item.kind, item.state, item.request.requestId])).toEqual([['async_input', 'pending', opened!.requestId]]);
 
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
-    await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).click();
+    // UX wave U1b: the waiting async_input names the ask's call, so its form is in the capsule's row; no sheet opened
+    const form = formOf(s);
+    await expect(form).toHaveAttribute('data-hover-ask', opened!.askId);
+    await expect(sheetOf(s)).toHaveCount(0);
+    await sectionOf(form, 'q1').getByRole('radio', { name: 'Yes' }).click();
     await clearToasts(s.page);
-    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
 
     // the steer written at priority next opens as the recorded one does and then, board ticket 711, holds no text the
     // model wrote: the question by its number, the label picked by its place among the options, the block's question
@@ -505,9 +700,6 @@ const LAYOUT_ASK = {
   }],
 };
 
-type Box = { x: number; y: number; width: number; height: number };
-const box = async (locator: Locator): Promise<Box> => (await locator.boundingBox())!;
-
 test('previews: a single-select question lays its options beside the focused option’s preview when the panel is wide and under it when narrow, and Submit sends the label chosen', async () => {
   await scene({ titles: ['P2-C3: previews'] }, async (s) => {
     const [id] = s.ids;
@@ -519,8 +711,7 @@ test('previews: a single-select question lays its options beside the focused opt
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
     expect(opened!.questions[0]!.options!.map((option) => option.preview !== undefined)).toEqual([true, true, true, false]);
 
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    const sheet = await openBeside(s, opened!.askId); // UX wave U1b: the sheet opens only from the capsule's row
     // A narrow tool opens 360 px wide (UX wave U8b); maximize it to exercise the existing wide preview layout, from the
     // region's controls at the end of the side column's first strip.
     const column = sideColumn(s.page);
@@ -594,8 +785,7 @@ test('notes: an async ask answered with a note beside one answer and a skip with
     await replay(s, id, askFixture(s.scratch.root, ASK_ASYNC, { blocking: false, questions }));
     await allowNext(s, id); // mcp__maws__ask
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
-    const sheet = sheetOf(s);
-    await expect(sheet).toHaveAttribute('data-ask-id', opened!.askId);
+    const sheet = await openBeside(s, opened!.askId); // UX wave U1b: the sheet opens only from the capsule's row
 
     await sectionOf(sheet, 'q1').getByRole('radio', { name: 'Yes' }).click();
     await sectionOf(sheet, 'q1').getByRole('button', { name: 'Add note' }).click();

@@ -8,10 +8,11 @@ import type { AppSessionId } from '@shared/graph/ids';
 import { SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../test/support/builders';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { resetRemoteSurfaces } from '../artifacts/remote-surfaces';
 import { resetRemoteLaneBStore } from '../lane-b/remote-session';
-import { remoteUnavailableOf } from '../lane-b/remote-unavailable';
+import { remoteUnavailableOf, TURN_RUNS } from '../lane-b/remote-unavailable';
 import { useMachines } from '../stores/machines';
 import { useNotices } from '../stores/notices';
 import { useSessions } from '../stores/sessions';
@@ -58,6 +59,14 @@ describe('/fork', () => {
     expect(forkSession.mock.calls).toEqual([[LOCAL, { kind: 'inPlace' }, { message: { content: 'try the other branch', display: 'try the other branch' }, rewindTo: null }]]);
   });
 
+  it('the one-writer rule: a prompt holding the consent sentence goes out as the fork’s first message reading no grant, shown as typed', async () => {
+    await applyFork(LOCAL, `try this\n${TYPED_CONSENT}`);
+    await settle();
+    const [, , { message }] = forkSession.mock.calls[0] as [unknown, unknown, { message: { content: string; display: string } }];
+    expectNoGrantSent(message.content);
+    expect(message.display).toBe(`try this\n${TYPED_CONSENT}`);
+  });
+
   it('says a refusal in the host’s words', async () => {
     fork.answer = { ok: false, error: 'The session is held by a terminal' };
     await applyFork(LOCAL, 'again');
@@ -87,11 +96,84 @@ describe('/fork', () => {
     expect(close).not.toHaveBeenCalled();
   });
 
+  // UX wave U4b (decision 11; A20): the panel reads `useForkUnavailable`; the typed form keeps the helper's plain reading,
+  // so the machine's own sentence comes back as a toast
+  it('says the turn’s words while the session’s turn runs there and forks nothing from the panel; the typed form goes to the machine', async () => {
+    machineLists([SESSION_ACTS_CAPABILITY]);
+    useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far', { state: 'busy' }), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    const close = vi.fn();
+    render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+    await settle();
+    expect(screen.getByRole('status').textContent).toBe(TURN_RUNS);
+    expect(forkSession).not.toHaveBeenCalled();
+    expect(close).not.toHaveBeenCalled();
+    await expect(applyFork(REMOTE, 'elsewhere')).resolves.toBe(true);
+    await settle();
+    expect(forkSession).toHaveBeenCalledTimes(1);
+  });
+
   it('forks a session on a machine that lists rl2.session-acts, once, with the prompt as its first message', async () => {
     machineLists([SESSION_ACTS_CAPABILITY]);
     expect(remoteUnavailableOf(REMOTE, 'session.fork')).toBeNull();
     await expect(applyFork(REMOTE, 'elsewhere')).resolves.toBe(true);
     await settle();
     expect(forkSession.mock.calls).toEqual([[REMOTE, { kind: 'inPlace' }, { message: { content: 'elsewhere', display: 'elsewhere' }, rewindTo: null }]]);
+  });
+
+  // UX wave U4b (decision 11; the Decision Log's line on the panel review): the panel acts once, when nothing refuses it.
+  // Opened while the turn runs there it waits; the turn ending with the panel still open, it closes and forks, as an
+  // ordinary open does; a panel dismissed meanwhile, or one the turn outlasts, forks nothing.
+  describe('opened while the turn runs on the other machine', () => {
+    const turn = (state: 'busy' | 'idle') => act(() => useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far', { state }), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) }));
+    beforeEach(() => machineLists([SESSION_ACTS_CAPABILITY]));
+
+    it('busy, then idle with the panel open: forks once, and closes the panel', async () => {
+      turn('busy');
+      const close = vi.fn();
+      render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      expect(screen.getByRole('status').textContent).toBe(TURN_RUNS);
+      turn('idle');
+      await settle();
+      expect(forkSession.mock.calls).toEqual([[REMOTE, { kind: 'inPlace' }, { message: null, rewindTo: null }]]);
+      expect(close).toHaveBeenCalledTimes(1);
+      turn('busy'); // the fork's own launch, or a further turn: nothing more
+      turn('idle');
+      await settle();
+      expect(forkSession).toHaveBeenCalledTimes(1);
+    });
+
+    it('busy, dismissed, then idle: forks nothing', async () => {
+      turn('busy');
+      const close = vi.fn();
+      const view = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      view.unmount(); // the panel dismissed: the host draws it no longer
+      turn('idle');
+      await settle();
+      expect(forkSession).not.toHaveBeenCalled();
+    });
+
+    it('busy for the panel’s whole life: forks nothing', async () => {
+      turn('busy');
+      const close = vi.fn();
+      const { rerender, unmount } = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      rerender(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      unmount();
+      await settle();
+      expect(forkSession).not.toHaveBeenCalled();
+      expect(close).not.toHaveBeenCalled();
+    });
+
+    it('an ordinary open, the turn idle there: forks once and closes, as today', async () => {
+      turn('idle');
+      const close = vi.fn();
+      const { rerender } = render(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      rerender(<ForkWidget appSessionId={REMOTE} args="" close={close} />);
+      await settle();
+      expect(forkSession).toHaveBeenCalledTimes(1);
+      expect(close).toHaveBeenCalledTimes(1);
+    });
   });
 });

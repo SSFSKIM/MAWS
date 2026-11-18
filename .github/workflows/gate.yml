@@ -353,8 +353,10 @@ jobs:
     permissions:
       contents: read
       actions: read
-    # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the self-hosted Mac
-    # when the repository variable GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
+    # The smallest hosted runner (ubuntu-slim, 1 vCPU; the plan only computes outputs and takes seconds), or the hosted label
+    # the repository variable GATE_LIGHT_RUNNER names (ubuntu-24.04 while GitHub acquires no slim runner for the account, as
+    # from 2026-11-17 16:21Z; docs and static stay on ubuntu-24.04 for the same reason, a literal label the refused-start
+    # walk reads as hosted), or the self-hosted Mac when GATE_RUNNER is `macos` (§3.6); hosted under `pool`, since it is what makes the pool's box
     # (Decision Log 53). The jobs below take the runners the plan resolves: class 1a's from the `Class1a:` trailer or
     # GATE_RUNNER (linux, macos or pool), each e2e job its lane's runner or, for POOL_E2E, the pool's or hosted Linux's;
     # on the Mac, the exclusive instance's labels, the shared instances' for unit:darwin and the e2e groups on
@@ -362,7 +364,7 @@ jobs:
     # after e2e-build, on the pool, made their out/.
     # A push to master runs nothing here (the warm job of Decision Log 26 left with Decision Log 53); master's class 1a
     # is the landing gate's.
-    runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || 'ubuntu-slim' }}
+    runs-on: ${{ vars.GATE_RUNNER == 'macos' && fromJSON('["self-hosted","macOS","ARM64"]') || vars.GATE_LIGHT_RUNNER || 'ubuntu-slim' }}
     # On the Mac, the exclusive instance's wait bound on top (gate-plan.mjs's MAC_EXCLUSIVE_WAIT_MINUTES).
     timeout-minutes: ${{ vars.GATE_RUNNER == 'macos' && 40 || 30 }}
     outputs:
@@ -466,7 +468,7 @@ jobs:
   docs:
     needs: plan
     if: needs.plan.outputs.docs == 'true'
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@v7
@@ -578,7 +580,7 @@ jobs:
   static:
     needs: [plan, static-checks, static-local]
     if: ${{ !cancelled() && needs.plan.outputs.static == 'true' }}
-    runs-on: ubuntu-slim
+    runs-on: ubuntu-24.04
     timeout-minutes: 5
     steps:
       - env:

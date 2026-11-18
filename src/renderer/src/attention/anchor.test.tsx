@@ -14,7 +14,7 @@ import { markIdOf } from '@shared/owner/marks';
 import { fakeClient } from '../../../../test/support/fake-client';
 import { item } from '../../../../test/support/builders';
 import { ipc } from '../ipc/client';
-import { swapOf } from '../composer/docked/swap';
+import { noticeOf } from '../composer/docked/swap';
 import { RequestCard } from '../request-card/RequestCard';
 import { Sidebar } from '../sidebar/Sidebar';
 import { useAttention } from '../stores/attention';
@@ -192,8 +192,8 @@ describe('the surfaces', () => {
     expect(screen.getByRole('button', { name: 'Mark read' })).toBeTruthy();
   });
 
-  it('the composer neither docks nor shows a notice for either kind', () => {
+  it('the composer shows no notice for either kind', () => {
     const items = [owner('async_input', 'Question — Which backend?'), owner('essential_unread', 'Must read — x', '2026-09-28T08:01:00.000Z')];
-    expect(swapOf(items, new Map())).toEqual({ item: null, notice: null, waiting: 0, unread: [] });
+    expect(noticeOf(items)).toBeNull();
   });
 });

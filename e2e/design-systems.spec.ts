@@ -21,7 +21,8 @@
 //   holds (A's export service; D12);
 // - the agent's `ask` with design_system questions, over C3's replay of a journal derived from E1's recorded blocking ask
 //   with only the ask's questions and its recorded answers rewritten (the replay matches the host's answers by request
-//   id; what the sheet submitted is asserted on the journal's own rows): the sheet lists the seeded systems with their
+//   id; what the form submitted is asserted on the journal's own rows): the ask's form, in its capsule's row since UX wave
+//   U1b (the Question sheet's own sections), lists the seeded systems with their
 //   swatches and origin, offers "Build one with me" where allowed, and answers `{designSystemId, name}` and
 //   `{create: true}` (14).
 // - P3-F's S-RESTYLE: B's real document page and C's real deck stage, side by side in a split so neither unmounts,
@@ -662,7 +663,7 @@ async function replayJournal(s: Scene, id: AppSessionId, journal: string): Promi
   value(await invoke(s.page, 'session.send', { appSessionId: id, content: prompt }));
 }
 
-test('the agent asks for a design system: the sheet lists the systems with their swatches and origin, offers Build one with me where allowed, and answers the chosen id or create', async () => {
+test('the agent asks for a design system: the form in the ask’s row lists the systems with their swatches and origin, offers Build one with me where allowed, and answers the chosen id or create', async () => {
   test.setTimeout(120_000);
   await scene({ titles: ['P3-D: a design system ask'], label: 'p3d-ask' }, async (s) => {
     const [id] = s.ids;
@@ -680,9 +681,12 @@ test('the agent asks for a design system: the sheet lists the systems with their
 
     const [opened] = ofKind(await s.events(id), 'maws.ask.opened');
     expect(opened).toMatchObject({ askId: ASK_TOOL_USE, blocking: true, questions: QUESTIONS });
-    const sheet = s.panel.locator('[data-ask-sheet]');
-    await expect(sheet).toHaveAttribute('data-ask-id', ASK_TOOL_USE);
-    const section = (questionId: string) => sheet.locator(`section[data-question-id="${questionId}"]`);
+    // UX wave U1b (O-17): the ask's form stands in its capsule's row; no sheet opens by itself
+    const capsule = s.pane.locator('section.transcript-ask');
+    const form = capsule.locator('.transcript-ask-form [data-hover-ask]');
+    await expect(form).toHaveAttribute('data-hover-ask', ASK_TOOL_USE);
+    await expect(s.panel.locator('[data-ask-sheet]')).toHaveCount(0);
+    const section = (questionId: string) => form.locator(`section[data-question-id="${questionId}"]`);
     // every live system by name, in order, with "Build one with me" only where the question allows it
     await expect(section('q1').getByRole('radio')).toHaveText(BUILT_IN.map((title) => new RegExp(`^${title}`)));
     await expect(section('q2').getByRole('radio')).toHaveCount(BUILT_IN.length + 1);
@@ -698,13 +702,12 @@ test('the agent asks for a design system: the sheet lists the systems with their
 
     await section('q1').getByRole('radio', { name: 'Classroom' }).click();
     await section('q2').getByRole('radio', { name: 'Build one with me' }).click();
-    await sheet.getByRole('button', { name: 'Submit', exact: true }).click();
+    await form.getByRole('button', { name: 'Submit', exact: true }).click();
 
     // the answers the host wrote to the engine: the system by its id and name, and the build request
     let written: McpResult | null = null;
     await expect.poll(() => (written = mcpResultOf(s.journal(id), opened!.requestId)) !== null, { timeout: 20_000 }).toBe(true);
     expect(JSON.parse(resultText(written!))).toEqual({ status: 'answered', askId: ASK_TOOL_USE, answers });
-    const capsule = s.pane.locator('section.transcript-ask');
     await expect(capsule).toHaveAttribute('data-ask-state', 'answered');
     await expect(capsule.locator('[data-ask-answer]')).toHaveText(['Design system→Classroom', 'And the slides?→Build one with me']);
   });

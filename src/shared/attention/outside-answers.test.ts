@@ -30,6 +30,15 @@ describe('what may be answered from outside a session’s pane', () => {
     for (const tool of ['Read', 'Glob', 'Grep', 'WebFetch']) expect(outsideAnswers(permission(tool), surface), tool).toEqual(BOTH);
   });
 
+  // The branch panel's finding 4 (ruled, fail closed): a fetch named mcp__web__fetch gets the ordinary prompt, Deny alone
+  // from outside, whatever server it came from: no recording tells the web plugin's server from a user's named `web`.
+  it.each(SURFACES)('offers Deny alone on a fetch by a user’s HTTP server named web, and on any mcp__web__fetch (%s)', (surface) => {
+    const fetch = { url: 'https://example.com', prompt: 'What is the page’s main heading?' };
+    expect(outsideAnswers(permission('mcp__web__fetch', fetch, { mcpServer: { name: 'web', source: 'user' } }), surface)).toEqual(DENY_ONLY);
+    expect(outsideAnswers(permission('mcp__web__fetch', fetch, { mcpServer: { name: 'web', source: 'plugin' } }), surface)).toEqual(DENY_ONLY);
+    expect(outsideAnswers(permission('mcp__web__fetch', fetch), surface)).toEqual(DENY_ONLY);
+  });
+
   it('on a notification, allows a command of one line and at most 120 characters, and only denies a longer one', () => {
     expect(NOTIFICATION_COMMAND_MAX).toBe(120);
     expect(outsideAnswers(command(of(120)), 'notification')).toEqual(BOTH);

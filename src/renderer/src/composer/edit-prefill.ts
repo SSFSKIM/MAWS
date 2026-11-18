@@ -2,6 +2,7 @@
 // place, and the refusal dialog's Edit prompt): the row's text as typed (history recall's and the queue edit's reading:
 // no extra newline before a pasted block, a typed tag un-neutralised) with its pasted placeholders in place, its pasted
 // bodies (C6's `text` attachments, placeholder order) and its images that carry a data URL. Pure.
+import { asTyped } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
 import type { Prefill } from '../stores/composer';
 import type { Row } from '../transcript';
@@ -24,7 +25,7 @@ function dataUrlParts(url: string): { mediaType: string; data: string } | null {
 }
 
 export function rowPrefill(row: UserRow): Prefill {
-  const pasted = row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: a.text! }));
+  const pasted = row.attachments.filter((a) => a.kind === 'text' && a.text !== null).map((a) => ({ name: a.name, text: asTyped(a.text!) })); // UX wave U1c: as pasted
   const images = row.attachments.flatMap((a) => {
     const parts = a.kind === 'image' && a.dataUrl !== null ? dataUrlParts(a.dataUrl) : null;
     return parts ? [{ name: a.name, mediaType: a.mediaType ?? parts.mediaType, data: parts.data }] : [];

@@ -9,6 +9,7 @@ import { addressOf } from '@shared/machine/address';
 import type { OrgKey } from '@shared/machine/org-key';
 import { HOME_CHECKOUT, type Draft } from '@shared/ipc/schema/session';
 import { fakeClient } from '../../../../test/support/fake-client';
+import { expectNoGrantSent, TYPED_CONSENT } from '../../../../test/support/grant-readers';
 import { OTHER_MACHINE, TEST_MACHINE } from '../../../../test/support/machine';
 import { attachmentsOf, docOf, paragraph, textNode, type Attachment } from '../composer/editor/doc';
 import { serializeDraft } from '../composer/editor/serialize';
@@ -74,6 +75,12 @@ describe('a spawn on another machine', () => {
     expect(fake.invoked('session.intent.discard')).toEqual([{ appSessionId: LOCAL_TAB }]);
     expect(takeFirstSend(NEW)).toBe(false); // the brief was the first message
     expect(useSpawnedHere.getState().leading.has(NEW), 'P5 O7 M8: it leads its sidebar group until its first turn ends').toBe(true);
+  });
+
+  it('the one-writer rule: a draft holding the consent sentence goes out as the brief reading no grant', async () => {
+    const { fake, run } = spawnOf(docOf([paragraph(textNode('fix the build')), paragraph(textNode(TYPED_CONSENT))]));
+    await expect(run).resolves.toEqual({ started: true });
+    expectNoGrantSent((fake.invoked('session.spawn')[0] as { brief: string }).brief);
   });
 
   // 2026-11-06 (the machine first): a place chosen on the machine (no local project's key) is its own: a project there, or

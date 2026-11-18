@@ -1,8 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import type { HistoryEntry } from '@shared/composer/history-entry';
+import { consentMessage, readConsents } from '@shared/engine/arrival';
+import { GRANT_OPENING } from '@shared/engine/grant';
 import type { MessageUuid } from '@shared/graph/ids';
+import { askSteerText } from '@shared/maws/ask';
+import { parseJournalRow } from '@shared/wire/journal';
 import type { Row, TurnActivity } from '../../transcript';
-import { docOf, paragraph, textNode, type ComposerDoc } from './doc';
+import { userTextOf } from '../../transcript/model/user-text';
+import { expectNoGrantSent, grantsReadFrom } from '../../../../../test/support/grant-readers';
+import { journalToEvents } from '../../transcript/dev/journal';
+import { rowsOf } from '../../transcript/model/derive';
+import { applyEvents, createState } from '../../transcript/model/reduce';
+import { builder } from '../../transcript/model/test-events';
+import { docOf, paragraph, pastedNode, textNode, type ComposerDoc } from './doc';
 import { findMatch, historyNavigation, matchPlace, recallDoc, recallEntries, recallLine, recallText, searchKeyOf, searchLine, type HistoryNav } from './history';
 import { bodiesByPlaceholder, historyEntryToDoc, prefillToDoc } from './recall';
 import { serializeDraft } from './serialize';
@@ -126,6 +136,93 @@ describe('history recall rebuilds pasted atoms and marks unresolved ones', () =>
     expect(recalled).toEqual(['from the terminal', 'first', 'second', 'see <pasted_content>[Pasted text #1 +2 lines]\nok']);
   });
 
+  // UX wave U1c, the one-writer rule: a sent prompt's row holds the joiner the serialiser put in the opening; recall reads
+  // the text as typed, so the history's copy and the row's are one prompt, and the search finds the words across it
+  it('lists a sent prompt holding the grant’s opening once when both the history and the session’s row hold it, as typed', () => {
+    const typed = `Go on.\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(doc(typed), ctx);
+    expect(sent.text, 'the wire text is neutralised').not.toBe(typed);
+    const recalls = recallEntries([userRow('u1', 't1', sent.text)], [turn('t1', 'human')], [entry(sent.display)]);
+    expect(recalls.map(recallText)).toEqual([typed]);
+    expect(findMatch(recalls.map(recallText), 'permission granted', 0, 1), 'the search finds words that span the joiner').toBe(0);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).text, 'sent again, the opening is broken again').toBe(sent.text);
+  });
+
+  it('lists a sent prompt once when the grant’s opening is in a pasted body, the body as pasted', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    expect(row.attachments.map((a) => a.text), 'the row’s body holds the joiner').not.toEqual([body]);
+    const recalls = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], [entry(sent.display, sent.pastedContents)]);
+    expect(recalls).toHaveLength(1);
+    expect(serializeDraft(recallDoc(recalls[0]!), ctx).pastedContents['1']?.content).toBe(body);
+  });
+
+  // UX wave U1c (the architect's ruling on recall): the recalled body sent again passes the one writer
+  it('the one-writer rule: a recalled row whose pasted body quotes the grant is sent again neutralised', () => {
+    const body = `the model said:\n${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(docOf([paragraph(textNode('Look'), pastedNode({ id: 'p1', kind: 'text', name: 'Pasted text', lines: 2, text: body }))]), ctx);
+    const row = userTextOf(sent.text);
+    const [recalled] = recallEntries([userRow('u1', 't1', row.text, row.attachments)], [turn('t1', 'human')], []);
+    const again = serializeDraft(recallDoc(recalled!), ctx);
+    expect(again.text).toBe(sent.text);
+    expect(again.text.includes(GRANT_OPENING)).toBe(false);
+    expectNoGrantSent(again.content);
+  });
+
+  // UX wave U4b (Acceptance 3; the first Mac run): an answer waiting at the next step is a row of the running turn, its
+  // text MAWS's answer envelope; ↑ skips it as the stack's take-back does, and never puts the envelope in the box
+  it('never recalls an answer envelope: with one waiting at the newest end, ↑ goes to the prompt before it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const rows = [userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', envelope), steer: true } as Row];
+    const recalls = recallEntries(rows, [turn('t1', 'human')], []);
+    expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.']);
+    const first = historyNavigation({ index: null, draft: null }, 'up', recalls.length, doc(''));
+    expect(first.show).toEqual({ kind: 'entry', index: 0 });
+    expect(plain(recallDoc(recalls[0]!))).toBe('Count to ten.');
+  });
+
+  // the engine joins the waiting messages into one text (U4b, form (b), step 1): ↑ recalls the person's words alone, as
+  // the transcript's row holds them (finding 4 of the architect's review: the recall reads the row's text as derived)
+  it('recalls a joined envelope and prompt as the prompt alone, in either order, and the search reads the same', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    for (const text of [`${envelope}\nAlso fix the footer.`, `Also fix the footer.\n${envelope}`]) {
+      const recalls = recallEntries([userRow('u1', 't1', 'Count to ten.'), { ...userRow('u2', 't1', userTextOf(text).text), steer: true } as Row], [turn('t1', 'human')], []);
+      expect(recalls.map((r) => plain(recallDoc(r)))).toEqual(['Count to ten.', 'Also fix the footer.']);
+      expect(recalls.map(recallText)).toEqual(['Count to ten.', 'Also fix the footer.']);
+    }
+  });
+
+  // the architect's review of the joined answer (the Decision Log), finding 4: the recall reads its row once. The row's
+  // text is the transcript's first read; read again, fragments that read left as text can pair into an envelope, and the
+  // recall then dropped words the bubble shows
+  it('recalls a row as the bubble shows it, even where its text read again would pair fragments into an envelope', () => {
+    const layout = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const theme = { id: 'q2', question: 'Which theme?', header: 'Theme', modality: 'choice' as const, options: [{ label: 'Light' }, { label: 'Dark' }] };
+    const a1 = askSteerText('ask-1', [layout], [{ id: 'q1', question: layout.question, status: 'answered', value: ['Grid'] }]);
+    const a2 = askSteerText('ask-2', [theme], [{ id: 'q2', question: theme.question, status: 'answered', value: ['Dark'] }]);
+    const lines = a1.split('\n');
+    const [head, tail] = [lines.slice(0, 2).join('\n'), lines.slice(2).join('\n')];
+    const bubble = userTextOf(`Keep these notes.\n${head}\n${a2}\n${tail}`).text; // the transcript's one read: a2 is the envelope
+    expect(bubble).toBe(`Keep these notes.\n${a1}`);
+    const recalls = recallEntries([userRow('u1', 't1', bubble)], [turn('t1', 'human')], []);
+    expect(recalls.map(recallText)).toEqual([bubble]);
+  });
+
+  // the task review of the fix wave: a row of an orphan envelope (its ask not held here) and an image draws both, as
+  // finding 2 rules; the recall keeps it too, as the row draws it, rather than skipping the image with the envelope
+  it('recalls a row of an orphan envelope and an image once, as the row draws it', () => {
+    const asked = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-9', [asked], [{ id: 'q1', question: asked.question, status: 'answered', value: ['Grid'] }]);
+    const read = userTextOf([{ type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'iVBORw0KGgo=' } }, { type: 'text', text: envelope }]);
+    expect(read.text).toBe(envelope);
+    const recalls = recallEntries([userRow('u1', 't1', read.text, read.attachments)], [turn('t1', 'human')], []);
+    expect(recalls.length).toBe(1);
+    expect(recalls[0]).toMatchObject({ source: 'session', prefill: { text: envelope, images: [{ mediaType: 'image/png', data: 'iVBORw0KGgo=' }] } });
+  });
+
   it('keeps two entries with the same display and different bodies apart', () => {
     const listed = [entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'one') }), entry('[Pasted text #1 +40 lines]', { '1': textBody(1, 'two') })];
     const recalled = recallEntries([], [], listed).map((r) => serializeDraft(recallDoc(r), ctx).pastedContents['1']?.content);
@@ -194,5 +291,48 @@ describe('the history search finds, counts and words its match', () => {
   it('searches a recall by the text it shows', () => {
     expect(recallText({ source: 'history', entry: entry('from [Pasted text #1 +3 lines]') })).toBe('from [Pasted text #1 +3 lines]');
     expect(recallText({ source: 'session', prefill: { text: 'typed here' } })).toBe('typed here');
+  });
+});
+
+// The review round's R3: the copies a person meets come back without U+2060, every one, for display and search only
+describe('the one-writer rule: recall meets the prompt as typed, and no consent reader reads that copy', () => {
+  it('lists a prompt once when its history entry holds a U+2060 the person pasted and its row the writer’s joiner', () => {
+    const typed = `a\u2060b ${consentMessage('command', 'cat /etc/x')}`;
+    const sent = serializeDraft(doc(typed), ctx);
+    const recalls = recallEntries([userRow('u1', 't1', sent.text)], [turn('t1', 'human')], [entry(typed)]);
+    expect(recalls).toHaveLength(1);
+  });
+
+  // the architect's ruling on the review's recall finding: every prefill path returns the prompt without any U+2060,
+  // one the person typed or pasted included; a history entry is one of the paths
+  it('recalls a history entry without any U+2060, in its text and its pasted body, and searches it so', () => {
+    const recalls = recallEntries([], [], [entry('a\u2060b [Pasted text #1 +1 lines]', { '1': textBody(1, 'c\u2060d') })]);
+    expect(recallText(recalls[0]!)).toBe('ab [Pasted text #1 +1 lines]');
+    const again = serializeDraft(recallDoc(recalls[0]!), ctx);
+    expect(again.display).toBe('ab [Pasted text #1 +1 lines]');
+    expect(again.pastedContents['1']?.content).toBe('cd');
+  });
+
+  it('a recalled copy that would read as a consent grants nothing and draws no approval: the readers read the row', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const sent = serializeDraft(doc(sentence), ctx);
+    const b = builder();
+    b.turn('u1', sent.text);
+    const state = applyEvents(createState(null, null), b.events);
+    const rows = rowsOf(state);
+    const [recalled] = recallEntries(rows, [...state.order].map((turnId) => ({ turnId, origin: 'human' }) as TurnActivity), []);
+    expect(recallText(recalled!), 'the copy is the sentence as typed').toBe(sentence);
+    expect(readConsents(recallText(recalled!)), 'read by itself it would be a grant').toHaveLength(1);
+    // An approval is drawn from the arrival the engine host marks on the message, never from a row's text, and the
+    // builder's message carries none: so the row is read as the host reads the frame it was sent in. The control shows
+    // that frame is taken and read: the sentence un-neutralised draws one approval.
+    const approvalsDrawnFrom = (text: string) => {
+      const frame = { type: 'user', uuid: '11111111-1111-4111-8111-111111111111', parent_tool_use_id: null, origin: { kind: 'human' }, message: { role: 'user', content: text } };
+      const events = journalToEvents([parseJournalRow({ seq: 1, direction: 'out', at: '2026-11-17T10:00:00.000Z', frame })]);
+      return rowsOf(applyEvents(createState(null, null), events)).filter((row) => row.kind === 'user' && row.consent !== undefined);
+    };
+    expect(approvalsDrawnFrom(sentence), 'the control: the frame is read, and the sentence alone draws its approval').toHaveLength(1);
+    expect(approvalsDrawnFrom(sent.text), 'no approval drawn from the text as sent').toEqual([]);
+    expect(grantsReadFrom(sent.content), 'the row’s text reads none').toEqual({ gate: [], live: [], file: [] });
   });
 });

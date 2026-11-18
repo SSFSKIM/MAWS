@@ -5,22 +5,26 @@
 // completions, which patch the pane's store whether or not the question view is on screen (P5 O7 M8: and a remote
 // session's reopened stream, which lists its log again). UX wave U5a: a session that leaves the window's session store
 // (its record, or its listed row) ends its unsent comments' passes. The last four are undone by the returned disposer. The `btw` slash widget is C11's registration
-// (`widgets/index.ts`), never this module's.
+// (`widgets/index.ts`), never this module's. UX wave U4b (M2): the session's `/btw` card at the card column's foot (U8b's
+// slot), drawn there while the column is drawn for the session.
 import type { Anchor } from '@shared/anchor/anchor';
 import type { MawsBridge } from '@shared/ipc/schema';
 import { ipc } from '../ipc/client';
+import { registerSlot } from '../app/slots';
 import { registerPanelTool } from '../panel/host';
 import { registerCommentComposer, type CommentContext } from '../tools/code/anchor/anchor';
 import { registerTranscriptActions } from '../transcript';
 import { openSideThread } from './actions';
 import { dropSession, openCard, useCommentCard } from './card/store';
 import { openComposer } from './CommentComposer';
+import { BtwCardFoot } from './BtwCard';
 import { sideTool } from './SideTool';
 import { onSideOperation, onSideReopened } from './store';
 import { useSessions } from '../stores/sessions';
 
 export function registerSidePane(): void {
   registerPanelTool(sideTool);
+  registerSlot('sessionCardFoot', BtwCardFoot); // UX wave U4b
 }
 
 // The seam's one opener (P2-E1, D2): a card placement opens the comment card in the producer's host, anything else the

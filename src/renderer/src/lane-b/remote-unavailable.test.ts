@@ -8,7 +8,7 @@
 import { act, cleanup, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { AppSessionId } from '@shared/graph/ids';
-import { REMOTE_UNAVAILABLE, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
+import { REMOTE_UNAVAILABLE, SEND_NOW_CAPABILITY, SESSION_ACTS_CAPABILITY } from '@shared/ipc/remote-unavailable';
 import type { MachineState } from '@shared/ipc/schema/machines';
 import { addressOf } from '@shared/machine/address';
 import { remoteRow } from '../../../../test/support/builders';
@@ -18,7 +18,7 @@ import { useMachines } from '../stores/machines';
 import { useSessions } from '../stores/sessions';
 import { BUSY_REASON } from '../composer/InlineEdit';
 import * as helper from './remote-unavailable';
-import { remoteUnavailableOf, TURN_RUNS, useForkUnavailable, useRemoteUnavailable, useRemoteUnavailableAs } from './remote-unavailable';
+import { remoteUnavailableAsOf, remoteUnavailableOf, TURN_RUNS, useForkUnavailable, useRemoteUnavailable, useRemoteUnavailableAs } from './remote-unavailable';
 import { resetRemoteLaneBStore } from './remote-session';
 
 const R = addressOf(OTHER_MACHINE, 'app-r' as AppSessionId);
@@ -153,6 +153,26 @@ describe('useRemoteUnavailableAs', () => {
     expect(result.current).toBe('Can’t edit on mini yet. Update MAWS on mini and try again.');
     const local = renderHook(() => useRemoteUnavailableAs('edit', L, 'session.steer.cancel'));
     expect(local.result.current).toBeNull();
+  });
+});
+
+// The UX wave (U4b, M3; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces D and E): the
+// keys read a control's own sentence at the press, outside a render, through the labelled reader's non-hook form
+describe('remoteUnavailableAsOf', () => {
+  it('answers each control’s sentence by its own label, read now, as the hook answers it in a render', () => {
+    roster({ capabilities: [SESSION_ACTS_CAPABILITY], owner: true }); // build G's: no Send now
+    expect(remoteUnavailableAsOf('send now', R, 'session.steer.sendNow')).toBe('Can’t send now on mini yet. Update MAWS on mini and try again.');
+    expect(remoteUnavailableAsOf('edit', R, 'session.steer.cancel')).toBeNull();
+    roster({ capabilities: [], owner: true }); // build F's: neither
+    expect(remoteUnavailableAsOf('edit', R, 'session.steer.cancel')).toBe('Can’t edit on mini yet. Update MAWS on mini and try again.');
+    expect(remoteUnavailableAsOf('delete', R, 'session.steer.cancel')).toBe('Can’t delete on mini yet. Update MAWS on mini and try again.');
+    expect(renderHook(() => useRemoteUnavailableAs('delete', R, 'session.steer.cancel')).result.current).toBe(remoteUnavailableAsOf('delete', R, 'session.steer.cancel'));
+    roster({ capabilities: [SESSION_ACTS_CAPABILITY, SEND_NOW_CAPABILITY], owner: true }); // this build's
+    expect(remoteUnavailableAsOf('send now', R, 'session.steer.sendNow')).toBeNull();
+    roster({ state: 'down', generation: 0, since: new Date().toISOString() });
+    expect(remoteUnavailableAsOf('send now', R, 'session.steer.sendNow')).toBe('Send now is unavailable while mini is offline.');
+    expect(remoteUnavailableAsOf('send now', L, 'session.steer.sendNow')).toBeNull();
+    expect(remoteUnavailableAsOf('send now', null, 'session.steer.sendNow')).toBeNull();
   });
 });
 

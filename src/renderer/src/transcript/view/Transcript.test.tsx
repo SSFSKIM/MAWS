@@ -3,8 +3,11 @@ import type { AppSessionId, EventId, MessageUuid } from '@shared/graph/ids';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterAll, afterEach, beforeAll, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { useTranscriptStore } from '../../stores/transcript';
+import { useAttention } from '../../stores/attention'; // UX wave U1b
+import type { AttentionItem } from '@shared/graph/attention'; // UX wave U1b
 import { afterAccepted } from '../../composer/editor/submit';
 import { fakeClient } from '../../../../../test/support/fake-client';
+import { at } from '../../../../../test/support/machine'; // UX wave U1b
 import type { Serialized } from '../../composer/editor/serialize';
 import { cellId, rowId, turnId } from '../model/keys';
 import { loadJournal } from '../../../../../test/support/fixtures';
@@ -12,7 +15,7 @@ import { journalToEvents } from '../dev/journal';
 import { BASH_RESULT, builder, request, tool, uuid } from '../model/test-events';
 import type { OlderPagesState, SeekResult, TranscriptSource } from '../source/types';
 import { createStore } from 'zustand/vanilla';
-import { Transcript } from './Transcript';
+import { estimateRow, Transcript } from './Transcript';
 import { markTranscriptCarry, recordTranscriptScroll, scrollSignature, takeTranscriptCarry } from './scroll-carry'; // P4-B3
 
 // happy-dom has no layout: give the scroller a viewport and every row a height so the virtualiser mounts rows.
@@ -418,15 +421,21 @@ describe('Transcript', () => {
     expect(screen.queryByText('Loading…'), 'the rows are the content').toBeNull();
   });
 
-  it('docks C7’s card through renderRequest in a pending request’s slot', async () => {
+  // UX wave U1b (§C, §D): a pending question has its own row; while the session's list names its call the row draws the
+  // host's card through renderRequest in place of its receipt, and no slot row is made for the request
+  it('draws C7’s card through renderRequest in a waiting question’s own row', async () => {
     const b = builder();
     b.turn('u1');
     b.toolUse('q1', 'AskUserQuestion', { questions: [] });
     b.emit('question.requested', { requestId: request('r1'), toolUseId: tool('q1'), questions: [] });
-    const source = sourceOf(b.events);
-    render(<Transcript source={source} variant="session" renderRequest={(slot) => <div data-card="">{`Card ${slot.requestKind}`}</div>} />);
-    await waitFor(() => expect(document.querySelector('[data-card]')?.textContent).toBe('Card question'));
-    expect(document.querySelector('[data-kind="request_slot"]')?.textContent).toBe('Card question');
+    const source = { ...sourceOf(b.events), key: at('transcript-test-waiting') }; // a MAWS session's key is its address (M5's fix)
+    const item = { id: 'att-r1', appSessionId: source.key, sessionId: null, kind: 'question', request: { requestId: 'r1', toolUseId: 'q1', taskId: null, agentId: null }, summary: 'Question', createdAt: '2026-09-28T10:00:00.000Z', state: 'pending', stateChangedAt: '2026-09-28T10:00:00.000Z', expiresAt: null } as unknown as AttentionItem;
+    useAttention.setState({ bySession: new Map([[source.key as AppSessionId, [item]]]), version: useAttention.getState().version + 1 });
+    onTestFinished(() => useAttention.setState({ bySession: new Map(), version: useAttention.getState().version + 1 }));
+    render(<Transcript source={source} variant="session" renderRequest={(slot) => <div data-card="">{`Card ${slot.requestKind} ${slot.requestId}`}</div>} />);
+    await waitFor(() => expect(document.querySelector('[data-card]')?.textContent).toBe('Card question r1'));
+    expect(document.querySelector('.transcript-row[data-kind="question"] [data-card]')).not.toBeNull();
+    expect(document.querySelectorAll('.transcript-row[data-kind="request_slot"]')).toHaveLength(0);
   });
 
   it('pass2/rewind: Show reveals the hidden branch muted and not in context, Hide removes it, and the boundary stays put', async () => {
@@ -434,7 +443,7 @@ describe('Transcript', () => {
     const boundaryId = useTranscriptStore.getState().rows(key).find((row) => row.kind === 'boundary')!.id;
     const place = () => {
       const element = document.querySelector<HTMLElement>(`[data-row-id="${boundaryId}"]`)!;
-      return { transform: element.style.transform, index: useTranscriptStore.getState().rows(key).findIndex((row) => row.id === boundaryId) };
+      return { top: element.style.top, index: useTranscriptStore.getState().rows(key).findIndex((row) => row.id === boundaryId) };
     };
     const before = place();
     expect(document.querySelectorAll('[data-muted]')).toHaveLength(0);
@@ -452,6 +461,17 @@ describe('Transcript', () => {
 
   // A turn the owner did not start has no user row, a peer turn as much as an engine turn. UX wave U2 (O-15): one that only
   // answers has no divider either, so the mark goes on the turn's first drawn row, here its answer.
+  // Ruling R8: a row is placed at its start by `top` and carries no transform, under which Chromium placed a sticky box
+  // inside it (a code block's actions row) from the untransformed position, at the bottom of its frame.
+  it('places each row at its start by top, with no transform', async () => {
+    await mounted(deniedThenAnswer());
+    await waitFor(() => expect(document.querySelectorAll('[data-row-id]').length).toBeGreaterThan(2));
+    const rows = [...document.querySelectorAll<HTMLElement>('[data-row-id]')].sort((a, b) => Number(a.dataset.index) - Number(b.dataset.index));
+    expect(rows.map((row) => row.style.transform)).toEqual(rows.map(() => ''));
+    // every row is 40 px high here, and all of them are mounted: each starts where the one before it ends
+    await waitFor(() => expect(rows.map((row) => Number.parseFloat(row.style.top))).toEqual(rows.map((row) => 40 * Number(row.dataset.index))));
+  });
+
   it('a revealed peer turn without a user row says Not in context on its first drawn row', async () => {
     const b = builder();
     b.turn('u1');
@@ -549,7 +569,7 @@ describe('the scroll carried across a card’s float and dock', () => {
   };
   const scroller = () => document.querySelector<HTMLElement>('[data-transcript-scroller]')!;
   const rendered = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')];
-  const startOf = (row: HTMLElement) => Number(/translateY\((-?[\d.]+)px\)/.exec(row.style.transform)![1]);
+  const startOf = (row: HTMLElement) => Number.parseFloat(row.style.top); // a row is placed at its start by `top`
   // happy-dom has no scroll metrics: the scroller's, by hand, and every scroll the list makes kept
   function scrollMetrics() {
     let top = 0;
@@ -759,5 +779,74 @@ describe('a jump to a message older than what is loaded', () => {
     expect(screen.getByTestId('reach').dataset.phase).toBe('loading');
     await act(async () => walks[1]!.settle({ outcome: 'absent' }));
     await waitFor(() => expect(screen.getByTestId('reach').dataset.phase).toBe('missing'));
+  });
+});
+
+// UX wave U3b (M3; decision 12, Interfaces §C, ruled R15): the mount places each answer's action row from the list it
+// draws, once per change of the list, and a row draws it from the mount's store.
+describe('the answers’ action rows', () => {
+  const words = () => [...document.querySelectorAll('.transcript-answer-actions')].map((line) => line.previousElementSibling?.textContent); // the answer's body, which the row draws first
+
+  it('stand under the last answer before each prompt and under the list’s last answer, and follow a turn that arrives', async () => {
+    const b = builder();
+    b.turn('u1', 'Check the gauges.');
+    b.text('m1', 0, 'Looking at the log.');
+    b.toolUse('t1', 'Read', { file_path: '/work/gauges.csv' }, 'm1', 1);
+    b.result('t1', 'station,offset');
+    b.text('m2', 0, 'All five are inside the limit.');
+    b.end(['u1']);
+    b.turn('u2', 'Draft the note.');
+    b.text('m3', 0, 'Here is the note.');
+    b.end(['u2']);
+    let push: (batch: SessionEvent[]) => void = () => {};
+    const source: TranscriptSource = { key: `transcript-test-${++keys}`, subscribe: (listener) => ((push = listener), () => {}), snapshot: () => Promise.resolve([...b.events]) };
+    render(<Transcript source={source} variant="session" />);
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+    await waitFor(() => expect(words()).toEqual(['All five are inside the limit.', 'Here is the note.']));
+    const from = b.events.length;
+    b.turn('u3', 'Send it.');
+    b.text('m4', 0, 'Sent.');
+    b.end(['u3']);
+    act(() => push(b.events.slice(from)));
+    await waitFor(() => expect(words()).toEqual(['All five are inside the limit.', 'Here is the note.', 'Sent.']));
+  });
+
+  it('make an answer that has one 16 px taller in the list’s first guess', () => {
+    const answer = { id: 'text:a' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'assistant_text' as const, messageUuid: null, blockIndex: 0, markdown: 'Done.', live: false, phase: 'answer' as const, model: null };
+    expect(estimateRow(answer, true) - estimateRow(answer)).toBe(16);
+  });
+});
+
+// UX wave U3b (M4; decisions 16 and 17, Interfaces §E): while the mount is told a compaction runs, the drawn list's last
+// row says so, with the time so far once it reaches a second; nothing of it remains once it is told none runs.
+describe('the compaction’s row', () => {
+  const T0 = Date.parse('2026-11-15T10:00:00.000Z');
+  afterEach(() => void vi.useRealTimers());
+  const lastRow = () => [...document.querySelectorAll<HTMLElement>('[data-row-id]')].at(-1)!;
+
+  it('is the last row while `compacting` holds a time, ticks once a second, and goes when it is null', async () => {
+    const source = sourceOf(deniedThenAnswer());
+    const view = render(<Transcript source={source} variant="session" browserActivity={false} compacting={null} />); // no browser activity: the test's key is no address
+    await waitFor(() => expect(useTranscriptStore.getState().entries[source.key!]?.phase).toBe('live'));
+    await screen.findByText('Done.');
+    vi.useFakeTimers({ toFake: ['Date', 'setInterval', 'clearInterval'] }); // the row's clock, once the history is in
+    vi.setSystemTime(T0);
+    view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={T0} />);
+    expect(lastRow().dataset.rowId).toBe('activity:compacting');
+    const line = within(lastRow()).getByRole('status');
+    expect(line.textContent).toBe('Compacting session…');
+    act(() => void vi.advanceTimersByTime(1_000));
+    expect(line.textContent).toBe('Compacting session… 1s');
+    expect(within(line).getByRole('timer').textContent).toBe('1s');
+    act(() => void vi.advanceTimersByTime(61_000));
+    expect(line.textContent).toBe('Compacting session… 1m 02s');
+    view.rerender(<Transcript source={source} variant="session" browserActivity={false} compacting={null} />);
+    expect(document.querySelector('[data-row-id="activity:compacting"]')).toBeNull();
+    expect(screen.queryByText(/Compacting session/)).toBeNull();
+  });
+
+  it('is guessed at the turn line’s height before it is measured', () => {
+    const activity = { id: 'activity:compacting' as never, turnId: null, at: '2026-11-15T10:00:00.000Z', kind: 'activity' as const, activity: 'compacting' as const, since: '2026-11-15T10:00:00.000Z' };
+    expect(estimateRow(activity)).toBe(40);
   });
 });

@@ -12,12 +12,21 @@
 // machine, in the order of the session's other saves (../../lane-b/remote-drafts.ts). A claim answered stale comes only
 // from a store of an earlier build, which knows neither the claim nor the fence: nothing is withdrawn, and Edit and ↑
 // are refused for that machine's sessions until its link opens again (`storeRefusesStage`).
+//
+// The UX wave, U4b (docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, decisions 10 and 12): a record
+// that could not be asked (its call failed: the link is down, the call was refused) is no answer, so nothing is loaded and
+// nothing settled; the stage stays stored, the box held, and the record alone is asked again after the loop's wait, or as
+// soon as the session's machine's link opens again. Only a record that answers and cannot say loads the message under the
+// line that it may have been read. And over the link a machine whose endpoint lists no `rl2.session-acts` runs services
+// that do not know the claim (the draft store learnt it after U9's landing), so Edit and ↑ are refused for its sessions
+// from the first draw, with no claim sent.
 import { create } from 'zustand';
 import type { SendContent } from '@shared/engine/session-state-store';
 import type { PromptHistoryEvent } from '@shared/graph/events';
 import type { AppSessionId, MessageUuid } from '@shared/graph/ids';
 import type { CommandResult, MawsBridge } from '@shared/ipc/schema';
 import type { DaemonStatus } from '@shared/ipc/schema/daemon';
+import { SESSION_ACTS_CAPABILITY, type RemoteStanding } from '@shared/ipc/remote-unavailable';
 import { DRAFT_CLAIM, DRAFT_KEPT_WORDS, settles, STAGED_DRAFT_WORDS, STALE_DRAFT_WORDS, type Draft, type TakeBackMark } from '@shared/ipc/schema/session';
 import { isAddress, machineOf } from '@shared/machine/address';
 import type { MachineRef } from '@shared/machine/ref';
@@ -25,6 +34,7 @@ import { ipc } from '../../ipc/client';
 import { readerRowsOf } from '../../lane-b/reader-rows';
 import { readRemoteDraft, saveRemoteDraftOnce } from '../../lane-b/remote-drafts';
 import { isRemoteLaneB } from '../../lane-b/remote-session';
+import { remoteStandingOf, useRemoteStanding } from '../../lane-b/remote-standing';
 import type { QueueControls } from '../../session/controls/types';
 import { showStackNotice } from '../../stores/composer';
 import { useHosts } from '../../stores/hosts';
@@ -120,7 +130,9 @@ const servicesRun = (key: StoreKey, machines: Machines, daemon: Daemon): string 
 const sentenceFor = (key: StoreKey, machines: Machines): string => (key === LOCAL ? TAKE_BACK_WORDS.needsServices : TAKE_BACK_WORDS.needsNewer(machineName(machines, key, ipc.localMachine)));
 const daemonNow = (): Daemon => useHosts.getState().supervisor?.daemon ?? null;
 
-function refusalIn(appSessionId: AppSessionId, refused: ReadonlyMap<StoreKey, string>, machines: Machines, daemon: Daemon): string | null {
+function refusalIn(appSessionId: AppSessionId, refused: ReadonlyMap<StoreKey, string>, machines: Machines, daemon: Daemon, standing: RemoteStanding | null): string | null {
+  // U4b (decision 10): known from the machine's handshake, before any claim; not yet known (the link not up), the claim decides
+  if (standing !== null && standing.capabilities !== null && !standing.capabilities.includes(SESSION_ACTS_CAPABILITY)) return TAKE_BACK_WORDS.needsNewer(standing.machine);
   const key = machineKeyOf(appSessionId);
   const run = refused.get(key);
   return run !== undefined && run === servicesRun(key, machines, daemon) ? sentenceFor(key, machines) : null;
@@ -128,7 +140,7 @@ function refusalIn(appSessionId: AppSessionId, refused: ReadonlyMap<StoreKey, st
 
 /** The sentence while the run of that session's machine's services that answered a claim as stale serves; null otherwise. */
 export function storeRefusesStage(appSessionId: AppSessionId): string | null {
-  return refusalIn(appSessionId, useRefusedStores.getState().refused, useMachines.getState().machines, daemonNow());
+  return refusalIn(appSessionId, useRefusedStores.getState().refused, useMachines.getState().machines, daemonNow(), remoteStandingOf(appSessionId));
 }
 
 /** The same, followed in a render. */
@@ -136,7 +148,8 @@ export function useStoreRefusesStage(appSessionId: AppSessionId): string | null 
   const refused = useRefusedStores((s) => s.refused);
   const machines = useMachines((s) => s.machines);
   const daemon = useHosts((s) => s.supervisor?.daemon ?? null);
-  return refusalIn(appSessionId, refused, machines, daemon);
+  const standing = useRemoteStanding(appSessionId);
+  return refusalIn(appSessionId, refused, machines, daemon, standing);
 }
 
 function rememberRefusal(appSessionId: AppSessionId): string {
@@ -236,7 +249,8 @@ export async function carryForward(appSessionId: AppSessionId, stage: Draft, dep
 // Steps 3 and 4, under the message's current name. Each read of the record is replayed from the stage's own name (the
 // panel's finding 4): a promotion and its revert read from the promoted uuid would say nothing. A message the record
 // keeps listed keeps its stage and is withdrawn again, at once under a new name and after the settle's backoff under the
-// same one; only a record that cannot say loads it (decision 13's table; the panel's finding 3, ruled (A)).
+// same one; only a record that answers and cannot say loads it (decision 13's table; the panel's finding 3, ruled (A)). A
+// record that could not be asked is asked again, alone, until it answers (U4b, decision 12).
 async function forward(appSessionId: AppSessionId, stage: Draft, deps: TakeBackDeps): Promise<void> {
   const mark = stageMark(stage)!;
   const own: Name = { kind: mark.kind, ref: mark.ref };
@@ -245,18 +259,50 @@ async function forward(appSessionId: AppSessionId, stage: Draft, deps: TakeBackD
   for (let again = 0; ; ) {
     if (await withdraw(deps, name)) return load(appSessionId, stage, deps, null); // this caller's own withdrawal
     if (epoch !== started) return;
-    const said = await record(deps.client, appSessionId, mark.since, own);
-    if (epoch !== started) return;
+    const said = await recordAnswered(deps.client, appSessionId, mark.since, own, started);
+    if (said === null) return;
     if (said.kind === 'gone') return load(appSessionId, stage, deps, null);
     if (said.kind === 'read') return clear(appSessionId, stage, deps);
     if (said.kind === 'unknown') return load(appSessionId, stage, deps, TAKE_BACK_WORDS.mayHaveRead);
     if (said.name.kind === name.kind && said.name.ref === name.ref) {
-      await new Promise((resolve) => setTimeout(resolve, Math.min(SETTLE_RETRY_MS * 2 ** again, SETTLE_RETRY_MAX_MS)));
+      await new Promise((resolve) => setTimeout(resolve, backoff(again)));
       again += 1;
       if (epoch !== started) return;
     }
     name = said.name;
   }
+}
+
+const backoff = (attempt: number): number => Math.min(SETTLE_RETRY_MS * 2 ** attempt, SETTLE_RETRY_MAX_MS);
+
+// U4b (decision 12): the record until it answers, each failed call followed by the loop's wait or, for a session over
+// the link, by its machine's link opening again (the roster's generation moving), whichever comes first; null once this
+// window's take-backs ended meanwhile (`resetTakeBack`).
+async function recordAnswered(client: MawsBridge, appSessionId: AppSessionId, since: string, name: Name, started: number): Promise<Exclude<Said, { kind: 'unasked' }> | null> {
+  for (let attempt = 0; ; attempt++) {
+    const said = await record(client, appSessionId, since, name);
+    if (epoch !== started) return null;
+    if (said.kind !== 'unasked') return said;
+    await linkOpensOrWaited(appSessionId, backoff(attempt));
+    if (epoch !== started) return null;
+  }
+}
+
+function linkOpensOrWaited(appSessionId: AppSessionId, ms: number): Promise<void> {
+  const key = machineKeyOf(appSessionId);
+  const generation = () => (key === LOCAL ? null : (useMachines.getState().machines.get(key)?.generation ?? null));
+  const from = generation();
+  return new Promise((resolve) => {
+    const off = key === LOCAL ? () => {} : useMachines.subscribe(() => {
+      if (generation() !== from) finish();
+    });
+    const timer = setTimeout(finish, ms);
+    function finish() {
+      clearTimeout(timer);
+      off();
+      resolve();
+    }
+  });
 }
 
 const bounded = <T>(promise: Promise<T> | undefined): Promise<T | undefined> =>
@@ -274,7 +320,8 @@ async function withdraw(deps: TakeBackDeps, name: Name): Promise<boolean> {
   return result?.ok === true;
 }
 
-type Said = { kind: 'gone' } | { kind: 'read' } | { kind: 'unknown' } | { kind: 'listed'; name: Name };
+// `unknown`: the record answered and cannot say; `unasked`: it could not be asked (U4b, decision 12)
+type Said = { kind: 'gone' } | { kind: 'read' } | { kind: 'unknown' } | { kind: 'unasked' } | { kind: 'listed'; name: Name };
 
 const listedIn = (queue: SessionQueue | undefined, name: Name): boolean =>
   queue !== undefined && (name.kind === 'steer' ? queue.steers.some((steer) => steer.messageUuid === name.ref) : queue.entries.some((entry) => entry.queueId === name.ref && entry.state === 'queued'));
@@ -337,11 +384,19 @@ export function readRecord(events: readonly PromptHistoryEvent[], start: Name): 
 
 async function record(client: MawsBridge, appSessionId: AppSessionId, since: string, name: Name): Promise<Said> {
   const result = await client.invoke('session.promptHistory', { appSessionId, since });
-  if (!result.ok || !result.value.complete) return { kind: 'unknown' };
+  if (!result.ok) return { kind: 'unasked' };
+  if (!result.value.complete) return { kind: 'unknown' };
   const read = readRecord(result.value.events, name);
   if (read.state === 'gone') return { kind: 'gone' };
   if (read.state === 'read') return { kind: 'read' };
   return listedIn(useQueueStore.getState().bySession.get(appSessionId), read.name) ? { kind: 'listed', name: read.name } : { kind: 'unknown' };
+}
+
+/** Whether the session's record says the agent read the message: `readRecord` over `session.promptHistory` from `since`; false where the record could not be asked. */
+export async function recordSaysRead(client: MawsBridge, appSessionId: AppSessionId, since: string, messageUuid: MessageUuid): Promise<boolean> {
+  const result = await client.invoke('session.promptHistory', { appSessionId, since });
+  // as `record` reads it: an incomplete record cannot say, so it says nothing was read
+  return result.ok && result.value.complete && readRecord(result.value.events, { kind: 'steer', ref: messageUuid }).state === 'read';
 }
 
 // Step 4: the stage into the box, then the stage settled as the ordinary draft the box holds.

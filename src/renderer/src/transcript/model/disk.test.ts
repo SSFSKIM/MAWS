@@ -10,7 +10,7 @@ import type { AgentId, SessionId } from '@shared/graph/ids';
 import { askSteerText } from '@shared/maws/ask'; // board ticket 711
 import { AgentMetaSchema } from '@shared/wire/transcript';
 import { ChainFollower } from '../../../../engine-host/fs/chain-follower';
-import { loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
+import { FIXTURE_DIR, loadJournal, TEST_FIXTURE_DIR, TRANSCRIPT_FIXTURE_DIR } from '../../../../../test/support/fixtures';
 import { journalToEvents } from '../dev/journal';
 
 const SNAPSHOT_DIR = join(__dirname, '../../../../../test/snapshots/transcript');
@@ -221,6 +221,22 @@ describe('a steer reloaded from disk', () => {
     expect(ofKind(rowsOf(state), 'user').filter((row) => row.turnId === counting).map((row) => row.steer)).toEqual([false, true]); // in view when the turn folds
     const rows = expanded(state).filter((row) => row.turnId === counting);
     expect(rows.findIndex((row) => row.kind === 'user' && row.steer)).toBeGreaterThan(rows.findIndex((row) => row.kind === 'cell' || row.kind === 'group')); // after the first Bash call
+  });
+});
+
+// UX wave U1b, probe 9a (spikes/protocol-probe/findings-uxwave-u1b-message-and-stop-while-asked.txt): a message sent
+// while MAWS's blocking ask waits is queued by the engine, and once the ask is answered its file holds it only as a
+// `queued_command` attachment after the ask's result, never as a `user` row. Reloaded, it is the person's message, drawn
+// as their bubble after the ask's row.
+describe('a message sent while a blocking ask waited, reloaded from disk (probe 9a)', () => {
+  it('u1b-askwait-mcp-answer-r1: the queued_command after the ask’s result is the person’s message, after the ask’s row', async () => {
+    const disk = await backfill(readFileSync(join(FIXTURE_DIR, 'uxwave', 'u1b-askwait-mcp-answer-r1.transcript.jsonl')), 'de3d3e11-577b-40eb-be7c-80b9cf3c4563');
+    const rows = expanded(stateOf(disk));
+    const users = ofKind(rows, 'user');
+    expect(users.map((row) => [row.steer, row.text])).toEqual([[false, users[0]!.text], [true, 'Also: end your reply with the word KIWI.']]);
+    const message = rows.findIndex((row) => row.kind === 'user' && row.steer);
+    expect(message, 'after the ask’s row').toBeGreaterThan(rows.findIndex((row) => row.kind === 'ask'));
+    expect(rows.findIndex((row) => row.kind === 'ask')).toBeGreaterThan(-1);
   });
 });
 

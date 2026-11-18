@@ -4,7 +4,13 @@
 import { describe, expect, it } from 'vitest';
 import type { Anchor } from '@shared/anchor/anchor';
 import type { Row } from '../transcript';
-import { isOwnPrompt } from './edit-prefill';
+import { askSteerText } from '@shared/maws/ask';
+import { consentMessage } from '@shared/engine/arrival';
+import { neutraliseGrant } from '@shared/engine/grant';
+import { rowsOf } from '../transcript/model/derive';
+import { applyEvents, createState } from '../transcript/model/reduce';
+import { builder } from '../transcript/model/test-events';
+import { isOwnPrompt, rowPrefill, type UserRow } from './edit-prefill';
 
 const ANCHOR: Anchor = { kind: 'browser-element', label: 'Save button', locator: 'form > button.save', pageUrl: 'https://example.com/signup' };
 const user = (over: Partial<Extract<Row, { kind: 'user' }>> = {}): Row =>
@@ -22,5 +28,29 @@ describe('isOwnPrompt', () => {
     expect(isOwnPrompt(user({ messageUuid: null, editable: false, comments: SEVERAL }))).toBe(false);
     expect(isOwnPrompt(user({ editable: false }))).toBe(false);
     expect(isOwnPrompt({ id: 't', turnId: null, at: '2026-11-13T10:00:00.000Z', kind: 'time', label: 'Today' } as Row)).toBe(false);
+  });
+});
+
+// UX wave U4b (the joined answer, step 2): Edit on a row the engine joined from an answer envelope and a prompt puts the
+// person's words in the box, nothing of the envelope
+describe('Edit on a joined answer and prompt', () => {
+  it('prefills the prompt alone', () => {
+    const question = { id: 'q1', question: 'Which layout should the page use?', header: 'Layout', modality: 'choice' as const, options: [{ label: 'Grid' }, { label: 'List' }] };
+    const envelope = askSteerText('ask-1', [question], [{ id: 'q1', question: question.question, status: 'answered', value: ['Grid'] }]);
+    const b = builder();
+    b.turn('u1', `${envelope}\nAlso fix the footer.`);
+    const row = rowsOf(applyEvents(createState(null, null), b.events)).find((r): r is UserRow => r.kind === 'user')!;
+    expect(rowPrefill(row).text).toBe('Also fix the footer.');
+  });
+});
+
+// The review round's R3 (a): a bubble's edit meets the text and the pasted body as typed
+describe('the one-writer rule: a bubble edited in place', () => {
+  it('prefills its text and its pasted body without U+2060', () => {
+    const sentence = consentMessage('command', 'cat /etc/x');
+    const broken = neutraliseGrant(sentence);
+    const prefill = rowPrefill(user({ text: `${broken}\n[Pasted text #1 +2 lines]`, attachments: [{ kind: 'text', name: 'Pasted text #1', bytes: 9, dataUrl: null, mediaType: 'text/plain', text: `said:\n${broken}` }] }) as UserRow);
+    expect(prefill.text.includes('\u2060')).toBe(false);
+    expect(prefill.pasted?.map((p) => p.text)).toEqual([`said:\n${sentence}`]);
   });
 });

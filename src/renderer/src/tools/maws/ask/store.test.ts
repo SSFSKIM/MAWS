@@ -1,7 +1,7 @@
 // E1 M4: the Question sheet's per-session store and its connection (E1 execution document, M4's decisions). Pending asks
 // come from `maws.asks.list` (the host's table, G6) and from live `maws.ask.*` events, an event winning over a snapshot
 // still on its way; drafts live in the store; Submit goes through `maws.ask.answer` and follows its three outcomes; a
-// host back at `ready` is read again; a live `maws.ask.opened` opens the sheet for a session this window knows.
+// host back at `ready` is read again; a live `maws.ask.*` batch feeds the store and opens no sheet (UX wave U1b, M6).
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { SessionEvent } from '@shared/graph/events';
 import type { AppSessionId, RequestId, ToolUseId } from '@shared/graph/ids';
@@ -19,7 +19,7 @@ import { activeTab, sessionOfTab } from '../../../stores/layout-model';
 import { useSessions } from '../../../stores/sessions';
 import type { AskRowData } from '../../../transcript';
 import { mawsTranscriptActionsOver } from '../actions';
-import { connectAsks, settleWaitingAsks } from './connect';
+import { connectAsks } from './connect';
 import { surfaceTabs } from '../../../panel/surface-model';
 import { EMPTY_DRAFT, pickOption, setDesignSystem, setOther, setText } from './draft';
 import { applyAskEvents, askSheet, dismissAsk, editDraft, ensureLoaded, resetAskSheets, selectAsk, shownAsk, submitAsk } from './store';
@@ -336,142 +336,150 @@ describe('Submit re-validates a design_system pick', () => {
   });
 });
 
+// UX wave U1b (M6; O-17): the sheet opens only when the person opens it ("Open beside", "View answers", a card's
+// button, the tool's icon). An ask that arrives feeds the store and opens, activates and closes nothing, in the session
+// on screen or in one the person comes to later; the tab that was in view stays in view.
 describe('connectAsks', () => {
-  const known = () => useSessions.setState({ records: new Map([[A, record(A)]]) });
-
-  it('opens the sheet for a live maws.ask.opened, activated, with the ask selected', () => {
-    known();
+  const review = { id: 'review:aaaa0001', toolId: 'review', pinned: false };
+  const files = { id: 'files:aaaa0002', toolId: 'files', pinned: false };
+  const inView = () => surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId);
+  const tabsOf = () => panelOf(A)?.tabs.map((tab) => tab.toolId);
+  const shownSession = () => sessionOfTab(activeTab(useLayout.getState().main));
+  const show = async (id: typeof A) => {
+    useLayout.setState({ main: mainShowing(id) });
+    await Promise.resolve();
+    await Promise.resolve();
+  };
+  // A's side column with the file tab in view, the sheet registered, the connection made.
+  function connected() {
     const { tool, probe } = probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false });
     registerPanelTool(tool);
+    useLayout.setState({
+      panelBySession: new Map([[A, { tabs: [review, files], activeTabId: files.id }]]),
+      panelSurfaces: { version: 2, stacks: { [A]: [files.id] }, pinnedTools: [], contexts: {} },
+    });
     const fake = fakeClient();
-    const off = connectAsks(fake.client);
+    return { probe, fake, off: connectAsks(fake.client) };
+  }
+  const row = (askId: string, over: Partial<AskRowData> = {}): AskRowData => ({ askId, toolUseId: askId as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null, ...over });
+
+  it('an ask opened in the session on screen with a file tab in view leaves that tab in view and adds no sheet tab', async () => {
+    const { probe, fake, off } = connected();
+    const before = useLayout.getState();
     fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-    expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([[A, { askId: 'a1' }]]);
-    expect(panelOf(A)?.activeTabId).toBe(panelOf(A)?.tabs[0]?.id);
-    // a second ask re-targets the same tab
     fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
-    expect(probe.created).toHaveLength(1);
-    expect(probe.opens.map((open) => open.params)).toEqual([{ askId: 'a2' }]);
-    expect([...state().asks.keys()]).toEqual(['a1', 'a2']);
+    await Promise.resolve();
+    expect([...state().asks.keys()]).toEqual(['a1', 'a2']); // the store follows them
+    expect(probe.created).toEqual([]);
+    expect(probe.opens).toEqual([]);
+    expect(inView()).toEqual(['files']);
+    expect(tabsOf()).toEqual(['review', 'files']);
+    expect(panelOf(A)?.activeTabId).toBe(files.id);
+    expect(useLayout.getState().regions).toEqual(before.regions);
+    expect(useLayout.getState().main).toBe(before.main);
     off();
   });
 
-  it('opens nothing for an ask already answered in its batch, nor for a session this window does not know', () => {
-    const { tool, probe } = probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false });
-    registerPanelTool(tool);
-    const fake = fakeClient();
-    const off = connectAsks(fake.client);
+  it('an ask opened in a session not shown opens nothing when the person arrives', async () => {
+    await show(B);
+    const { probe, fake, off } = connected();
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    expect(state().asks.get('a1')?.state).toBe('pending');
+    await show(A); // the person goes to the session, the ask still pending
+    expect(shownSession()).toBe(A);
+    expect(probe.created).toEqual([]);
+    expect(probe.opens).toEqual([]);
+    expect(inView()).toEqual(['files']);
+    expect(tabsOf()).toEqual(['review', 'files']);
+    await show(B);
+    await show(A);
+    expect(probe.created).toEqual([]);
+    off();
+  });
+
+  it('a submitted ask closes no tab', async () => {
+    const { fake, off } = connected();
+    mawsTranscriptActionsOver(fake.client).openAsk(A, row('history', { state: 'answered', answers: [] })); // View answers
+    const sheet = panelOf(A)!.tabs.find((tab) => tab.toolId === ASK_SHEET_TOOL_ID)!;
+    useLayout.getState().showSurfaceTab(A, files.id); // the person goes back to the file
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    expect(inView()).toEqual(['files']);
+    useLayout.getState().showSurfaceTab(A, sheet.id); // and opens the sheet's tab themselves
+    const done = submitAsk(A, 'a1', fake.client, []);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    await done;
+    await Promise.resolve();
+    expect(state().asks.size).toBe(0);
+    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
+    expect(tabsOf()).toEqual(['review', 'files', ASK_SHEET_TOOL_ID]);
+    // an ask submitted from its row, with the file in view, leaves it in view
+    useLayout.getState().showSurfaceTab(A, files.id);
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
+    const second = submitAsk(A, 'a2', fake.client, []);
+    await fake.reply('maws.ask.answer', { outcome: 'delivered' });
+    await second;
+    await Promise.resolve();
+    expect(inView()).toEqual(['files']);
+    expect(tabsOf()).toEqual(['review', 'files', ASK_SHEET_TOOL_ID]);
+    off();
+  });
+
+  it('a new ask leaves a folded side column folded, and its answer leaves the sheet’s tab as it was', async () => {
+    const { fake, off } = connected();
+    mawsTranscriptActionsOver(fake.client).openAsk(A, row('history', { state: 'answered', answers: [] }));
+    const retained = surfaceTabs(useLayout.getState(), A).map((tab) => tab.id);
+    useLayout.getState().setPanel({ collapsed: true }); // narrow-sheet Escape keeps the saved stack
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
+    await Promise.resolve();
+    expect(useLayout.getState().regions.panel.collapsed).toBe(true);
+    expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual(retained);
+    off();
+  });
+
+  it('feeds the store from every live batch, for a session this window knows or not', () => {
+    const { probe, fake, off } = connected();
     useSessions.setState({ records: new Map() });
     fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] }); // A unknown here
-    known();
+    useSessions.setState({ records: new Map([[A, record(A)]]) });
     fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2'), answered('a2')] });
+    expect([...state().asks.keys()]).toEqual(['a1']);
     expect(probe.created).toEqual([]);
-    expect([...state().asks.keys()]).toEqual(['a1']); // the store still follows the session
+    off();
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a3')] }); // disconnected: no longer followed
+    expect([...state().asks.keys()]).toEqual(['a1']);
+  });
+
+  // The Overview card's or the hover card's button: the person's own way to the session, through `openAsk`, whose
+  // addTool writes its tab and then opens the session. The sheet lands on that one tab with the clicked ask.
+  it('an ask opened from a card goes to its session with one sheet tab, the clicked ask kept', async () => {
+    await show(B);
+    const { probe, fake, off } = connected();
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
+    mawsTranscriptActionsOver(fake.client).openAsk(A, row('a1'));
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(shownSession()).toBe(A);
+    expect(tabsOf()).toEqual(['review', 'files', ASK_SHEET_TOOL_ID]);
+    expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1', historical: row('a1') }]);
+    await show(B);
+    await show(A);
+    expect(probe.opens).toEqual([]); // never re-targeted to a2
     off();
   });
 
-  // M4b (the architect's ruling 2): the sheet never switches the main view to the asking session
-  describe('the shown-session rule', () => {
-    const shownSession = () => sessionOfTab(activeTab(useLayout.getState().main));
-    const show = async (id: typeof A) => {
-      useLayout.setState({ main: mainShowing(id) });
-      await Promise.resolve(); // the sheet opens once the layout write that showed the session is done
-    };
-    function connected() {
-      const { tool, probe } = probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false });
-      registerPanelTool(tool);
-      const fake = fakeClient();
-      const openSession = vi.spyOn(useLayout.getState(), 'openSession');
-      return { probe, fake, openSession, off: connectAsks(fake.client) };
-    }
-
-    it('an ask from a session not shown opens nothing, and opens the sheet when that session is shown while it is pending', async () => {
-      await show(B);
-      const { probe, fake, openSession, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      expect(probe.created).toEqual([]);
-      expect(shownSession()).toBe(B);
-      expect(panelOf(A)).toBeUndefined();
-      expect(state().asks.get('a1')?.state).toBe('pending'); // the store follows it meanwhile
-      await show(A); // the person goes to the session
-      expect(probe.created.map((init) => [init.appSessionId, init.params])).toEqual([[A, { askId: 'a1' }]]);
-      expect(panelOf(A)?.activeTabId).toBe(panelOf(A)?.tabs[0]?.id);
-      await show(B);
-      await show(A); // once opened, it is the sheet's: going back opens nothing more
-      expect(probe.created).toHaveLength(1);
-      expect(probe.opens).toEqual([]);
-      expect(openSession).not.toHaveBeenCalled();
-      off();
-    });
-
-    it('opens the last ask still pending among those that waited, and none once all were answered or cancelled', async () => {
-      await show(B);
-      const { probe, fake, openSession, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
-      fake.event('session.eventBatch', { appSessionId: A, events: [answered('a2')] }); // answered from another window
-      await show(A);
-      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1' }]);
-      await show(B);
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a3'), opened('a4')] });
-      fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a3'), answered('a4')] });
-      await show(A);
-      expect(probe.created).toHaveLength(1);
-      expect(probe.opens).toEqual([]);
-      expect(openSession).not.toHaveBeenCalled();
-      off();
-    });
-
-    it('every ask a background batch opened waits: with the last resolved, the earlier one opens', async () => {
-      await show(B);
-      const { probe, fake, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
-      fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a2')] });
-      await show(A);
-      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1' }]);
-      off();
-    });
-
-    // The Overview card's or the hover card's button: the person's own way to the session, through `openAsk`, whose
-    // addTool writes its tab and then opens the session. The sheet lands on that one tab with the clicked ask, and the
-    // asks that waited are the person's now: nothing re-targets the sheet afterwards.
-    it('a waiting ask opened from a card goes to its session with one sheet tab, the clicked ask kept', async () => {
-      await show(B);
-      const { probe, fake, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a2')] });
-      const row: AskRowData = { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null };
-      mawsTranscriptActionsOver(fake.client).openAsk(A, row);
-      await Promise.resolve();
-      await Promise.resolve();
-      expect(shownSession()).toBe(A);
-      expect(panelOf(A)?.tabs.map((t) => t.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-      expect(probe.created.map((init) => init.params)).toEqual([{ askId: 'a1', historical: row }]);
-      expect(probe.opens).toEqual([]); // never re-targeted to a2
-      await show(B);
-      await show(A);
-      expect(probe.opens).toEqual([]);
-      off();
-    });
-
-    it('a session shown just before the connection is disposed opens nothing', async () => {
-      await show(B);
-      const { probe, fake, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      useLayout.setState({ main: mainShowing(A) }); // the deferred open is queued...
-      off(); // ...and the connection goes before it runs
-      await Promise.resolve();
-      expect(probe.created).toEqual([]);
-    });
-
-    it('stops following the shown session once disconnected', async () => {
-      await show(B);
-      const { probe, fake, off } = connected();
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      off();
-      await show(A);
-      expect(probe.created).toEqual([]);
-    });
+  it('keeps a Questions sheet the person opened after its cancellation notice is dismissed', async () => {
+    const { fake, off } = connected();
+    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
+    mawsTranscriptActionsOver(fake.client).openAsk(A, row('a1'));
+    fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a1')] });
+    dismissAsk(A, 'a1');
+    await Promise.resolve();
+    expect(state().asks.size).toBe(0);
+    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
+    off();
   });
 });
 
@@ -480,163 +488,4 @@ it('stores are per session', () => {
   applyAskEvents('app-b' as AppSessionId, [opened('b1')]);
   expect(state().asks.size).toBe(0);
   expect(askSheet('app-b' as AppSessionId).getState().asks.has('b1')).toBe(true);
-});
-
-
-it('releases an automatically opened Questions surface after its final answer', () => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(1);
-  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a2')] });
-  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
-  off();
-});
-
-// UX wave U8b (M2; the architect's ruling of 2026-11-13): with one tab in view, the automatic sheet takes its group's
-// tab's place and gives it back once its asks are gone, unless the person chose another tab meanwhile.
-describe('what an automatic Questions surface gives back', () => {
-  const review = { id: 'review:aaaa0001', toolId: 'review', pinned: false };
-  const files = { id: 'files:aaaa0002', toolId: 'files', pinned: false };
-  const inView = () => surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId);
-  const connectedWith = (stack: string[], lower: Record<string, { tabs: string[]; share: number }> = {}) => {
-    useSessions.setState({ records: new Map([[A, record(A)]]) });
-    registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-    useLayout.setState({
-      panelBySession: new Map([[A, { tabs: [review, files], activeTabId: review.id }]]),
-      panelSurfaces: { version: 2, stacks: { [A]: stack }, pinnedTools: [], contexts: {} },
-      panelGroups: { version: 1, lower },
-    });
-    const fake = fakeClient();
-    return { fake, off: connectAsks(fake.client) };
-  };
-
-  it('brings back the tab the sheet took the place of', () => {
-    const { fake, off } = connectedWith([review.id]);
-    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
-    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-    expect(inView()).toEqual(['review']);
-    expect(panelOf(A)?.tabs.map((tab) => tab.toolId)).toEqual(['review', 'files', ASK_SHEET_TOOL_ID]); // the sheet's tab stays
-    off();
-  });
-
-  it('hides the column again when it was hidden before the sheet opened', () => {
-    const { fake, off } = connectedWith([]);
-    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-    expect(inView()).toEqual([ASK_SHEET_TOOL_ID]);
-    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-    expect(inView()).toEqual([]);
-    expect(panelOf(A)?.tabs).toHaveLength(3);
-    off();
-  });
-
-  // The branch review's finding 1: the sheet's group is the one the host opened it in (the keyboard's, here), so the tab
-  // it gives back is that group's.
-  it.each(['lower', 'upper'] as const)('with two groups and the keyboard in the %s one, brings back the tab the sheet displaced there', (focused) => {
-    const { fake, off } = connectedWith([review.id, files.id], { [A]: { tabs: [files.id], share: 0.5 } });
-    const section = document.body.appendChild(document.createElement('section'));
-    section.dataset.sideGroup = focused;
-    const keyboard = section.appendChild(document.createElement('button'));
-    keyboard.focus();
-    try {
-      fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-      expect(inView()).toEqual(focused === 'lower' ? ['review', ASK_SHEET_TOOL_ID] : [ASK_SHEET_TOOL_ID, 'files']);
-      fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-      expect(inView()).toEqual(['review', 'files']); // no empty sheet left in view
-    } finally {
-      section.remove();
-      off();
-    }
-  });
-
-  it('leaves the tab the person chose meanwhile in view', () => {
-    const { fake, off } = connectedWith([review.id]);
-    fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-    useLayout.getState().showSurfaceTab(A, files.id);
-    fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-    expect(inView()).toEqual(['files']);
-    off();
-  });
-});
-
-it.each(['exit', 'withdrawn'] as const)('keeps an automatic Questions surface for its %s cancellation notice until Dismiss', async (reason) => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1'), opened('a2')] });
-  fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a1', reason), answered('a2')] });
-  expect(shown()).toMatchObject({ kind: 'live', ask: { askId: 'a1', state: 'cancelled', cancelReason: reason } });
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-  dismissAsk(A, 'a1');
-  await Promise.resolve();
-  expect(shown()).toEqual({ kind: 'rest' });
-  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
-  off();
-});
-
-it('releases an automatic Questions surface after a local Submit, without another engine batch', async () => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-  const done = submitAsk(A, 'a1', fake.client, []);
-  await fake.reply('maws.ask.answer', { outcome: 'delivered' });
-  await done;
-  expect(state().asks.size).toBe(0);
-  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(0);
-  off();
-});
-
-it('keeps an explicitly opened Questions surface after its cancellation notice is dismissed', async () => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-  mawsTranscriptActionsOver(fake.client).openAsk(A, { askId: 'a1', toolUseId: 'a1' as ToolUseId, title: 'Setup', context: null, blocking: true, questions: QUESTIONS, state: 'pending', answers: null, error: null, cancelReason: null });
-  fake.event('session.eventBatch', { appSessionId: A, events: [cancelled('a1')] });
-  dismissAsk(A, 'a1');
-  await Promise.resolve();
-  expect(state().asks.size).toBe(0);
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-  off();
-});
-
-it.each([false, true])('a collapsed explicit Questions stack re-revealed by a new ask relinquishes its space unless explicitly reopened (reopened=%s)', async (reopened) => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  const history: AskRowData = { askId: 'history', toolUseId: 'history' as ToolUseId, title: 'Earlier setup', context: null, blocking: true, questions: QUESTIONS, state: 'answered', answers: [], error: null, cancelReason: null };
-  mawsTranscriptActionsOver(fake.client).openAsk(A, history);
-  const retained = surfaceTabs(useLayout.getState(), A).map((tab) => tab.id);
-  useLayout.getState().setPanel({ collapsed: true }); // narrow-sheet Escape keeps the saved stack
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.id)).toEqual(retained);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-  expect(useLayout.getState().regions.panel.collapsed).toBe(false);
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual([ASK_SHEET_TOOL_ID]);
-  if (reopened) mawsTranscriptActionsOver(fake.client).openAsk(A, history);
-  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-  await Promise.resolve();
-  expect(surfaceTabs(useLayout.getState(), A).map((tab) => tab.toolId)).toEqual(reopened ? [ASK_SHEET_TOOL_ID] : []);
-  off();
-});
-
-it('does not dismiss Questions explicitly opened to inspect an answer', () => {
-  useSessions.setState({ records: new Map([[A, record(A)]]) });
-  registerPanelTool(probeTool(ASK_SHEET_TOOL_ID, { multiInstance: false, pinnable: false }).tool);
-  const fake = fakeClient();
-  const off = connectAsks(fake.client);
-  fake.event('session.eventBatch', { appSessionId: A, events: [opened('a1')] });
-  settleWaitingAsks(A);
-  fake.event('session.eventBatch', { appSessionId: A, events: [answered('a1')] });
-  expect(surfaceTabs(useLayout.getState(), A)).toHaveLength(1);
-  off();
 });

@@ -127,6 +127,8 @@
 // UX wave U6e: (an outside file, both ways) and (outside file, on the peer's daemon), a chosen file outside the session's
 // folders across build F and master at U6e's parent pin; their block is at the end of this file, and their row is in
 // U13a's UC-14 coverage table.
+// UX wave U3b: (a command's output, both ways), a session kept with a slash command's output in its journal, shown by the
+// other build's window as the row the build that reads the frames makes; its block is at the end of this file.
 // Run by `pnpm e2e:cross-build` (MAWS_CROSS_BUILD_E2E=1), which the gate adds to a run whose tree and peer differ in
 // WIRE_MINOR (.github/scripts/gate-plan.mjs).
 // An equal wire (decision 3475): a change to a stored form alone takes no WIRE_MINOR bump, yet a go-back to the build the
@@ -3140,6 +3142,14 @@ const knowsStagesWhy = (peer: Build) => `the peer (wire ${wireOf(peer)}) names D
 // what the scene's three launches and two crossings take; the taken scene keeps the crossing's pace (ROW_MS)
 const STAGE_ROW_MS = 6_000;
 const STAGE_PREMISE = 'the turn reached its request, whose card holds the box, before the scene had looked: the premise of a turn that runs with a message waiting is gone';
+// UX wave U1b: whether a build's request takes its composer's place (its `swapOf`, the docked swap). Both peers, build F
+// and the master build, dock a session's oldest request over the box; from U1b a request is drawn in the transcript and
+// the box is shown beside it, so on such a build a request ahead holds no box and the premise above stands.
+const docksRequests = (build: Build) => {
+  const swap = join(build.root ?? REPO_ROOT, 'src/renderer/src/composer/docked/swap.ts');
+  return existsSync(swap) && readFileSync(swap, 'utf8').includes('export function swapOf');
+};
+const boxHeld = async (build: Build, page: Page, id: AppSessionId) => docksRequests(build) && (await hasRequest(page, id));
 const STAGE_WAITING = 'Add a heading to the release checklist after this turn';
 const STAGE_TAKEN = 'Rename the second fixture once the review is done';
 const READ_ALREADY = 'The agent has already read this message'; // composer/queue/stack.ts, STACK_WORDS.readAlready
@@ -3228,7 +3238,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
 
     // the peer: the stage in its box as an ordinary draft, the message still listed
     const old = await launchServed(s, id, peer.root);
-    test.skip(await hasRequest(old.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(peer, old.page, id), STAGE_PREMISE);
     expect(await queuedIn(old.page, id, queueId), 'the peer’s queue still lists the message').toBe(true);
     const left = await peerShowsDraft(s, old, id, STAGE_WAITING);
     said.push(`  ${peer.label}: the box showed the message as a draft, the queue listed it; it left ${left === null ? 'no draft' : stageOf(left) !== null ? 'the stage as it was' : 'an ordinary draft'}`);
@@ -3239,7 +3249,7 @@ test('(stage, its message waiting) a take-back’s stage this build kept for a m
     expect(found, 'this build finds what the peer left').toEqual(left);
     const outcome = stageOf(found) !== null ? 'the stage carried forward' : holdsText(found, STAGE_WAITING) ? 'the peer’s draft beside the message still listed' : null;
     expect(outcome, `a third state: what is kept is ${JSON.stringify(found)}`).not.toBeNull();
-    test.skip(await hasRequest(back.page, id), STAGE_PREMISE);
+    test.skip(await boxHeld(here, back.page, id), STAGE_PREMISE);
     await showSession(back.page, id, `session:${await addressed(back.page, id)}`);
     if (stageOf(found) !== null) {
       await expect.poll(() => queuedIn(back.page, id, queueId), { timeout: 30_000, message: 'carried forward: the message withdrawn' }).toBe(false);
@@ -3283,7 +3293,8 @@ test('(stage, its message taken) a take-back’s stage this build kept for a mes
     expect(await queuedIn(run.page, id, queueId), 'the queue no longer lists it').toBe(false);
     // the message's own turn plays the fixture's second round trip: its request answered as the recording answered it
     // (deny, `permission-roundtrip.jsonl` seq 144; the replay compares the answer's behaviour), so the session idles at
-    // the next prompt and no request's card holds either build's box
+    // the next prompt and no request's card holds the box of a build that docks one (`docksRequests`: both peers; this
+    // build, from UX wave U1b, never covers it)
     type Requested = Extract<SessionEvent, { kind: 'permission.requested' }>;
     let next: Requested | undefined;
     await expect
@@ -3896,10 +3907,11 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 // U6e (docs/doperpowers/plans/2026-11-14-ux-wave-U6e-outside-file-editable.md, §A) stores one profile file neither older
 // build names, `sessions/file-grants.json` (the files the person chose with Open File…, per session), and one key in a
 // Files tab's params, `agent` (the mark of an open the agent asked for); the tab of a chosen file is a Files tab or a main
-// `file` tab of U6b-1's shape. Its two peers are build F (`f1852de3a`) and master at its parent pin (`2c7044231`), told
-// apart by the peer's checked-out commit (the gate's peer is a worktree at it, .github/scripts/gate-peer.sh); each scene
-// skips, saying so, for a peer that is neither, and the runs of record are `--peer-exact f1852de3a` and `--peer-exact
-// 2c7044231`.
+// `file` tab of U6b-1's shape. Its peers are the builds from before it, read from marks in the peer's source as the file's
+// other scenes read theirs (`u6ePeer`): a peer whose source names `files.grant` has U6e, and each scene skips, saying so;
+// any other is told by whether its files service answers `named`. One that does not is build F's behaviour (`f1852de3a`);
+// one that does, with no `outside`, is a master from before U6e (its parent pin `2c7044231`, or a later one such as
+// `b89d6d1d7`).
 //   (an outside file, both ways)          this build chooses two text files outside the session's folders with Open
 //                                         File… (the pick seam), saves one beside the chat and moves the other to the
 //                                         main area, and quits; the peer, on its own daemon, shows nothing of them it
@@ -3917,17 +3929,16 @@ test('(space instructions, both ways) the instructions this build keeps in the a
 //                                         the page's bridge answers `unknown_command` and both files' bytes are unchanged.
 // The two pairings no scene stages (a page of an older build on this build's daemon) are proved at the schema
 // (test/cross-build/files-schema.test.ts), as §A says.
-const U6E_PEERS = { f1852de3a: 'build F', '2c7044231': 'master at U6e’s parent pin' } as const;
+const U6E_PEERS = { dropsNamed: 'build F’s files service, which drops `named`', answersNamed: 'a master from before U6e, whose files service answers `named` with no `outside`' } as const;
 type U6ePeer = keyof typeof U6E_PEERS;
+const peerSource = (build: Build, path: string) => readFileSync(join(build.root ?? REPO_ROOT, path), 'utf8');
 function u6ePeer(peer: Build): { which: U6ePeer | null; why: string } {
-  let head = '';
-  try {
-    head = execFileSync('git', ['-C', peer.root ?? REPO_ROOT, 'rev-parse', 'HEAD'], { env: isolatedGitEnv(), encoding: 'utf8' }).trim();
-  } catch {
-    // no commit to read: neither peer can be told
+  if (peerSource(peer, 'src/shared/ipc/names/files.ts').includes("'files.grant'")) {
+    return { which: null, why: `the peer (wire ${wireOf(peer)}) names files.grant (its src/shared/ipc/names/files.ts): a build from U6e on, which knows a grant` };
   }
-  const which = (Object.keys(U6E_PEERS) as U6ePeer[]).find((sha) => head.startsWith(sha)) ?? null;
-  return { which, why: `the peer (wire ${wireOf(peer)}) is at ${head || 'a commit git cannot read'}: U6e's cross-build scenes are written for f1852de3a and 2c7044231 (--peer-exact)` };
+  // the files service's answer to a read asked with `named` (`{ ...answer, named: true }` in a master before U6e; F's has none)
+  const which = peerSource(peer, 'src/services/files/service.ts').includes('named: true') ? 'answersNamed' : 'dropsNamed';
+  return { which, why: '' };
 }
 const OUTSIDE_TEXT = (name: string) => `An invented file outside the session’s folders, ${name}.\n`;
 const FILES_REFUSED = "Refused: path outside the session's directories"; // each build's files service and viewer copy
@@ -4057,7 +4068,7 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       await expect(chip, 'the agent’s link to the outside file').toBeVisible({ timeout: 20_000 });
       await chip.click();
       const viewer = sideColumn(run.page).locator(`[data-file-viewer][data-path="${linked}"]`);
-      if (known.which === 'f1852de3a') {
+      if (known.which === 'dropsNamed') {
         await expect(viewer.locator('[data-refusal]'), 'F’s daemon drops `named`: the file is refused, as F refuses it').toContainText(FILES_REFUSED, { timeout: 20_000 });
       } else {
         await expect(viewer.locator('.cm-content'), 'master’s daemon answers `named`: the file is read').toContainText('linked.txt', { timeout: 20_000 });
@@ -4078,9 +4089,106 @@ test('(outside file, on the peer’s daemon) this build’s app on the peer’s 
       expect(answer, 'the peer’s daemon answers unknown_command').toMatchObject({ ok: false, error: { code: 'unknown_command' } });
       expect([readFileSync(linked, 'utf8'), readFileSync(chosen, 'utf8')], 'both files unchanged').toEqual([OUTSIDE_TEXT('linked.txt'), OUTSIDE_TEXT('chosen.txt')]);
       expect(run.maws.consoleErrors()).toEqual([]);
-      said.push(`  the link: ${known.which === 'f1852de3a' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
+      said.push(`  the link: ${known.which === 'dropsNamed' ? 'refused' : 'read-only'}; Open File…: could not open; files.writeOutside: unknown_command, nothing written`);
       await s.quit(run);
       record(said);
     });
   });
+});
+
+// ---- UX wave U3b (docs/doperpowers/plans/2026-11-15-ux-wave-U3b-transcript-rows-find.md, M6): a command's output -----
+// The engine writes a slash command's output as an assistant frame with `local_command_source` and, from 2.1.322, the
+// run it made (`local_command_run`); a build from U3 on maps it to the person's line of class `command` (its
+// normalizer's `commandOutput`), and U3b's event carries the run in a `command` entry. A build before U3 (build F) draws
+// it as the model's answer. Whichever build's engine host reads the frames makes the window's events: at a handover (both
+// builds list `host.holder`) the attacher's host adopts the session and folds the whole journal itself, so the entry is
+// never sent across the builds on one profile; without one the keeper's host serves the other build's app. The scene
+// keeps a session whose journal holds a `/rename` and its output (u3-commands-r1, seq 198 to 208, inside C3's permission
+// round trip), crosses each way and reads the row the attacher's window draws: one row of the output, of the kind that
+// host's build makes, drawn by the attacher's build (U3b's light line, or the earlier "Command output" card), nothing
+// refused and no gap. Where both builds hand over (this tree, build G and build F all list `host.holder`), the window's
+// build is the reading build, so this build's entry never reaches an older window here: what an older reader does with it
+// is held by acceptance 14's unit cases (src/shared/graph/arrival-builds.test.ts). The recorded rows are the probe's own,
+// with the scene's name for the session in place of the recorded one.
+const COMMAND_ROWS = { fixture: 'spikes/protocol-probe/fixtures/uxwave/u3-commands-r1.jsonl', from: 198, to: 208, named: 'uxw renamed' };
+const COMMAND = '/rename crossing check';
+const COMMAND_OUTPUT = 'Session renamed to: crossing check';
+const sourceHas = (build: Build, file: string, text: string) => {
+  const path = join(build.root ?? REPO_ROOT, file);
+  return existsSync(path) && readFileSync(path, 'utf8').includes(text);
+};
+// What the peer knows, read from its source; this build's side is pinned, not read: its host reads the frame as a
+// command's output and its window draws U3b's light line, so losing either fails the scene rather than changing it
+const readsCommandOutput = (build: Build) => build.root === undefined || sourceHas(build, 'src/engine-host/normalizer.ts', 'commandOutput('); // UX wave U3's class `command`
+const drawsLightLine = (build: Build) => build.root === undefined || sourceHas(build, 'src/renderer/src/transcript/view/rows/LocalCommand.tsx', 'transcript-command-output'); // U3b's line
+const takesStubEngine = (build: Build) => sourceHas(build, 'src/engine-host/binary-info.ts', 'MAWS_E2E_ENGINE_BIN');
+
+// C3's permission round trip with the recorded `/rename` turn ahead of its prompt, written into the scratch: the rows
+// carry the round trip's session id and its init (the recorded turn's own init names the probe's folder), the name is
+// the scene's, and the seqs run on. The stub holds at the command's `out` row until the app sends a user frame, plays the
+// command's rows, then holds at the prompt.
+function commandJournal(dir: string): string {
+  const read = (fixture: string) => readFileSync(join(REPO_ROOT, fixture), 'utf8').split('\n').filter(Boolean).map((line) => JSON.parse(line) as JournalRow);
+  const rows = read(PERMISSION);
+  const init = rows.find((r) => r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init')!;
+  const sessionId = init.frame.session_id as string;
+  const recorded = read(COMMAND_ROWS.fixture).filter((r) => r.seq >= COMMAND_ROWS.from && r.seq <= COMMAND_ROWS.to && r.direction !== 'meta');
+  const recordedId = recorded.find((r) => typeof r.frame.session_id === 'string')!.frame.session_id as string;
+  const prompt = rows.findIndex((r) => r.direction === 'out' && r.frame.type === 'user');
+  const command = recorded.map((r) =>
+    r.direction === 'in' && r.frame.type === 'system' && r.frame.subtype === 'init'
+      ? { ...init, at: rows[prompt]!.at }
+      : ({ ...JSON.parse(JSON.stringify(r).replaceAll(recordedId, sessionId).replaceAll(COMMAND_ROWS.named, COMMAND.slice('/rename '.length))), at: rows[prompt]!.at } as JournalRow),
+  );
+  const path = join(dir, 'command-output.jsonl');
+  writeFileSync(path, [...rows.slice(0, prompt), ...command, ...rows.slice(prompt)].map((r, i) => JSON.stringify({ ...r, seq: i + 1 })).join('\n') + '\n');
+  return path;
+}
+
+test('(a command’s output, both ways) a session kept with a slash command’s output in its journal shows the output once in the other build’s window, as the row the reading build makes', async () => {
+  test.setTimeout(480_000);
+  const { here, peer } = builds();
+  test.skip(!takesStubEngine(peer), `the peer (wire ${wireOf(peer)}) names no MAWS_E2E_ENGINE_BIN in its src/engine-host/binary-info.ts: a session it keeps cannot run on the stub engine`);
+  for (const [keeper, attacher] of [[here, peer], [peer, here]] as const) {
+    await withScratch(`xb-command-${keeper === here ? 'here' : 'peer'}`, async (s) => {
+      const handover = holds(keeper) && holds(attacher);
+      const reader = handover ? attacher : keeper; // the build whose engine host reads the frames
+      const said: string[] = [`${keeper.label} (wire ${wireOf(keeper)}) keeps a session whose turn ran ${COMMAND}; ${attacher.label} (wire ${wireOf(attacher)}) shows it; ${reader.label}'s engine host reads the frames${handover ? ' (the handover)' : ''}`];
+      const stub = s.useStub({ rowMs: Number(ROW_MS) });
+
+      // the keeper: the command's turn played to its end, then the app quits and the session is kept
+      const first = await s.launch({ MAWS_E2E_QUIT_ANSWER: 'keep' }, keeper.root);
+      await s.ready(first.page);
+      const id = await s.record(first.page);
+      const input = fitTo(commandOf(keeper, 'session.launch')!.input, { spec: stubSpec(stub, id, commandJournal(s.root), { cwd: s.repo }) });
+      expect(value(await invoke(first.page, 'session.launch', input as CommandInput<'session.launch'>))).toMatchObject({ status: 'launching' });
+      await expect.poll(async () => (await statusOf(first.page, id)).process, { timeout: 30_000 }).toBe('ready');
+      value(await invoke(first.page, 'session.send', { appSessionId: id, content: COMMAND }));
+      await expect.poll(async () => JSON.stringify(await eventsOf(first.page, id)).includes(COMMAND_OUTPUT), { timeout: 60_000, message: 'the output reached the keeper’s events' }).toBe(true);
+      await turnEnded(first.page, id);
+      expect(first.maws.consoleErrors()).toEqual([]);
+      await s.quit(first);
+
+      // the attacher: served the kept session, its window shows the output once
+      const second = await launchServed(s, id, attacher.root);
+      await showSession(second.page, id, `session:${await addressed(second.page, id)}`);
+      const transcript = second.page.locator('[data-region="main"] [data-transcript-scroller]');
+      const row = transcript.locator('.transcript-row[data-kind]').filter({ hasText: COMMAND_OUTPUT });
+      await expect(row, 'one row of the output').toHaveCount(1, { timeout: 20_000 });
+      const kind = await row.getAttribute('data-kind');
+      if (readsCommandOutput(reader)) {
+        expect(kind, `${reader.label} reads the frame as a command’s output`).toBe('local_command');
+        if (drawsLightLine(attacher)) await expect(row.locator('.transcript-command-output'), `${attacher.label} draws the light line`).toHaveText(COMMAND_OUTPUT);
+        else await expect(row, `${attacher.label} draws its card`).toContainText('Command output');
+      } else expect(kind, `${reader.label} reads the frame as the model’s answer`).toBe('assistant_text');
+      await expect(transcript.locator('.transcript-row[data-kind="gap"]'), 'no gap').toHaveCount(0);
+      expect(second.output().split('\n').filter((l) => MAIN_REFUSES.test(l)), `${attacher.label}'s main refuses nothing`).toEqual([]);
+      expect(s.log().split('\n').filter((l) => HOST_REFUSES.test(l)), 'no engine host refuses what the other build sent').toEqual([]);
+      const dropped = [...first.output().split('\n'), ...second.output().split('\n'), ...s.log().split('\n'), ...s.daemonLog().split('\n')].filter((l) => DROPPED.test(l));
+      said.push(`  ${attacher.label}'s window: one ${kind} row${kind === 'local_command' ? (drawsLightLine(attacher) ? ', the light line' : ', the "Command output" card') : ''}`, dropped.length === 0 ? '  dropped: nothing, at either end' : `  dropped (the tolerant reader): ${dropped.map((l) => l.trim()).join(' | ')}`);
+      expect(second.maws.consoleErrors()).toEqual([]);
+      await s.quit(second);
+      record(said);
+    });
+  }
 });

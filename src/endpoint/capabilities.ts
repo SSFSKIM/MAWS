@@ -72,4 +72,8 @@ export const ENDPOINT_CAPABILITIES = [
   // `artifacts.undelete`, the undo of an agent's delete of its own draft, to the machine's owners; a device sends a
   // machine none unless its `h2` listed it, since an older one has no row for it and answers `not-offered`.
   'rl2.artifact-undelete',
+  // The UX wave (U4b; docs/doperpowers/plans/2026-11-15-ux-wave-U4b-composer-integrations.md, Interfaces C): this endpoint
+  // offers `session.steer.sendNow`, a message waiting at the next step sent now; a device sends a machine the act only
+  // when its `h2` listed it (SEND_NOW_CAPABILITY), since an older one has no row for it and answers `not-offered`.
+  'rl2.send-now',
 ] as const;

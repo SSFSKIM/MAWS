@@ -1,8 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import { AttentionItemSchema, type AttentionItem } from '@shared/graph/attention';
 import type { AppSessionId, RequestId } from '@shared/graph/ids';
-import type { ControlRequestFrame } from '@shared/wire/frames';
-import { loadJournal } from '../../test/support/fixtures';
+import { ControlRequestFrameSchema, type ControlRequestFrame } from '@shared/wire/frames';
+import type { JournalRow } from '@shared/wire/journal';
+import { loadJournal, loadUxwaveJournal } from '../../test/support/fixtures';
 import { PermissionBroker, type BrokerDeps } from './broker';
 
 const APP = 'app-b' as AppSessionId;
@@ -431,5 +432,95 @@ describe('a broker restored from a journal', () => {
 
     broker.accept(canUseTool('r1')); // the engine's redelivery after the re-initialize
     expect(broker.snapshot().map((i) => [i.id, i.state])).toEqual([['app-b:r1', 'pending'], ['app-b:r2', 'delivered'], ['app-b:d1', 'pending']]);
+  });
+});
+
+// UX wave U1b, decision 22 (probe 8, spikes/protocol-probe/findings-uxwave-u1b-interrupt-pending.txt, engine 2.1.322):
+// Stop's interrupt while a permission request is pending. The engine cancels the main loop's request with
+// `control_cancel_request`, so its item retires `abort` on that frame and a late answer is refused; a subagent's request
+// gets no cancel and stays answerable, so its item stays pending through the interrupt and the main turn's result, and
+// a late allow is written and confirmed. The broker is fed each recorded inbound frame as the session feeds it (an
+// engine request accepted, then every frame observed); the window's own interrupt is an outbound row it never sees.
+describe('Stop while a permission request is pending (probe 8)', () => {
+  type Recorded = { rows: JournalRow[]; request: ControlRequestFrame; requestSeq: number; interruptSeq: number; lateAllow: JournalRow };
+  const ACCEPTED = new Set(['can_use_tool', 'elicitation', 'request_user_dialog']); // session.ts's broker subtypes
+
+  function recorded(name: string): Recorded {
+    const rows = loadUxwaveJournal(name);
+    const frame = (row: JournalRow) => row.frame as Record<string, unknown> & { request?: { subtype?: unknown }; request_id?: unknown; response?: { request_id?: unknown } };
+    const requestRow = rows.find((row) => row.direction === 'in' && frame(row).type === 'control_request' && frame(row).request?.subtype === 'can_use_tool')!;
+    const request = ControlRequestFrameSchema.parse(requestRow.frame);
+    const interrupt = rows.find((row) => row.direction === 'out' && frame(row).type === 'control_request' && frame(row).request?.subtype === 'interrupt')!;
+    const lateAllow = rows.find((row) => row.direction === 'out' && frame(row).type === 'control_response' && frame(row).response?.request_id === request.request_id)!;
+    expect(requestRow.seq < interrupt.seq && interrupt.seq < lateAllow.seq, `${name}: the request, then Stop's interrupt, then the late allow`).toBe(true);
+    return { rows, request, requestSeq: requestRow.seq, interruptSeq: interrupt.seq, lateAllow };
+  }
+
+  function feed(broker: PermissionBroker, row: JournalRow): void {
+    if (row.direction !== 'in') return;
+    const parsed = ControlRequestFrameSchema.safeParse(row.frame);
+    if (parsed.success && ACCEPTED.has(parsed.data.request.subtype)) broker.accept(parsed.data);
+    broker.observe(row.frame);
+  }
+
+  const isMainResult = (row: JournalRow) => {
+    const f = row.frame as { type?: unknown; parent_tool_use_id?: unknown };
+    return row.direction === 'in' && f.type === 'result' && (f.parent_tool_use_id ?? null) === null;
+  };
+
+  it.each(['u1b-intpend-main-r1', 'u1b-intpend-main-r2', 'u1b-intpend-main-r3'])('%s: the main loop\'s request retires as abort on its control_cancel_request, and a late allow is not_pending', async (name) => {
+    const { rows, request, interruptSeq, lateAllow } = recorded(name);
+    const id = rid(request.request_id);
+    expect(request.request.agent_id ?? null, 'the main loop\'s own request').toBeNull();
+    const cancel = rows.find((row) => row.direction === 'in' && (row.frame as { type?: unknown; request_id?: unknown }).type === 'control_cancel_request' && (row.frame as { request_id?: unknown }).request_id === request.request_id)!;
+    expect(cancel.seq, 'the engine cancels it after Stop').toBeGreaterThan(interruptSeq);
+    const { broker, responses, last } = setup();
+
+    for (const row of rows.filter((r) => r.seq < cancel.seq)) feed(broker, row);
+    expect(broker.item(id)?.attention.state, 'pending through the interrupt, up to the cancel').toBe('pending');
+    expect(last().map((item) => item.id)).toEqual([`app-b:${request.request_id}`]);
+
+    feed(broker, cancel);
+    expect(broker.item(id), 'retired at the cancel frame itself').toBeUndefined();
+    expect(broker.retiredReason(id)).toBe('abort');
+    expect(last()).toEqual([]);
+
+    const after = rows.filter((r) => r.seq > cancel.seq && r.seq < lateAllow.seq);
+    expect(after.some(isMainResult), 'the turn\'s result follows').toBe(true);
+    for (const row of after) feed(broker, row);
+    expect(broker.retiredReason(id), 'the result changes nothing').toBe('abort');
+
+    expect(await broker.answer(id, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('not_pending');
+    expect(responses, 'nothing is written for it').toEqual([]);
+    expect(broker.processExited()).toEqual({ lost: 0 });
+  });
+
+  it.each(['u1b-intpend-child-r1', 'u1b-intpend-child-r2', 'u1b-intpend-child-r3', 'u1b-intpend-child-r4'])('%s: a subagent\'s request gets no cancel, stays pending through Stop and the main turn\'s result, and a late allow is delivered and confirmed', async (name) => {
+    const { rows, request, requestSeq, lateAllow } = recorded(name);
+    const id = rid(request.request_id);
+    expect(request.request.agent_id, 'a subagent\'s request').toEqual(expect.any(String));
+    const { broker, responses, last } = setup();
+
+    const before = rows.filter((r) => r.seq < lateAllow.seq);
+    expect(before.some((row) => (row.frame as { type?: unknown }).type === 'control_cancel_request'), 'the recording holds no cancel').toBe(false);
+    expect(before.some((row) => row.seq > requestSeq && isMainResult(row)), 'the main turn\'s result comes between the request and the late allow').toBe(true);
+    for (const row of before) {
+      feed(broker, row);
+      if (row.seq >= requestSeq) expect(broker.item(id)?.attention.state, `pending after seq ${row.seq}`).toBe('pending');
+    }
+    expect(broker.item(id)?.attention).toMatchObject({ state: 'pending', request: { requestId: request.request_id, agentId: request.request.agent_id } });
+    expect(last().map((item) => item.id)).toEqual([`app-b:${request.request_id}`]);
+
+    expect(await broker.answer(id, { kind: 'permission', decision: 'allow', scope: 'once' })).toBe('delivered');
+    expect(responses.map((r) => [r.requestId, r.response])).toEqual([[request.request_id, expect.objectContaining((lateAllow.frame as { response: { response: object } }).response.response)]]);
+
+    const after = rows.filter((r) => r.seq > lateAllow.seq);
+    const toolUseId = request.request.tool_use_id as string;
+    const ran = after.find((row) => row.direction === 'in' && JSON.stringify((row.frame as { message?: unknown }).message ?? null).includes(`"tool_use_id":"${toolUseId}"`))!;
+    for (const row of after.filter((r) => r.seq <= ran.seq)) feed(broker, row);
+    expect(broker.item(id)?.attention.state, 'the child\'s tool ran on the late allow').toBe('confirmed');
+    for (const row of after.filter((r) => r.seq > ran.seq)) feed(broker, row);
+    expect(broker.item(id)).toBeUndefined();
+    expect(broker.retiredReason(id), 'retired at the next main-lane result, answered').toBe('answered');
   });
 });

@@ -3,6 +3,7 @@
 // from it. The terminal's pasted blocks become `[Pasted text #n +L lines]` placeholders (their bodies kept for the
 // editor), the neutralised `<\pasted_content` is restored to what was typed, and images and PDFs are named `[Image #n]`
 // and `[PDF #n]` before the text, as they ride before it. Pure.
+import { asTyped } from '@shared/engine/grant';
 import type { ContentBlock } from '@shared/graph/events';
 import { PASTED_BLOCK, pastedPlaceholder } from '@shared/composer/pasted-content';
 import { countLines } from '@shared/composer/pasted-framing';
@@ -19,7 +20,7 @@ const base64Of = (block: Base64Block) => (block.source?.type === 'base64' && typ
 function extractPasted(text: string): { text: string; bodies: string[] } {
   const bodies: string[] = [];
   const replaced = text.replace(new RegExp(PASTED_BLOCK.source, 'g'), (match: string, _id: string, body: string) => {
-    bodies.push(body);
+    bodies.push(asTyped(body)); // UX wave U1c: as pasted
     const before = match.startsWith('\n') ? '\n' : '';
     const after = match.endsWith('\n') ? '\n' : '';
     return `${before}${pastedPlaceholder(bodies.length, countLines(body))}${after}`;

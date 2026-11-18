@@ -11,7 +11,7 @@ import { at, OTHER_MACHINE, TEST_MACHINE } from '../../../../../test/support/mac
 import { resetRemoteSurfaces } from '../../artifacts/remote-surfaces';
 import { registerAction } from '../../keymap/actions-runtime';
 import { resetRemoteLaneBStore } from '../../lane-b/remote-session';
-import { remoteUnavailableOf } from '../../lane-b/remote-unavailable';
+import { remoteUnavailableOf, TURN_RUNS } from '../../lane-b/remote-unavailable';
 import { EMPTY_CATALOG, type SessionCatalog } from '../../stores/catalog';
 import { useMachines } from '../../stores/machines';
 import { useSessions } from '../../stores/sessions';
@@ -169,6 +169,29 @@ describe('the highlighted row’s popover', () => {
       const here = open('fork', { widgets: PANELS });
       expect(here.options()[0].getAttribute('aria-disabled')).toBeNull();
       expect(here.popover()!.textContent).toBe(`${declared('fork')}[prompt]MAWS`);
+    } finally {
+      useSessions.setState({ listed: new Map(), listedMachines: new Set() });
+    }
+  });
+});
+
+// UX wave U4b (decision 11; A20): the row reads `useForkUnavailable`, which adds the turn's words while the session's turn
+// runs on another machine
+describe('/fork while a turn runs on another machine', () => {
+  it('is greyed with “Wait for the turn to end, or stop it first”, and opens again when the turn ends', () => {
+    const listing = (state: string) => useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'app-far', { state }), appId: REMOTE }]]), listedMachines: new Set([OTHER_MACHINE]) });
+    try {
+      resetRemoteSurfaces();
+      resetRemoteLaneBStore();
+      useMachines.getState().applyRoster([{ ref: OTHER_MACHINE, name: 'mini', local: false, state: 'up', since: '2026-10-31T10:00:00.000Z', generation: 1, carrier: 'relay', capabilities: [SESSION_ACTS_CAPABILITY], owner: true }]);
+      listing('busy');
+      const far = open('fork', { appSessionId: REMOTE, widgets: PANELS });
+      expect(far.options()[0].getAttribute('aria-disabled')).toBe('true');
+      expect(far.popover()!.textContent).toBe(`${declared('fork')}[prompt]${TURN_RUNS}`);
+      cleanup();
+      listing('idle');
+      const idle = open('fork', { appSessionId: REMOTE, widgets: PANELS });
+      expect(idle.options()[0].getAttribute('aria-disabled')).toBeNull();
     } finally {
       useSessions.setState({ listed: new Map(), listedMachines: new Set() });
     }

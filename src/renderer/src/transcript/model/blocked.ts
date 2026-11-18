@@ -1,0 +1,159 @@
+// UX wave U1c (l4-approvals-12; the U1c document, Design 1 and 3, Interfaces §A and §B): a call auto mode blocked. The
+// classifier's own reason, cut out of the text the engine gives the model as Claude Desktop cuts it
+// (`web/app/v1/c62da1b56-Cmxkc-l_.js:424-484` of 5.1231.2); the name a grant gives the call, by the engine's rule for
+// its "Recently blocked" list (`cli.pretty.js:1242837-1242850, 1242901-1242905` of 2.1.322); and the rule by which a
+// blocked row reads approved, waits or is blocked again, read from the transcript's rows alone. A row says it was
+// approved only on the reader's mark of the person's own send of the grant (`consent` on a `user` row): never on a
+// press, the queue, a later run of the same command, or a row's text.
+import type { TranscriptState } from './reduce';
+import type { BlockedCall, Cell, CellId, Row, TurnId } from './rows';
+
+const OPENING = 'Permission for this action was denied by the Claude Code auto mode classifier. Reason: ';
+const AFTER = '. If you have other tasks';
+const REASON_MAX = 1000;
+export const STAND_IN_REASONS: ReadonlySet<string> = new Set([
+  'Blocked by classifier',
+  'Blocked by fast classifier',
+  'No reason provided',
+  'The server-side auto mode classifier judged this action dangerous (it gave no explanation)',
+]);
+
+/** The classifier's own reason in a blocked call's result text; null when it gave none (Design 1). */
+export function classifierReason(resultText: string): string | null {
+  if (!resultText.startsWith(OPENING)) return null;
+  const rest = resultText.slice(OPENING.length);
+  const end = rest.indexOf(AFTER);
+  if (end <= 0) return null;
+  const reason = rest.slice(0, end).replace(/\s+/g, ' ').trim();
+  if (reason === '' || STAND_IN_REASONS.has(reason)) return null;
+  return reason.length > REASON_MAX ? `${reason.slice(0, REASON_MAX).replace(/\s\S*$/, '')}…` : reason;
+}
+
+// The shell tools a grant names by their command (the engine's list, read by its use; the U1c document, What is not
+// proven 6), which are also those whose command line Desktop's rule shortens (its `fu`; UX wave U2, O-49). Defined here
+// and re-exported by cells.ts, so that this module imports nothing of the cells it names.
+export const shellToolOf = (toolName: string): 'Bash' | 'PowerShell' | null => (toolName === 'Bash' || toolName === 'PowerShell' ? toolName : null);
+
+/** What a grant names: defined with the row types (`rows.ts`), and named here for this module's importers. */
+export type { BlockedCall } from './rows';
+
+// The keys of a shell call's input that leave it named by its command: these two always, these two when set false.
+const NAMING_ALWAYS = new Set(['description', 'timeout']);
+const NAMING_WHEN_FALSE = new Set(['run_in_background', 'dangerouslyDisableSandbox']);
+
+/** A call's name by the engine's rule; in this landing a plain shell command's, null for every other call (probe C's one place). */
+export function blockedCallOf(toolName: string, input: unknown): BlockedCall | null {
+  if (shellToolOf(toolName) === null || typeof input !== 'object' || input === null) return null;
+  const { command, ...rest } = input as Record<string, unknown>;
+  if (typeof command !== 'string' || command === '') return null;
+  const flagged = Object.entries(rest).some(([key, value]) => value !== undefined && !NAMING_ALWAYS.has(key) && !(value === false && NAMING_WHEN_FALSE.has(key)));
+  return flagged ? null : { kind: 'command', subject: command };
+}
+export const blockedKey = (call: BlockedCall): string => `${call.kind}\u0000${call.subject}`;
+
+export interface BlockedState { call: BlockedCall; again: boolean; grant: 'none' | 'waiting' | 'read' }
+/** Whether the row reads approved: a grant that was read (card 1's one place). */
+export const readsApproved = (state: BlockedState): boolean => state.grant === 'read';
+
+// UX wave U1c (Design 6; Interfaces §E; Decision Log 8): the line names the grant's subject whole only up to this many
+// UTF-16 units, so a row's line never grows to many lines; a longer command stands in the subject's block.
+export const LINE_SUBJECT_MAX = 200;
+/** Whether the row's line shows the grant's subject whole and exactly: a command with no line break and no backtick, drawn as that same string. */
+export function lineNamesWhole(drawn: Cell, call: BlockedCall): boolean {
+  if (call.kind !== 'command' || drawn.detail.kind !== 'shell' || drawn.detail.command !== call.subject) return false;
+  return call.subject.length <= LINE_SUBJECT_MAX && !/[\n\r`]/.test(call.subject);
+}
+
+/**
+ * Whether the row drawn for a call shows that auto mode blocked it: a call's cell in the denied state of that kind, whose
+ * line says the block and the classifier's reason where it gave one (Design 1). The one test by which the engine's
+ * advisory for that call is left out (Decision Log 46): a row of any other kind (an Agent call's, which keeps neither
+ * status nor reason) keeps its advisory.
+ */
+export const showsAutoModeBlock = (cell: Cell): boolean => cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';
+
+/** A call auto mode blocked that has a name, as the model drew it (a mod's draw-time status is not one). */
+export const isBlockedCell = (cell: Cell): cell is Cell & { blocked: BlockedCall } =>
+  cell.blocked !== undefined && cell.status === 'denied' && cell.classification.denial?.kind === 'automode-blocked';
+
+// M2's review (fix 1): the cell an opened blocked row draws. The engine's text to the model (its stand-in reason and the
+// instructions after it) is the call's result, which the detail would draw as the call's output; a call auto mode
+// blocked never ran, so its detail draws what it would have run and no output, as a refused file change draws no diff.
+// The label carries the classifier's own reason where it gave one. The cell itself, its result and the copy keep the
+// text, and so does the output a mod's tool-result component is handed (its rewrite, where it makes one, stands); every
+// other call is returned as it is.
+export function withoutRefusalText(cell: Cell): Cell {
+  if (cell.status !== 'denied' || cell.classification.denial?.kind !== 'automode-blocked') return cell;
+  const { detail } = cell;
+  switch (detail.kind) {
+    case 'shell': return { ...cell, detail: { ...detail, stdout: '', stderr: '', truncated: null, spill: null } };
+    case 'mcp': return { ...cell, detail: { ...detail, result: '', structured: null, spill: null } };
+    case 'generic': return { ...cell, detail: { ...detail, result: '', structured: null, spill: null, truncated: null } };
+    case 'read': return { ...cell, detail: { ...detail, preview: null, truncated: null } };
+    case 'search': case 'web': return { ...cell, detail: { ...detail, output: '', truncated: null } };
+    default: return cell;
+  }
+}
+
+const NO_TURNS: readonly TurnId[] = [];
+/** A transcript's hidden turns, the list `blockedStates` and `approvalsFor` take: the same array while it is unchanged. */
+export const hiddenTurnsOf = (state: Pick<TranscriptState, 'hidden'>): readonly TurnId[] => state.hidden?.turns ?? NO_TURNS;
+
+interface Approval { key: string; dropped: boolean; waits: boolean }
+const approvalOf = (row: Row): Approval | null =>
+  row.kind === 'user' && row.consent !== undefined ? { key: blockedKey(row.consent), dropped: row.dropped, waits: row.started !== true || row.pending !== undefined || row.unread === true } : null;
+const blockedRowOf = (row: Row): (Cell & { blocked: BlockedCall }) | null => (row.kind === 'cell' && isBlockedCell(row) ? row : null);
+
+const memo = new WeakMap<readonly Row[], { hidden: readonly TurnId[]; states: ReadonlyMap<CellId, BlockedState> }>();
+
+/** Every blocked call's row that has a name and is outside a hidden branch, by its cell id (the rule of Design 3). */
+export function blockedStates(rows: readonly Row[], hidden: readonly TurnId[]): ReadonlyMap<CellId, BlockedState> {
+  const known = memo.get(rows);
+  if (known !== undefined && known.hidden === hidden) return known.states;
+  const states = deriveStates(rows, new Set(hidden));
+  memo.set(rows, { hidden, states });
+  return states;
+}
+
+// One pass backward for what stands after each blocked row (its grant), one forward for what stands before it (again).
+// An approval row counts when it is not dropped; it was read only when it says the engine started its message
+// (`started`, Decision Log 45) and carries no waiting mark: nothing the model cannot place reads as read.
+function deriveStates(rows: readonly Row[], hidden: ReadonlySet<TurnId>): ReadonlyMap<CellId, BlockedState> {
+  const shown = rows.filter((row) => row.turnId === null || !hidden.has(row.turnId));
+  const grants: BlockedState['grant'][] = [];
+  const read = new Set<string>();
+  const waiting = new Set<string>();
+  for (let i = shown.length - 1; i >= 0; i -= 1) {
+    const approval = approvalOf(shown[i]);
+    const blocked = blockedRowOf(shown[i]);
+    if (approval !== null && !approval.dropped) (approval.waits ? waiting : read).add(approval.key);
+    if (blocked === null) continue;
+    const key = blockedKey(blocked.blocked);
+    grants[i] = read.has(key) ? 'read' : waiting.has(key) ? 'waiting' : 'none';
+  }
+  const states = new Map<CellId, BlockedState>();
+  const before = new Set<string>();
+  shown.forEach((row, i) => {
+    const approval = approvalOf(row);
+    const blocked = blockedRowOf(row);
+    if (approval !== null && !approval.dropped) before.add(approval.key);
+    if (blocked !== null) states.set(blocked.id, { call: blocked.blocked, again: before.has(blockedKey(blocked.blocked)), grant: grants[i] });
+  });
+  return states;
+}
+
+/** Whether the row draws the cell: as a row of its own, or as a member of a run of calls drawn as one line. */
+export const drawsCell = (row: Row, cell: CellId): boolean => row.id === cell || (row.kind === 'group' && row.cells.some((member) => member.id === cell));
+
+/**
+ * The approval rows for a key outside a hidden branch, read, waiting or dropped, that stand after the row drawing the
+ * pressed cell `after`: what a press remembers and compares (Design 4; M3's review, finding 1, as the coordinator ruled).
+ * Rows that do not draw the cell are counted whole. The caller hands rows that draw the cell's own turn whenever the
+ * transcript holds it (`blocked-call/grants.ts`), so rows without the cell lie wholly after it, and the count is then as
+ * many as stand after it or fewer, never more.
+ */
+export function approvalsFor(rows: readonly Row[], hidden: readonly TurnId[], key: string, after: CellId): number {
+  const hiddenTurns = new Set(hidden);
+  const at = rows.findIndex((row) => drawsCell(row, after));
+  return rows.slice(at + 1).filter((row) => (row.turnId === null || !hiddenTurns.has(row.turnId)) && approvalOf(row)?.key === key).length;
+}

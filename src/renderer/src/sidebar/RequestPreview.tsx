@@ -1,5 +1,5 @@
-// The request preview: C5's fallback for the `requestCard` slot (X4; C5 execution document, Slots) in all three
-// placements until C7's card lands, and the body of the sidebar's hover card. It shows what is being asked (kind, wait,
+// The request preview: C5's fallback for the `requestCard` slot (X4; C5 execution document, Slots) in its two
+// placements, card and hover (UX wave U1b: no request docks), until C7's card lands, and the body of the sidebar's hover card. It shows what is being asked (kind, wait,
 // requesting agent, tool, a bounded preview of the input, the questions or the plan, the cwd) and offers "Open
 // session". Only in the hover placement, and only for a permission request whose tool is read-only (§5.1, shared
 // `READ_ONLY_TOOLS`), it also offers Approve and Deny by explicit click; they answer allow-once or a plain deny through
@@ -136,15 +136,13 @@ export const RequestPreview: Slots['requestCard'] = ({ item, request, placement 
       )}
       {canAnswer && <p className="m-0 text-fg-muted">Approve applies to this request only.</p>}
       <div className="flex items-center gap-2">
-        {placement !== 'docked' && ( // docked, it is already in its session
-          <button
-            type="button"
-            onClick={() => useLayout.getState().openSession(item.appSessionId)}
-            className="rounded-sm border border-border-strong px-2.5 py-1 whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
-          >
-            Open session
-          </button>
-        )}
+        <button
+          type="button"
+          onClick={() => useLayout.getState().openSession(item.appSessionId)}
+          className="rounded-sm border border-border-strong px-2.5 py-1 whitespace-nowrap text-fg outline-accent hover:bg-bg-hover focus-visible:outline-2"
+        >
+          Open session
+        </button>
         {delivery === 'not_delivered' && <span className="text-danger">Not delivered</span>}
         {canAnswer && (
           <div className="ml-auto flex items-center gap-1.5">

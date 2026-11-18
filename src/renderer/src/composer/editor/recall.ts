@@ -6,6 +6,7 @@
 import type { HistoryEntry } from '@shared/composer/history-entry';
 import { pastedPlaceholder } from '@shared/composer/pasted-content';
 import { parsePlaceholders, restorePastedTags, type Placeholder } from '@shared/composer/pasted-framing';
+import { asTyped } from '@shared/engine/grant';
 import type { JSONContent } from '@tiptap/core';
 import type { Prefill } from '../../stores/composer';
 import { atomId, docOf, mentionNode, paragraph, pastedNode, textNode, type Attachment, type ComposerDoc, type PastedAttrs } from './doc';
@@ -64,10 +65,11 @@ const available = (placeholder: Placeholder & { kind: 'pasted' }, body: string, 
   text: body,
 });
 
+// UX wave U1c: as typed (`asTyped`), as every prefill path is: no U+2060 comes back, one the person typed included
 export function historyEntryToDoc(entry: HistoryEntry): ComposerDoc {
-  return textToDoc(entry.display, (placeholder) => {
+  return textToDoc(asTyped(entry.display), (placeholder) => {
     const body = placeholder.kind === 'pasted' ? entry.pastedContents[String(placeholder.n)] : undefined;
-    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, body.content) : unavailable(placeholder);
+    return placeholder.kind === 'pasted' && body?.type === 'text' && typeof body.content === 'string' ? available(placeholder, asTyped(body.content)) : unavailable(placeholder);
   });
 }
 
@@ -114,9 +116,11 @@ export function prefillToDoc(prefill: Prefill): ComposerDoc {
   );
 }
 
-// A user row's text as the human typed it: the neutralised `<\pasted_content` restored, and the one newline C6 keeps
-// before each pasted placeholder removed (the composer's framing opens every block after a blank line, which C6's
-// extraction reduces to that newline; the newline after it is the paragraph join and stays).
+// A user row's text as the human typed it: the neutralised `<\pasted_content` restored, the joiner the one-writer rule put
+// in each opening of the grant removed (UX wave U1c, shared/engine/grant.ts `asTyped`, every U+2060; sent again, the
+// serialiser puts the joiner back; a U+2060 the person typed or pasted does not come back), and the one newline C6 keeps before each
+// pasted placeholder removed (the composer's framing opens every block after a blank line, which C6's extraction
+// reduces to that newline; the newline after it is the paragraph join and stays).
 export function typedFromRowText(text: string): string {
-  return restorePastedTags(text).replace(/\n(?=\[Pasted text #\d+ \+\d+ lines\])/g, '');
+  return asTyped(restorePastedTags(text)).replace(/\n(?=\[Pasted text #\d+ \+\d+ lines\])/g, '');
 }

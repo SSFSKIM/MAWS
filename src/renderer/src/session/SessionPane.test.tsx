@@ -86,22 +86,20 @@ describe('session pane', () => {
     }
   });
 
-  it('shows the transcript slot and the docked request above the composer, and nothing under it (W2: no status line)', () => {
+  // UX wave U1b (M3; decision 1): a waiting request is drawn in the session's transcript, never above its composer, with
+  // the fallback composer as with a registered one
+  it('shows the transcript slot over the composer with no request between them, and nothing under it (W2: no status line)', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('transcript', ({ appSessionId, agentId, paneIndex }) => <p>transcript {`${appSessionId} ${agentId} ${paneIndex}`}</p>);
     registerSlot('requestCard', ({ item, placement, paneIndex }) => <p>request {`${item.kind} ${placement} ${paneIndex}`}</p>);
-    // C7: no composer registered here (C5's stub composer registration removed): a registered composer docks the request itself (the C7 case below)
     render(<SessionPane appSessionId={id} paneIndex={1} />);
     expect(screen.getByText(`transcript ${id} null 1`)).toBeTruthy();
-    const request = screen.getByText('request permission docked 1');
-    const composer = screen.getByText('Composer unavailable'); // C7: the pane docks above C5's fallback composer only
-    expect(request.compareDocumentPosition(composer) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.queryByText(/^request /)).toBeNull();
     expect(screen.queryByRole('group', { name: 'Session status' })).toBeNull();
   });
 
-  // C7 start: a registered composer is the one docked swap: it docks the request in its own place, so the pane's slot
-  // docks nothing (two docked placements of one request would take focus and bind Enter twice).
-  it('leaves the docking to a registered composer', () => {
+  it('draws no request beside a registered composer either', () => {
     const id = idOf('Fix sidebar drag');
     registerSlot('requestCard', ({ item, placement }) => <p>request {`${item.kind} ${placement}`}</p>);
     registerSlot('composer', ({ appSessionId, paneIndex }) => <p>composer {`${appSessionId} ${paneIndex}`}</p>);
@@ -109,7 +107,6 @@ describe('session pane', () => {
     expect(screen.getByText(`composer ${id} 1`)).toBeTruthy();
     expect(screen.queryByText('request permission docked')).toBeNull();
   });
-  // C7 end
 
   it('docks no request when nothing waits', () => {
     registerSlot('requestCard', () => <p>request</p>);
@@ -118,10 +115,10 @@ describe('session pane', () => {
     expect(screen.getByText('Composer unavailable')).toBeTruthy();
   });
 
-  it('the docked fallback does not offer to open the session it is already in', () => {
+  it('draws no card of its own for a waiting request', () => {
     render(<SessionPane appSessionId={idOf('Fix sidebar drag')} paneIndex={0} />);
-    expect(screen.getByText('Approval needed')).toBeTruthy();
-    expect(screen.queryByRole('button', { name: 'Open session' })).toBeNull();
+    expect(screen.getByText('Composer unavailable')).toBeTruthy();
+    expect(screen.queryByText('Approval needed')).toBeNull();
   });
 
   it('replaces the composer of a foreign-live session with its holder, and docks no request', () => {
@@ -240,8 +237,8 @@ describe('session pane', () => {
   });
 
   // P5 O9 M9: another machine's terminal session is a listed lane A row with no record; it reads as started, its
-  // composer the lane A port's (never the holder notice), and its pending request docked.
-  it('shows another machine’s listed lane A session as started, with its composer and its docked request', () => {
+  // composer the lane A port's (never the holder notice); UX wave U1b: its pending request is its transcript's.
+  it('shows another machine’s listed lane A session as started, with its composer and no request docked', () => {
     const REMOTE = addressOf(OTHER_MACHINE, 'eng-r' as AppSessionId);
     useSessions.setState({ listed: new Map([[REMOTE, { ...remoteRow(OTHER_MACHINE, 'eng-r', { lane: 'A', availability: 'foreign_held' }), appId: REMOTE }]]) });
     registerSlot('transcript', ({ appSessionId }) => <p>transcript {appSessionId}</p>);
@@ -251,7 +248,7 @@ describe('session pane', () => {
     render(<SessionPane appSessionId={REMOTE} paneIndex={0} />);
     expect(screen.getByText(`transcript ${REMOTE}`)).toBeTruthy();
     expect(screen.getByText('Composer unavailable')).toBeTruthy();
-    expect(screen.getByText('request permission docked')).toBeTruthy();
+    expect(screen.queryByText(/^request /)).toBeNull();
     expect(screen.queryByRole('heading', { name: 'setup' })).toBeNull();
   });
 

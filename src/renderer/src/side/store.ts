@@ -297,16 +297,20 @@ export function waitingSince(parent: AppSessionId, exchange: SideExchange): numb
 // is to take the keyboard once drawn (a pick of `/btw` from the palette asks it, for the card or, for a side thread hosted
 // in its parent's pane, the questions under its thread view); the question typed in the card and not asked yet, so a fold
 // or a close hides it and loses nothing; and the settled exchanges seen while it was open on screen, so an answer that
-// settles while it is folded, closed or off screen is unseen until it is open again. The window's for its life and never
-// stored: after a reload every card is closed and empty until the next `/btw`.
+// settles while it is folded, closed or off screen is unseen until it is open again. UX wave U4b (M2, decision 4): a start
+// of the session for a question in flight and the last refusal, kept here and not in a mount, since a fold and a move
+// between the pane's corner and the card column's foot each mount the card again; a close keeps both, as it keeps the
+// question. The window's for its life and never stored: after a reload every card is closed and empty until the next `/btw`.
 export type BtwCardView = 'closed' | 'open' | 'folded';
 export interface BtwCard {
   view: BtwCardView;
   focus: boolean;
   question: string;
   seen: ReadonlySet<string>; // each settled exchange seen, by its id and its state
+  starting: boolean; // a start of the session for a side question is in flight
+  refusal: string | null; // why the last start, or the last promotion, was refused
 }
-const CLOSED: BtwCard = { view: 'closed', focus: false, question: '', seen: new Set() };
+const CLOSED: BtwCard = { view: 'closed', focus: false, question: '', seen: new Set(), starting: false, refusal: null };
 
 export const useBtwCards = create<{ cards: ReadonlyMap<AppSessionId, BtwCard> }>()(() => ({ cards: new Map() }));
 
@@ -330,6 +334,10 @@ export const setBtwQuestion = (parent: AppSessionId, next: string | ((current: s
     const question = typeof next === 'function' ? next(card.question) : next;
     return question === card.question ? card : { ...card, question };
   });
+// UX wave U4b: the card's start in flight, set before the start is awaited and cleared when it answers, by the
+// continuation that began it, wherever the card is drawn by then; and its refusal.
+export const setBtwStarting = (parent: AppSessionId, on: boolean): void => patchCard(parent, (card) => (card.starting === on ? card : { ...card, starting: on }));
+export const setBtwRefusal = (parent: AppSessionId, words: string | null): void => patchCard(parent, (card) => (card.refusal === words ? card : { ...card, refusal: words }));
 // The field took the keyboard: the request is spent, so a later mount (the tab shown again) leaves the keyboard alone.
 export const takeBtwFocus = (parent: AppSessionId): void => patchCard(parent, (card) => (card.focus ? { ...card, focus: false } : card));
 export const foldBtwCard = (parent: AppSessionId): void => patchCard(parent, (card) => (card.view === 'open' ? { ...card, view: 'folded', focus: false } : card));
