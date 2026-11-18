@@ -3,11 +3,18 @@
 // a damaged file read from offset 0; "as of" the last caught-up; migrated history kept past the bound by its writer's
 // checkpoint, whose record's signer is checked again at load; and other bytes at a covered position never `migrated`,
 // whatever offset served them and however often the cache is reloaded.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CHANNEL_RULE, type ChannelRuleEvent } from '../../../../apps/org-protocol/vectors/index.ts';
 import { ChannelOrg, ORG, PROJECT, S1, S2, type Event } from '../../../../test/org/channel-world';
 import { addressOf } from './address';
 import { emptyLog, loadLog, type ChannelLimits, type Ground } from './cache';
+
+/** The shared vectors' `retired` cases (apps/org-protocol/vectors/channel-rule.json), read as the file sminos copies. */
+type ChannelRuleEvent = { kind: 'joined' | 'retired'; reason?: string; thread?: string };
+const CHANNEL_RULE = JSON.parse(readFileSync(join(__dirname, '../../../../apps/org-protocol/vectors/channel-rule.json'), 'utf8')) as {
+  retired: { name: string; steps: { event: ChannelRuleEvent; member: boolean }[] }[];
+};
 
 const LIMITS: ChannelLimits = { events: 5000, bytes: 8 * 1024 * 1024 };
 const ground = (o: ChannelOrg): Ground => {

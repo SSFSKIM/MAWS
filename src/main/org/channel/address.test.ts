@@ -2,9 +2,16 @@
 // words, sent"): a leading `@alias` names that session of the project, as `sminos say` reads tags, and untagged words go
 // to everyone. The project's sessions are what its log's lifecycle events say: each session's latest `joined`,
 // `retired`, `renamed` and `titled` from its own writer, by offset.
+import { readFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { CHANNEL_RULE, type ChannelRuleEvent } from '../../../../apps/org-protocol/vectors/index.ts';
 import { addressOf, isStamped, isUnstampedEnd, lifecycleOf, projectSessions } from './address';
+
+/** The shared vectors' `retired` cases (apps/org-protocol/vectors/channel-rule.json), read as the file sminos copies. */
+type ChannelRuleEvent = { kind: 'joined' | 'retired'; reason?: string; thread?: string };
+const CHANNEL_RULE = JSON.parse(readFileSync(join(__dirname, '../../../../apps/org-protocol/vectors/channel-rule.json'), 'utf8')) as {
+  retired: { name: string; steps: { event: ChannelRuleEvent; member: boolean }[] }[];
+};
 
 const S1 = 'e0ad139c-18bc-45bd-9489-be8653145f80';
 const S2 = 'f1be24ad-29cd-46ce-a59a-cf9764256091';
@@ -90,9 +97,11 @@ describe("a stopped thread's membership", () => {
     expect(memberAfter([asS1(stampedJoin, 1), asS1({ kind: 'retired', reason: 'moved' }, 2), asS1(unstampedEnd, 3)])).toBe(false);
   });
 
-  it('keeps a member through an unstamped end whatever order the entries are given in', () => {
-    const [join, end] = logged(asS1(stampedJoin, 1), asS1(unstampedEnd, 2));
-    expect(projectSessions([end, join]).map((s) => s.member)).toEqual([true]);
+  it('reads the entries by offset before the rule, whatever order they are given in', () => {
+    // A `moved`, then a stamped `joined`, then an unstamped `ended`: a member, read by offset. Read in the order given
+    // (joined, ended, moved), the `moved` would come last and end the membership.
+    const [moved, join, end] = logged(asS1({ kind: 'retired', reason: 'moved' }, 1), asS1(stampedJoin, 2), asS1(unstampedEnd, 3));
+    expect(projectSessions([join, end, moved]).map((s) => s.member)).toEqual([true]);
   });
 
   it('reads the joined of the provenance the session is read from: a legacy stamped joined passes no end by', () => {

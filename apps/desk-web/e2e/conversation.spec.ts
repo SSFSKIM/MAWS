@@ -286,6 +286,8 @@ test('a retired session ends with who retired it and no Resume; an ended one off
 
   await nav(page).locator(`[data-session="${S.works}"]`).click();
   await header.getByRole('button', { name: 'Retire…' }).click();
+  // A session with no seat: the confirmation says what holds for a session its human opened and for a sminos thread alike.
+  await expect(header).toContainText('This records it retired; it returns only if its human reopens it.');
   await header.getByRole('button', { name: 'Retire', exact: true }).click();
   expect((await lastRpc(hub, 2)).args).toEqual({ session: S.works });
 
