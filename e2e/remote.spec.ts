@@ -4324,10 +4324,13 @@ test('U6f: a file outside the session’s folders on B opens in A, is edited, an
       expect(unreachable, `the list’s place says B is not reachable\n${said()}`).not.toBeNull();
       expect(unreachable!.height, 'as tall while it says B is not reachable').toBe(listed.height);
       await expect(sheet.getByRole('button', { name: 'Try again', exact: true })).toBeVisible();
+      // the link reports up through its reconnect grace with no channel current, when a listing answers at once that B is
+      // not reachable (decision 6): the link is back once it went down and came up again, as the other scenes' cuts wait
+      await expect.poll(linkUp, { timeout: 60_000, message: `A's link to B goes down once cut\n${mainSaid(page)}` }).toBe('down');
       scene.aHub.restore();
       await expect.poll(linkUp, { timeout: 120_000, message: `A's link to B comes up again\n${mainSaid(page)}` }).toBe('up');
       await sheet.getByRole('button', { name: 'Try again', exact: true }).click();
-      await expect(sheet.locator('[data-entry]'), 'listed again').toHaveCount(200, { timeout: 60_000 });
+      await quoting(expect(sheet.locator('[data-entry]'), 'listed again').toHaveCount(200, { timeout: 60_000 }), async () => `the sheet: ${(await sheet.locator('[data-chooser-list]').innerText()).slice(0, 300)}\n${said()}`);
 
       // a path deeper than the field is wide: the field's scroll stands at its end while it does not hold the keyboard
       await goTo(w.deep);
