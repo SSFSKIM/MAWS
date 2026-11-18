@@ -68,12 +68,20 @@ export const SUMMARIES_BEFORE_LIVE_PATH = '/__test/summaries-before-live';
  * `live` took it: the counts stored without `live`, nothing answered. */
 export const SUMMARY_AS_PREVIOUS_PATH = '/__test/summary-as-previous';
 /** Where the suites' `Registry` moves times back (`{machines?: [{name, seen?, confirmed?}], key?: {id, expires},
- * enrollment?: {machine, expires}}`, all in one step), as an hour or a pending window having passed would leave them, schedules its alarm as its own
- * changes do, and answers the alarm (`{alarm}`, ms or null). The Registry reads `Date.now()`, and a key's offline time is
- * an hour at least. */
+ * enrollment?: {machine, expires}, projects?: [{id, unlisted?, created?}], clearAlarm?}`, all in one step), as an hour, a
+ * pending window or a sminos channel's seven days having passed would leave them, schedules its alarm as its own changes
+ * do (with `clearAlarm`, deletes it instead), and answers the alarm (`{alarm}`, ms or null). The Registry reads
+ * `Date.now()`, and a key's offline time is an hour at least. */
 export const BACKDATE_PATH = '/__test/backdate';
-/** Where the suites' `Registry` answers its alarm (`{alarm}`, ms or null); a POST of `{clear: true}` deletes it first. */
+/** Where the suites' `Registry` answers its alarm (`{alarm}`, ms or null); a POST of `{clear: true}` deletes it first, and
+ * one of `{sweep: true}` then runs its sweep as the alarm would, answering the alarm the sweep left. */
 export const ALARM_PATH = '/__test/alarm';
+/** Where the suites' `Registry` answers a project row's `unlisted` (`{id}`: `{unlisted}`, an ISO time or null; null for no
+ * row): since when no counted projects record has listed a sminos channel's row as known. */
+export const UNLISTED_PATH = '/__test/unlisted';
+/** Where the suites' `Registry` drops `unlisted` from its `projects`, as a registry stored before that column had it; its
+ * next construction adds the column again. */
+export const PROJECTS_BEFORE_UNLISTED_PATH = '/__test/projects-before-unlisted';
 /** Where the suites' `Registry` is armed to hold its next `leave` until it is released, as the Worker would be held
  * between resolving a machine's credential and asking for its revocation. */
 export const LEAVE_HOLD_PATH = '/__test/leave-hold';
@@ -104,8 +112,9 @@ export const PROJECT_STATE_FAULT_PATH = '/__test/state-fault';
  * takes workerd's refusal for a callee on older code. */
 export const MISSING_METHOD_PATH = '/__test/missing-method';
 /** Where the suites' `Registry` takes a call of one of its RPC methods (`{method, args}`) as an object calling it would
- * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `notify`, `ownersOf`, `push`;
- * with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in order. */
+ * (M6's Machine DO, Project), and answers its result: `storeListing`, `storeEndpoint`, `storeProjects`, `notify`,
+ * `ownersOf`, `push`, `policies`; with `{concurrent: [{method, args}…]}`, all at once, answering each one's result in
+ * order. */
 export const REGISTRY_RPC_PATH = '/__test/registry-rpc';
 /** Where the suites' `Registry` is armed (`{fail: boolean}`) to throw from every `head()` until disarmed, as an
  * unreachable Registry would answer a `Project` checking a v2 event. */

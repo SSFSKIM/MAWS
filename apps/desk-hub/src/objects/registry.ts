@@ -36,13 +36,20 @@
 // project's announcement of the state, `Project.stateAdvanced`, which carries the head's member ids) closing `4403
 // removed`, and a socket the Worker admitted just before is refused at its accept, here and at the project. Each RL1
 // relay's object is announced the state the same way from its first socket on (`relays`; O11 M6), for its app sockets.
+//
+// A sminos declared channel's log is registered by a hello as any project's is, a `hub` row whose id is a channel's
+// (`isChannelId`; docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §F). Its row follows the projects
+// records: it is retired once no record that counts (that verifies under the head as it stands) has listed it as known
+// for `CHANNEL_RETENTION_MS`, and active again at the next record that lists it, its log kept throughout. The time since
+// which it has gone unlisted is the row's `unlisted`; a pass reads the records and applies it, at each record accepted
+// and at each sweep, and its registration reads the records already held, since a listing record can arrive first.
 import { DurableObject } from 'cloudflare:workers';
 import { hubConfig, MEMBER_HEADER, type Env, type HubConfig } from '../env';
 import type { AccessIdentity } from '../identity/access';
 import { ServiceTokenApiError, serviceTokens } from '../identity/service-tokens';
 import { importVapidKey, pushRequest, type VapidKey } from '../push/web-push';
 import { base64urlEncode, isBase64urlOf } from '../protocol/base64url';
-import { isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type ProjectsRecord, type RegistryAppFrame, type Signed } from 'org-protocol';
+import { isChannelId, isListingGone, LISTINGS_PAGE_BYTES, REGISTRY_APP_PARAM, type Delegation, type HistoryInventory, type Listing, type ProjectsRecord, type RegistryAppFrame, type Signed } from 'org-protocol';
 import type { GridDown, ProjectSummary, PushNotice, RegistryDown } from '../protocol/browser';
 import { toWire } from '../protocol/parts';
 import {
@@ -80,7 +87,7 @@ import {
   type OwnerNotice,
 } from '../protocol/identity';
 import { OrgChain } from './org-chain';
-import { OrgRecords } from './org-records';
+import { OrgRecords, type HeldProjects } from './org-records';
 import { Policies, type PoliciesAnswer, type Snapshot } from './policies';
 import { OrgKeys, type StoredKey } from './org-keys';
 import { described } from './project';
@@ -115,7 +122,7 @@ CREATE TABLE IF NOT EXISTS enrollments (
   expires TEXT NOT NULL, ttl_s INTEGER NOT NULL, state TEXT NOT NULL, machine TEXT, key TEXT, use INTEGER, replaces TEXT);
 CREATE TABLE IF NOT EXISTS projects (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, registered_by TEXT NOT NULL, created TEXT NOT NULL, archive_machine TEXT,
-  kind TEXT NOT NULL DEFAULT 'hub', machine TEXT, retired INTEGER NOT NULL DEFAULT 0);
+  kind TEXT NOT NULL DEFAULT 'hub', machine TEXT, retired INTEGER NOT NULL DEFAULT 0, unlisted TEXT);
 CREATE TABLE IF NOT EXISTS orphans (token_name TEXT PRIMARY KEY, since TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS revocations (machine TEXT NOT NULL, project TEXT NOT NULL, generation INTEGER NOT NULL, PRIMARY KEY (machine, project));
 CREATE TABLE IF NOT EXISTS push_subscriptions (
@@ -144,7 +151,8 @@ const ADDED_COLUMNS: Record<string, string[]> = {
   enrollments: ['key TEXT', 'use INTEGER', 'replaces TEXT'],
   // The member's device a subscription is bound to (O11 M4); null for one bound to the member alone.
   push_subscriptions: ['device TEXT'],
-  projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0'],
+  // `unlisted`: since when no counted projects record has listed a sminos channel's row as known (§F); null otherwise.
+  projects: ["kind TEXT NOT NULL DEFAULT 'hub'", 'machine TEXT', 'retired INTEGER NOT NULL DEFAULT 0', 'unlisted TEXT'],
   summaries: ['report_seq INTEGER', 'live INTEGER NOT NULL DEFAULT 0'],
 };
 
@@ -176,6 +184,13 @@ type ProjectRow = Omit<ProjectRecord, 'retired'> & { retired: number };
 const projectOf = (row: ProjectRow): ProjectRecord => ({ ...row, retired: row.retired === 1 });
 /** How soon a failed orphan deletion, or a revocation a project has not taken, is tried again. */
 const RETRY_MS = 60_000;
+/** How long a channel's row stays on the grid with no counted record listing it as known. */
+export const CHANNEL_RETENTION_MS = 7 * 24 * 60 * 60 * 1000;
+/** The longest a listed channel's row goes without a pass. */
+export const CHANNEL_RECHECK_MS = 24 * 60 * 60 * 1000;
+/** A sminos channel's row as a pass and the alarm read it. */
+type ChannelRow = { id: string; retired: number; unlisted: string | null };
+const sameHeld = (a: HeldProjects, b: HeldProjects) => a.length === b.length && a.every((r, i) => r.machine === b[i].machine && r.revision === b[i].revision);
 /** How long an upload's policy call waits for the registry's fill before it is refused `state-unavailable`. */
 const POLICY_FILL_WAIT_MS = 10_000;
 
@@ -721,7 +736,14 @@ export class Registry extends DurableObject<Env> {
    * of an enrolled machine's project registers as that machine's (`kind` `machine`, under its name), whoever sends it: a
    * machine enrolled before machine projects existed has none until its first hello of it. A retired machine project
    * whose name was enrolled again is active again. Anything else is answered as held, a retired project too (a machine
-   * may hello one from a directory it read before the retirement).
+   * may hello one from a directory it read before the retirement; a sminos channel's row is made active again only by a
+   * record that lists it).
+   *
+   * A channel's row is inserted with its clock as the projects records held read in this same step, counted or not: not
+   * started when the `known` of one names it, started now when none does. A record listing the channel can be stored
+   * before this hello arrives (a connection's records and its log-plane frames reach this object by separate queues), and
+   * a pass that met no row did nothing for it. One that has stopped counting since keeps the row listed until the next
+   * pass, which the alarm brings within `CHANNEL_RECHECK_MS`.
    */
   registerProject(id: string, name: string, machine: string): ProjectRecord {
     const held = this.project(id);
@@ -732,9 +754,11 @@ export class Registry extends DurableObject<Env> {
       .toArray()
       .find((m) => machineProjectId(org, m.name) === id)?.name;
     if (held && !owner) return held;
+    const created = iso(Date.now());
+    const unlisted = isChannelId(id) && !this.records.knownHeld(id) ? created : null;
     const listed = owner
       ? this.keepMachineProject(id, owner, machine)
-      : this.sql.exec("INSERT INTO projects (id, name, registered_by, created, archive_machine, kind, machine, retired) VALUES (?, ?, ?, ?, NULL, 'hub', NULL, 0)", id, name, machine, iso(Date.now())).rowsWritten > 0;
+      : this.sql.exec("INSERT INTO projects (id, name, registered_by, created, archive_machine, kind, machine, retired, unlisted) VALUES (?, ?, ?, ?, NULL, 'hub', NULL, 0, ?)", id, name, machine, created, unlisted).rowsWritten > 0;
     const project = this.project(id)!;
     if (listed) {
       this.seedProject(id);
@@ -1128,6 +1152,8 @@ export class Registry extends DurableObject<Env> {
     this.sweepProjects(now);
     await this.sweepRevocations();
     await this.sweepOrphans();
+    // A pass that applied nothing leaves a channel's passed deadline to wait the retry (`scheduleAlarm`).
+    if (!(await this.passChannels())) this.channelRetry = Date.now() + RETRY_MS;
     await this.scheduleAlarm();
   }
 
@@ -1228,13 +1254,25 @@ export class Registry extends DurableObject<Env> {
 
   /** The alarm at the next expiry or offline revocation, or sooner when an orphan or a revocation waits for a retry;
    * never in the past, so an enrollment kept open by a mint in flight does not spin it, and an offline revocation that
-   * failed waits for its retry. */
+   * failed waits for its retry. An active channel's row adds the end of its seven days unlisted, and a listed one a day
+   * from now, so that a record that stopped counting with no event (a certificate expired) is seen within a day; a
+   * deadline passed that the sweep's pass could not act on waits the retry rather than wake the alarm at once. */
   protected async scheduleAlarm(): Promise<void> {
     const now = Date.now();
     const next = this.sql
       .exec<{ expires: string }>("SELECT expires FROM enrollments WHERE state IN ('open', 'pending')")
       .toArray()
       .map((e) => Date.parse(e.expires));
+    let recheck = false;
+    for (const row of this.channelRows()) {
+      if (row.retired === 1) continue;
+      if (row.unlisted === null) recheck = true;
+      else {
+        const due = Date.parse(row.unlisted) + CHANNEL_RETENTION_MS;
+        next.push(due <= now && this.channelRetry !== null ? Math.max(due, this.channelRetry) : due);
+      }
+    }
+    if (recheck) next.push(now + CHANNEL_RECHECK_MS);
     for (const { enrollment, deadline } of this.offlineDeadlines()) if (!this.unfinished.has(enrollment)) next.push(deadline);
     for (const { began } of this.unfinished.values()) next.push(began + this.offlineRetryMs());
     if (this.sql.exec('SELECT 1 FROM orphans UNION ALL SELECT 1 FROM revocations LIMIT 1').toArray().length > 0) next.push(now + RETRY_MS);
@@ -1622,10 +1660,17 @@ export class Registry extends DurableObject<Env> {
    * app's Registry socket and to every machine's ref object, for its endpoint, the machine's own included; one held
    * already goes nowhere. Each ref is owed the machine's record (`projects_owed`) in the step that stores it, and the
    * alarm is set before any is sent, so a push lost with this object's reset is sent by the alarm (`pushProjects`).
+   *
+   * A record accepted, stored or held already, runs a pass over the channels' rows before anything else and before the
+   * answer: a pass left running beside the answer could be lost to a reset with nothing owed to run it again, and a
+   * machine shown its record back has had it applied. The same bytes again count, since an endpoint sends its kept record
+   * again at each welcome, which makes up a pass lost so.
    */
   async storeProjects(record: unknown): Promise<Result<{ stored: boolean }>> {
     const kept = await this.records.storeProjects(record, (body) => this.oweProjects(body.machine, body.revision));
-    if (!kept.ok || !kept.value.stored) return kept;
+    if (!kept.ok) return kept;
+    await this.passChannels();
+    if (!kept.value.stored) return kept;
     const { machine } = (record as Signed<ProjectsRecord>).body;
     this.toApps({ t: 'projects', record: record as Signed<ProjectsRecord> });
     await this.scheduleAlarm();
@@ -1689,6 +1734,88 @@ export class Registry extends DurableObject<Env> {
     const org = this.ensureOrg().id;
     this.sql.exec('UPDATE projects_owed SET due = ? WHERE due <= ?', now + RETRY_CAP_MS, now);
     for (const { ref, machine } of due) void this.pushProjects(org, ref, machine);
+  }
+
+  // ---- sminos declared channels' rows (docs/doperpowers/plans/2026-11-18-mw-sminos-channels.md, Interfaces §F) -------
+
+  /** The tail of the passes queued in this object's life: one runs at a time. */
+  private channelPasses: Promise<unknown> = Promise.resolve();
+  /** Set when the sweep's pass applied nothing: a channel's passed deadline wakes the alarm no sooner (`scheduleAlarm`).
+   * Held in memory: after a reset the next sweep tries once more, and sets it again if that pass applies nothing too. */
+  private channelRetry: number | null = null;
+
+  /** Every channel's row, active and retired: a `hub` row whose id is a sminos channel's. */
+  private channelRows(): ChannelRow[] {
+    return this.sql.exec<ChannelRow>("SELECT id, retired, unlisted FROM projects WHERE kind = 'hub'").toArray().filter((row) => isChannelId(row.id));
+  }
+
+  /** A pass, once every pass asked for before it has run; it reads the records as it starts. True when it applied the
+   * listing (with no channel's row, there is nothing to apply), false when it applied nothing. */
+  private passChannels(): Promise<boolean> {
+    const pass = this.channelPasses.then(() => this.channelPass());
+    this.channelPasses = pass.catch(() => false);
+    return pass;
+  }
+
+  /**
+   * Reads which channels the counted projects records list as known and applies it to the channels' rows: a row listed
+   * is active with no clock, a retired one so made active again; an active row not listed starts its clock, or, its
+   * clock `CHANNEL_RETENTION_MS` old, is retired. With no channel's row it does nothing and verifies nothing. The
+   * listing applied is that of the records held when it applies, in one synchronous step with the rows as they are then:
+   * when the records verified are no longer the ones held (one was accepted meanwhile, whose own pass follows), it
+   * applies nothing, as it does when the head cannot be read. A retirement sends the grid again whole; a row made active
+   * returns as a new one does.
+   */
+  private async channelPass(): Promise<boolean> {
+    if (this.channelRows().length === 0) return true;
+    const verified = await this.countedProjects();
+    // From here on synchronous: the records found counting are the ones held as the listing is applied.
+    if (verified === null || !sameHeld(verified.held, this.records.projectsHeld())) return false;
+    const listed = new Set(verified.counted.flatMap((record) => record.known.map((k) => k.id)));
+    const now = Date.now();
+    const retired: string[] = [];
+    const returned: string[] = [];
+    let changed = false;
+    this.ctx.storage.transactionSync(() => {
+      for (const row of this.channelRows()) {
+        const isListed = listed.has(row.id);
+        if (row.retired === 1) {
+          if (!isListed) continue;
+          this.sql.exec('UPDATE projects SET retired = 0, unlisted = NULL WHERE id = ?', row.id);
+          returned.push(row.id);
+        } else if (isListed) {
+          if (row.unlisted === null) continue;
+          this.sql.exec('UPDATE projects SET unlisted = NULL WHERE id = ?', row.id);
+        } else if (row.unlisted === null) {
+          this.sql.exec('UPDATE projects SET unlisted = ? WHERE id = ?', iso(now), row.id);
+        } else if (Date.parse(row.unlisted) + CHANNEL_RETENTION_MS <= now) {
+          this.sql.exec('UPDATE projects SET retired = 1 WHERE id = ?', row.id);
+          retired.push(row.id);
+        } else continue;
+        changed = true;
+      }
+    });
+    this.channelRetry = null;
+    if (retired.length > 0) this.toGrid(this.gridFrame());
+    for (const id of returned) {
+      this.seedProject(id);
+      this.toGrid({ t: 'summary', project: this.summaryOf(this.project(id)!) });
+    }
+    if (changed) await this.scheduleAlarm();
+    return true;
+  }
+
+  /** The projects records held and those of them that count (`OrgRecords.countedProjects`), under the head as a Project
+   * reads it (`head`) with the certificates kept beside it; null when the head cannot be read. */
+  private async countedProjects(): Promise<{ held: HeldProjects; counted: ProjectsRecord[] } | null> {
+    try {
+      const view = this.head();
+      if (view.head === null) return null;
+      return await this.records.countedProjects(view.head.state, view.certificates, new Date());
+    } catch (error) {
+      console.log(JSON.stringify({ desk: 'registry', event: 'channel-pass-failed', error: described(error) }));
+      return null;
+    }
   }
 
   /** The listings kept, a project's alone when named, with their machines' endpoint records. */
